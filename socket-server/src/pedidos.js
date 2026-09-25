@@ -1,6 +1,7 @@
 const { exito, fallo, manejar } = require('./ack');
 const { esEventIdValido } = require('./idempotencia');
 const { salaMesa, SALA_KDS, SALA_ADMIN, esIdValido } = require('./salas');
+const { notificarCambioEstado } = require('./suscripciones');
 const { enviarAck, leerCuerpoCrudo, parsearJson, exigirClaveInterna } = require('./http');
 
 // Mismos valores que el CHECK del backend. Solo se usan para rechazar basura;
@@ -108,6 +109,11 @@ function difundirCambioEstado(ctx, p) {
     emitidoEn: new Date().toISOString(),
   };
   io.to(SALA_KDS).to(SALA_ADMIN).to(salaMesa(p.id_mesa)).emit('order:status', cambio);
+
+  // Push para el comensal que ya cerró la PWA. Sin await a propósito: un
+  // servicio push lento no debe retrasar el ack; y notificarCambioEstado
+  // no lanza, pero el catch protege el proceso de un rechazo no capturado.
+  notificarCambioEstado(ctx, cambio).catch((err) => console.error('[push] fallo al notificar:', err));
   return exito({ eventId: p.eventId, duplicado: false });
 }
 

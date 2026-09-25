@@ -124,7 +124,7 @@ const rutasQr = {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
     if (!esIdValido(cuerpo.id_mesa)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'id_mesa debe ser un entero positivo');
-    ctx.qr.revocarMesa(cuerpo.id_mesa);
+    ctx.liberarMesa(cuerpo.id_mesa);
     enviarJson(res, 200, { ok: true });
   },
 };

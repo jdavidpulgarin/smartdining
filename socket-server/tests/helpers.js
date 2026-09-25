@@ -10,9 +10,9 @@ const firmar = (payload, secreto = SECRETO, opts = {}) => jwt.sign(payload, secr
 const tokenComensal = (id_mesa) => firmar({ id_mesa, rol: 'comensal' });
 const tokenPersonal = (rol, id_usuario = 1) => firmar({ id_usuario, rol });
 
-async function levantar(extraEnv = {}) {
+async function levantar(extraEnv = {}, deps = {}) {
   const config = cargarConfig({ CORS_ORIGINS: ORIGEN, JWT_SECRET: SECRETO, ...extraEnv });
-  const servidor = crearServidor(config);
+  const servidor = crearServidor(config, deps);
   await new Promise((r) => servidor.httpServer.listen(0, r));
   const url = `http://localhost:${servidor.httpServer.address().port}`;
   const clientes = [];

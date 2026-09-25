@@ -273,7 +273,7 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 | DELETE | `/push/suscripcion` | Bearer JWT `comensal` | Body `{ "endpoint": "..." }` → 200 |
 | POST | `/internal/order-created` | Header `x-internal-key` | Solo backend. Mismo body que el evento `order:created` |
 | POST | `/internal/order-status` | Header `x-internal-key` | Solo backend. Mismo body que `order:status` |
-| POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5 }` → invalida los QR emitidos de esa mesa |
+| POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5 }` → invalida los QR emitidos de esa mesa y borra su carrito y sus suscripciones push |
 | POST | `/pagos/webhook` | Firma del proveedor | Ver sección 8 |
 
 ### 6.1. Token QR
@@ -318,6 +318,16 @@ seguro.
 ```
 
 Las suscripciones caducadas (HTTP 404/410 del servicio push) se eliminan solas.
+
+Reglas:
+
+- Solo se envía push para `en_preparacion` ("Tu pedido está en preparación"), `listo` y
+  `cancelado`.
+- El `endpoint` debe ser una URL `https` de un servicio push (no IPs ni `localhost`); si no,
+  `PAYLOAD_INVALIDO`. Máximo 20 suscripciones por mesa.
+- Suscribirse dos veces con el mismo `endpoint` no duplica.
+- Las suscripciones son de la **sesión de mesa**: se borran cuando el backend llama a
+  `/internal/mesa-liberada`, para que el siguiente grupo no reciba avisos ajenos.
 
 ---
 

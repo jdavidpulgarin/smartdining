@@ -8,6 +8,7 @@ const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
 const { registrarPedidos, rutasPedidos } = require('./pedidos');
 const { crearServicioQr, derivarSecretoQr, rutasQr } = require('./qr');
 const { crearServicioPush, rutasPush } = require('./push');
+const { crearAlmacenSuscripciones, registrarSuscripcionesSocket, rutasSuscripciones } = require('./suscripciones');
 const { crearRouter, enviarJson } = require('./http');
 
 const rutasBase = {
@@ -18,7 +19,7 @@ const rutasBase = {
  * Construye el servidor HTTP + Socket.io sin ponerlo a escuchar, para que
  * las pruebas puedan levantarlo en un puerto efímero.
  */
-function crearServidor(config) {
+function crearServidor(config, deps = {}) {
   // Se usa la misma lista blanca para HTTP (health, webhooks) y para el
   // handshake de Socket.io, así no hay dos políticas que se desincronicen.
   const corsHttp = cors({ origin: config.origenes, credentials: true });
@@ -26,7 +27,7 @@ function crearServidor(config) {
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
   const ctx = { config };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush }, ctx);
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));
@@ -46,9 +47,20 @@ function crearServidor(config) {
     io,
     registro: crearRegistroIdempotencia(),
     carritos: crearAlmacenCarritos(),
-    push: crearServicioPush(config),
+    // `deps.push` permite a las pruebas inyectar un servicio push falso.
+    push: deps.push || crearServicioPush(config),
+    suscripciones: crearAlmacenSuscripciones(),
     qr: crearServicioQr({ secreto: derivarSecretoQr(config), ttlMinutosPorDefecto: config.qrTtlMinutos }),
   });
+
+  // Cuando el backend libera la mesa (al pagar) termina la sesión de mesa: se
+  // invalidan sus QR y se borra el estado que era de esa sesión, para que el
+  // siguiente grupo empiece limpio y no reciba avisos del anterior.
+  ctx.liberarMesa = (idMesa) => {
+    ctx.qr.revocarMesa(idMesa);
+    ctx.suscripciones.limpiarMesa(idMesa);
+    ctx.carritos.vaciar(idMesa);
+  };
 
   // Sin JWT válido no se entra: todo socket que llega a 'connection' ya tiene
   // una identidad verificada en socket.data.identidad.
@@ -59,6 +71,7 @@ function crearServidor(config) {
     registrarSalas(socket, { obtenerSnapshot: ctx.carritos.snapshot });
     registrarCarrito(socket, ctx);
     registrarPedidos(socket, ctx);
+    registrarSuscripcionesSocket(socket, ctx);
     socket.on('disconnect', (motivo) => console.log(`[socket] ${socket.id} desconectado: ${motivo}`));
   });
 
