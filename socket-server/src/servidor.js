@@ -5,6 +5,12 @@ const { autenticarSocket } = require('./auth');
 const { registrarSalas } = require('./salas');
 const { crearRegistroIdempotencia } = require('./idempotencia');
 const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
+const { registrarPedidos, rutasPedidos } = require('./pedidos');
+const { crearRouter, enviarJson } = require('./http');
+
+const rutasBase = {
+  'GET /health': async (req, res) => enviarJson(res, 200, { estado: 'ok' }),
+};
 
 /**
  * Construye el servidor HTTP + Socket.io sin ponerlo a escuchar, para que
@@ -15,15 +21,13 @@ function crearServidor(config) {
   // handshake de Socket.io, así no hay dos políticas que se desincronicen.
   const corsHttp = cors({ origin: config.origenes, credentials: true });
 
+  // El contexto se completa más abajo, cuando existe `io`; el router solo lo
+  // lee cuando llega una petición, o sea, ya completo.
+  const ctx = { config };
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos }, ctx);
+
   const httpServer = http.createServer((req, res) => {
-    corsHttp(req, res, () => {
-      if (req.method === 'GET' && req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ estado: 'ok' }));
-      }
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Ruta no encontrada' }));
-    });
+    corsHttp(req, res, () => router(req, res));
   });
 
   const io = new Server(httpServer, {
@@ -36,8 +40,11 @@ function crearServidor(config) {
   });
 
   // Estado compartido por todos los sockets de esta instancia.
-  const registro = crearRegistroIdempotencia();
-  const carritos = crearAlmacenCarritos();
+  Object.assign(ctx, {
+    io,
+    registro: crearRegistroIdempotencia(),
+    carritos: crearAlmacenCarritos(),
+  });
 
   // Sin JWT válido no se entra: todo socket que llega a 'connection' ya tiene
   // una identidad verificada en socket.data.identidad.
@@ -45,12 +52,13 @@ function crearServidor(config) {
 
   io.on('connection', (socket) => {
     console.log(`[socket] conectado ${socket.id} (${socket.data.identidad.rol})`);
-    registrarSalas(socket, { obtenerSnapshot: carritos.snapshot });
-    registrarCarrito(socket, { carritos, registro });
+    registrarSalas(socket, { obtenerSnapshot: ctx.carritos.snapshot });
+    registrarCarrito(socket, ctx);
+    registrarPedidos(socket, ctx);
     socket.on('disconnect', (motivo) => console.log(`[socket] ${socket.id} desconectado: ${motivo}`));
   });
 
-  return { httpServer, io, registro, carritos };
+  return { httpServer, io, ...ctx };
 }
 
 module.exports = { crearServidor };

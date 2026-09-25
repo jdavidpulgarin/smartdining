@@ -28,6 +28,8 @@ function cargarConfig(env = process.env) {
     entorno: env.NODE_ENV || 'development',
     origenes,
     jwtSecret: env.JWT_SECRET,
+    // Opcional: sin ella los endpoints /internal/* responden 503 (cerrados).
+    internalApiKey: env.INTERNAL_API_KEY || null,
   };
 }
 
