@@ -1,0 +1,28 @@
+{
+  "name": "smartdining",
+  "version": "1.0.0",
+  "description": "> Plataforma web para digitalizar la experiencia en sala de restaurantes: pedidos colaborativos en tiempo real mediante QR, panel administrativo para sala y sistema Kitchen Display System (KDS) para cocina.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jdavidpulgarin/smartdining.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/jdavidpulgarin/smartdining/issues"
+  },
+  "homepage": "https://github.com/jdavidpulgarin/smartdining#readme",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.4",
+    "jsonwebtoken": "^9.0.3",
+    "socket.io": "^4.8.4",
+    "web-push": "^3.6.7"
+  }
+}
