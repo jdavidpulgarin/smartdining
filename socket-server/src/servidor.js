@@ -1,6 +1,8 @@
 const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
+const { autenticarSocket } = require('./auth');
+const { registrarSalas } = require('./salas');
 
 /**
  * Construye el servidor HTTP + Socket.io sin ponerlo a escuchar, para que
@@ -30,8 +32,13 @@ function crearServidor(config) {
     connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
   });
 
+  // Sin JWT válido no se entra: todo socket que llega a 'connection' ya tiene
+  // una identidad verificada en socket.data.identidad.
+  io.use(autenticarSocket(config.jwtSecret));
+
   io.on('connection', (socket) => {
-    console.log(`[socket] conectado ${socket.id}`);
+    console.log(`[socket] conectado ${socket.id} (${socket.data.identidad.rol})`);
+    registrarSalas(socket);
     socket.on('disconnect', (motivo) => console.log(`[socket] ${socket.id} desconectado: ${motivo}`));
   });
 

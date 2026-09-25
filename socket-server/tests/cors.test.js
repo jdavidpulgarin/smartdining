@@ -1,21 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { io: cliente } = require('socket.io-client');
+const { levantar } = require('./helpers');
 const { cargarConfig } = require('../src/config');
-const { crearServidor } = require('../src/servidor');
 
 const PERMITIDO = 'http://localhost:5173';
 
-async function levantar() {
-  const config = cargarConfig({ CORS_ORIGINS: PERMITIDO, PORT: '0' });
-  const { httpServer, io } = crearServidor(config);
-  await new Promise((r) => httpServer.listen(0, r));
-  return { httpServer, io, url: `http://localhost:${httpServer.address().port}` };
-}
-
-test('rechaza CORS_ORIGINS con comodín o vacío', () => {
-  assert.throws(() => cargarConfig({ CORS_ORIGINS: '*' }));
-  assert.throws(() => cargarConfig({}));
+test('rechaza una configuración insegura o incompleta', () => {
+  assert.throws(() => cargarConfig({ CORS_ORIGINS: '*', JWT_SECRET: 's' }), /"\*"/);
+  assert.throws(() => cargarConfig({ JWT_SECRET: 's' }), /CORS_ORIGINS/);
+  assert.throws(() => cargarConfig({ CORS_ORIGINS: PERMITIDO }), /JWT_SECRET/);
 });
 
 test('handshake polling: origen permitido recibe ACAO, origen ajeno no', async () => {
@@ -25,15 +18,17 @@ test('handshake polling: origen permitido recibe ACAO, origen ajeno no', async (
   const mal = await pedir('http://evil.example');
   assert.strictEqual(ok.headers.get('access-control-allow-origin'), PERMITIDO);
   assert.notStrictEqual(mal.headers.get('access-control-allow-origin'), 'http://evil.example');
-  s.io.close();
+  await s.cerrar();
 });
 
-test('un cliente se conecta y /health responde', async () => {
+test('/health responde y hay preflight CORS para POST con Authorization', async () => {
   const s = await levantar();
-  const c = cliente(s.url, { transports: ['websocket'] });
-  await new Promise((res, rej) => { c.on('connect', res); c.on('connect_error', rej); });
   const h = await (await fetch(`${s.url}/health`)).json();
   assert.strictEqual(h.estado, 'ok');
-  c.close();
-  s.io.close();
+  const pre = await fetch(`${s.url}/health`, {
+    method: 'OPTIONS',
+    headers: { Origin: PERMITIDO, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type' },
+  });
+  assert.strictEqual(pre.headers.get('access-control-allow-origin'), PERMITIDO);
+  await s.cerrar();
 });

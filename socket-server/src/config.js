@@ -17,6 +17,12 @@ function cargarConfig(env = process.env) {
     throw new Error('CORS_ORIGINS es obligatorio (orígenes separados por comas)');
   }
 
+  // Sin el secreto compartido con el backend no podemos verificar ningún JWT
+  // y cualquiera podría conectarse; es mejor no arrancar.
+  if (!env.JWT_SECRET) {
+    throw new Error('JWT_SECRET es obligatorio (el mismo que usa backend/)');
+  }
+
   return {
     puerto: Number(env.PORT) || 4001,
     entorno: env.NODE_ENV || 'development',
