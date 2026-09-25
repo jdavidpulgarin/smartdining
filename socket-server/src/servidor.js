@@ -9,6 +9,7 @@ const { registrarPedidos, rutasPedidos } = require('./pedidos');
 const { crearServicioQr, derivarSecretoQr, rutasQr } = require('./qr');
 const { crearServicioPush, rutasPush } = require('./push');
 const { crearAlmacenSuscripciones, registrarSuscripcionesSocket, rutasSuscripciones } = require('./suscripciones');
+const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
 
 const rutasBase = {
@@ -27,7 +28,7 @@ function crearServidor(config, deps = {}) {
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
   const ctx = { config };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones }, ctx);
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));
@@ -47,6 +48,9 @@ function crearServidor(config, deps = {}) {
     io,
     registro: crearRegistroIdempotencia(),
     carritos: crearAlmacenCarritos(),
+    // Registro aparte con TTL de 7 días: los proveedores de pago reintentan
+    // durante días, mucho más que los 10 min de los eventos de socket.
+    registroPagos: crearRegistroIdempotencia({ ttlMs: 7 * 24 * 60 * 60 * 1000 }),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),
     suscripciones: crearAlmacenSuscripciones(),

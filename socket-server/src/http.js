@@ -11,7 +11,10 @@ class ErrorHttp extends Error {
 }
 
 function enviarJson(res, status, cuerpo) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  const cabeceras = { 'Content-Type': 'application/json' };
+  // Tras un 413 quedan bytes sin leer en la conexión: se cierra para no reutilizarla.
+  if (status === 413) cabeceras.Connection = 'close';
+  res.writeHead(status, cabeceras);
   res.end(JSON.stringify(cuerpo));
 }
 
@@ -26,16 +29,21 @@ function leerCuerpoCrudo(req, limite = LIMITE_CUERPO) {
   return new Promise((resolve, reject) => {
     const trozos = [];
     let total = 0;
+    let excedido = false;
     req.on('data', (t) => {
+      if (excedido) return; // se descarta el resto sin acumularlo en memoria
       total += t.length;
       if (total > limite) {
+        // No se destruye la conexión: primero hay que poder contestar 413
+        // (con Connection: close, ver enviarJson) y recién entonces cerrarla.
+        excedido = true;
+        trozos.length = 0;
         reject(new ErrorHttp(413, 'CUERPO_DEMASIADO_GRANDE', 'El cuerpo excede el límite permitido'));
-        req.destroy();
         return;
       }
       trozos.push(t);
     });
-    req.on('end', () => resolve(Buffer.concat(trozos)));
+    req.on('end', () => { if (!excedido) resolve(Buffer.concat(trozos)); });
     req.on('error', reject);
   });
 }
