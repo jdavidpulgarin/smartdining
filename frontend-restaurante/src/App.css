@@ -203,6 +203,27 @@
   font-weight: 600;
 }
 
+.table-filters {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.filter-chip {
+  border: 1px solid #dbeafe;
+  background: #f8fafc;
+  color: #374151;
+  border-radius: 999px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.filter-chip.active {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: white;
+}
+
 .tables-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(140px, 1fr));
@@ -214,6 +235,9 @@
   border: 1px solid #e2e8f0;
   border-radius: 14px;
   padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
 }
 
 .table-card.active {
@@ -225,10 +249,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.45rem;
 }
 
-.table-card p {
+.table-card p,
+.table-card small {
   margin: 0;
   color: #6b7280;
   font-size: 0.8rem;

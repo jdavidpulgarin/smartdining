@@ -8,12 +8,12 @@ const stats = [
 ]
 
 const tables = [
-  { name: 'Mesa 1', status: 'Disponible', seats: 4 },
-  { name: 'Mesa 2', status: 'Ocupada', seats: 2, active: true },
-  { name: 'Mesa 3', status: 'Reservada', seats: 6 },
-  { name: 'Mesa 4', status: 'Ocupada', seats: 4, active: true },
-  { name: 'Mesa 5', status: 'Disponible', seats: 2 },
-  { name: 'Mesa 6', status: 'Ocupada', seats: 3, active: true },
+  { name: 'Mesa 1', status: 'Disponible', seats: 4, detail: 'Lista para asignar' },
+  { name: 'Mesa 2', status: 'Ocupada', seats: 2, active: true, detail: '2 personas · Pedido #1042' },
+  { name: 'Mesa 3', status: 'Reservada', seats: 6, detail: 'Reserva 13:30' },
+  { name: 'Mesa 4', status: 'Ocupada', seats: 4, active: true, detail: '4 personas · Cuenta abierta' },
+  { name: 'Mesa 5', status: 'Disponible', seats: 2, detail: 'Pendiente limpieza' },
+  { name: 'Mesa 6', status: 'Ocupada', seats: 3, active: true, detail: '3 personas · Pedido #1044' },
 ]
 
 const orders = [
@@ -80,7 +80,11 @@ function App() {
           <div className="panel">
             <div className="panel-header">
               <h2>Mesas</h2>
-              <button className="link-button">Ver todas</button>
+              <div className="table-filters">
+                <button className="filter-chip active">Todas</button>
+                <button className="filter-chip">Disponibles</button>
+                <button className="filter-chip">Ocupadas</button>
+              </div>
             </div>
 
             <div className="tables-grid">
@@ -93,6 +97,7 @@ function App() {
                     </span>
                   </div>
                   <p>{table.seats} personas</p>
+                  <small>{table.detail}</small>
                 </div>
               ))}
             </div>
