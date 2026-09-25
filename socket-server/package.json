@@ -1,0 +1,23 @@
+{
+  "name": "smartdining-socket-server",
+  "version": "0.1.0",
+  "description": "Servidor de tiempo real de SmartDining: WebSockets, QR, pagos y notificaciones push",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "jsonwebtoken": "^9.0.3",
+    "socket.io": "^4.8.4",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}
