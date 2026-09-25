@@ -279,7 +279,10 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 ### 6.1. Token QR
 
 - Formato: `v1.<payload-base64url>.<firma-hmac-sha256-base64url>`; el payload lleva
-  `m` (id_mesa), `iat`, `exp` y `sid`.
+  `m` (id_mesa), `iat` y `exp` (ambos en **milisegundos** Unix) y `sid` (id aleatorio).
+- `ttl_minutos` es opcional (por defecto `QR_TTL_MINUTOS`); rango permitido 1–1440.
+- `motivo` de un QR inválido: `formato`, `firma`, `expirado` o `revocado`. `/qr/validar`
+  responde `200` si es válido y `401` si no.
 - **Reutilizable durante la sesión de mesa**: se puede escanear cuantas veces se quiera
   hasta que expire o la mesa se libere.
 - Se valida **en el servidor** (firma + expiración + mesa no liberada). El cliente no

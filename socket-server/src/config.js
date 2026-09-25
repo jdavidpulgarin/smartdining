@@ -30,6 +30,9 @@ function cargarConfig(env = process.env) {
     jwtSecret: env.JWT_SECRET,
     // Opcional: sin ella los endpoints /internal/* responden 503 (cerrados).
     internalApiKey: env.INTERNAL_API_KEY || null,
+    // Si falta, se deriva de JWT_SECRET (ver derivarSecretoQr en qr.js).
+    qrSecret: env.QR_SECRET || null,
+    qrTtlMinutos: Number(env.QR_TTL_MINUTOS) || 360,
   };
 }
 
