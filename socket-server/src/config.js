@@ -33,6 +33,10 @@ function cargarConfig(env = process.env) {
     // Si falta, se deriva de JWT_SECRET (ver derivarSecretoQr en qr.js).
     qrSecret: env.QR_SECRET || null,
     qrTtlMinutos: Number(env.QR_TTL_MINUTOS) || 360,
+    // Web Push (opcional): sin las tres, las notificaciones quedan deshabilitadas.
+    vapidPublica: env.VAPID_PUBLIC_KEY || null,
+    vapidPrivada: env.VAPID_PRIVATE_KEY || null,
+    vapidSubject: env.VAPID_SUBJECT || null,
   };
 }
 

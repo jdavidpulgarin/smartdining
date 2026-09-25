@@ -7,6 +7,7 @@ const { crearRegistroIdempotencia } = require('./idempotencia');
 const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
 const { registrarPedidos, rutasPedidos } = require('./pedidos');
 const { crearServicioQr, derivarSecretoQr, rutasQr } = require('./qr');
+const { crearServicioPush, rutasPush } = require('./push');
 const { crearRouter, enviarJson } = require('./http');
 
 const rutasBase = {
@@ -25,7 +26,7 @@ function crearServidor(config) {
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
   const ctx = { config };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr }, ctx);
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));
@@ -45,6 +46,7 @@ function crearServidor(config) {
     io,
     registro: crearRegistroIdempotencia(),
     carritos: crearAlmacenCarritos(),
+    push: crearServicioPush(config),
     qr: crearServicioQr({ secreto: derivarSecretoQr(config), ttlMinutosPorDefecto: config.qrTtlMinutos }),
   });
 
