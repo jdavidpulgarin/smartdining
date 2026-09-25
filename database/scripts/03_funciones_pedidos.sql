@@ -182,8 +182,8 @@ BEGIN
         RAISE EXCEPTION 'Pedido ID % no encontrado', id_pedido_param;
     END IF;
 
-    IF v_estado_actual IN ('pagado', 'cancelado') THEN
-        RAISE EXCEPTION 'No se puede cancelar un pedido en estado final "%"', v_estado_actual;
+    IF v_estado_actual NOT IN ('recibido', 'en_preparacion') THEN
+        RAISE EXCEPTION 'No se puede cancelar un pedido en estado "%". Solo se permite cancelar desde recibido o en_preparacion', v_estado_actual;
     END IF;
 
     -- Marcar items del pedido como cancelados
