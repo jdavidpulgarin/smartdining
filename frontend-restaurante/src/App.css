@@ -56,7 +56,8 @@
 .ghost-button,
 .primary-button,
 .link-button,
-.nav-item {
+.nav-item,
+.filter-chip {
   border: none;
   border-radius: 10px;
   font: inherit;
@@ -74,6 +75,12 @@
   color: white;
   padding: 0.7rem 1rem;
   font-weight: 600;
+}
+
+.primary-button.small,
+.ghost-button.small {
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8rem;
 }
 
 .avatar {
@@ -281,14 +288,16 @@
 }
 
 .orders-list,
-.menu-list {
+.menu-list,
+.items-list {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
 }
 
 .order-item,
-.menu-item {
+.menu-item,
+.item-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -305,12 +314,16 @@
 }
 
 .order-item strong,
-.menu-item strong {
+.menu-item strong,
+.item-row strong,
+.item-row b {
   color: #111827;
 }
 
 .order-item span,
-.menu-item span {
+.menu-item span,
+.order-label,
+.item-row span {
   color: #6b7280;
   font-size: 0.78rem;
 }
@@ -330,6 +343,64 @@
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 600;
+}
+
+.order-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.order-focus {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.order-header,
+.order-client-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.order-header strong,
+.order-client-row strong {
+  display: block;
+  color: #111827;
+  margin-top: 0.2rem;
+}
+
+.order-id {
+  color: #374151;
+  font-weight: 700;
+}
+
+.item-name-block {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.total-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.8rem 0.9rem;
+  color: #111827;
+}
+
+.total-box strong {
+  font-size: 1.1rem;
+}
+
+.order-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .bottom-panel {

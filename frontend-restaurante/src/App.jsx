@@ -17,10 +17,48 @@ const tables = [
 ]
 
 const orders = [
-  { id: '#1042', client: 'Ana López', time: '12:35', total: '$84.50', state: 'En cocina' },
-  { id: '#1043', client: 'Javier Ruiz', time: '12:42', total: '$58.00', state: 'Por servir' },
-  { id: '#1044', client: 'Familia Díaz', time: '12:50', total: '$132.00', state: 'Preparando' },
+  {
+    id: '#1042',
+    client: 'Ana López',
+    table: 'Mesa 2',
+    time: '12:35',
+    total: '$84.50',
+    state: 'En cocina',
+    items: [
+      { name: 'Lomo saltado', qty: 1, subtotal: '$24.00' },
+      { name: 'Inca Kola', qty: 2, subtotal: '$16.00' },
+      { name: 'Tiramisú', qty: 1, subtotal: '$12.00' },
+    ],
+  },
+  {
+    id: '#1043',
+    client: 'Javier Ruiz',
+    table: 'Mesa 5',
+    time: '12:42',
+    total: '$58.00',
+    state: 'Por servir',
+    items: [
+      { name: 'Ceviche mixto', qty: 1, subtotal: '$26.50' },
+      { name: 'Agua mineral', qty: 1, subtotal: '$4.00' },
+      { name: 'Helado', qty: 1, subtotal: '$9.50' },
+    ],
+  },
+  {
+    id: '#1044',
+    client: 'Familia Díaz',
+    table: 'Mesa 6',
+    time: '12:50',
+    total: '$132.00',
+    state: 'Preparando',
+    items: [
+      { name: 'Arroz con pollo', qty: 2, subtotal: '$52.00' },
+      { name: 'Ensalada', qty: 1, subtotal: '$14.00' },
+      { name: 'Jugo de maracuyá', qty: 2, subtotal: '$16.00' },
+    ],
+  },
 ]
+
+const selectedOrder = orders[0]
 
 const menu = [
   { name: 'Lomo saltado', price: '$24.00', tag: 'Popular' },
@@ -103,26 +141,50 @@ function App() {
             </div>
           </div>
 
-          <div className="panel">
+          <div className="panel order-panel">
             <div className="panel-header">
-              <h2>Pedidos</h2>
+              <h2>Pedido activo</h2>
               <button className="link-button">Actualizar</button>
             </div>
 
-            <div className="orders-list">
-              {orders.map((order) => (
-                <div key={order.id} className="order-item">
-                  <div>
-                    <strong>{order.client}</strong>
-                    <span>{order.id}</span>
-                  </div>
-                  <div className="order-meta">
-                    <small>{order.time}</small>
-                    <small>{order.total}</small>
-                  </div>
-                  <span className="order-state">{order.state}</span>
+            <div className="order-focus">
+              <div className="order-header">
+                <div>
+                  <span className="order-label">Mesa</span>
+                  <strong>{selectedOrder.table}</strong>
                 </div>
-              ))}
+                <span className="order-state">{selectedOrder.state}</span>
+              </div>
+
+              <div className="order-client-row">
+                <div>
+                  <span className="order-label">Cliente</span>
+                  <strong>{selectedOrder.client}</strong>
+                </div>
+                <span className="order-id">{selectedOrder.id}</span>
+              </div>
+
+              <div className="items-list">
+                {selectedOrder.items.map((item) => (
+                  <div key={`${selectedOrder.id}-${item.name}`} className="item-row">
+                    <div className="item-name-block">
+                      <strong>{item.qty}x</strong>
+                      <span>{item.name}</span>
+                    </div>
+                    <b>{item.subtotal}</b>
+                  </div>
+                ))}
+              </div>
+
+              <div className="total-box">
+                <span>Total</span>
+                <strong>{selectedOrder.total}</strong>
+              </div>
+
+              <div className="order-actions">
+                <button className="primary-button small">Enviar a cocina</button>
+                <button className="ghost-button small">Editar</button>
+              </div>
             </div>
           </div>
         </section>
