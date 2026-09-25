@@ -64,7 +64,8 @@ un UUID v4 generado por el cliente **una sola vez por acción del usuario**.
 
 - Si el cliente no recibe el ack (corte de red), **reenvía el mismo evento con el mismo
   `eventId`**. El servidor detecta el duplicado, **no vuelve a aplicar el cambio** y
-  responde con el ack original (`duplicado: true`).
+  responde `duplicado: true`. En `cart:update` el ack de un duplicado trae el snapshot
+  **vigente** del carrito (no el de la primera vez), para que el cliente se resincronice.
 - La ventana de deduplicación es de 10 minutos.
 - Los eventos se envían con **callback de ack**:
 
@@ -156,6 +157,7 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
 | Campo | Tipo | Reglas |
 |---|---|---|
 | `eventId` | string | UUID, obligatorio |
+| `id_mesa` | entero > 0 | Solo personal (`mesero`/`admin`). El comensal no lo envía: se toma de su JWT |
 | `accion` | string | `set` (fija la cantidad), `remove` (quita el plato), `clear` (vacía todo el carrito) |
 | `comensal` | string | 1–40 caracteres. Obligatorio en `set` y `remove` |
 | `id_plato` | entero > 0 | Obligatorio en `set` y `remove` |

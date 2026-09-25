@@ -3,6 +3,8 @@ const cors = require('cors');
 const { Server } = require('socket.io');
 const { autenticarSocket } = require('./auth');
 const { registrarSalas } = require('./salas');
+const { crearRegistroIdempotencia } = require('./idempotencia');
+const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
 
 /**
  * Construye el servidor HTTP + Socket.io sin ponerlo a escuchar, para que
@@ -27,10 +29,15 @@ function crearServidor(config) {
   const io = new Server(httpServer, {
     cors: { origin: config.origenes, methods: ['GET', 'POST'], credentials: true },
     // Al reconectar tras un corte corto, Socket.io recupera la sesión y los
-    // eventos perdidos; ayuda a no perder cart:update. La idempotencia real
-    // (id de evento + ack) se implementa en las actividades 4-6.
+    // eventos perdidos. No basta por sí solo: la garantía de no duplicar la
+    // da la idempotencia por eventId (idempotencia.js), que cubre también los
+    // cortes largos y los reenvíos manuales del cliente.
     connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
   });
+
+  // Estado compartido por todos los sockets de esta instancia.
+  const registro = crearRegistroIdempotencia();
+  const carritos = crearAlmacenCarritos();
 
   // Sin JWT válido no se entra: todo socket que llega a 'connection' ya tiene
   // una identidad verificada en socket.data.identidad.
@@ -38,11 +45,12 @@ function crearServidor(config) {
 
   io.on('connection', (socket) => {
     console.log(`[socket] conectado ${socket.id} (${socket.data.identidad.rol})`);
-    registrarSalas(socket);
+    registrarSalas(socket, { obtenerSnapshot: carritos.snapshot });
+    registrarCarrito(socket, { carritos, registro });
     socket.on('disconnect', (motivo) => console.log(`[socket] ${socket.id} desconectado: ${motivo}`));
   });
 
-  return { httpServer, io };
+  return { httpServer, io, registro, carritos };
 }
 
 module.exports = { crearServidor };
