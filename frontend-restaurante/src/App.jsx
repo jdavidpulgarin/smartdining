@@ -1,4 +1,8 @@
 import './App.css'
+import { StatCard } from './components/StatCard'
+import { TableCard } from './components/TableCard'
+import { OrderPanel } from './components/OrderPanel'
+import { MenuItem } from './components/MenuItem'
 
 const stats = [
   { label: 'Mesas ocupadas', value: '14', detail: '+2 hoy' },
@@ -106,11 +110,12 @@ function App() {
       <main className="main-panel">
         <section className="stats-grid">
           {stats.map((item) => (
-            <article key={item.label} className="stat-card">
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-              <small>{item.detail}</small>
-            </article>
+            <StatCard
+              key={item.label}
+              label={item.label}
+              value={item.value}
+              detail={item.detail}
+            />
           ))}
         </section>
 
@@ -127,66 +132,19 @@ function App() {
 
             <div className="tables-grid">
               {tables.map((table) => (
-                <div key={table.name} className={`table-card ${table.active ? 'active' : ''}`}>
-                  <div className="table-top">
-                    <strong>{table.name}</strong>
-                    <span className={`status ${table.status.toLowerCase().replace(' ', '-')}`}>
-                      {table.status}
-                    </span>
-                  </div>
-                  <p>{table.seats} personas</p>
-                  <small>{table.detail}</small>
-                </div>
+                <TableCard
+                  key={table.name}
+                  name={table.name}
+                  status={table.status}
+                  seats={table.seats}
+                  detail={table.detail}
+                  active={table.active}
+                />
               ))}
             </div>
           </div>
 
-          <div className="panel order-panel">
-            <div className="panel-header">
-              <h2>Pedido activo</h2>
-              <button className="link-button">Actualizar</button>
-            </div>
-
-            <div className="order-focus">
-              <div className="order-header">
-                <div>
-                  <span className="order-label">Mesa</span>
-                  <strong>{selectedOrder.table}</strong>
-                </div>
-                <span className="order-state">{selectedOrder.state}</span>
-              </div>
-
-              <div className="order-client-row">
-                <div>
-                  <span className="order-label">Cliente</span>
-                  <strong>{selectedOrder.client}</strong>
-                </div>
-                <span className="order-id">{selectedOrder.id}</span>
-              </div>
-
-              <div className="items-list">
-                {selectedOrder.items.map((item) => (
-                  <div key={`${selectedOrder.id}-${item.name}`} className="item-row">
-                    <div className="item-name-block">
-                      <strong>{item.qty}x</strong>
-                      <span>{item.name}</span>
-                    </div>
-                    <b>{item.subtotal}</b>
-                  </div>
-                ))}
-              </div>
-
-              <div className="total-box">
-                <span>Total</span>
-                <strong>{selectedOrder.total}</strong>
-              </div>
-
-              <div className="order-actions">
-                <button className="primary-button small">Enviar a cocina</button>
-                <button className="ghost-button small">Editar</button>
-              </div>
-            </div>
-          </div>
+          <OrderPanel order={selectedOrder} />
         </section>
 
         <section className="panel bottom-panel">
@@ -197,13 +155,12 @@ function App() {
 
           <div className="menu-list">
             {menu.map((item) => (
-              <div key={item.name} className="menu-item">
-                <div>
-                  <strong>{item.name}</strong>
-                  <span>{item.tag}</span>
-                </div>
-                <b>{item.price}</b>
-              </div>
+              <MenuItem
+                key={item.name}
+                name={item.name}
+                tag={item.tag}
+                price={item.price}
+              />
             ))}
           </div>
         </section>
