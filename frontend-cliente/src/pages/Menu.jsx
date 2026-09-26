@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { obtenerCategorias, obtenerPlatos } from '../services/menuService';
+import CategoriaFiltro from '../components/menu/CategoriaFiltro';
 
 function Menu() {
   const [categorias, setCategorias] = useState([]);
   const [platos, setPlatos] = useState([]);
+  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState(null);
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -25,6 +27,10 @@ function Menu() {
     cargarDatos();
   }, []);
 
+  const platosFiltrados = categoriaSeleccionada
+    ? platos.filter((p) => p.categoriaId === categoriaSeleccionada)
+    : platos;
+
   if (cargando) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
@@ -36,24 +42,31 @@ function Menu() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-gray-900">Menú Digital</h1>
+      {/* Filtro horizontal por categoría */}
+      <CategoriaFiltro
+        categorias={categorias}
+        categoriaSeleccionada={categoriaSeleccionada}
+        onSeleccionar={setCategoriaSeleccionada}
+      />
+
+      {/* Lista de platos filtrados (en texto plano) */}
       <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm space-y-2">
-        <p className="text-sm text-gray-700">
-          <strong className="text-gray-900">Categorías cargadas:</strong> {categorias.length}
-        </p>
-        <p className="text-sm text-gray-700">
-          <strong className="text-gray-900">Platos cargados:</strong> {platos.length}
-        </p>
-      </div>
-      <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-        <h2 className="text-sm font-semibold text-gray-700 mb-2">Lista de platos (texto):</h2>
-        <ul className="text-xs text-gray-600 space-y-1 list-disc list-inside">
-          {platos.map((p) => (
-            <li key={p.id}>
-              {p.nombre} - ${p.precio.toLocaleString('es-CO')}
-            </li>
-          ))}
-        </ul>
+        <h2 className="text-sm font-semibold text-gray-700">
+          Platos filtrados ({platosFiltrados.length}):
+        </h2>
+        {platosFiltrados.length === 0 ? (
+          <p className="text-xs text-gray-500 italic">
+            No hay platos en esta categoría.
+          </p>
+        ) : (
+          <ul className="text-xs text-gray-600 space-y-1 list-disc list-inside">
+            {platosFiltrados.map((p) => (
+              <li key={p.id}>
+                {p.nombre} - ${p.precio.toLocaleString('es-CO')}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
