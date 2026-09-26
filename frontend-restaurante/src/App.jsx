@@ -1,4 +1,6 @@
 import './App.css'
+import { Topbar } from './components/Topbar'
+import { Sidebar } from './components/Sidebar'
 import { StatCard } from './components/StatCard'
 import { TableCard } from './components/TableCard'
 import { OrderPanel } from './components/OrderPanel'
@@ -74,38 +76,8 @@ const menu = [
 function App() {
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-block">
-          <div className="brand-mark">S</div>
-          <div>
-            <p className="brand-name">SmartDining</p>
-            <span>Restaurante</span>
-          </div>
-        </div>
-
-        <div className="topbar-actions">
-          <button className="ghost-button">Hoy</button>
-          <button className="primary-button">+ Nuevo pedido</button>
-          <div className="avatar">JP</div>
-        </div>
-      </header>
-
-      <aside className="sidebar">
-        <nav className="nav-menu">
-          <button className="nav-item active">Inicio</button>
-          <button className="nav-item">Mesas</button>
-          <button className="nav-item">Pedidos</button>
-          <button className="nav-item">Menú</button>
-          <button className="nav-item">Caja</button>
-          <button className="nav-item">Reportes</button>
-        </nav>
-
-        <div className="sidebar-card">
-          <span className="card-label">Turno actual</span>
-          <strong>12:00 - 15:00</strong>
-          <p>6 empleados activos</p>
-        </div>
-      </aside>
+      <Topbar />
+      <Sidebar />
 
       <main className="main-panel">
         <section className="stats-grid">
