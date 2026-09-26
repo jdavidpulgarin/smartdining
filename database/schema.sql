@@ -53,7 +53,7 @@ CREATE TABLE mesas (
     ubicacion VARCHAR(50) NOT NULL DEFAULT 'Principal',
     estado VARCHAR(20) NOT NULL DEFAULT 'disponible'
         CHECK (estado IN ('disponible', 'ocupada', 'reservada', 'mantenimiento')),
-    token_qr VARCHAR(64) NOT NULL UNIQUE,
+    token_qr VARCHAR(255) NOT NULL UNIQUE,
     version_control INTEGER NOT NULL DEFAULT 1,
     actualizado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -282,7 +282,7 @@ CREATE TABLE intentos_pago_fallidos (
 CREATE TABLE token_qr_historico (
     id_historico_token SERIAL PRIMARY KEY,
     id_mesa INTEGER NOT NULL,
-    token_antiguo VARCHAR(64) NOT NULL,
+    token_antiguo VARCHAR(255) NOT NULL,
     fecha_invalidacion TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_token_historico_mesa
         FOREIGN KEY (id_mesa)
