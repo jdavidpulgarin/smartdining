@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import Layout from './components/layout/Layout'
 import Inicio from './pages/Inicio'
 import Menu from './pages/Menu'
 import Carrito from './pages/Carrito'
@@ -10,10 +11,38 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Inicio />} />
-        <Route path="/menu" element={<Menu />} />
-        <Route path="/carrito" element={<Carrito />} />
-        <Route path="/seguimiento" element={<Seguimiento />} />
-        <Route path="/pago" element={<Pago />} />
+        <Route
+          path="/menu"
+          element={
+            <Layout>
+              <Menu />
+            </Layout>
+          }
+        />
+        <Route
+          path="/carrito"
+          element={
+            <Layout>
+              <Carrito />
+            </Layout>
+          }
+        />
+        <Route
+          path="/seguimiento"
+          element={
+            <Layout>
+              <Seguimiento />
+            </Layout>
+          }
+        />
+        <Route
+          path="/pago"
+          element={
+            <Layout>
+              <Pago />
+            </Layout>
+          }
+        />
       </Routes>
     </BrowserRouter>
   )
