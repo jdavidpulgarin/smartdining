@@ -1,13 +1,29 @@
+import { Link, useLocation } from 'react-router-dom'
+
+const navItems = [
+  { label: 'Inicio', path: '/' },
+  { label: 'Mesas', path: '/mesas' },
+  { label: 'Pedidos', path: '/pedidos' },
+  { label: 'Menú', path: '/menu' },
+  { label: 'Caja', path: '/caja' },
+  { label: 'Reportes', path: '/reportes' },
+]
+
 export function Sidebar() {
+  const location = useLocation()
+
   return (
     <aside className="sidebar">
       <nav className="nav-menu">
-        <button className="nav-item active">Inicio</button>
-        <button className="nav-item">Mesas</button>
-        <button className="nav-item">Pedidos</button>
-        <button className="nav-item">Menú</button>
-        <button className="nav-item">Caja</button>
-        <button className="nav-item">Reportes</button>
+        {navItems.map((item) => (
+          <Link
+            key={item.path}
+            to={item.path}
+            className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}
+          >
+            {item.label}
+          </Link>
+        ))}
       </nav>
 
       <div className="sidebar-card">

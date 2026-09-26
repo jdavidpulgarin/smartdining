@@ -1,33 +1,32 @@
 import './App.css'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { Topbar, Sidebar } from './components'
 import {
-  Topbar,
-  Sidebar,
-  StatsSection,
-  TablesPanel,
-  OrderPanel,
-  MenuSection,
-} from './components'
-import { stats, tables, orders, menu } from './constants/mockData'
-
-const selectedOrder = orders[0]
+  Home,
+  Mesas,
+  Pedidos,
+  Menu,
+  Caja,
+  Reportes,
+} from './pages'
 
 function App() {
   return (
-    <div className="app-shell">
-      <Topbar />
-      <Sidebar />
+    <BrowserRouter>
+      <div className="app-shell">
+        <Topbar />
+        <Sidebar />
 
-      <main className="main-panel">
-        <StatsSection stats={stats} />
-
-        <section className="content-grid">
-          <TablesPanel tables={tables} />
-          <OrderPanel order={selectedOrder} />
-        </section>
-
-        <MenuSection menu={menu} />
-      </main>
-    </div>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/mesas" element={<Mesas />} />
+          <Route path="/pedidos" element={<Pedidos />} />
+          <Route path="/menu" element={<Menu />} />
+          <Route path="/caja" element={<Caja />} />
+          <Route path="/reportes" element={<Reportes />} />
+        </Routes>
+      </div>
+    </BrowserRouter>
   )
 }
 
