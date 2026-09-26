@@ -1,10 +1,10 @@
 import './App.css'
 import { Topbar } from './components/Topbar'
 import { Sidebar } from './components/Sidebar'
-import { StatCard } from './components/StatCard'
-import { TableCard } from './components/TableCard'
+import { StatsSection } from './components/StatsSection'
+import { TablesPanel } from './components/TablesPanel'
 import { OrderPanel } from './components/OrderPanel'
-import { MenuItem } from './components/MenuItem'
+import { MenuSection } from './components/MenuSection'
 
 const stats = [
   { label: 'Mesas ocupadas', value: '14', detail: '+2 hoy' },
@@ -80,62 +80,14 @@ function App() {
       <Sidebar />
 
       <main className="main-panel">
-        <section className="stats-grid">
-          {stats.map((item) => (
-            <StatCard
-              key={item.label}
-              label={item.label}
-              value={item.value}
-              detail={item.detail}
-            />
-          ))}
-        </section>
+        <StatsSection stats={stats} />
 
         <section className="content-grid">
-          <div className="panel">
-            <div className="panel-header">
-              <h2>Mesas</h2>
-              <div className="table-filters">
-                <button className="filter-chip active">Todas</button>
-                <button className="filter-chip">Disponibles</button>
-                <button className="filter-chip">Ocupadas</button>
-              </div>
-            </div>
-
-            <div className="tables-grid">
-              {tables.map((table) => (
-                <TableCard
-                  key={table.name}
-                  name={table.name}
-                  status={table.status}
-                  seats={table.seats}
-                  detail={table.detail}
-                  active={table.active}
-                />
-              ))}
-            </div>
-          </div>
-
+          <TablesPanel tables={tables} />
           <OrderPanel order={selectedOrder} />
         </section>
 
-        <section className="panel bottom-panel">
-          <div className="panel-header">
-            <h2>Menú del día</h2>
-            <button className="link-button">Agregar</button>
-          </div>
-
-          <div className="menu-list">
-            {menu.map((item) => (
-              <MenuItem
-                key={item.name}
-                name={item.name}
-                tag={item.tag}
-                price={item.price}
-              />
-            ))}
-          </div>
-        </section>
+        <MenuSection menu={menu} />
       </main>
     </div>
   )
