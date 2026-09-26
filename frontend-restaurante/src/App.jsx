@@ -1,10 +1,12 @@
 import './App.css'
-import { Topbar } from './components/Topbar'
-import { Sidebar } from './components/Sidebar'
-import { StatsSection } from './components/StatsSection'
-import { TablesPanel } from './components/TablesPanel'
-import { OrderPanel } from './components/OrderPanel'
-import { MenuSection } from './components/MenuSection'
+import {
+  Topbar,
+  Sidebar,
+  StatsSection,
+  TablesPanel,
+  OrderPanel,
+  MenuSection,
+} from './components'
 import { stats, tables, orders, menu } from './constants/mockData'
 
 const selectedOrder = orders[0]
