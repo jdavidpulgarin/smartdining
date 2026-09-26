@@ -9,8 +9,11 @@ import {
   Caja,
   Reportes,
 } from './pages'
+import { useSocket } from './hooks'
 
 function App() {
+  useSocket()
+
   return (
     <BrowserRouter>
       <div className="app-shell">
