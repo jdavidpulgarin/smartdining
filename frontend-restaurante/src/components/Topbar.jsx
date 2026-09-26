@@ -1,3 +1,5 @@
+import { GhostButton, PrimaryButton } from './ui/Button'
+
 export function Topbar() {
   return (
     <header className="topbar">
@@ -10,8 +12,8 @@ export function Topbar() {
       </div>
 
       <div className="topbar-actions">
-        <button className="ghost-button">Hoy</button>
-        <button className="primary-button">+ Nuevo pedido</button>
+        <GhostButton>Hoy</GhostButton>
+        <PrimaryButton>+ Nuevo pedido</PrimaryButton>
         <div className="avatar">JP</div>
       </div>
     </header>

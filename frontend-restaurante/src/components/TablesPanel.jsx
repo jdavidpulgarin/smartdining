@@ -1,4 +1,5 @@
 import { TableCard } from './TableCard'
+import { FilterChip } from './ui/FilterChip'
 
 export function TablesPanel({ tables }) {
   return (
@@ -6,9 +7,9 @@ export function TablesPanel({ tables }) {
       <div className="panel-header">
         <h2>Mesas</h2>
         <div className="table-filters">
-          <button className="filter-chip active">Todas</button>
-          <button className="filter-chip">Disponibles</button>
-          <button className="filter-chip">Ocupadas</button>
+          <FilterChip label="Todas" active />
+          <FilterChip label="Disponibles" />
+          <FilterChip label="Ocupadas" />
         </div>
       </div>
 

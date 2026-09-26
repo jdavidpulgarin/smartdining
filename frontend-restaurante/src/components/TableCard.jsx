@@ -1,13 +1,11 @@
-export function TableCard({ name, status, seats, detail, active }) {
-  const statusClass = status.toLowerCase().replace(' ', '-')
+import { StatusBadge } from './ui/Badge'
 
+export function TableCard({ name, status, seats, detail, active }) {
   return (
     <div className={`table-card ${active ? 'active' : ''}`}>
       <div className="table-top">
         <strong>{name}</strong>
-        <span className={`status ${statusClass}`}>
-          {status}
-        </span>
+        <StatusBadge status={status} />
       </div>
       <p>{seats} personas</p>
       <small>{detail}</small>

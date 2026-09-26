@@ -1,9 +1,12 @@
+import { PrimaryButton, GhostButton, LinkButton } from './ui/Button'
+import { StateBadge } from './ui/Badge'
+
 export function OrderPanel({ order }) {
   return (
     <div className="panel order-panel">
       <div className="panel-header">
         <h2>Pedido activo</h2>
-        <button className="link-button">Actualizar</button>
+        <LinkButton>Actualizar</LinkButton>
       </div>
 
       <div className="order-focus">
@@ -12,7 +15,7 @@ export function OrderPanel({ order }) {
             <span className="order-label">Mesa</span>
             <strong>{order.table}</strong>
           </div>
-          <span className="order-state">{order.state}</span>
+          <StateBadge state={order.state} />
         </div>
 
         <div className="order-client-row">
@@ -41,8 +44,8 @@ export function OrderPanel({ order }) {
         </div>
 
         <div className="order-actions">
-          <button className="primary-button small">Enviar a cocina</button>
-          <button className="ghost-button small">Editar</button>
+          <PrimaryButton className="small">Enviar a cocina</PrimaryButton>
+          <GhostButton className="small">Editar</GhostButton>
         </div>
       </div>
     </div>
