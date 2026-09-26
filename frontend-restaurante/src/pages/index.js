@@ -1,0 +1,6 @@
+export { Home } from './Home'
+export { Mesas } from './Mesas'
+export { Pedidos } from './Pedidos'
+export { Menu } from './Menu'
+export { Caja } from './Caja'
+export { Reportes } from './Reportes'
