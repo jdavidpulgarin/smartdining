@@ -1,8 +1,15 @@
+import { Navigate } from 'react-router-dom';
 import Header from './Header';
 import { useMesaSession } from '../../hooks/useMesaSession';
+import { obtenerApodo } from '../../utils/apodo';
 
 function Layout({ children }) {
   const { mesa } = useMesaSession();
+  const apodo = obtenerApodo();
+
+  if (!apodo) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">

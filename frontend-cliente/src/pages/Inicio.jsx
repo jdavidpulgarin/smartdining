@@ -1,9 +1,19 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMesaSession } from '../hooks/useMesaSession';
+import { obtenerApodo, guardarApodo } from '../utils/apodo';
 
 function Inicio() {
   const navigate = useNavigate();
   const { mesa, valida, cargando } = useMesaSession();
+  const [apodo, setApodo] = useState(() => obtenerApodo());
+
+  const manejarContinuar = () => {
+    const apodoLimpio = guardarApodo(apodo);
+    if (apodoLimpio) {
+      navigate('/menu');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-blue-500 flex items-center justify-center p-4">
@@ -28,9 +38,34 @@ function Inicio() {
                 Tu sesión ha sido verificada con éxito. Ya puedes consultar nuestro menú y ordenar.
               </p>
             </div>
+
+            {/* Input de Apodo */}
+            <div className="text-left space-y-1.5">
+              <label
+                htmlFor="apodo-comensal"
+                className="block text-sm font-bold text-gray-900"
+              >
+                ¿Cómo te llamas?
+              </label>
+              <p className="text-xs text-gray-500">
+                Así la cocina sabrá de quién es cada plato
+              </p>
+              <input
+                id="apodo-comensal"
+                type="text"
+                value={apodo}
+                onChange={(e) => setApodo(e.target.value)}
+                maxLength={40}
+                autoComplete="nickname"
+                placeholder="Ej: David, Caro..."
+                className="w-full text-base border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
+              />
+            </div>
+
             <button
-              onClick={() => navigate('/menu')}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors duration-200 shadow-md cursor-pointer"
+              onClick={manejarContinuar}
+              disabled={!apodo.trim()}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors duration-200 shadow-md cursor-pointer disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
             >
               Ver menú
             </button>
