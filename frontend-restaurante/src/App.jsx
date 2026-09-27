@@ -1,5 +1,5 @@
 import './App.css'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { Topbar, Sidebar } from './components'
 import {
   Home,
@@ -8,28 +8,49 @@ import {
   Menu,
   Caja,
   Reportes,
+  Login,
 } from './pages'
 import { useSocket } from './hooks'
+import { AuthProvider } from './context/AuthContext'
 
-function App() {
+function AppContent() {
   useSocket()
+  const location = useLocation()
+  const isLoginPage = location.pathname === '/login'
+
+  if (isLoginPage) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+      </Routes>
+    )
+  }
 
   return (
-    <BrowserRouter>
-      <div className="app-shell">
-        <Topbar />
-        <Sidebar />
+    <div className="app-shell">
+      <Topbar />
+      <Sidebar />
 
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/mesas" element={<Mesas />} />
-          <Route path="/pedidos" element={<Pedidos />} />
-          <Route path="/menu" element={<Menu />} />
-          <Route path="/caja" element={<Caja />} />
-          <Route path="/reportes" element={<Reportes />} />
-        </Routes>
-      </div>
-    </BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/mesas" element={<Mesas />} />
+        <Route path="/pedidos" element={<Pedidos />} />
+        <Route path="/menu" element={<Menu />} />
+        <Route path="/caja" element={<Caja />} />
+        <Route path="/reportes" element={<Reportes />} />
+        <Route path="/login" element={<Login />} />
+      </Routes>
+    </div>
+  )
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
+    </AuthProvider>
   )
 }
 
