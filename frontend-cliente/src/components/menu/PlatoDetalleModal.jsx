@@ -1,9 +1,16 @@
+import { useState } from 'react';
 import Modal from '../ui/Modal';
 import { formatearPrecio } from '../../utils/formato';
 import { ETIQUETAS_MAP, ALERGENOS_MAP } from '../../constants/dieta';
+import SelectorPersonalizacion from './SelectorPersonalizacion';
 
 function PlatoDetalleModal({ plato, abierto, onCerrar }) {
-  // En los pasos 5 a 7 los hooks (useState) deben ir ANTES de este return
+  const [selecciones, setSelecciones] = useState({});
+
+  const manejarCambio = (grupoId, ids) =>
+    setSelecciones((prev) => ({ ...prev, [grupoId]: ids }));
+
+  // Los hooks deben ir ANTES de este return (reglas de hooks de React)
   if (!plato) {
     return null;
   }
@@ -87,6 +94,26 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
               </p>
             )}
           </div>
+
+          {/* 7. Sección Personaliza tu plato */}
+          {plato.personalizaciones && plato.personalizaciones.length > 0 && (
+            <div className="border-t border-gray-100 pt-4 space-y-4">
+              <h3 className="text-sm font-bold text-gray-900">
+                Personaliza tu plato
+              </h3>
+              <div className="space-y-4">
+                {plato.personalizaciones.map((grupo) => (
+                  <SelectorPersonalizacion
+                    key={grupo.id}
+                    grupo={grupo}
+                    seleccionadas={selecciones[grupo.id] ?? []}
+                    onCambiar={(ids) => manejarCambio(grupo.id, ids)}
+                    deshabilitado={plato.disponible === false}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </Modal>
