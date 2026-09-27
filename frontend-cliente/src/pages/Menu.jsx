@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { obtenerCategorias, obtenerPlatos } from '../services/menuService';
 import CategoriaFiltro from '../components/menu/CategoriaFiltro';
 import PlatoCard from '../components/menu/PlatoCard';
+import PlatoDetalleModal from '../components/menu/PlatoDetalleModal';
 
 function Menu() {
   const [categorias, setCategorias] = useState([]);
   const [platos, setPlatos] = useState([]);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState(null);
+  const [platoSeleccionado, setPlatoSeleccionado] = useState(null);
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -31,6 +33,11 @@ function Menu() {
   const platosFiltrados = categoriaSeleccionada
     ? platos.filter((p) => p.categoriaId === categoriaSeleccionada)
     : platos;
+
+  const manejarAgregar = (item) => {
+    console.log('Item para el carrito:', item);
+    setPlatoSeleccionado(null);
+  };
 
   if (cargando) {
     return (
@@ -66,10 +73,23 @@ function Menu() {
       ) : (
         <div className="grid grid-cols-1 gap-3">
           {platosFiltrados.map((plato) => (
-            <PlatoCard key={plato.id} plato={plato} />
+            <PlatoCard
+              key={plato.id}
+              plato={plato}
+              onSeleccionar={setPlatoSeleccionado}
+            />
           ))}
         </div>
       )}
+
+      {/* Modal de detalle del plato */}
+      <PlatoDetalleModal
+        key={platoSeleccionado?.id ?? 'ninguno'}
+        plato={platoSeleccionado}
+        abierto={platoSeleccionado !== null}
+        onCerrar={() => setPlatoSeleccionado(null)}
+        onAgregar={manejarAgregar}
+      />
     </div>
   );
 }

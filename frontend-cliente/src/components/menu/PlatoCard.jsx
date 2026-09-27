@@ -1,12 +1,24 @@
 import { formatearPrecio } from '../../utils/formato';
 import { ETIQUETAS_MAP } from '../../constants/dieta';
 
-function PlatoCard({ plato }) {
+function PlatoCard({ plato, onSeleccionar }) {
   const { nombre, descripcion, precio, imagen, etiquetas, disponible = true } = plato;
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSeleccionar?.(plato);
+    }
+  };
 
   return (
     <div
-      className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex gap-3 p-3 transition-all ${
+      role="button"
+      tabIndex={0}
+      aria-haspopup="dialog"
+      onClick={() => onSeleccionar?.(plato)}
+      onKeyDown={handleKeyDown}
+      className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex gap-3 p-3 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
         !disponible ? 'opacity-65 grayscale-[25%]' : 'hover:shadow-md'
       }`}
     >
