@@ -6,6 +6,7 @@ export const DEMO_USERS = [
     role: 'admin',
     roleLabel: 'Administrador',
     avatar: 'JP',
+    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZF91c3VhcmlvIjoxLCJyb2wiOiJhZG1pbiIsImlhdCI6MTc5MDUyNTcwMywiZXhwIjoxODIyMDYxNzAzfQ.q-pTk_MpQlyP3NEPDWrKh-ToolrlnAJmJ-bM8d_1AkI',
   },
   {
     id: 2,
@@ -14,6 +15,7 @@ export const DEMO_USERS = [
     role: 'cajero',
     roleLabel: 'Caja & Facturación',
     avatar: 'RC',
+    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZF91c3VhcmlvIjo0LCJyb2wiOiJjYWplcm8iLCJpYXQiOjE3OTA1MjU3MDMsImV4cCI6MTgyMjA2MTcwM30.xpMtk4Y1jYZPGzp8kGR6FjRIZsu77xlqR5wX1Zsafiw',
   },
   {
     id: 3,
@@ -22,6 +24,7 @@ export const DEMO_USERS = [
     role: 'mesero',
     roleLabel: 'Mesero de Sala',
     avatar: 'JM',
+    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZF91c3VhcmlvIjozLCJyb2wiOiJtZXNlcm8iLCJpYXQiOjE3OTA1MjU3MDMsImV4cCI6MTgyMjA2MTcwM30._bse1chvpYkIqk7RxJ7U0WFKwCxQln8DlAOguYprYjQ',
   },
   {
     id: 4,
@@ -30,5 +33,6 @@ export const DEMO_USERS = [
     role: 'cocina',
     roleLabel: 'Jefe de Cocina',
     avatar: 'CC',
+    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZF91c3VhcmlvIjoyLCJyb2wiOiJjb2NpbmEiLCJpYXQiOjE3OTA1MjU3MDMsImV4cCI6MTgyMjA2MTcwM30.AIuq7PzSxVWbBSXenoBFCbFHpnorI9FoIBW0ArBUeF4',
   },
 ]
