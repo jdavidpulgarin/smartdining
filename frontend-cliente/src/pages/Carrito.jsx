@@ -18,7 +18,10 @@ function Carrito() {
   if (lineas.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-        <div className="w-20 h-20 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-3xl mb-4 shadow-inner">
+        <div
+          aria-hidden="true"
+          className="w-20 h-20 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-3xl mb-4 shadow-inner"
+        >
           🛒
         </div>
         <h2 className="text-xl font-bold text-gray-900 mb-2">
@@ -111,7 +114,7 @@ function Carrito() {
         </div>
       </div>
 
-      {/* Acciones finales: botón deshabilitado Próximamente Fase 9 y volver al menú */}
+      {/* Acciones finales: confirmar pedido (deshabilitado) y volver al menú */}
       <div className="space-y-2 pt-2">
         <button
           type="button"
@@ -121,7 +124,7 @@ function Carrito() {
         >
           <span>Confirmar pedido</span>
           <span className="text-xs font-semibold text-gray-400">
-            (Próximamente — Fase 9)
+            (próximamente)
           </span>
         </button>
 
