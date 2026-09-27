@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { obtenerCategorias, obtenerPlatos } from '../services/menuService';
 import CategoriaFiltro from '../components/menu/CategoriaFiltro';
 import PlatoCard from '../components/menu/PlatoCard';
 import PlatoDetalleModal from '../components/menu/PlatoDetalleModal';
+import { useCarrito } from '../context/CarritoContext';
+import { obtenerApodo } from '../utils/apodo';
+import { generarIdLinea } from '../utils/id';
 
 function Menu() {
   const [categorias, setCategorias] = useState([]);
@@ -10,6 +13,18 @@ function Menu() {
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState(null);
   const [platoSeleccionado, setPlatoSeleccionado] = useState(null);
   const [cargando, setCargando] = useState(true);
+  const [toastMensaje, setToastMensaje] = useState(null);
+  const toastTimeoutRef = useRef(null);
+
+  const { agregarLinea } = useCarrito();
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     async function cargarDatos() {
@@ -35,8 +50,29 @@ function Menu() {
     : platos;
 
   const manejarAgregar = (item) => {
-    console.log('Item para el carrito:', item);
+    const apodo = obtenerApodo();
+    const linea = {
+      id_linea: generarIdLinea(),
+      comensal: apodo,
+      id_plato: item.plato.id,
+      cantidad: item.cantidad,
+      notas: item.notasCocina,
+      nombre: item.plato.nombre,
+      precioUnitario: item.precioUnitario,
+      selecciones: item.selecciones,
+      notasCliente: item.notasCliente,
+    };
+
+    agregarLinea(linea);
     setPlatoSeleccionado(null);
+
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToastMensaje(`${item.plato.nombre} añadido al carrito`);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMensaje(null);
+    }, 2000);
   };
 
   if (cargando) {
@@ -90,6 +126,20 @@ function Menu() {
         onCerrar={() => setPlatoSeleccionado(null)}
         onAgregar={manejarAgregar}
       />
+
+      {/* Feedback visual accesible (toast temporal) */}
+      {toastMensaje && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2 max-w-[90vw]"
+        >
+          <span className="text-green-400 font-bold" aria-hidden="true">
+            ✓
+          </span>
+          <span className="truncate">{toastMensaje}</span>
+        </div>
+      )}
     </div>
   );
 }

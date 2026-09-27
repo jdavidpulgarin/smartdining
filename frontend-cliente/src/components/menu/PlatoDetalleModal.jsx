@@ -3,6 +3,10 @@ import Modal from '../ui/Modal';
 import { formatearPrecio } from '../../utils/formato';
 import { ETIQUETAS_MAP, ALERGENOS_MAP } from '../../constants/dieta';
 import SelectorPersonalizacion from './SelectorPersonalizacion';
+import {
+  construirNotasCocina,
+  NOTAS_MAX_SERVIDOR,
+} from '../../utils/notasCocina';
 
 const NOTAS_MAX = 150;
 const CANTIDAD_MIN = 1;
@@ -45,13 +49,19 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
     return !sel || sel.length === 0;
   });
 
-  const puedeAgregar = !agotado && gruposFaltantes.length === 0;
+  const notasCocina = construirNotasCocina(plato, selecciones, notas);
+  const notasDemasiadoLargas = notasCocina.length > NOTAS_MAX_SERVIDOR;
+
+  const puedeAgregar =
+    !agotado && gruposFaltantes.length === 0 && !notasDemasiadoLargas;
 
   const textoBoton = agotado
     ? 'No disponible'
     : gruposFaltantes.length > 0
       ? `Elige: ${gruposFaltantes[0].nombre}`
-      : `Añadir ${cantidad} · ${formatearPrecio(subtotal)}`;
+      : notasDemasiadoLargas
+        ? 'Notas demasiado largas'
+        : `Añadir ${cantidad} · ${formatearPrecio(subtotal)}`;
 
   const manejarAgregar = () => {
     if (!puedeAgregar) return;
@@ -67,13 +77,12 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
     );
 
     onAgregar?.({
-      platoId: plato.id,
-      nombre: plato.nombre,
+      plato,
       cantidad,
       selecciones: seleccionesLimpias,
-      notas: notas.trim(),
+      notasCliente: notas.trim(),
+      notasCocina,
       precioUnitario,
-      subtotal,
     });
   };
 
