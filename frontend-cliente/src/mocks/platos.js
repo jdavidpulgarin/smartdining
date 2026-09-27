@@ -9,6 +9,7 @@ export const platos = [
     alergenos: ["gluten"],
     etiquetas: [],
     disponible: true,
+    personalizaciones: [],
   },
   {
     id: 2,
@@ -20,6 +21,7 @@ export const platos = [
     alergenos: [],
     etiquetas: ["vegano", "sin_gluten"],
     disponible: true,
+    personalizaciones: [],
   },
   {
     id: 3,
@@ -31,6 +33,7 @@ export const platos = [
     alergenos: ["gluten", "lacteos"],
     etiquetas: ["vegetariano"],
     disponible: true,
+    personalizaciones: [],
   },
   {
     id: 4,
@@ -42,6 +45,20 @@ export const platos = [
     alergenos: ["huevo"],
     etiquetas: ["sin_gluten"],
     disponible: true,
+    personalizaciones: [
+      {
+        id: "adiciones",
+        nombre: "Adiciones",
+        tipo: "multiple",
+        obligatorio: false,
+        max: 2,
+        opciones: [
+          { id: "aguacate-extra", nombre: "Aguacate extra", precioExtra: 4000 },
+          { id: "chicharron-extra", nombre: "Porción de chicharrón extra", precioExtra: 8000 },
+          { id: "arepa-adicional", nombre: "Arepa adicional", precioExtra: 2000 },
+        ],
+      },
+    ],
   },
   {
     id: 5,
@@ -53,6 +70,20 @@ export const platos = [
     alergenos: ["pescado", "lacteos"],
     etiquetas: ["sin_gluten"],
     disponible: true,
+    personalizaciones: [
+      {
+        id: "acompanamiento",
+        nombre: "Acompañamiento",
+        tipo: "unica",
+        obligatorio: true,
+        max: 1,
+        opciones: [
+          { id: "pure-papa-criolla", nombre: "Puré de papa criolla", precioExtra: 0 },
+          { id: "papas-francesa", nombre: "Papas a la francesa", precioExtra: 0 },
+          { id: "ensalada-casa", nombre: "Ensalada fresca de la casa", precioExtra: 0 },
+        ],
+      },
+    ],
   },
   {
     id: 6,
@@ -64,6 +95,43 @@ export const platos = [
     alergenos: ["gluten", "lacteos", "sesamo"],
     etiquetas: [],
     disponible: true,
+    personalizaciones: [
+      {
+        id: "termino",
+        nombre: "Término de la carne",
+        tipo: "unica",
+        obligatorio: true,
+        max: 1,
+        opciones: [
+          { id: "medio", nombre: "Término medio", precioExtra: 0 },
+          { id: "tres-cuartos", nombre: "Tres cuartos", precioExtra: 0 },
+          { id: "bien-asado", nombre: "Bien asado", precioExtra: 0 },
+        ],
+      },
+      {
+        id: "acompanamiento",
+        nombre: "Acompañamiento",
+        tipo: "unica",
+        obligatorio: true,
+        max: 1,
+        opciones: [
+          { id: "papas-rusticas", nombre: "Papas rústicas", precioExtra: 0 },
+          { id: "papas-francesa", nombre: "Papas a la francesa", precioExtra: 0 },
+          { id: "aros-cebolla", nombre: "Aros de cebolla", precioExtra: 2500 },
+        ],
+      },
+      {
+        id: "adiciones",
+        nombre: "Adiciones",
+        tipo: "multiple",
+        obligatorio: false,
+        max: 2,
+        opciones: [
+          { id: "tocineta-crocante", nombre: "Tocineta crocante", precioExtra: 3500 },
+          { id: "queso-cheddar-extra", nombre: "Queso cheddar extra", precioExtra: 3000 },
+        ],
+      },
+    ],
   },
   {
     id: 7,
@@ -75,6 +143,19 @@ export const platos = [
     alergenos: ["lacteos"],
     etiquetas: ["vegetariano", "sin_gluten"],
     disponible: true,
+    personalizaciones: [
+      {
+        id: "adicion-gourmet",
+        nombre: "Adición gourmet",
+        tipo: "multiple",
+        obligatorio: false,
+        max: 2,
+        opciones: [
+          { id: "parmesano-reggiano", nombre: "Queso parmesano reggiano", precioExtra: 3000 },
+          { id: "aceite-trufa", nombre: "Aceite de trufa blanca", precioExtra: 4500 },
+        ],
+      },
+    ],
   },
   {
     id: 8,
@@ -86,6 +167,20 @@ export const platos = [
     alergenos: [],
     etiquetas: ["vegano", "sin_gluten"],
     disponible: true,
+    personalizaciones: [
+      {
+        id: "nivel-dulce",
+        nombre: "Nivel de dulce",
+        tipo: "unica",
+        obligatorio: true,
+        max: 1,
+        opciones: [
+          { id: "dulce-normal", nombre: "Dulce normal", precioExtra: 0 },
+          { id: "poca-azucar", nombre: "Poca azúcar", precioExtra: 0 },
+          { id: "sin-azucar", nombre: "Sin azúcar", precioExtra: 0 },
+        ],
+      },
+    ],
   },
   {
     id: 9,
@@ -97,6 +192,20 @@ export const platos = [
     alergenos: [],
     etiquetas: ["vegano", "sin_gluten"],
     disponible: true,
+    personalizaciones: [
+      {
+        id: "preparacion",
+        nombre: "Preparación",
+        tipo: "unica",
+        obligatorio: true,
+        max: 1,
+        opciones: [
+          { id: "en-agua", nombre: "En agua", precioExtra: 0 },
+          { id: "en-leche-entera", nombre: "En leche entera", precioExtra: 2000, alergenos: ["lacteos"] },
+          { id: "en-leche-almendras", nombre: "En leche de almendras", precioExtra: 3000, alergenos: ["frutos_secos"] },
+        ],
+      },
+    ],
   },
   {
     id: 10,
@@ -108,6 +217,7 @@ export const platos = [
     alergenos: ["gluten"],
     etiquetas: [],
     disponible: false,
+    personalizaciones: [],
   },
   {
     id: 11,
@@ -119,6 +229,7 @@ export const platos = [
     alergenos: ["gluten", "lacteos", "huevo"],
     etiquetas: ["vegetariano"],
     disponible: true,
+    personalizaciones: [],
   },
   {
     id: 12,
@@ -130,6 +241,7 @@ export const platos = [
     alergenos: ["gluten", "lacteos"],
     etiquetas: ["vegetariano"],
     disponible: true,
+    personalizaciones: [],
   },
 ];
 
