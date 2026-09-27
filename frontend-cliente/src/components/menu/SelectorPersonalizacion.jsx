@@ -21,9 +21,9 @@ function SelectorPersonalizacion({
   return (
     <fieldset className="space-y-2">
       <legend className="w-full text-sm font-semibold text-gray-900 mb-1">
-        <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center justify-between gap-2">
           <span>{grupo.nombre}</span>
-          <div className="flex items-center gap-1.5 text-xs font-normal">
+          <span className="flex items-center gap-1.5 text-xs font-normal">
             {!esUnica && grupo.max && (
               <span className="text-gray-500">
                 Elige hasta {grupo.max}
@@ -38,8 +38,8 @@ function SelectorPersonalizacion({
                 Opcional
               </span>
             )}
-          </div>
-        </div>
+          </span>
+        </span>
       </legend>
 
       <div className="space-y-2 mt-2">
@@ -61,7 +61,7 @@ function SelectorPersonalizacion({
                   : 'cursor-pointer'
               }`}
             >
-              <div className="flex items-center gap-3 min-w-0 flex-1">
+              <span className="flex items-center gap-3 min-w-0 flex-1">
                 <input
                   type={esUnica ? 'radio' : 'checkbox'}
                   name={radioName}
@@ -79,22 +79,22 @@ function SelectorPersonalizacion({
                       }
                     }
                   }}
-                  className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 shrink-0 cursor-pointer disabled:cursor-not-allowed"
+                  className="w-4 h-4 accent-blue-600 shrink-0 cursor-pointer disabled:cursor-not-allowed"
                 />
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-gray-900 block truncate">
+                <span className="block min-w-0 flex-1">
+                  <span className="text-sm font-medium text-gray-900 block">
                     {opcion.nombre}
                   </span>
                   {opcion.alergenos && opcion.alergenos.length > 0 && (
-                    <span className="text-xs text-amber-700 block mt-0.5">
+                    <span className="text-xs text-gray-600 block mt-0.5">
                       Contiene:{' '}
                       {opcion.alergenos
                         .map((a) => ALERGENOS_MAP[a] ?? a)
                         .join(', ')}
                     </span>
                   )}
-                </div>
-              </div>
+                </span>
+              </span>
 
               {opcion.precioExtra > 0 && (
                 <span className="text-xs font-semibold text-gray-600 shrink-0 ml-3">

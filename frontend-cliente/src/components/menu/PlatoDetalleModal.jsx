@@ -136,15 +136,15 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
 
           {/* 6. Sección de Alérgenos */}
           <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
               Alérgenos
-            </h4>
+            </h3>
             {plato.alergenos && plato.alergenos.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 {plato.alergenos.map((alergeno) => (
                   <span
                     key={alergeno}
-                    className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200"
+                    className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 border border-gray-200"
                   >
                     {ALERGENOS_MAP[alergeno] ?? alergeno}
                   </span>
@@ -234,7 +234,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
             type="button"
             onClick={manejarAgregar}
             disabled={!puedeAgregar}
-            className="flex-1 min-h-11 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm md:text-base rounded-lg transition-colors flex items-center justify-center text-center disabled:bg-gray-300 disabled:cursor-not-allowed"
+            className="flex-1 min-h-11 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm md:text-base rounded-lg transition-colors flex items-center justify-center text-center disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed"
           >
             {textoBoton}
           </button>
