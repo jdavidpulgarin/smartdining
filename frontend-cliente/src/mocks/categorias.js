@@ -19,6 +19,11 @@ export const categorias = [
     nombre: "Postres",
     orden: 4,
   },
+  {
+    id: 5,
+    nombre: "Adicionales",
+    orden: 5,
+  },
 ];
 
 export default categorias;
