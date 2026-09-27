@@ -23,7 +23,11 @@ function Header({ numeroMesa, cantidadCarrito = 0 }) {
           <Link
             to="/carrito"
             className="relative p-2 text-gray-700 hover:text-blue-600 transition-colors rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            aria-label={`Carrito de compras con ${cantidadCarrito} productos`}
+            aria-label={
+              cantidadCarrito === 1
+                ? 'Carrito, 1 producto'
+                : `Carrito, ${cantidadCarrito} productos`
+            }
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -39,7 +43,10 @@ function Header({ numeroMesa, cantidadCarrito = 0 }) {
                 d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
               />
             </svg>
-            <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold leading-none text-white bg-blue-600 rounded-full min-w-4 h-4">
+            <span
+              aria-hidden="true"
+              className="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold leading-none text-white bg-blue-600 rounded-full min-w-4 h-4"
+            >
               {cantidadCarrito}
             </span>
           </Link>
