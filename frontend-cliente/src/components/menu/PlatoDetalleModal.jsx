@@ -8,7 +8,7 @@ const NOTAS_MAX = 150;
 const CANTIDAD_MIN = 1;
 const CANTIDAD_MAX = 20;
 
-function PlatoDetalleModal({ plato, abierto, onCerrar }) {
+function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
   const [selecciones, setSelecciones] = useState({});
   const [notas, setNotas] = useState('');
   const [cantidad, setCantidad] = useState(CANTIDAD_MIN);
@@ -21,6 +21,61 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
   if (!plato) {
     return null;
   }
+
+  // Valores derivados
+  const personalizaciones = plato.personalizaciones ?? [];
+
+  const extras = personalizaciones.reduce((totalGrupo, grupo) => {
+    const seleccionadosGrupo = selecciones[grupo.id] ?? [];
+    const sumaGrupo = grupo.opciones.reduce((acc, opcion) => {
+      return seleccionadosGrupo.includes(opcion.id)
+        ? acc + (opcion.precioExtra ?? 0)
+        : acc;
+    }, 0);
+    return totalGrupo + sumaGrupo;
+  }, 0);
+
+  const precioUnitario = plato.precio + extras;
+  const subtotal = precioUnitario * cantidad;
+  const agotado = plato.disponible === false;
+
+  const gruposFaltantes = personalizaciones.filter((grupo) => {
+    if (!grupo.obligatorio) return false;
+    const sel = selecciones[grupo.id];
+    return !sel || sel.length === 0;
+  });
+
+  const puedeAgregar = !agotado && gruposFaltantes.length === 0;
+
+  const textoBoton = agotado
+    ? 'No disponible'
+    : gruposFaltantes.length > 0
+      ? `Elige: ${gruposFaltantes[0].nombre}`
+      : `Añadir ${cantidad} · ${formatearPrecio(subtotal)}`;
+
+  const manejarAgregar = () => {
+    if (!puedeAgregar) return;
+
+    const seleccionesLimpias = Object.entries(selecciones).reduce(
+      (acc, [grupoId, ids]) => {
+        if (ids && ids.length > 0) {
+          acc[grupoId] = ids;
+        }
+        return acc;
+      },
+      {}
+    );
+
+    onAgregar?.({
+      platoId: plato.id,
+      nombre: plato.nombre,
+      cantidad,
+      selecciones: seleccionesLimpias,
+      notas: notas.trim(),
+      precioUnitario,
+      subtotal,
+    });
+  };
 
   return (
     <Modal abierto={abierto} onCerrar={onCerrar} titulo={plato.nombre}>
@@ -146,9 +201,9 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
           </div>
         </div>
 
-        {/* Barra inferior fija con selector de cantidad */}
+        {/* Barra inferior fija con selector de cantidad y botón añadir */}
         <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setCantidad((c) => Math.max(CANTIDAD_MIN, c - 1))}
@@ -174,6 +229,15 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
               +
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={manejarAgregar}
+            disabled={!puedeAgregar}
+            className="flex-1 min-h-11 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm md:text-base rounded-lg transition-colors flex items-center justify-center text-center disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            {textoBoton}
+          </button>
         </div>
       </div>
     </Modal>
