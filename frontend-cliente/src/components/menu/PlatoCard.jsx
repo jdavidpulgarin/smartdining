@@ -1,3 +1,5 @@
+import { formatearPrecio } from '../../utils/formato';
+
 const ETIQUETAS_MAP = {
   vegetariano: { label: 'Vegetariano', style: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   vegano: { label: 'Vegano', style: 'bg-green-50 text-green-700 border-green-200' },
@@ -6,12 +8,6 @@ const ETIQUETAS_MAP = {
 
 function PlatoCard({ plato }) {
   const { nombre, descripcion, precio, imagen, etiquetas, disponible = true } = plato;
-
-  const precioFormateado = new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    maximumFractionDigits: 0,
-  }).format(precio);
 
   return (
     <div
@@ -75,7 +71,7 @@ function PlatoCard({ plato }) {
         {/* Precio */}
         <div className="mt-2.5 flex items-center justify-between">
           <span className="font-extrabold text-blue-600 text-sm">
-            {precioFormateado}
+            {formatearPrecio(precio)}
           </span>
         </div>
       </div>
