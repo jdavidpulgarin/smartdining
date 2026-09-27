@@ -1752,4 +1752,343 @@
   color: #64748b;
 }
 
+/* ==========================================================================
+   Reportes & Analytics Dashboard
+   ========================================================================== */
+.reportes-header-panel {
+  margin-bottom: 1.5rem;
+}
+
+.reportes-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.reportes-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.range-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  padding: 0.25rem 0.4rem;
+  border-radius: 10px;
+  color: #475569;
+}
+
+.range-pill {
+  background: transparent;
+  border: none;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  padding: 0.35rem 0.7rem;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.range-pill:hover {
+  color: #0f172a;
+}
+
+.range-pill.active {
+  background: #ffffff;
+  color: #0f766e;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.reportes-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.kpi-icon-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.kpi-badge-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+}
+
+.kpi-badge-icon.teal { background: #ecfeff; color: #0f766e; }
+.kpi-badge-icon.blue { background: #eff6ff; color: #2563eb; }
+.kpi-badge-icon.amber { background: #fef3c7; color: #d97706; }
+.kpi-badge-icon.purple { background: #f3e8ff; color: #9333ea; }
+
+.text-amber { color: #d97706; }
+
+.reportes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.reportes-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.panel-title-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.panel-title-with-icon h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+/* Ranking de Platos */
+.ranking-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.ranking-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.9rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.ranking-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.ranking-pos {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.ranking-pos.pos-1 { background: #fef08a; color: #854d0e; }
+.ranking-pos.pos-2 { background: #e2e8f0; color: #334155; }
+.ranking-pos.pos-3 { background: #fed7aa; color: #9a3412; }
+
+.ranking-info strong {
+  display: block;
+  font-size: 0.88rem;
+  color: #0f172a;
+}
+
+.ranking-info span {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.ranking-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  min-width: 110px;
+}
+
+.ranking-total {
+  font-size: 0.95rem;
+  color: #0f766e;
+}
+
+.ranking-bar-track {
+  width: 100%;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.ranking-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #14b8a6, #0f766e);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+/* Métodos de Pago Bars */
+.payment-distribution-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.multi-bar {
+  display: flex;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+
+.bar-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.payment-legends-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.payment-legend-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.82rem;
+}
+
+.legend-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #334155;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.legend-values {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.percentage-pill {
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+}
+
+/* Peak Hours Chart */
+.peak-hours-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  height: 150px;
+  padding-top: 1.5rem;
+}
+
+.peak-hour-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  height: 100%;
+}
+
+.bar-wrapper {
+  flex: 1;
+  width: 100%;
+  max-width: 32px;
+  display: flex;
+  align-items: flex-end;
+  background: #f1f5f9;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.peak-bar-fill {
+  width: 100%;
+  background: linear-gradient(180deg, #14b8a6, #0f766e);
+  border-radius: 6px 6px 0 0;
+  position: relative;
+  transition: height 0.4s ease;
+}
+
+.hour-label {
+  font-size: 0.72rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.kds-alert-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background: #fefce8;
+  border: 1px solid #fef08a;
+  border-radius: 12px;
+}
+
+.kds-alert-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.kds-alert-header strong {
+  font-size: 0.88rem;
+  color: #854d0e;
+  display: block;
+}
+
+.kds-alert-header p {
+  margin: 0.1rem 0 0 0;
+  font-size: 0.75rem;
+  color: #a16207;
+}
+
+.kds-badge-clean {
+  background: #ffffff;
+  color: #854d0e;
+  border: 1px solid #fef08a;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .reportes-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 
