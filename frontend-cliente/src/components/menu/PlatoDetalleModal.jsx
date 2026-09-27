@@ -1,11 +1,18 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import Modal from '../ui/Modal';
 import { formatearPrecio } from '../../utils/formato';
 import { ETIQUETAS_MAP, ALERGENOS_MAP } from '../../constants/dieta';
 import SelectorPersonalizacion from './SelectorPersonalizacion';
 
+const NOTAS_MAX = 150;
+const CANTIDAD_MIN = 1;
+const CANTIDAD_MAX = 20;
+
 function PlatoDetalleModal({ plato, abierto, onCerrar }) {
   const [selecciones, setSelecciones] = useState({});
+  const [notas, setNotas] = useState('');
+  const [cantidad, setCantidad] = useState(CANTIDAD_MIN);
+  const notasId = useId();
 
   const manejarCambio = (grupoId, ids) =>
     setSelecciones((prev) => ({ ...prev, [grupoId]: ids }));
@@ -114,6 +121,59 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
               </div>
             </div>
           )}
+
+          {/* 8. Sección Notas para la cocina */}
+          <div className="border-t border-gray-100 pt-4 space-y-2">
+            <label
+              htmlFor={notasId}
+              className="block text-sm font-bold text-gray-900"
+            >
+              Notas para la cocina
+            </label>
+            <textarea
+              id={notasId}
+              value={notas}
+              onChange={(e) => setNotas(e.target.value)}
+              maxLength={NOTAS_MAX}
+              rows={3}
+              placeholder="Ej: sin cebolla"
+              disabled={plato.disponible === false}
+              className="w-full text-base border border-gray-200 rounded-lg p-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+            />
+            <div className="text-right text-xs text-gray-400">
+              {notas.length}/{NOTAS_MAX}
+            </div>
+          </div>
+        </div>
+
+        {/* Barra inferior fija con selector de cantidad */}
+        <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCantidad((c) => Math.max(CANTIDAD_MIN, c - 1))}
+              disabled={plato.disponible === false || cantidad === CANTIDAD_MIN}
+              aria-label="Disminuir cantidad"
+              className="w-11 h-11 flex items-center justify-center rounded-lg border border-gray-200 text-gray-700 text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              −
+            </button>
+            <span
+              aria-live="polite"
+              className="min-w-8 text-center font-bold text-gray-900 text-base"
+            >
+              {cantidad}
+            </span>
+            <button
+              type="button"
+              onClick={() => setCantidad((c) => Math.min(CANTIDAD_MAX, c + 1))}
+              disabled={plato.disponible === false || cantidad === CANTIDAD_MAX}
+              aria-label="Aumentar cantidad"
+              className="w-11 h-11 flex items-center justify-center rounded-lg border border-gray-200 text-gray-700 text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              +
+            </button>
+          </div>
         </div>
       </div>
     </Modal>
