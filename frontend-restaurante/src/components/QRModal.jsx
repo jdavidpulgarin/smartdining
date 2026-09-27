@@ -1,6 +1,17 @@
 import { useState, useRef } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { QrCode, Download, RefreshCw, Copy, Check, Printer, X, ExternalLink } from 'lucide-react'
+import {
+  QrCode,
+  Download,
+  RefreshCw,
+  Copy,
+  Check,
+  Printer,
+  X,
+  ExternalLink,
+  Wifi,
+  Smartphone,
+} from 'lucide-react'
 import { StatusBadge } from './ui/Badge'
 
 export function QRModal({ table, onClose, onUpdateToken }) {
@@ -9,11 +20,23 @@ export function QRModal({ table, onClose, onUpdateToken }) {
   const [regenerating, setRegenerating] = useState(false)
   const qrRef = useRef(null)
 
+  // Detectar la IP del host actual o usar la IP Wi-Fi de la máquina
+  const defaultHost =
+    typeof window !== 'undefined' &&
+    window.location.hostname !== 'localhost' &&
+    window.location.hostname !== '127.0.0.1'
+      ? window.location.hostname
+      : '192.168.1.22'
+
+  const [useWifiIp, setUseWifiIp] = useState(true)
+  const [hostIp, setHostIp] = useState(defaultHost)
+
   if (!table) return null
 
-  // URL del cliente comensal para la mesa
-  const clientBaseUrl = import.meta.env.VITE_CLIENT_URL || 'http://localhost:5174'
-  const diningUrl = `${clientBaseUrl}/menu?mesa=${table.number || table.id}&token=${token}`
+  // Puerto actual donde está corriendo la aplicación
+  const port = typeof window !== 'undefined' ? window.location.port || '5173' : '5173'
+  const activeDomain = useWifiIp ? hostIp : 'localhost'
+  const diningUrl = `http://${activeDomain}:${port}/menu?mesa=${table.number || table.id}&token=${token}`
 
   const handleCopy = () => {
     navigator.clipboard.writeText(diningUrl)
@@ -23,7 +46,9 @@ export function QRModal({ table, onClose, onUpdateToken }) {
 
   const handleRegenerate = () => {
     setRegenerating(true)
-    const randomHex = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10)
+    const randomHex =
+      Math.random().toString(36).substring(2, 10) +
+      Math.random().toString(36).substring(2, 10)
     const newToken = `qr-token-mesa-${String(table.number || table.id).padStart(2, '0')}-${randomHex}`
     setTimeout(() => {
       setToken(newToken)
@@ -75,6 +100,7 @@ export function QRModal({ table, onClose, onUpdateToken }) {
         </div>
 
         <div className="modal-body qr-modal-body">
+          {/* Tarjeta Imprimible */}
           <div className="printable-qr-card" ref={qrRef}>
             <div className="printable-brand">
               <span className="printable-logo">🍽️ SmartDining</span>
@@ -98,14 +124,57 @@ export function QRModal({ table, onClose, onUpdateToken }) {
             </div>
           </div>
 
+          {/* Controles y Ajustes */}
           <div className="qr-controls">
             <div className="qr-status-row">
               <span className="qr-label">Estado actual de la mesa:</span>
               <StatusBadge status={table.status} />
             </div>
 
+            {/* Selector de Conexión Móvil vs Local */}
+            <div className="qr-network-selector-box">
+              <div className="network-toggle-header">
+                <span className="qr-label">
+                  <Wifi size={14} className="inline-icon text-teal" /> Destino del Escaneo:
+                </span>
+                <div className="network-pills">
+                  <button
+                    type="button"
+                    className={`net-pill ${useWifiIp ? 'active' : ''}`}
+                    onClick={() => setUseWifiIp(true)}
+                  >
+                    <Smartphone size={13} />
+                    <span>Red Wi-Fi (Celular)</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`net-pill ${!useWifiIp ? 'active' : ''}`}
+                    onClick={() => setUseWifiIp(false)}
+                  >
+                    <span>Localhost</span>
+                  </button>
+                </div>
+              </div>
+
+              {useWifiIp && (
+                <div className="ip-input-wrapper">
+                  <label>IP de tu PC en la red Wi-Fi:</label>
+                  <input
+                    type="text"
+                    value={hostIp}
+                    onChange={(e) => setHostIp(e.target.value.trim())}
+                    placeholder="192.168.1.X"
+                  />
+                  <small className="ip-hint">
+                    💡 Asegúrate de que tu celular esté conectado al mismo Wi-Fi que este computador.
+                  </small>
+                </div>
+              )}
+            </div>
+
+            {/* Enlace directo codificado en el QR */}
             <div className="qr-url-box">
-              <label>Enlace directo del comensal:</label>
+              <label>Enlace codificado en el QR:</label>
               <div className="qr-url-input-group">
                 <input type="text" readOnly value={diningUrl} />
                 <button
@@ -120,6 +189,7 @@ export function QRModal({ table, onClose, onUpdateToken }) {
               </div>
             </div>
 
+            {/* Botones de Acción */}
             <div className="qr-actions-grid">
               <button
                 type="button"
@@ -157,7 +227,7 @@ export function QRModal({ table, onClose, onUpdateToken }) {
                 className="link-button small qr-action-btn test-link"
               >
                 <ExternalLink size={16} />
-                <span>Probar PWA</span>
+                <span>Probar Enlace</span>
               </a>
             </div>
           </div>
