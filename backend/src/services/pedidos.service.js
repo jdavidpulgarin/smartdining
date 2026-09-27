@@ -11,6 +11,15 @@ const ESTADOS_VALIDOS = ['recibido', 'en_preparacion', 'listo', 'entregado', 'pa
 
 const MAX_INTENTOS_CODIGO = 5;
 
+// Detalles con el nombre del plato. Lo usan crearConDetalles (para el payload de
+// order:created) y obtenerConDetalles (para GET /pedidos/:id).
+const SQL_DETALLES_CON_PLATO = `
+  SELECT dp.*, pl.nombre AS plato_nombre
+  FROM detalles_pedido dp
+  JOIN platos pl ON pl.id_plato = dp.id_plato
+  WHERE dp.id_pedido = $1
+  ORDER BY dp.id_detalle ASC`;
+
 /**
  * codigo_pedido es VARCHAR(16) UNIQUE en el schema de Jarrison:
  * 'PED-' (4) + AAMMDD (6) + '-' (1) + 5 hex = 16 caracteres exactos.
@@ -99,8 +108,13 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
       pedido.id_pedido,
     ]);
 
+    // Los detalles ya enriquecidos se devuelven junto al pedido: los necesita el
+    // payload de order:created (socket-server/EVENTS.md) y así se leen dentro de
+    // la misma transacción, sin una consulta extra después del COMMIT.
+    const detalles = await client.query(SQL_DETALLES_CON_PLATO, [pedido.id_pedido]);
+
     await client.query('COMMIT');
-    return conTotal.rows[0];
+    return { ...conTotal.rows[0], detalles: detalles.rows };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -119,14 +133,7 @@ async function listarActivos() {
 async function obtenerConDetalles(id) {
   const pedido = await pool.query('SELECT * FROM pedidos WHERE id_pedido = $1', [id]);
   if (pedido.rows.length === 0) return null;
-  const detalles = await pool.query(
-    `SELECT dp.*, pl.nombre AS plato_nombre
-     FROM detalles_pedido dp
-     JOIN platos pl ON pl.id_plato = dp.id_plato
-     WHERE dp.id_pedido = $1
-     ORDER BY dp.id_detalle ASC`,
-    [id]
-  );
+  const detalles = await pool.query(SQL_DETALLES_CON_PLATO, [id]);
   return { ...pedido.rows[0], detalles: detalles.rows };
 }
 
@@ -163,7 +170,9 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
     );
 
     await client.query('COMMIT');
-    return result.rows[0];
+    // estado_anterior no es una columna de pedidos: se agrega al resultado
+    // porque lo necesitan el payload de order:status y quien audite el cambio.
+    return { ...result.rows[0], estado_anterior: estadoAnterior };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

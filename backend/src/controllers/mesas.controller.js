@@ -37,10 +37,11 @@ async function obtener(req, res, next) {
  * GET /api/mesas/qr/:token — usado por frontend-cliente al escanear el QR.
  * Solo confirma que el token corresponde a una mesa; no emite sesión.
  *
- * NOTA/pendiente de coordinar con Roberto: la vigencia real (TTL) del token QR
- * vive en Redis, del lado del socket-server — falta acordar si ese chequeo se
- * hace aquí (consultando Redis desde el backend) o si el backend confía en que
- * Roberto ya validó el token antes de que la PWA llegue aquí.
+ * El socket-server de Roberto NO usa Redis: sus tokens QR son tokens firmados
+ * (HMAC) que llevan su propia expiración dentro, y se validan con
+ * POST /qr/validar contra el socket-server. Este endpoint sigue resolviendo la
+ * mesa por la columna mesas.token_qr — PENDIENTE de la decisión del equipo sobre
+ * cuál de los dos modelos de QR queda (ver docs/api-spec.md).
  */
 async function obtenerPorToken(req, res, next) {
   try {

@@ -3,10 +3,10 @@ const pool = require('../config/db');
 // Tabla mesas (docs/modelo-er.md): id_mesa, numero, capacidad, ubicacion,
 // estado, token_qr, actualizado_en.
 //
-// El token_qr lo genera y firma Roberto (socket-server); este servicio solo
-// lee/expone lo que ya quedó guardado en la columna token_qr de la mesa. La
-// vigencia (TTL) del token vive en Redis, del lado de Roberto — este servicio
-// solo confirma que el token corresponde a una mesa existente.
+// Este servicio solo lee/expone lo que está guardado en la columna token_qr.
+// El socket-server de Roberto no usa Redis ni esta columna: emite tokens QR
+// firmados con HMAC, con la expiración dentro del propio token. Los dos modelos
+// conviven por ahora; la decisión de cuál queda es del equipo (docs/api-spec.md).
 
 // Valores exactos del CHECK de mesas.estado en el schema.sql de Jarrison.
 const ESTADOS_MESA = ['disponible', 'ocupada', 'reservada', 'mantenimiento'];

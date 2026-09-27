@@ -62,7 +62,14 @@ async function registrarPago({
     }
 
     await client.query('COMMIT');
-    return transaccionResult.rows[0];
+    // Se devuelve también si el pedido quedó liquidado y de qué mesa era, para
+    // que el controller sepa si toca cerrar la sesión de mesa en el socket-server
+    // sin tener que volver a consultar.
+    return {
+      transaccion: transaccionResult.rows[0],
+      pedidoLiquidado: estado === ESTADO_COBRADO,
+      id_mesa: pedido.id_mesa,
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

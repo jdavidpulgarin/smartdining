@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const transaccionesService = require('../services/transacciones.service');
+const socketNotifier = require('../services/socket.notifier');
 
 // Valores exactos de los CHECK de la tabla transacciones en el schema.sql de
 // Jarrison. referencia_externa es la referencia de la pasarela de Roberto.
@@ -19,10 +20,24 @@ async function crear(req, res, next) {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
 
   try {
-    const transaccion = await transaccionesService.registrarPago({
+    const { transaccion, pedidoLiquidado, id_mesa } = await transaccionesService.registrarPago({
       ...parsed.data,
       id_usuario: req.user.id_usuario,
     });
+
+    // Solo un cobro efectivo cierra la sesión de mesa. Se avisa al socket-server
+    // para que invalide los QR emitidos y borre el carrito y las suscripciones
+    // push de esa mesa, de modo que el grupo siguiente empiece limpio.
+    if (pedidoLiquidado) {
+      socketNotifier.notificarCambioEstado({
+        id_pedido: transaccion.id_pedido,
+        id_mesa,
+        estado_anterior: 'entregado',
+        estado: 'pagado',
+      });
+      socketNotifier.notificarMesaLiberada(id_mesa);
+    }
+
     return res.status(201).json(transaccion);
   } catch (err) {
     return next(err);

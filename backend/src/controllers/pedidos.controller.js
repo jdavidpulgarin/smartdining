@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const pedidosService = require('../services/pedidos.service');
 const { esComensal } = require('../middleware/auth.middleware');
+const socketNotifier = require('../services/socket.notifier');
 
 // El trigger tr_validar_disponibilidad_plato de Jarrison deja comandar un plato
 // agotado si notas_especiales contiene 'OVERRIDE_ADMIN' (bypass administrativo).
@@ -55,8 +56,11 @@ async function crear(req, res, next) {
       items: parsed.data.items,
       notas_generales: parsed.data.notas_generales,
     });
-    // NOTA para Roberto: aquí es donde se debe emitir 'order:created' hacia
-    // el socket-server, para que llegue al KDS y al panel admin en vivo.
+    // Avisa al socket-server para que la comanda aparezca en vivo en el KDS, el
+    // panel admin y la mesa. Sin await a propósito: el tiempo real no debe
+    // retrasar ni hacer fallar la respuesta del pedido (el notifier nunca lanza).
+    socketNotifier.notificarPedidoCreado(pedido, pedido.detalles);
+
     return res.status(201).json({
       id_pedido: pedido.id_pedido,
       codigo_pedido: pedido.codigo_pedido,
@@ -110,7 +114,11 @@ async function actualizarEstado(req, res, next) {
       esComensal(req) ? null : req.user.id_usuario
     );
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
-    // NOTA para Roberto: aquí se dispara 'order:status' hacia cliente y KDS.
+
+    // actualizarEstado devuelve el pedido ya con estado_anterior, que es lo que
+    // espera el payload de order:status.
+    socketNotifier.notificarCambioEstado(pedido);
+
     return res.json(pedido);
   } catch (err) {
     return next(err);

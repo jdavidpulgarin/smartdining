@@ -1,4 +1,5 @@
 const kdsService = require('../services/kds.service');
+const socketNotifier = require('../services/socket.notifier');
 
 // Desde el KDS, el cocinero solo puede mover una comanda entre estos dos
 // estados (marcar "en preparación" o "listo"). Cancelar o cobrar se hace
@@ -30,8 +31,12 @@ async function cambiarEstado(req, res, next) {
       req.user.id_usuario
     );
     if (!pedido) return res.status(404).json({ error: 'Comanda no encontrada' });
-    // NOTA para Roberto: aquí se dispara 'order:status' (o 'order:item_ready')
-    // hacia el cliente y el panel admin.
+
+    // El comensal ve avanzar su pedido y el panel admin se entera en vivo.
+    // (No existe un evento order:item_ready en socket-server/EVENTS.md: el
+    // avance de la comanda se comunica con order:status.)
+    socketNotifier.notificarCambioEstado(pedido);
+
     return res.json(pedido);
   } catch (err) {
     return next(err);
