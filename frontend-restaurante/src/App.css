@@ -432,3 +432,331 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   Table QR Button & Actions
+   ========================================================================== */
+.table-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.table-qr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.22rem 0.45rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.table-qr-btn:hover {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.panel-subtitle {
+  display: block;
+  font-size: 0.8rem;
+  color: #64748b;
+  margin-top: 0.2rem;
+}
+
+/* ==========================================================================
+   Modal Component Styles
+   ========================================================================== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 1rem;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modal-card {
+  background: #ffffff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 620px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  animation: scaleIn 0.2s ease-out;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.modal-icon-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #ecfeff;
+  color: #0f766e;
+  display: grid;
+  place-items: center;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #0f172a;
+}
+
+.modal-subtitle {
+  margin: 0.2rem 0 0 0;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modal-close-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+/* ==========================================================================
+   QR Modal Specific
+   ========================================================================== */
+.qr-modal-body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.printable-qr-card {
+  background: #f8fafc;
+  border: 2px dashed #cbd5e1;
+  border-radius: 14px;
+  padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.printable-brand {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 0.8rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #0f766e;
+}
+
+.printable-mesa {
+  background: #0f766e;
+  color: #ffffff;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+}
+
+.qr-svg-wrapper {
+  background: #ffffff;
+  padding: 0.5rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+  display: grid;
+  place-items: center;
+}
+
+.printable-footer {
+  margin-top: 0.8rem;
+}
+
+.printable-cta {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0 0 0.3rem 0;
+  line-height: 1.2;
+}
+
+.printable-token {
+  font-family: monospace;
+  font-size: 0.65rem;
+  color: #94a3b8;
+  display: block;
+}
+
+.qr-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.qr-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.qr-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.qr-url-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.qr-url-box label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.qr-url-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.qr-url-input-group input {
+  flex: 1;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.78rem;
+  color: #334155;
+  font-family: monospace;
+}
+
+.qr-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.qr-btn-icon:hover {
+  background: #e2e8f0;
+}
+
+.qr-btn-icon.copied {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #15803d;
+}
+
+.qr-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.qr-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  text-decoration: none;
+  font-size: 0.8rem;
+}
+
+.test-link {
+  background: #f0fdfa;
+  border: 1px solid #99f6e4;
+  color: #0f766e;
+  padding: 0.6rem 0.9rem;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.test-link:hover {
+  background: #ccfbf1;
+}
+
+.danger-hover:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 640px) {
+  .qr-modal-body {
+    grid-template-columns: 1fr;
+  }
+}

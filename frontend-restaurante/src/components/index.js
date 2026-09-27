@@ -7,6 +7,7 @@ export { MenuItem } from './MenuItem'
 export { StatsSection } from './StatsSection'
 export { TablesPanel } from './TablesPanel'
 export { MenuSection } from './MenuSection'
+export { QRModal } from './QRModal'
 
 export {
   PrimaryButton,
