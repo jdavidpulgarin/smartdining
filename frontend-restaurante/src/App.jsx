@@ -12,6 +12,7 @@ import {
 } from './pages'
 import { useSocket } from './hooks'
 import { AuthProvider } from './context/AuthContext'
+import { TablesProvider } from './context/TablesContext'
 
 function AppContent() {
   useSocket()
@@ -47,9 +48,11 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
+      <TablesProvider>
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </TablesProvider>
     </AuthProvider>
   )
 }
