@@ -294,6 +294,37 @@ Doble comprobación, porque cada una cubre algo distinto:
 **503** si el socket-server no responde: sin validar no se puede dejar entrar a nadie.
 Las 3 h son la vigencia de la *sesión*, no la del token QR (`qr_expira_en`).
 
+### Criterios de aceptación del QR (propuesta de Roberto)
+
+Los seis criterios acordados, con la prueba que cubre cada uno. Todas están en
+`backend/tests/criterios-aceptacion.test.js` y recorren el flujo de punta a punta
+(tablet → QR → sesión → pedido → liberación) con dobles de la base y del socket-server,
+sin tocar la red.
+
+| # | Criterio | Prueba |
+|---|---|---|
+| 1 | El QR generado desde la tablet permite abrir sesión y hacer un pedido | `CA1: el QR generado desde la tablet permite abrir sesión y hacer un pedido` |
+| 2 | Varios comensales pueden escanear el mismo QR dentro de la misma sesión | `CA2: varios comensales pueden escanear el mismo QR dentro de la misma sesión` |
+| 3 | Después de liberar la mesa, ese mismo QR responde error al intentar abrir sesión | `CA3: después de liberar la mesa, ese mismo QR da error al abrir sesión` (+ el caso de defensa en profundidad) |
+| 4 | Después de liberar la mesa, un JWT de la sesión anterior no puede crear pedidos (401) | `CA4: después de liberar la mesa, un JWT de la sesión anterior no puede crear pedidos (401)` |
+| 5 | El siguiente grupo recibe un QR nuevo que funciona con normalidad | `CA5: el siguiente grupo recibe un QR nuevo que funciona con normalidad` |
+| 6 | Un grupo que se va sin pedir queda cerrado con "Liberar mesa" | `CA6: un grupo que se va sin pedir queda cerrado con "Liberar mesa"` |
+
+Notas de lo que quedó demostrado al escribirlas:
+
+- **CA2** es la razón por la que el QR es *de la sesión* y no de un solo uso: los tres
+  comensales reciben JWT distintos pero con el **mismo `sid`**, o sea una sola sesión de
+  mesa, y cada uno pide con su apodo sobre la cuenta compartida.
+- **CA3** está cubierto por **dos defensas independientes**: el socket-server revoca los
+  tokens de la mesa al recibir `/internal/mesa-liberada` (`motivo: revocado`), y además el
+  backend rechaza el QR porque `mesas.token_qr` quedó en NULL (`motivo: mesa_sin_sesion`).
+  Hay una prueba para cada una, así que si el aviso al socket-server se pierde el QR viejo
+  sigue sin servir.
+- **CA6** es el caso sin pedidos: nada lo cierra automáticamente (la liberación automática
+  solo se dispara al cerrarse un pedido), así que el botón "Liberar mesa" es el único
+  camino. La prueba hermana cubre el otro lado: si el grupo pidió y pagó, la mesa se
+  cierra sola.
+
 ---
 
 ## Pedidos
