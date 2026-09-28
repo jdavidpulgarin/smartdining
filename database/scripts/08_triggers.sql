@@ -212,54 +212,16 @@ CREATE TRIGGER tr_control_concurrencia_mesa
     EXECUTE FUNCTION fn_tr_control_concurrencia_mesa();
 
 -- ------------------------------------------------------------------------------
--- TRIGGER 7: tr_regenerar_token_qr
--- Invalida y regenera el QR de la mesa al liquidar o cancelar la sesión de consumo.
+-- NOTA ARQUITECTÓNICA:
+-- El trigger tr_regenerar_token_qr fue retirado para ceder la propiedad exclusiva
+-- de token_qr y la liberación de mesas al backend. Esto preserva el formato
+-- criptográfico firmado v1.<datos>.<firma> y la sesión (sid).
 -- ------------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fn_tr_regenerar_token_qr()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_pedidos_abiertos INTEGER;
-    v_nuevo_token VARCHAR(64);
-    v_token_actual VARCHAR(64);
-BEGIN
-    IF NEW.estado IN ('pagado', 'cancelado') AND OLD.estado NOT IN ('pagado', 'cancelado') THEN
-        -- Comprobar si quedan más pedidos activos en la misma mesa
-        SELECT COUNT(*) INTO v_pedidos_abiertos
-        FROM pedidos
-        WHERE id_mesa = NEW.id_mesa
-          AND estado NOT IN ('pagado', 'cancelado')
-          AND id_pedido != NEW.id_pedido;
-
-        IF v_pedidos_abiertos = 0 THEN
-            SELECT token_qr INTO v_token_actual FROM mesas WHERE id_mesa = NEW.id_mesa;
-
-            v_nuevo_token := encode(gen_random_bytes(32), 'hex');
-
-            -- Guardar histórico de token anterior
-            INSERT INTO token_qr_historico (id_mesa, token_antiguo, fecha_invalidacion)
-            VALUES (NEW.id_mesa, v_token_actual, CURRENT_TIMESTAMP);
-
-            -- Rotar token y liberar mesa
-            UPDATE mesas
-            SET token_qr = v_nuevo_token,
-                estado = 'disponible',
-                actualizado_en = CURRENT_TIMESTAMP
-            WHERE id_mesa = NEW.id_mesa;
-        END IF;
-    END IF;
-
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
 DROP TRIGGER IF EXISTS tr_regenerar_token_qr ON pedidos;
-CREATE TRIGGER tr_regenerar_token_qr
-    AFTER UPDATE OF estado ON pedidos
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_tr_regenerar_token_qr();
+DROP FUNCTION IF EXISTS fn_tr_regenerar_token_qr();
 
 -- ------------------------------------------------------------------------------
--- TRIGGER 8: tr_auditar_cambios
+-- TRIGGER 7: tr_auditar_cambios
 -- Bitácora unificada de auditoría DML en tablas críticas del sistema.
 -- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_tr_auditar_cambios()
@@ -326,7 +288,7 @@ DROP TRIGGER IF EXISTS tr_auditar_transacciones ON transacciones;
 CREATE TRIGGER tr_auditar_transacciones AFTER INSERT OR UPDATE OR DELETE ON transacciones FOR EACH ROW EXECUTE FUNCTION fn_tr_auditar_cambios();
 
 -- ------------------------------------------------------------------------------
--- TRIGGER 9: tr_calcular_tiempo_preparacion
+-- TRIGGER 8: tr_calcular_tiempo_preparacion
 -- Registra métricas y alertas de demora en cocina al pasar pedido a 'listo'.
 -- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_tr_calcular_tiempo_preparacion()
@@ -400,7 +362,7 @@ CREATE TRIGGER tr_calcular_tiempo_preparacion
     EXECUTE FUNCTION fn_tr_calcular_tiempo_preparacion();
 
 -- ------------------------------------------------------------------------------
--- TRIGGER 10: tr_validar_disponibilidad_plato
+-- TRIGGER 9: tr_validar_disponibilidad_plato
 -- Impide comandar platos inactivos salvo autorización explícita de administración.
 -- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_tr_validar_disponibilidad_plato()
