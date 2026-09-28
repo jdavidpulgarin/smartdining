@@ -119,6 +119,10 @@ async function actualizarEstado(req, res, next) {
     // espera el payload de order:status.
     socketNotifier.notificarCambioEstado(pedido);
 
+    // El cierre del pedido pudo liberar la mesa (ya ocurrió en la transacción):
+    // se avisa para que el socket-server cierre la sesión de esa mesa.
+    if (pedido.mesaLiberada) socketNotifier.notificarMesaLiberada(pedido.id_mesa);
+
     return res.json(pedido);
   } catch (err) {
     return next(err);

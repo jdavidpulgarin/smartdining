@@ -36,6 +36,7 @@ async function cambiarEstado(req, res, next) {
     // (No existe un evento order:item_ready en socket-server/EVENTS.md: el
     // avance de la comanda se comunica con order:status.)
     socketNotifier.notificarCambioEstado(pedido);
+    if (pedido.mesaLiberada) socketNotifier.notificarMesaLiberada(pedido.id_mesa);
 
     return res.json(pedido);
   } catch (err) {

@@ -101,7 +101,7 @@ curl http://localhost:4000/api/health
 | Rol | De dónde sale | Payload del JWT |
 |---|---|---|
 | `admin`, `mesero`, `cajero`, `cocina` | Tabla `usuarios`, vía `POST /api/auth/login` | `{ id_usuario, rol }` |
-| `comensal` | **No existe en la tabla usuarios.** Se emite al escanear el QR, vía `POST /api/mesas/qr/:token/sesion` (3 h) | `{ id_mesa, rol: "comensal" }` |
+| `comensal` | **No existe en la tabla usuarios.** Se emite al escanear el QR, vía `POST /api/mesas/qr/:token/sesion` (3 h) | `{ id_mesa, sid, rol: "comensal" }` |
 
 - El rol `cliente` ya no existe.
 - Solo un `admin` puede registrar usuarios (`POST /api/auth/register`). El primer admin
@@ -112,15 +112,39 @@ curl http://localhost:4000/api/health
 - En el carrito colaborativo, a cada comensal lo identifica su **apodo**, que se guarda
   por ítem en `detalles_pedido.notas_especiales`.
 
-## Flujo del comensal
+## Flujo de una mesa, de principio a fin
 
 ```
-escanea el QR
-  → POST /api/mesas/qr/:token/sesion      (valida token_qr, devuelve el JWT de la mesa, 3 h)
-  → GET  /api/categorias  +  GET /api/platos?id_categoria=
-  → POST /api/pedidos                     (id_mesa del token; apodo por ítem)
-  → GET  /api/pedidos/mesa                (los pedidos de su mesa)
+mesero   → POST /api/mesas/:id/abrir        pide el QR al socket-server, lo guarda en
+                                            mesas.token_qr y deja la mesa 'ocupada'
+                                            (idempotente: llamarlo dos veces da el mismo token)
+comensal → POST /api/mesas/qr/:token/sesion el token debe ser válido para el socket-server
+                                            Y el vigente de la mesa -> JWT { id_mesa, sid }
+         → GET  /api/categorias + GET /api/platos?id_categoria=
+         → POST /api/pedidos                id_mesa del token; apodo por ítem
+         → GET  /api/pedidos/mesa
+cocina   → PATCH /api/kds/comandas/:id/estado
+cajero   → POST /api/transacciones          cobro 'completada'
+                                            si no quedan pedidos abiertos, la mesa se
+                                            libera en esa misma transacción
+mesero   → POST /api/mesas/:id/liberar      (o manualmente en cualquier momento)
 ```
+
+Al liberarse, `token_qr` queda en NULL y las sesiones de ese grupo caen con **401
+"Sesión de mesa cerrada"** en su siguiente petición: el middleware compara el `sid` del
+JWT contra el del token que la mesa tiene ahora. El QR impreso es fijo mientras la sesión
+dure; Jarrison retiró el trigger `tr_regenerar_token_qr`, así que ese ciclo de vida lo
+maneja el backend.
+
+## Tiempo real
+
+El backend avisa al socket-server de Roberto por HTTP interno
+(`/internal/order-created`, `/internal/order-status`, `/internal/mesa-liberada`) desde
+`src/services/socket.notifier.js`, con `x-internal-key` y un `eventId` por acción.
+
+Ese cliente **nunca lanza**: con timeout corto, registra el fallo y sigue, así que un
+socket-server caído no rompe un pedido ni un cobro. La excepción son `/qr/generar` y
+`/qr/validar`: ahí sin respuesta no se puede abrir la mesa ni la sesión, y se responde 503.
 
 ## Pruebas
 
@@ -128,7 +152,7 @@ escanea el QR
 npm test
 ```
 
-41 pruebas con `node --test` + `supertest`. No hacen falta PostgreSQL ni Redis:
+81 pruebas con `node --test` + `supertest`. No hacen falta PostgreSQL ni Redis:
 `tests/helpers/fake-db.js` reemplaza `pool.query`/`pool.connect` por dobles en memoria
 y registra las queries ejecutadas, así que las pruebas también verifican con qué
 valores llega cada `INSERT`.
@@ -166,7 +190,8 @@ valores llega cada `INSERT`.
 - [x] Errores de la base traducidos en un solo lugar (409 para `P0001`, 500 genérico para el resto)
 - [x] `OVERRIDE_ADMIN` rechazado en apodos y notas (era un bypass del control de disponibilidad)
 - [x] Solo un cobro `completada` liquida el pedido
-- [ ] Decidir quién marca la mesa como `ocupada`: ningún trigger lo hace y este backend no usa `crear_pedido()`
+- [x] Ciclo de vida de la sesión de mesa: abrir/liberar, QR fijo por sesión y cierre por `sid`
+- [x] Integración con el socket-server: `order:created`, `order:status` y `mesa-liberada`
 - [ ] Cache de sesiones con Redis (conexión lista, falta integrarla en el middleware de auth)
 - [ ] Validar el TTL del token QR contra Redis, o confirmar que Roberto ya lo validó
 - [ ] Disparar los eventos de WebSocket hacia socket-server en los puntos ya marcados con `NOTA` en el código (coordinar con Roberto)

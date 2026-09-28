@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const mesasService = require('./mesas.service');
 
 // Tabla transacciones (docs/modelo-er.md): id_transaccion, id_pedido,
 // metodo_pago, monto, estado_transaccion, referencia_externa, creado_en.
@@ -49,8 +50,7 @@ async function registrarPago({
 
     // Solo un cobro efectivo liquida el pedido. Una transacción 'pendiente' o
     // 'fallida' queda registrada, pero el pedido NO pasa a 'pagado': si pasara,
-    // un pago rechazado liberaría la mesa (vía tr_regenerar_token_qr) y dejaría
-    // la cuenta como cobrada.
+    // un pago rechazado liberaría la mesa y dejaría la cuenta como cobrada.
     if (estado === ESTADO_COBRADO) {
       await client.query(`UPDATE pedidos SET estado = 'pagado' WHERE id_pedido = $1`, [id_pedido]);
       await client.query(
@@ -61,13 +61,20 @@ async function registrarPago({
       );
     }
 
+    // El pedido quedó cerrado: si la mesa no tiene otros pedidos abiertos, se
+    // libera en esta misma transacción (estado 'disponible' y token_qr en NULL).
+    let mesaLiberada = false;
+    if (estado === ESTADO_COBRADO) {
+      mesaLiberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, pedido.id_mesa);
+    }
+
     await client.query('COMMIT');
-    // Se devuelve también si el pedido quedó liquidado y de qué mesa era, para
-    // que el controller sepa si toca cerrar la sesión de mesa en el socket-server
-    // sin tener que volver a consultar.
+    // Se devuelve qué pasó, para que el controller avise al socket-server
+    // después del commit sin volver a consultar.
     return {
       transaccion: transaccionResult.rows[0],
       pedidoLiquidado: estado === ESTADO_COBRADO,
+      mesaLiberada,
       id_mesa: pedido.id_mesa,
     };
   } catch (err) {

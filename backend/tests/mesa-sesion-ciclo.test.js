@@ -1,0 +1,375 @@
+const test = require('node:test');
+const assert = require('node:assert');
+const request = require('supertest');
+const { instalarFakeDb, tokenStaff, construirTokenQr } = require('./helpers/fake-db');
+const { instalarFakeSocket, socketCaido } = require('./helpers/fake-socket');
+const app = require('../server');
+const mesasService = require('../src/services/mesas.service');
+
+const MESA = { id_mesa: 5, numero: 5, capacidad: 4, ubicacion: 'Terraza', estado: 'disponible' };
+
+/** Doble de BD que simula la fila de la mesa, con el token_qr que se le pase. */
+function dbMesa(tokenQr, estado = 'disponible') {
+  return instalarFakeDb((sql, params) => {
+    if (sql.includes('FROM mesas WHERE id_mesa = $1 FOR UPDATE')) {
+      return { rows: [{ ...MESA, estado, token_qr: tokenQr }] };
+    }
+    if (sql.includes('UPDATE mesas SET token_qr = $1')) {
+      return { rows: [{ ...MESA, estado: 'ocupada', token_qr: params[0] }] };
+    }
+    if (sql.includes('UPDATE mesas SET estado = $1, token_qr = NULL')) {
+      return { rows: [{ ...MESA, estado: 'disponible', token_qr: null }] };
+    }
+    return { rows: [] };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/mesas/:id/abrir
+// ---------------------------------------------------------------------------
+
+test('abrir una mesa sin token pide uno a /qr/generar y lo guarda', async () => {
+  const { token } = construirTokenQr(5);
+  const socket = instalarFakeSocket((ruta) => {
+    if (ruta === '/qr/generar') return { __status: 201, token, id_mesa: 5, expira_en: Date.now() + 3600000 };
+    return { ok: true };
+  });
+  const db = dbMesa(null);
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.token, token);
+    assert.strictEqual(res.body.reutilizado, false);
+    assert.strictEqual(res.body.mesa.estado, 'ocupada');
+
+    // La url se arma desde FRONTEND_CLIENTE_URL
+    assert.match(res.body.url, /^http:\/\/localhost:5173\/\?token=/);
+    assert.ok(res.body.url.includes(encodeURIComponent(token)));
+
+    // Se guardó el token y la mesa quedó ocupada, con la fila bloqueada.
+    assert.ok(db.buscar('FROM mesas WHERE id_mesa = $1 FOR UPDATE'), 'debe bloquear la fila');
+    const guardado = db.buscar('UPDATE mesas SET token_qr = $1');
+    assert.strictEqual(guardado.params[0], token);
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('abrir reenvía el JWT del mesero a /qr/generar', async () => {
+  const { token } = construirTokenQr(5);
+  const jwtMesero = tokenStaff(3, 'mesero');
+  const socket = instalarFakeSocket((ruta) =>
+    ruta === '/qr/generar' ? { __status: 201, token, id_mesa: 5 } : { ok: true }
+  );
+  const db = dbMesa(null);
+  try {
+    await request(app).post('/api/mesas/5/abrir').set('Authorization', `Bearer ${jwtMesero}`);
+
+    const aviso = socket.buscar('/qr/generar');
+    assert.strictEqual(aviso.cabeceras.Authorization, `Bearer ${jwtMesero}`);
+    assert.ok(!aviso.cabeceras['x-internal-key'], '/qr/generar no usa la clave interna');
+    assert.deepStrictEqual(aviso.cuerpo, { id_mesa: 5 });
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('abrir dos veces devuelve el MISMO token (idempotente)', async () => {
+  const { token } = construirTokenQr(5);
+  let generaciones = 0;
+  const socket = instalarFakeSocket((ruta, cuerpo) => {
+    if (ruta === '/qr/generar') {
+      generaciones += 1;
+      return { __status: 201, token, id_mesa: 5 };
+    }
+    if (ruta === '/qr/validar') {
+      // El token ya guardado sigue vigente.
+      return cuerpo.token === token ? { valido: true, id_mesa: 5 } : { __status: 401, valido: false, motivo: 'firma' };
+    }
+    return { ok: true };
+  });
+
+  // Primera llamada: la mesa no tiene token. Segunda: ya lo tiene.
+  let tokenEnLaMesa = null;
+  const db = instalarFakeDb((sql, params) => {
+    if (sql.includes('FROM mesas WHERE id_mesa = $1 FOR UPDATE')) {
+      return { rows: [{ ...MESA, token_qr: tokenEnLaMesa }] };
+    }
+    if (sql.includes('UPDATE mesas SET token_qr = $1')) {
+      tokenEnLaMesa = params[0];
+      return { rows: [{ ...MESA, estado: 'ocupada', token_qr: params[0] }] };
+    }
+    return { rows: [] };
+  });
+
+  try {
+    const primera = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+    const segunda = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(primera.status, 201);
+    assert.strictEqual(segunda.status, 201);
+    assert.strictEqual(segunda.body.token, primera.body.token, 'el token debe ser el mismo');
+    assert.strictEqual(primera.body.reutilizado, false);
+    assert.strictEqual(segunda.body.reutilizado, true);
+    assert.strictEqual(generaciones, 1, 'solo se genera un QR');
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('si el token guardado ya expiró, abrir genera uno nuevo', async () => {
+  const { token: viejo } = construirTokenQr(5);
+  const { token: nuevo } = construirTokenQr(5);
+  const socket = instalarFakeSocket((ruta) => {
+    if (ruta === '/qr/validar') return { __status: 401, valido: false, motivo: 'expirado' };
+    if (ruta === '/qr/generar') return { __status: 201, token: nuevo, id_mesa: 5 };
+    return { ok: true };
+  });
+  const db = dbMesa(viejo, 'ocupada');
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.token, nuevo);
+    assert.strictEqual(res.body.reutilizado, false);
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('socket-server caído al abrir: 503 y la mesa no se toca', async () => {
+  const socket = socketCaido();
+  const db = dbMesa(null);
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 503);
+    assert.strictEqual(db.buscar('UPDATE mesas SET token_qr = $1'), undefined, 'no debe guardar nada');
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('si el socket-server rechaza el rol (403), abrir responde 403', async () => {
+  const socket = instalarFakeSocket((ruta) =>
+    ruta === '/qr/generar'
+      ? { __status: 403, ok: false, codigo: 'NO_AUTORIZADO', mensaje: 'Tu rol no puede generar QR' }
+      : { ok: true }
+  );
+  const db = dbMesa(null);
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 403);
+    assert.match(res.body.error, /no puede generar QR/);
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('abrir exige rol mesero o admin', async () => {
+  for (const rol of ['cajero', 'cocina']) {
+    const res = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(9, rol)}`);
+    assert.strictEqual(res.status, 403, `${rol} no debe poder abrir mesas`);
+  }
+  const sinToken = await request(app).post('/api/mesas/5/abrir');
+  assert.strictEqual(sinToken.status, 401);
+});
+
+test('abrir una mesa que no existe: 404', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    const res = await request(app)
+      .post('/api/mesas/99/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 404);
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/mesas/:id/liberar
+// ---------------------------------------------------------------------------
+
+test('liberar deja la mesa disponible, borra el token y avisa al socket-server', async () => {
+  const { token } = construirTokenQr(5);
+  const socket = instalarFakeSocket();
+  const db = dbMesa(token, 'ocupada');
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/liberar')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.estado, 'disponible');
+    assert.strictEqual(res.body.token_qr, null);
+
+    assert.ok(db.buscar('FROM mesas WHERE id_mesa = $1 FOR UPDATE'), 'con la fila bloqueada');
+    assert.ok(db.buscar('UPDATE mesas SET estado = $1, token_qr = NULL'));
+
+    const aviso = socket.buscar('/internal/mesa-liberada');
+    assert.ok(aviso, 'debe avisar al socket-server');
+    assert.deepStrictEqual(aviso.cuerpo, { id_mesa: 5 });
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('si el socket-server falla, la liberación no se revierte', async () => {
+  const { token } = construirTokenQr(5);
+  const socket = socketCaido();
+  const db = dbMesa(token, 'ocupada');
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/liberar')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 200, 'la mesa queda liberada igual');
+    assert.ok(db.buscar('UPDATE mesas SET estado = $1, token_qr = NULL'));
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('liberar exige rol mesero o admin', async () => {
+  const res = await request(app)
+    .post('/api/mesas/5/liberar')
+    .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`);
+  assert.strictEqual(res.status, 403);
+});
+
+// ---------------------------------------------------------------------------
+// Liberación automática al cerrarse el último pedido
+// ---------------------------------------------------------------------------
+
+test('cancelar el último pedido de la mesa la libera', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) {
+      return { rows: [{ id_pedido: 87, id_mesa: 5, estado: 'cancelado' }] };
+    }
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .post('/api/pedidos/87/cancelar')
+      .set('Authorization', `Bearer ${tokenStaff(1, 'admin')}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.ok(db.buscar('UPDATE mesas SET estado = $1, token_qr = NULL'), 'la mesa se libera');
+    assert.ok(socket.buscar('/internal/mesa-liberada'));
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('si quedan otros pedidos abiertos, cerrar uno NO libera la mesa', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(
+    (sql) => {
+      if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+      if (sql.includes('UPDATE pedidos SET estado')) {
+        return { rows: [{ id_pedido: 87, id_mesa: 5, estado: 'cancelado' }] };
+      }
+      return { rows: [] };
+    },
+    { pedidosAbiertos: 1 }
+  );
+  try {
+    const res = await request(app)
+      .post('/api/pedidos/87/cancelar')
+      .set('Authorization', `Bearer ${tokenStaff(1, 'admin')}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(db.buscar('UPDATE mesas SET estado = $1, token_qr = NULL'), undefined);
+    assert.strictEqual(socket.buscar('/internal/mesa-liberada'), undefined);
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('dos pedidos de la misma mesa cerrándose a la vez la liberan una sola vez', async () => {
+  // Se simula la carrera: el UPDATE de liberación solo afecta filas cuando la
+  // mesa todavía no estaba liberada, igual que el WHERE real del servicio.
+  let mesaLiberada = false;
+  const intentos = [];
+
+  const clienteFalso = {
+    query: async (sql, params = []) => {
+      if (sql.includes('count(*)::int AS n FROM pedidos')) return { rows: [{ n: 0 }] };
+      if (sql.includes('UPDATE mesas SET estado = $1, token_qr = NULL')) {
+        intentos.push(params[1]);
+        if (mesaLiberada) return { rows: [] }; // ya estaba liberada: 0 filas
+        mesaLiberada = true;
+        return { rows: [{ id_mesa: params[1] }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const primera = await mesasService.liberarSiNoQuedanPedidosAbiertos(clienteFalso, 5);
+  const segunda = await mesasService.liberarSiNoQuedanPedidosAbiertos(clienteFalso, 5);
+
+  assert.strictEqual(primera, true, 'el primer cierre libera la mesa');
+  assert.strictEqual(segunda, false, 'el segundo ve que ya estaba liberada');
+  assert.strictEqual(intentos.length, 2, 'ambos lo intentan...');
+  assert.strictEqual(intentos.filter(Boolean).length, 2);
+});
+
+test('la liberación automática bloquea la fila de la mesa antes de decidir', async () => {
+  const consultas = [];
+  const clienteFalso = {
+    query: async (sql) => {
+      consultas.push(sql);
+      if (sql.includes('count(*)::int AS n FROM pedidos')) return { rows: [{ n: 0 }] };
+      return { rows: [{ id_mesa: 5 }] };
+    },
+  };
+
+  await mesasService.liberarSiNoQuedanPedidosAbiertos(clienteFalso, 5);
+
+  assert.ok(consultas[0].includes('FOR UPDATE'), 'lo primero es bloquear la mesa');
+  assert.ok(consultas[1].includes('count(*)::int AS n FROM pedidos'), 'luego contar los abiertos');
+});
+
+test('si no se puede leer el conteo de pedidos abiertos, NO se libera la mesa', async () => {
+  const clienteFalso = {
+    query: async (sql) => {
+      if (sql.includes('count(*)::int AS n FROM pedidos')) return { rows: [] }; // sin datos
+      return { rows: [{ id_mesa: 5 }] };
+    },
+  };
+
+  const liberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(clienteFalso, 5);
+  assert.strictEqual(liberada, false, 'ante la duda, la mesa se queda ocupada');
+});

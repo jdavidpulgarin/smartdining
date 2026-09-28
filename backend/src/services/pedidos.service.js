@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const pool = require('../config/db');
+const mesasService = require('./mesas.service');
 
 /**
  * Dominio del CHECK de pedidos.estado. Se usa solo para validar que el body
@@ -137,6 +138,9 @@ async function obtenerConDetalles(id) {
   return { ...pedido.rows[0], detalles: detalles.rows };
 }
 
+// Estados en los que un pedido deja de ocupar la mesa.
+const ESTADOS_CIERRE = ['pagado', 'cancelado'];
+
 /**
  * Cambia el estado del pedido y lo registra en historial_estados.
  *
@@ -169,10 +173,19 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
       [id, id_usuario, estadoAnterior, estado, observaciones || null]
     );
 
+    // Si el pedido se cerró y la mesa no tiene otros pedidos abiertos, la mesa
+    // se libera en esta misma transacción: el QR impreso deja de valer y las
+    // sesiones de comensal de ese grupo caen.
+    const pedido = result.rows[0];
+    let mesaLiberada = false;
+    if (ESTADOS_CIERRE.includes(estado)) {
+      mesaLiberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, pedido.id_mesa);
+    }
+
     await client.query('COMMIT');
     // estado_anterior no es una columna de pedidos: se agrega al resultado
     // porque lo necesitan el payload de order:status y quien audite el cambio.
-    return { ...result.rows[0], estado_anterior: estadoAnterior };
+    return { ...pedido, estado_anterior: estadoAnterior, mesaLiberada };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

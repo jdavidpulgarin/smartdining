@@ -10,6 +10,10 @@ router.get('/', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.list
 router.get('/qr/:token', ctrl.obtenerPorToken);
 router.post('/qr/:token/sesion', ctrl.crearSesionPorToken);
 
+// Ciclo de vida de la sesión de mesa: el mesero abre (obtiene el QR) y cierra.
+router.post('/:id/abrir', requireAuth, requireRole('mesero', 'admin'), ctrl.abrir);
+router.post('/:id/liberar', requireAuth, requireRole('mesero', 'admin'), ctrl.liberar);
+
 router.get('/:id', ctrl.obtener);
 router.post('/', requireAuth, requireRole('admin'), ctrl.crear);
 router.patch('/:id/estado', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.actualizarEstado);

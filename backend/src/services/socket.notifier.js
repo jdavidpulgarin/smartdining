@@ -97,6 +97,117 @@ function armarPedido(pedido, detalles = []) {
   };
 }
 
+/**
+ * POST /qr/generar — pide al socket-server el token del QR de una mesa.
+ *
+ * Reenvía el JWT del mesero/admin que abrió la mesa porque esa ruta exige
+ * `Authorization: Bearer` con rol admin/mesero/cajero: el socket-server decide
+ * por sí mismo si quien pide puede generar QR, sin que el backend suplante a
+ * nadie con la clave interna.
+ *
+ * Como en validarTokenQr, aquí el resultado SÍ importa: sin token no se puede
+ * abrir la mesa, así que se distingue "me rechazó" de "no pude preguntar".
+ *
+ * @returns {Promise<{alcanzado: boolean, token?: string, expira_en?: number,
+ *                    status?: number, mensaje?: string, motivo?: string}>}
+ */
+async function generarTokenQr(idMesa, jwtStaff, ttlMinutos) {
+  const { url, timeoutMs } = config();
+  if (!url) return { alcanzado: false, motivo: 'SIN_CONFIGURAR' };
+
+  const cuerpo = { id_mesa: idMesa };
+  if (ttlMinutos !== undefined) cuerpo.ttl_minutos = ttlMinutos;
+
+  try {
+    const res = await fetch(`${url}/qr/generar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${jwtStaff}`,
+      },
+      body: JSON.stringify(cuerpo),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    const texto = await res.text();
+    let respuesta = null;
+    try {
+      respuesta = texto ? JSON.parse(texto) : null;
+    } catch {
+      respuesta = null;
+    }
+
+    if (res.status === 201 && respuesta && respuesta.token) {
+      return { alcanzado: true, token: respuesta.token, expira_en: respuesta.expira_en };
+    }
+    // 401/403/400: el socket-server contestó y dijo que no. Es un veredicto, no
+    // una caída, así que el llamador puede traducirlo a su propio status.
+    if (res.status >= 400 && res.status < 500) {
+      return {
+        alcanzado: true,
+        status: res.status,
+        mensaje: (respuesta && respuesta.mensaje) || 'El servicio de QR rechazó la solicitud',
+      };
+    }
+    console.error(`[socket] /qr/generar respondio ${res.status}:`, respuesta);
+    return { alcanzado: false, motivo: `HTTP_${res.status}` };
+  } catch (err) {
+    const motivo = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'TIMEOUT' : 'INALCANZABLE';
+    console.error(`[socket] /qr/generar no se pudo consultar (${motivo}):`, err.message);
+    return { alcanzado: false, motivo };
+  }
+}
+
+/**
+ * POST /qr/validar — decide si un token QR sirve para abrir sesión de mesa.
+ *
+ * A diferencia del resto de este módulo, aquí el resultado SÍ importa: sin
+ * validar no se puede entrar, así que el llamador tiene que distinguir "token
+ * inválido" de "no pude preguntar" y responder 503 en el segundo caso.
+ *
+ * La ruta es pública en el socket-server (el comensal aún no tiene sesión
+ * cuando escanea), por eso no lleva x-internal-key.
+ *
+ * @returns {Promise<{alcanzado: boolean, valido?: boolean, id_mesa?: number,
+ *                    motivo?: string}>}
+ */
+async function validarTokenQr(token) {
+  const { url, timeoutMs } = config();
+  if (!url) return { alcanzado: false, motivo: 'SIN_CONFIGURAR' };
+
+  try {
+    const res = await fetch(`${url}/qr/validar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    const texto = await res.text();
+    let cuerpo = null;
+    try {
+      cuerpo = texto ? JSON.parse(texto) : null;
+    } catch {
+      cuerpo = null;
+    }
+
+    // 200 => válido; 401 => inválido con motivo. Cualquier otro status es un
+    // problema del socket-server, no un veredicto sobre el token.
+    if (res.status === 200 && cuerpo && cuerpo.valido) {
+      return { alcanzado: true, valido: true, id_mesa: cuerpo.id_mesa, expira_en: cuerpo.expira_en };
+    }
+    if (res.status === 401) {
+      return { alcanzado: true, valido: false, motivo: (cuerpo && cuerpo.motivo) || 'invalido' };
+    }
+    console.error(`[socket] /qr/validar respondio ${res.status}:`, cuerpo);
+    return { alcanzado: false, motivo: `HTTP_${res.status}` };
+  } catch (err) {
+    const motivo = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'TIMEOUT' : 'INALCANZABLE';
+    console.error(`[socket] /qr/validar no se pudo consultar (${motivo}):`, err.message);
+    return { alcanzado: false, motivo };
+  }
+}
+
 /** POST /internal/order-created — comanda nueva hacia KDS, admin y la mesa. */
 async function notificarPedidoCreado(pedido, detalles) {
   return enviar('/internal/order-created', {
@@ -129,6 +240,8 @@ async function notificarMesaLiberada(id_mesa) {
 module.exports = {
   nuevoEventId,
   armarPedido,
+  generarTokenQr,
+  validarTokenQr,
   notificarPedidoCreado,
   notificarCambioEstado,
   notificarMesaLiberada,
