@@ -1,51 +1,99 @@
-import { PrimaryButton, GhostButton, LinkButton } from './ui/Button'
+import { Utensils, CheckCircle2, Flame, User, Clock, ArrowRight } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { StateBadge } from './ui/Badge'
 
 export function OrderPanel({ order }) {
+  if (!order) {
+    return (
+      <div className="panel order-panel empty-selection">
+        <div className="panel-header">
+          <h2>Comanda Activa</h2>
+        </div>
+        <div className="order-empty-prompt">
+          <Utensils size={42} className="text-muted" />
+          <h3>Sin comanda seleccionada</h3>
+          <p>Selecciona una mesa ocupada en el plano para monitorear sus platos en cocina o gestionar su consumo.</p>
+          <Link to="/mesas" className="primary-button small inline-flex-center">
+            <span>Ver Mapa de Mesas</span>
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="panel order-panel">
       <div className="panel-header">
-        <h2>Pedido activo</h2>
-        <LinkButton>Actualizar</LinkButton>
+        <div className="panel-title-with-badge">
+          <h2>Comanda en Curso</h2>
+          <span className="live-pulse-badge">En Vivo</span>
+        </div>
+        <span className="order-id-badge font-mono">{order.id}</span>
       </div>
 
       <div className="order-focus">
-        <div className="order-header">
-          <div>
-            <span className="order-label">Mesa</span>
-            <strong>{order.table}</strong>
+        {/* Mesa & Estado */}
+        <div className="order-header-card">
+          <div className="order-mesa-block">
+            <span className="order-label">Mesa Seleccionada</span>
+            <strong className="order-table-name">{order.table}</strong>
           </div>
           <StateBadge state={order.state} />
         </div>
 
+        {/* Cliente & Hora */}
         <div className="order-client-row">
-          <div>
-            <span className="order-label">Cliente</span>
-            <strong>{order.client}</strong>
+          <div className="client-chip">
+            <User size={13} className="text-muted" />
+            <span>{order.client}</span>
           </div>
-          <span className="order-id">{order.id}</span>
+          <div className="time-chip">
+            <Clock size={13} className="text-muted" />
+            <span>{order.time || '12:45'}</span>
+          </div>
         </div>
 
-        <div className="items-list">
-          {order.items.map((item) => (
-            <div key={`${order.id}-${item.name}`} className="item-row">
-              <div className="item-name-block">
-                <strong>{item.qty}x</strong>
-                <span>{item.name}</span>
+        {/* Lista de Platos */}
+        <div className="order-items-wrapper">
+          <span className="items-section-title">Ítems ordenados ({order.items.length})</span>
+          <div className="items-list">
+            {order.items.map((item, idx) => (
+              <div key={`${order.id}-${item.name}-${idx}`} className="item-row">
+                <div className="item-name-block">
+                  <span className="item-qty-tag">x{item.qty}</span>
+                  <div>
+                    <span className="item-title-text">{item.name}</span>
+                    {item.notes && (
+                      <span className="item-sub-note">{item.notes}</span>
+                    )}
+                  </div>
+                </div>
+                <strong className="item-price-tag">{item.subtotal}</strong>
               </div>
-              <b>{item.subtotal}</b>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
+        {/* Total a Pagar */}
         <div className="total-box">
-          <span>Total</span>
-          <strong>{order.total}</strong>
+          <div>
+            <span className="total-label-dim">Consumo Acumulado</span>
+            <strong className="total-value-glow">{order.total}</strong>
+          </div>
+          <span className="tax-hint">IVA incluido</span>
         </div>
 
+        {/* Acciones Rápidas */}
         <div className="order-actions">
-          <PrimaryButton className="small">Enviar a cocina</PrimaryButton>
-          <GhostButton className="small">Editar</GhostButton>
+          <Link to="/caja" className="primary-button small flex-1 text-center">
+            <CheckCircle2 size={15} />
+            <span>Cobrar en Caja</span>
+          </Link>
+          <Link to="/pedidos" className="ghost-button small text-center">
+            <Flame size={15} />
+            <span>KDS Cocina</span>
+          </Link>
         </div>
       </div>
     </div>

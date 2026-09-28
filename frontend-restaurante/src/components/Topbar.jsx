@@ -1,11 +1,29 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogOut, UserCheck } from 'lucide-react'
-import { GhostButton, PrimaryButton } from './ui/Button'
+import { LogOut, UserCheck, Plus, Radio, Clock } from 'lucide-react'
 import { useAuth } from '../hooks'
 
 export function Topbar() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const [currentTime, setCurrentTime] = useState('')
+  const [currentDate, setCurrentDate] = useState('')
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date()
+      setCurrentTime(
+        now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      )
+      setCurrentDate(
+        now.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
+      )
+    }
+
+    updateTime()
+    const timer = setInterval(updateTime, 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   const handleLogout = () => {
     logout()
@@ -15,20 +33,45 @@ export function Topbar() {
   return (
     <header className="topbar">
       <div className="brand-block">
-        <div className="brand-mark">S</div>
+        <div className="brand-mark-glow">
+          <span className="brand-icon">🍽️</span>
+        </div>
         <div>
-          <p className="brand-name">SmartDining</p>
-          <span>Panel de Restaurante</span>
+          <div className="brand-title-wrap">
+            <h1 className="brand-name">SmartDining</h1>
+            <span className="brand-badge-pro">PRO SALA</span>
+          </div>
+          <span className="brand-sub">Control de Sala & Terminal POS</span>
+        </div>
+      </div>
+
+      <div className="topbar-center-info">
+        <div className="live-clock-widget">
+          <Clock size={14} className="text-emerald clock-pulse" />
+          <span className="live-time">{currentTime || '12:00:00'}</span>
+          <span className="live-date">{currentDate}</span>
+        </div>
+
+        <div className="socket-status-pill" title="Conectado al servidor en tiempo real (puerto 4001)">
+          <Radio size={12} className="socket-beacon" />
+          <span>Socket en vivo</span>
         </div>
       </div>
 
       <div className="topbar-actions">
-        <GhostButton>Hoy</GhostButton>
-        <PrimaryButton onClick={() => navigate('/pedidos')}>+ Nuevo pedido</PrimaryButton>
+        <button
+          type="button"
+          className="topbar-btn-primary"
+          onClick={() => navigate('/pedidos')}
+          title="Tomar nueva orden en mesa"
+        >
+          <Plus size={16} />
+          <span>Nuevo Pedido</span>
+        </button>
 
         {user ? (
           <div className="user-profile-widget">
-            <div className="avatar" title={user.name}>
+            <div className={`avatar role-avatar-${user.role}`} title={user.name}>
               {user.avatar || 'U'}
             </div>
             <div className="user-meta-info">
@@ -41,7 +84,7 @@ export function Topbar() {
               type="button"
               className="topbar-logout-btn"
               onClick={handleLogout}
-              title="Cerrar sesión / Cambiar de usuario"
+              title="Cerrar sesión / Cambiar de rol"
             >
               <LogOut size={16} />
             </button>
@@ -49,11 +92,11 @@ export function Topbar() {
         ) : (
           <button
             type="button"
-            className="primary-button small"
+            className="topbar-btn-login"
             onClick={() => navigate('/login')}
           >
             <UserCheck size={16} />
-            <span>Ingresar</span>
+            <span>Ingresar Staff</span>
           </button>
         )}
       </div>
