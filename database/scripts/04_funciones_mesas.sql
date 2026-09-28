@@ -93,8 +93,8 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION regenerar_token_qr(id_mesa_param INTEGER)
 RETURNS VARCHAR AS $$
 DECLARE
-    v_token_antiguo VARCHAR(64);
-    v_nuevo_token VARCHAR(64);
+    v_token_antiguo VARCHAR(255);
+    v_nuevo_token VARCHAR(255);
 BEGIN
     SELECT token_qr INTO v_token_antiguo
     FROM mesas
