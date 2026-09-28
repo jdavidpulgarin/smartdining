@@ -12,6 +12,7 @@ const socketNotifier = require('./socket.notifier');
 // Valores exactos del CHECK de mesas.estado en el schema.sql de Jarrison.
 const ESTADOS_MESA = ['disponible', 'ocupada', 'reservada', 'mantenimiento'];
 const ESTADO_MESA_LIBRE = 'disponible';
+const ESTADO_MESA_OCUPADA = 'ocupada';
 
 async function listar() {
   const result = await pool.query('SELECT * FROM mesas ORDER BY numero ASC');
@@ -78,7 +79,11 @@ async function abrirSesion(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
     }
     const mesa = bloqueada.rows[0];
 
-    if (mesa.token_qr) {
+    // Se reutiliza el QR solo si la mesa está 'ocupada', o sea con una sesión
+    // viva. Una mesa 'disponible' con token_qr es un resto de una sesión que ya
+    // terminó: ahí SIEMPRE se genera uno nuevo y se reemplaza el guardado, para
+    // que el grupo que llega no herede el QR del anterior.
+    if (mesa.token_qr && mesa.estado === ESTADO_MESA_OCUPADA) {
       const vigente = await socket.validarTokenQr(mesa.token_qr);
       if (!vigente.alcanzado) {
         await client.query('ROLLBACK');
@@ -116,12 +121,20 @@ async function abrirSesion(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
 }
 
 /**
- * Cierra la sesión de la mesa: la deja 'disponible' y borra su token_qr, con lo
- * que el QR impreso deja de valer y las sesiones de comensal de ese grupo caen
- * (el middleware compara el sid del JWT contra la columna).
+ * Cierra la sesión de la mesa a mano: la deja 'disponible' y borra su token_qr,
+ * con lo que el QR impreso deja de valer y las sesiones de comensal de ese grupo
+ * caen (el middleware compara el sid del JWT contra la columna).
+ *
+ * Liberar a mano es SOLO para grupos que se van sin pedir: si la mesa tiene
+ * pedidos abiertos hay que cobrarlos o cancelarlos, y entonces la mesa se libera
+ * sola (ver liberarSiNoQuedanPedidosAbiertos). El chequeo va dentro de la misma
+ * transacción y con la mesa bloqueada, para que no se cuele un pedido nuevo
+ * entre la comprobación y el UPDATE.
  *
  * Avisar al socket-server es del controller, DESPUÉS del commit: si ese aviso
  * falla no se debe revertir la liberación.
+ *
+ * @returns { noExiste: true } | { pedidosAbiertos: number } | { mesa }
  */
 async function liberarSesion(idMesa) {
   const client = await pool.connect();
@@ -131,7 +144,24 @@ async function liberarSesion(idMesa) {
     const bloqueada = await client.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE', [idMesa]);
     if (bloqueada.rows.length === 0) {
       await client.query('ROLLBACK');
-      return null;
+      return { noExiste: true };
+    }
+
+    const abiertos = await client.query(
+      `SELECT count(*)::int AS n FROM pedidos
+       WHERE id_mesa = $1 AND estado NOT IN ('pagado', 'cancelado')`,
+      [idMesa]
+    );
+    const n = abiertos.rows[0] && abiertos.rows[0].n;
+    if (typeof n !== 'number') {
+      // Sin poder contar no se libera: es más seguro que soltar una mesa con
+      // pedidos vivos (mismo criterio que la liberación automática).
+      await client.query('ROLLBACK');
+      throw { status: 500, message: 'No se pudo comprobar si la mesa tiene pedidos abiertos' };
+    }
+    if (n > 0) {
+      await client.query('ROLLBACK');
+      return { pedidosAbiertos: n };
     }
 
     const actualizada = await client.query(
@@ -140,7 +170,7 @@ async function liberarSesion(idMesa) {
     );
 
     await client.query('COMMIT');
-    return actualizada.rows[0];
+    return { mesa: actualizada.rows[0] };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -199,6 +229,7 @@ async function eliminar(id) {
 module.exports = {
   ESTADOS_MESA,
   ESTADO_MESA_LIBRE,
+  ESTADO_MESA_OCUPADA,
   abrirSesion,
   liberarSesion,
   liberarSiNoQuedanPedidosAbiertos,

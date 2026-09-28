@@ -169,7 +169,7 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 |---|---|---|---|
 | GET | /mesas | admin, cajero, mesero | Lista todas |
 | **POST** | **/mesas/:id/abrir** | **mesero, admin** | **Abre la mesa: obtiene su QR y la marca `ocupada`** |
-| **POST** | **/mesas/:id/liberar** | **mesero, admin** | **Cierra la mesa: `disponible` y `token_qr` a NULL** |
+| **POST** | **/mesas/:id/liberar** | **mesero, admin** | **Cierra la mesa: `disponible` y `token_qr` a NULL. 409 si tiene pedidos abiertos** |
 | GET | /mesas/qr/:token | No | Busca la mesa por el valor de su columna `token_qr` (utilidad de sala, **no** valida el QR del comensal) |
 | POST | /mesas/qr/:token/sesion | No | Abre la sesión del comensal y devuelve su JWT |
 | GET | /mesas/:id | No | Obtiene una |
@@ -222,12 +222,18 @@ No aplica al personal.
 **Idempotente.** Todo ocurre con la fila de la mesa bloqueada (`SELECT … FOR UPDATE`),
 así que dos meseros pulsando "abrir" a la vez reciben el mismo token:
 
-1. Si `mesas.token_qr` tiene un token y `/qr/validar` lo da por vigente, devuelve **ese
-   mismo** (`reutilizado: true`).
-2. Si no hay o el que había caducó, pide uno a `POST /qr/generar` **reenviando el JWT del
-   mesero** (esa ruta exige `Authorization: Bearer` con rol admin/mesero/cajero: es el
-   socket-server quien autoriza, el backend no suplanta a nadie con la clave interna),
-   lo guarda en `mesas.token_qr` y deja la mesa `ocupada`.
+1. **Solo si la mesa está `ocupada`** y su `token_qr` sigue vigente según `/qr/validar`,
+   devuelve **ese mismo** (`reutilizado: true`).
+2. En cualquier otro caso —sin token, token caducado, o la mesa **no** está `ocupada`—
+   pide uno a `POST /qr/generar` **reenviando el JWT del mesero** (esa ruta exige
+   `Authorization: Bearer` con rol admin/mesero/cajero: es el socket-server quien
+   autoriza, el backend no suplanta a nadie con la clave interna), lo guarda en
+   `mesas.token_qr` reemplazando lo que hubiera, y deja la mesa `ocupada`.
+
+> El estado de la mesa es lo que decide si hay una sesión viva. Una mesa `disponible` (o
+> `reservada`, o `mantenimiento`) con `token_qr` es un resto de una sesión ya cerrada, así
+> que **se genera siempre uno nuevo**: el grupo que llega nunca hereda el QR del anterior,
+> ni siquiera si el token viejo todavía estuviera firmado y sin expirar.
 
 201:
 
@@ -246,9 +252,19 @@ socket-server no responde** (sin QR no se puede abrir, y la mesa no se toca).
 
 ### POST /mesas/:id/liberar — mesero, admin
 
-Con la fila bloqueada, deja la mesa `disponible` y `token_qr` en NULL. Después del
-commit avisa a `/internal/mesa-liberada` de forma **aislada**: si ese aviso falla, la
-liberación **no** se revierte (solo queda registrado el error).
+**Es solo para grupos que se van sin pedir.** Con la fila bloqueada y dentro de la misma
+transacción se cuentan los pedidos de la mesa que no estén `pagado` ni `cancelado`:
+
+- **409** si hay alguno, y **no cambia nada**:
+  `{ "error": "La mesa tiene pedidos abiertos; cóbralos o cancélalos antes de liberarla", "pedidos_abiertos": 2 }`
+- si no hay ninguno, deja la mesa `disponible` y `token_qr` en NULL.
+
+El conteo va con la mesa ya bloqueada para que no se cuele un pedido nuevo entre la
+comprobación y el UPDATE. Una mesa con pedidos se cierra **cobrándolos o cancelándolos**:
+al cerrarse el último, la mesa se libera sola (ver abajo).
+
+Después del commit avisa a `/internal/mesa-liberada` de forma **aislada**: si ese aviso
+falla, la liberación **no** se revierte (solo queda registrado el error).
 
 200: `{ "id_mesa": 5, "numero": 5, "estado": "disponible", "token_qr": null }`
 
@@ -320,10 +336,10 @@ Notas de lo que quedó demostrado al escribirlas:
   backend rechaza el QR porque `mesas.token_qr` quedó en NULL (`motivo: mesa_sin_sesion`).
   Hay una prueba para cada una, así que si el aviso al socket-server se pierde el QR viejo
   sigue sin servir.
-- **CA6** es el caso sin pedidos: nada lo cierra automáticamente (la liberación automática
-  solo se dispara al cerrarse un pedido), así que el botón "Liberar mesa" es el único
-  camino. La prueba hermana cubre el otro lado: si el grupo pidió y pagó, la mesa se
-  cierra sola.
+- **CA6** es el caso sin pedidos, y es el único en el que "Liberar mesa" aplica: con
+  pedidos abiertos ese botón responde 409, porque la liberación automática solo se dispara
+  al cerrarse un pedido. La prueba hermana cubre el otro lado: si el grupo pidió y pagó, la
+  mesa se cierra sola.
 
 ---
 

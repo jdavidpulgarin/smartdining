@@ -121,6 +121,9 @@ async function abrir(req, res, next) {
  *
  * Deja la mesa 'disponible' y token_qr en NULL, con lo que el QR anterior deja
  * de servir y las sesiones de comensal de ese grupo caen en el middleware.
+ *
+ * Es solo para grupos que se van SIN PEDIR: con pedidos abiertos responde 409 y
+ * no cambia nada. Cuando se cobran o cancelan, la mesa se libera sola.
  */
 async function liberar(req, res, next) {
   const idMesa = Number(req.params.id);
@@ -129,14 +132,26 @@ async function liberar(req, res, next) {
   }
 
   try {
-    const mesa = await mesasService.liberarSesion(idMesa);
-    if (!mesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+    const r = await mesasService.liberarSesion(idMesa);
+
+    if (r.noExiste) return res.status(404).json({ error: 'Mesa no encontrada' });
+    if (r.pedidosAbiertos) {
+      return res.status(409).json({
+        error: 'La mesa tiene pedidos abiertos; cóbralos o cancélalos antes de liberarla',
+        pedidos_abiertos: r.pedidosAbiertos,
+      });
+    }
 
     // Después del commit y aislado: si el socket-server falla, la mesa ya quedó
     // liberada en la base y no se revierte (el notifier no lanza).
     socketNotifier.notificarMesaLiberada(idMesa);
 
-    return res.json({ id_mesa: mesa.id_mesa, numero: mesa.numero, estado: mesa.estado, token_qr: null });
+    return res.json({
+      id_mesa: r.mesa.id_mesa,
+      numero: r.mesa.numero,
+      estado: r.mesa.estado,
+      token_qr: null,
+    });
   } catch (err) {
     return next(err);
   }

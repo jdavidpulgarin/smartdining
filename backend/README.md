@@ -127,7 +127,9 @@ cocina   → PATCH /api/kds/comandas/:id/estado
 cajero   → POST /api/transacciones          cobro 'completada'
                                             si no quedan pedidos abiertos, la mesa se
                                             libera en esa misma transacción
-mesero   → POST /api/mesas/:id/liberar      (o manualmente en cualquier momento)
+mesero   → POST /api/mesas/:id/liberar      solo si la mesa NO tiene pedidos abiertos
+                                            (si los tiene: 409, hay que cobrarlos o
+                                             cancelarlos, y ahí se libera sola)
 ```
 
 Al liberarse, `token_qr` queda en NULL y las sesiones de ese grupo caen con **401
@@ -152,7 +154,7 @@ socket-server caído no rompe un pedido ni un cobro. La excepción son `/qr/gene
 npm test
 ```
 
-81 pruebas con `node --test` + `supertest`. No hacen falta PostgreSQL ni Redis:
+95 pruebas con `node --test` + `supertest`. No hacen falta PostgreSQL ni Redis:
 `tests/helpers/fake-db.js` reemplaza `pool.query`/`pool.connect` por dobles en memoria
 y registra las queries ejecutadas, así que las pruebas también verifican con qué
 valores llega cada `INSERT`.

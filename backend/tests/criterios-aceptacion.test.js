@@ -199,6 +199,11 @@ function instalarEscenario() {
 
     avisos: (ruta) => estado.avisos.filter((a) => a.ruta === ruta),
 
+    // Con pedidos abiertos, liberar a mano responde 409: la mesa se cierra
+    // cancelando (o cobrando) el pedido, y entonces se libera sola.
+    cancelarPedido: (id) =>
+      request(app).post(`/api/pedidos/${id}/cancelar`).set('Authorization', `Bearer ${jwtStaff('mesero')}`),
+
     restaurar() {
       pool.query = queryOriginal;
       pool.connect = connectOriginal;
@@ -335,10 +340,15 @@ test('CA4: después de liberar la mesa, un JWT de la sesión anterior no puede c
     const jwtViejo = sesion.body.token;
 
     // Con la mesa abierta, ese JWT pide sin problema.
-    assert.strictEqual((await e.crearPedido(jwtViejo)).status, 201);
+    const suPedido = await e.crearPedido(jwtViejo);
+    assert.strictEqual(suPedido.status, 201);
     const pedidosAntes = e.estado.pedidos.length;
 
-    await e.liberarMesa();
+    // Con pedidos abiertos, liberar a mano no procede: se cancela el pedido y
+    // la mesa se libera sola.
+    assert.strictEqual((await e.liberarMesa()).status, 409);
+    assert.strictEqual((await e.cancelarPedido(suPedido.body.id_pedido)).status, 200);
+    assert.strictEqual(e.estado.mesa.token_qr, null, 'la mesa quedó liberada');
 
     const intento = await e.crearPedido(jwtViejo);
     assert.strictEqual(intento.status, 401);
@@ -359,11 +369,12 @@ test('CA4: después de liberar la mesa, un JWT de la sesión anterior no puede c
 test('CA5: el siguiente grupo recibe un QR nuevo que funciona con normalidad', async () => {
   const e = instalarEscenario();
   try {
-    // Grupo 1: abre, pide y se va (la mesa se libera).
+    // Grupo 1: abre, pide y se va. Al cerrarse su pedido la mesa se libera sola.
     const primera = await e.abrirMesa();
     const sesion1 = await e.abrirSesion(primera.body.token);
-    await e.crearPedido(sesion1.body.token, 'Ana');
-    await e.liberarMesa();
+    const pedido1 = await e.crearPedido(sesion1.body.token, 'Ana');
+    await e.cancelarPedido(pedido1.body.id_pedido);
+    assert.strictEqual(e.estado.mesa.token_qr, null, 'la mesa se liberó al cerrar el pedido');
 
     // Grupo 2: el mesero vuelve a abrir la mesa.
     const segunda = await e.abrirMesa();
