@@ -33,6 +33,9 @@ function cargarConfig(env = process.env) {
     // Si falta, se deriva de JWT_SECRET (ver derivarSecretoQr en qr.js).
     qrSecret: env.QR_SECRET || null,
     qrTtlMinutos: Number(env.QR_TTL_MINUTOS) || 360,
+    // Vigencia del JWT de la pantalla de mesa (modelo "QR en vidrio"): larga a
+    // propósito, la tablet queda montada de sesión en sesión, no por horas.
+    pantallaExpiresIn: env.PANTALLA_TOKEN_EXPIRES_IN || '30d',
     // Webhook de pagos: sin secreto el endpoint responde 503 (cerrado).
     pagosWebhookSecret: env.PAYMENT_WEBHOOK_SECRET || null,
     pagosToleranciaSegundos: Number(env.PAYMENT_WEBHOOK_TOLERANCIA_SEG) || 300,

@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { crearServicioQr } = require('../src/qr');
-const { levantar, tokenPersonal, tokenComensal } = require('./helpers');
+const {
+  levantar, emitir, esperar, tokenPersonal, tokenComensal, tokenPantalla,
+} = require('./helpers');
 
 function servicio(secreto = 's3creto') {
   const reloj = { t: 1_000_000 };
@@ -88,5 +90,53 @@ test('HTTP: generar exige rol de personal; validar es público; mesa-liberada re
   assert.strictEqual((await post('/internal/mesa-liberada', { id_mesa: 5 }, { 'x-internal-key': 'k' })).status, 200);
   const revocado = await post('/qr/validar', { token });
   assert.deepStrictEqual([revocado.status, (await revocado.json()).motivo], [401, 'revocado']);
+  await s.cerrar();
+});
+
+test('POST /qr/pantalla: exige rol de personal y devuelve un JWT de pantalla para esa mesa', async () => {
+  const s = await levantar();
+  const post = (cuerpo, cabeceras = {}) => fetch(`${s.url}/qr/pantalla`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...cabeceras }, body: JSON.stringify(cuerpo),
+  });
+  const bearer = (t) => ({ Authorization: `Bearer ${t}` });
+
+  assert.strictEqual((await post({ id_mesa: 5 })).status, 401);
+  assert.strictEqual((await post({ id_mesa: 5 }, bearer(tokenComensal(5)))).status, 403);
+  assert.strictEqual((await post({ id_mesa: 5 }, bearer(tokenPersonal('cocina')))).status, 403);
+  assert.strictEqual((await post({ id_mesa: 'x' }, bearer(tokenPersonal('admin')))).status, 400);
+
+  const r = await post({ id_mesa: 5 }, bearer(tokenPersonal('admin')));
+  assert.strictEqual(r.status, 201);
+  const { token, id_mesa } = await r.json();
+  assert.strictEqual(id_mesa, 5);
+
+  // Ese JWT autentica al socket como pantalla y la une sola a room:mesa-5.
+  const pantalla = await s.conectar(token);
+  assert.strictEqual(s.io.sockets.adapter.rooms.get('room:mesa-5').has(pantalla.id), true);
+  await s.cerrar();
+});
+
+test('POST /internal/qr-rotado: exige clave interna y solo avisa a la mesa correspondiente', async () => {
+  const s = await levantar({ INTERNAL_API_KEY: 'k' });
+  const post = (cuerpo, cabeceras = {}) => fetch(`${s.url}/internal/qr-rotado`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...cabeceras }, body: JSON.stringify(cuerpo),
+  });
+  const interna = { 'x-internal-key': 'k' };
+
+  assert.strictEqual((await post({ id_mesa: 5, token_qr: 'abc' })).status, 401);
+  assert.strictEqual((await post({ id_mesa: 'x', token_qr: 'abc' }, interna)).status, 400);
+  assert.strictEqual((await post({ id_mesa: 5, token_qr: '' }, interna)).status, 400);
+  assert.strictEqual((await post({ id_mesa: 5, token_qr: 'x'.repeat(200) }, interna)).status, 400);
+
+  const pantalla5 = await s.conectar(tokenPantalla(5));
+  const pantalla9 = await s.conectar(tokenPantalla(9));
+  const en5 = esperar(pantalla5, 'qr:actualizado');
+  const en9 = esperar(pantalla9, 'qr:actualizado');
+
+  const r = await post({ id_mesa: 5, token_qr: 'qr-token-mesa-05-nuevo' }, interna);
+  assert.strictEqual(r.status, 200);
+
+  assert.deepStrictEqual((await en5).token_qr, 'qr-token-mesa-05-nuevo');
+  assert.strictEqual(await en9, null);
   await s.cerrar();
 });

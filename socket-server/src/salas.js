@@ -1,5 +1,5 @@
 const { exito, fallo, manejar } = require('./ack');
-const { ROL_COMENSAL } = require('./auth');
+const { ROL_COMENSAL, ROL_PANTALLA } = require('./auth');
 
 // Sala por mesa. El prefijo fijo evita colisiones con las salas de personal
 // y con la sala privada que Socket.io crea por cada socket (su propio id).
@@ -14,12 +14,13 @@ const esIdValido = (v) => Number.isInteger(v) && v > 0;
 
 /**
  * Resuelve a qué mesa se refiere el evento, aplicando el aislamiento:
- * - Comensal: la mesa sale SIEMPRE de su JWT. Si el payload trae otra, es un
- *   intento de espiar otra mesa y se rechaza (no se "corrige" en silencio).
+ * - Comensal y pantalla: la mesa sale SIEMPRE de su JWT. Si el payload trae
+ *   otra, es un intento de espiar otra mesa y se rechaza (no se "corrige" en
+ *   silencio).
  * - Personal: debe indicar la mesa explícitamente.
  */
 function resolverMesa(identidad, idPayload) {
-  if (identidad.rol === ROL_COMENSAL) {
+  if (identidad.rol === ROL_COMENSAL || identidad.rol === ROL_PANTALLA) {
     if (idPayload !== undefined && idPayload !== identidad.id_mesa) {
       return { error: fallo('NO_AUTORIZADO', 'No puedes acceder a otra mesa') };
     }
@@ -45,6 +46,9 @@ function registrarSalas(socket, { obtenerSnapshot } = {}) {
   // dependen de que el frontend recuerde emitir un evento de unión.
   if (ROLES_KDS.includes(identidad.rol)) socket.join(SALA_KDS);
   if (ROLES_ADMIN.includes(identidad.rol)) socket.join(SALA_ADMIN);
+  // La tablet de mesa (QR en vidrio) tiene una mesa fija de por vida: se une
+  // sola a esa sala, sin depender de que emita join:table.
+  if (identidad.rol === ROL_PANTALLA) socket.join(salaMesa(identidad.id_mesa));
 
   socket.on('join:table', manejar('join:table', (payload) => {
     if (identidad.rol === 'cocina') {

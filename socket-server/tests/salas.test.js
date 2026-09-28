@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { levantar, emitir, esperar, tokenComensal, tokenPersonal, firmar } = require('./helpers');
+const {
+  levantar, emitir, esperar, tokenComensal, tokenPantalla, tokenPersonal, firmar,
+} = require('./helpers');
 
 test('rechaza conexiones sin token, con token inválido, expirado o de otro secreto', async () => {
   const s = await levantar();
@@ -52,6 +54,16 @@ test('el personal entra a sus salas al conectar y puede vigilar cualquier mesa',
   assert.strictEqual((await emitir(mesero, 'join:table', { id_mesa: 7 })).ok, true);
   assert.strictEqual((await emitir(cocina, 'join:table', { id_mesa: 7 })).codigo, 'NO_AUTORIZADO');
   assert.strictEqual((await emitir(admin, 'leave:table', { id_mesa: 7 })).ok, true);
+  await s.cerrar();
+});
+
+test('la pantalla de mesa entra sola a su sala y no puede espiar otra mesa', async () => {
+  const s = await levantar();
+  const pantalla = await s.conectar(tokenPantalla(4));
+  assert.strictEqual(s.io.sockets.adapter.rooms.get('room:mesa-4').has(pantalla.id), true);
+
+  const ajena = await emitir(pantalla, 'join:table', { id_mesa: 9 });
+  assert.strictEqual(ajena.codigo, 'NO_AUTORIZADO');
   await s.cerrar();
 });
 

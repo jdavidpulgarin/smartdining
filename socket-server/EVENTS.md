@@ -30,13 +30,21 @@ socket.on('connect_error', (err) => {
 | Rol (`rol` del JWT) | Payload del JWT | Salas a las que entra |
 |---|---|---|
 | `comensal` | `{ id_mesa, rol }` | Solo `room:mesa-{su id_mesa}` (con `join:table`) |
+| `pantalla` | `{ id_mesa, rol }` | Solo `room:mesa-{su id_mesa}` (automático al conectar, sin `join:table`) |
 | `cocina` | `{ id_usuario, rol }` | `room:kds` (automático al conectar) |
 | `admin` | `{ id_usuario, rol }` | `room:kds` y `room:admin` (automático) + cualquier mesa |
 | `mesero`, `cajero` | `{ id_usuario, rol }` | `room:admin` (automático) + cualquier mesa |
 
+`pantalla` es la tablet fija montada en la mesa (modelo **"QR en vidrio"**: ya no se
+imprime el QR, la pantalla lo muestra y se refresca sola). Su JWT lo emite este mismo
+servicio (`POST /qr/pantalla`, ver §6) y es de larga duración porque la tablet no se
+retira al cerrar la mesa. Solo escucha `qr:actualizado`; no puede tocar el carrito ni
+emitir pedidos (no está en ninguna de las listas de roles permitidos de esos eventos).
+
 Si el JWT expira, el servidor no corta el socket a mitad de sesión, pero **la reconexión
 fallará** con `TOKEN_INVALIDO`: el frontend debe pedir un JWT nuevo (para el comensal,
-`POST /api/mesas/qr/:token/sesion` del backend).
+`POST /api/mesas/qr/:token/sesion` del backend; para la pantalla, `POST /qr/pantalla`
+de nuevo).
 
 ---
 
@@ -248,6 +256,7 @@ Rol: `comensal`.
 | `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, emitidoEn }` |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, monto, referencia_externa, emitidoEn }` |
+| `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 
 Notas para el frontend:
 
@@ -256,6 +265,10 @@ Notas para el frontend:
 - `order:created` y `order:status` pueden llegar repetidos si el servidor reintenta;
   deduplica por `eventId`.
 - El sender de `cart:update` **no** recibe `cart:updated` (usa el snapshot de su ack).
+- `qr:actualizado` no lleva `eventId` (no lo dispara un cliente, lo dispara el backend al
+  rotar el token en la base). La pantalla de la mesa simplemente **redibuja el QR** con el
+  `token_qr` recibido; no hace falta deduplicar porque redibujar con el mismo valor es
+  inofensivo.
 
 ---
 
@@ -268,11 +281,13 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 | GET | `/health` | — | `{ "estado": "ok" }` |
 | POST | `/qr/generar` | Bearer JWT `admin`/`mesero`/`cajero` | Genera un token QR. Body `{ "id_mesa": 5, "ttl_minutos": 360 }` → `{ token, id_mesa, expira_en }` |
 | POST | `/qr/validar` | — | Body `{ "token": "..." }` → `{ valido: true, id_mesa }` o `{ valido: false, motivo }` |
+| POST | `/qr/pantalla` | Bearer JWT `admin`/`mesero`/`cajero` | Emite el JWT de la tablet de mesa. Body `{ "id_mesa": 5 }` → `{ token, id_mesa, expira_en }` |
 | GET | `/push/clave-publica` | — | `{ "clave": "<VAPID public key>" }` |
 | POST | `/push/suscripcion` | Bearer JWT `comensal` | Body `{ "subscription": {...} }` → 201 |
 | DELETE | `/push/suscripcion` | Bearer JWT `comensal` | Body `{ "endpoint": "..." }` → 200 |
 | POST | `/internal/order-created` | Header `x-internal-key` | Solo backend. Mismo body que el evento `order:created` |
 | POST | `/internal/order-status` | Header `x-internal-key` | Solo backend. Mismo body que `order:status` |
+| POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` → reenvía `qr:actualizado` a la pantalla de esa mesa |
 | POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5 }` → invalida los QR emitidos de esa mesa y borra su carrito y sus suscripciones push |
 | POST | `/pagos/webhook` | Firma del proveedor | Ver sección 8 |
 
@@ -290,7 +305,31 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 - Al pagar y liberar la mesa, el backend llama `POST /internal/mesa-liberada` y los QR
   anteriores dejan de valer.
 
-### 6.2. Cómo emite el backend `order:created` / `order:status`
+> **Pendiente de acordar con el equipo:** este token (`/qr/generar` + `/qr/validar`) y el
+> `mesas.token_qr` de la base (el que de verdad valida `POST /api/mesas/qr/:token/sesion`
+> en el backend) son **dos cosas distintas hoy**; el backend nunca llama a `/qr/validar`.
+> Además este formato firmado (~150 caracteres) no cabe en el `varchar(64)` de
+> `mesas.token_qr`, así que no puede ser el mismo valor sin acortarlo o sin ampliar la
+> columna. Mientras eso no se decida, el QR que la pantalla de mesa debe mostrar y que
+> `/internal/qr-rotado` (§6.2) reenvía es el `token_qr` que ya vive en la base, no el de
+> este endpoint.
+
+### 6.2. Cómo avisa el backend una rotación de `token_qr` (pantalla de mesa)
+
+```
+POST http://localhost:4001/internal/qr-rotado
+x-internal-key: <INTERNAL_API_KEY>
+Content-Type: application/json
+
+{ "id_mesa": 5, "token_qr": "qr-token-mesa-05-<nuevo>" }
+```
+
+Se llama cada vez que cambia el `token_qr` vigente de una mesa: al sembrarla, y cada vez
+que el trigger `tr_regenerar_token_qr` lo rota (pago o cancelación). Responde
+`200 { "ok": true }`. La pantalla de esa mesa recibe `qr:actualizado` y redibuja el QR
+sin que nadie tenga que ir a cambiar ningún papel.
+
+### 6.3. Cómo emite el backend `order:created` / `order:status`
 
 ```
 POST http://localhost:4001/internal/order-created
@@ -367,5 +406,6 @@ socket-server **no escribe en la base de datos**: registrar la transacción
 | `INTERNAL_API_KEY` | Clave que el backend envía en `x-internal-key` |
 | `QR_SECRET` | Secreto de firma de los tokens QR |
 | `QR_TTL_MINUTOS` | Vigencia por defecto del QR (360) |
+| `PANTALLA_TOKEN_EXPIRES_IN` | Vigencia del JWT de la pantalla de mesa (30d por defecto) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push (`npm run vapid` las genera) |
 | `PAYMENT_WEBHOOK_SECRET` | Secreto compartido con el proveedor de pagos |
