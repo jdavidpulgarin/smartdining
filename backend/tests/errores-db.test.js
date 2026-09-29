@@ -89,7 +89,7 @@ test('metodo_pago solo acepta los valores del CHECK del schema', async () => {
   assert.strictEqual(res.status, 400, "'tarjeta' no existe en el schema: se rechaza en el body");
 });
 
-test('el pago no toca la tabla mesas: liberarla es del trigger tr_regenerar_token_qr', async () => {
+test('el pago libera la mesa desde el backend (el trigger tr_regenerar_token_qr ya no existe)', async () => {
   const db = instalarFakeDb((sql) => {
     if (sql.includes('SELECT * FROM pedidos')) return { rows: [{ id_pedido: 1, id_mesa: 5, estado: 'entregado' }] };
     if (sql.includes('INSERT INTO transacciones')) return { rows: [{ id_transaccion: 1 }] };
@@ -102,7 +102,15 @@ test('el pago no toca la tabla mesas: liberarla es del trigger tr_regenerar_toke
       .send({ id_pedido: 1, monto: 56000, metodo_pago: 'tarjeta_credito' });
 
     assert.strictEqual(res.status, 201);
-    assert.strictEqual(db.buscar('UPDATE mesas'), undefined, 'el backend ya no libera la mesa');
+
+    // Jarrison retiró el trigger, así que el ciclo de vida de token_qr es del
+    // backend: al cobrar, la mesa queda disponible y sin token.
+    const liberacion = db.buscar('UPDATE mesas SET estado = $1, token_qr = NULL');
+    assert.ok(liberacion, 'el backend debe liberar la mesa');
+    assert.strictEqual(liberacion.params[1], 5);
+
+    // Y con la fila de la mesa bloqueada, para no competir con otro cierre.
+    assert.ok(db.buscar('FROM mesas WHERE id_mesa = $1 FOR UPDATE'));
   } finally {
     db.restaurar();
   }
