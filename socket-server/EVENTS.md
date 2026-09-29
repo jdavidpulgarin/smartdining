@@ -159,7 +159,7 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
 |---|---|---|
 | `eventId` | string | UUID, obligatorio |
 | `id_mesa` | entero > 0 | Solo personal (`mesero`/`admin`). El comensal no lo envía: se toma de su JWT |
-| `accion` | string | `set` (fija la cantidad), `remove` (quita la línea), `clear` (vacía todo el carrito) |
+| `accion` | string | `set` (fija la cantidad), `remove` (quita la línea), `clear` (vacía todo el carrito, **solo `mesero`/`admin`**) |
 | `id_linea` | string | UUID, obligatorio en `set` y `remove`. Lo genera el cliente **una sola vez por línea** añadida (no por plato) |
 | `comensal` | string | 1–40 caracteres. Obligatorio en `set` y `remove` |
 | `id_plato` | entero > 0 | Obligatorio en `set`. **Ya no se envía en `remove`**: la línea se borra por `id_linea` |
@@ -171,6 +171,11 @@ nunca duplique unidades. Cada ítem se identifica por `id_linea`: dos líneas de
 mismo comensal y el mismo plato (p. ej. una hamburguesa término medio y otra bien
 asada) conviven porque tienen `id_linea` distinto. Repetir `set` con un `id_linea`
 ya existente **edita esa línea** (cantidad o notas), no crea una línea nueva.
+
+`clear` vacía el carrito de **toda la mesa**, así que un comensal no puede emitirlo
+(respondería `NO_AUTORIZADO` y el carrito quedaría intacto): borraría también lo que
+pidieron los demás. Para quitar sus propios platos, el comensal usa `remove` por cada
+una de sus líneas (por `id_linea`).
 
 Ack (incluye el snapshot resultante):
 
