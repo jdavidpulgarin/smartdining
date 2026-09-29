@@ -110,7 +110,7 @@ CREATE INDEX IF NOT EXISTS idx_intentos_pago_fecha ON intentos_pago_fallidos(fec
 CREATE TABLE IF NOT EXISTS token_qr_historico (
     id_historico_token SERIAL PRIMARY KEY,
     id_mesa INTEGER NOT NULL,
-    token_antiguo VARCHAR(64) NOT NULL,
+    token_antiguo VARCHAR(255) NOT NULL,
     fecha_invalidacion TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_token_historico_mesa 
         FOREIGN KEY (id_mesa) 

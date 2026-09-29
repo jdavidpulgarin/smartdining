@@ -47,6 +47,26 @@ export function TablesProvider({ children }) {
     }
   })
 
+  // Escuchar cuando el backend o trigger rota el token QR (evento de Roberto 'qr:actualizado')
+  useSocketListener('qr:actualizado', (data) => {
+    if (data?.id_mesa && data?.token_qr) {
+      const numId = Number(data.id_mesa)
+      setTables((prev) =>
+        prev.map((t) =>
+          t.id === numId || t.number === numId
+            ? {
+                ...t,
+                token_qr: data.token_qr,
+                detail: 'QR sincronizado en vivo por el servidor',
+                actualizadoEn: data.emitidoEn || new Date().toISOString(),
+              }
+            : t
+        )
+      )
+      showNotification(`Mesa ${numId}: Código QR actualizado en vivo`, 'info')
+    }
+  })
+
   /**
    * Abre una mesa libre, genera el token QR dinámico v1 y la marca como 'Ocupada'.
    */

@@ -219,8 +219,8 @@ CREATE OR REPLACE FUNCTION fn_tr_regenerar_token_qr()
 RETURNS TRIGGER AS $$
 DECLARE
     v_pedidos_abiertos INTEGER;
-    v_nuevo_token VARCHAR(64);
-    v_token_actual VARCHAR(64);
+    v_nuevo_token VARCHAR(255);
+    v_token_actual VARCHAR(255);
 BEGIN
     IF NEW.estado IN ('pagado', 'cancelado') AND OLD.estado NOT IN ('pagado', 'cancelado') THEN
         -- Comprobar si quedan más pedidos activos en la misma mesa

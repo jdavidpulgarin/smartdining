@@ -183,7 +183,7 @@ export async function liberarMesaRemota(idMesa) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-key': 'dev-key',
+        'x-internal-key': import.meta.env.VITE_INTERNAL_API_KEY || 'dev-key',
       },
       body: JSON.stringify({ id_mesa: Number(idMesa) }),
     }).catch(() => null)
@@ -194,3 +194,77 @@ export async function liberarMesaRemota(idMesa) {
     return { ok: false, error: err.message }
   }
 }
+
+/**
+ * Solicita el JWT de autenticación para la tablet física de la mesa (rol 'pantalla')
+ * llamando a POST /qr/pantalla del socket-server de Roberto (EVENTS.md §6).
+ * Este token une automáticamente al socket a room:mesa-{id_mesa} y escucha 'qr:actualizado'.
+ */
+export async function solicitarTokenPantalla(idMesa) {
+  const staffToken = getStaffToken()
+  const storageKey = `smartdining_pantalla_token_${idMesa}`
+
+  try {
+    const res = await fetch(`${SOCKET_URL}/qr/pantalla`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: staffToken ? `Bearer ${staffToken}` : '',
+      },
+      body: JSON.stringify({ id_mesa: Number(idMesa) }),
+    })
+
+    if (res.ok) {
+      const data = await res.json()
+      try {
+        localStorage.setItem(storageKey, data.token)
+      } catch {
+        // ignorar
+      }
+      return data
+    }
+  } catch (err) {
+    console.warn('Aviso: no se pudo obtener token de /qr/pantalla:', err.message)
+  }
+
+  // Fallback: reutilizar token en localStorage si ya se había emitido
+  try {
+    const cached = localStorage.getItem(storageKey)
+    if (cached) {
+      return { token: cached, id_mesa: Number(idMesa), expira_en: 'cached' }
+    }
+  } catch {
+    // ignorar
+  }
+
+  return {
+    token: staffToken || '',
+    id_mesa: Number(idMesa),
+    expira_en: 'fallback-staff',
+  }
+}
+
+/**
+ * Simula o fuerza el envío de 'POST /internal/qr-rotado' al socket-server
+ * para que emita en vivo 'qr:actualizado' a la tablet de la mesa.
+ */
+export async function notificarQrRotado(idMesa, tokenQr) {
+  try {
+    const res = await fetch(`${SOCKET_URL}/internal/qr-rotado`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-key': import.meta.env.VITE_INTERNAL_API_KEY || 'dev-key',
+      },
+      body: JSON.stringify({
+        id_mesa: Number(idMesa),
+        token_qr: tokenQr,
+      }),
+    })
+    return res.ok
+  } catch (err) {
+    console.warn('Error al notificar /internal/qr-rotado:', err.message)
+    return false
+  }
+}
+

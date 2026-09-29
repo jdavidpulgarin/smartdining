@@ -15,9 +15,12 @@ import {
   Sparkles,
   ShieldCheck,
   Clock,
+  Tablet,
+  Monitor,
 } from 'lucide-react'
 import { StatusBadge } from './ui/Badge'
 import { decodificarTokenQr } from '../services/qrService'
+import { useSocketListener } from '../hooks'
 
 export function QRModal({
   table,
@@ -27,9 +30,18 @@ export function QRModal({
   onFreeTable,
 }) {
   const [copied, setCopied] = useState(false)
+  const [copiedTablet, setCopiedTablet] = useState(false)
   const [token, setToken] = useState(table?.token_qr || '')
   const [loadingAction, setLoadingAction] = useState(false)
   const qrRef = useRef(null)
+
+  // Escuchar en vivo si el backend o trigger rota el QR de esta mesa (evento qr:actualizado)
+  useSocketListener('qr:actualizado', (data) => {
+    const tableId = Number(table.id || table.number)
+    if (data?.id_mesa && Number(data.id_mesa) === tableId && data.token_qr) {
+      setToken(data.token_qr)
+    }
+  })
 
   // Detectar la IP del host actual o usar la IP Wi-Fi de la máquina
   const defaultHost =
@@ -59,6 +71,11 @@ export function QRModal({
   const diningUrl = token
     ? `http://${activeDomain}:${port}/?token=${token}&mesa=${table.number || table.id}`
     : ''
+
+  // URL para la tablet física de la mesa (modelo "QR en vidrio")
+  const tabletUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/pantalla/mesa/${table.number || table.id}`
+    : `/pantalla/mesa/${table.number || table.id}`
 
   const handleCopy = () => {
     if (!diningUrl) return
@@ -240,6 +257,46 @@ export function QRModal({
               </div>
             )}
 
+            {/* Modo Pantalla Tablet (QR en Vidrio) */}
+            <div className="qr-tablet-mode-banner">
+              <div className="tablet-mode-left">
+                <div className="tablet-mode-badge-icon">
+                  <Tablet size={20} />
+                </div>
+                <div>
+                  <h4 className="tablet-mode-title">Modo Pantalla Tablet ("QR en Vidrio")</h4>
+                  <p className="tablet-mode-desc">
+                    Vista para la tablet fija de la mesa. Se conecta al socket server y se auto-refresca sola cuando el token rota.
+                  </p>
+                </div>
+              </div>
+              <div className="tablet-mode-buttons">
+                <a
+                  href={tabletUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="primary-button small tablet-launch-btn"
+                  title="Abrir la interfaz dedicada para la tablet física de la mesa"
+                >
+                  <Monitor size={14} />
+                  <span>Lanzar Pantalla</span>
+                </a>
+                <button
+                  type="button"
+                  className={`ghost-button small tablet-copy-btn ${copiedTablet ? 'copied' : ''}`}
+                  onClick={() => {
+                    navigator.clipboard.writeText(tabletUrl)
+                    setCopiedTablet(true)
+                    setTimeout(() => setCopiedTablet(false), 2000)
+                  }}
+                  title="Copiar URL para configurar la tablet del restaurante"
+                >
+                  {copiedTablet ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copiedTablet ? 'Copiada' : 'Copiar URL Tablet'}</span>
+                </button>
+              </div>
+            </div>
+
             {/* Selector de Conexión Wi-Fi vs Local */}
             {token && (
               <div className="qr-network-selector-box">
@@ -354,13 +411,26 @@ export function QRModal({
 
               {token && (
                 <a
+                  href={tabletUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="link-button small qr-action-btn tablet-link-btn"
+                  title="Abrir vista de tablet para esta mesa"
+                >
+                  <Tablet size={16} />
+                  <span>Pantalla Tablet</span>
+                </a>
+              )}
+
+              {token && (
+                <a
                   href={diningUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="link-button small qr-action-btn test-link"
                 >
                   <ExternalLink size={16} />
-                  <span>Probar en pestaña</span>
+                  <span>Probar comensal</span>
                 </a>
               )}
             </div>

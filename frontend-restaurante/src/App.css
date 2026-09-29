@@ -1429,6 +1429,80 @@
   color: #f87171;
 }
 
+.qr-action-btn.tablet-link-btn {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+
+.qr-action-btn.tablet-link-btn:hover {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: rgba(16, 185, 129, 0.6);
+  color: #6ee7b7;
+}
+
+/* Banner de Modo Tablet en el Modal */
+.qr-tablet-mode-banner {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(6, 78, 59, 0.25));
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 12px;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tablet-mode-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.tablet-mode-badge-icon {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  padding: 0.45rem;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tablet-mode-title {
+  margin: 0 0 0.2rem 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.tablet-mode-desc {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.tablet-mode-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.tablet-launch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+  font-size: 0.75rem;
+  padding: 0.45rem 0.85rem;
+}
+
+.tablet-copy-btn {
+  font-size: 0.75rem;
+  padding: 0.45rem 0.75rem;
+}
+
 /* ==============================================================================
    ESTILOS GENERALES DE BOTONES Y FORMULARIOS
    ============================================================================== */
@@ -3890,5 +3964,725 @@
 
   .modal-body.qr-modal-body {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ==============================================================================
+   PANTALLA DE MESA (TABLET / "QR EN VIDRIO") — SMARTDINING KIOSK
+   ============================================================================== */
+.tablet-screen-root {
+  min-height: 100vh;
+  width: 100vw;
+  background: #060911;
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow-x: hidden;
+  user-select: none;
+}
+
+/* Fondos ambientales y auras esmeralda */
+.tablet-ambient-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.ambient-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(140px);
+  opacity: 0.28;
+}
+
+.ambient-orb-1 {
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, #10b981 0%, rgba(5, 150, 105, 0.4) 70%, transparent 100%);
+  top: -200px;
+  right: -100px;
+}
+
+.ambient-orb-2 {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, #0284c7 0%, rgba(14, 116, 144, 0.3) 70%, transparent 100%);
+  bottom: -150px;
+  left: -100px;
+}
+
+.ambient-grid-overlay {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Cabecera de la Tablet */
+.tablet-header {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.2rem 2.5rem;
+  background: rgba(10, 15, 29, 0.7);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tablet-brand-group {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.tablet-logo-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 78, 59, 0.4));
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tablet-brand-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.35rem;
+  font-weight: 800;
+  margin: 0;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #ffffff 40%, #a7f3d0 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.tablet-brand-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  display: block;
+}
+
+.tablet-header-center {
+  display: flex;
+  align-items: center;
+}
+
+.tablet-table-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  padding: 0.4rem 1.1rem;
+  border-radius: 999px;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+}
+
+.table-badge-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #6ee7b7;
+}
+
+.table-badge-number {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.table-badge-loc {
+  font-size: 0.8rem;
+  color: #a7f3d0;
+  font-weight: 600;
+}
+
+.tablet-header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.tablet-socket-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.socket-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.tablet-socket-pill.conectado .socket-dot {
+  background: #10b981;
+  box-shadow: 0 0 10px #10b981;
+  animation: pulse-beacon 2s infinite ease-in-out;
+}
+
+.tablet-socket-pill.conectado {
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+
+.tablet-socket-pill.reconectando .socket-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 10px #f59e0b;
+}
+
+.tablet-socket-pill.reconectando {
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #fcd34d;
+}
+
+.tablet-socket-pill.desconectado .socket-dot {
+  background: #ef4444;
+}
+
+.tablet-socket-pill.desconectado {
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+@keyframes pulse-beacon {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.65;
+  }
+}
+
+.tablet-clock {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.35rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tablet-icon-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tablet-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.tablet-icon-btn.active {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: #10b981;
+  color: #34d399;
+}
+
+/* Banner de rotación */
+.tablet-rotation-banner {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.2), rgba(6, 78, 59, 0.3), rgba(16, 185, 129, 0.2));
+  border-bottom: 1px solid rgba(16, 185, 129, 0.4);
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #6ee7b7;
+  text-align: center;
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.25);
+}
+
+/* Escenario Principal */
+.tablet-main-stage {
+  position: relative;
+  z-index: 5;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem 3rem;
+}
+
+.tablet-content-card {
+  max-width: 1100px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 3.5rem;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 32px;
+  padding: 3rem 3.5rem;
+  box-shadow: 
+    0 25px 60px -15px rgba(0, 0, 0, 0.7),
+    0 0 40px rgba(16, 185, 129, 0.1);
+}
+
+/* Columna Izquierda: Instrucciones y bienvenida */
+.tablet-intro-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.tablet-welcome-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  width: fit-content;
+}
+
+.tablet-headline {
+  font-family: 'Outfit', sans-serif;
+  font-size: 2.3rem;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  color: #ffffff;
+  margin: 0;
+}
+
+.tablet-lead {
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.tablet-features-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.tablet-feature-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.feature-icon-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.tablet-feature-item strong {
+  display: block;
+  font-size: 0.92rem;
+  color: #f1f5f9;
+  margin-bottom: 0.15rem;
+}
+
+.tablet-feature-item p {
+  font-size: 0.82rem;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.35;
+}
+
+/* Tarjeta Wi-Fi */
+.tablet-wifi-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.wifi-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.wifi-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+
+.wifi-credentials {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.wifi-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.wifi-label {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.wifi-value {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* Columna Derecha: Tarjeta del QR */
+.tablet-qr-col {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tablet-qr-display-box {
+  background: #0f172a;
+  border: 2px solid rgba(16, 185, 129, 0.3);
+  border-radius: 28px;
+  padding: 2rem 2.2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4rem;
+  box-shadow: 
+    0 20px 45px rgba(0, 0, 0, 0.6),
+    0 0 35px rgba(16, 185, 129, 0.15);
+  transition: all 0.35s ease;
+  position: relative;
+}
+
+.tablet-qr-display-box.pulse-update {
+  border-color: #10b981;
+  box-shadow: 
+    0 0 50px rgba(16, 185, 129, 0.6),
+    0 0 100px rgba(16, 185, 129, 0.3);
+  transform: scale(1.02);
+}
+
+.qr-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.qr-box-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #6ee7b7;
+  letter-spacing: 0.06em;
+}
+
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+.qr-mesa-indicator {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 800;
+  font-size: 0.82rem;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+}
+
+.tablet-qr-svg-holder {
+  background: #ffffff;
+  padding: 1.25rem;
+  border-radius: 22px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-box-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+}
+
+.qr-callout-action {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  text-align: center;
+}
+
+.qr-token-hash-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: #94a3b8;
+}
+
+/* Pie de la Tablet */
+.tablet-footer {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 2.5rem;
+  background: rgba(10, 15, 29, 0.85);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.tablet-footer-info {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.tablet-footer-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+}
+
+/* Drawer de Configuración Técnica para Staff */
+.tablet-config-drawer {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  width: 440px;
+  max-width: 90vw;
+  background: #0b1120;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  border-top-left-radius: 20px;
+  box-shadow: -15px 0 40px rgba(0, 0, 0, 0.8);
+  z-index: 100;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.config-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 0.75rem;
+}
+
+.config-drawer-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.tablet-close-config {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+}
+
+.tablet-close-config:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.config-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.config-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-bottom: 0.35rem;
+  display: block;
+}
+
+.config-pills-row {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.config-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #cbd5e1;
+  font-size: 0.75rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.config-pill.active {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: #10b981;
+  color: #34d399;
+}
+
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.config-field label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.config-input {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.config-input.read-only {
+  background: rgba(0, 0, 0, 0.3);
+  color: #64748b;
+  cursor: default;
+}
+
+.config-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.config-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+}
+
+.config-action-btn.primary {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+}
+
+.config-action-btn.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.config-action-btn.ghost {
+  background: transparent;
+  color: #94a3b8;
+}
+
+.config-action-btn:hover {
+  filter: brightness(1.15);
+}
+
+/* Responsividad Tablet Kiosk */
+@media (max-width: 900px) {
+  .tablet-content-card {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    padding: 2rem;
+  }
+
+  .tablet-header {
+    padding: 1rem 1.5rem;
+  }
+
+  .tablet-headline {
+    font-size: 1.8rem;
   }
 }
