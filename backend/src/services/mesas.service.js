@@ -24,11 +24,6 @@ async function obtenerPorId(id) {
   return result.rows[0] || null;
 }
 
-async function obtenerPorToken(token) {
-  const result = await pool.query('SELECT * FROM mesas WHERE token_qr = $1', [token]);
-  return result.rows[0] || null;
-}
-
 async function crear({ numero, capacidad, ubicacion, estado, token_qr }) {
   // capacidad, ubicacion y actualizado_en tienen DEFAULT en el schema: si no
   // vienen, se deja que la base ponga el suyo.
@@ -236,7 +231,6 @@ module.exports = {
   tokenQrDeMesa,
   listar,
   obtenerPorId,
-  obtenerPorToken,
   crear,
   actualizarEstado,
   eliminar,

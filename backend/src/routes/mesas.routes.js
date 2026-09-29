@@ -6,8 +6,7 @@ const router = express.Router();
 
 router.get('/', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.listar);
 
-// Públicas: las usa la PWA del comensal al escanear el QR de la mesa.
-router.get('/qr/:token', ctrl.obtenerPorToken);
+// Pública: la usa la PWA del comensal al escanear el QR de la mesa.
 router.post('/qr/:token/sesion', ctrl.crearSesionPorToken);
 
 // Ciclo de vida de la sesión de mesa: el mesero abre (obtiene el QR) y cierra.

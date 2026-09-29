@@ -16,6 +16,35 @@ const MENSAJE_MOTIVO = {
   firma: 'Token de mesa inválido',
 };
 
+/**
+ * Mesa tal como sale en las respuestas de la API.
+ *
+ * token_qr NUNCA se incluye: es la credencial con la que se abre la sesión de la
+ * mesa, así que quien lo tenga puede pedir a nombre de ese grupo. Solo viaja en
+ * la respuesta de POST /mesas/:id/abrir, que es quien lo necesita para imprimir
+ * el QR, y solo a mesero/admin.
+ */
+function vistaMesa(mesa) {
+  return {
+    id_mesa: mesa.id_mesa,
+    numero: mesa.numero,
+    capacidad: mesa.capacidad,
+    ubicacion: mesa.ubicacion,
+    estado: mesa.estado,
+  };
+}
+
+/**
+ * Vista para el personal. Agrega si la mesa tiene una sesión de QR abierta, que
+ * es lo único que el panel de sala necesita saber del token: para volver a
+ * mostrar el QR llama a POST /mesas/:id/abrir, que es idempotente y devuelve el
+ * mismo token. Así el token no aparece en un listado que se pinta en pantalla,
+ * se cachea y acaba en logs.
+ */
+function vistaMesaPersonal(mesa) {
+  return { ...vistaMesa(mesa), sesion_abierta: Boolean(mesa.token_qr) };
+}
+
 /** URL que se codifica en el QR impreso de la mesa. */
 function urlDelComensal(token) {
   const base = (process.env.FRONTEND_CLIENTE_URL || 'http://localhost:5173').replace(/\/+$/, '');
@@ -33,7 +62,7 @@ const mesaSchema = z.object({
 async function listar(req, res, next) {
   try {
     const mesas = await mesasService.listar();
-    return res.json({ mesas });
+    return res.json({ mesas: mesas.map(vistaMesaPersonal) });
   } catch (err) {
     return next(err);
   }
@@ -43,27 +72,8 @@ async function obtener(req, res, next) {
   try {
     const mesa = await mesasService.obtenerPorId(req.params.id);
     if (!mesa) return res.status(404).json({ error: 'Mesa no encontrada' });
-    return res.json(mesa);
-  } catch (err) {
-    return next(err);
-  }
-}
-
-/**
- * GET /api/mesas/qr/:token — usado por frontend-cliente al escanear el QR.
- * Solo confirma que el token corresponde a una mesa; no emite sesión.
- *
- * El socket-server de Roberto NO usa Redis: sus tokens QR son tokens firmados
- * (HMAC) que llevan su propia expiración dentro, y se validan con
- * POST /qr/validar contra el socket-server. Este endpoint sigue resolviendo la
- * mesa por la columna mesas.token_qr — PENDIENTE de la decisión del equipo sobre
- * cuál de los dos modelos de QR queda (ver docs/api-spec.md).
- */
-async function obtenerPorToken(req, res, next) {
-  try {
-    const mesa = await mesasService.obtenerPorToken(req.params.token);
-    if (!mesa) return res.status(404).json({ error: 'Token de mesa inválido' });
-    return res.json(mesa);
+    // Ruta pública: sin token_qr.
+    return res.json(vistaMesa(mesa));
   } catch (err) {
     return next(err);
   }
@@ -233,7 +243,7 @@ async function crear(req, res, next) {
 
   try {
     const mesa = await mesasService.crear(parsed.data);
-    return res.status(201).json(mesa);
+    return res.status(201).json(vistaMesaPersonal(mesa));
   } catch (err) {
     return next(err);
   }
@@ -246,7 +256,7 @@ async function actualizarEstado(req, res, next) {
   try {
     const mesa = await mesasService.actualizarEstado(req.params.id, parsed.data.estado);
     if (!mesa) return res.status(404).json({ error: 'Mesa no encontrada' });
-    return res.json(mesa);
+    return res.json(vistaMesaPersonal(mesa));
   } catch (err) {
     return next(err);
   }
@@ -265,7 +275,6 @@ async function eliminar(req, res, next) {
 module.exports = {
   listar,
   obtener,
-  obtenerPorToken,
   abrir,
   liberar,
   crearSesionPorToken,

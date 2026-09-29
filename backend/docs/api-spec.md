@@ -170,7 +170,6 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 | GET | /mesas | admin, cajero, mesero | Lista todas |
 | **POST** | **/mesas/:id/abrir** | **mesero, admin** | **Abre la mesa: obtiene su QR y la marca `ocupada`** |
 | **POST** | **/mesas/:id/liberar** | **mesero, admin** | **Cierra la mesa: `disponible` y `token_qr` a NULL. 409 si tiene pedidos abiertos** |
-| GET | /mesas/qr/:token | No | Busca la mesa por el valor de su columna `token_qr` (utilidad de sala, **no** valida el QR del comensal) |
 | POST | /mesas/qr/:token/sesion | No | Abre la sesión del comensal y devuelve su JWT |
 | GET | /mesas/:id | No | Obtiene una |
 | POST | /mesas | admin | Crea |
@@ -178,8 +177,29 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 | DELETE | /mesas/:id | admin | Elimina |
 
 ```json
-{ "id_mesa": 5, "numero": 5, "capacidad": 4, "ubicacion": "Terraza", "estado": "ocupada", "token_qr": "v1.…" }
+{ "id_mesa": 5, "numero": 5, "capacidad": 4, "ubicacion": "Terraza", "estado": "ocupada" }
 ```
+
+### `token_qr` no sale en ninguna respuesta salvo /abrir
+
+El `token_qr` es la **credencial** con la que se abre la sesión de la mesa: quien lo tenga
+puede pedir a nombre de ese grupo. Por eso **ninguna** respuesta de la API lo incluye,
+excepto `POST /mesas/:id/abrir`, que es justamente quien lo necesita para imprimir el QR y
+está restringido a mesero/admin.
+
+- `GET /mesas/:id` es **pública** (la PWA la usa para mostrar el número de mesa) y devuelve
+  solo `id_mesa`, `numero`, `capacidad`, `ubicacion` y `estado`.
+- `GET /mesas` (personal) devuelve lo mismo más **`sesion_abierta`** (booleano), y **no** el
+  token. El panel de sala solo necesita saber qué mesas tienen sesión viva; para volver a
+  mostrar un QR llama a `POST /mesas/:id/abrir`, que es idempotente y devuelve el mismo
+  token. Mandar el token en un listado lo multiplicaría por pantallas, cachés y logs sin
+  que nadie lo use.
+- `POST /mesas` y `PATCH /mesas/:id/estado` siguen la misma vista del personal.
+
+`GET /mesas/qr/:token` **se eliminó**: nadie la consumía (ni los frontends, que aún son solo
+READMEs, ni el socket-server, ni las pruebas), el camino del comensal es
+`POST /mesas/qr/:token/sesion`, y al responder 200 con la mesa servía de oráculo para
+adivinar tokens válidos sin abrir sesión.
 
 ---
 
