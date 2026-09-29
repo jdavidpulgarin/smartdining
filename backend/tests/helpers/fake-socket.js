@@ -6,6 +6,10 @@
 // .env local de quien las corra.
 
 const URL_FALSA = 'http://socket-de-prueba:4001';
+
+// Tope solo para el caso en que no venga AbortSignal (el código de producción
+// siempre lo manda). Evita que un doble mal usado cuelgue la suite.
+const TOPE_SIN_SIGNAL_MS = 5000;
 const CLAVE_FALSA = 'clave-interna-de-prueba';
 
 /**
@@ -36,22 +40,44 @@ function instalarFakeSocket(responder) {
     const aviso = { ruta, cuerpo, cabeceras: opciones.headers || {}, opciones };
     avisos.push(aviso);
 
-    // El fetch real aborta cuando salta la señal de timeout; el doble tiene que
-    // hacer lo mismo o una respuesta que nunca llega colgaría la prueba.
+    // El fetch real rechaza cuando se dispara el AbortSignal, y el doble tiene
+    // que hacer lo mismo: si no, un responder que nunca resuelve deja la
+    // petición colgada, la prueba no termina nunca y el runner acaba cancelando
+    // el resto del archivo.
+    const señal = opciones.signal;
+    let quitarEscucha = () => {};
+
     const abortada = new Promise((_, rechazar) => {
-      const señal = opciones.signal;
-      if (!señal) return;
       const fallar = () => {
         const err = new Error('The operation was aborted due to timeout');
-        err.name = señal.reason && señal.reason.name === 'TimeoutError' ? 'TimeoutError' : 'AbortError';
+        err.name = señal && señal.reason && señal.reason.name === 'TimeoutError' ? 'TimeoutError' : 'AbortError';
         rechazar(err);
       };
-      if (señal.aborted) fallar();
-      else señal.addEventListener('abort', fallar, { once: true });
+
+      if (señal) {
+        if (señal.aborted) return fallar();
+        señal.addEventListener('abort', fallar, { once: true });
+        quitarEscucha = () => señal.removeEventListener('abort', fallar);
+        return;
+      }
+
+      // Red de seguridad: si una prueba futura llama sin signal y su responder
+      // no resuelve, se corta igual en vez de colgar todo el archivo.
+      const temporizador = setTimeout(fallar, TOPE_SIN_SIGNAL_MS);
+      if (temporizador.unref) temporizador.unref();
+      quitarEscucha = () => clearTimeout(temporizador);
     });
 
     const respondida = Promise.resolve(responder ? responder(ruta, cuerpo, aviso) : { ok: true });
-    const resultado = await Promise.race([respondida, abortada]);
+
+    let resultado;
+    try {
+      resultado = await Promise.race([respondida, abortada]);
+    } finally {
+      // Se suelta la escucha gane quien gane: sin esto quedan listeners y
+      // temporizadores vivos por cada petición de cada prueba.
+      quitarEscucha();
+    }
     if (resultado instanceof Error) throw resultado;
 
     const status = resultado && resultado.__status ? resultado.__status : 200;

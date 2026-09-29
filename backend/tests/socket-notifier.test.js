@@ -143,8 +143,11 @@ test('si el socket-server responde 500 el pedido se crea igual', async () => {
 });
 
 test('si el socket-server no contesta, el notifier se rinde por timeout y no cuelga', async () => {
-  const socket = instalarFakeSocket(() => new Promise(() => {})); // nunca resuelve
-  process.env.SOCKET_TIMEOUT_MS = '80';
+  // El responder nunca resuelve: la única salida es que el doble respete el
+  // AbortSignal que pone el notifier. Si no lo respetara, esta prueba colgaría
+  // y el runner cancelaría las que vienen detrás.
+  const socket = instalarFakeSocket(() => new Promise(() => {}));
+  process.env.SOCKET_TIMEOUT_MS = '250';
   try {
     const { notificarMesaLiberada } = require('../src/services/socket.notifier');
     const inicio = Date.now();
@@ -153,7 +156,51 @@ test('si el socket-server no contesta, el notifier se rinde por timeout y no cue
 
     assert.strictEqual(r.ok, false);
     assert.strictEqual(r.motivo, 'TIMEOUT');
-    assert.ok(transcurrido < 2000, `se rindió en ${transcurrido}ms`);
+    // Margen amplio a propósito: lo que se comprueba es que TERMINA, no cuánto
+    // tarda. Un umbral ajustado se vuelve inestable en máquinas cargadas.
+    assert.ok(transcurrido < 5000, `se rindió en ${transcurrido}ms`);
+  } finally {
+    socket.restaurar(); // restaura también SOCKET_TIMEOUT_MS
+  }
+});
+
+test('el doble de fetch rechaza en cuanto se dispara el AbortSignal', async () => {
+  // Propiedad del propio helper: es la que impide que la suite se cuelgue, así
+  // que se prueba de forma explícita en vez de confiar en ella.
+  const socket = instalarFakeSocket(() => new Promise(() => {}));
+  try {
+    const control = AbortSignal.timeout(120);
+    const inicio = Date.now();
+
+    await assert.rejects(
+      () => fetch('http://socket-de-prueba:4001/internal/order-status', {
+        method: 'POST',
+        body: JSON.stringify({ hola: 'mundo' }),
+        signal: control,
+      }),
+      (err) => {
+        assert.strictEqual(err.name, 'TimeoutError');
+        return true;
+      }
+    );
+
+    assert.ok(Date.now() - inicio < 5000, 'debe rechazar, no quedarse colgado');
+  } finally {
+    socket.restaurar();
+  }
+});
+
+test('el doble rechaza de inmediato si el signal ya venía abortado', async () => {
+  const socket = instalarFakeSocket(() => new Promise(() => {}));
+  try {
+    const control = AbortSignal.abort();
+    await assert.rejects(() =>
+      fetch('http://socket-de-prueba:4001/internal/order-status', {
+        method: 'POST',
+        body: '{}',
+        signal: control,
+      })
+    );
   } finally {
     socket.restaurar();
   }
