@@ -128,7 +128,7 @@ Ack:
   "carrito": {
     "version": 12,
     "items": [
-      { "comensal": "Ana", "id_plato": 3, "cantidad": 2, "notas": "sin cebolla" }
+      { "id_linea": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", "comensal": "Ana", "id_plato": 3, "cantidad": 2, "notas": "sin cebolla" }
     ]
   }
 }
@@ -147,6 +147,7 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
 {
   "eventId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
   "accion": "set",
+  "id_linea": "6f1c1b1a-2222-4b3c-8d4e-5f6a7b8c9d0e",
   "comensal": "Ana",
   "id_plato": 3,
   "cantidad": 2,
@@ -158,14 +159,18 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
 |---|---|---|
 | `eventId` | string | UUID, obligatorio |
 | `id_mesa` | entero > 0 | Solo personal (`mesero`/`admin`). El comensal no lo envía: se toma de su JWT |
-| `accion` | string | `set` (fija la cantidad), `remove` (quita el plato), `clear` (vacía todo el carrito) |
+| `accion` | string | `set` (fija la cantidad), `remove` (quita la línea), `clear` (vacía todo el carrito) |
+| `id_linea` | string | UUID, obligatorio en `set` y `remove`. Lo genera el cliente **una sola vez por línea** añadida (no por plato) |
 | `comensal` | string | 1–40 caracteres. Obligatorio en `set` y `remove` |
-| `id_plato` | entero > 0 | Obligatorio en `set` y `remove` |
+| `id_plato` | entero > 0 | Obligatorio en `set`. **Ya no se envía en `remove`**: la línea se borra por `id_linea` |
 | `cantidad` | entero 1–99 | Obligatorio en `set`. Es la cantidad **final**, no un incremento |
 | `notas` | string ≤ 200 | Opcional, solo en `set` |
 
 Por qué `set` y no `+1`/`-1`: fijar el valor absoluto hace que reenviar el evento
-nunca duplique unidades. Cada ítem se identifica por `(comensal, id_plato)`.
+nunca duplique unidades. Cada ítem se identifica por `id_linea`: dos líneas del
+mismo comensal y el mismo plato (p. ej. una hamburguesa término medio y otra bien
+asada) conviven porque tienen `id_linea` distinto. Repetir `set` con un `id_linea`
+ya existente **edita esa línea** (cantidad o notas), no crea una línea nueva.
 
 Ack (incluye el snapshot resultante):
 
