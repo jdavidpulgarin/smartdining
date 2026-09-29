@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const routes = require('./src/routes');
 const { manejadorErrores } = require('./src/middleware/errores.middleware');
+const { exigirEntornoValido } = require('./src/config/verificar-entorno');
 
 const app = express();
 
@@ -22,6 +23,9 @@ app.use(manejadorErrores);
 const PORT = process.env.PORT || 4000;
 
 if (require.main === module) {
+  // Va aquí y no al cargar el módulo: las pruebas importan `app` con supertest y
+  // no deben depender de la configuración real ni poder matar el proceso.
+  exigirEntornoValido();
   app.listen(PORT, () => console.log(`SmartDining backend corriendo en http://localhost:${PORT}`));
 }
 
