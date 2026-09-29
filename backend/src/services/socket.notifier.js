@@ -229,6 +229,34 @@ async function notificarCambioEstado({ id_pedido, id_mesa, codigo_pedido, estado
 }
 
 /**
+ * POST /internal/qr-rotado — avisa a la tablet de la mesa que hay un QR nuevo.
+ *
+ * Modelo "QR en vidrio" (opción A): el QR no se imprime, lo muestra la tablet
+ * fija de la mesa. El socket-server reenvía esto como `qr:actualizado` a
+ * room:mesa-{id}, y la tablet redibuja el QR sola.
+ *
+ * Aislado como el resto de los avisos: si falla, la mesa ya quedó abierta y el
+ * mesero siempre puede volver a pulsar "abrir" (es idempotente).
+ */
+async function notificarQrRotado(id_mesa, token_qr) {
+  const resultado = await enviar('/internal/qr-rotado', { id_mesa, token_qr });
+
+  // Un 400 aquí casi siempre es el límite de longitud del socket-server: hoy
+  // acepta hasta 128 caracteres (MAX_TOKEN_QR_MOSTRADO) y nuestros tokens v1
+  // miden ~150. Roberto lo va a subir a 255. Se deja constancia con el motivo y
+  // la longitud real, sin recortar el token: un token recortado no valida.
+  if (!resultado.ok && resultado.motivo === 'HTTP_400') {
+    const mensaje = (resultado.respuesta && resultado.respuesta.mensaje) || 'sin mensaje';
+    console.error(
+      `[socket] /internal/qr-rotado rechazo el token de la mesa ${id_mesa}: ${mensaje} `
+        + `(longitud enviada: ${String(token_qr).length}). La tablet no refrescara el QR.`
+    );
+  }
+
+  return resultado;
+}
+
+/**
  * POST /internal/mesa-liberada — invalida los QR emitidos de esa mesa y borra
  * su carrito y sus suscripciones push, para que el grupo siguiente empiece
  * limpio. Se llama tras un pago efectivo (estado_transaccion 'completada').
@@ -242,6 +270,7 @@ module.exports = {
   armarPedido,
   generarTokenQr,
   validarTokenQr,
+  notificarQrRotado,
   notificarPedidoCreado,
   notificarCambioEstado,
   notificarMesaLiberada,

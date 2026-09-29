@@ -267,7 +267,11 @@ así que dos meseros pulsando "abrir" a la vez reciben el mismo token:
 ```
 
 `url` se arma con `FRONTEND_CLIENTE_URL` para que la sala no tenga que saber cómo se
-construye. 404 mesa inexistente · 403 si el socket-server rechaza el rol · **503 si el
+construye.
+
+Cuando el token es **nuevo**, después del commit se avisa a
+`POST /internal/qr-rotado` para que la tablet de la mesa lo muestre (ver *Tablet fija en
+la mesa* más abajo). Si el token se **reutiliza**, no se avisa. 404 mesa inexistente · 403 si el socket-server rechaza el rol · **503 si el
 socket-server no responde** (sin QR no se puede abrir, y la mesa no se toca).
 
 ### POST /mesas/:id/liberar — mesero, admin
@@ -287,6 +291,43 @@ Después del commit avisa a `/internal/mesa-liberada` de forma **aislada**: si e
 falla, la liberación **no** se revierte (solo queda registrado el error).
 
 200: `{ "id_mesa": 5, "numero": 5, "estado": "disponible", "token_qr": null }`
+
+### Tablet fija en la mesa — modelo "QR en vidrio" (opción A)
+
+El QR ya no se imprime: lo muestra una tablet montada en la mesa. La opción que eligió el
+equipo es la **A**, o sea que **la tablet solo muestra el QR cuando el mesero abre la
+mesa**; mientras la mesa esté libre no hay QR que escanear.
+
+```
+mesero  → POST /api/mesas/:id/abrir
+            backend: guarda el token en mesas.token_qr, mesa a 'ocupada'
+            backend → POST /internal/qr-rotado  { id_mesa, token_qr }
+socket-server → qr:actualizado  { id_mesa, token_qr, emitidoEn }  a room:mesa-{id}
+            tablet: arma FRONTEND_CLIENTE_URL/?token=<token_qr> y dibuja el QR
+comensal→ escanea → POST /api/mesas/qr/:token/sesion
+            ...pide, cambia de estado, paga...
+mesero  → POST /api/mesas/:id/liberar   (o se libera sola al cerrarse el último pedido)
+            backend → POST /internal/mesa-liberada  { id_mesa }
+```
+
+Reglas del aviso:
+
+- Solo se avisa cuando el token es **nuevo**. Si `/abrir` reutiliza el QR de una mesa que ya
+  estaba `ocupada`, la tablet ya lo está mostrando y reenviarlo solo la haría parpadear.
+- El aviso va **después del commit** y **aislado**: si el socket-server está caído o
+  responde error, la mesa se abre igual. El mesero siempre puede volver a pulsar "abrir",
+  que es idempotente, y eso reintenta el aviso.
+- El token se envía **completo**. No se recorta para caber en ningún límite: un token
+  recortado no valida.
+- En la **liberación** el backend no cambia: sigue llamando solo a
+  `/internal/mesa-liberada`. Avisar a la tablet de que se apague el QR es del
+  socket-server.
+
+> **Pendiente del lado de Roberto:** hoy `/internal/qr-rotado` rechaza `token_qr` de más de
+> 128 caracteres (`MAX_TOKEN_QR_MOSTRADO`) y los tokens `v1` miden ~150, así que responde
+> 400 y la tablet no refresca. Roberto va a subir el límite a 255. El backend registra ese
+> 400 con el motivo y la longitud enviada, y abrir la mesa sigue funcionando: es solo la
+> tablet la que no se actualiza hasta que suba el límite.
 
 ### Liberación automática
 
@@ -519,6 +560,7 @@ Contrato completo en [socket-server/EVENTS.md](../../socket-server/EVENTS.md).
 |---|---|
 | Se crea un pedido | `POST /internal/order-created` con el pedido y sus ítems |
 | Cambia el estado (pedidos y KDS) | `POST /internal/order-status` con `estado_anterior` |
+| Se abre una mesa con un token **nuevo** | `POST /internal/qr-rotado` → `qr:actualizado` a la tablet |
 | Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada` |
 
 **Aislamiento:** salvo en `/qr/generar` y `/qr/validar` (donde sin respuesta no se puede

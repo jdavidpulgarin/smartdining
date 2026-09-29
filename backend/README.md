@@ -118,6 +118,8 @@ curl http://localhost:4000/api/health
 mesero   → POST /api/mesas/:id/abrir        pide el QR al socket-server, lo guarda en
                                             mesas.token_qr y deja la mesa 'ocupada'
                                             (idempotente: llamarlo dos veces da el mismo token)
+                                            si el token es nuevo, avisa a /internal/qr-rotado
+                                            y la tablet de la mesa dibuja el QR
 comensal → POST /api/mesas/qr/:token/sesion el token debe ser válido para el socket-server
                                             Y el vigente de la mesa -> JWT { id_mesa, sid }
          → GET  /api/categorias + GET /api/platos?id_categoria=
@@ -141,7 +143,8 @@ maneja el backend.
 ## Tiempo real
 
 El backend avisa al socket-server de Roberto por HTTP interno
-(`/internal/order-created`, `/internal/order-status`, `/internal/mesa-liberada`) desde
+(`/internal/order-created`, `/internal/order-status`, `/internal/qr-rotado`,
+`/internal/mesa-liberada`) desde
 `src/services/socket.notifier.js`, con `x-internal-key` y un `eventId` por acción.
 
 Ese cliente **nunca lanza**: con timeout corto, registra el fallo y sigue, así que un
@@ -154,7 +157,7 @@ socket-server caído no rompe un pedido ni un cobro. La excepción son `/qr/gene
 npm test
 ```
 
-95 pruebas con `node --test` + `supertest`. No hacen falta PostgreSQL ni Redis:
+119 pruebas con `node --test` + `supertest`. No hacen falta PostgreSQL ni Redis:
 `tests/helpers/fake-db.js` reemplaza `pool.query`/`pool.connect` por dobles en memoria
 y registra las queries ejecutadas, así que las pruebas también verifican con qué
 valores llega cada `INSERT`.

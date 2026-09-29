@@ -85,8 +85,13 @@ async function obtener(req, res, next) {
  * Idempotente: dos meseros pulsando "abrir" a la vez reciben el mismo token
  * (ver mesasService.abrirSesion, que bloquea la fila de la mesa).
  *
- * Devuelve la url ya armada para imprimir o mostrar el QR, para que la sala no
- * tenga que saber cómo se construye.
+ * Devuelve la url ya armada para mostrar el QR, para que la sala no tenga que
+ * saber cómo se construye.
+ *
+ * Modelo "QR en vidrio" (opción A): cuando el token es NUEVO se avisa al
+ * socket-server para que la tablet de la mesa lo muestre. Si se reutiliza el de
+ * una mesa que ya estaba ocupada NO se avisa: la tablet ya está mostrando ese
+ * mismo QR y reenviarlo solo haría parpadear la pantalla.
  */
 async function abrir(req, res, next) {
   const idMesa = Number(req.params.id);
@@ -110,6 +115,10 @@ async function abrir(req, res, next) {
     if (r.rechazado) {
       return res.status(r.status === 403 ? 403 : 502).json({ error: r.mensaje });
     }
+
+    // Después del commit (abrirSesion ya cerró su transacción) y aislado: si el
+    // socket-server falla, la mesa queda abierta igual.
+    if (!r.reutilizado) socketNotifier.notificarQrRotado(idMesa, r.token);
 
     return res.status(201).json({
       token: r.token,

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
 const { instalarFakeDb, tokenStaff, construirTokenQr } = require('./helpers/fake-db');
-const { instalarFakeSocket, socketCaido } = require('./helpers/fake-socket');
+const { instalarFakeSocket, socketCaido, CLAVE_FALSA } = require('./helpers/fake-socket');
 const app = require('../server');
 const mesasService = require('../src/services/mesas.service');
 
@@ -547,5 +547,163 @@ test("una mesa 'reservada' con token_qr también recibe uno nuevo", async () => 
   } finally {
     socket.restaurar();
     db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Modelo "QR en vidrio" (opción A): la tablet de la mesa muestra el QR y se
+// refresca cuando el backend avisa a /internal/qr-rotado.
+// ---------------------------------------------------------------------------
+
+test('abrir con token nuevo avisa a /internal/qr-rotado con { id_mesa, token_qr }', async () => {
+  const { token } = construirTokenQr(5);
+  const socket = instalarFakeSocket((ruta) =>
+    ruta === '/qr/generar' ? { __status: 201, token, id_mesa: 5 } : { ok: true }
+  );
+  const db = dbMesa(null, 'disponible');
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.reutilizado, false);
+
+    const aviso = socket.buscar('/internal/qr-rotado');
+    assert.ok(aviso, 'debe avisarse a la tablet de la mesa');
+    // Exactamente esas dos claves y esos valores: el token va completo, sin recortar.
+    assert.deepStrictEqual(aviso.cuerpo, { id_mesa: 5, token_qr: token });
+    assert.strictEqual(aviso.cabeceras['x-internal-key'], CLAVE_FALSA);
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('el token que se avisa es el completo, sin recortar', async () => {
+  const { token } = construirTokenQr(5);
+  const socket = instalarFakeSocket((ruta) =>
+    ruta === '/qr/generar' ? { __status: 201, token, id_mesa: 5 } : { ok: true }
+  );
+  const db = dbMesa(null, 'disponible');
+  try {
+    await request(app).post('/api/mesas/5/abrir').set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    const enviado = socket.buscar('/internal/qr-rotado').cuerpo.token_qr;
+    assert.strictEqual(enviado.length, token.length);
+    assert.ok(enviado.length > 128, 'los tokens v1 pasan de 128: no se recortan para que quepan');
+    assert.strictEqual(enviado.split('.').length, 3, 'sigue siendo v1.<datos>.<firma>');
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('abrir reutilizando el QR de una mesa ocupada NO avisa a la tablet', async () => {
+  const { token } = construirTokenQr(5);
+  const socket = instalarFakeSocket((ruta, cuerpo) => {
+    if (ruta === '/qr/validar') {
+      return cuerpo.token === token ? { valido: true, id_mesa: 5 } : { __status: 401, valido: false, motivo: 'firma' };
+    }
+    return { ok: true };
+  });
+  const db = dbMesa(token, 'ocupada');
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.reutilizado, true);
+    assert.strictEqual(
+      socket.buscar('/internal/qr-rotado'),
+      undefined,
+      'la tablet ya muestra ese QR: reenviarlo solo la haría parpadear'
+    );
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('si el socket-server está caído, la mesa se abre igual', async () => {
+  const { token } = construirTokenQr(5);
+  // Cae todo menos /qr/generar: el QR se obtiene, pero el aviso a la tablet falla.
+  const socket = instalarFakeSocket((ruta) => {
+    if (ruta === '/qr/generar') return { __status: 201, token, id_mesa: 5 };
+    const err = new Error('connect ECONNREFUSED 127.0.0.1:4001');
+    err.name = 'TypeError';
+    return err;
+  });
+  const db = dbMesa(null, 'disponible');
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 201, 'la mesa se abre igual');
+    assert.strictEqual(res.body.token, token);
+    assert.ok(db.buscar('UPDATE mesas SET token_qr = $1'), 'y el token quedó guardado');
+    assert.ok(socket.buscar('/internal/qr-rotado'), 'se intentó avisar');
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('un 400 del socket-server por el límite de longitud no rompe el abrir', async () => {
+  const { token } = construirTokenQr(5);
+  const socket = instalarFakeSocket((ruta) => {
+    if (ruta === '/qr/generar') return { __status: 201, token, id_mesa: 5 };
+    if (ruta === '/internal/qr-rotado') {
+      // Lo que responde hoy el socket-server: MAX_TOKEN_QR_MOSTRADO = 128.
+      return {
+        __status: 400,
+        ok: false,
+        codigo: 'PAYLOAD_INVALIDO',
+        mensaje: 'token_qr debe ser un texto de 1 a 128 caracteres',
+      };
+    }
+    return { ok: true };
+  });
+  const db = dbMesa(null, 'disponible');
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/abrir')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 201, 'abrir la mesa no depende de la tablet');
+    assert.strictEqual(res.body.token, token, 'y el token se devuelve completo');
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('notificarQrRotado deja el motivo del 400 en el log', async () => {
+  const socket = instalarFakeSocket(() => ({
+    __status: 400,
+    ok: false,
+    codigo: 'PAYLOAD_INVALIDO',
+    mensaje: 'token_qr debe ser un texto de 1 a 128 caracteres',
+  }));
+  const errores = [];
+  const errorOriginal = console.error;
+  console.error = (...args) => errores.push(args.join(' '));
+  try {
+    const { notificarQrRotado } = require('../src/services/socket.notifier');
+    const { token } = construirTokenQr(5);
+    const r = await notificarQrRotado(5, token);
+
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.motivo, 'HTTP_400');
+
+    const log = errores.join('\n');
+    assert.match(log, /qr-rotado/);
+    assert.match(log, /1 a 128 caracteres/, 'el motivo del socket-server debe quedar en el log');
+    assert.match(log, new RegExp(String(token.length)), 'y la longitud real que se envió');
+  } finally {
+    console.error = errorOriginal;
+    socket.restaurar();
   }
 });
