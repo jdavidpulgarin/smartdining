@@ -10,20 +10,24 @@ const MAX_NOTAS = 200;
 /**
  * Almacén del carrito grupal de cada mesa (en memoria).
  *
- * Cada ítem se identifica por (comensal, id_plato) y `set` guarda la cantidad
- * FINAL. Por eso aplicar dos veces la misma operación deja el mismo estado:
+ * Cada ítem se identifica por su `id_linea` (UUID que genera el cliente una
+ * sola vez por línea añadida) y `set` guarda la cantidad/notas FINALES de esa
+ * línea. Por eso aplicar dos veces la misma operación deja el mismo estado:
  * el carrito converge aunque un evento llegue repetido tras una reconexión.
+ * Repetir `set` sobre el mismo `id_linea` es una EDICIÓN de esa línea (sirve
+ * para cambiar cantidad o notas), no crea una línea nueva; dos líneas con el
+ * mismo (comensal, id_plato) pero distinto id_linea conviven sin pisarse
+ * (p. ej. dos hamburguesas del mismo comensal con términos distintos).
  * `version` sube en cada cambio real para que los clientes descarten
  * snapshots que lleguen desordenados.
  */
 function crearAlmacenCarritos() {
-  const mesas = new Map(); // idMesa -> { version, items: Map<clave, item> }
+  const mesas = new Map(); // idMesa -> { version, items: Map<id_linea, item> }
 
   const obtener = (idMesa) => {
     if (!mesas.has(idMesa)) mesas.set(idMesa, { version: 0, items: new Map() });
     return mesas.get(idMesa);
   };
-  const clave = (comensal, idPlato) => `${comensal}\u0000${idPlato}`;
 
   function snapshot(idMesa) {
     const c = mesas.get(idMesa);
@@ -35,13 +39,16 @@ function crearAlmacenCarritos() {
   function aplicar(idMesa, op) {
     const c = obtener(idMesa);
     if (op.accion === 'set') {
-      const k = clave(op.comensal, op.id_plato);
-      if (!c.items.has(k) && c.items.size >= MAX_ITEMS_POR_MESA) {
+      // El tope de ítems solo aplica a líneas NUEVAS: editar una línea
+      // existente (mismo id_linea) nunca debe bloquearse por el máximo.
+      if (!c.items.has(op.id_linea) && c.items.size >= MAX_ITEMS_POR_MESA) {
         return { error: 'El carrito de la mesa alcanzó el máximo de ítems' };
       }
-      c.items.set(k, { comensal: op.comensal, id_plato: op.id_plato, cantidad: op.cantidad, notas: op.notas ?? null });
+      c.items.set(op.id_linea, {
+        id_linea: op.id_linea, comensal: op.comensal, id_plato: op.id_plato, cantidad: op.cantidad, notas: op.notas ?? null,
+      });
     } else if (op.accion === 'remove') {
-      c.items.delete(clave(op.comensal, op.id_plato));
+      c.items.delete(op.id_linea);
     } else if (op.accion === 'clear') {
       c.items.clear();
     }
@@ -60,11 +67,14 @@ function crearAlmacenCarritos() {
 function validarOperacion(p) {
   if (!['set', 'remove', 'clear'].includes(p.accion)) return 'accion debe ser set, remove o clear';
   if (p.accion === 'clear') return null;
+  // id_linea identifica la línea en set y en remove; en remove ya no hace
+  // falta id_plato (se borra por id_linea), pero comensal se sigue exigiendo.
+  if (!esEventIdValido(p.id_linea)) return 'id_linea debe ser un UUID';
   if (typeof p.comensal !== 'string' || !p.comensal.trim() || p.comensal.length > MAX_APODO) {
     return `comensal debe ser un texto de 1 a ${MAX_APODO} caracteres`;
   }
-  if (!esIdValido(p.id_plato)) return 'id_plato debe ser un entero positivo';
   if (p.accion === 'set') {
+    if (!esIdValido(p.id_plato)) return 'id_plato debe ser un entero positivo';
     if (!Number.isInteger(p.cantidad) || p.cantidad < 1 || p.cantidad > 99) {
       return 'cantidad debe ser un entero entre 1 y 99';
     }

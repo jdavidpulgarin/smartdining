@@ -89,7 +89,9 @@ test('por socket: mesero y admin pueden emitir; comensal y cocina no', async () 
 
 test('al crearse la comanda se vacía el carrito de esa mesa y se avisa a la mesa', async () => {
   const { s, mesa5 } = await escenario();
-  await emitir(mesa5, 'cart:update', { eventId: randomUUID(), accion: 'set', comensal: 'Ana', id_plato: 3, cantidad: 2 });
+  await emitir(mesa5, 'cart:update', {
+    eventId: randomUUID(), accion: 'set', id_linea: randomUUID(), comensal: 'Ana', id_plato: 3, cantidad: 2,
+  });
   const aviso = esperar(mesa5, 'cart:updated');
   await post(s, '/internal/order-created', { eventId: randomUUID(), pedido: pedido() });
   const ev = await aviso;

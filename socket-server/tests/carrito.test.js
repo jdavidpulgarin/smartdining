@@ -3,7 +3,9 @@ const assert = require('node:assert');
 const { randomUUID } = require('node:crypto');
 const { levantar, emitir, esperar, tokenComensal, tokenPersonal } = require('./helpers');
 
-const set = (comensal, id_plato, cantidad, extra = {}) => ({ eventId: randomUUID(), accion: 'set', comensal, id_plato, cantidad, ...extra });
+const set = (comensal, id_plato, cantidad, extra = {}) => ({
+  eventId: randomUUID(), accion: 'set', id_linea: randomUUID(), comensal, id_plato, cantidad, ...extra,
+});
 
 async function mesaConDos(s, id = 1) {
   const ana = await s.conectar(tokenComensal(id));
@@ -17,9 +19,12 @@ test('cart:update sincroniza a los demás y el emisor recibe el snapshot en el a
   const s = await levantar();
   const { ana, beto } = await mesaConDos(s);
   const llega = esperar(beto, 'cart:updated');
-  const ack = await emitir(ana, 'cart:update', set('Ana', 3, 2, { notas: 'sin cebolla' }));
+  const evento = set('Ana', 3, 2, { notas: 'sin cebolla' });
+  const ack = await emitir(ana, 'cart:update', evento);
   assert.strictEqual(ack.ok, true);
-  assert.deepStrictEqual(ack.carrito.items, [{ comensal: 'Ana', id_plato: 3, cantidad: 2, notas: 'sin cebolla' }]);
+  assert.deepStrictEqual(ack.carrito.items, [
+    { id_linea: evento.id_linea, comensal: 'Ana', id_plato: 3, cantidad: 2, notas: 'sin cebolla' },
+  ]);
   const ev = await llega;
   assert.strictEqual(ev.carrito.version, 1);
   assert.strictEqual(ev.origen, 'Ana');
@@ -62,14 +67,69 @@ test('reconexión: el snapshot del join:table reemplaza el estado sin duplicar',
 test('set fija cantidad absoluta; remove y clear', async () => {
   const s = await levantar();
   const { ana } = await mesaConDos(s);
-  await emitir(ana, 'cart:update', set('Ana', 3, 2));
-  const b = await emitir(ana, 'cart:update', set('Ana', 3, 5)); // otro evento, mismo ítem
+  const primero = set('Ana', 3, 2);
+  await emitir(ana, 'cart:update', primero);
+  // mismo id_linea: es una edición de esa línea, no un ítem nuevo
+  const b = await emitir(ana, 'cart:update', set('Ana', 3, 5, { id_linea: primero.id_linea }));
   assert.deepStrictEqual(b.carrito.items.map((i) => i.cantidad), [5]);
-  const c = await emitir(ana, 'cart:update', { eventId: randomUUID(), accion: 'remove', comensal: 'Ana', id_plato: 3 });
+  const c = await emitir(ana, 'cart:update', {
+    eventId: randomUUID(), accion: 'remove', comensal: 'Ana', id_linea: primero.id_linea,
+  });
   assert.strictEqual(c.carrito.items.length, 0);
   await emitir(ana, 'cart:update', set('Ana', 1, 1));
   const d = await emitir(ana, 'cart:update', { eventId: randomUUID(), accion: 'clear' });
   assert.strictEqual(d.carrito.items.length, 0);
+  await s.cerrar();
+});
+
+test('mismo comensal y mismo plato con distinto id_linea: conviven dos líneas', async () => {
+  const s = await levantar();
+  const { ana } = await mesaConDos(s);
+  await emitir(ana, 'cart:update', set('Ana', 3, 1, { notas: 'término medio' }));
+  const b = await emitir(ana, 'cart:update', set('Ana', 3, 1, { notas: 'bien asada' }));
+  assert.strictEqual(b.carrito.items.length, 2);
+  assert.deepStrictEqual(b.carrito.items.map((i) => i.notas).sort(), ['bien asada', 'término medio']);
+  await s.cerrar();
+});
+
+test('set con un id_linea existente reemplaza esa línea, no crea otra', async () => {
+  const s = await levantar();
+  const { ana } = await mesaConDos(s);
+  const primero = set('Ana', 3, 1, { notas: 'sin sal' });
+  await emitir(ana, 'cart:update', primero);
+  const editado = await emitir(ana, 'cart:update', set('Ana', 3, 4, { id_linea: primero.id_linea, notas: 'con sal' }));
+  assert.strictEqual(editado.carrito.items.length, 1);
+  assert.deepStrictEqual(editado.carrito.items[0], {
+    id_linea: primero.id_linea, comensal: 'Ana', id_plato: 3, cantidad: 4, notas: 'con sal',
+  });
+  await s.cerrar();
+});
+
+test('remove por id_linea elimina solo esa línea', async () => {
+  const s = await levantar();
+  const { ana } = await mesaConDos(s);
+  const uno = set('Ana', 3, 1);
+  const dos = set('Ana', 3, 1);
+  await emitir(ana, 'cart:update', uno);
+  await emitir(ana, 'cart:update', dos);
+  const r = await emitir(ana, 'cart:update', {
+    eventId: randomUUID(), accion: 'remove', comensal: 'Ana', id_linea: uno.id_linea,
+  });
+  assert.strictEqual(r.carrito.items.length, 1);
+  assert.strictEqual(r.carrito.items[0].id_linea, dos.id_linea);
+  await s.cerrar();
+});
+
+test('set o remove sin id_linea válido responde PAYLOAD_INVALIDO', async () => {
+  const s = await levantar();
+  const { ana } = await mesaConDos(s);
+  const sinLinea = set('Ana', 3, 1);
+  delete sinLinea.id_linea;
+  assert.strictEqual((await emitir(ana, 'cart:update', sinLinea)).codigo, 'PAYLOAD_INVALIDO');
+  assert.strictEqual((await emitir(ana, 'cart:update', set('Ana', 3, 1, { id_linea: 'no-es-uuid' }))).codigo, 'PAYLOAD_INVALIDO');
+  assert.strictEqual((await emitir(ana, 'cart:update', {
+    eventId: randomUUID(), accion: 'remove', comensal: 'Ana', id_linea: 'no-es-uuid',
+  })).codigo, 'PAYLOAD_INVALIDO');
   await s.cerrar();
 });
 
