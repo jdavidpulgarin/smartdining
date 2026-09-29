@@ -77,8 +77,27 @@ test('set fija cantidad absoluta; remove y clear', async () => {
   });
   assert.strictEqual(c.carrito.items.length, 0);
   await emitir(ana, 'cart:update', set('Ana', 1, 1));
-  const d = await emitir(ana, 'cart:update', { eventId: randomUUID(), accion: 'clear' });
+  // clear es del personal, no del comensal (ver el test dedicado más abajo)
+  const mesero = await s.conectar(tokenPersonal('mesero'));
+  await emitir(mesero, 'join:table', { id_mesa: 1 });
+  const d = await emitir(mesero, 'cart:update', { eventId: randomUUID(), accion: 'clear', id_mesa: 1 });
   assert.strictEqual(d.carrito.items.length, 0);
+  await s.cerrar();
+});
+
+test('clear: el comensal no puede vaciar el carrito de la mesa; el personal sí', async () => {
+  const s = await levantar();
+  const { ana } = await mesaConDos(s);
+  await emitir(ana, 'cart:update', set('Ana', 3, 1));
+  const rechazado = await emitir(ana, 'cart:update', { eventId: randomUUID(), accion: 'clear' });
+  assert.strictEqual(rechazado.codigo, 'NO_AUTORIZADO');
+  assert.strictEqual(s.carritos.snapshot(1).items.length, 1); // el carrito queda intacto
+
+  const mesero = await s.conectar(tokenPersonal('mesero'));
+  await emitir(mesero, 'join:table', { id_mesa: 1 });
+  const ok = await emitir(mesero, 'cart:update', { eventId: randomUUID(), accion: 'clear', id_mesa: 1 });
+  assert.strictEqual(ok.ok, true);
+  assert.strictEqual(s.carritos.snapshot(1).items.length, 0);
   await s.cerrar();
 });
 

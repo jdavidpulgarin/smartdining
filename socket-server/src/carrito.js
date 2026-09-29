@@ -1,4 +1,5 @@
 const { exito, fallo, manejar } = require('./ack');
+const { ROL_COMENSAL } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
 const { resolverMesa, estaEnMesa, salaMesa, esIdValido } = require('./salas');
 
@@ -93,6 +94,11 @@ function registrarCarrito(socket, { carritos, registro }) {
     if (!esEventIdValido(eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
     if (!ROLES_CARRITO.includes(identidad.rol)) {
       return fallo('NO_AUTORIZADO', 'Tu rol no puede modificar el carrito', { eventId });
+    }
+    // Vaciar TODA la mesa es una acción de sala, no de un comensal: un
+    // comensal solo puede quitar sus propias líneas una por una con `remove`.
+    if (p.accion === 'clear' && identidad.rol === ROL_COMENSAL) {
+      return fallo('NO_AUTORIZADO', 'Solo el personal puede vaciar el carrito de la mesa', { eventId });
     }
 
     const { idMesa, error } = resolverMesa(identidad, p.id_mesa);
