@@ -161,6 +161,8 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 -- 6. OBTENER MENÚ DIGITAL COMPLETO ESTRUCTURADO
+-- NOTA: 13_constructor.sql redefine esta función para incluir personalizable,
+-- calorias y pasos -> ingredientes. La versión vigente es la de ese script.
 CREATE OR REPLACE FUNCTION obtener_menu_completo()
 RETURNS JSON AS $$
 BEGIN

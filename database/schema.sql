@@ -8,6 +8,11 @@
 -- ==============================================================================
 
 -- 1. LIMPIEZA PREVIA (orden inverso de dependencias)
+-- Tablas del constructor: se crean en scripts/13_constructor.sql, pero dependen
+-- de platos y detalles_pedido, así que se borran primero al reconstruir.
+DROP TABLE IF EXISTS detalles_ingredientes CASCADE;
+DROP TABLE IF EXISTS ingredientes CASCADE;
+DROP TABLE IF EXISTS pasos_constructor CASCADE;
 DROP TABLE IF EXISTS kds_alertas CASCADE;
 DROP TABLE IF EXISTS token_qr_historico CASCADE;
 DROP TABLE IF EXISTS intentos_pago_fallidos CASCADE;

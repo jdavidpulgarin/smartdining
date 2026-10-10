@@ -152,6 +152,8 @@ CREATE TRIGGER tr_actualizar_total_pedido
 -- ------------------------------------------------------------------------------
 -- TRIGGER 5: tr_validar_detalle_pedido
 -- Valida cantidades, precios históricos y coherencia de subtotal.
+-- NOTA: 13_constructor.sql redefine la función para que el subtotal incluya
+-- los extras del constructor (precio_extras). La versión vigente es esa.
 -- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_tr_validar_detalle_pedido()
 RETURNS TRIGGER AS $$
