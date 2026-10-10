@@ -34,3 +34,8 @@ Thumbs.db
 *.sqlite
 *.sql.backup
 *.dump
+
+# Monorepo: ignorar carpetas autogeneradas en cualquier subdirectorio
+**/dev-dist/
+**/dist/
+**/node_modules/
