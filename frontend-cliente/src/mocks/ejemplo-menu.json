@@ -245,7 +245,7 @@
                 "calorias": 0,
                 "alergenos": [],
                 "url_imagen": null,
-                "disponible": true
+                "disponible": false
               }
             ]
           },

@@ -37,7 +37,7 @@ INSERT INTO ingredientes (id_paso, nombre, precio_extra, disponible) VALUES
 (102, 'Pollo a la Plancha', 0.00, TRUE),
 (102, 'Carne Desmechada', 2500.00, TRUE),
 (102, 'Falafel (Vegano)', 0.00, TRUE),
-(102, 'Panceta Crujiente', 3000.00, TRUE);
+(102, 'Panceta Crujiente', 3000.00, FALSE);
 
 -- Toppings (Bowl)
 INSERT INTO ingredientes (id_paso, nombre, precio_extra, disponible) VALUES 
