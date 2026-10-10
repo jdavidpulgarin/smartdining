@@ -174,7 +174,7 @@ Mesas físicas en el salón del restaurante y configuración de códigos QR.
 | `capacidad` | `INTEGER` | NO | DEFAULT 4, CHECK (`capacidad` > 0) | Número máximo recomendado de comensales. |
 | `ubicacion` | `VARCHAR(50)` | SÍ | DEFAULT 'Principal' | Zona del restaurante (Terraza, Salón Principal, Barra). |
 | `estado` | `VARCHAR(20)` | NO | DEFAULT 'disponible', CHECK (`estado` IN ('disponible', 'ocupada', 'reservada', 'mantenimiento')) | Estado operativo actual de la mesa. |
-| `token_qr` | `VARCHAR(64)` | NO | UNIQUE | Token aleatorio seguro (UUID/Hash) incrustado en el QR. |
+| `token_qr` | `VARCHAR(255)` | NO | UNIQUE | Token aleatorio seguro o firmado (UUID/Hash/HMAC) incrustado en el QR. |
 | `actualizado_en` | `TIMESTAMPTZ` | NO | DEFAULT `CURRENT_TIMESTAMP` | Marca temporal de última modificación. |
 
 ---
