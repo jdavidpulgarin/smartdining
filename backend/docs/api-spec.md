@@ -19,7 +19,8 @@ el modelo entidad-relación oficial de Jarrison (dueño de la base de datos).
 | Disponibilidad del plato | Trigger `tr_validar_disponibilidad_plato` |
 | Precios históricos | Se congelan leyendo `platos.precio` dentro del propio INSERT |
 | Validación de pagos (monto vs total) | Trigger `tr_validar_transaccion_financiera` |
-| Liberar la mesa y rotar su `token_qr` | Trigger `tr_regenerar_token_qr` |
+| Firmar y validar los tokens QR | **socket-server** (`POST /qr/generar`, `POST /qr/validar`) |
+| Ciclo de vida de `mesas.token_qr` y del estado de la mesa | **Backend** (el trigger `tr_regenerar_token_qr` fue retirado) |
 | Autenticación, roles (RBAC) | **Backend** |
 | Que el body venga bien formado | **Backend** (zod) |
 
@@ -79,7 +80,7 @@ La función `cancelar_pedido()` de Jarrison aplica la misma regla.
 | Rol | Origen | Payload del JWT | Vigencia |
 |---|---|---|---|
 | `admin`, `mesero`, `cajero`, `cocina` | Tabla `usuarios` (`usuarios.rol`), vía `POST /auth/login` | `{ id_usuario, rol }` | `JWT_EXPIRES_IN` (8 h) |
-| `comensal` | **No existe en la tabla usuarios.** Se emite al escanear el QR de la mesa, vía `POST /mesas/qr/:token/sesion` | `{ id_mesa, rol: "comensal" }` | 3 h (`JWT_COMENSAL_EXPIRES_IN`) |
+| `comensal` | **No existe en la tabla usuarios.** Se emite al escanear el QR de la mesa, vía `POST /mesas/qr/:token/sesion` | `{ id_mesa, sid, rol: "comensal" }` | 3 h, y cae antes si la mesa se libera (ver *Ciclo de vida de la sesión de mesa*) |
 
 Notas del flujo del comensal (definido por Jarrison):
 
@@ -167,38 +168,239 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | GET | /mesas | admin, cajero, mesero | Lista todas |
-| GET | /mesas/qr/:token | No | Busca la mesa por su `token_qr` (no emite sesión) |
-| **POST** | **/mesas/qr/:token/sesion** | **No** | **Abre la sesión del comensal y devuelve su JWT** |
+| **POST** | **/mesas/:id/abrir** | **mesero, admin** | **Abre la mesa: obtiene su QR y la marca `ocupada`** |
+| **POST** | **/mesas/:id/liberar** | **mesero, admin** | **Cierra la mesa: `disponible` y `token_qr` a NULL. 409 si tiene pedidos abiertos** |
+| POST | /mesas/qr/:token/sesion | No | Abre la sesión del comensal y devuelve su JWT |
 | GET | /mesas/:id | No | Obtiene una |
 | POST | /mesas | admin | Crea |
 | PATCH | /mesas/:id/estado | admin, cajero, mesero | Cambia estado (`disponible`, `ocupada`, `reservada`, `mantenimiento`) |
 | DELETE | /mesas/:id | admin | Elimina |
 
 ```json
-{ "id_mesa": 5, "numero": 5, "capacidad": 4, "ubicacion": "Terraza", "estado": "ocupada", "token_qr": "..." }
+{ "id_mesa": 5, "numero": 5, "capacidad": 4, "ubicacion": "Terraza", "estado": "ocupada" }
 ```
 
-### POST /mesas/qr/:token/sesion *(nuevo — punto de entrada del comensal)*
+### `token_qr` no sale en ninguna respuesta salvo /abrir
 
-Valida que el `token_qr` exista en la tabla `mesas` y emite el JWT de la sesión de mesa.
+El `token_qr` es la **credencial** con la que se abre la sesión de la mesa: quien lo tenga
+puede pedir a nombre de ese grupo. Por eso **ninguna** respuesta de la API lo incluye,
+excepto `POST /mesas/:id/abrir`, que es justamente quien lo necesita para imprimir el QR y
+está restringido a mesero/admin.
+
+- `GET /mesas/:id` es **pública** (la PWA la usa para mostrar el número de mesa) y devuelve
+  solo `id_mesa`, `numero`, `capacidad`, `ubicacion` y `estado`.
+- `GET /mesas` (personal) devuelve lo mismo más **`sesion_abierta`** (booleano), y **no** el
+  token. El panel de sala solo necesita saber qué mesas tienen sesión viva; para volver a
+  mostrar un QR llama a `POST /mesas/:id/abrir`, que es idempotente y devuelve el mismo
+  token. Mandar el token en un listado lo multiplicaría por pantallas, cachés y logs sin
+  que nadie lo use.
+- `POST /mesas` y `PATCH /mesas/:id/estado` siguen la misma vista del personal.
+
+`GET /mesas/qr/:token` **se eliminó**: nadie la consumía (ni los frontends, que aún son solo
+READMEs, ni el socket-server, ni las pruebas), el camino del comensal es
+`POST /mesas/qr/:token/sesion`, y al responder 200 con la mesa servía de oráculo para
+adivinar tokens válidos sin abrir sesión.
+
+---
+
+## Ciclo de vida de la sesión de mesa
+
+Modelo aprobado por el equipo:
+
+- El **QR impreso de la mesa es fijo durante la sesión** y su token vive en
+  `mesas.token_qr` (la columna es `VARCHAR(255)` y **nullable**: NULL significa "mesa sin
+  sesión abierta").
+- Los tokens los **genera y valida el socket-server** de Roberto (`POST /qr/generar` y
+  `POST /qr/validar`): son tokens firmados con HMAC, con formato
+  `v1.<datos base64url>.<firma>` y datos `{ m: id_mesa, iat, exp, sid }`. El backend no
+  los firma ni verifica su firma; solo guarda el token y compara.
+- Jarrison **retiró el trigger `tr_regenerar_token_qr`**, así que el ciclo de vida de
+  `token_qr` es responsabilidad exclusiva del backend.
+
+```
+mesero  → POST /api/mesas/:id/abrir      → token del QR (+ url para imprimirlo)
+comensal→ POST /api/mesas/qr/:token/sesion → JWT { id_mesa, sid, rol: 'comensal' }
+          …pide, cambia de estado, paga…
+          → la mesa se libera (manual o automáticamente) y token_qr queda en NULL
+          → las sesiones de ese grupo caen en la siguiente petición (401)
+```
+
+### El `sid` cierra la sesión sin esperar a que expire el JWT
+
+El JWT del comensal lleva el `sid` del QR con el que entró. En **cada petición de
+comensal**, el middleware lee `mesas.token_qr`, le extrae el `sid` y lo compara:
+
+- columna en NULL → la mesa se liberó;
+- `sid` distinto → se generó otro QR y ese JWT es del grupo anterior.
+
+En ambos casos responde **401** `{ "error": "Sesión de mesa cerrada, escanea el QR de nuevo" }`.
+Va en el middleware, no en los controllers, para que ninguna ruta pueda olvidarlo.
+No aplica al personal.
+
+### POST /mesas/:id/abrir — mesero, admin
+
+**Idempotente.** Todo ocurre con la fila de la mesa bloqueada (`SELECT … FOR UPDATE`),
+así que dos meseros pulsando "abrir" a la vez reciben el mismo token:
+
+1. **Solo si la mesa está `ocupada`** y su `token_qr` sigue vigente según `/qr/validar`,
+   devuelve **ese mismo** (`reutilizado: true`).
+2. En cualquier otro caso —sin token, token caducado, o la mesa **no** está `ocupada`—
+   pide uno a `POST /qr/generar` **reenviando el JWT del mesero** (esa ruta exige
+   `Authorization: Bearer` con rol admin/mesero/cajero: es el socket-server quien
+   autoriza, el backend no suplanta a nadie con la clave interna), lo guarda en
+   `mesas.token_qr` reemplazando lo que hubiera, y deja la mesa `ocupada`.
+
+> El estado de la mesa es lo que decide si hay una sesión viva. Una mesa `disponible` (o
+> `reservada`, o `mantenimiento`) con `token_qr` es un resto de una sesión ya cerrada, así
+> que **se genera siempre uno nuevo**: el grupo que llega nunca hereda el QR del anterior,
+> ni siquiera si el token viejo todavía estuviera firmado y sin expirar.
 
 201:
 
 ```json
 {
-  "token": "<jwt con id_mesa y rol comensal>",
+  "token": "v1.eyJtIjoxLCJpYXQiOjE3OTA2…",
+  "url": "http://localhost:5173/?token=v1.eyJtIjoxLCJpYXQiOjE3OTA2…",
+  "reutilizado": false,
+  "mesa": { "id_mesa": 5, "numero": 5, "estado": "ocupada" }
+}
+```
+
+`url` se arma con `FRONTEND_CLIENTE_URL` para que la sala no tenga que saber cómo se
+construye.
+
+Cuando el token es **nuevo**, después del commit se avisa a
+`POST /internal/qr-rotado` para que la tablet de la mesa lo muestre (ver *Tablet fija en
+la mesa* más abajo). Si el token se **reutiliza**, no se avisa. 404 mesa inexistente · 403 si el socket-server rechaza el rol · **503 si el
+socket-server no responde** (sin QR no se puede abrir, y la mesa no se toca).
+
+### POST /mesas/:id/liberar — mesero, admin
+
+**Es solo para grupos que se van sin pedir.** Con la fila bloqueada y dentro de la misma
+transacción se cuentan los pedidos de la mesa que no estén `pagado` ni `cancelado`:
+
+- **409** si hay alguno, y **no cambia nada**:
+  `{ "error": "La mesa tiene pedidos abiertos; cóbralos o cancélalos antes de liberarla", "pedidos_abiertos": 2 }`
+- si no hay ninguno, deja la mesa `disponible` y `token_qr` en NULL.
+
+El conteo va con la mesa ya bloqueada para que no se cuele un pedido nuevo entre la
+comprobación y el UPDATE. Una mesa con pedidos se cierra **cobrándolos o cancelándolos**:
+al cerrarse el último, la mesa se libera sola (ver abajo).
+
+Después del commit avisa a `/internal/mesa-liberada` de forma **aislada**: si ese aviso
+falla, la liberación **no** se revierte (solo queda registrado el error).
+
+200: `{ "id_mesa": 5, "numero": 5, "estado": "disponible", "token_qr": null }`
+
+### Tablet fija en la mesa — modelo "QR en vidrio" (opción A)
+
+El QR ya no se imprime: lo muestra una tablet montada en la mesa. La opción que eligió el
+equipo es la **A**, o sea que **la tablet solo muestra el QR cuando el mesero abre la
+mesa**; mientras la mesa esté libre no hay QR que escanear.
+
+```
+mesero  → POST /api/mesas/:id/abrir
+            backend: guarda el token en mesas.token_qr, mesa a 'ocupada'
+            backend → POST /internal/qr-rotado  { id_mesa, token_qr }
+socket-server → qr:actualizado  { id_mesa, token_qr, emitidoEn }  a room:mesa-{id}
+            tablet: arma FRONTEND_CLIENTE_URL/?token=<token_qr> y dibuja el QR
+comensal→ escanea → POST /api/mesas/qr/:token/sesion
+            ...pide, cambia de estado, paga...
+mesero  → POST /api/mesas/:id/liberar   (o se libera sola al cerrarse el último pedido)
+            backend → POST /internal/mesa-liberada  { id_mesa }
+```
+
+Reglas del aviso:
+
+- Solo se avisa cuando el token es **nuevo**. Si `/abrir` reutiliza el QR de una mesa que ya
+  estaba `ocupada`, la tablet ya lo está mostrando y reenviarlo solo la haría parpadear.
+- El aviso va **después del commit** y **aislado**: si el socket-server está caído o
+  responde error, la mesa se abre igual. El mesero siempre puede volver a pulsar "abrir",
+  que es idempotente, y eso reintenta el aviso.
+- El token se envía **completo**. No se recorta para caber en ningún límite: un token
+  recortado no valida.
+- En la **liberación** el backend no cambia: sigue llamando solo a
+  `/internal/mesa-liberada`. Avisar a la tablet de que se apague el QR es del
+  socket-server.
+
+> **Pendiente del lado de Roberto:** hoy `/internal/qr-rotado` rechaza `token_qr` de más de
+> 128 caracteres (`MAX_TOKEN_QR_MOSTRADO`) y los tokens `v1` miden ~150, así que responde
+> 400 y la tablet no refresca. Roberto va a subir el límite a 255. El backend registra ese
+> 400 con el motivo y la longitud enviada, y abrir la mesa sigue funcionando: es solo la
+> tablet la que no se actualiza hasta que suba el límite.
+
+### Liberación automática
+
+Cuando un pedido queda **`pagado`** (cobro `completada`) o **`cancelado`**, en la misma
+transacción se bloquea la mesa y se cuentan sus pedidos abiertos; si no queda ninguno, se
+libera igual que arriba. El `SELECT … FOR UPDATE` serializa los cierres simultáneos, así
+que **dos pedidos de la misma mesa cerrándose a la vez la liberan una sola vez**. Si no se
+puede leer el conteo, la mesa se queda ocupada (es más seguro que soltarla con pedidos
+vivos).
+
+### POST /mesas/qr/:token/sesion — punto de entrada del comensal
+
+Doble comprobación, porque cada una cubre algo distinto:
+
+1. **`POST /qr/validar`** del socket-server: que el token esté bien firmado y no haya
+   expirado (la firma y la vigencia son suyas).
+2. **Que sea idéntico al guardado en `mesas.token_qr`**: así un QR de una sesión anterior,
+   aunque siga firmado y sin expirar, no sirve una vez que la mesa se liberó o se le
+   generó otro.
+
+201:
+
+```json
+{
+  "token": "<jwt con { id_mesa, sid, rol: 'comensal' }>",
   "expira_en": "3h",
+  "qr_expira_en": 1790651940443,
   "mesa": { "id_mesa": 5, "numero": 5, "capacidad": 4, "ubicacion": "Terraza", "estado": "ocupada" }
 }
 ```
 
-404: `{ "error": "Token de mesa inválido" }` — si el token no corresponde a ninguna
-mesa, no se emite ningún JWT.
+**401** con el `motivo`, sin emitir JWT:
 
-> El `token_qr` lo genera y firma Roberto (socket-server); este backend solo lo lee.
-> La vigencia (TTL) del token QR vive en Redis — **pendiente acordar con Roberto** si
-> ese chequeo se hace aquí o ya viene validado. Las 3 h de este endpoint son la
-> vigencia de la *sesión* del comensal, no la del token QR.
+| `motivo` | Cuándo |
+|---|---|
+| `expirado` / `revocado` | Lo dice `/qr/validar` |
+| `formato` / `firma` | El token no tiene forma válida o la firma no cuadra |
+| `no_es_el_vigente` | Está bien firmado, pero la mesa ya tiene otro QR |
+| `mesa_sin_sesion` | `mesas.token_qr` está en NULL: la mesa no está abierta |
+
+**503** si el socket-server no responde: sin validar no se puede dejar entrar a nadie.
+Las 3 h son la vigencia de la *sesión*, no la del token QR (`qr_expira_en`).
+
+### Criterios de aceptación del QR (propuesta de Roberto)
+
+Los seis criterios acordados, con la prueba que cubre cada uno. Todas están en
+`backend/tests/criterios-aceptacion.test.js` y recorren el flujo de punta a punta
+(tablet → QR → sesión → pedido → liberación) con dobles de la base y del socket-server,
+sin tocar la red.
+
+| # | Criterio | Prueba |
+|---|---|---|
+| 1 | El QR generado desde la tablet permite abrir sesión y hacer un pedido | `CA1: el QR generado desde la tablet permite abrir sesión y hacer un pedido` |
+| 2 | Varios comensales pueden escanear el mismo QR dentro de la misma sesión | `CA2: varios comensales pueden escanear el mismo QR dentro de la misma sesión` |
+| 3 | Después de liberar la mesa, ese mismo QR responde error al intentar abrir sesión | `CA3: después de liberar la mesa, ese mismo QR da error al abrir sesión` (+ el caso de defensa en profundidad) |
+| 4 | Después de liberar la mesa, un JWT de la sesión anterior no puede crear pedidos (401) | `CA4: después de liberar la mesa, un JWT de la sesión anterior no puede crear pedidos (401)` |
+| 5 | El siguiente grupo recibe un QR nuevo que funciona con normalidad | `CA5: el siguiente grupo recibe un QR nuevo que funciona con normalidad` |
+| 6 | Un grupo que se va sin pedir queda cerrado con "Liberar mesa" | `CA6: un grupo que se va sin pedir queda cerrado con "Liberar mesa"` |
+
+Notas de lo que quedó demostrado al escribirlas:
+
+- **CA2** es la razón por la que el QR es *de la sesión* y no de un solo uso: los tres
+  comensales reciben JWT distintos pero con el **mismo `sid`**, o sea una sola sesión de
+  mesa, y cada uno pide con su apodo sobre la cuenta compartida.
+- **CA3** está cubierto por **dos defensas independientes**: el socket-server revoca los
+  tokens de la mesa al recibir `/internal/mesa-liberada` (`motivo: revocado`), y además el
+  backend rechaza el QR porque `mesas.token_qr` quedó en NULL (`motivo: mesa_sin_sesion`).
+  Hay una prueba para cada una, así que si el aviso al socket-server se pierde el QR viejo
+  sigue sin servir.
+- **CA6** es el caso sin pedidos, y es el único en el que "Liberar mesa" aplica: con
+  pedidos abiertos ese botón responde 409, porque la liberación automática solo se dispara
+  al cerrarse un pedido. La prueba hermana cubre el otro lado: si el grupo pidió y pagó, la
+  mesa se cierra sola.
 
 ---
 
@@ -348,6 +550,32 @@ anterior se archiva en `token_qr_historico`.
 
 ---
 
+## Tiempo real (socket-server)
+
+El backend avisa al socket-server por HTTP interno, con la cabecera `x-internal-key` y un
+`eventId` UUID v4 por acción (reintentar con el mismo `eventId` es seguro: él deduplica).
+Contrato completo en [socket-server/EVENTS.md](../../socket-server/EVENTS.md).
+
+| Cuándo | Aviso |
+|---|---|
+| Se crea un pedido | `POST /internal/order-created` con el pedido y sus ítems |
+| Cambia el estado (pedidos y KDS) | `POST /internal/order-status` con `estado_anterior` |
+| Se abre una mesa con un token **nuevo** | `POST /internal/qr-rotado` → `qr:actualizado` a la tablet |
+| Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada` |
+
+**Aislamiento:** salvo en `/qr/generar` y `/qr/validar` (donde sin respuesta no se puede
+abrir mesa ni sesión, y por eso se responde 503), el tiempo real es un extra. El cliente
+(`src/services/socket.notifier.js`) **nunca lanza**: timeout corto (`SOCKET_TIMEOUT_MS`),
+registra el motivo y sigue. Un socket-server caído no hace fallar un pedido ni un cobro.
+
+En `order:created` los ítems se envían con `nombre` (no `plato_nombre`), que es el nombre
+de campo del contrato de Roberto.
+
+Los importes (`total`, `precio`, `subtotal`, `monto`) salen como **número**, no como string:
+se registra un parser por OID 1700 en `src/config/db.js`.
+
+---
+
 ## Pendiente por acordar con el equipo
 
 Ya resueltos contra el `schema.sql` de Jarrison: `mesas.estado` es
@@ -356,11 +584,7 @@ Ya resueltos contra el `schema.sql` de Jarrison: `mesas.estado` es
 
 Sigue abierto:
 
-- **Nadie marca la mesa como `ocupada`.** Lo hacía la función `crear_pedido()`, que este
-  backend no usa (hace `INSERT` directo para que actúen los triggers). Ningún trigger lo
-  cubre, así que una mesa con pedidos activos sigue en `disponible`. Sí se libera al
-  pagar (`tr_regenerar_token_qr`). **Falta decidir** si lo hace el backend o un trigger
-  nuevo de Jarrison.
+- ~~Nadie marca la mesa como `ocupada`~~ → resuelto: lo hace `POST /mesas/:id/abrir`.
 - **`transiciones_validas.requiere_usuario` está declarado pero no se aplica.** Cuatro
   transiciones lo tienen en `TRUE`; el trigger `tr_validar_transicion_estado` no lo
   valida (solo lo mira `cambiar_estado_pedido()`, que no usamos). El backend manda

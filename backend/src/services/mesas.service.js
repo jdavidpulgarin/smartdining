@@ -1,16 +1,18 @@
 const pool = require('../config/db');
+const socketNotifier = require('./socket.notifier');
 
 // Tabla mesas (docs/modelo-er.md): id_mesa, numero, capacidad, ubicacion,
 // estado, token_qr, actualizado_en.
 //
-// El token_qr lo genera y firma Roberto (socket-server); este servicio solo
-// lee/expone lo que ya quedó guardado en la columna token_qr de la mesa. La
-// vigencia (TTL) del token vive en Redis, del lado de Roberto — este servicio
-// solo confirma que el token corresponde a una mesa existente.
+// Este servicio solo lee/expone lo que está guardado en la columna token_qr.
+// El socket-server de Roberto no usa Redis ni esta columna: emite tokens QR
+// firmados con HMAC, con la expiración dentro del propio token. Los dos modelos
+// conviven por ahora; la decisión de cuál queda es del equipo (docs/api-spec.md).
 
 // Valores exactos del CHECK de mesas.estado en el schema.sql de Jarrison.
 const ESTADOS_MESA = ['disponible', 'ocupada', 'reservada', 'mantenimiento'];
 const ESTADO_MESA_LIBRE = 'disponible';
+const ESTADO_MESA_OCUPADA = 'ocupada';
 
 async function listar() {
   const result = await pool.query('SELECT * FROM mesas ORDER BY numero ASC');
@@ -19,11 +21,6 @@ async function listar() {
 
 async function obtenerPorId(id) {
   const result = await pool.query('SELECT * FROM mesas WHERE id_mesa = $1', [id]);
-  return result.rows[0] || null;
-}
-
-async function obtenerPorToken(token) {
-  const result = await pool.query('SELECT * FROM mesas WHERE token_qr = $1', [token]);
   return result.rows[0] || null;
 }
 
@@ -47,6 +44,175 @@ async function actualizarEstado(id, estado) {
   return result.rows[0] || null;
 }
 
+/**
+ * Abre la sesión de la mesa y devuelve el token del QR que hay que imprimir.
+ *
+ * Es idempotente: si la mesa ya tiene un token_qr y el socket-server dice que
+ * sigue vigente, se devuelve ese mismo. Solo se pide uno nuevo si no hay o el
+ * que había caducó.
+ *
+ * Todo ocurre con la fila de la mesa bloqueada (SELECT ... FOR UPDATE) para que
+ * dos meseros pulsando "abrir" a la vez no generen dos QR distintos y se pisen
+ * el token. Contrapartida asumida: el bloqueo se mantiene durante la llamada
+ * HTTP al socket-server, por eso el timeout de ese cliente es corto.
+ *
+ * El JWT del mesero se reenvía a /qr/generar: es el socket-server quien decide
+ * si ese rol puede generar QR.
+ *
+ * @returns uno de: { mesa, token, reutilizado } | { noExiste: true }
+ *          | { socketCaido: true, motivo } | { rechazado: true, status, mensaje }
+ */
+async function abrirSesion(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const bloqueada = await client.query('SELECT * FROM mesas WHERE id_mesa = $1 FOR UPDATE', [idMesa]);
+    if (bloqueada.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { noExiste: true };
+    }
+    const mesa = bloqueada.rows[0];
+
+    // Se reutiliza el QR solo si la mesa está 'ocupada', o sea con una sesión
+    // viva. Una mesa 'disponible' con token_qr es un resto de una sesión que ya
+    // terminó: ahí SIEMPRE se genera uno nuevo y se reemplaza el guardado, para
+    // que el grupo que llega no herede el QR del anterior.
+    if (mesa.token_qr && mesa.estado === ESTADO_MESA_OCUPADA) {
+      const vigente = await socket.validarTokenQr(mesa.token_qr);
+      if (!vigente.alcanzado) {
+        await client.query('ROLLBACK');
+        return { socketCaido: true, motivo: vigente.motivo };
+      }
+      if (vigente.valido) {
+        await client.query('COMMIT');
+        return { mesa, token: mesa.token_qr, reutilizado: true };
+      }
+    }
+
+    const generado = await socket.generarTokenQr(idMesa, jwtStaff);
+    if (!generado.alcanzado) {
+      await client.query('ROLLBACK');
+      return { socketCaido: true, motivo: generado.motivo };
+    }
+    if (!generado.token) {
+      await client.query('ROLLBACK');
+      return { rechazado: true, status: generado.status, mensaje: generado.mensaje };
+    }
+
+    const actualizada = await client.query(
+      `UPDATE mesas SET token_qr = $1, estado = 'ocupada' WHERE id_mesa = $2 RETURNING *`,
+      [generado.token, idMesa]
+    );
+
+    await client.query('COMMIT');
+    return { mesa: actualizada.rows[0], token: generado.token, reutilizado: false };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Cierra la sesión de la mesa a mano: la deja 'disponible' y borra su token_qr,
+ * con lo que el QR impreso deja de valer y las sesiones de comensal de ese grupo
+ * caen (el middleware compara el sid del JWT contra la columna).
+ *
+ * Liberar a mano es SOLO para grupos que se van sin pedir: si la mesa tiene
+ * pedidos abiertos hay que cobrarlos o cancelarlos, y entonces la mesa se libera
+ * sola (ver liberarSiNoQuedanPedidosAbiertos). El chequeo va dentro de la misma
+ * transacción y con la mesa bloqueada, para que no se cuele un pedido nuevo
+ * entre la comprobación y el UPDATE.
+ *
+ * Avisar al socket-server es del controller, DESPUÉS del commit: si ese aviso
+ * falla no se debe revertir la liberación.
+ *
+ * @returns { noExiste: true } | { pedidosAbiertos: number } | { mesa }
+ */
+async function liberarSesion(idMesa) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const bloqueada = await client.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE', [idMesa]);
+    if (bloqueada.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { noExiste: true };
+    }
+
+    const abiertos = await client.query(
+      `SELECT count(*)::int AS n FROM pedidos
+       WHERE id_mesa = $1 AND estado NOT IN ('pagado', 'cancelado')`,
+      [idMesa]
+    );
+    const n = abiertos.rows[0] && abiertos.rows[0].n;
+    if (typeof n !== 'number') {
+      // Sin poder contar no se libera: es más seguro que soltar una mesa con
+      // pedidos vivos (mismo criterio que la liberación automática).
+      await client.query('ROLLBACK');
+      throw { status: 500, message: 'No se pudo comprobar si la mesa tiene pedidos abiertos' };
+    }
+    if (n > 0) {
+      await client.query('ROLLBACK');
+      return { pedidosAbiertos: n };
+    }
+
+    const actualizada = await client.query(
+      `UPDATE mesas SET estado = $1, token_qr = NULL WHERE id_mesa = $2 RETURNING *`,
+      [ESTADO_MESA_LIBRE, idMesa]
+    );
+
+    await client.query('COMMIT');
+    return { mesa: actualizada.rows[0] };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Libera la mesa si ya no le quedan pedidos abiertos. Se usa DENTRO de la
+ * transacción que acaba de cerrar un pedido (pagado o cancelado), con el client
+ * de esa transacción.
+ *
+ * El SELECT ... FOR UPDATE sobre la mesa serializa los cierres simultáneos: si
+ * dos pedidos de la misma mesa se liquidan a la vez, el segundo espera al
+ * primero y ve el estado ya actualizado, así la mesa se libera una sola vez.
+ *
+ * @returns {Promise<boolean>} true si esta llamada fue la que la liberó.
+ */
+async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
+  await client.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE', [idMesa]);
+
+  const abiertos = await client.query(
+    `SELECT count(*)::int AS n FROM pedidos
+     WHERE id_mesa = $1 AND estado NOT IN ('pagado', 'cancelado')`,
+    [idMesa]
+  );
+  // Si por alguna razón no se puede leer el conteo, NO se libera: es más
+  // seguro dejar la mesa ocupada que soltarla con pedidos vivos.
+  const fila = abiertos.rows[0];
+  if (!fila || typeof fila.n !== 'number' || fila.n > 0) return false;
+
+  const liberada = await client.query(
+    `UPDATE mesas SET estado = $1, token_qr = NULL
+     WHERE id_mesa = $2 AND (estado <> $1 OR token_qr IS NOT NULL)
+     RETURNING id_mesa`,
+    [ESTADO_MESA_LIBRE, idMesa]
+  );
+  return liberada.rows.length > 0;
+}
+
+/** token_qr vigente de la mesa, o null. Lo usa el middleware de sesión. */
+async function tokenQrDeMesa(idMesa) {
+  const result = await pool.query('SELECT token_qr FROM mesas WHERE id_mesa = $1', [idMesa]);
+  return (result.rows[0] && result.rows[0].token_qr) || null;
+}
+
 async function eliminar(id) {
   const result = await pool.query(
     'DELETE FROM mesas WHERE id_mesa = $1 RETURNING id_mesa',
@@ -58,9 +224,13 @@ async function eliminar(id) {
 module.exports = {
   ESTADOS_MESA,
   ESTADO_MESA_LIBRE,
+  ESTADO_MESA_OCUPADA,
+  abrirSesion,
+  liberarSesion,
+  liberarSiNoQuedanPedidosAbiertos,
+  tokenQrDeMesa,
   listar,
   obtenerPorId,
-  obtenerPorToken,
   crear,
   actualizarEstado,
   eliminar,
