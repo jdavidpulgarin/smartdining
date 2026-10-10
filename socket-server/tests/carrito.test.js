@@ -23,7 +23,7 @@ test('cart:update sincroniza a los demás y el emisor recibe el snapshot en el a
   const ack = await emitir(ana, 'cart:update', evento);
   assert.strictEqual(ack.ok, true);
   assert.deepStrictEqual(ack.carrito.items, [
-    { id_linea: evento.id_linea, comensal: 'Ana', id_plato: 3, cantidad: 2, notas: 'sin cebolla' },
+    { id_linea: evento.id_linea, comensal: 'Ana', id_plato: 3, cantidad: 2, notas: 'sin cebolla', ingredientes: null },
   ]);
   const ev = await llega;
   assert.strictEqual(ev.carrito.version, 1);
@@ -119,7 +119,7 @@ test('set con un id_linea existente reemplaza esa línea, no crea otra', async (
   const editado = await emitir(ana, 'cart:update', set('Ana', 3, 4, { id_linea: primero.id_linea, notas: 'con sal' }));
   assert.strictEqual(editado.carrito.items.length, 1);
   assert.deepStrictEqual(editado.carrito.items[0], {
-    id_linea: primero.id_linea, comensal: 'Ana', id_plato: 3, cantidad: 4, notas: 'con sal',
+    id_linea: primero.id_linea, comensal: 'Ana', id_plato: 3, cantidad: 4, notas: 'con sal', ingredientes: null,
   });
   await s.cerrar();
 });
