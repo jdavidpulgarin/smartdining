@@ -17,6 +17,7 @@ el modelo entidad-relación oficial de Jarrison (dueño de la base de datos).
 | Totales y subtotales | Triggers `tr_validar_detalle_pedido` y `tr_actualizar_total_pedido` |
 | Transiciones de estado del pedido | Trigger `tr_validar_transicion_estado` contra la tabla `transiciones_validas` |
 | Disponibilidad del plato | Trigger `tr_validar_disponibilidad_plato` |
+| Forma del JSON del menú (categorías, platos, pasos, ingredientes) | Función `obtener_menu_completo()`; el backend solo la cachea 60 s |
 | Precios históricos | Se congelan leyendo `platos.precio` dentro del propio INSERT |
 | Validación de pagos (monto vs total) | Trigger `tr_validar_transaccion_financiera` |
 | Firmar y validar los tokens QR | **socket-server** (`POST /qr/generar`, `POST /qr/validar`) |
@@ -160,6 +161,103 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 > El modelo ER no tiene `personalizaciones` ni `alergenos` en `platos`: ese campo se
 > eliminó del backend. Las preferencias del comensal van por ítem del pedido, en
 > `detalles_pedido.notas_especiales`.
+>
+> Lo que agregó el constructor (`personalizable`, `calorias` en `platos`;
+> `alergenos` en `ingredientes`) sale por `GET /menu`, no por estas rutas.
+
+---
+
+## Menú digital (constructor de platos)
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| GET | /menu | No | Carta completa: categorías → platos → pasos → ingredientes |
+
+Público y de solo lectura: el comensal carga la carta antes de tener sesión de mesa.
+
+La forma del JSON la define la base, no el backend: se devuelve tal cual lo entrega
+`obtener_menu_completo()` (`database/scripts/13_constructor.sql`), envuelto en la clave
+`categorias` para ser consistente con `GET /categorias`. El backend no filtra, ordena ni
+recalcula nada.
+
+200:
+
+```json
+{
+  "categorias": [
+    {
+      "id_categoria": 2,
+      "categoria": "Hamburguesas",
+      "descripcion": "Arma la tuya",
+      "orden": 1,
+      "platos": [
+        {
+          "id_plato": 7,
+          "nombre": "Hamburguesa Smart",
+          "descripcion": "Base para personalizar",
+          "precio": 32000,
+          "url_imagen": "https://...",
+          "tiempo_estimado": 15,
+          "personalizable": true,
+          "calorias": 650,
+          "pasos": [
+            {
+              "id_paso": 1,
+              "nombre": "Proteína",
+              "orden": 1,
+              "min_sel": 1,
+              "max_sel": 1,
+              "obligatorio": true,
+              "ingredientes": [
+                {
+                  "id_ingrediente": 10,
+                  "nombre": "Carne de res",
+                  "precio_extra": 0,
+                  "calorias": 250,
+                  "alergenos": null,
+                  "url_imagen": null,
+                  "disponible": true
+                },
+                {
+                  "id_ingrediente": 11,
+                  "nombre": "Pollo crispy",
+                  "precio_extra": 2000,
+                  "calorias": 300,
+                  "alergenos": "gluten",
+                  "url_imagen": null,
+                  "disponible": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Reglas del contenido (las aplica la función de la base):
+
+- Solo categorías con `activo = true` y platos con `disponible = true`.
+- `pasos` llega como `[]` en los platos no personalizables.
+- Los ingredientes agotados **sí** se devuelven, con `disponible: false`, para que el
+  constructor los muestre deshabilitados en vez de hacerlos desaparecer.
+
+### Caché de 60 segundos
+
+La respuesta se guarda en Redis bajo la clave `cache:menu` con TTL de 60 s (cache-aside:
+la primera llamada lee de la base y guarda; las siguientes salen del caché hasta que
+expire).
+
+- El caché es un extra, no parte del contrato: si Redis está caído, falla o no hay
+  `REDIS_URL`, el endpoint responde igual leyendo de la base. **Nunca da 500 por culpa del
+  caché.**
+- Toda mutación de la carta (`POST`/`PUT`/`DELETE` de `/platos` y `/categorias`) borra
+  `cache:menu` con `invalidarMenu()`, así que un cambio del admin se ve de inmediato sin
+  esperar el TTL. Con Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la
+  mutación sigue su curso.
+- Un error de la base **no** se cachea.
 
 ---
 
