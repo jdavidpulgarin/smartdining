@@ -8,6 +8,7 @@
     "dev": "node --watch server.js",
     "start": "node server.js",
     "vapid": "node scripts/generar-vapid.js",
+    "token:comensal": "node scripts/token-comensal.js",
     "test": "node --test --test-timeout=10000 tests/*.test.js"
   },
   "license": "ISC",
