@@ -86,6 +86,10 @@ INSERT INTO categorias (nombre, descripcion, orden_visualizacion, activo)
 SELECT 'Postres', 'El toque dulce perfecto para finalizar', 4, true
 WHERE NOT EXISTS (SELECT 1 FROM categorias WHERE nombre = 'Postres');
 
+INSERT INTO categorias (nombre, descripcion, orden_visualizacion, activo)
+SELECT 'Adicionales', 'Toppings, extras y adiciones para personalizar tus platos', 5, true
+WHERE NOT EXISTS (SELECT 1 FROM categorias WHERE nombre = 'Adicionales');
+
 -- 5. PLATOS
 INSERT INTO platos (id_categoria, nombre, descripcion, precio, url_imagen, disponible, tiempo_preparacion_estimado)
 SELECT c.id_categoria, 'Nachos Supremos', 'Totopos crujientes con guacamole, queso cheddar fundido, pico de gallo y frijol refrito.', 24000.00, 'https://images.unsplash.com/photo-1513456852971-30c0b8199d4d', true, 10
@@ -128,6 +132,55 @@ SELECT c.id_categoria, 'Volcán de Chocolate', 'Bizcocho tibio de chocolate rell
 FROM categorias c
 WHERE c.nombre = 'Postres'
   AND NOT EXISTS (SELECT 1 FROM platos WHERE nombre = 'Volcán de Chocolate');
+
+-- PLATOS: Adicionales / Extras
+INSERT INTO platos (id_categoria, nombre, descripcion, precio, url_imagen, disponible, tiempo_preparacion_estimado)
+SELECT c.id_categoria, 'Aguacate Extra', 'Porción fresca de aguacate hass en láminas.', 4000.00, 'https://images.unsplash.com/photo-1523049673857-eb18f1d7b578', true, 3
+FROM categorias c
+WHERE c.nombre = 'Adicionales'
+  AND NOT EXISTS (SELECT 1 FROM platos WHERE nombre = 'Aguacate Extra');
+
+INSERT INTO platos (id_categoria, nombre, descripcion, precio, url_imagen, disponible, tiempo_preparacion_estimado)
+SELECT c.id_categoria, 'Chicharrón Crocante Extra', 'Porción adicional de chicharrón carnudo frito al punto crocante.', 8000.00, 'https://images.unsplash.com/photo-1544025162-d76694265947', true, 8
+FROM categorias c
+WHERE c.nombre = 'Adicionales'
+  AND NOT EXISTS (SELECT 1 FROM platos WHERE nombre = 'Chicharrón Crocante Extra');
+
+INSERT INTO platos (id_categoria, nombre, descripcion, precio, url_imagen, disponible, tiempo_preparacion_estimado)
+SELECT c.id_categoria, 'Arepa Adicional', 'Arepa de maíz blanco asada a la plancha con mantequilla.', 2000.00, 'https://images.unsplash.com/photo-1565299585323-38d6b0865b47', true, 5
+FROM categorias c
+WHERE c.nombre = 'Adicionales'
+  AND NOT EXISTS (SELECT 1 FROM platos WHERE nombre = 'Arepa Adicional');
+
+INSERT INTO platos (id_categoria, nombre, descripcion, precio, url_imagen, disponible, tiempo_preparacion_estimado)
+SELECT c.id_categoria, 'Aros de Cebolla', 'Aros de cebolla rebozados y crujientes con salsa tártara.', 2500.00, 'https://images.unsplash.com/photo-1639024471287-032f66442657', true, 6
+FROM categorias c
+WHERE c.nombre = 'Adicionales'
+  AND NOT EXISTS (SELECT 1 FROM platos WHERE nombre = 'Aros de Cebolla');
+
+INSERT INTO platos (id_categoria, nombre, descripcion, precio, url_imagen, disponible, tiempo_preparacion_estimado)
+SELECT c.id_categoria, 'Tocineta Crocante', 'Tiras de tocineta ahumada dorada y crocante.', 3500.00, 'https://images.unsplash.com/photo-1528607929212-2636ec44253e', true, 5
+FROM categorias c
+WHERE c.nombre = 'Adicionales'
+  AND NOT EXISTS (SELECT 1 FROM platos WHERE nombre = 'Tocineta Crocante');
+
+INSERT INTO platos (id_categoria, nombre, descripcion, precio, url_imagen, disponible, tiempo_preparacion_estimado)
+SELECT c.id_categoria, 'Queso Cheddar Extra', 'Porción de queso cheddar americano fundido.', 3000.00, 'https://images.unsplash.com/photo-1618160702438-9b02ab6515c9', true, 2
+FROM categorias c
+WHERE c.nombre = 'Adicionales'
+  AND NOT EXISTS (SELECT 1 FROM platos WHERE nombre = 'Queso Cheddar Extra');
+
+INSERT INTO platos (id_categoria, nombre, descripcion, precio, url_imagen, disponible, tiempo_preparacion_estimado)
+SELECT c.id_categoria, 'Queso Parmesano Reggiano', 'Láminas de queso parmesano madurado reggiano.', 3000.00, 'https://images.unsplash.com/photo-1452195100486-9cc805987862', true, 2
+FROM categorias c
+WHERE c.nombre = 'Adicionales'
+  AND NOT EXISTS (SELECT 1 FROM platos WHERE nombre = 'Queso Parmesano Reggiano');
+
+INSERT INTO platos (id_categoria, nombre, descripcion, precio, url_imagen, disponible, tiempo_preparacion_estimado)
+SELECT c.id_categoria, 'Aceite de Trufa Blanca', 'Gotas de aceite de oliva infusionado con trufa blanca.', 4500.00, 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5', true, 1
+FROM categorias c
+WHERE c.nombre = 'Adicionales'
+  AND NOT EXISTS (SELECT 1 FROM platos WHERE nombre = 'Aceite de Trufa Blanca');
 
 -- 6. PEDIDO DEMO
 INSERT INTO pedidos (id_mesa, codigo_pedido, estado, total, notas_generales)

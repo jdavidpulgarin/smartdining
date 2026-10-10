@@ -73,10 +73,17 @@ test('GET /api/kds/comandas con rol mesero responde 403', async () => {
   assert.strictEqual(res.status, 403);
 });
 
-test('un comensal no puede entrar al KDS', async () => {
-  const res = await request(app)
-    .get('/api/kds/comandas')
-    .set('Authorization', `Bearer ${tokenComensal(5)}`);
+test('un comensal con sesión vigente no puede entrar al KDS', async () => {
+  // Con BD simulada para que el middleware pueda comprobar la sesión de mesa:
+  // así se verifica el 403 por rol y no un 401 por sesión.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    const res = await request(app)
+      .get('/api/kds/comandas')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`);
 
-  assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.status, 403);
+  } finally {
+    db.restaurar();
+  }
 });
