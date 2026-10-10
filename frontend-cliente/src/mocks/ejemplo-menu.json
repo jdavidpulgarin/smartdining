@@ -1,0 +1,517 @@
+[
+  {
+    "id_categoria": 100,
+    "categoria": "Arma tu plato",
+    "descripcion": "Crea tu propia combinación eligiendo tus ingredientes favoritos",
+    "orden": 1,
+    "platos": [
+      {
+        "id_plato": 1003,
+        "nombre": "Arepa Rellena",
+        "descripcion": "Auténtica arepa de maíz con los rellenos que elijas.",
+        "precio": 15000,
+        "url_imagen": null,
+        "tiempo_estimado": 12,
+        "personalizable": true,
+        "calorias": null,
+        "pasos": [
+          {
+            "id_paso": 301,
+            "nombre": "Tipo de Arepa",
+            "orden": 1,
+            "min_sel": 1,
+            "max_sel": 1,
+            "obligatorio": true,
+            "ingredientes": [
+              {
+                "id_ingrediente": 29,
+                "nombre": "Arepa de Maíz",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 30,
+                "nombre": "Arepa de Chócolo",
+                "precio_extra": 1500,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 302,
+            "nombre": "Elige tu Relleno Principal",
+            "orden": 2,
+            "min_sel": 1,
+            "max_sel": 1,
+            "obligatorio": true,
+            "ingredientes": [
+              {
+                "id_ingrediente": 31,
+                "nombre": "Pollo a la Plancha",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 32,
+                "nombre": "Carne Desmechada",
+                "precio_extra": 2500,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 33,
+                "nombre": "Panceta Crujiente",
+                "precio_extra": 3000,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 303,
+            "nombre": "Añade Extras",
+            "orden": 3,
+            "min_sel": 0,
+            "max_sel": 2,
+            "obligatorio": false,
+            "ingredientes": [
+              {
+                "id_ingrediente": 34,
+                "nombre": "Aguacate",
+                "precio_extra": 1500,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 35,
+                "nombre": "Queso Rallado",
+                "precio_extra": 1000,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 36,
+                "nombre": "Cebolla Caramelizada",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 304,
+            "nombre": "Elige tu Salsa",
+            "orden": 4,
+            "min_sel": 0,
+            "max_sel": 1,
+            "obligatorio": false,
+            "ingredientes": [
+              {
+                "id_ingrediente": 37,
+                "nombre": "Salsa de Ajo",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 38,
+                "nombre": "Salsa Picante",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 39,
+                "nombre": "Guacamole",
+                "precio_extra": 2000,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id_plato": 1001,
+        "nombre": "Bowl Personalizado",
+        "descripcion": "Arma tu bowl con base, proteína, vegetales y salsa a tu gusto.",
+        "precio": 20000,
+        "url_imagen": null,
+        "tiempo_estimado": 10,
+        "personalizable": true,
+        "calorias": null,
+        "pasos": [
+          {
+            "id_paso": 101,
+            "nombre": "Elige tu Base",
+            "orden": 1,
+            "min_sel": 1,
+            "max_sel": 1,
+            "obligatorio": true,
+            "ingredientes": [
+              {
+                "id_ingrediente": 1,
+                "nombre": "Arroz Integral",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 2,
+                "nombre": "Quinoa",
+                "precio_extra": 2000,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 3,
+                "nombre": "Lechuga Fresca",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 102,
+            "nombre": "Elige tu Proteína",
+            "orden": 2,
+            "min_sel": 1,
+            "max_sel": 1,
+            "obligatorio": true,
+            "ingredientes": [
+              {
+                "id_ingrediente": 4,
+                "nombre": "Pollo a la Plancha",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 5,
+                "nombre": "Carne Desmechada",
+                "precio_extra": 2500,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 6,
+                "nombre": "Falafel (Vegano)",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 7,
+                "nombre": "Panceta Crujiente",
+                "precio_extra": 3000,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 103,
+            "nombre": "Añade Toppings",
+            "orden": 3,
+            "min_sel": 0,
+            "max_sel": 3,
+            "obligatorio": false,
+            "ingredientes": [
+              {
+                "id_ingrediente": 8,
+                "nombre": "Maíz Tierno",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 9,
+                "nombre": "Tomate Picado",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 10,
+                "nombre": "Aguacate",
+                "precio_extra": 1500,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 11,
+                "nombre": "Queso Rallado",
+                "precio_extra": 1000,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 12,
+                "nombre": "Cebolla Caramelizada",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 104,
+            "nombre": "Elige tu Salsa",
+            "orden": 4,
+            "min_sel": 0,
+            "max_sel": 1,
+            "obligatorio": false,
+            "ingredientes": [
+              {
+                "id_ingrediente": 13,
+                "nombre": "Salsa de Ajo",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 14,
+                "nombre": "Salsa Picante",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 15,
+                "nombre": "Mayonesa de Cilantro",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 16,
+                "nombre": "Guacamole",
+                "precio_extra": 2000,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id_plato": 1002,
+        "nombre": "Wrap Personalizado",
+        "descripcion": "Tu combinación favorita envuelta en tortilla de harina fresca.",
+        "precio": 18000,
+        "url_imagen": null,
+        "tiempo_estimado": 8,
+        "personalizable": true,
+        "calorias": null,
+        "pasos": [
+          {
+            "id_paso": 201,
+            "nombre": "Tipo de Tortilla",
+            "orden": 1,
+            "min_sel": 1,
+            "max_sel": 1,
+            "obligatorio": true,
+            "ingredientes": [
+              {
+                "id_ingrediente": 17,
+                "nombre": "Tortilla de Harina",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 18,
+                "nombre": "Tortilla Integral",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 202,
+            "nombre": "Elige tu Proteína",
+            "orden": 2,
+            "min_sel": 1,
+            "max_sel": 1,
+            "obligatorio": true,
+            "ingredientes": [
+              {
+                "id_ingrediente": 19,
+                "nombre": "Pollo a la Plancha",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 20,
+                "nombre": "Carne Desmechada",
+                "precio_extra": 2500,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 21,
+                "nombre": "Falafel (Vegano)",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 203,
+            "nombre": "Añade Toppings",
+            "orden": 3,
+            "min_sel": 0,
+            "max_sel": 3,
+            "obligatorio": false,
+            "ingredientes": [
+              {
+                "id_ingrediente": 22,
+                "nombre": "Maíz Tierno",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 23,
+                "nombre": "Tomate Picado",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 24,
+                "nombre": "Aguacate",
+                "precio_extra": 1500,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 25,
+                "nombre": "Queso Rallado",
+                "precio_extra": 1000,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 204,
+            "nombre": "Elige tu Salsa",
+            "orden": 4,
+            "min_sel": 0,
+            "max_sel": 1,
+            "obligatorio": false,
+            "ingredientes": [
+              {
+                "id_ingrediente": 26,
+                "nombre": "Salsa de Ajo",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 27,
+                "nombre": "Salsa Picante",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 28,
+                "nombre": "Mayonesa de Cilantro",
+                "precio_extra": 0,
+                "calorias": 0,
+                "alergenos": [],
+                "url_imagen": null,
+                "disponible": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
