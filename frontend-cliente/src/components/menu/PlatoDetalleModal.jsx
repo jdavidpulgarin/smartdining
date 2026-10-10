@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import Modal from '../ui/Modal';
+import Button from '../ui/Button';
 import { formatearPrecio } from '../../utils/formato';
 import { ETIQUETAS_MAP, ALERGENOS_MAP } from '../../constants/dieta';
 import SelectorPersonalizacion from './SelectorPersonalizacion';
@@ -103,15 +104,15 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
         <div className="p-4 space-y-4">
           {/* 2. Aviso de agotado si disponible === false */}
           {plato.disponible === false && (
-            <div className="bg-red-50 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+            <div className="bg-primary/10 text-primary border border-primary/30 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
               <span>Agotado: este plato no está disponible por ahora</span>
             </div>
           )}
 
           {/* 3. Precio formateado */}
           <div>
-            <span className="font-extrabold text-blue-600 text-xl">
+            <span className="font-extrabold text-primary text-xl">
               {formatearPrecio(plato.precio)}
             </span>
           </div>
@@ -138,14 +139,14 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
 
           {/* 5. Descripción completa */}
           {plato.descripcion && (
-            <p className="text-sm text-gray-600 leading-relaxed">
+            <p className="text-sm text-cafe leading-relaxed">
               {plato.descripcion}
             </p>
           )}
 
           {/* 6. Sección de Alérgenos */}
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">
               Alérgenos
             </h3>
             {plato.alergenos && plato.alergenos.length > 0 ? (
@@ -153,14 +154,14 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
                 {plato.alergenos.map((alergeno) => (
                   <span
                     key={alergeno}
-                    className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 border border-gray-200"
+                    className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-md bg-gray-100 text-cafe border border-gray-200"
                   >
                     {ALERGENOS_MAP[alergeno] ?? alergeno}
                   </span>
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-gray-500 italic">
+              <p className="text-xs text-gray-600 italic">
                 Sin alérgenos declarados
               </p>
             )}
@@ -169,7 +170,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
           {/* 7. Sección Personaliza tu plato */}
           {plato.personalizaciones && plato.personalizaciones.length > 0 && (
             <div className="border-t border-gray-100 pt-4 space-y-4">
-              <h3 className="text-sm font-bold text-gray-900">
+              <h3 className="text-sm font-bold text-cafe">
                 Personaliza tu plato
               </h3>
               <div className="space-y-4">
@@ -190,7 +191,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
           <div className="border-t border-gray-100 pt-4 space-y-2">
             <label
               htmlFor={notasId}
-              className="block text-sm font-bold text-gray-900"
+              className="block text-sm font-bold text-cafe"
             >
               Notas para la cocina
             </label>
@@ -202,9 +203,9 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
               rows={3}
               placeholder="Ej: sin cebolla"
               disabled={plato.disponible === false}
-              className="w-full text-base border border-gray-200 rounded-lg p-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+              className="w-full text-base text-cafe placeholder:text-gray-600 border border-gray-200 rounded-lg p-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
             />
-            <div className="text-right text-xs text-gray-400">
+            <div className="text-right text-xs text-gray-600">
               {notas.length}/{NOTAS_MAX}
             </div>
           </div>
@@ -218,13 +219,13 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
               onClick={() => setCantidad((c) => Math.max(CANTIDAD_MIN, c - 1))}
               disabled={plato.disponible === false || cantidad === CANTIDAD_MIN}
               aria-label="Disminuir cantidad"
-              className="w-11 h-11 flex items-center justify-center rounded-lg border border-gray-200 text-gray-700 text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-lg border border-gray-200 text-cafe text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               −
             </button>
             <span
               aria-live="polite"
-              className="min-w-8 text-center font-bold text-gray-900 text-base"
+              className="min-w-8 text-center font-bold text-cafe text-base"
             >
               {cantidad}
             </span>
@@ -233,20 +234,21 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
               onClick={() => setCantidad((c) => Math.min(CANTIDAD_MAX, c + 1))}
               disabled={plato.disponible === false || cantidad === CANTIDAD_MAX}
               aria-label="Aumentar cantidad"
-              className="w-11 h-11 flex items-center justify-center rounded-lg border border-gray-200 text-gray-700 text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-lg border border-gray-200 text-cafe text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               +
             </button>
           </div>
 
-          <button
+          <Button
             type="button"
+            variante="primario"
             onClick={manejarAgregar}
             disabled={!puedeAgregar}
-            className="flex-1 min-h-11 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm md:text-base rounded-lg transition-colors flex items-center justify-center text-center disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed"
+            className="flex-1 md:text-base"
           >
             {textoBoton}
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

@@ -18,7 +18,7 @@ function PlatoCard({ plato, onSeleccionar }) {
       aria-haspopup="dialog"
       onClick={() => onSeleccionar?.(plato)}
       onKeyDown={handleKeyDown}
-      className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex gap-3 p-3 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+      className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex gap-3 p-3 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         !disponible ? 'opacity-65 grayscale-[25%]' : 'hover:shadow-md'
       }`}
     >
@@ -41,16 +41,16 @@ function PlatoCard({ plato, onSeleccionar }) {
       <div className="flex flex-col justify-between flex-1 min-w-0">
         <div>
           <div className="flex items-start justify-between gap-1">
-            <h3 className="font-bold text-gray-900 text-base leading-snug truncate">
+            <h3 className="font-bold text-cafe text-base leading-snug truncate">
               {nombre}
             </h3>
             {!disponible && (
-              <span className="shrink-0 text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
+              <span className="shrink-0 text-[10px] font-bold text-primary bg-primary/10 border border-primary/30 px-1.5 py-0.5 rounded">
                 Agotado
               </span>
             )}
           </div>
-          <p className="text-xs text-gray-500 line-clamp-2 mt-1">
+          <p className="text-xs text-gray-600 line-clamp-2 mt-1">
             {descripcion}
           </p>
 
@@ -77,7 +77,7 @@ function PlatoCard({ plato, onSeleccionar }) {
 
         {/* Precio */}
         <div className="mt-2.5 flex items-center justify-between">
-          <span className="font-extrabold text-blue-600 text-sm">
+          <span className="font-extrabold text-primary text-sm">
             {formatearPrecio(precio)}
           </span>
         </div>

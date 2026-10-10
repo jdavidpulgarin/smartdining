@@ -78,8 +78,8 @@ function Menu() {
   if (cargando) {
     return (
       <div className="flex flex-col items-center justify-center py-16">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent mb-3"></div>
-        <p className="text-gray-500 text-sm font-medium">Cargando menú...</p>
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent mb-3"></div>
+        <p className="text-gray-600 text-sm font-medium">Cargando menú...</p>
       </div>
     );
   }
@@ -96,13 +96,13 @@ function Menu() {
       {/* Grid de platos o mensaje de estado vacío */}
       {platosFiltrados.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 p-8 text-center shadow-sm">
-          <div className="w-12 h-12 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center mx-auto mb-3 text-xl">
+          <div className="w-12 h-12 bg-gray-100 text-gray-600 rounded-full flex items-center justify-center mx-auto mb-3 text-xl">
             🍽️
           </div>
-          <p className="text-gray-600 font-medium text-sm">
+          <p className="text-cafe font-medium text-sm">
             No hay platos en esta categoría
           </p>
-          <p className="text-gray-400 text-xs mt-1">
+          <p className="text-gray-600 text-xs mt-1">
             Prueba seleccionando otra categoría o la opción "Todas".
           </p>
         </div>
@@ -132,9 +132,9 @@ function Menu() {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2 max-w-[90vw]"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-verde text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2 max-w-[90vw]"
         >
-          <span className="text-green-400 font-bold" aria-hidden="true">
+          <span className="text-white font-bold" aria-hidden="true">
             ✓
           </span>
           <span className="truncate">{toastMensaje}</span>
