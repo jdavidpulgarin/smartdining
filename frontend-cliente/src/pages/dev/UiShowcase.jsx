@@ -1,0 +1,195 @@
+import { useState } from 'react';
+import Badge from '../../components/ui/Badge';
+import BottomBar from '../../components/ui/BottomBar';
+import Button from '../../components/ui/Button';
+import Card from '../../components/ui/Card';
+import Imagen from '../../components/ui/Imagen';
+import IngredientCard from '../../components/ui/IngredientCard';
+import ProgressBar from '../../components/ui/ProgressBar';
+
+const INGREDIENTES_MUESTRA = [
+  {
+    id: 'ing-pollo',
+    nombre: 'Pechuga a la parrilla con hierbas',
+    imagen: 'https://images.unsplash.com/photo-1532550907401-a500c9a57435?auto=format&fit=crop&w=300&q=80',
+    precioExtra: 6000,
+    calorias: 210,
+    disabled: false,
+  },
+  {
+    id: 'ing-aguacate',
+    nombre: 'Aguacate Hass en láminas',
+    imagen: 'https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?auto=format&fit=crop&w=300&q=80',
+    precioExtra: 4500,
+    calorias: 160,
+    disabled: false,
+  },
+  {
+    id: 'ing-arroz',
+    nombre: 'Arroz artesanal al cilantro',
+    imagen: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=300&q=80',
+    precioExtra: 0,
+    calorias: 185,
+    disabled: false,
+  },
+  {
+    id: 'ing-queso',
+    nombre: 'Queso madurado de la casa',
+    imagen: 'https://images.unsplash.com/photo-1452195100486-9cc805987862?auto=format&fit=crop&w=300&q=80',
+    precioExtra: 3500,
+    calorias: 120,
+    disabled: true,
+  },
+];
+
+function UiShowcase() {
+  const [seleccionados, setSeleccionados] = useState(['ing-pollo']);
+  const [paso, setPaso] = useState(2);
+
+  const alternarIngrediente = (id) => {
+    setSeleccionados((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const precioBase = 24000;
+  const caloriasBase = 320;
+
+  const totalExtra = INGREDIENTES_MUESTRA.filter((i) => seleccionados.includes(i.id)).reduce(
+    (acc, i) => acc + i.precioExtra,
+    0
+  );
+  const totalCalorias =
+    caloriasBase +
+    INGREDIENTES_MUESTRA.filter((i) => seleccionados.includes(i.id)).reduce(
+      (acc, i) => acc + i.calorias,
+      0
+    );
+
+  return (
+    <div className="min-h-screen bg-crema text-cafe pb-28">
+      <header className="bg-white border-b border-gray-200 px-4 py-4">
+        <div className="max-w-3xl mx-auto flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              SmartDining · Catálogo UI Base
+            </h1>
+            <p className="text-sm text-gray-600">
+              Vista de desarrollo para verificar tokens de marca y componentes reutilizables
+            </p>
+          </div>
+          <Badge variante="alerta">DEV ONLY</Badge>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto px-4 py-6 space-y-8">
+        {/* 1. Botones */}
+        <Card className="space-y-4">
+          <h2 className="text-xl font-bold">1. Botones (Button)</h2>
+          <div className="flex flex-wrap gap-3">
+            <Button variante="primario">Botón Primario</Button>
+            <Button variante="secundario">Botón Secundario</Button>
+            <Button variante="primario" disabled>
+              Primario Deshabilitado
+            </Button>
+            <Button variante="secundario" disabled>
+              Secundario Deshabilitado
+            </Button>
+          </div>
+        </Card>
+
+        {/* 2. Badges */}
+        <Card className="space-y-4">
+          <h2 className="text-xl font-bold">2. Etiquetas (Badge)</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge variante="neutro">Neutro · Mesa 4</Badge>
+            <Badge variante="exito">Éxito · Confirmado</Badge>
+            <Badge variante="alerta">Alerta · Nuevo</Badge>
+          </div>
+        </Card>
+
+        {/* 3. Barra de progreso */}
+        <Card className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold">3. Progreso (ProgressBar)</h2>
+            <div className="flex gap-2">
+              <Button
+                variante="secundario"
+                onClick={() => setPaso((p) => Math.max(1, p - 1))}
+                disabled={paso <= 1}
+              >
+                Anterior
+              </Button>
+              <Button
+                variante="primario"
+                onClick={() => setPaso((p) => Math.min(4, p + 1))}
+                disabled={paso >= 4}
+              >
+                Siguiente
+              </Button>
+            </div>
+          </div>
+          <ProgressBar
+            pasoActual={paso}
+            totalPasos={4}
+            etiqueta="Selecciona tus proteínas y acompañamientos"
+          />
+        </Card>
+
+        {/* 4. Imágenes */}
+        <Card className="space-y-4">
+          <h2 className="text-xl font-bold">4. Imágenes (Imagen con proporción y fallback)</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Imagen
+                src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80"
+                alt="Bowl saludable con vegetales frescos"
+                aspecto="4/3"
+                className="rounded-xl"
+              />
+              <p className="text-xs text-gray-600">Imagen válida (aspecto 4/3)</p>
+            </div>
+            <div className="space-y-1.5">
+              <Imagen
+                src="https://url-invalida-ejemplo.local/no-existe.jpg"
+                alt="Plato con respaldo automático"
+                aspecto="4/3"
+                className="rounded-xl"
+              />
+              <p className="text-xs text-gray-600">Respaldo automático al fallar onError</p>
+            </div>
+          </div>
+        </Card>
+
+        {/* 5. Tarjetas de ingrediente */}
+        <Card className="space-y-4">
+          <h2 className="text-xl font-bold">5. Tarjetas de Ingrediente (IngredientCard)</h2>
+          <p className="text-sm text-gray-600">
+            Accesibles con teclado (Tab + Espacio/Enter). Incluye estados seleccionado, disponible y agotado.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {INGREDIENTES_MUESTRA.map((ing) => (
+              <IngredientCard
+                key={ing.id}
+                nombre={ing.nombre}
+                imagen={ing.imagen}
+                precioExtra={ing.precioExtra}
+                calorias={ing.calorias}
+                seleccionado={seleccionados.includes(ing.id)}
+                disabled={ing.disabled}
+                onToggle={() => alternarIngrediente(ing.id)}
+              />
+            ))}
+          </div>
+        </Card>
+      </main>
+
+      {/* 6. Barra inferior */}
+      <BottomBar precioTotal={precioBase + totalExtra} calorias={totalCalorias}>
+        <Button variante="primario">Agregar al pedido</Button>
+      </BottomBar>
+    </div>
+  );
+}
+
+export default UiShowcase;
