@@ -1,6 +1,7 @@
 const crypto = require('crypto');
-const { ROLES_PERSONAL, verificarJwt } = require('./auth');
-const { esIdValido } = require('./salas');
+const jwt = require('jsonwebtoken');
+const { ROLES_PERSONAL, ROL_PANTALLA, verificarJwt } = require('./auth');
+const { esIdValido, salaMesa } = require('./salas');
 const {
   ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson, exigirClaveInterna,
 } = require('./http');
@@ -9,6 +10,7 @@ const VERSION = 'v1';
 const TTL_MIN_MINUTOS = 1;
 const TTL_MAX_MINUTOS = 24 * 60; // un QR que vive días dejaría de ser "de la sesión de mesa"
 const ROLES_GENERAN_QR = ['admin', 'mesero', 'cajero'];
+const MAX_TOKEN_QR_MOSTRADO = 128; // margen generoso sobre el varchar(64) real de mesas.token_qr
 
 const b64 = (buf) => Buffer.from(buf).toString('base64url');
 
@@ -19,7 +21,10 @@ const b64 = (buf) => Buffer.from(buf).toString('base64url');
  * de mesa. Cualquier comensal puede escanearlo las veces que quiera hasta que
  * (a) llegue su expiración explícita o (b) la mesa se libere al pagar y el
  * backend avise con revocarMesa(). No es de un solo uso porque en una mesa se
- * sientan varias personas y todas escanean el mismo QR impreso.
+ * sientan varias personas y todas escanean el mismo QR — ya no impreso, sino
+ * mostrado en la pantalla/tablet de la mesa (ver ROL_PANTALLA en auth.js y
+ * POST /internal/qr-rotado más abajo), pero la propiedad no cambia: sigue
+ * siendo un único QR por mesa, compartido por todos los que se sientan ahí.
  *
  * Formato: v1.<payload base64url>.<firma HMAC-SHA256 base64url>
  * Payload: { m: id_mesa, iat: emitido (ms), exp: expira (ms), sid: id aleatorio }
@@ -94,6 +99,22 @@ function derivarSecretoQr(config) {
   return crypto.createHmac('sha256', config.jwtSecret).update('smartdining:qr:v1').digest('hex');
 }
 
+/**
+ * Token de la PANTALLA de mesa (modelo "QR en vidrio"): una tablet fija en la
+ * mesa que solo muestra el QR, no pide ni ve el carrito. A diferencia del
+ * token del comensal, no expira en horas porque la tablet no se retira al
+ * pagar la cuenta: sigue montada para el siguiente grupo. Por eso es un JWT
+ * normal (mismo JWT_SECRET del backend) y no el token QR firmado aparte:
+ * autentica al SOCKET, no reemplaza a `mesas.token_qr`.
+ */
+function generarTokenPantalla(idMesa, config) {
+  if (!esIdValido(idMesa)) throw new RangeError('id_mesa inválido');
+  const token = jwt.sign({ id_mesa: idMesa, rol: ROL_PANTALLA }, config.jwtSecret, {
+    expiresIn: config.pantallaExpiresIn,
+  });
+  return { token, id_mesa: idMesa, expira_en: config.pantallaExpiresIn };
+}
+
 const rutasQr = {
   'POST /qr/generar': async (req, res, ctx) => {
     const auth = req.headers.authorization || '';
@@ -120,6 +141,48 @@ const rutasQr = {
     enviarJson(res, resultado.valido ? 200 : 401, resultado);
   },
 
+  /**
+   * Emite el JWT que usa la tablet de la mesa para conectarse al socket y
+   * escuchar `qr:actualizado`. Mismo rol que puede generar QR de mesa: el
+   * personal que instala/reinicia la pantalla física.
+   */
+  'POST /qr/pantalla': async (req, res, ctx) => {
+    const auth = req.headers.authorization || '';
+    const identidad = auth.startsWith('Bearer ') ? verificarJwt(auth.slice(7), ctx.config.jwtSecret) : null;
+    if (!identidad) throw new ErrorHttp(401, 'NO_AUTORIZADO', 'Se requiere un JWT válido');
+    if (!ROLES_GENERAN_QR.includes(identidad.rol) || !ROLES_PERSONAL.includes(identidad.rol)) {
+      throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Tu rol no puede generar el token de pantalla');
+    }
+    const cuerpo = parsearJson(await leerCuerpoCrudo(req));
+    try {
+      enviarJson(res, 201, generarTokenPantalla(cuerpo.id_mesa, ctx.config));
+    } catch (err) {
+      if (err instanceof RangeError) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', err.message);
+      throw err;
+    }
+  },
+
+  /**
+   * El backend avisa aquí el `token_qr` vigente de la mesa (recién sembrado o
+   * recién rotado por el trigger `tr_regenerar_token_qr` al pagar/cancelar).
+   * Se reenvía tal cual a la sala de la mesa: la pantalla de esa mesa
+   * refresca el QR sola, sin que nadie tenga que ir a imprimir nada.
+   */
+  'POST /internal/qr-rotado': async (req, res, ctx) => {
+    exigirClaveInterna(req, ctx.config);
+    const cuerpo = parsearJson(await leerCuerpoCrudo(req));
+    if (!esIdValido(cuerpo.id_mesa)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'id_mesa debe ser un entero positivo');
+    if (typeof cuerpo.token_qr !== 'string' || !cuerpo.token_qr || cuerpo.token_qr.length > MAX_TOKEN_QR_MOSTRADO) {
+      throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', `token_qr debe ser un texto de 1 a ${MAX_TOKEN_QR_MOSTRADO} caracteres`);
+    }
+    ctx.io.to(salaMesa(cuerpo.id_mesa)).emit('qr:actualizado', {
+      id_mesa: cuerpo.id_mesa,
+      token_qr: cuerpo.token_qr,
+      emitidoEn: new Date().toISOString(),
+    });
+    enviarJson(res, 200, { ok: true });
+  },
+
   'POST /internal/mesa-liberada': async (req, res, ctx) => {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
@@ -129,4 +192,6 @@ const rutasQr = {
   },
 };
 
-module.exports = { crearServicioQr, derivarSecretoQr, rutasQr, TTL_MAX_MINUTOS };
+module.exports = {
+  crearServicioQr, derivarSecretoQr, generarTokenPantalla, rutasQr, TTL_MAX_MINUTOS,
+};

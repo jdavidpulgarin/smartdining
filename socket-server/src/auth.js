@@ -2,6 +2,9 @@ const jwt = require('jsonwebtoken');
 
 const ROLES_PERSONAL = ['admin', 'mesero', 'cajero', 'cocina'];
 const ROL_COMENSAL = 'comensal';
+// Pantalla fija montada en la mesa (tablet) que solo muestra su QR: no es un
+// comensal (no pide ni carga carrito) ni personal (no ve otras mesas ni KDS).
+const ROL_PANTALLA = 'pantalla';
 
 /**
  * Verifica un JWT del backend y devuelve la identidad normalizada, o null si
@@ -11,9 +14,9 @@ const ROL_COMENSAL = 'comensal';
 function verificarJwt(token, secreto) {
   try {
     const p = jwt.verify(token, secreto, { algorithms: ['HS256'] });
-    if (p.rol === ROL_COMENSAL) {
+    if (p.rol === ROL_COMENSAL || p.rol === ROL_PANTALLA) {
       if (!Number.isInteger(p.id_mesa)) return null;
-      return { rol: ROL_COMENSAL, id_mesa: p.id_mesa };
+      return { rol: p.rol, id_mesa: p.id_mesa };
     }
     if (ROLES_PERSONAL.includes(p.rol)) {
       return { rol: p.rol, id_usuario: p.id_usuario };
@@ -40,4 +43,6 @@ function autenticarSocket(secreto) {
   };
 }
 
-module.exports = { verificarJwt, autenticarSocket, ROLES_PERSONAL, ROL_COMENSAL };
+module.exports = {
+  verificarJwt, autenticarSocket, ROLES_PERSONAL, ROL_COMENSAL, ROL_PANTALLA,
+};

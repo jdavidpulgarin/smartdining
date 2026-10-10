@@ -8,6 +8,7 @@ const ORIGEN = 'http://localhost:5173';
 
 const firmar = (payload, secreto = SECRETO, opts = {}) => jwt.sign(payload, secreto, { expiresIn: '1h', ...opts });
 const tokenComensal = (id_mesa) => firmar({ id_mesa, rol: 'comensal' });
+const tokenPantalla = (id_mesa) => firmar({ id_mesa, rol: 'pantalla' });
 const tokenPersonal = (rol, id_usuario = 1) => firmar({ id_usuario, rol });
 
 async function levantar(extraEnv = {}, deps = {}) {
@@ -42,4 +43,6 @@ const esperar = (socket, evento, ms = 300) => new Promise((res) => {
   socket.once(evento, h);
 });
 
-module.exports = { levantar, emitir, esperar, tokenComensal, tokenPersonal, firmar, SECRETO, ORIGEN };
+module.exports = {
+  levantar, emitir, esperar, tokenComensal, tokenPantalla, tokenPersonal, firmar, SECRETO, ORIGEN,
+};
