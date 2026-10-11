@@ -20,7 +20,9 @@ const { crearRegistroIdempotenciaRedis } = require('./almacen/idempotencia-redis
 const { crearRevocacionesRedis } = require('./almacen/revocaciones-redis');
 const { crearAlmacenSuscripcionesRedis } = require('./almacen/suscripciones-redis');
 const { crearEstadoMesasRedis } = require('./almacen/mesas-redis');
-const { registrarSala, crearEstadoMesasMemoria, crearPresencia } = require('./sala');
+const {
+  registrarSala, crearEstadoMesasMemoria, crearPresencia, rutasSala,
+} = require('./sala');
 
 const rutasBase = {
   /**
@@ -49,7 +51,7 @@ function crearServidor(config, deps = {}) {
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
   const ctx = { config };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos }, ctx);
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));

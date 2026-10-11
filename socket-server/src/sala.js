@@ -2,6 +2,9 @@ const { exito, fallo, manejar } = require('./ack');
 const { ROL_COMENSAL } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
 const { salaMesa, SALA_ADMIN, estaEnMesa } = require('./salas');
+const {
+  ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson, exigirClaveInterna,
+} = require('./http');
 
 const MAX_MOTIVO = 100;
 // Como mucho un aviso de presencia por mesa cada 500 ms: cuando llega un grupo
@@ -177,6 +180,41 @@ function registrarSala(socket, ctx) {
   }));
 }
 
+/**
+ * Rutas internas de sala (solo backend, con x-internal-key).
+ *
+ * POST /internal/ingrediente-disponibilidad — un ingrediente se agotó o volvió.
+ * Se difunde a TODOS los sockets: es información pública del menú y le sirve
+ * a cada mesa (el constructor deshabilita la opción en vivo), a la cocina y al
+ * panel. Solo se reenvían los dos campos validados.
+ */
+const rutasSala = {
+  'POST /internal/ingrediente-disponibilidad': async (req, res, ctx) => {
+    exigirClaveInterna(req, ctx.config);
+    const cuerpo = parsearJson(await leerCuerpoCrudo(req));
+    if (!Number.isSafeInteger(cuerpo.id_ingrediente) || cuerpo.id_ingrediente <= 0) {
+      throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'id_ingrediente debe ser un entero positivo');
+    }
+    if (typeof cuerpo.disponible !== 'boolean') {
+      throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'disponible debe ser true o false');
+    }
+    // eventId opcional: si el backend reintenta el mismo aviso, no se repite.
+    if (cuerpo.eventId !== undefined) {
+      if (!esEventIdValido(cuerpo.eventId)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
+      if (!(await ctx.registro.reservar(`backend:ingrediente:${cuerpo.eventId}`))) {
+        return enviarJson(res, 200, { ok: true, duplicado: true });
+      }
+    }
+    ctx.io.emit('ingrediente:disponibilidad', {
+      id_ingrediente: cuerpo.id_ingrediente,
+      disponible: cuerpo.disponible,
+      emitidoEn: new Date().toISOString(),
+    });
+    return enviarJson(res, 200, { ok: true, duplicado: false });
+  },
+};
+
 module.exports = {
+  rutasSala,
   registrarSala, crearEstadoMesasMemoria, crearPresencia, VENTANA_PRESENCIA_MS, validarComensalEnSala, LIMITE_LLAMADA_SEG, MAX_MOTIVO,
 };
