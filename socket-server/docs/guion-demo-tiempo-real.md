@@ -47,9 +47,9 @@ Tarjetas de prueba de Wompi (sandbox): `4242 4242 4242 4242` aprobada,
 - **"¿Qué pasa si se reinicia el servidor?"** El estado vive en Redis: el
   carrito sigue ahí, y el cierre es ordenado: espera los acks en curso antes de
   apagarse (prueba manual en el [README](../README.md#persistencia-con-redis)).
-- **"¿Cuánto aguanta?"** 80 comensales en 20 mesas: p95 del ack entre 109 y
-  133 ms, sin errores, medido con el estado en memoria
-  ([informe-carga.md](informe-carga.md)). Falta repetirla con Redis.
+- **"¿Cuánto aguanta?"** 80 comensales en 20 mesas, sin errores: p95 del ack de
+  66 ms con Redis real (21 ms en memoria) en GitHub Actions, y entre 109 y 133 ms
+  en un portátil modesto ([informe-carga.md](informe-carga.md)).
 
 ## Dependencias de esta demo
 
