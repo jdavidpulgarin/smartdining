@@ -60,9 +60,18 @@ jobs:
           # Copia de despliegue: nadie edita aquí. infra/.env está ignorado y
           # no se toca.
           git reset --hard --quiet "$2"
-          # --wait: falla si algún servicio no llega a healthy.
-          docker compose -f docker-compose.prod.yml --env-file infra/.env \
-            up -d --build --remove-orphans --wait --wait-timeout 180
+          dc() { docker compose -f docker-compose.prod.yml --env-file infra/.env "$@" < /dev/null; }
+          # El script llega por stdin: < /dev/null evita que un comando se
+          # coma el resto. --wait: falla si un servicio no llega a healthy.
+          # Primero lo interno; nginx (lo único público) solo si ninguna
+          # cuenta del personal tiene una contraseña conocida o publicada.
+          dc up -d --build --remove-orphans --wait --wait-timeout 180 postgres redis backend socket-server
+          if ! sh infra/scripts/passwords-demo.sh verificar < /dev/null; then
+            dc stop nginx
+            echo "::error::Hay cuentas con contraseña conocida (Admin123!). Sitio detenido: corre 'sh infra/scripts/passwords-demo.sh cambiar' en el VPS."
+            exit 1
+          fi
+          dc up -d --build --remove-orphans --wait --wait-timeout 180
           docker image prune -f > /dev/null
           echo "Desplegado $(git rev-parse --short HEAD)"
           REMOTO

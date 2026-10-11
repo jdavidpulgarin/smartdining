@@ -114,38 +114,64 @@ nano infra/.env
 ### 2.3 Primer arranque con HTTPS
 
 ```bash
-STAGING=1 sh infra/scripts/primer-certificado.sh   # ensayo: certificado de prueba
-sh infra/scripts/primer-certificado.sh             # certificado real
+STAGING=1 SEED_DEMO=1 sh infra/scripts/primer-certificado.sh   # ensayo: certificado de prueba
+sh infra/scripts/primer-certificado.sh                         # certificado real
 ```
 
-El script crea un certificado temporal para que nginx pueda arrancar, levanta
-toda la pila, pide el certificado real a Let's Encrypt por webroot y recarga
-nginx. Primero haz el ensayo con `STAGING=1`: Let's Encrypt limita a 5
-certificados fallidos por hora, y un DNS mal puesto los gasta rápido. Si el
-ensayo funciona, la corrida sin `STAGING` reemplaza el certificado de prueba.
+En orden, el script:
+
+1. levanta Postgres, Redis, backend y socket-server **sin nginx**: todavía no
+   hay nada público. Con `SEED_DEMO=1` carga además `database/seed.sql`;
+2. exige contraseñas propias para el personal (ver 2.4) y, si falta, te pide una;
+3. crea un certificado temporal para que nginx pueda arrancar;
+4. arranca nginx y certbot;
+5. pide el certificado real a Let's Encrypt por webroot;
+6. recarga nginx.
+
+Primero haz el ensayo con `STAGING=1`: Let's Encrypt limita a 5 certificados
+fallidos por hora, y un DNS mal puesto los gasta rápido. Si el ensayo funciona,
+la corrida sin `STAGING` reemplaza el certificado de prueba.
 
 Después de esto, el servicio `certbot` intenta renovar cada 12 h y nginx se
 recarga cada 6 h para tomar el certificado nuevo. No hay que hacer nada más.
 
 La primera vez, Postgres ejecuta `database/scripts/00_ejecutar_todo.sql`
-(esquema, funciones, triggers y el seed de demostración).
+(esquema, funciones, triggers, transiciones y el menú del constructor). Ese
+script **no crea usuarios, mesas ni platos de ejemplo**: están en
+`database/seed.sql`, que solo se carga con `SEED_DEMO=1`.
 
-### 2.4 Usuarios de la demo
+### 2.4 Contraseñas del personal (obligatorio)
 
-El seed trae usuarios cuyo hash no corresponde a ninguna contraseña conocida.
-**No uses `Admin123!` en producción**: el repositorio es público y esa
-contraseña está escrita en él. Elige una propia y aplícala así:
+Los usuarios de `database/seed.sql` traen el hash de `Admin123!`, la misma
+contraseña de `backend/scripts/fijar-password-demo.sql`. El repositorio es
+público, así que cualquiera puede entrar como admin con ella. Por eso **el
+sitio no se publica mientras una cuenta del personal tenga una contraseña
+conocida**:
+
+- `primer-certificado.sh` no arranca nginx hasta que pase la verificación;
+- el workflow Deploy la corre en cada despliegue y, si falla, **detiene nginx**
+  y termina en rojo.
+
+Una cuenta no pasa si su hash aparece en cualquier archivo del repositorio, o
+si su contraseña es `Admin123!` (con cualquier sal) u otra de una lista de
+contraseñas conocidas. Los inactivos también cuentan, porque se pueden
+reactivar.
 
 ```bash
-HASH=$(docker compose -f docker-compose.prod.yml --env-file infra/.env exec -T backend \
-  node -e "require('bcrypt').hash(process.argv[1],10).then(console.log)" 'TuClaveDeDemo')
-# Por stdin y no con -c: psql no sustituye :'h' dentro de -c.
-echo "UPDATE usuarios SET password_hash = :'h';" | \
-  docker compose -f docker-compose.prod.yml --env-file infra/.env exec -T postgres \
-  psql -v ON_ERROR_STOP=1 -U smartdining -d smartdining -v h="$HASH"
+sh infra/scripts/passwords-demo.sh verificar        # lista las cuentas que no pasan
+sh infra/scripts/passwords-demo.sh cambiar          # pide la nueva (dos veces, sin eco) y la aplica a esas cuentas
+sh infra/scripts/passwords-demo.sh cambiar --todos  # la aplica a todas las cuentas
 ```
 
-Si cambiaste `POSTGRES_USER` o `POSTGRES_DB`, ajusta `-U` y `-d`.
+La contraseña nueva necesita al menos 12 caracteres, máximo 72 bytes (el
+límite de bcrypt) y no puede contener `admin123`, `smartdining`, `password`
+ni `123456`. Viaja por stdin, así que no queda en `ps`, en el historial ni en
+el contenedor. Entrégala al equipo por un canal privado, nunca por el grupo
+ni en un PR.
+
+No cargues `seed.sql` a mano con la página ya publicada: sus usuarios
+volverían a tener `Admin123!` hasta el próximo despliegue. Si lo haces, corre
+`cambiar` enseguida.
 
 ### 2.5 Comprobar
 
@@ -269,4 +295,5 @@ dc exec -T postgres psql -v ON_ERROR_STOP=1 -U smartdining -d smartdining < data
 | El build del VPS se queda sin memoria | Agrega swap o compila con más RAM. |
 | `Pool overlaps with other one on this address space` | La subred fija `172.31.250.0/24` choca con otra red del VPS: cámbiala en `docker-compose.prod.yml` junto con la IP de nginx y `TRUST_PROXY`. |
 | Los logs del socket-server muestran `172.31.250.10` como IP de todos | `TRUST_PROXY` no coincide con la IP de nginx. |
+| Deploy en rojo: `Hay cuentas con contraseña conocida`; el sitio no responde | La compuerta de 2.4 detuvo nginx. En el VPS: `sh infra/scripts/passwords-demo.sh cambiar` y vuelve a lanzar Deploy. |
 | Deploy: `Host key verification failed` | `VPS_KNOWN_HOSTS` no coincide con la huella actual del VPS. |
