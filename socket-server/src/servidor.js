@@ -17,6 +17,7 @@ const { crearRouter, enviarJson } = require('./http');
 const { crearConexionRedis } = require('./almacen/redis');
 const { crearClienteBackend } = require('./backend');
 const { crearRotadorQr } = require('./rotacion');
+const { limitarEventos, crearLimiteMesas, MAX_BUFFER_BYTES } = require('./limites');
 const { crearPasarelaWompi } = require('./pasarelas/wompi');
 const { verificarImplementacion } = require('./pasarelas/PasarelaPago');
 const {
@@ -72,6 +73,8 @@ function crearServidor(config, deps = {}) {
     // da la idempotencia por eventId (idempotencia.js), que cubre también los
     // cortes largos y los reenvíos manuales del cliente.
     connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
+    // Un mensaje más grande que esto se rechaza y se cierra esa conexión.
+    maxHttpBufferSize: MAX_BUFFER_BYTES,
   });
 
   // Redis solo si hay REDIS_URL (en producción es obligatorio, ver config.js).
@@ -169,8 +172,15 @@ function crearServidor(config, deps = {}) {
   // Sin JWT válido no se entra: todo socket que llega a 'connection' ya tiene
   // una identidad verificada en socket.data.identidad.
   io.use(autenticarSocket(config.jwtSecret, { sesionVigente }));
+  // Después de autenticar (necesita la mesa del JWT): tope de comensales por mesa.
+  ctx.limiteMesas = crearLimiteMesas({
+    backend: ctx.backend, capacidadPorDefecto: config.capacidadMesaPorDefecto, ...(deps.limiteMesas || {}),
+  });
+  io.use(ctx.limiteMesas.middleware());
 
   io.on('connection', (socket) => {
+    // Primero el límite de frecuencia: aplica a todos los eventos que siguen.
+    limitarEventos(socket, deps.limiteEventos || {});
     console.log(`[socket] conectado ${socket.id} (${socket.data.identidad.rol})`);
     registrarSalas(socket, {
       obtenerSnapshot: ctx.carritos.snapshot,
