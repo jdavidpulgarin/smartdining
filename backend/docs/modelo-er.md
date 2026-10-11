@@ -110,8 +110,10 @@ entregado      -> pagado
 | | tiempo_preparacion_estimado | INTEGER | NOT NULL DEFAULT 15 · CHECK > 0 · minutos |
 | | creado_en | TIMESTAMPTZ | NOT NULL DEFAULT now |
 
-> No existen `personalizaciones` ni `alergenos`. Las preferencias del comensal van por ítem,
-> en `detalles_pedido.notas_especiales`.
+> No existe una tabla `alergenos`. Las preferencias en texto libre van por ítem en
+> `detalles_pedido.notas_especiales`; las opciones de un plato armado **sí** están
+> modeladas, en `pasos_constructor` / `ingredientes` / `detalles_ingredientes`
+> (script 13), no como texto.
 
 ## 6. pedidos
 
