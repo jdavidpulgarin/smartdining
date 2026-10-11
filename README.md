@@ -196,6 +196,11 @@ Invoke-RestMethod http://localhost:4000/api/health
 Invoke-RestMethod http://localhost:4001/health
 ```
 
+## 🌐 Producción
+
+Un VPS con Docker Compose, HTTPS de Let's Encrypt y despliegue automático al fusionar en
+`main`. Guía completa: [`docs/despliegue.md`](docs/despliegue.md).
+
 ---
 
 ## 📋 Hoja de Ruta Inicial
