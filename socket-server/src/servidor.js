@@ -2,7 +2,7 @@ const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
 const { autenticarSocket } = require('./auth');
-const { registrarSalas } = require('./salas');
+const { registrarSalas, salaMesa, SALA_ADMIN } = require('./salas');
 const { crearRegistroIdempotencia } = require('./idempotencia');
 const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
 const { registrarPedidos, rutasPedidos } = require('./pedidos');
@@ -57,13 +57,31 @@ function crearServidor(config, deps = {}) {
     qr: crearServicioQr({ secreto: derivarSecretoQr(config), ttlMinutosPorDefecto: config.qrTtlMinutos }),
   });
 
-  // Cuando el backend libera la mesa (al pagar) termina la sesión de mesa: se
-  // invalidan sus QR y se borra el estado que era de esa sesión, para que el
-  // siguiente grupo empiece limpio y no reciba avisos del anterior.
-  ctx.liberarMesa = (idMesa) => {
+  // Mesas ya liberadas que aún no tienen sesión nueva. Hace idempotente a
+  // liberarMesa: el backend puede reintentar el aviso sin que se repita el
+  // evento ni se revoquen los QR de una sesión que acaba de empezar.
+  const mesasLiberadas = new Set();
+  // Una mesa vuelve a tener sesión cuando el personal le genera un QR nuevo.
+  ctx.reabrirMesa = (idMesa) => mesasLiberadas.delete(idMesa);
+
+  // Cuando el backend libera la mesa (al pagar o a mano) termina la sesión de
+  // mesa: se invalidan sus QR, se avisa en vivo y se borra el estado de esa
+  // sesión, para que el siguiente grupo empiece limpio y no reciba avisos del
+  // anterior.
+  ctx.liberarMesa = async (idMesa, motivo = 'liberada') => {
+    if (mesasLiberadas.has(idMesa)) return { duplicado: true };
+    mesasLiberadas.add(idMesa);
     ctx.qr.revocarMesa(idMesa);
+    // ANTES de vaciar el carrito: quien lo reciba todavía puede mostrar qué
+    // quedó sin pedir. Al panel le sirve para pintar la mesa libre al instante.
+    io.to(salaMesa(idMesa)).to(SALA_ADMIN).emit('mesa:liberada', {
+      id_mesa: idMesa,
+      motivo,
+      emitidoEn: new Date().toISOString(),
+    });
     ctx.suscripciones.limpiarMesa(idMesa);
     ctx.carritos.vaciar(idMesa);
+    return { duplicado: false };
   };
 
   // Sin JWT válido no se entra: todo socket que llega a 'connection' ya tiene
