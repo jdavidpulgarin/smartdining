@@ -9,6 +9,8 @@ export { TablesPanel } from './TablesPanel'
 export { MenuSection } from './MenuSection'
 export { QRModal } from './QRModal'
 export { TableDetailModal } from './TableDetailModal'
+export { BandejaAlertas } from './BandejaAlertas'
+
 
 
 export {

@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LogOut, UserCheck, Plus, Radio, Clock } from 'lucide-react'
-import { useAuth } from '../hooks'
+import { useAuth, useTables } from '../hooks'
+import { BandejaAlertas } from './BandejaAlertas'
 
 export function Topbar() {
   const { user, logout } = useAuth()
+  const { alertas, atenderAlerta, limpiarAlertas } = useTables()
   const navigate = useNavigate()
   const [currentTime, setCurrentTime] = useState('')
   const [currentDate, setCurrentDate] = useState('')
@@ -59,6 +61,13 @@ export function Topbar() {
       </div>
 
       <div className="topbar-actions">
+        {/* Bandeja de Alertas y Llamados en Vivo */}
+        <BandejaAlertas
+          alertas={alertas}
+          onAtender={atenderAlerta}
+          onLimpiarTodas={limpiarAlertas}
+        />
+
         <button
           type="button"
           className="topbar-btn-primary"
@@ -68,6 +77,7 @@ export function Topbar() {
           <Plus size={16} />
           <span>Nuevo Pedido</span>
         </button>
+
 
         {user ? (
           <div className="user-profile-widget">

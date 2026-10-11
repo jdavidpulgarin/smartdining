@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { tables as defaultTables } from '../constants/mockData'
 import { generarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
+import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
 import { TablesContext } from './tablesContextDef'
 
@@ -50,6 +51,7 @@ export function TablesProvider({ children }) {
   })
 
   const [pedidosActivos, setPedidosActivos] = useState([])
+  const [alertas, setAlertas] = useState([])
   const [loading, setLoading] = useState(false)
   const [notification, setNotification] = useState(null)
 
@@ -59,6 +61,28 @@ export function TablesProvider({ children }) {
       setNotification((prev) => (prev?.mensaje === mensaje ? null : prev))
     }, 3500)
   }, [])
+
+  const agregarAlerta = useCallback((nuevaAlerta) => {
+    const id = Date.now() + Math.random().toString(36).substring(2, 7)
+    setAlertas((prev) => [
+      {
+        id,
+        hora: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        atendida: false,
+        ...nuevaAlerta,
+      },
+      ...prev,
+    ])
+  }, [])
+
+  const atenderAlerta = useCallback((idAlerta) => {
+    setAlertas((prev) => prev.filter((a) => a.id !== idAlerta))
+  }, [])
+
+  const limpiarAlertas = useCallback(() => {
+    setAlertas([])
+  }, [])
+
 
   // Guardar estado persistente en el navegador
   useEffect(() => {
@@ -164,6 +188,12 @@ export function TablesProvider({ children }) {
       )
 
       if (nuevoEstado === 'listo') {
+        agregarAlerta({
+          tipo: 'pedido_listo',
+          idMesa: data.id_mesa,
+          mensaje: `Pedido ${data.codigo_pedido || `#${idPedido}`} listo en cocina para servir`,
+        })
+        emitirSonidoAlerta()
         showNotification(
           `🍽️ ¡Pedido ${data.codigo_pedido || `#${idPedido}`} LISTO para servir (Mesa ${data.id_mesa})!`,
           'success'
@@ -181,11 +211,64 @@ export function TablesProvider({ children }) {
   useSocketListener('payment:confirmed', (data) => {
     if (data?.id_mesa) {
       const montoFormateado = Number(data.monto || 0).toLocaleString('es-CO')
+      agregarAlerta({
+        tipo: 'pago',
+        idMesa: data.id_mesa,
+        mensaje: `Pago confirmado por $${montoFormateado} (Mesa ${data.id_mesa})`,
+      })
+      emitirSonidoAlerta()
       showNotification(`💰 Pago confirmado de $${montoFormateado} para Mesa ${data.id_mesa}`, 'success')
       cargarMesas()
       cargarPedidosActivos()
     }
   })
+
+  // Escuchar llamado al mesero (mesa:llamar_mesero / waiter:call)
+  useSocketListener('mesa:llamar_mesero', (data) => {
+    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    agregarAlerta({
+      tipo: 'llamado',
+      idMesa,
+      mensaje: data?.motivo || `Comensal solicita asistencia urgente en mesa`,
+    })
+    emitirSonidoAlerta()
+    showNotification(`🔔 Mesa ${idMesa} llama al mesero`, 'info')
+  })
+
+  useSocketListener('waiter:call', (data) => {
+    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    agregarAlerta({
+      tipo: 'llamado',
+      idMesa,
+      mensaje: data?.motivo || `Comensal solicita asistencia en mesa`,
+    })
+    emitirSonidoAlerta()
+    showNotification(`🔔 Mesa ${idMesa} llama al mesero`, 'info')
+  })
+
+  // Escuchar solicitud de cuenta (cuenta:solicitada / bill:requested)
+  useSocketListener('cuenta:solicitada', (data) => {
+    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    agregarAlerta({
+      tipo: 'cuenta',
+      idMesa,
+      mensaje: `Comensales solicitan la cuenta y factura`,
+    })
+    emitirSonidoAlerta()
+    showNotification(`🧾 Mesa ${idMesa} solicita la cuenta`, 'info')
+  })
+
+  useSocketListener('bill:requested', (data) => {
+    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    agregarAlerta({
+      tipo: 'cuenta',
+      idMesa,
+      mensaje: `Comensales solicitan la cuenta y factura`,
+    })
+    emitirSonidoAlerta()
+    showNotification(`🧾 Mesa ${idMesa} solicita la cuenta`, 'info')
+  })
+
 
 
   // Escuchar si el backend o socket-server avisa de una mesa liberada
@@ -374,11 +457,14 @@ export function TablesProvider({ children }) {
       value={{
         tables,
         pedidosActivos,
+        alertas,
         loading,
         notification,
         cargarMesas,
         cargarPedidosActivos,
         marcarEntregado,
+        atenderAlerta,
+        limpiarAlertas,
         abrirMesa,
         liberarMesa,
         regenerarQr,
@@ -388,6 +474,7 @@ export function TablesProvider({ children }) {
     >
       {children}
     </TablesContext.Provider>
+
   )
 }
 
