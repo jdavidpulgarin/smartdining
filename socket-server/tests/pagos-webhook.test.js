@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { levantar } = require('./helpers');
-const { WOMPI_ENV, backendFalso } = require('./pagos-helpers');
+const { WOMPI_ENV, backendFalso, pasarelaFalsa } = require('./pagos-helpers');
 const { eventoWompi } = require('./wompi-eventos');
 const { verificarEventoWompi } = require('../src/pasarelas/wompi');
 
@@ -9,7 +9,8 @@ const SECRETO = WOMPI_ENV.WOMPI_EVENTS_SECRET;
 const crudo = (e) => Buffer.from(JSON.stringify(e));
 
 async function escenario(t) {
-  const s = await levantar(WOMPI_ENV, { backend: backendFalso() });
+  const { pasarela } = pasarelaFalsa({});
+  const s = await levantar(WOMPI_ENV, { backend: backendFalso(), pasarela });
   t.after(() => s.cerrar());
   const enviar = (cuerpo, cabeceras = {}) => fetch(`${s.url}/pagos/webhook`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...cabeceras }, body: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo),

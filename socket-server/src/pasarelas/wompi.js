@@ -166,6 +166,47 @@ function crearPasarelaWompi({
       });
     },
 
+    /**
+     * Estado real de la transacción en la API de Wompi (con la llave privada).
+     * @returns {Promise<import('./PasarelaPago').Transaccion|null>} null si no existe.
+     * Lanza Error con .codigo PASARELA_TIMEOUT | PASARELA_INALCANZABLE | PASARELA_ERROR.
+     */
+    async consultarTransaccion(id) {
+      // El id va en la URL: solo caracteres del formato de Wompi (sin "/", "..").
+      if (typeof id !== 'string' || !ID_TRANSACCION.test(id)) return null;
+      const control = new AbortController();
+      const temporizador = setTimeout(() => control.abort(), timeoutMs);
+      let res;
+      try {
+        res = await fetchFn(`${apiUrl}/transactions/${encodeURIComponent(id)}`, {
+          headers: { Authorization: `Bearer ${llavePrivada}`, Accept: 'application/json' },
+          signal: control.signal,
+        });
+      } catch {
+        const err = new Error(control.signal.aborted ? 'Wompi no respondió a tiempo' : 'No se pudo contactar a Wompi');
+        err.codigo = control.signal.aborted ? 'PASARELA_TIMEOUT' : 'PASARELA_INALCANZABLE';
+        throw err;
+      } finally {
+        clearTimeout(temporizador);
+      }
+      if (res.status === 404) return null;
+      if (!res.ok) throw Object.assign(new Error(`Wompi respondió ${res.status}`), { codigo: 'PASARELA_ERROR' });
+      let cuerpo;
+      try {
+        cuerpo = JSON.parse(await res.text());
+      } catch {
+        throw Object.assign(new Error('Respuesta de Wompi no es JSON'), { codigo: 'PASARELA_ERROR' });
+      }
+      const d = cuerpo && cuerpo.data;
+      if (!d || typeof d.id !== 'string') throw Object.assign(new Error('Respuesta de Wompi sin data'), { codigo: 'PASARELA_ERROR' });
+      return {
+        id: d.id,
+        referencia: d.reference,
+        estado: d.status,
+        monto_centavos: d.amount_in_cents,
+        moneda: d.currency,
+      };
+    },
   };
 }
 

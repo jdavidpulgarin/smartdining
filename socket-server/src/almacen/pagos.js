@@ -27,6 +27,10 @@ function crearAlmacenPagosMemoria({ ahora = Date.now } = {}) {
     async guardarIntencion(ref, intencion, ttlSeg) { escribir(llaveRef(ref), { ...intencion }, ttlSeg); },
     async obtener(ref) { const v = leer(llaveRef(ref)); return v ? { ...v } : null; },
     async borrarIntencion(ref) { datos.delete(llaveRef(ref)); },
+    async actualizarEstado(ref, estado, ttlSeg) {
+      const actual = leer(llaveRef(ref));
+      if (actual) escribir(llaveRef(ref), { ...actual, estado }, ttlSeg);
+    },
     /** Fija la pendiente solo si no hay otra. Devuelve la referencia ganadora. */
     async reservarPendiente(idMesa, comensal, ref, ttlSeg) {
       const k = llavePendiente(idMesa, comensal);
@@ -50,6 +54,10 @@ function crearAlmacenPagosRedis({ cliente }) {
       return v ? JSON.parse(v) : null;
     },
     async borrarIntencion(ref) { await cliente.del(llaveRef(ref)); },
+    async actualizarEstado(ref, estado, ttlSeg) {
+      const actual = await cliente.get(llaveRef(ref));
+      if (actual) await cliente.set(llaveRef(ref), JSON.stringify({ ...JSON.parse(actual), estado }), { EX: ttlSeg });
+    },
     async reservarPendiente(idMesa, comensal, ref, ttlSeg) {
       const k = llavePendiente(idMesa, comensal);
       // SET NX: si dos peticiones del mismo comensal llegan a la vez, una

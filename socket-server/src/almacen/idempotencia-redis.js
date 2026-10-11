@@ -20,6 +20,10 @@ function crearRegistroIdempotenciaRedis({ cliente, ttlMs = 10 * 60 * 1000 }) {
     async guardar(clave, respuesta) {
       await cliente.set(llave(clave), JSON.stringify(respuesta), { EX: ttlSeg });
     },
+    /** Quita una reserva: el evento se podrá procesar de nuevo (reintento tras un fallo). */
+    async liberar(clave) {
+      await cliente.del(llave(clave));
+    },
     /** true si esta llamada reservó la clave; false si ya estaba (duplicado). */
     async reservar(clave, respuesta = true) {
       return (await cliente.set(llave(clave), JSON.stringify(respuesta), { EX: ttlSeg, NX: true })) === 'OK';

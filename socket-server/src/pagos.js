@@ -131,6 +131,37 @@ async function crearIntencionPago(req, res, ctx) {
   return responder({ ...intencion, referencia }, 201);
 }
 
+// Una intención ya resuelta se conserva 7 días para reconocer reintentos tardíos.
+const TTL_INTENCION_RESUELTA_SEG = 7 * 24 * 60 * 60;
+const ESTADOS_FALLIDOS = { DECLINED: 'rechazada', ERROR: 'error', VOIDED: 'anulada' };
+
+/**
+ * Capa 5: aunque la firma sea válida, se cree a la API de la pasarela, no al
+ * evento, y se compara contra lo que ESTE servidor esperaba cobrar.
+ * Devuelve null si todo coincide o el motivo de la discrepancia.
+ */
+function compararTransaccion({ evento, tx, intencion }) {
+  if (!tx) return 'transaccion_inexistente';
+  if (tx.id !== evento.id_transaccion) return 'transaccion_distinta';
+  if (tx.estado !== 'APPROVED') return 'estado_no_aprobado';
+  if (tx.referencia !== evento.referencia) return 'referencia_distinta';
+  if (!intencion) return 'referencia_desconocida';
+  if (intencion.estado !== 'pendiente') return 'intencion_no_pendiente';
+  // EXACTAMENTE igual: ni un centavo de menos (pago parcial con la firma de
+  // otra intención) ni de más.
+  if (tx.monto_centavos !== intencion.monto_centavos) return 'monto_distinto';
+  if (tx.moneda !== 'COP') return 'moneda_distinta';
+  return null;
+}
+
+/** Un pago rechazado o con error libera al comensal para que pueda reintentar. */
+async function registrarFallo(ctx, evento) {
+  const intencion = await ctx.almacenPagos.obtener(evento.referencia);
+  if (!intencion || intencion.estado !== 'pendiente') return;
+  await ctx.almacenPagos.actualizarEstado(evento.referencia, ESTADOS_FALLIDOS[evento.estado] || 'fallida', TTL_INTENCION_RESUELTA_SEG);
+  await ctx.almacenPagos.liberarPendiente(intencion.id_mesa, intencion.comensal);
+}
+
 /**
  * POST /pagos/webhook — eventos de la pasarela (capa 4).
  *
@@ -156,10 +187,31 @@ async function recibirEventoPasarela(req, res, ctx) {
   const clave = `pago:${ctx.pasarela.nombre}:${evento.id_transaccion}:${evento.estado}`;
   if (!(await ctx.registroPagos.reservar(clave))) return enviarJson(res, 200, { ok: true, duplicado: true });
 
-  // La reverificación contra la API y el registro en el backend llegan en
-  // los siguientes pasos; mientras tanto NO se emite nada: un pago solo se
-  // anuncia después de registrarse en la base.
-  return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
+  try {
+    if (evento.estado !== 'APPROVED') {
+      // DECLINED, ERROR, VOIDED: nada que cobrar ni que anunciar como pago.
+      if (ESTADOS_FALLIDOS[evento.estado]) await registrarFallo(ctx, evento);
+      return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false, estado: evento.estado });
+    }
+
+    const tx = await ctx.pasarela.consultarTransaccion(evento.id_transaccion);
+    const intencion = await ctx.almacenPagos.obtener(evento.referencia);
+    const problema = compararTransaccion({ evento, tx, intencion });
+    if (problema) {
+      console.warn(`[pagos] transacción ${evento.id_transaccion} no coincide: ${problema}`);
+      // 200: reintentar no lo arreglaría (la pasarela devolvería lo mismo).
+      return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
+    }
+
+    // Registro en el backend: siguiente paso. Hasta entonces, nada se emite.
+    return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false, verificado: true });
+  } catch (err) {
+    // No se pudo terminar (pasarela o backend sin respuesta): se libera la
+    // marca de idempotencia y se responde 5xx para que la pasarela reintente.
+    await ctx.registroPagos.liberar(clave);
+    console.error(`[pagos] transacción ${evento.id_transaccion}: ${err.codigo || err.message}; se pide reintento`);
+    throw new ErrorHttp(503, 'ERROR_INTERNO', 'No se pudo procesar el evento; reintenta');
+  }
 }
 
 const rutasPagos = {
@@ -169,5 +221,5 @@ const rutasPagos = {
 };
 
 module.exports = {
-  rutasPagos, generarReferencia, LIMITE_INTENCIONES,
+  rutasPagos, generarReferencia, compararTransaccion, LIMITE_INTENCIONES,
 };
