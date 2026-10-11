@@ -13,6 +13,7 @@ código y este documento no coinciden, es un error y se corrige en el mismo PR.
 
 ## Índice
 
+- [Alias del comensal (R-18)](#alias-del-comensal-r-18)
 - [Catálogo completo](#catálogo-completo)
 - [Códigos de error](#códigos-de-error)
 - [1. Conexión y autenticación](#1-conexión-y-autenticación) · [1.1. Límites](#11-límites-de-la-conexión)
@@ -25,6 +26,21 @@ código y este documento no coinciden, es un error y se corrige en el mismo PR.
 - [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox)
 - [9. Variables de entorno](#9-variables-de-entorno)
 - [10. Historial de cambios de contrato](#10-historial-de-cambios-de-contrato)
+
+## Alias del comensal (R-18)
+
+El alias ("Ana") identifica al comensal ante su mesa: quién pidió cada plato, a quién avisar
+que su plato está listo y cuánto paga en el modo "propio". Por eso **lo fija el backend una
+sola vez** (`POST /api/mesas/qr/:token/sesion` con `{ comensal }`, único en la sesión de la
+mesa) y lo **firma en el JWT**. El socket-server lo toma **solo del JWT**:
+
+| Dónde | Regla |
+|---|---|
+| Handshake | JWT de comensal sin alias (o con uno inválido) → `connect_error` `TOKEN_INVALIDO` |
+| `join:table`, `cart:update`, `push:subscribe` | `comensal` opcional; distinto del JWT → `NO_AUTORIZADO` |
+| `cart:update` | Un comensal solo edita o quita sus propias líneas; el personal, cualquiera |
+| `mesa:llamar_mesero`, `cuenta:solicitada`, `mesa:presencia` | El servidor pone el alias del JWT |
+| `/pagos/intencion`, `/push/suscripcion` | `comensal` opcional; distinto → 403; JWT sin alias → 401 `TOKEN_INVALIDO` |
 
 ## Catálogo completo
 
@@ -90,7 +106,7 @@ motivo exacto) va solo al log del servidor.
 | `err.message` | Cuándo | Qué hacer |
 |---|---|---|
 | `AUTH_REQUERIDA` | No se envió `auth.token` | Pedir sesión (escanear el QR o iniciar sesión) |
-| `TOKEN_INVALIDO` | JWT inválido, vencido o de una sesión de mesa ya liberada | Pedir un JWT nuevo; no reintentar con el mismo |
+| `TOKEN_INVALIDO` | JWT inválido, vencido, de una sesión de mesa ya liberada o de comensal **sin alias** (sesión antigua) | Pedir un JWT nuevo; no reintentar con el mismo |
 | `MESA_LLENA` | La mesa ya tiene capacidad + 4 comensales conectados | Avisar al comensal; reintentar más tarde |
 | `SERVIDOR_CERRANDO` | El servidor se está reiniciando | Nada: Socket.io reintenta solo |
 | `ERROR_INTERNO` | Fallo inesperado (p. ej. Redis caído) | Reintentar con espera |
@@ -100,7 +116,7 @@ motivo exacto) va solo al log del servidor.
 | `codigo` | Cuándo |
 |---|---|
 | `PAYLOAD_INVALIDO` | Falta un campo o tiene un tipo/valor inválido |
-| `NO_AUTORIZADO` | El rol no puede emitir ese evento o tocar esa mesa |
+| `NO_AUTORIZADO` | El rol no puede emitir ese evento o tocar esa mesa; o el comensal manda otro alias que el de su JWT, o toca una línea de otro comensal |
 | `SIN_SALA` | El comensal no hizo `join:table` antes de emitir |
 | `RATE_LIMIT` | 20 eventos/s por socket, o 1 llamada al mesero por mesa cada 60 s |
 | `ERROR_INTERNO` | Fallo inesperado del servidor o de Redis; reenviar con el **mismo** `eventId` |
@@ -113,6 +129,7 @@ motivo exacto) va solo al log del servidor.
 | `400 JSON_INVALIDO` | El cuerpo no es JSON |
 | `400 FIRMA_INVALIDA` | Webhook con checksum o antigüedad inválidos |
 | `401 NO_AUTORIZADO` | Sin credencial, credencial inválida o sesión de mesa liberada |
+| `401 TOKEN_INVALIDO` | JWT de comensal antiguo, sin alias (`/pagos/intencion`, `/push/suscripcion`) |
 | `403 NO_AUTORIZADO` | Credencial válida sin permiso (rol, alias que no está en la mesa) |
 | `404` | Ruta inexistente (y toda `/internal/*` desde Internet, en nginx) |
 | `409 SIN_SALDO` | Intención de pago sin nada que cobrar |
@@ -142,7 +159,7 @@ socket.on('connect_error', (err) => {
 
 | Rol (`rol` del JWT) | Payload del JWT | Salas a las que entra |
 |---|---|---|
-| `comensal` | `{ id_mesa, rol }` | Solo `room:mesa-{su id_mesa}` (con `join:table`) |
+| `comensal` | `{ id_mesa, rol, comensal, sid }` (`comensal` = su alias, **obligatorio**) | Solo `room:mesa-{su id_mesa}` (con `join:table`) |
 | `pantalla` | `{ id_mesa, rol }` | Solo `room:mesa-{su id_mesa}` (automático al conectar, sin `join:table`) |
 | `cocina` | `{ id_usuario, rol }` | `room:kds` (automático al conectar) |
 | `admin` | `{ id_usuario, rol }` | `room:kds` y `room:admin` (automático) + cualquier mesa |
@@ -248,10 +265,9 @@ Unirse a la sala de una mesa. Roles: `comensal`, `mesero`, `cajero`, `admin`.
 
 - Comensal: `id_mesa` es opcional; si viene y no coincide con su JWT → `NO_AUTORIZADO`.
 - Personal: `id_mesa` es obligatorio.
-- Comensal: `comensal` (alias, 1–40 caracteres) es **opcional** y recomendado:
-  `{ "comensal": "Ana" }`. Es como lo ven el panel (`mesa:presencia`) y el mesero
-  (`mesa:llamar_mesero`). Si no es un texto válido → `PAYLOAD_INVALIDO`. Repetir
-  `join:table` con otro alias lo cambia.
+- Comensal: su alias sale **del JWT** (lo firma el backend al abrir la sesión; ver
+  [Alias del comensal](#alias-del-comensal-r-18)). No hace falta enviarlo; si se envía
+  `comensal` distinto del JWT → `NO_AUTORIZADO`.
 
 Ack:
 
@@ -283,7 +299,6 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
   "eventId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
   "accion": "set",
   "id_linea": "6f1c1b1a-2222-4b3c-8d4e-5f6a7b8c9d0e",
-  "comensal": "Ana",
   "id_plato": 3,
   "cantidad": 2,
   "notas": "sin cebolla",
@@ -300,7 +315,7 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
 | `id_mesa` | entero > 0 | Solo personal (`mesero`/`admin`). El comensal no lo envía: se toma de su JWT |
 | `accion` | string | `set` (fija la cantidad), `remove` (quita la línea), `clear` (vacía todo el carrito, **solo `mesero`/`admin`**) |
 | `id_linea` | string | UUID, obligatorio en `set` y `remove`. Lo genera el cliente **una sola vez por línea** añadida (no por plato) |
-| `comensal` | string | 1–40 caracteres. Obligatorio en `set` y `remove` |
+| `comensal` | string | **Comensal:** opcional; se usa el alias del JWT y, si viene distinto, `NO_AUTORIZADO`. Un comensal solo edita o quita **sus** líneas (las de otro → `NO_AUTORIZADO`, sin cambios). **Personal:** obligatorio en `set` y `remove` (1–40); puede corregir cualquier línea |
 | `id_plato` | entero > 0 | Obligatorio en `set`. **Ya no se envía en `remove`**: la línea se borra por `id_linea` |
 | `cantidad` | entero 1–99 | Obligatorio en `set`. Es la cantidad **final**, no un incremento |
 | `notas` | string ≤ 200 | Opcional, solo en `set` |
@@ -430,8 +445,8 @@ El comensal pide que vaya un mesero. Rol: **solo `comensal`**, con `join:table` 
 - Límite: **1 llamada por mesa cada 60 s** (cuenta para toda la mesa, no por persona). Al
   excederlo el ack es `{ "ok": false, "codigo": "RATE_LIMIT" }` y no se avisa al panel.
 - Reenviar el mismo `eventId` responde `duplicado: true` sin chocar con el límite.
-- El servidor reenvía a `room:admin` con `id_mesa` (del JWT), `comensal` (el alias del
-  `join:table`) y `emitidoEn`. Los comensales no lo reciben.
+- El servidor reenvía a `room:admin` con `id_mesa` y `comensal` (ambos del JWT) y
+  `emitidoEn`. Un `comensal` en el payload se ignora. Los comensales no lo reciben.
 
 ### `cuenta:solicitada`
 
@@ -515,7 +530,7 @@ ventana, se envía uno más al cerrarla (el último estado siempre llega).
 ```
 
 - `comensales`: alias distintos, ordenados. Dos pestañas de "Ana" cuentan como una persona.
-- `total`: personas en la mesa = alias distintos + sockets de comensal **sin** alias.
+- `total`: personas en la mesa = alias distintos (cada JWT de comensal trae el suyo).
 - El personal y la pantalla no cuentan.
 - No lleva `eventId`: es un estado completo; quédate siempre con el último.
 
@@ -609,16 +624,14 @@ un extra para cuando el comensal cerró la PWA. En **iPhone** Web Push solo func
 
 1. El frontend pide la clave pública: `GET /push/clave-publica`.
 2. `registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })`.
-3. Hace `join:table` **con su alias** (`{ comensal: "Ana" }`) y envía la suscripción:
-   - por socket: `push:subscribe { eventId, subscription }`. El alias es el del `join:table`
-     de ese socket (`SIN_SALA` sin join; `PAYLOAD_INVALIDO` si el join no llevó alias); o
-   - por HTTP: `POST /push/suscripcion { subscription, comensal }`. El alias debe estar sentado
-     ahora en la mesa del JWT; si no, `403`.
+3. Hace `join:table` y envía la suscripción. El alias es **el del JWT**:
+   - por socket: `push:subscribe { eventId, subscription }` (`SIN_SALA` sin join); o
+   - por HTTP: `POST /push/suscripcion { subscription }`. `comensal` es opcional y, si
+     viene distinto del JWT, responde `403`.
 4. Service worker de referencia: [`examples/sw-push.js`](examples/sw-push.js) (muestra la
    notificación y, al tocarla, abre `/seguimiento`).
 
-> **Cambio de contrato:** la suscripción ahora queda ligada al **comensal** (alias). Sin alias
-> ya no se puede suscribir.
+> **Cambio de contrato:** la suscripción queda ligada al **comensal** (alias del JWT).
 
 Qué se envía:
 
@@ -661,14 +674,14 @@ intención y verifica el resultado. Todo va detrás de la interfaz `PasarelaPago
 Auth: `Authorization: Bearer <JWT del comensal>` (sesión de mesa vigente). La mesa sale del JWT.
 
 ```json
-{ "modo": "igual", "eventId": "4b0d…", "comensal": "Ana" }
+{ "modo": "igual", "eventId": "4b0d…" }
 ```
 
 | Campo | Reglas |
 |---|---|
 | `modo` | `total` (saldo de la mesa), `igual` (total ÷ personas presentes), `propio` (lo de ese comensal) |
 | `eventId` | UUID. Repetirlo devuelve la **misma** respuesta |
-| `comensal` | Alias de quien paga (1–40). Debe estar **sentado ahora** en la mesa (`join:table` con ese alias); si no, `403` |
+| `comensal` | Opcional. Quien paga es el alias **del JWT**; si viene uno distinto → `403 NO_AUTORIZADO` (nadie paga ni consulta "lo propio" de otro) |
 
 Cualquier otro campo (`monto`, `id_mesa`, `precio`…) **se ignora**: el monto lo calcula el
 servidor con la cuenta del backend.
@@ -690,7 +703,8 @@ servidor con la cuenta del backend.
 |---|---|
 | `400 PAYLOAD_INVALIDO` | `modo`, `eventId` o `comensal` inválidos |
 | `401 NO_AUTORIZADO` | Sin JWT, JWT inválido o la mesa ya se liberó |
-| `403 NO_AUTORIZADO` | No es comensal, o el alias no está en la mesa |
+| `401 TOKEN_INVALIDO` | JWT de comensal antiguo, sin alias: volver a escanear el QR |
+| `403 NO_AUTORIZADO` | No es comensal, o `comensal` distinto del alias del JWT |
 | `409 SIN_SALDO` | Saldo 0 (o `propio` sin consumos de ese alias) |
 | `429 RATE_LIMIT` | Más de 5 intenciones por minuto del mismo comensal |
 | `502/503 ERROR_INTERNO` | El backend no respondió o respondió mal |
@@ -895,7 +909,8 @@ Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 
 ## 10. Historial de cambios de contrato
 
-Todos son **compatibles hacia atrás** salvo el webhook de pagos, que nadie usaba.
+Todos son **compatibles hacia atrás** salvo el webhook de pagos, que nadie usaba, y el alias en
+el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias deja de servir.
 
 | Cambio | Antes | Ahora | Quién debe adaptarse |
 |---|---|---|---|
@@ -908,3 +923,4 @@ Todos son **compatibles hacia atrás** salvo el webhook de pagos, que nadie usab
 | `payment:confirmed` | Con `id_pedido` | Sin `id_pedido`; con `comensal`, `saldo_restante` y centavos | Panel (Caja): dejar de emitirlo desde el navegador |
 | `/internal/qr-rotado` | `token_qr` de hasta 128 caracteres | Hasta 255 (caben los tokens v1 reales) | Nadie |
 | Arranque | Aceptaba secretos cortos o de ejemplo | No arranca sin secretos de 32+ caracteres, distintos y propios | Todo el equipo: regenerar `.env` |
+| Alias del comensal (R-18) | Lo mandaba el cliente en cada evento (`join:table`, `cart:update`, pago, push) | Sale **solo del JWT**; otro alias → `NO_AUTORIZADO`; JWT sin alias → `TOKEN_INVALIDO`; solo se tocan las líneas propias | PWA: enviar `{ comensal }` al abrir la sesión y dejar de mandarlo en los eventos. Backend: `feature/mesas-alias-en-jwt` |

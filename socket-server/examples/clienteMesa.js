@@ -30,15 +30,30 @@ export function uuidV4() {
 }
 
 /**
+ * Alias del comensal dentro de su JWT ("Ana"), para mostrarlo en pantalla.
+ * Solo DECODIFICA el payload (no verifica la firma): no sirve para decidir
+ * nada, eso lo hace el servidor. null si el token no trae alias.
+ */
+export function aliasDelToken(token) {
+  try {
+    const parte = String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = new TextDecoder().decode(Uint8Array.from(globalThis.atob(parte), (c) => c.charCodeAt(0)));
+    const { comensal } = JSON.parse(json);
+    return typeof comensal === 'string' ? comensal : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {object} opciones
  * @param {string} opciones.url      URL del socket-server (VITE_SOCKET_URL)
- * @param {string} opciones.token    JWT del comensal
- * @param {string} [opciones.alias]  Nombre visible del comensal ("Ana")
+ * @param {string} opciones.token    JWT del comensal (trae su alias firmado)
  * @param {Function} [opciones.io]   Para pruebas; por defecto el de socket.io-client
  * @param {object} [opciones.esperas] Para pruebas: { ackMs, reintentosMs: [] }
  */
 export function crearClienteMesa({
-  url, token, alias, io = ioPorDefecto, esperas = {}, opcionesSocket = {},
+  url, token, io = ioPorDefecto, esperas = {}, opcionesSocket = {},
 }) {
   const ackMs = esperas.ackMs ?? ESPERA_ACK_MS;
   const reintentosMs = esperas.reintentosMs ?? ESPERAS_MS;
@@ -115,8 +130,9 @@ export function crearClienteMesa({
 
   function unirse() {
     enSala = false;
-    const datos = alias ? { comensal: alias } : {};
-    socket.timeout(ackMs).emit('join:table', datos, (errTimeout, ack) => {
+    // Sin `comensal`: el servidor usa el alias firmado en el JWT (si se manda
+    // otro distinto, responde NO_AUTORIZADO).
+    socket.timeout(ackMs).emit('join:table', {}, (errTimeout, ack) => {
       if (errTimeout) return; // se reintenta en la siguiente reconexión
       if (!ack || !ack.ok) {
         if (ack && ack.codigo === 'NO_AUTORIZADO') cerrarSesion('NO_AUTORIZADO');

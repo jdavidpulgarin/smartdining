@@ -1,11 +1,13 @@
 /**
  * Hook de React de referencia para la mesa del comensal.
  *
- *   const { estado, carrito, enviar, on } = useMesaSocket({ url, token, alias: 'Ana' });
+ *   const { estado, carrito, comensal, enviar, on } = useMesaSocket({ url, token });
  *
- *   enviar('cart:update', { accion: 'set', id_linea, comensal: 'Ana', id_plato: 3, cantidad: 1 })
+ *   // `comensal` ("Ana") viene FIRMADO en el JWT de la sesión: no se manda
+ *   // en los eventos. Si se manda uno distinto, el servidor responde NO_AUTORIZADO.
+ *   enviar('cart:update', { accion: 'set', id_linea, id_plato: 3, cantidad: 1 })
  *     .then((ack) => ...)                 // el carrito ya se actualizó solo
- *     .catch((e) => mostrar(e.codigo));   // PAYLOAD_INVALIDO, RATE_LIMIT, SIN_RESPUESTA...
+ *     .catch((e) => mostrar(e.codigo));   // PAYLOAD_INVALIDO, NO_AUTORIZADO, RATE_LIMIT, SIN_RESPUESTA...
  *
  *   useEffect(() => on('order:status', (ev) => ...), [on]);   // se re-suscribe solo
  *
@@ -17,20 +19,19 @@
  * Dependencias: react y socket.io-client (vía clienteMesa.js).
  */
 import { useCallback, useEffect, useState } from 'react';
-import { crearClienteMesa } from './clienteMesa.js';
+import { crearClienteMesa, aliasDelToken } from './clienteMesa.js';
 
 const VACIO = { version: 0, items: [] };
 
-export function useMesaSocket({ url, token, alias }) {
+export function useMesaSocket({ url, token }) {
   const [cliente, setCliente] = useState(null);
   const [estado, setEstado] = useState(token ? 'conectando' : 'sesion_cerrada');
   const [carrito, setCarrito] = useState(VACIO);
 
   useEffect(() => {
     if (!url || !token) return undefined;
-    // Token, url o alias nuevos = sesión nueva: se crea otro cliente (el
-    // alias viaja en cada join:table).
-    const nuevo = crearClienteMesa({ url, token, alias });
+    // Token o url nuevos = sesión nueva: se crea otro cliente.
+    const nuevo = crearClienteMesa({ url, token });
     const bajas = [nuevo.on('estado', setEstado), nuevo.on('carrito', setCarrito)];
     setCliente(nuevo);
     return () => {
@@ -39,7 +40,7 @@ export function useMesaSocket({ url, token, alias }) {
       setCliente(null);
       setCarrito(VACIO);
     };
-  }, [url, token, alias]);
+  }, [url, token]);
 
   const enviar = useCallback((evento, payload) => {
     if (!cliente) {
@@ -53,6 +54,6 @@ export function useMesaSocket({ url, token, alias }) {
   const on = useCallback((evento, fn) => (cliente ? cliente.on(evento, fn) : () => {}), [cliente]);
 
   return {
-    estado, carrito, enviar, on,
+    estado, carrito, comensal: aliasDelToken(token), enviar, on,
   };
 }
