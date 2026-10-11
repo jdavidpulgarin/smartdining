@@ -100,6 +100,7 @@ Error:
 | `PAYLOAD_INVALIDO` | Falta un campo o tiene un tipo/valor inválido |
 | `NO_AUTORIZADO` | El rol no puede emitir ese evento o tocar esa mesa |
 | `SIN_SALA` | El comensal no hizo `join:table` antes de emitir |
+| `RATE_LIMIT` | Se superó el límite de frecuencia del evento (p. ej. llamar al mesero) |
 | `ERROR_INTERNO` | Fallo inesperado del servidor |
 
 ### 3.3. Reconexión
@@ -125,6 +126,10 @@ Unirse a la sala de una mesa. Roles: `comensal`, `mesero`, `cajero`, `admin`.
 
 - Comensal: `id_mesa` es opcional; si viene y no coincide con su JWT → `NO_AUTORIZADO`.
 - Personal: `id_mesa` es obligatorio.
+- Comensal: `comensal` (alias, 1–40 caracteres) es **opcional** y recomendado:
+  `{ "comensal": "Ana" }`. Es como lo ven el panel (`mesa:presencia`) y el mesero
+  (`mesa:llamar_mesero`). Si no es un texto válido → `PAYLOAD_INVALIDO`. Repetir
+  `join:table` con otro alias lo cambia.
 
 Ack:
 
@@ -287,6 +292,34 @@ Rol: `comensal`.
 
 `{ "endpoint": "https://fcm.googleapis.com/fcm/send/..." }` → ack `{ "ok": true }`.
 
+### `mesa:llamar_mesero`
+
+El comensal pide que vaya un mesero. Rol: **solo `comensal`**, con `join:table` previo.
+
+```json
+{ "eventId": "0c9e...", "motivo": "Más servilletas, por favor" }
+```
+
+| Campo | Tipo | Reglas |
+|---|---|---|
+| `eventId` | string | UUID, obligatorio |
+| `motivo` | string | Opcional, 0–100 caracteres |
+
+- Límite: **1 llamada por mesa cada 60 s** (cuenta para toda la mesa, no por persona). Al
+  excederlo el ack es `{ "ok": false, "codigo": "RATE_LIMIT" }` y no se avisa al panel.
+- Reenviar el mismo `eventId` responde `duplicado: true` sin chocar con el límite.
+- El servidor reenvía a `room:admin` con `id_mesa` (del JWT), `comensal` (el alias del
+  `join:table`) y `emitidoEn`. Los comensales no lo reciben.
+
+### `cuenta:solicitada`
+
+El comensal pide la cuenta. Rol: **solo `comensal`**, con `join:table` previo.
+Payload: `{ "eventId": "..." }`. Idempotente por `eventId`.
+
+Llega a `room:admin` y a la sala de la mesa (los demás comensales lo ven) como
+`{ eventId, id_mesa, comensal, emitidoEn }`. La mesa queda marcada (`sd:mesa:{ID}:cuenta = 1`)
+hasta que se libere.
+
 ---
 
 ## 5. Eventos servidor → cliente
@@ -298,6 +331,10 @@ Rol: `comensal`.
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, emitidoEn }` |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, monto, referencia_externa, emitidoEn }` |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
+| `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
+| `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
+| `mesa:presencia` | `room:admin` | `{ id_mesa, comensales: [alias], total }` (ver §5.2) |
+| `ingrediente:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_ingrediente, disponible, emitidoEn }` |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | `{ id_mesa, motivo, emitidoEn }` (`motivo`: `pagada` o `liberada`) |
 
 Notas para el frontend:
@@ -343,6 +380,28 @@ Qué debe hacer cada cliente:
 Es idempotente: si el backend repite el aviso, responde `{ "ok": true, "duplicado": true }` y
 no vuelve a emitir. La mesa vuelve a tener sesión cuando el personal genera un QR nuevo.
 
+### 5.2. `mesa:presencia`
+
+Quién está sentado en cada mesa, para el panel. Se emite a `room:admin` cada vez que un
+**comensal** hace `join:table`, `leave:table` o se desconecta, con un máximo de **un aviso
+por mesa cada 500 ms**: el primero sale al instante y, si hubo más cambios dentro de esa
+ventana, se envía uno más al cerrarla (el último estado siempre llega).
+
+```json
+{ "id_mesa": 5, "comensales": ["Ana", "Beto"], "total": 3 }
+```
+
+- `comensales`: alias distintos, ordenados. Dos pestañas de "Ana" cuentan como una persona.
+- `total`: personas en la mesa = alias distintos + sockets de comensal **sin** alias.
+- El personal y la pantalla no cuentan.
+- No lleva `eventId`: es un estado completo; quédate siempre con el último.
+
+### 5.3. `ingrediente:disponibilidad`
+
+El backend avisa que un ingrediente se agotó (`disponible: false`) o volvió (`true`) con
+`POST /internal/ingrediente-disponibilidad`. El constructor de la PWA debe deshabilitar o
+habilitar esa opción en vivo; el KDS puede mostrar una alerta. No lo puede emitir un cliente.
+
 ---
 
 ## 6. Endpoints HTTP
@@ -362,6 +421,7 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 | POST | `/internal/order-status` | Header `x-internal-key` | Solo backend. Mismo body que `order:status` |
 | POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` (token de 1 a 255 caracteres) → reenvía `qr:actualizado` a la pantalla de esa mesa |
 | POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "motivo": "pagada" }` (`motivo` opcional: `pagada` o `liberada`, por defecto `liberada`) → revoca los QR, emite `mesa:liberada`, desconecta a los comensales y borra carrito y suscripciones. Responde `{ ok, duplicado }` |
+| POST | `/internal/ingrediente-disponibilidad` | Header `x-internal-key` | Solo backend. `{ "id_ingrediente": 12, "disponible": false, "eventId": "<uuid opcional>" }` → emite `ingrediente:disponibilidad`. Con `eventId`, un reintento responde `duplicado: true` |
 | POST | `/pagos/webhook` | Firma del proveedor | Ver sección 8 |
 
 ### 6.1. Token QR
