@@ -10,7 +10,9 @@ const VERSION = 'v1';
 const TTL_MIN_MINUTOS = 1;
 const TTL_MAX_MINUTOS = 24 * 60; // un QR que vive días dejaría de ser "de la sesión de mesa"
 const ROLES_GENERAN_QR = ['admin', 'mesero', 'cajero'];
-const MAX_TOKEN_QR_MOSTRADO = 128; // margen generoso sobre el varchar(64) real de mesas.token_qr
+// 255: un token v1 firmado mide ~150 caracteres (payload + HMAC en base64url).
+// Con 128 se rechazaban los tokens reales y la tablet nunca refrescaba el QR.
+const MAX_TOKEN_QR_MOSTRADO = 255;
 
 const b64 = (buf) => Buffer.from(buf).toString('base64url');
 

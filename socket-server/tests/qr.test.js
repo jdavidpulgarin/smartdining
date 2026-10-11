@@ -126,7 +126,7 @@ test('POST /internal/qr-rotado: exige clave interna y solo avisa a la mesa corre
   assert.strictEqual((await post({ id_mesa: 5, token_qr: 'abc' })).status, 401);
   assert.strictEqual((await post({ id_mesa: 'x', token_qr: 'abc' }, interna)).status, 400);
   assert.strictEqual((await post({ id_mesa: 5, token_qr: '' }, interna)).status, 400);
-  assert.strictEqual((await post({ id_mesa: 5, token_qr: 'x'.repeat(200) }, interna)).status, 400);
+  assert.strictEqual((await post({ id_mesa: 5, token_qr: 'x'.repeat(256) }, interna)).status, 400);
 
   const pantalla5 = await s.conectar(tokenPantalla(5));
   const pantalla9 = await s.conectar(tokenPantalla(9));
@@ -138,5 +138,21 @@ test('POST /internal/qr-rotado: exige clave interna y solo avisa a la mesa corre
 
   assert.deepStrictEqual((await en5).token_qr, 'qr-token-mesa-05-nuevo');
   assert.strictEqual(await en9, null);
+  await s.cerrar();
+});
+
+test('POST /internal/qr-rotado acepta un token v1 real (más largo que 128 caracteres)', async () => {
+  const s = await levantar();
+  const real = s.qr.generar(5).token;
+  assert.ok(real.length > 128, `el token v1 mide ${real.length}`);
+  const pantalla = await s.conectar(tokenPantalla(5));
+  const llega = esperar(pantalla, 'qr:actualizado');
+  const r = await fetch(`${s.url}/internal/qr-rotado`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-internal-key': CLAVE_INTERNA },
+    body: JSON.stringify({ id_mesa: 5, token_qr: real }),
+  });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual((await llega).token_qr, real);
   await s.cerrar();
 });
