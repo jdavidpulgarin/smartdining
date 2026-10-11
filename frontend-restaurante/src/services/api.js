@@ -139,6 +139,15 @@ export const mesasApi = {
       body: JSON.stringify({ estado }),
     })
   },
+
+  /**
+   * Rota el QR de una mesa en curso: POST /api/mesas/:id/rotar-qr
+   */
+  async rotarQr(id) {
+    return apiFetch(`/mesas/${id}/rotar-qr`, {
+      method: 'POST',
+    })
+  },
 }
 
 // Submódulo de Pedidos
