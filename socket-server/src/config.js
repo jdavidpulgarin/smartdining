@@ -47,6 +47,11 @@ function leerWompi(env, backendUrl) {
   // El monto sale de la cuenta que calcula el backend: sin él no hay pagos.
   if (!backendUrl) problemas.push('BACKEND_URL es obligatoria si se configuran pagos');
   const ttl = env.PAGOS_TTL_MINUTOS === undefined ? 30 : Number(env.PAGOS_TTL_MINUTOS);
+  // Antigüedad máxima aceptada de un evento (ver TOLERANCIA_PASADO_SEG en wompi.js).
+  const toleranciaSeg = env.PAGOS_WEBHOOK_TOLERANCIA_SEG === undefined ? undefined : Number(env.PAGOS_WEBHOOK_TOLERANCIA_SEG);
+  if (toleranciaSeg !== undefined && (!Number.isInteger(toleranciaSeg) || toleranciaSeg < 60 || toleranciaSeg > 48 * 3600)) {
+    problemas.push('PAGOS_WEBHOOK_TOLERANCIA_SEG debe ser un entero entre 60 y 172800');
+  }
   if (!Number.isInteger(ttl) || ttl < 5 || ttl > 120) problemas.push('PAGOS_TTL_MINUTOS debe ser un entero entre 5 y 120');
   if (problemas.length) throw new Error(`Configuración de Wompi inválida:\n  - ${problemas.join('\n  - ')}`);
 
@@ -58,6 +63,7 @@ function leerWompi(env, backendUrl) {
     apiUrl: v.WOMPI_API_URL,
     sandbox: entornos.has('test'),
     ttlMinutos: ttl,
+    toleranciaPasadoSeg: toleranciaSeg,
   };
 }
 
@@ -122,9 +128,6 @@ function cargarConfig(env = process.env) {
     // Vigencia del JWT de la pantalla de mesa (modelo "QR en vidrio"): larga a
     // propósito, la tablet queda montada de sesión en sesión, no por horas.
     pantallaExpiresIn: env.PANTALLA_TOKEN_EXPIRES_IN || '30d',
-    // Webhook de pagos: sin secreto el endpoint responde 503 (cerrado).
-    pagosWebhookSecret: env.PAYMENT_WEBHOOK_SECRET || null,
-    pagosToleranciaSegundos: Number(env.PAYMENT_WEBHOOK_TOLERANCIA_SEG) || 300,
     // Web Push (opcional): sin las tres, las notificaciones quedan deshabilitadas.
     vapidPublica: env.VAPID_PUBLIC_KEY || null,
     vapidPrivada: env.VAPID_PRIVATE_KEY || null,
