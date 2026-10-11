@@ -21,7 +21,9 @@ function pushFalso() {
 const post = (s, metodo, cuerpo, token) => fetch(`${s.url}/push/suscripcion`, {
   method: metodo, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(cuerpo),
 });
-const cambio = (extra) => ({ eventId: randomUUID(), id_pedido: 1, id_mesa: 5, codigo_pedido: 'PED-1', estado: 'listo', ...extra });
+// Por defecto "en_preparacion" (se avisa a toda la mesa); "listo" va solo a
+// los dueños del pedido y se prueba en push-duenos.test.js.
+const cambio = (extra) => ({ eventId: randomUUID(), id_pedido: 1, id_mesa: 5, codigo_pedido: 'PED-1', estado: 'en_preparacion', ...extra });
 const pausa = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
 test('validarSuscripcion rechaza endpoints peligrosos (SSRF) y llaves malformadas', () => {
@@ -83,10 +85,9 @@ test('un cambio de estado envía push solo a las suscripciones de ESA mesa', asy
   await emitir(cocina, 'order:status', cambio());
   await pausa();
   assert.deepStrictEqual(push.enviados.map((e) => e.endpoint), [sub(1).endpoint]);
-  assert.strictEqual(push.enviados[0].payload.titulo, 'Tu pedido está listo');
-  assert.strictEqual(push.enviados[0].payload.id_mesa, 5);
+  assert.strictEqual(push.enviados[0].payload.titulo, 'Tu pedido está en preparación');
   // Estados que no ameritan interrumpir al comensal no generan push.
-  await emitir(cocina, 'order:status', cambio({ estado: 'listo' }));
+  await emitir(cocina, 'order:status', cambio({ estado: 'en_preparacion' }));
   const mesero = await s.conectar(tokenPersonal('mesero'));
   await emitir(mesero, 'order:status', cambio({ estado: 'entregado' }));
   await pausa();

@@ -52,9 +52,22 @@ async function difundirPedidoCreado(ctx, p) {
     emitidoEn: new Date().toISOString(),
   });
 
+  // Dueños del pedido para el push "¡Tu plato está listo!": el comensal de
+  // cada ítem si el backend lo envía y, además, los de las líneas del carrito
+  // que se están convirtiendo en este pedido (el backend hoy guarda el apodo
+  // dentro de notas_especiales, no en un campo propio).
+  const carrito = await carritos.snapshot(pedido.id_mesa);
+  const duenos = new Set(carrito.items.map((i) => i.comensal).filter(Boolean));
+  for (const item of Array.isArray(pedido.items) ? pedido.items : []) {
+    if (item && typeof item.comensal === 'string' && item.comensal.trim() && item.comensal.length <= 40) {
+      duenos.add(item.comensal.trim());
+    }
+  }
+  if (duenos.size > 0 && ctx.duenosPedidos) await ctx.duenosPedidos.guardar(pedido.id_pedido, duenos);
+
   // Lo que estaba en el carrito acaba de convertirse en pedido: se vacía para
   // que la mesa no pueda volver a ordenar lo mismo por accidente.
-  if ((await carritos.snapshot(pedido.id_mesa)).items.length > 0) {
+  if (carrito.items.length > 0) {
     io.to(salaMesa(pedido.id_mesa)).emit('cart:updated', {
       eventId: p.eventId,
       origen: 'sistema',

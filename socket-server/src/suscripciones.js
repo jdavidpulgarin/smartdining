@@ -163,9 +163,11 @@ const rutasSuscripciones = {
 // interrumpirlo con una notificación.
 const MENSAJES_ESTADO = {
   en_preparacion: 'Tu pedido está en preparación',
-  listo: 'Tu pedido está listo',
+  listo: '¡Tu plato está listo!',
   cancelado: 'Tu pedido fue cancelado',
 };
+// Al tocar la notificación, la PWA abre el seguimiento del pedido.
+const URL_SEGUIMIENTO = '/seguimiento';
 
 /**
  * Envía la notificación push a las suscripciones de la mesa y elimina las
@@ -175,19 +177,28 @@ const MENSAJES_ESTADO = {
 async function notificarCambioEstado(ctx, cambio) {
   const titulo = MENSAJES_ESTADO[cambio.estado];
   if (!titulo || !ctx.push.habilitado) return;
+  // Payload mínimo: sin nombres, sin montos, sin mesa. El navegador lo
+  // muestra en la pantalla bloqueada del teléfono.
   const payload = {
     titulo,
     cuerpo: cambio.codigo_pedido || `Pedido #${cambio.id_pedido}`,
     id_pedido: cambio.id_pedido,
     estado: cambio.estado,
-    id_mesa: cambio.id_mesa,
+    url: URL_SEGUIMIENTO,
   };
-  await Promise.all((await ctx.suscripciones.listar(cambio.id_mesa)).map(async (s) => {
+  let destinatarios = await ctx.suscripciones.listar(cambio.id_mesa);
+  if (cambio.estado === 'listo') {
+    // "¡Tu plato está listo!" solo a quien lo pidió. Si no se sabe quién fue,
+    // no se avisa a nadie por push (la sala igual recibe order:status en vivo).
+    const duenos = ctx.duenosPedidos ? await ctx.duenosPedidos.obtener(cambio.id_pedido) : [];
+    destinatarios = destinatarios.filter((s) => s.comensal && duenos.includes(s.comensal));
+  }
+  await Promise.all(destinatarios.map(async (s) => {
     const r = await ctx.push.enviar(s, payload);
     if (r.caducada) await ctx.suscripciones.quitar(cambio.id_mesa, s.endpoint);
   }));
 }
 
 module.exports = {
-  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, rutasSuscripciones, notificarCambioEstado, validarSuscripcion,
+  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, URL_SEGUIMIENTO, rutasSuscripciones, notificarCambioEstado, validarSuscripcion,
 };
