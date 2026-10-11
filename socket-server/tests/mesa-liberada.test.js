@@ -24,7 +24,7 @@ const desconexion = (socket, ms = 1000) => new Promise((res) => {
 });
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
 // JWT de comensal emitido hace `seg` segundos (el grupo que ya estaba sentado).
-const comensalDeAntes = (id_mesa, seg = 60) => firmar({ id_mesa, rol: 'comensal', iat: Math.floor(Date.now() / 1000) - seg });
+const comensalDeAntes = (id_mesa, seg = 60) => tokenComensal(id_mesa, 'Ana', { iat: Math.floor(Date.now() / 1000) - seg });
 
 async function escenario(t) {
   const s = await levantar();
@@ -87,7 +87,7 @@ test('la pantalla y el personal siguen conectados y el panel recibe el aviso', a
 
 test('otra mesa no recibe nada ni pierde su carrito', async (t) => {
   const { s } = await escenario(t);
-  const beto = await s.conectar(tokenComensal(7));
+  const beto = await s.conectar(tokenComensal(7, 'Beto'));
   await emitir(beto, 'join:table', {});
   await emitir(beto, 'cart:update', {
     eventId: randomUUID(), accion: 'set', id_linea: randomUUID(), comensal: 'Beto', id_plato: 1, cantidad: 2,

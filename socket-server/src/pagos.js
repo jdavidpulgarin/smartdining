@@ -4,11 +4,10 @@ const { log } = require('./log');
 const {
   ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson,
 } = require('./http');
-const { verificarJwt, ROL_COMENSAL } = require('./auth');
+const { verificarJwt, esComensalSinAlias, ROL_COMENSAL } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
 const { calcularMonto, validarCuenta, MODOS } = require('./cuenta');
 
-const MAX_ALIAS = 40;
 // 5 intenciones por minuto por comensal: de sobra para reintentar un pago
 // fallido y corta a quien intenta martillar al backend o a la pasarela.
 const LIMITE_INTENCIONES = 5;
@@ -22,8 +21,14 @@ function generarReferencia(idMesa, ahora = Date.now) {
 /** Comensal autenticado por Bearer, con su sesión de mesa todavía vigente. */
 async function comensalAutenticado(req, ctx) {
   const auth = req.headers.authorization || '';
-  const identidad = auth.startsWith('Bearer ') ? verificarJwt(auth.slice(7), ctx.config.jwtSecret) : null;
-  if (!identidad) throw new ErrorHttp(401, 'NO_AUTORIZADO', 'Se requiere un JWT válido');
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const identidad = token ? verificarJwt(token, ctx.config.jwtSecret) : null;
+  if (!identidad) {
+    if (token && esComensalSinAlias(token, ctx.config.jwtSecret)) {
+      throw new ErrorHttp(401, 'TOKEN_INVALIDO', 'Sesión antigua sin nombre: escanea el QR de nuevo');
+    }
+    throw new ErrorHttp(401, 'NO_AUTORIZADO', 'Se requiere un JWT válido');
+  }
   if (identidad.rol !== ROL_COMENSAL) throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Solo un comensal puede pagar desde la mesa');
   if (await ctx.qr.revocadaDespuesDe(identidad.id_mesa, identidad.iat)) {
     throw new ErrorHttp(401, 'NO_AUTORIZADO', 'La sesión de esta mesa ya se cerró');
@@ -47,18 +52,15 @@ async function crearIntencionPago(req, res, ctx) {
 
   if (!MODOS.includes(cuerpo.modo)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', `modo debe ser uno de: ${MODOS.join(', ')}`);
   if (!esEventIdValido(cuerpo.eventId)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
-  const comensal = typeof cuerpo.comensal === 'string' ? cuerpo.comensal.trim() : '';
-  if (!comensal || comensal.length > MAX_ALIAS) {
-    throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', `comensal debe ser un texto de 1 a ${MAX_ALIAS} caracteres`);
+  // Quien paga es el alias FIRMADO en el JWT. `comensal` en el cuerpo es
+  // opcional; si viene distinto, alguien intenta pagar (o ver "lo propio")
+  // como otro comensal.
+  const { comensal } = identidad;
+  if (cuerpo.comensal !== undefined && cuerpo.comensal !== comensal) {
+    throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Solo puedes pagar con tu propio nombre');
   }
-
-  // El alias no viaja en el JWT: como mínimo se exige que esa persona esté
-  // sentada ahora en ESTA mesa (presencia real de la sala), para que nadie
-  // pague ni consulte "lo propio" de un alias inventado.
+  // El modo "igual" reparte entre las personas sentadas ahora en la mesa.
   const presencia = await ctx.presencia.calcular(idMesa);
-  if (!presencia.comensales.includes(comensal)) {
-    throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Únete a la mesa (join:table) con tu nombre antes de pagar');
-  }
 
   // Reintento del mismo eventId: misma respuesta, sin otra intención.
   const claveEvento = `comensal:pago:intencion:${idMesa}:${cuerpo.eventId}`;

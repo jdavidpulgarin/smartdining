@@ -37,18 +37,15 @@ test('validarSuscripcion rechaza endpoints peligrosos (SSRF) y llaves malformada
   assert.ok(validarSuscripcion(null).error);
 });
 
-test('HTTP: el comensal se suscribe con su alias presente y se desuscribe; solo el comensal', async () => {
+test('HTTP: el comensal se suscribe con el alias de su JWT y se desuscribe; solo el comensal', async () => {
   const push = pushFalso();
   const s = await levantar({}, { push });
-  const ana = await s.conectar(tokenComensal(5));
-  await emitir(ana, 'join:table', { comensal: 'Ana' });
   const alta = (extra = {}) => ({ subscription: sub(), comensal: 'Ana', ...extra });
   assert.strictEqual((await post(s, 'POST', alta())).status, 401);
   assert.strictEqual((await post(s, 'POST', alta(), tokenPersonal('mesero'))).status, 403);
   assert.strictEqual((await post(s, 'POST', alta({ subscription: { endpoint: 'x' } }), tokenComensal(5))).status, 400);
-  assert.strictEqual((await post(s, 'POST', alta({ comensal: undefined }), tokenComensal(5))).status, 400);
-  assert.strictEqual((await post(s, 'POST', alta({ comensal: 'Zoe' }), tokenComensal(5))).status, 403, 'alias que no está en la mesa');
-  assert.strictEqual((await post(s, 'POST', alta(), tokenComensal(6))).status, 403, 'Ana no está en la mesa 6');
+  assert.strictEqual((await post(s, 'POST', alta({ comensal: 'Zoe' }), tokenComensal(5))).status, 403, 'otro alias que el del JWT');
+  assert.strictEqual((await post(s, 'POST', alta({ comensal: undefined }), tokenComensal(5))).status, 201, 'sin comensal: el del JWT');
   assert.strictEqual((await post(s, 'POST', alta(), tokenComensal(5))).status, 201);
   assert.strictEqual((await post(s, 'POST', alta(), tokenComensal(5))).status, 201); // idempotente
   assert.deepStrictEqual(s.suscripciones.listar(5).map((x) => x.comensal), ['Ana']);
@@ -57,13 +54,11 @@ test('HTTP: el comensal se suscribe con su alias presente y se desuscribe; solo 
   await s.cerrar();
 });
 
-test('por socket: exige sala y alias; es idempotente y push:unsubscribe la quita', async () => {
+test('por socket: exige sala; el alias es el del JWT; es idempotente y push:unsubscribe la quita', async () => {
   const s = await levantar({}, { push: pushFalso() });
   const ana = await s.conectar(tokenComensal(5));
   assert.strictEqual((await emitir(ana, 'push:subscribe', { eventId: randomUUID(), subscription: sub() })).codigo, 'SIN_SALA');
   await emitir(ana, 'join:table', {});
-  assert.strictEqual((await emitir(ana, 'push:subscribe', { eventId: randomUUID(), subscription: sub() })).codigo, 'PAYLOAD_INVALIDO', 'sin alias');
-  await emitir(ana, 'join:table', { comensal: 'Ana' });
   const eventId = randomUUID();
   assert.strictEqual((await emitir(ana, 'push:subscribe', { eventId, subscription: sub() })).duplicado, false);
   assert.strictEqual((await emitir(ana, 'push:subscribe', { eventId, subscription: sub() })).duplicado, true);

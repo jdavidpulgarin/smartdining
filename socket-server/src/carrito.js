@@ -67,6 +67,15 @@ function normalizarIngredientes(lista) {
  */
 function aplicarOperacion(actual, op) {
   let items = actual.items.slice();
+  // Un comensal solo toca SUS líneas (op.soloDe = su alias del JWT). Se mira
+  // aquí, dentro del paso atómico del almacén, y no antes: así nadie puede
+  // colarse entre la comprobación y la escritura. El personal no lleva soloDe.
+  if (op.soloDe && op.accion !== 'clear') {
+    const existente = items.find((x) => x.id_linea === op.id_linea);
+    if (existente && existente.comensal !== op.soloDe) {
+      return { error: 'Esa línea es de otro comensal', codigo: 'NO_AUTORIZADO' };
+    }
+  }
   if (op.accion === 'set') {
     const linea = {
       id_linea: op.id_linea,
@@ -185,7 +194,17 @@ function registrarCarrito(socket, { carritos }) {
       return fallo('SIN_SALA', 'Haz join:table antes de modificar el carrito', { eventId });
     }
 
-    const errorPayload = validarOperacion(p);
+    // El comensal es el del JWT. Puede omitir `comensal`; si lo manda distinto,
+    // intenta editar o quitar como otro: NO_AUTORIZADO.
+    let op = p;
+    if (identidad.rol === ROL_COMENSAL) {
+      if (p.comensal !== undefined && p.comensal !== identidad.comensal) {
+        return fallo('NO_AUTORIZADO', 'Solo puedes modificar el carrito con tu propio nombre', { eventId });
+      }
+      op = { ...p, comensal: identidad.comensal, soloDe: identidad.comensal };
+    }
+
+    const errorPayload = validarOperacion(op);
     if (errorPayload) return fallo('PAYLOAD_INVALIDO', errorPayload, { eventId });
 
     // Duplicado (reenvío tras reconexión): no se reaplica; se responde con el
@@ -193,14 +212,14 @@ function registrarCarrito(socket, { carritos }) {
     // Comprobar el eventId y aplicar ocurren en UN paso atómico del almacén:
     // con Redis, dos reenvíos simultáneos no pueden aplicarse ambos.
     const claveEvento = `${identidad.rol}:cart:${idMesa}:${eventId}`;
-    const resultado = await carritos.aplicarUnaVez(idMesa, p, claveEvento);
-    if (resultado.error) return fallo('PAYLOAD_INVALIDO', resultado.error, { eventId });
+    const resultado = await carritos.aplicarUnaVez(idMesa, op, claveEvento);
+    if (resultado.error) return fallo(resultado.codigo || 'PAYLOAD_INVALIDO', resultado.error, { eventId });
     if (resultado.duplicado) return exito({ eventId, duplicado: true, carrito: resultado.snapshot });
 
     // A los demás; el emisor ya recibe el snapshot en su ack.
     socket.to(salaMesa(idMesa)).emit('cart:updated', {
       eventId,
-      origen: typeof p.comensal === 'string' ? p.comensal : null,
+      origen: typeof op.comensal === 'string' ? op.comensal : null,
       carrito: resultado.snapshot,
     });
     return exito({ eventId, duplicado: false, carrito: resultado.snapshot });

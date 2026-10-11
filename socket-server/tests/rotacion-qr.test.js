@@ -156,7 +156,7 @@ test('quien entró antes de una rotación sigue operando en el socket', async (t
   const { s, reloj, abrir, pantalla } = await escenario(t);
   await abrir(5);
   // Ana escaneó el QR inicial y recibió su JWT, pero aún no conecta el socket.
-  const jwtAna = firmar({ id_mesa: 5, rol: 'comensal', sid: 'sid-del-qr-inicial' });
+  const jwtAna = tokenComensal(5, 'Ana', { sid: 'sid-del-qr-inicial' });
   const llega = esperar(pantalla, 'qr:actualizado');
   await reloj.avanzar();
   await llega; // el QR ya rotó

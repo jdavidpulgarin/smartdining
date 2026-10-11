@@ -5,6 +5,18 @@ const ROL_COMENSAL = 'comensal';
 // Pantalla fija montada en la mesa (tablet) que solo muestra su QR: no es un
 // comensal (no pide ni carga carrito) ni personal (no ve otras mesas ni KDS).
 const ROL_PANTALLA = 'pantalla';
+const MAX_ALIAS = 40;
+
+/**
+ * Alias del comensal tal como viene FIRMADO en su JWT (lo pone el backend al
+ * abrir la sesión, único en la mesa). Es la única fuente del alias: el que
+ * mande el cliente en un evento solo puede coincidir con este.
+ */
+function aliasDelJwt(p) {
+  if (typeof p.comensal !== 'string') return null;
+  const alias = p.comensal.trim();
+  return alias && alias.length <= MAX_ALIAS ? alias : null;
+}
 
 /**
  * Verifica un JWT del backend y devuelve la identidad normalizada, o null si
@@ -14,9 +26,18 @@ const ROL_PANTALLA = 'pantalla';
 function verificarJwt(token, secreto) {
   try {
     const p = jwt.verify(token, secreto, { algorithms: ['HS256'] });
-    if (p.rol === ROL_COMENSAL || p.rol === ROL_PANTALLA) {
+    if (p.rol === ROL_COMENSAL) {
       if (!Number.isInteger(p.id_mesa)) return null;
+      // Un JWT de comensal sin alias es de antes de que el backend lo firmara:
+      // se trata como inválido para obligar a pedir una sesión nueva, en vez de
+      // volver a creerle al cliente el alias de cada evento.
+      const comensal = aliasDelJwt(p);
+      if (!comensal) return null;
       // iat permite saber si la sesión es anterior a la liberación de la mesa.
+      return { rol: p.rol, id_mesa: p.id_mesa, iat: p.iat, comensal };
+    }
+    if (p.rol === ROL_PANTALLA) {
+      if (!Number.isInteger(p.id_mesa)) return null;
       return { rol: p.rol, id_mesa: p.id_mesa, iat: p.iat };
     }
     if (ROLES_PERSONAL.includes(p.rol)) {
@@ -25,6 +46,20 @@ function verificarJwt(token, secreto) {
     return null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * ¿Es un JWT de comensal bien firmado y vigente, pero SIN alias (sesión
+ * antigua)? Sirve para responder TOKEN_INVALIDO por HTTP y que el cliente
+ * sepa que debe abrir una sesión nueva, no que le falta permiso.
+ */
+function esComensalSinAlias(token, secreto) {
+  try {
+    const p = jwt.verify(token, secreto, { algorithms: ['HS256'] });
+    return p.rol === ROL_COMENSAL && Number.isInteger(p.id_mesa) && !aliasDelJwt(p);
+  } catch {
+    return false;
   }
 }
 
@@ -57,5 +92,5 @@ function autenticarSocket(secreto, { sesionVigente = () => true } = {}) {
 }
 
 module.exports = {
-  verificarJwt, autenticarSocket, ROLES_PERSONAL, ROL_COMENSAL, ROL_PANTALLA,
+  verificarJwt, esComensalSinAlias, autenticarSocket, ROLES_PERSONAL, ROL_COMENSAL, ROL_PANTALLA, MAX_ALIAS,
 };

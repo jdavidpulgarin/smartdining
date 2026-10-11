@@ -111,7 +111,7 @@ test('corte de red: lo enviado sin conexión queda en cola y sale tras el nuevo 
 });
 
 test('mesa:liberada cierra la sesión: vacía carrito, rechaza la cola y no reconecta', async (t) => {
-  const { s, cliente } = await escenario(t, firmar({ id_mesa: 5, rol: 'comensal', iat: Math.floor(Date.now() / 1000) - 60 }));
+  const { s, cliente } = await escenario(t, tokenComensal(5, 'Ana', { iat: Math.floor(Date.now() / 1000) - 60 }));
   await hasta(() => cliente.estado === 'conectado');
   await cliente.enviar('cart:update', linea());
   let liberada = null;
