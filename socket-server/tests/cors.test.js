@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { levantar } = require('./helpers');
+const { levantar, ENV_BASE } = require('./helpers');
 const { cargarConfig } = require('../src/config');
 
 const PERMITIDO = 'http://localhost:5173';

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { randomUUID } = require('node:crypto');
-const { levantar, emitir, tokenComensal, tokenPersonal } = require('./helpers');
+const { levantar, emitir, tokenComensal, tokenPersonal, CLAVE_INTERNA } = require('./helpers');
 const { validarSuscripcion } = require('../src/suscripciones');
 
 const sub = (n = 1) => ({
@@ -102,12 +102,12 @@ test('un evento duplicado no reenvía push y las suscripciones caducadas se elim
 });
 
 test('al liberar la mesa se borran suscripciones y carrito de esa mesa (no de otras)', async () => {
-  const s = await levantar({ INTERNAL_API_KEY: 'k' }, { push: pushFalso() });
+  const s = await levantar({}, { push: pushFalso() });
   s.suscripciones.agregar(5, sub(1));
   s.suscripciones.agregar(6, sub(2));
   s.carritos.aplicar(5, { accion: 'set', comensal: 'Ana', id_plato: 1, cantidad: 1 });
   const r = await fetch(`${s.url}/internal/mesa-liberada`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-internal-key': 'k' }, body: JSON.stringify({ id_mesa: 5 }),
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-internal-key': CLAVE_INTERNA }, body: JSON.stringify({ id_mesa: 5 }),
   });
   assert.strictEqual(r.status, 200);
   assert.strictEqual(s.suscripciones.listar(5).length, 0);

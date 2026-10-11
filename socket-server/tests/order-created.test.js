@@ -1,9 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { randomUUID } = require('node:crypto');
-const { levantar, emitir, esperar, tokenComensal, tokenPersonal } = require('./helpers');
+const { exigirClaveInterna } = require('../src/http');
+const { levantar, emitir, esperar, tokenComensal, tokenPersonal, CLAVE_INTERNA } = require('./helpers');
 
-const CLAVE = 'clave-interna-de-pruebas';
+const CLAVE = CLAVE_INTERNA;
 const pedido = (id_pedido = 87, id_mesa = 5) => ({
   id_pedido, codigo_pedido: `PED-${id_pedido}`, id_mesa, estado: 'recibido', total: 56000, items: [{ id_plato: 3, cantidad: 2 }],
 });
@@ -14,7 +15,7 @@ const post = (s, ruta, cuerpo, clave = CLAVE) => fetch(`${s.url}${ruta}`, {
 });
 
 async function escenario() {
-  const s = await levantar({ INTERNAL_API_KEY: CLAVE });
+  const s = await levantar({});
   const cocina = await s.conectar(tokenPersonal('cocina'));
   const admin = await s.conectar(tokenPersonal('admin'));
   const mesero = await s.conectar(tokenPersonal('mesero'));
@@ -60,19 +61,20 @@ test('un admin conectado a KDS y Admin recibe la comanda una sola vez', async ()
   await s.cerrar();
 });
 
-test('HTTP interno exige la clave; sin clave configurada queda cerrado', async () => {
+test('HTTP interno exige la clave; sin clave configurada queda cerrado', async (t) => {
   const { s } = await escenario();
+  // Se cierra aunque falle una aserción: un servidor abierto cuelga node --test.
+  t.after(() => s.cerrar());
   const cuerpo = { eventId: randomUUID(), pedido: pedido() };
   assert.strictEqual((await post(s, '/internal/order-created', cuerpo, null)).status, 401);
   assert.strictEqual((await post(s, '/internal/order-created', cuerpo, 'mala')).status, 401);
   assert.strictEqual((await post(s, '/internal/order-created', '{no es json', CLAVE)).status, 400);
   assert.strictEqual((await post(s, '/internal/order-created', { eventId: 'x', pedido: pedido() })).status, 400);
   assert.strictEqual((await post(s, '/internal/order-created', { eventId: randomUUID(), pedido: { ...pedido(), estado: 'raro' } })).status, 400);
-  await s.cerrar();
 
-  const cerrado = await levantar();
-  assert.strictEqual((await post(cerrado, '/internal/order-created', cuerpo)).status, 503);
-  await cerrado.cerrar();
+  // El arranque ya exige INTERNAL_API_KEY (secretos.js), pero la guarda sigue:
+  // si algún día la configuración llega sin clave, /internal/* queda cerrado.
+  assert.throws(() => exigirClaveInterna({ headers: {} }, { internalApiKey: null }), (e) => e.status === 503);
 });
 
 test('por socket: mesero y admin pueden emitir; comensal y cocina no', async () => {

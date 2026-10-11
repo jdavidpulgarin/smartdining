@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { crearServicioQr } = require('../src/qr');
 const {
-  levantar, emitir, esperar, tokenPersonal, tokenComensal, tokenPantalla,
+  levantar, emitir, esperar, tokenPersonal, tokenComensal, tokenPantalla, CLAVE_INTERNA,
 } = require('./helpers');
 
 function servicio(secreto = 's3creto') {
@@ -65,7 +65,7 @@ test('valida el rango del TTL y el id de mesa', () => {
 });
 
 test('HTTP: generar exige rol de personal; validar es público; mesa-liberada revoca', async () => {
-  const s = await levantar({ INTERNAL_API_KEY: 'k' });
+  const s = await levantar({});
   const post = (ruta, cuerpo, cabeceras = {}) => fetch(`${s.url}${ruta}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...cabeceras }, body: JSON.stringify(cuerpo),
   });
@@ -87,7 +87,7 @@ test('HTTP: generar exige rol de personal; validar es público; mesa-liberada re
 
   assert.strictEqual((await post('/internal/mesa-liberada', { id_mesa: 5 })).status, 401);
   await new Promise((r2) => setTimeout(r2, 5)); // el QR debe ser anterior a la liberación
-  assert.strictEqual((await post('/internal/mesa-liberada', { id_mesa: 5 }, { 'x-internal-key': 'k' })).status, 200);
+  assert.strictEqual((await post('/internal/mesa-liberada', { id_mesa: 5 }, { 'x-internal-key': CLAVE_INTERNA })).status, 200);
   const revocado = await post('/qr/validar', { token });
   assert.deepStrictEqual([revocado.status, (await revocado.json()).motivo], [401, 'revocado']);
   await s.cerrar();
@@ -117,11 +117,11 @@ test('POST /qr/pantalla: exige rol de personal y devuelve un JWT de pantalla par
 });
 
 test('POST /internal/qr-rotado: exige clave interna y solo avisa a la mesa correspondiente', async () => {
-  const s = await levantar({ INTERNAL_API_KEY: 'k' });
+  const s = await levantar({});
   const post = (cuerpo, cabeceras = {}) => fetch(`${s.url}/internal/qr-rotado`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...cabeceras }, body: JSON.stringify(cuerpo),
   });
-  const interna = { 'x-internal-key': 'k' };
+  const interna = { 'x-internal-key': CLAVE_INTERNA };
 
   assert.strictEqual((await post({ id_mesa: 5, token_qr: 'abc' })).status, 401);
   assert.strictEqual((await post({ id_mesa: 'x', token_qr: 'abc' }, interna)).status, 400);
