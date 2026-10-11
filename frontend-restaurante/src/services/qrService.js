@@ -179,35 +179,48 @@ export async function liberarMesaRemota(idMesa) {
 /**
  * Solicita el JWT de autenticación para la tablet física de la mesa (rol 'pantalla')
  * llamando a POST /qr/pantalla del socket-server (EVENTS.md §6).
+ *
+ * Si falla, se reutiliza solo un token de PANTALLA emitido antes para esta mesa.
+ * Nunca se usa el JWT del personal en su lugar: la tablet queda a la vista de
+ * los comensales y con ese token cualquiera podría actuar como mesero (abrir y
+ * liberar mesas, ver todas las salas). Sin credencial, se lanza un error para
+ * que la pantalla lo muestre.
+ *
+ * @throws Error si no hay token de pantalla emitido ni en caché
  */
 export async function solicitarTokenPantalla(idMesa) {
   const staffToken = getStaffToken()
   const storageKey = `smartdining_pantalla_token_${idMesa}`
+  let motivo = 'sin sesión de personal'
 
-  try {
-    const res = await fetch(`${SOCKET_URL}/qr/pantalla`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: staffToken ? `Bearer ${staffToken}` : '',
-      },
-      body: JSON.stringify({ id_mesa: Number(idMesa) }),
-    })
+  if (staffToken) {
+    try {
+      const res = await fetch(`${SOCKET_URL}/qr/pantalla`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${staffToken}`,
+        },
+        body: JSON.stringify({ id_mesa: Number(idMesa) }),
+      })
 
-    if (res.ok) {
-      const data = await res.json()
-      try {
-        localStorage.setItem(storageKey, data.token)
-      } catch {
-        // ignorar
+      if (res.ok) {
+        const data = await res.json()
+        try {
+          localStorage.setItem(storageKey, data.token)
+        } catch {
+          // ignorar
+        }
+        return data
       }
-      return data
+      motivo = `el servidor respondió ${res.status}`
+    } catch (err) {
+      motivo = 'el servidor de tiempo real no responde'
+      console.warn('Aviso: no se pudo obtener token de /qr/pantalla:', err.message)
     }
-  } catch (err) {
-    console.warn('Aviso: no se pudo obtener token de /qr/pantalla:', err.message)
   }
 
-  // Fallback: reutilizar token en localStorage si ya se había emitido
+  // Respaldo: reutilizar un token de pantalla ya emitido para esta mesa
   try {
     const cached = localStorage.getItem(storageKey)
     if (cached) {
@@ -217,11 +230,7 @@ export async function solicitarTokenPantalla(idMesa) {
     // ignorar
   }
 
-  return {
-    token: staffToken || '',
-    id_mesa: Number(idMesa),
-    expira_en: 'fallback-staff',
-  }
+  throw new Error(`No se pudo obtener la credencial de la pantalla (${motivo}). Inicia sesión como personal y recarga.`)
 }
 
 /**

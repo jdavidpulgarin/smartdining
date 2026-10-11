@@ -79,8 +79,17 @@ export function PantallaMesa() {
 
     async function initSocketPantalla() {
       // 1. Obtener credencial JWT para esta tablet de mesa (POST /qr/pantalla)
-      const cred = await solicitarTokenPantalla(numMesa)
+      let cred
+      try {
+        cred = await solicitarTokenPantalla(numMesa)
+      } catch (err) {
+        if (isCancelled) return
+        setSocketStatus('desconectado')
+        setErrorPantalla(err.message)
+        return
+      }
       if (isCancelled) return
+      setErrorPantalla('')
       setPantallaToken(cred.token)
 
       // 2. Conectar al socket server con el token emitido
