@@ -46,9 +46,12 @@
 \echo '===> [12/14] Ejecutando 12_documentacion.sql...'
 \i 12_documentacion.sql
 
-\echo '===> [13/14] Ejecutando 13_constructor.sql...'
+\echo '===> [13/15] Ejecutando 13_constructor.sql...'
 \i 13_constructor.sql
 
-\echo '===> [14/14] Finalizando bootstrap...'
+\echo '===> [14/15] Ejecutando 14_seed_constructor.sql...'
+\i 14_seed_constructor.sql
+
+\echo '===> [15/15] Finalizando bootstrap...'
 \echo '====================================================='
 \echo '  SmartDining: bootstrap del esquema y scripts completado. '

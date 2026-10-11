@@ -46,7 +46,7 @@ function crearAlmacenCarritos() {
         return { error: 'El carrito de la mesa alcanzó el máximo de ítems' };
       }
       c.items.set(op.id_linea, {
-        id_linea: op.id_linea, comensal: op.comensal, id_plato: op.id_plato, cantidad: op.cantidad, notas: op.notas ?? null,
+        id_linea: op.id_linea, comensal: op.comensal, id_plato: op.id_plato, cantidad: op.cantidad, notas: op.notas ?? null, ingredientes: op.ingredientes ?? null,
       });
     } else if (op.accion === 'remove') {
       c.items.delete(op.id_linea);
@@ -81,6 +81,9 @@ function validarOperacion(p) {
     }
     if (p.notas !== undefined && p.notas !== null && (typeof p.notas !== 'string' || p.notas.length > MAX_NOTAS)) {
       return `notas debe ser un texto de hasta ${MAX_NOTAS} caracteres`;
+    }
+    if (p.ingredientes !== undefined && p.ingredientes !== null && !Array.isArray(p.ingredientes)) {
+      return 'ingredientes debe ser un arreglo';
     }
   }
   return null;

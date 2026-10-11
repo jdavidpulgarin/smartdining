@@ -159,7 +159,11 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
   "comensal": "Ana",
   "id_plato": 3,
   "cantidad": 2,
-  "notas": "sin cebolla"
+  "notas": "sin cebolla",
+  "ingredientes": [
+    { "id_ingrediente": 10, "porcion": "normal", "precio_aplicado": 0 },
+    { "id_ingrediente": 12, "porcion": "extra", "precio_aplicado": 1500 }
+  ]
 }
 ```
 
@@ -173,6 +177,7 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
 | `id_plato` | entero > 0 | Obligatorio en `set`. **Ya no se envía en `remove`**: la línea se borra por `id_linea` |
 | `cantidad` | entero 1–99 | Obligatorio en `set`. Es la cantidad **final**, no un incremento |
 | `notas` | string ≤ 200 | Opcional, solo en `set` |
+| `ingredientes` | array | Opcional, solo en `set`. Contiene los detalles del constructor para platos armables |
 
 Por qué `set` y no `+1`/`-1`: fijar el valor absoluto hace que reenviar el evento
 nunca duplique unidades. Cada ítem se identifica por `id_linea`: dos líneas del
@@ -208,7 +213,17 @@ la fuente de verdad; un comensal **no** puede emitirlo.
     "total": 56000,
     "notas_generales": null,
     "items": [
-      { "id_plato": 3, "nombre": "Bandeja paisa", "cantidad": 2, "notas_especiales": "Ana: sin cebolla" }
+      { 
+        "id_plato": 3, 
+        "nombre": "Bowl", 
+        "cantidad": 2, 
+        "comensal": "Ana", 
+        "notas_especiales": "sin cebolla",
+        "ingredientes": [
+          { "id_ingrediente": 10, "nombre": "Arroz", "porcion": "normal", "precio_aplicado": 0 },
+          { "id_ingrediente": 12, "nombre": "Pollo", "porcion": "extra", "precio_aplicado": 1500 }
+        ]
+      }
     ]
   }
 }
