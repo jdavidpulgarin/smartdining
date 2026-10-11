@@ -32,6 +32,12 @@ export function QRModal({
   const [copied, setCopied] = useState(false)
   const [copiedTablet, setCopiedTablet] = useState(false)
   const [token, setToken] = useState(table?.token_qr || '')
+  const [prevTableToken, setPrevTableToken] = useState(table?.token_qr)
+  if (table?.token_qr !== prevTableToken) {
+    setPrevTableToken(table?.token_qr)
+    setToken(table?.token_qr || '')
+  }
+
   const [loadingAction, setLoadingAction] = useState(false)
   const qrRef = useRef(null)
 
@@ -69,7 +75,9 @@ export function QRModal({
 
   // URL para el comensal: Juan acordó https://<app>/?token=<qr> o /menu?token=<qr>
   const diningUrl = token
-    ? `http://${activeDomain}:${port}/?token=${token}&mesa=${table.number || table.id}`
+    ? useWifiIp
+      ? `http://${activeDomain}:${port}/?token=${encodeURIComponent(token)}&mesa=${table.number || table.id}`
+      : table.qr_url || `http://localhost:${port}/?token=${encodeURIComponent(token)}&mesa=${table.number || table.id}`
     : ''
 
   // URL para la tablet física de la mesa (modelo "QR en vidrio")
