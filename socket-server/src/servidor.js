@@ -19,6 +19,8 @@ const { crearAlmacenCarritosRedis } = require('./almacen/carritos-redis');
 const { crearRegistroIdempotenciaRedis } = require('./almacen/idempotencia-redis');
 const { crearRevocacionesRedis } = require('./almacen/revocaciones-redis');
 const { crearAlmacenSuscripcionesRedis } = require('./almacen/suscripciones-redis');
+const { crearEstadoMesasRedis } = require('./almacen/mesas-redis');
+const { registrarSala, crearEstadoMesasMemoria } = require('./sala');
 
 const rutasBase = {
   /**
@@ -87,6 +89,7 @@ function crearServidor(config, deps = {}) {
     registroPagos: cliente
       ? crearRegistroIdempotenciaRedis({ cliente, ttlMs: TTL_PAGOS_MS })
       : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
+    estadoMesas: cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria(),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),
     suscripciones: cliente
@@ -147,6 +150,7 @@ function crearServidor(config, deps = {}) {
     registrarCarrito(socket, ctx);
     registrarPedidos(socket, ctx);
     registrarSuscripcionesSocket(socket, ctx);
+    registrarSala(socket, ctx);
     socket.on('disconnect', (motivo) => console.log(`[socket] ${socket.id} desconectado: ${motivo}`));
   });
 
