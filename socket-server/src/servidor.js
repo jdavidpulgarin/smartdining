@@ -12,6 +12,7 @@ const { crearServicioPush, rutasPush } = require('./push');
 const { crearAlmacenSuscripciones, registrarSuscripcionesSocket, rutasSuscripciones } = require('./suscripciones');
 const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
+const { crearConexionRedis } = require('./almacen/redis');
 
 const rutasBase = {
   'GET /health': async (req, res) => enviarJson(res, 200, { estado: 'ok' }),
@@ -44,9 +45,18 @@ function crearServidor(config, deps = {}) {
     connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
   });
 
+  // Redis solo si hay REDIS_URL (en producción es obligatorio, ver config.js).
+  // No se espera la conexión para escuchar: mientras no esté lista, /health
+  // responde "degradado" y los eventos que tocan estado, ERROR_INTERNO.
+  const redis = deps.redis || (config.redisUrl ? crearConexionRedis({ url: config.redisUrl }) : null);
+  if (redis) {
+    redis.conectar().catch((err) => console.error(`[redis] no se pudo conectar: ${err.code || err.name}`));
+  }
+
   // Estado compartido por todos los sockets de esta instancia.
   Object.assign(ctx, {
     io,
+    redis,
     registro: crearRegistroIdempotencia(),
     carritos: crearAlmacenCarritos(),
     // Registro aparte con TTL de 7 días: los proveedores de pago reintentan

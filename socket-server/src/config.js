@@ -23,9 +23,20 @@ function cargarConfig(env = process.env) {
   // ejemplo, liberar mesas o inventar comandas por /internal/* (ver secretos.js).
   exigirSecretos(env);
 
+  const entorno = env.NODE_ENV || 'development';
+  const redisUrl = (env.REDIS_URL || '').trim() || null;
+  // En producción el estado (carritos, idempotencia, revocaciones de QR) DEBE
+  // sobrevivir a un reinicio: arrancar en memoria en silencio perdería los
+  // carritos y, peor, volvería a aceptar QR revocados. Sin Redis no se arranca.
+  if (entorno === 'production' && !redisUrl) {
+    throw new Error('REDIS_URL es obligatoria con NODE_ENV=production (el estado no puede vivir solo en memoria)');
+  }
+
   return {
     puerto: Number(env.PORT) || 4001,
-    entorno: env.NODE_ENV || 'development',
+    entorno,
+    // Sin REDIS_URL (solo fuera de producción) el estado vive en memoria.
+    redisUrl,
     origenes,
     jwtSecret: env.JWT_SECRET,
     internalApiKey: env.INTERNAL_API_KEY,

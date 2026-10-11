@@ -36,6 +36,7 @@ async function levantar(extraEnv = {}, deps = {}) {
   const cerrar = async () => {
     clientes.forEach((c) => c.close());
     await servidor.io.close();
+    if (servidor.redis) await servidor.redis.cerrar();
   };
   return { ...servidor, url, conectar, cerrar, config };
 }
