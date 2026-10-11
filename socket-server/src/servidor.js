@@ -21,7 +21,18 @@ const { crearRevocacionesRedis } = require('./almacen/revocaciones-redis');
 const { crearAlmacenSuscripcionesRedis } = require('./almacen/suscripciones-redis');
 
 const rutasBase = {
-  'GET /health': async (req, res) => enviarJson(res, 200, { estado: 'ok' }),
+  /**
+   * Estado para Docker, Nginx y el despliegue. Con Redis configurado pero sin
+   * conexión responde 503 "degradado": el proceso vive, pero no puede atender
+   * eventos que cambian estado (responden ERROR_INTERNO) y no debe recibir
+   * tráfico nuevo. Sin REDIS_URL (solo desarrollo) informa "memoria".
+   */
+  'GET /health': async (req, res, ctx) => {
+    if (!ctx.redis) return enviarJson(res, 200, { estado: 'ok', redis: 'memoria' });
+    const redis = ctx.redis.estado();
+    if (!ctx.redis.disponible()) return enviarJson(res, 503, { estado: 'degradado', redis });
+    return enviarJson(res, 200, { estado: 'ok', redis });
+  },
 };
 
 /**

@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { cargarConfig } = require('../src/config');
 const { crearConexionRedis } = require('../src/almacen/redis');
 const { crearRedisFalso } = require('./redis-falso');
-const { ENV_BASE, ORIGEN } = require('./helpers');
+const { ENV_BASE, ORIGEN, levantar } = require('./helpers');
 
 const silencioso = { info() {}, error() {} };
 
@@ -41,4 +41,26 @@ test('el estado refleja caídas y recuperaciones de Redis', async () => {
   assert.notStrictEqual(r.estado(), 'conectado');
   falso.levantar();
   assert.strictEqual(r.estado(), 'conectado');
+});
+
+test('/health: memoria sin Redis; ok con Redis; degradado (503) si Redis cae', async (t) => {
+  const sinRedis = await levantar();
+  t.after(() => sinRedis.cerrar());
+  assert.deepStrictEqual(await (await fetch(`${sinRedis.url}/health`)).json(), { estado: 'ok', redis: 'memoria' });
+
+  const falso = crearRedisFalso();
+  const redis = crearConexionRedis({ url: 'redis://x:6379', crearCliente: falso.crearCliente, log: silencioso });
+  const s = await levantar({}, { redis });
+  t.after(() => s.cerrar());
+  await redis.conectar();
+  const ok = await fetch(`${s.url}/health`);
+  assert.deepStrictEqual([ok.status, await ok.json()], [200, { estado: 'ok', redis: 'conectado' }]);
+
+  falso.caer();
+  const caido = await fetch(`${s.url}/health`);
+  assert.strictEqual(caido.status, 503);
+  assert.strictEqual((await caido.json()).estado, 'degradado');
+
+  falso.levantar();
+  assert.strictEqual((await fetch(`${s.url}/health`)).status, 200);
 });

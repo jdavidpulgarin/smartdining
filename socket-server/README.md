@@ -38,6 +38,37 @@ socket.emit('cart:update', {
 }, (ack) => { /* ack.carrito trae el snapshot resultante */ });
 ```
 
+### Persistencia con Redis
+
+Con `REDIS_URL` el estado vive en Redis y sobrevive a reinicios (sin ella, solo en desarrollo,
+vive en memoria; con `NODE_ENV=production` el servidor no arranca sin Redis):
+
+| Llave | Tipo | Contenido | TTL |
+|---|---|---|---|
+| `sd:carrito:{mesa}` | string (JSON) | `{ version, items }`, actualizado con WATCH/MULTI | 24 h |
+| `sd:idem:{ámbito}:{eventId}` | string | eventos ya procesados (`SET NX`) | 10 min (pagos: 7 días) |
+| `sd:qr:revocado:{mesa}` | string | ms de la última liberación de la mesa | 25 h |
+| `sd:push:{mesa}` | hash | endpoint → suscripción Web Push | 24 h |
+
+El ámbito de `sd:idem` empieza por el rol cuando el evento viene de un socket (por ejemplo
+`sd:idem:comensal:cart:5:<eventId>`) y por el tipo de evento cuando viene del backend
+(`sd:idem:order:status:<eventId>`), para que el mismo UUID en otra mesa no sea un duplicado.
+
+Si Redis se cae: `/health` responde `503 degradado`, los eventos que cambian estado
+responden `ERROR_INTERNO` (el cliente reintenta con el mismo `eventId`) y las conexiones de
+comensal se rechazan con `ERROR_INTERNO`. Nunca se pasa a memoria en silencio.
+
+**Prueba manual (persistencia tras reinicio):**
+
+1. `docker compose up -d redis` en la raíz y `REDIS_URL=redis://localhost:6379` en `.env`.
+2. `npm run dev` y `npm run token:comensal -- --mesa 5` (copia el token).
+3. Conecta un cliente, haz `join:table` y dos `cart:update` (ver el ejemplo de abajo).
+4. Detén el servidor (Ctrl+C) y vuelve a correr `npm run dev`.
+5. Conecta otro cliente con el mismo token y haz `join:table`: el `carrito` del ack debe ser
+   **idéntico** (misma `version` y mismos `items`) al último snapshot antes del reinicio.
+6. Reenvía uno de los `cart:update` anteriores con su mismo `eventId`: responde
+   `duplicado: true` y la `version` no cambia.
+
 `id_linea`, roles, `clear` (solo personal) y el resto de eventos están documentados en
 detalle en [EVENTS.md](EVENTS.md).
 
