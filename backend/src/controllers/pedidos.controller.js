@@ -5,22 +5,89 @@ const socketNotifier = require('../services/socket.notifier');
 
 // El trigger tr_validar_disponibilidad_plato de Jarrison deja comandar un plato
 // agotado si notas_especiales contiene 'OVERRIDE_ADMIN' (bypass administrativo).
-// Ese campo se arma con texto que escribe el comensal (su apodo y su nota), así
-// que el marcador se rechaza en el body: de lo contrario cualquiera se pone de
-// apodo "OVERRIDE_ADMIN" y se salta el control de disponibilidad.
+// Ese campo se arma con texto que escribe el comensal, así que el marcador se
+// rechaza en el body. El alias (comensal/apodo) ya no se guarda ahí, pero se
+// sigue revisando igual: es texto del cliente y mañana puede volver a mezclarse
+// con notas en algún listado o reporte.
 const MARCADOR_OVERRIDE = /override_admin/i;
 const MENSAJE_OVERRIDE = 'El texto no puede contener OVERRIDE_ADMIN';
 const sinOverride = (valor) => !MARCADOR_OVERRIDE.test(valor);
 
-// El apodo es el nombre que el comensal se puso en el carrito colaborativo
-// ("Ana", "Pipe"): identifica quién agregó cada ítem y se guarda en
-// detalles_pedido.notas_especiales, junto con la nota del ítem si la hay.
-const itemSchema = z.object({
-  id_plato: z.number().int(),
-  cantidad: z.number().int().positive(),
-  apodo: z.string().min(1).max(40).refine(sinOverride, MENSAJE_OVERRIDE).optional(),
-  notas: z.string().max(200).refine(sinOverride, MENSAJE_OVERRIDE).optional(),
-});
+// Porciones que acepta detalles_ingredientes.porcion (CHECK del script 13).
+const PORCIONES = ['ligera', 'normal', 'extra'];
+
+// Tope defensivo del body, no una regla de negocio: cuántas opciones se pueden
+// elegir de verdad lo dicen min_sel/max_sel de cada paso, y eso lo valida
+// validar_selecciones_detalle en la base.
+const MAX_INGREDIENTES_POR_ITEM = 20;
+
+// Campos de precio que un cliente podría intentar imponer. El precio lo fija
+// SIEMPRE la base (platos.precio e ingredientes.precio_extra vía trigger), así
+// que se rechazan en voz alta en vez de ignorarlos en silencio: quien los manda
+// está dando por hecho que cuentan, y es mejor que se entere con un 400.
+const CAMPOS_DE_PRECIO = [
+  'precio',
+  'precio_unitario',
+  'precio_extra',
+  'precio_aplicado',
+  'precio_extras',
+  'subtotal',
+  'total',
+];
+const MENSAJE_PRECIO = 'El precio lo fija la base de datos: no envíes campos de precio';
+
+/** Agrega un issue por cada campo de precio presente en el objeto recibido. */
+function rechazarPrecios(valor, ctx) {
+  for (const campo of CAMPOS_DE_PRECIO) {
+    if (valor[campo] !== undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: MENSAJE_PRECIO, path: [campo] });
+    }
+  }
+}
+
+const ingredienteSchema = z
+  .object({
+    id_ingrediente: z.number().int().positive(),
+    // 'normal' es la porción sin recargo: el valor por defecto más conservador.
+    porcion: z.enum(PORCIONES).default('normal'),
+  })
+  .superRefine(rechazarPrecios);
+
+/**
+ * `comensal` es el alias con el que la persona se identificó en el carrito
+ * colaborativo ("Ana", "Pipe"). Desde D-03 va en su propia columna
+ * detalles_pedido.comensal y no antepuesto a notas_especiales, para poder
+ * dividir la cuenta por persona sin parsear texto libre.
+ *
+ * `apodo` sigue aceptándose como alias de compatibilidad (así lo llamaba la API
+ * anterior); si llegan los dos, manda `comensal`.
+ */
+const aliasSchema = z.string().trim().min(1).max(40).refine(sinOverride, MENSAJE_OVERRIDE);
+
+const itemSchema = z
+  .object({
+    id_plato: z.number().int(),
+    cantidad: z.number().int().positive(),
+    comensal: aliasSchema.optional(),
+    apodo: aliasSchema.optional(),
+    notas: z.string().max(200).refine(sinOverride, MENSAJE_OVERRIDE).optional(),
+    ingredientes: z.array(ingredienteSchema).max(MAX_INGREDIENTES_POR_ITEM).optional(),
+  })
+  .superRefine((item, ctx) => {
+    rechazarPrecios(item, ctx);
+
+    // El mismo ingrediente dos veces en un ítem no tiene significado (la porción
+    // sería ambigua) y además chocaría con la PK de detalles_ingredientes, que
+    // saldría como 500 en vez de 400. Se corta aquí.
+    const ids = (item.ingredientes || []).map((i) => i.id_ingrediente);
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'No repitas el mismo ingrediente en un ítem',
+        path: ['ingredientes'],
+      });
+    }
+  });
 
 // id_mesa es opcional en el body porque para un comensal se toma del token y se
 // ignora lo que venga aquí; para el personal (mesero/admin) es obligatorio.
@@ -31,9 +98,30 @@ const crearPedidoSchema = z.object({
 });
 
 /**
+ * Alias del comensal que queda guardado en el ítem.
+ *
+ * Si el JWT trae `comensal` (alias firmado al abrir la sesión de mesa; llega con
+ * el PR #13 de Roberto), ESE manda y el del body se ignora: un alias firmado por
+ * el servidor no se puede suplantar escribiendo otro en el cuerpo, que es justo
+ * lo que permitiría cargarle un ítem a otra persona de la mesa.
+ *
+ * Sin alias en el token se usa el del body, que es el caso de hoy y el del
+ * personal: el mesero escribe de parte de quién va cada ítem.
+ */
+function aliasDelComensal(req, item) {
+  const firmado = req.user?.comensal;
+  if (typeof firmado === 'string' && firmado.trim()) return firmado.trim();
+  return item.comensal ?? item.apodo ?? null;
+}
+
+/**
  * POST /api/pedidos — lo usan el comensal (desde su sesión de QR), el mesero y
  * el admin. Si quien pide es un comensal, la mesa sale del token y el id_mesa
  * del body se ignora: así una mesa no puede ordenar a nombre de otra.
+ *
+ * Los platos personalizables llegan con `ingredientes`; el backend no decide
+ * nada sobre ellos (ni precio ni validez): los inserta y deja que el trigger
+ * tr_validar_detalle_ingrediente y validar_selecciones_detalle manden.
  */
 async function crear(req, res, next) {
   const parsed = crearPedidoSchema.safeParse(req.body);
@@ -50,10 +138,20 @@ async function crear(req, res, next) {
   }
 
   try {
+    // El alias se resuelve aquí (es una decisión sobre quién pide, propia del
+    // controller) y el service recibe los ítems ya normalizados.
+    const items = parsed.data.items.map((item) => ({
+      id_plato: item.id_plato,
+      cantidad: item.cantidad,
+      comensal: aliasDelComensal(req, item),
+      notas: item.notas ?? null,
+      ingredientes: item.ingredientes ?? [],
+    }));
+
     const pedido = await pedidosService.crearConDetalles({
       id_mesa,
       id_usuario,
-      items: parsed.data.items,
+      items,
       notas_generales: parsed.data.notas_generales,
     });
     // Avisa al socket-server para que la comanda aparezca en vivo en el KDS, el
