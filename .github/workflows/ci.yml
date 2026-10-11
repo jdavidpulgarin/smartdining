@@ -32,8 +32,8 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      - name: npm test
-        run: npm test
+      - name: npm test (falla si hay pruebas canceladas)
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/npm-test-sin-canceladas.sh"
 
   socket-server:
     name: socket-server · pruebas (con Redis)
@@ -63,8 +63,8 @@ jobs:
           cache: npm
           cache-dependency-path: socket-server/package-lock.json
       - run: npm ci
-      - name: npm test
-        run: npm test
+      - name: npm test (falla si hay pruebas canceladas)
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/npm-test-sin-canceladas.sh"
 
   frontends:
     name: ${{ matrix.app }} · lint y build
