@@ -10,20 +10,37 @@ export function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!email) {
       setError('Por favor ingresa tu correo corporativo')
       return
     }
-    login(email, password)
-    navigate('/')
+    setError('')
+    setLoading(true)
+    try {
+      await login(email, password)
+      navigate('/')
+    } catch (err) {
+      setError(err.message || 'Error al iniciar sesión')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleQuickDemo = (role) => {
-    loginAsDemo(role)
-    navigate('/')
+  const handleQuickDemo = async (role) => {
+    setError('')
+    setLoading(true)
+    try {
+      await loginAsDemo(role)
+      navigate('/')
+    } catch (err) {
+      setError(err.message || 'Error al iniciar sesión con demo')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -72,9 +89,9 @@ export function Login() {
             </div>
           </div>
 
-          <button type="submit" className="primary-button login-submit-btn">
+          <button type="submit" className="primary-button login-submit-btn" disabled={loading}>
             <LogIn size={18} />
-            <span>Ingresar al Sistema</span>
+            <span>{loading ? 'Verificando credenciales...' : 'Ingresar al Sistema'}</span>
           </button>
         </form>
 
@@ -90,6 +107,7 @@ export function Login() {
                 key={demo.role}
                 type="button"
                 className="demo-role-btn"
+                disabled={loading}
                 onClick={() => handleQuickDemo(demo.role)}
               >
                 <div className="demo-role-avatar">{demo.avatar}</div>
