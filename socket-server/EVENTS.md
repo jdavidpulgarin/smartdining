@@ -161,8 +161,8 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
   "cantidad": 2,
   "notas": "sin cebolla",
   "ingredientes": [
-    { "id_ingrediente": 10, "porcion": "normal", "precio_aplicado": 0 },
-    { "id_ingrediente": 12, "porcion": "extra", "precio_aplicado": 1500 }
+    { "id_ingrediente": 10, "porcion": "normal" },
+    { "id_ingrediente": 12, "porcion": "extra" }
   ]
 }
 ```
@@ -177,7 +177,23 @@ Modifica el carrito grupal de la mesa. Roles: `comensal` (y `mesero`/`admin` con
 | `id_plato` | entero > 0 | Obligatorio en `set`. **Ya no se envía en `remove`**: la línea se borra por `id_linea` |
 | `cantidad` | entero 1–99 | Obligatorio en `set`. Es la cantidad **final**, no un incremento |
 | `notas` | string ≤ 200 | Opcional, solo en `set` |
-| `ingredientes` | array | Opcional, solo en `set`. Contiene los detalles del constructor para platos armables |
+| `ingredientes` | array | Opcional, solo en `set`. Platos armables (constructor). Ver reglas abajo. Sin el campo (o `null`) la línea es un plato simple |
+
+Reglas de `ingredientes` (si viene y no es `null`; si no cumple → `PAYLOAD_INVALIDO`):
+
+- Arreglo de **0 a 30** elementos.
+- Cada elemento es un **objeto plano** `{ id_ingrediente, porcion }`:
+  - `id_ingrediente`: entero > 0 (entero seguro de JavaScript).
+  - `porcion`: `"ligera"`, `"normal"` o `"extra"`.
+- Sin `id_ingrediente` repetidos en la misma línea.
+- **Se guarda y se difunde solo `{ id_ingrediente, porcion }`**: `precio_aplicado`, `nombre` o
+  cualquier otro campo se **descarta** en silencio. El precio de cada porción lo calcula el
+  **backend** con la base de datos al crear el pedido; el cliente nunca decide montos.
+
+> **Cambio de contrato (compatible):** hasta ahora se aceptaba `precio_aplicado` dentro de
+> `ingredientes`. Sigue sin dar error enviarlo, pero ya no se guarda ni llega a los demás
+> comensales. Si la PWA lo usaba para mostrar el subtotal, debe calcularlo con los precios
+> del menú (`GET /api/menu`).
 
 Por qué `set` y no `+1`/`-1`: fijar el valor absoluto hace que reenviar el evento
 nunca duplique unidades. Cada ítem se identifica por `id_linea`: dos líneas del
