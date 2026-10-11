@@ -81,6 +81,108 @@ para `develop`:
 
 ---
 
+## 🚀 Levantar SmartDining en 5 minutos
+
+Requisitos: **Node 22** y **Docker Desktop** (o Docker Engine con el plugin `compose`).
+
+| Servicio | Puerto | Cómo se levanta |
+| :--- | :--- | :--- |
+| PostgreSQL 16 | 5432 | `docker compose up -d` (carga `database/scripts` la primera vez) |
+| Redis 7 | 6379 | `docker compose up -d` |
+| backend | 4000 | `npm run dev` en `backend/` |
+| socket-server | 4001 | `npm run dev` en `socket-server/` |
+| frontend-cliente | 5173 | `npm run dev` en `frontend-cliente/` |
+| frontend-restaurante | 5174 | `npm run dev` en `frontend-restaurante/` (Vite toma el siguiente libre) |
+
+### 1. Base de datos y Redis
+
+**bash (Linux, macOS, Git Bash):**
+
+```bash
+cp .env.example .env            # opcional: solo si quieres cambiar puertos o la clave de Postgres
+docker compose up -d
+docker compose ps               # espera a que ambos digan (healthy)
+```
+
+**PowerShell (Windows):**
+
+```powershell
+Copy-Item .env.example .env     # opcional
+docker compose up -d
+docker compose ps
+```
+
+La primera vez, Postgres ejecuta `database/scripts/00_ejecutar_todo.sql` (esquema, funciones,
+triggers y datos de ejemplo). Para empezar de cero: `docker compose down -v` y otra vez `up -d`.
+
+### 2. Secretos (una sola vez)
+
+Genera **tres** valores distintos y guárdalos:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # JWT_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # INTERNAL_API_KEY
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # QR_SECRET
+```
+
+`JWT_SECRET` e `INTERNAL_API_KEY` deben ser **idénticos** en `backend/.env` y
+`socket-server/.env`; `QR_SECRET` va solo en `socket-server/.env`. El socket-server no arranca
+con secretos cortos, repetidos o de ejemplo. Nunca pongas un secreto en un frontend ni con
+prefijo `VITE_`.
+
+### 3. Backend y socket-server
+
+**bash:**
+
+```bash
+cd backend && cp .env.example .env && npm install && cd ..
+cd socket-server && cp .env.example .env && npm install && cd ..
+# edita backend/.env y socket-server/.env con los secretos del paso 2
+(cd backend && npm run dev) &
+(cd socket-server && npm run dev) &
+```
+
+**PowerShell** (una terminal por servicio):
+
+```powershell
+cd backend; Copy-Item .env.example .env; npm install; npm run dev
+```
+
+```powershell
+cd socket-server; Copy-Item .env.example .env; npm install; npm run dev
+```
+
+Usuarios de demo con contraseña `Admin123!` (opcional):
+
+```bash
+docker compose exec -T postgres psql -U postgres -d smartdining < backend/scripts/fijar-password-demo.sql
+```
+
+```powershell
+Get-Content backend/scripts/fijar-password-demo.sql | docker compose exec -T postgres psql -U postgres -d smartdining
+```
+
+### 4. Frontends
+
+```bash
+cd frontend-cliente && npm install && npm run dev
+cd frontend-restaurante && npm install && npm run dev
+```
+
+### 5. Comprobar
+
+```bash
+curl http://localhost:4000/api/health    # {"status":"ok"}
+curl http://localhost:4001/health        # {"estado":"ok"}
+```
+
+```powershell
+Invoke-RestMethod http://localhost:4000/api/health
+Invoke-RestMethod http://localhost:4001/health
+```
+
+---
+
 ## 📋 Hoja de Ruta Inicial
 
 - [x] **Paso 1:** Creación del repositorio y estructura base de carpetas.
