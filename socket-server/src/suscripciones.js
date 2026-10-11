@@ -5,6 +5,7 @@ const {
   ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson,
 } = require('./http');
 const { verificarJwt, ROL_COMENSAL } = require('./auth');
+const { estaEnMesa } = require('./salas');
 
 const MAX_SUSCRIPCIONES_POR_MESA = 20; // una mesa tiene pocos comensales; evita llenar memoria
 const MAX_ENDPOINT = 2048;
@@ -74,10 +75,16 @@ function crearAlmacenSuscripciones() {
   };
 }
 
-async function suscribir(ctx, idMesa, suscripcionCruda) {
+/**
+ * Guarda la suscripción ligada al COMENSAL (alias), no solo a la mesa: así
+ * "¡Tu plato está listo!" le llega a quien pidió ese plato y no a toda la
+ * mesa. El alias lo pone el servidor (el del join:table de ese socket o uno
+ * validado contra la presencia), nunca se acepta uno cualquiera.
+ */
+async function suscribir(ctx, idMesa, suscripcionCruda, comensal) {
   const { suscripcion, error } = validarSuscripcion(suscripcionCruda);
   if (error) return fallo('PAYLOAD_INVALIDO', error);
-  if (!(await ctx.suscripciones.agregar(idMesa, suscripcion))) {
+  if (!(await ctx.suscripciones.agregar(idMesa, { ...suscripcion, comensal }))) {
     return fallo('PAYLOAD_INVALIDO', `La mesa alcanzó el máximo de ${MAX_SUSCRIPCIONES_POR_MESA} suscripciones`);
   }
   return exito();
@@ -91,12 +98,19 @@ function registrarSuscripcionesSocket(socket, ctx) {
     if (identidad.rol !== ROL_COMENSAL) {
       return fallo('NO_AUTORIZADO', 'Solo el comensal se suscribe a push', { eventId: p.eventId });
     }
+    // El alias sale del join:table de ESTE socket: ya está validado y presente.
+    if (!estaEnMesa(socket, identidad.id_mesa)) {
+      return fallo('SIN_SALA', 'Haz join:table antes de suscribirte', { eventId: p.eventId });
+    }
+    if (!socket.data.alias) {
+      return fallo('PAYLOAD_INVALIDO', 'Haz join:table con tu nombre (comensal) antes de suscribirte', { eventId: p.eventId });
+    }
     const clave = `push:${identidad.id_mesa}:${p.eventId}`;
     if (await ctx.registro.obtener(clave)) return exito({ eventId: p.eventId, duplicado: true });
 
     // Dar de alta el mismo endpoint dos veces ya es idempotente (se indexa por
     // endpoint), así que aquí basta con marcar el eventId después del alta.
-    const r = await suscribir(ctx, identidad.id_mesa, p.subscription);
+    const r = await suscribir(ctx, identidad.id_mesa, p.subscription, socket.data.alias);
     if (!r.ok) return { ...r, eventId: p.eventId };
     await ctx.registro.guardar(clave, true);
     return exito({ eventId: p.eventId, duplicado: false });
@@ -123,7 +137,15 @@ const rutasSuscripciones = {
   'POST /push/suscripcion': async (req, res, ctx) => {
     const { id_mesa: idMesa } = comensalDeRequest(req, ctx);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    const r = await suscribir(ctx, idMesa, cuerpo.subscription);
+    // Por HTTP no hay socket: el alias se valida contra quienes están sentados
+    // ahora en esa mesa (presencia real de la sala).
+    const comensal = typeof cuerpo.comensal === 'string' ? cuerpo.comensal.trim() : '';
+    if (!comensal) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'comensal es obligatorio');
+    const { comensales } = await ctx.presencia.calcular(idMesa);
+    if (!comensales.includes(comensal)) {
+      throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Únete a la mesa (join:table) con ese nombre antes de suscribirte');
+    }
+    const r = await suscribir(ctx, idMesa, cuerpo.subscription, comensal);
     if (!r.ok) throw new ErrorHttp(400, r.codigo, r.mensaje);
     enviarJson(res, 201, { ok: true });
   },
