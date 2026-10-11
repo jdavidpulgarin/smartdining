@@ -20,7 +20,7 @@ const { crearRegistroIdempotenciaRedis } = require('./almacen/idempotencia-redis
 const { crearRevocacionesRedis } = require('./almacen/revocaciones-redis');
 const { crearAlmacenSuscripcionesRedis } = require('./almacen/suscripciones-redis');
 const { crearEstadoMesasRedis } = require('./almacen/mesas-redis');
-const { registrarSala, crearEstadoMesasMemoria } = require('./sala');
+const { registrarSala, crearEstadoMesasMemoria, crearPresencia } = require('./sala');
 
 const rutasBase = {
   /**
@@ -90,6 +90,7 @@ function crearServidor(config, deps = {}) {
       ? crearRegistroIdempotenciaRedis({ cliente, ttlMs: TTL_PAGOS_MS })
       : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
     estadoMesas: cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria(),
+    presencia: crearPresencia({ io, ...(deps.presencia || {}) }),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),
     suscripciones: cliente
@@ -147,7 +148,9 @@ function crearServidor(config, deps = {}) {
 
   io.on('connection', (socket) => {
     console.log(`[socket] conectado ${socket.id} (${socket.data.identidad.rol})`);
-    registrarSalas(socket, { obtenerSnapshot: ctx.carritos.snapshot, sesionVigente });
+    registrarSalas(socket, {
+      obtenerSnapshot: ctx.carritos.snapshot, sesionVigente, alCambiarSala: ctx.presencia.programar,
+    });
     registrarCarrito(socket, ctx);
     registrarPedidos(socket, ctx);
     registrarSuscripcionesSocket(socket, ctx);

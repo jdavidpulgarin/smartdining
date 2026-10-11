@@ -4,6 +4,67 @@ const { esEventIdValido } = require('./idempotencia');
 const { salaMesa, SALA_ADMIN, estaEnMesa } = require('./salas');
 
 const MAX_MOTIVO = 100;
+// Como mucho un aviso de presencia por mesa cada 500 ms: cuando llega un grupo
+// de 6 y todos escanean a la vez, el panel recibe 1-2 avisos y no 6.
+const VENTANA_PRESENCIA_MS = 500;
+const PREFIJO_SALA_MESA = 'room:mesa-';
+
+/**
+ * Presencia de comensales por mesa, calculada de los sockets que de verdad
+ * están en la sala (no de un contador que se pueda desincronizar).
+ *
+ * - comensales: alias distintos de los comensales conectados, ordenados.
+ * - total: personas en la mesa = alias distintos + sockets de comensal sin
+ *   alias (dos pestañas de "Ana" cuentan como una persona).
+ *
+ * `programar(idMesa)` emite `mesa:presencia` a room:admin al instante si no
+ * hubo aviso reciente; si lo hubo, deja uno pendiente para el final de la
+ * ventana, así el último estado siempre llega.
+ */
+function crearPresencia({ io, ventanaMs = VENTANA_PRESENCIA_MS }) {
+  const ventanas = new Map(); // idMesa -> { pendiente: boolean, temporizador }
+
+  async function calcular(idMesa) {
+    const sockets = await io.in(salaMesa(idMesa)).fetchSockets();
+    const alias = new Set();
+    let anonimos = 0;
+    for (const s of sockets) {
+      if (!s.data.identidad || s.data.identidad.rol !== ROL_COMENSAL) continue;
+      if (s.data.alias) alias.add(s.data.alias);
+      else anonimos += 1;
+    }
+    const comensales = [...alias].sort((a, b) => a.localeCompare(b));
+    return { id_mesa: idMesa, comensales, total: comensales.length + anonimos };
+  }
+
+  async function emitir(idMesa) {
+    const presencia = await calcular(idMesa);
+    io.to(SALA_ADMIN).emit('mesa:presencia', presencia);
+  }
+
+  function abrirVentana(idMesa) {
+    const v = { pendiente: false, temporizador: null };
+    v.temporizador = setTimeout(() => {
+      ventanas.delete(idMesa);
+      if (v.pendiente) programar(idMesa);
+    }, ventanaMs);
+    // No mantiene vivo el proceso por un aviso de presencia (cierre ordenado).
+    if (v.temporizador.unref) v.temporizador.unref();
+    ventanas.set(idMesa, v);
+  }
+
+  function programar(idMesa) {
+    const v = ventanas.get(idMesa);
+    if (v) {
+      v.pendiente = true;
+      return;
+    }
+    abrirVentana(idMesa);
+    emitir(idMesa).catch((err) => console.error('[presencia] no se pudo emitir:', err.message));
+  }
+
+  return { calcular, programar };
+}
 // Una mesa puede llamar al mesero una vez por minuto: suficiente para pedir
 // ayuda de verdad y corta el abuso de un comensal que pulsa sin parar.
 const LIMITE_LLAMADA_SEG = 60;
@@ -46,6 +107,19 @@ function validarComensalEnSala(socket, p) {
 }
 
 function registrarSala(socket, ctx) {
+  // Al desconectarse, el socket ya no está en ninguna sala: se anotan sus
+  // mesas mientras aún está dentro ('disconnecting') y se avisa después.
+  let mesasAlSalir = [];
+  socket.on('disconnecting', () => {
+    if (!socket.data.identidad || socket.data.identidad.rol !== ROL_COMENSAL) return;
+    mesasAlSalir = [...socket.rooms]
+      .filter((r) => r.startsWith(PREFIJO_SALA_MESA))
+      .map((r) => Number(r.slice(PREFIJO_SALA_MESA.length)));
+  });
+  socket.on('disconnect', () => {
+    for (const idMesa of mesasAlSalir) ctx.presencia.programar(idMesa);
+  });
+
   /**
    * mesa:llamar_mesero — el comensal pide atención. Va solo al panel.
    * El servidor pone id_mesa (del JWT), comensal y emitidoEn: el cliente no
@@ -104,5 +178,5 @@ function registrarSala(socket, ctx) {
 }
 
 module.exports = {
-  registrarSala, crearEstadoMesasMemoria, validarComensalEnSala, LIMITE_LLAMADA_SEG, MAX_MOTIVO,
+  registrarSala, crearEstadoMesasMemoria, crearPresencia, VENTANA_PRESENCIA_MS, validarComensalEnSala, LIMITE_LLAMADA_SEG, MAX_MOTIVO,
 };

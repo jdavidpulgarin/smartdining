@@ -39,7 +39,9 @@ function resolverMesa(identidad, idPayload) {
  * `obtenerSnapshot(idMesa)` permite que el ack de join:table incluya el
  * carrito actual; se inyecta para no acoplar este módulo al del carrito.
  */
-function registrarSalas(socket, { obtenerSnapshot, sesionVigente = () => true } = {}) {
+const MAX_ALIAS = 40;
+
+function registrarSalas(socket, { obtenerSnapshot, sesionVigente = () => true, alCambiarSala = () => {} } = {}) {
   const identidad = socket.data.identidad;
 
   // Las pantallas de personal escuchan sus salas desde que conectan: no
@@ -60,7 +62,18 @@ function registrarSalas(socket, { obtenerSnapshot, sesionVigente = () => true } 
     // sala (por eso no lo desconectamos) tampoco puede entrar después.
     if (!(await sesionVigente(identidad))) return fallo('NO_AUTORIZADO', 'La sesión de esta mesa ya se cerró');
 
+    // Alias opcional del comensal ("Ana"): es como lo ven los demás en la
+    // presencia y en los avisos al mesero. Solo lo fija el propio socket.
+    if (identidad.rol === ROL_COMENSAL && payload.comensal !== undefined) {
+      const alias = typeof payload.comensal === 'string' ? payload.comensal.trim() : '';
+      if (!alias || alias.length > MAX_ALIAS) {
+        return fallo('PAYLOAD_INVALIDO', `comensal debe ser un texto de 1 a ${MAX_ALIAS} caracteres`);
+      }
+      socket.data.alias = alias;
+    }
+
     socket.join(salaMesa(idMesa));
+    if (identidad.rol === ROL_COMENSAL) alCambiarSala(idMesa);
     const respuesta = { id_mesa: idMesa, sala: salaMesa(idMesa) };
     if (obtenerSnapshot) respuesta.carrito = await obtenerSnapshot(idMesa);
     return exito(respuesta);
@@ -70,6 +83,7 @@ function registrarSalas(socket, { obtenerSnapshot, sesionVigente = () => true } 
     const { idMesa, error } = resolverMesa(identidad, payload.id_mesa);
     if (error) return error;
     socket.leave(salaMesa(idMesa));
+    if (identidad.rol === ROL_COMENSAL) alCambiarSala(idMesa);
     return exito();
   }));
 }
