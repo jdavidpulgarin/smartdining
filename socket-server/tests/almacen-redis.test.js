@@ -134,11 +134,16 @@ const REDIS_URL = process.env.REDIS_URL;
 test('Redis real: idempotencia, revocaciones y suscripciones', { skip: !REDIS_URL && 'sin REDIS_URL' }, async (t) => {
   const conexion = crearConexionRedis({ url: REDIS_URL, log: silencioso });
   await conexion.conectar();
-  t.after(() => conexion.cerrar());
   const { cliente } = conexion;
   const mesa = 900000 + Math.floor(Math.random() * 99999);
   const clave = `prueba:${randomUUID()}`;
-  t.after(() => cliente.del([`sd:idem:${clave}`, `sd:qr:revocado:${mesa}`, `sd:push:${mesa}`]));
+  // Un solo hook y en este orden: node:test corre los t.after en el orden en
+  // que se registran, así que con dos hooks se cerraba el cliente antes de
+  // borrar las llaves ("The client is closed").
+  t.after(async () => {
+    await cliente.del([`sd:idem:${clave}`, `sd:qr:revocado:${mesa}`, `sd:push:${mesa}`]);
+    await conexion.cerrar();
+  });
 
   const registro = crearRegistroIdempotenciaRedis({ cliente });
   const reservas = await Promise.all([1, 2, 3, 4].map(() => registro.reservar(clave)));

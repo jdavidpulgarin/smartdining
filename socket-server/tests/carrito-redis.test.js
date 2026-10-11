@@ -118,9 +118,13 @@ const REDIS_URL = process.env.REDIS_URL;
 test('Redis real: carrito atómico, idempotente y persistente entre instancias', { skip: !REDIS_URL && 'sin REDIS_URL' }, async (t) => {
   const conexion = crearConexionRedis({ url: REDIS_URL, log: silencioso });
   await conexion.conectar();
-  t.after(() => conexion.cerrar());
   const mesa = 900000 + Math.floor(Math.random() * 99999);
-  t.after(() => conexion.cliente.del(llaveCarrito(mesa)));
+  // Limpiar y LUEGO cerrar, en un solo hook (node:test corre los t.after en
+  // orden de registro).
+  t.after(async () => {
+    await conexion.cliente.del(llaveCarrito(mesa));
+    await conexion.cerrar();
+  });
   const a = crearAlmacenCarritosRedis({ cliente: conexion.cliente });
   const b = crearAlmacenCarritosRedis({ cliente: conexion.cliente });
 
