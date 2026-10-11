@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { tables as defaultTables } from '../constants/mockData'
-import { generarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
+import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
@@ -408,7 +408,7 @@ export function TablesProvider({ children }) {
     const tableName = tableActual?.name || `Mesa ${numId}`
 
     try {
-      const qrResult = await generarTokenQrMesa(numId, ttlMinutos)
+      const qrResult = await rotarTokenQrMesa(numId, ttlMinutos)
       const sidCorto = qrResult.sid ? qrResult.sid.slice(0, 8) : 'rotado'
 
       setTables((prev) =>
