@@ -192,6 +192,41 @@ async function registrarEnBackend(ctx, { evento, tx, intencion }) {
   return { registrado: true, saldo };
 }
 
+/**
+ * Un pago que no cuadra (monto distinto, referencia desconocida, transacción
+ * que la API no confirma o que el backend rechaza) NO se registra como pago:
+ * se guarda como intento fallido (vía backend, tabla intentos_pago_fallidos)
+ * y se avisa al panel para que el personal lo revise.
+ *
+ * Contrato (pendiente: Daniel): POST /api/pagos/intentos-fallidos/interno
+ * (x-internal-key), idempotente por (id_transaccion_pasarela, motivo).
+ * Si el backend no lo puede guardar, se lanza: el webhook responde 503 y la
+ * pasarela reintenta (no se pierde la evidencia).
+ */
+async function alertarPago(ctx, { evento, tx, intencion, motivo }) {
+  const r = await ctx.backend.post('/api/pagos/intentos-fallidos/interno', {
+    referencia_externa: evento.referencia,
+    id_transaccion_pasarela: evento.id_transaccion,
+    pasarela: ctx.pasarela.nombre,
+    id_mesa: intencion ? intencion.id_mesa : null,
+    motivo,
+    monto_centavos: tx ? tx.monto_centavos : evento.monto_centavos,
+    monto_esperado_centavos: intencion ? intencion.monto_centavos : null,
+    moneda: tx ? tx.moneda : evento.moneda,
+    metodo_pago: 'online',
+  });
+  if (r.status >= 500) throw Object.assign(new Error(`el backend respondió ${r.status}`), { codigo: 'BACKEND_ERROR' });
+  // Al panel: qué pasó y dónde, sin datos del pagador.
+  ctx.io.to(SALA_ADMIN).emit('pago:alerta', {
+    eventId: `${evento.id_transaccion}:${motivo}`,
+    id_mesa: intencion ? intencion.id_mesa : null,
+    referencia_externa: evento.referencia,
+    id_transaccion_pasarela: evento.id_transaccion,
+    motivo,
+    emitidoEn: new Date().toISOString(),
+  });
+}
+
 /** Un pago rechazado o con error libera al comensal para que pueda reintentar. */
 async function registrarFallo(ctx, evento) {
   const intencion = await ctx.almacenPagos.obtener(evento.referencia);
@@ -237,6 +272,9 @@ async function recibirEventoPasarela(req, res, ctx) {
     const problema = compararTransaccion({ evento, tx, intencion });
     if (problema) {
       console.warn(`[pagos] transacción ${evento.id_transaccion} no coincide: ${problema}`);
+      await alertarPago(ctx, {
+        evento, tx, intencion, motivo: problema,
+      });
       // 200: reintentar no lo arreglaría (la pasarela devolvería lo mismo).
       return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
     }
@@ -244,6 +282,9 @@ async function recibirEventoPasarela(req, res, ctx) {
     const registro = await registrarEnBackend(ctx, { evento, tx, intencion });
     if (registro.rechazado) {
       console.warn(`[pagos] el backend rechazó la transacción ${tx.id} (${registro.rechazado})`);
+      await alertarPago(ctx, {
+        evento, tx, intencion, motivo: `backend_rechazo_${registro.rechazado}`,
+      });
       return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
     }
 
