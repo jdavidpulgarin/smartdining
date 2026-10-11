@@ -13,6 +13,7 @@ const { crearAlmacenSuscripciones, registrarSuscripcionesSocket, rutasSuscripcio
 const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
 const { crearConexionRedis } = require('./almacen/redis');
+const { crearAlmacenCarritosRedis } = require('./almacen/carritos-redis');
 
 const rutasBase = {
   'GET /health': async (req, res) => enviarJson(res, 200, { estado: 'ok' }),
@@ -54,11 +55,14 @@ function crearServidor(config, deps = {}) {
   }
 
   // Estado compartido por todos los sockets de esta instancia.
+  const registro = crearRegistroIdempotencia();
   Object.assign(ctx, {
     io,
     redis,
-    registro: crearRegistroIdempotencia(),
-    carritos: crearAlmacenCarritos(),
+    registro,
+    // Con Redis el carrito sobrevive a un reinicio y se actualiza de forma
+    // atómica aunque haya varias instancias; sin él, vive en memoria.
+    carritos: redis ? crearAlmacenCarritosRedis({ cliente: redis.cliente }) : crearAlmacenCarritos({ registro }),
     // Registro aparte con TTL de 7 días: los proveedores de pago reintentan
     // durante días, mucho más que los 10 min de los eventos de socket.
     registroPagos: crearRegistroIdempotencia({ ttlMs: 7 * 24 * 60 * 60 * 1000 }),
@@ -91,7 +95,7 @@ function crearServidor(config, deps = {}) {
       emitidoEn: new Date().toISOString(),
     });
     ctx.suscripciones.limpiarMesa(idMesa);
-    ctx.carritos.vaciar(idMesa);
+    await ctx.carritos.vaciar(idMesa);
     // Solo se echa a los comensales: la pantalla de la mesa sigue conectada
     // para mostrar el QR del siguiente grupo, y el personal sigue vigilando.
     const enSala = await io.in(salaMesa(idMesa)).fetchSockets();

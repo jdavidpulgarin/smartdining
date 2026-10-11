@@ -48,7 +48,9 @@ function normalizarIngredientes(lista) {
 }
 
 /**
- * Almacén del carrito grupal de cada mesa (en memoria).
+ * Lógica del carrito grupal de una mesa, sin estado propio: recibe el carrito
+ * actual ({ version, items }) y devuelve el siguiente. Es la MISMA para el
+ * almacén en memoria y para el de Redis, así ambos se comportan igual.
  *
  * Cada ítem se identifica por su `id_linea` (UUID que genera el cliente una
  * sola vez por línea añadida) y `set` guarda la cantidad/notas FINALES de esa
@@ -60,47 +62,76 @@ function normalizarIngredientes(lista) {
  * (p. ej. dos hamburguesas del mismo comensal con términos distintos).
  * `version` sube en cada cambio real para que los clientes descarten
  * snapshots que lleguen desordenados.
+ *
+ * @returns {{ carrito: {version:number, items:object[]} } | { error: string }}
  */
-function crearAlmacenCarritos() {
-  const mesas = new Map(); // idMesa -> { version, items: Map<id_linea, item> }
-
-  const obtener = (idMesa) => {
-    if (!mesas.has(idMesa)) mesas.set(idMesa, { version: 0, items: new Map() });
-    return mesas.get(idMesa);
-  };
-
-  function snapshot(idMesa) {
-    const c = mesas.get(idMesa);
-    if (!c) return { version: 0, items: [] };
-    return { version: c.version, items: [...c.items.values()].map((i) => ({ ...i })) };
-  }
-
-  /** Devuelve el snapshot resultante o { error } si se excede el tope. */
-  function aplicar(idMesa, op) {
-    const c = obtener(idMesa);
-    if (op.accion === 'set') {
-      // El tope de ítems solo aplica a líneas NUEVAS: editar una línea
-      // existente (mismo id_linea) nunca debe bloquearse por el máximo.
-      if (!c.items.has(op.id_linea) && c.items.size >= MAX_ITEMS_POR_MESA) {
-        return { error: 'El carrito de la mesa alcanzó el máximo de ítems' };
-      }
-      c.items.set(op.id_linea, {
-        id_linea: op.id_linea, comensal: op.comensal, id_plato: op.id_plato, cantidad: op.cantidad, notas: op.notas ?? null, ingredientes: normalizarIngredientes(op.ingredientes),
-      });
-    } else if (op.accion === 'remove') {
-      c.items.delete(op.id_linea);
-    } else if (op.accion === 'clear') {
-      c.items.clear();
+function aplicarOperacion(actual, op) {
+  let items = actual.items.slice();
+  if (op.accion === 'set') {
+    const linea = {
+      id_linea: op.id_linea,
+      comensal: op.comensal,
+      id_plato: op.id_plato,
+      cantidad: op.cantidad,
+      notas: op.notas ?? null,
+      ingredientes: normalizarIngredientes(op.ingredientes),
+    };
+    const i = items.findIndex((x) => x.id_linea === op.id_linea);
+    if (i >= 0) {
+      items[i] = linea; // edición: conserva la posición de la línea
+    } else {
+      // El tope solo aplica a líneas NUEVAS: editar una línea existente nunca
+      // debe bloquearse por el máximo.
+      if (items.length >= MAX_ITEMS_POR_MESA) return { error: 'El carrito de la mesa alcanzó el máximo de ítems' };
+      items.push(linea);
     }
-    c.version += 1;
-    return { snapshot: snapshot(idMesa) };
+  } else if (op.accion === 'remove') {
+    items = items.filter((x) => x.id_linea !== op.id_linea);
+  } else if (op.accion === 'clear') {
+    items = [];
+  }
+  return { carrito: { version: actual.version + 1, items } };
+}
+
+const CARRITO_VACIO = Object.freeze({ version: 0, items: Object.freeze([]) });
+const copiar = (c) => ({ version: c.version, items: c.items.map((i) => ({ ...i })) });
+
+/**
+ * Almacén del carrito en memoria (desarrollo y pruebas, sin REDIS_URL).
+ *
+ * `aplicarUnaVez` comprueba el eventId y aplica en el mismo paso síncrono:
+ * en memoria eso ya es atómico porque nada se intercala entre ambos.
+ * Interfaz común con almacen/carritos-redis.js (allí todo devuelve promesas;
+ * quien llama siempre usa await, que también funciona con valores directos).
+ */
+function crearAlmacenCarritos({ registro } = {}) {
+  const mesas = new Map(); // idMesa -> { version, items: [] }
+
+  const snapshot = (idMesa) => copiar(mesas.get(idMesa) || CARRITO_VACIO);
+
+  /** Devuelve { snapshot } o { error } si se excede el tope. */
+  function aplicar(idMesa, op) {
+    const r = aplicarOperacion(mesas.get(idMesa) || CARRITO_VACIO, op);
+    if (r.error) return r;
+    mesas.set(idMesa, r.carrito);
+    return { snapshot: copiar(r.carrito) };
   }
 
-  function vaciar(idMesa) {
-    return aplicar(idMesa, { accion: 'clear' }).snapshot;
+  /**
+   * Aplica la operación solo si `claveIdem` no se procesó antes.
+   * @returns {{ duplicado: boolean, snapshot } | { error: string }}
+   */
+  function aplicarUnaVez(idMesa, op, claveIdem) {
+    if (claveIdem && registro && registro.obtener(claveIdem)) return { duplicado: true, snapshot: snapshot(idMesa) };
+    const r = aplicar(idMesa, op);
+    if (r.error) return r;
+    if (claveIdem && registro) registro.guardar(claveIdem, true);
+    return { duplicado: false, snapshot: r.snapshot };
   }
 
-  return { snapshot, aplicar, vaciar };
+  const vaciar = (idMesa) => aplicar(idMesa, { accion: 'clear' }).snapshot;
+
+  return { snapshot, aplicar, aplicarUnaVez, vaciar };
 }
 
 /** Valida el payload de cart:update. Devuelve un mensaje de error o null. */
@@ -130,10 +161,10 @@ function validarOperacion(p) {
   return null;
 }
 
-function registrarCarrito(socket, { carritos, registro }) {
+function registrarCarrito(socket, { carritos }) {
   const identidad = socket.data.identidad;
 
-  socket.on('cart:update', manejar('cart:update', (p) => {
+  socket.on('cart:update', manejar('cart:update', async (p) => {
     const eventId = p.eventId;
     if (!esEventIdValido(eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
     if (!ROLES_CARRITO.includes(identidad.rol)) {
@@ -159,15 +190,13 @@ function registrarCarrito(socket, { carritos, registro }) {
 
     // Duplicado (reenvío tras reconexión): no se reaplica; se responde con el
     // snapshot VIGENTE, que es lo que el cliente necesita para resincronizarse.
-    const claveEvento = `cart:${idMesa}:${eventId}`;
-    if (registro.obtener(claveEvento)) {
-      return exito({ eventId, duplicado: true, carrito: carritos.snapshot(idMesa) });
-    }
-
-    const resultado = carritos.aplicar(idMesa, p);
+    // Comprobar el eventId y aplicar ocurren en UN paso atómico del almacén:
+    // con Redis, dos reenvíos simultáneos no pueden aplicarse ambos.
+    const claveEvento = `${identidad.rol}:cart:${idMesa}:${eventId}`;
+    const resultado = await carritos.aplicarUnaVez(idMesa, p, claveEvento);
     if (resultado.error) return fallo('PAYLOAD_INVALIDO', resultado.error, { eventId });
+    if (resultado.duplicado) return exito({ eventId, duplicado: true, carrito: resultado.snapshot });
 
-    registro.guardar(claveEvento, true);
     // A los demás; el emisor ya recibe el snapshot en su ack.
     socket.to(salaMesa(idMesa)).emit('cart:updated', {
       eventId,
@@ -179,5 +208,5 @@ function registrarCarrito(socket, { carritos, registro }) {
 }
 
 module.exports = {
-  crearAlmacenCarritos, registrarCarrito, validarOperacion, validarIngredientes, normalizarIngredientes, MAX_INGREDIENTES, PORCIONES,
+  aplicarOperacion, crearAlmacenCarritos, CARRITO_VACIO, registrarCarrito, validarOperacion, validarIngredientes, normalizarIngredientes, MAX_INGREDIENTES, PORCIONES,
 };

@@ -23,7 +23,7 @@ function validarPedidoCreado(p) {
  * Lógica única de order:created, compartida por el socket (personal) y por el
  * HTTP interno (backend). Así ambas vías validan, deduplican y difunden igual.
  */
-function difundirPedidoCreado(ctx, p) {
+async function difundirPedidoCreado(ctx, p) {
   const { io, carritos, registro } = ctx;
   if (!esEventIdValido(p.eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
   const errorPayload = validarPedidoCreado(p);
@@ -51,11 +51,11 @@ function difundirPedidoCreado(ctx, p) {
 
   // Lo que estaba en el carrito acaba de convertirse en pedido: se vacía para
   // que la mesa no pueda volver a ordenar lo mismo por accidente.
-  if (carritos.snapshot(pedido.id_mesa).items.length > 0) {
+  if ((await carritos.snapshot(pedido.id_mesa)).items.length > 0) {
     io.to(salaMesa(pedido.id_mesa)).emit('cart:updated', {
       eventId: p.eventId,
       origen: 'sistema',
-      carrito: carritos.vaciar(pedido.id_mesa),
+      carrito: await carritos.vaciar(pedido.id_mesa),
     });
   }
   return exito({ eventId: p.eventId, duplicado: false });
@@ -145,7 +145,7 @@ const rutasPedidos = {
   'POST /internal/order-created': async (req, res, ctx) => {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    enviarAck(res, difundirPedidoCreado(ctx, cuerpo));
+    enviarAck(res, await difundirPedidoCreado(ctx, cuerpo));
   },
   'POST /internal/order-status': async (req, res, ctx) => {
     exigirClaveInterna(req, ctx.config);
