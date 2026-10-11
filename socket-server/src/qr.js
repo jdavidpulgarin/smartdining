@@ -91,7 +91,19 @@ function crearServicioQr({ secreto, ttlMinutosPorDefecto = 360, ahora = Date.now
     revocadoDesde.set(idMesa, ahora() + 1);
   }
 
-  return { generar, validar, revocarMesa };
+  /**
+   * ¿Se liberó la mesa después de emitir una credencial en `emitidoSeg`
+   * (iat de un JWT, en segundos)? Se compara contra el final de ese segundo:
+   * ante la duda se acepta, porque el backend también comprueba el sid.
+   */
+  function revocadaDespuesDe(idMesa, emitidoSeg) {
+    const desde = revocadoDesde.get(idMesa);
+    if (!desde) return false;
+    if (!Number.isFinite(emitidoSeg)) return true; // sin iat no hay forma de saberlo
+    return (emitidoSeg + 1) * 1000 <= desde;
+  }
+
+  return { generar, validar, revocarMesa, revocadaDespuesDe };
 }
 
 /** Deriva una clave de firma propia si no se configuró QR_SECRET. */

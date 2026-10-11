@@ -3,6 +3,7 @@ const cors = require('cors');
 const { Server } = require('socket.io');
 const { autenticarSocket } = require('./auth');
 const { registrarSalas, salaMesa, SALA_ADMIN } = require('./salas');
+const { ROL_COMENSAL } = require('./auth');
 const { crearRegistroIdempotencia } = require('./idempotencia');
 const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
 const { registrarPedidos, rutasPedidos } = require('./pedidos');
@@ -81,16 +82,27 @@ function crearServidor(config, deps = {}) {
     });
     ctx.suscripciones.limpiarMesa(idMesa);
     ctx.carritos.vaciar(idMesa);
+    // Solo se echa a los comensales: la pantalla de la mesa sigue conectada
+    // para mostrar el QR del siguiente grupo, y el personal sigue vigilando.
+    const enSala = await io.in(salaMesa(idMesa)).fetchSockets();
+    for (const s of enSala) {
+      if (s.data.identidad && s.data.identidad.rol === ROL_COMENSAL) s.disconnect(true);
+    }
     return { duplicado: false };
   };
 
+  // Sesión de comensal vigente = su JWT es posterior a la última liberación de
+  // su mesa. El personal y la pantalla no dependen de la sesión de mesa.
+  const sesionVigente = (identidad) => identidad.rol !== ROL_COMENSAL
+    || !ctx.qr.revocadaDespuesDe(identidad.id_mesa, identidad.iat);
+
   // Sin JWT válido no se entra: todo socket que llega a 'connection' ya tiene
   // una identidad verificada en socket.data.identidad.
-  io.use(autenticarSocket(config.jwtSecret));
+  io.use(autenticarSocket(config.jwtSecret, { sesionVigente }));
 
   io.on('connection', (socket) => {
     console.log(`[socket] conectado ${socket.id} (${socket.data.identidad.rol})`);
-    registrarSalas(socket, { obtenerSnapshot: ctx.carritos.snapshot });
+    registrarSalas(socket, { obtenerSnapshot: ctx.carritos.snapshot, sesionVigente });
     registrarCarrito(socket, ctx);
     registrarPedidos(socket, ctx);
     registrarSuscripcionesSocket(socket, ctx);

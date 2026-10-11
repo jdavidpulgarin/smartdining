@@ -39,7 +39,7 @@ function resolverMesa(identidad, idPayload) {
  * `obtenerSnapshot(idMesa)` permite que el ack de join:table incluya el
  * carrito actual; se inyecta para no acoplar este módulo al del carrito.
  */
-function registrarSalas(socket, { obtenerSnapshot } = {}) {
+function registrarSalas(socket, { obtenerSnapshot, sesionVigente = () => true } = {}) {
   const identidad = socket.data.identidad;
 
   // Las pantallas de personal escuchan sus salas desde que conectan: no
@@ -56,6 +56,9 @@ function registrarSalas(socket, { obtenerSnapshot } = {}) {
     }
     const { idMesa, error } = resolverMesa(identidad, payload.id_mesa);
     if (error) return error;
+    // Un comensal conectado antes de liberar la mesa pero que no estaba en la
+    // sala (por eso no lo desconectamos) tampoco puede entrar después.
+    if (!sesionVigente(identidad)) return fallo('NO_AUTORIZADO', 'La sesión de esta mesa ya se cerró');
 
     socket.join(salaMesa(idMesa));
     const respuesta = { id_mesa: idMesa, sala: salaMesa(idMesa) };
