@@ -116,6 +116,63 @@ async function abrirSesion(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
 }
 
 /**
+ * Rota el QR de una mesa con sesión abierta: pide un token nuevo al
+ * socket-server y lo guarda como el vigente.
+ *
+ * Solo para mesas 'ocupada': rotar una mesa libre equivaldría a abrirla sin
+ * pasar por POST /abrir. La fila se bloquea (FOR UPDATE) igual que al abrir,
+ * para que dos rotaciones simultáneas no dejen guardado un token distinto del
+ * que se avisó a la tablet.
+ *
+ * Avisar a la tablet (/internal/qr-rotado) es del controller, DESPUÉS del
+ * commit: así nunca se anuncia un token que no quedó guardado.
+ *
+ * @returns { noExiste: true } | { noOcupada: true, estado }
+ *          | { socketCaido: true, motivo } | { rechazado: true, status, mensaje }
+ *          | { mesa, token, expira_en }
+ */
+async function rotarQr(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const bloqueada = await client.query('SELECT * FROM mesas WHERE id_mesa = $1 FOR UPDATE', [idMesa]);
+    if (bloqueada.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { noExiste: true };
+    }
+    const mesa = bloqueada.rows[0];
+    if (mesa.estado !== ESTADO_MESA_OCUPADA) {
+      await client.query('ROLLBACK');
+      return { noOcupada: true, estado: mesa.estado };
+    }
+
+    const generado = await socket.generarTokenQr(idMesa, jwtStaff);
+    if (!generado.alcanzado) {
+      await client.query('ROLLBACK');
+      return { socketCaido: true, motivo: generado.motivo };
+    }
+    if (!generado.token) {
+      await client.query('ROLLBACK');
+      return { rechazado: true, status: generado.status, mensaje: generado.mensaje };
+    }
+
+    const actualizada = await client.query(
+      'UPDATE mesas SET token_qr = $1 WHERE id_mesa = $2 RETURNING *',
+      [generado.token, idMesa]
+    );
+
+    await client.query('COMMIT');
+    return { mesa: actualizada.rows[0], token: generado.token, expira_en: generado.expira_en ?? null };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Cierra la sesión de la mesa a mano: la deja 'disponible' y borra su token_qr,
  * con lo que el QR impreso deja de valer y las sesiones de comensal de ese grupo
  * caen (el middleware compara el sid del JWT contra la columna).
@@ -226,6 +283,7 @@ module.exports = {
   ESTADO_MESA_LIBRE,
   ESTADO_MESA_OCUPADA,
   abrirSesion,
+  rotarQr,
   liberarSesion,
   liberarSiNoQuedanPedidosAbiertos,
   tokenQrDeMesa,
