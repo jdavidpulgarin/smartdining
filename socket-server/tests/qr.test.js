@@ -11,53 +11,53 @@ function servicio(secreto = 's3creto') {
   return { qr, reloj };
 }
 
-test('un token válido se puede validar VARIAS veces (reutilizable en la sesión)', () => {
+test('un token válido se puede validar VARIAS veces (reutilizable en la sesión)', async () => {
   const { qr } = servicio();
   const { token } = qr.generar(5);
-  for (let i = 0; i < 3; i += 1) assert.deepStrictEqual(qr.validar(token).id_mesa, 5);
+  for (let i = 0; i < 3; i += 1) assert.deepStrictEqual((await qr.validar(token)).id_mesa, 5);
 });
 
-test('expira de forma explícita', () => {
+test('expira de forma explícita', async () => {
   const { qr, reloj } = servicio();
   const { token, expira_en } = qr.generar(5, 10);
   assert.strictEqual(expira_en, reloj.t + 10 * 60 * 1000);
   reloj.t += 10 * 60 * 1000 - 1;
-  assert.strictEqual(qr.validar(token).valido, true);
+  assert.strictEqual((await qr.validar(token)).valido, true);
   reloj.t += 1;
-  assert.deepStrictEqual(qr.validar(token), { valido: false, motivo: 'expirado' });
+  assert.deepStrictEqual((await qr.validar(token)), { valido: false, motivo: 'expirado' });
 });
 
-test('rechaza tokens manipulados: mesa cambiada, expiración alargada, firma ajena, basura', () => {
+test('rechaza tokens manipulados: mesa cambiada, expiración alargada, firma ajena, basura', async () => {
   const { qr } = servicio();
   const { token } = qr.generar(5, 10);
   const [v, payload, firma] = token.split('.');
   const p = JSON.parse(Buffer.from(payload, 'base64url').toString());
 
   const conMesa = Buffer.from(JSON.stringify({ ...p, m: 6 })).toString('base64url');
-  assert.strictEqual(qr.validar(`${v}.${conMesa}.${firma}`).motivo, 'firma');
+  assert.strictEqual((await qr.validar(`${v}.${conMesa}.${firma}`)).motivo, 'firma');
   const conExp = Buffer.from(JSON.stringify({ ...p, exp: p.exp + 9e9 })).toString('base64url');
-  assert.strictEqual(qr.validar(`${v}.${conExp}.${firma}`).motivo, 'firma');
+  assert.strictEqual((await qr.validar(`${v}.${conExp}.${firma}`)).motivo, 'firma');
 
   const otro = crearServicioQr({ secreto: 'otro' }).generar(5).token;
-  assert.strictEqual(qr.validar(otro).motivo, 'firma');
+  assert.strictEqual((await qr.validar(otro)).motivo, 'firma');
   for (const basura of ['', 'a.b', 'v2.a.b', null, 42, 'v1..', 'x'.repeat(600)]) {
-    assert.strictEqual(qr.validar(basura).valido, false);
+    assert.strictEqual((await qr.validar(basura)).valido, false);
   }
 });
 
-test('liberar la mesa revoca los QR anteriores pero no el siguiente', () => {
+test('liberar la mesa revoca los QR anteriores pero no el siguiente', async () => {
   const { qr, reloj } = servicio();
   const viejo = qr.generar(5).token;
   const deOtraMesa = qr.generar(6).token;
   reloj.t += 1000;
-  qr.revocarMesa(5);
-  assert.strictEqual(qr.validar(viejo).motivo, 'revocado');
-  assert.strictEqual(qr.validar(deOtraMesa).valido, true);
+  await qr.revocarMesa(5);
+  assert.strictEqual((await qr.validar(viejo)).motivo, 'revocado');
+  assert.strictEqual((await qr.validar(deOtraMesa)).valido, true);
   reloj.t += 1000;
-  assert.strictEqual(qr.validar(qr.generar(5).token).valido, true);
+  assert.strictEqual((await qr.validar(qr.generar(5).token)).valido, true);
 });
 
-test('valida el rango del TTL y el id de mesa', () => {
+test('valida el rango del TTL y el id de mesa', async () => {
   const { qr } = servicio();
   assert.throws(() => qr.generar(5, 0), RangeError);
   assert.throws(() => qr.generar(5, 1441), RangeError);

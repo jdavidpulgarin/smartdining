@@ -102,8 +102,7 @@ const rutasPagos = {
     // 4) Idempotencia: los proveedores reintentan (a veces durante días) y
     // pueden entregar el mismo evento dos veces.
     const clave = `pago:${evento.id}`;
-    if (ctx.registroPagos.obtener(clave)) return enviarJson(res, 200, { ok: true, duplicado: true });
-    ctx.registroPagos.guardar(clave, true);
+    if (!(await ctx.registroPagos.reservar(clave))) return enviarJson(res, 200, { ok: true, duplicado: true });
 
     const { data } = evento;
     ctx.io.to(SALA_ADMIN).to(salaMesa(data.id_mesa)).emit('payment:confirmed', {

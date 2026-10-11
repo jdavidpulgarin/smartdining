@@ -74,10 +74,10 @@ function crearAlmacenSuscripciones() {
   };
 }
 
-function suscribir(ctx, idMesa, suscripcionCruda) {
+async function suscribir(ctx, idMesa, suscripcionCruda) {
   const { suscripcion, error } = validarSuscripcion(suscripcionCruda);
   if (error) return fallo('PAYLOAD_INVALIDO', error);
-  if (!ctx.suscripciones.agregar(idMesa, suscripcion)) {
+  if (!(await ctx.suscripciones.agregar(idMesa, suscripcion))) {
     return fallo('PAYLOAD_INVALIDO', `La mesa alcanzó el máximo de ${MAX_SUSCRIPCIONES_POR_MESA} suscripciones`);
   }
   return exito();
@@ -86,24 +86,26 @@ function suscribir(ctx, idMesa, suscripcionCruda) {
 function registrarSuscripcionesSocket(socket, ctx) {
   const identidad = socket.data.identidad;
 
-  socket.on('push:subscribe', manejar('push:subscribe', (p) => {
+  socket.on('push:subscribe', manejar('push:subscribe', async (p) => {
     if (!esEventIdValido(p.eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
     if (identidad.rol !== ROL_COMENSAL) {
       return fallo('NO_AUTORIZADO', 'Solo el comensal se suscribe a push', { eventId: p.eventId });
     }
     const clave = `push:${identidad.id_mesa}:${p.eventId}`;
-    if (ctx.registro.obtener(clave)) return exito({ eventId: p.eventId, duplicado: true });
+    if (await ctx.registro.obtener(clave)) return exito({ eventId: p.eventId, duplicado: true });
 
-    const r = suscribir(ctx, identidad.id_mesa, p.subscription);
+    // Dar de alta el mismo endpoint dos veces ya es idempotente (se indexa por
+    // endpoint), así que aquí basta con marcar el eventId después del alta.
+    const r = await suscribir(ctx, identidad.id_mesa, p.subscription);
     if (!r.ok) return { ...r, eventId: p.eventId };
-    ctx.registro.guardar(clave, true);
+    await ctx.registro.guardar(clave, true);
     return exito({ eventId: p.eventId, duplicado: false });
   }));
 
-  socket.on('push:unsubscribe', manejar('push:unsubscribe', (p) => {
+  socket.on('push:unsubscribe', manejar('push:unsubscribe', async (p) => {
     if (identidad.rol !== ROL_COMENSAL) return fallo('NO_AUTORIZADO', 'Solo el comensal gestiona sus suscripciones');
     if (typeof p.endpoint !== 'string') return fallo('PAYLOAD_INVALIDO', 'endpoint es obligatorio');
-    ctx.suscripciones.quitar(identidad.id_mesa, p.endpoint);
+    await ctx.suscripciones.quitar(identidad.id_mesa, p.endpoint);
     return exito();
   }));
 }
@@ -121,7 +123,7 @@ const rutasSuscripciones = {
   'POST /push/suscripcion': async (req, res, ctx) => {
     const { id_mesa: idMesa } = comensalDeRequest(req, ctx);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    const r = suscribir(ctx, idMesa, cuerpo.subscription);
+    const r = await suscribir(ctx, idMesa, cuerpo.subscription);
     if (!r.ok) throw new ErrorHttp(400, r.codigo, r.mensaje);
     enviarJson(res, 201, { ok: true });
   },
@@ -129,7 +131,7 @@ const rutasSuscripciones = {
     const { id_mesa: idMesa } = comensalDeRequest(req, ctx);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
     if (typeof cuerpo.endpoint !== 'string') throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'endpoint es obligatorio');
-    ctx.suscripciones.quitar(idMesa, cuerpo.endpoint);
+    await ctx.suscripciones.quitar(idMesa, cuerpo.endpoint);
     enviarJson(res, 200, { ok: true });
   },
 };
@@ -158,12 +160,12 @@ async function notificarCambioEstado(ctx, cambio) {
     estado: cambio.estado,
     id_mesa: cambio.id_mesa,
   };
-  await Promise.all(ctx.suscripciones.listar(cambio.id_mesa).map(async (s) => {
+  await Promise.all((await ctx.suscripciones.listar(cambio.id_mesa)).map(async (s) => {
     const r = await ctx.push.enviar(s, payload);
-    if (r.caducada) ctx.suscripciones.quitar(cambio.id_mesa, s.endpoint);
+    if (r.caducada) await ctx.suscripciones.quitar(cambio.id_mesa, s.endpoint);
   }));
 }
 
 module.exports = {
-  crearAlmacenSuscripciones, registrarSuscripcionesSocket, rutasSuscripciones, notificarCambioEstado, validarSuscripcion,
+  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, rutasSuscripciones, notificarCambioEstado, validarSuscripcion,
 };
