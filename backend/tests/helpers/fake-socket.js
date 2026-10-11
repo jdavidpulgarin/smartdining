@@ -57,7 +57,18 @@ function instalarFakeSocket(responder) {
       if (señal) {
         if (señal.aborted) return fallar();
         señal.addEventListener('abort', fallar, { once: true });
-        quitarEscucha = () => señal.removeEventListener('abort', fallar);
+        // AbortSignal.timeout() usa un temporizador "unref": no mantiene vivo
+        // el event loop. Con un responder que nunca resuelve no queda ningún
+        // otro trabajo pendiente, y en Node 22 el runner ve el loop vacío antes
+        // de que el abort se dispare: marca la prueba como "Promise resolution
+        // is still pending" y cancela todas las que siguen en el archivo. Un
+        // fetch real tendría un socket abierto que lo impide; este temporizador
+        // hace ese papel mientras la petición simulada está pendiente.
+        const sosten = setInterval(() => {}, 1000);
+        quitarEscucha = () => {
+          clearInterval(sosten);
+          señal.removeEventListener('abort', fallar);
+        };
         return;
       }
 
