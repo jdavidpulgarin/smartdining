@@ -9,7 +9,8 @@
     "start": "node server.js",
     "vapid": "node scripts/generar-vapid.js",
     "token:comensal": "node scripts/token-comensal.js",
-    "test": "node --test --test-timeout=10000 tests/*.test.js"
+    "test": "node --test --test-timeout=10000 tests/*.test.js",
+    "carga": "node tests/carga/carga.js"
   },
   "license": "ISC",
   "dependencies": {
