@@ -225,24 +225,25 @@ export async function solicitarTokenPantalla(idMesa) {
 }
 
 /**
- * Notifica /internal/qr-rotado al socket-server (usado en rotaciones manuales)
+ * Rota el QR de una mesa abierta a través del backend:
+ * POST /api/mesas/:id/rotar-qr (Bearer del personal).
+ *
+ * El navegador NUNCA llama a /internal/* del socket-server: esa ruta exige la
+ * clave interna, y cualquier valor con prefijo VITE_ queda incrustado en el
+ * JavaScript público. El backend guarda el token nuevo y, tras el commit, es
+ * él quien avisa a la tablet (qr:actualizado).
+ *
+ * @returns {Promise<{ ok: true, token: string, url: string, expira_en: number|null }>}
+ * @throws Error con .status si el backend rechaza (401/403/409/503)
  */
-export async function notificarQrRotado(idMesa, tokenQr) {
+export async function notificarQrRotado(idMesa) {
+  const data = await mesasApi.rotarQr(Number(idMesa))
+  // El backend solo devuelve la url; el token se lee de ahí para redibujar.
+  let token = null
   try {
-    const res = await fetch(`${SOCKET_URL}/internal/qr-rotado`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-internal-key': import.meta.env.VITE_INTERNAL_API_KEY || 'dev-key',
-      },
-      body: JSON.stringify({
-        id_mesa: Number(idMesa),
-        token_qr: tokenQr,
-      }),
-    })
-    return res.ok
-  } catch (err) {
-    console.warn('Error al notificar /internal/qr-rotado:', err.message)
-    return false
+    token = new URL(data.url).searchParams.get('token')
+  } catch {
+    token = null
   }
+  return { ok: true, token, url: data.url, expira_en: data.expira_en ?? null }
 }

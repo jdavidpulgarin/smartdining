@@ -122,6 +122,16 @@ export const mesasApi = {
   },
 
   /**
+   * Rota el QR de una mesa abierta: POST /api/mesas/:id/rotar-qr
+   * Responde { url, expira_en, mesa }: el token solo viaja dentro de url.
+   */
+  async rotarQr(id) {
+    return apiFetch(`/mesas/${id}/rotar-qr`, {
+      method: 'POST',
+    })
+  },
+
+  /**
    * Libera una mesa cerrando la sesión: POST /api/mesas/:id/liberar
    */
   async liberar(id) {
