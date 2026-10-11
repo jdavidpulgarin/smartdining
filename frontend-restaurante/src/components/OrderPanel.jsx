@@ -2,7 +2,7 @@ import { Utensils, CheckCircle2, Flame, User, Clock, ArrowRight } from 'lucide-r
 import { Link } from 'react-router-dom'
 import { StateBadge } from './ui/Badge'
 
-export function OrderPanel({ order }) {
+export function OrderPanel({ order, onDeliver }) {
   if (!order) {
     return (
       <div className="panel order-panel empty-selection">
@@ -21,6 +21,8 @@ export function OrderPanel({ order }) {
       </div>
     )
   }
+
+  const isListo = order.state?.toLowerCase() === 'listo'
 
   return (
     <div className="panel order-panel">
@@ -56,9 +58,9 @@ export function OrderPanel({ order }) {
 
         {/* Lista de Platos */}
         <div className="order-items-wrapper">
-          <span className="items-section-title">Ítems ordenados ({order.items.length})</span>
+          <span className="items-section-title">Ítems ordenados ({order.items?.length || 0})</span>
           <div className="items-list">
-            {order.items.map((item, idx) => (
+            {(order.items || []).map((item, idx) => (
               <div key={`${order.id}-${item.name}-${idx}`} className="item-row">
                 <div className="item-name-block">
                   <span className="item-qty-tag">x{item.qty}</span>
@@ -86,8 +88,19 @@ export function OrderPanel({ order }) {
 
         {/* Acciones Rápidas */}
         <div className="order-actions">
-          <Link to="/caja" className="primary-button small flex-1 text-center">
-            <CheckCircle2 size={15} />
+          {isListo && onDeliver && (
+            <button
+              type="button"
+              className="primary-button small flex-1 text-center btn-entregar-order"
+              onClick={() => onDeliver(order.id_pedido || order.id)}
+              style={{ backgroundColor: 'var(--emerald-600, #059669)', color: '#fff' }}
+            >
+              <CheckCircle2 size={15} />
+              <span>Marcar Entregado</span>
+            </button>
+          )}
+
+          <Link to="/caja" className="ghost-button small flex-1 text-center">
             <span>Cobrar en Caja</span>
           </Link>
           <Link to="/pedidos" className="ghost-button small text-center">
@@ -99,3 +112,4 @@ export function OrderPanel({ order }) {
     </div>
   )
 }
+
