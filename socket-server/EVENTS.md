@@ -503,7 +503,109 @@ Reglas:
 
 ---
 
-## 8. Webhook de pagos
+## 8. Pagos (Wompi, sandbox)
+
+El comensal paga en el **Widget de Wompi**: los datos de tarjeta o cuenta nunca pasan por
+SmartDining (alcance PCI DSS mínimo, SAQ A). El socket-server calcula el monto, firma la
+intención y verifica el resultado. Todo va detrás de la interfaz `PasarelaPago`
+(`src/pasarelas/`), así que cambiar de proveedor no toca el resto.
+
+### 8.1. `POST /pagos/intencion`
+
+Auth: `Authorization: Bearer <JWT del comensal>` (sesión de mesa vigente). La mesa sale del JWT.
+
+```json
+{ "modo": "igual", "eventId": "4b0d…", "comensal": "Ana" }
+```
+
+| Campo | Reglas |
+|---|---|
+| `modo` | `total` (saldo de la mesa), `igual` (total ÷ personas presentes), `propio` (lo de ese comensal) |
+| `eventId` | UUID. Repetirlo devuelve la **misma** respuesta |
+| `comensal` | Alias de quien paga (1–40). Debe estar **sentado ahora** en la mesa (`join:table` con ese alias); si no, `403` |
+
+Cualquier otro campo (`monto`, `id_mesa`, `precio`…) **se ignora**: el monto lo calcula el
+servidor con la cuenta del backend.
+
+`201` (o `200` si es la misma intención pendiente o el mismo `eventId`):
+
+```json
+{
+  "referencia": "SD-5-1760212345678-Qm9vX2FfdGVzdF9f",
+  "monto_en_centavos": 3333300,
+  "moneda": "COP",
+  "llave_publica": "pub_test_…",
+  "firma_integridad": "37c8407747e5…",
+  "expira_en": "2026-10-11T20:45:00.000Z"
+}
+```
+
+| Error | Cuándo |
+|---|---|
+| `400 PAYLOAD_INVALIDO` | `modo`, `eventId` o `comensal` inválidos |
+| `401 NO_AUTORIZADO` | Sin JWT, JWT inválido o la mesa ya se liberó |
+| `403 NO_AUTORIZADO` | No es comensal, o el alias no está en la mesa |
+| `409 SIN_SALDO` | Saldo 0 (o `propio` sin consumos de ese alias) |
+| `429 RATE_LIMIT` | Más de 5 intenciones por minuto del mismo comensal |
+| `502/503 ERROR_INTERNO` | El backend no respondió o respondió mal |
+| `503 NO_CONFIGURADO` | Pagos apagados (sin `WOMPI_*`) |
+
+Reglas de la cuenta dividida:
+
+- **total**: el saldo completo de la mesa.
+- **igual**: el **total** de la cuenta entre las personas presentes (`mesa:presencia.total`),
+  redondeado a pesos. Quien paga de último cubre el residuo del redondeo; nunca se cobra más
+  que el saldo.
+- **propio**: el saldo de ese alias según el backend (nunca más que el saldo de la mesa).
+- **Una sola intención pendiente por comensal**: si ya tiene una sin pagar, se devuelve esa.
+- La intención vive `PAGOS_TTL_MINUTOS` (30). Después el widget la rechaza (`expiration-time`
+  va dentro de la firma).
+
+Uso en la PWA (Widget de Wompi):
+
+```html
+<script src="https://checkout.wompi.co/widget.js"></script>
+```
+
+```js
+const i = await (await fetch(`${SOCKET_URL}/pagos/intencion`, { method: 'POST', headers, body })).json();
+const checkout = new WidgetCheckout({
+  currency: i.moneda,
+  amountInCents: i.monto_en_centavos,
+  reference: i.referencia,
+  publicKey: i.llave_publica,
+  signature: { integrity: i.firma_integridad },
+  expirationTime: i.expira_en,
+  redirectUrl: `${location.origin}/seguimiento`,
+});
+checkout.open(() => { /* el resultado oficial llega por payment:confirmed, no por aquí */ });
+```
+
+El resultado que muestra el widget **no** es la confirmación: la confirmación es el evento
+`payment:confirmed`, que solo se emite después de verificar el webhook y registrar el pago.
+
+### 8.2. Contrato que necesita del backend (pendiente: Daniel)
+
+```
+GET /api/mesas/:id/cuenta/interno
+x-internal-key: <INTERNAL_API_KEY>
+
+200 {
+  "id_mesa": 5,
+  "moneda": "COP",
+  "total_centavos": 9000000,
+  "saldo_centavos": 6000000,
+  "por_comensal": [ { "comensal": "Ana", "saldo_centavos": 3000000 } ]
+}
+```
+
+- Montos en **centavos enteros** (`total` del pedido × 100), calculados en SQL.
+- `total_centavos`: suma de los pedidos no cancelados de la sesión actual de la mesa.
+- `saldo_centavos`: `total_centavos` menos las transacciones `completada`.
+- `por_comensal`: por alias (el `apodo`/`comensal` de cada ítem), menos lo que ya pagó.
+- `404` si la mesa no existe. El socket-server trata cualquier otra forma como error (`502`).
+
+### 8.3. Webhook de pagos
 
 `POST /pagos/webhook` recibe confirmaciones del proveedor de pagos.
 
@@ -542,3 +644,12 @@ socket-server **no escribe en la base de datos**: registrar la transacción
 | `PANTALLA_TOKEN_EXPIRES_IN` | Vigencia del JWT de la pantalla de mesa (30d por defecto) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push (`npm run vapid` las genera) |
 | `PAYMENT_WEBHOOK_SECRET` | Secreto compartido con el proveedor de pagos |
+| `BACKEND_URL` | URL del backend para llamadas servidor a servidor (cuenta, registro de pagos, rotación de QR) |
+| `WOMPI_PUBLIC_KEY` | Llave pública (`pub_test_…`). La **única** que llega al cliente |
+| `WOMPI_PRIVATE_KEY` | Llave privada (`prv_test_…`). Solo para consultar transacciones en la API |
+| `WOMPI_INTEGRITY_SECRET` | Secreto de integridad (`test_integrity_…`). Firma las intenciones |
+| `WOMPI_EVENTS_SECRET` | Secreto de eventos (`test_events_…`). Verifica el webhook |
+| `WOMPI_API_URL` | `https://sandbox.wompi.co/v1` o `https://production.wompi.co/v1` (lista blanca) |
+| `PAGOS_TTL_MINUTOS` | Vida de una intención de pago (30) |
+| `REDIS_URL` | Estado persistente (obligatoria en producción) |
+| `ROTACION_QR_MINUTOS` | Rotación automática del QR con la mesa vacía (3) |
