@@ -1,4 +1,5 @@
 const { log } = require('./log');
+const { enCurso } = require('./cierre');
 
 // Formato único de respuesta (ack) para todos los eventos. Tener un solo
 // formato evita que cada frontend tenga que adivinar cómo leer un error.
@@ -24,6 +25,7 @@ function responder(ack, respuesta) {
  */
 function manejar(nombre, handler) {
   return async (payload, ack) => {
+    enCurso.iniciar();
     try {
       // Si el cliente manda un no-objeto (null, string...) se trata como vacío
       // para que los manejadores puedan leer campos sin comprobar el tipo.
@@ -32,6 +34,8 @@ function manejar(nombre, handler) {
     } catch (err) {
       log.error('error en evento de socket', { evento: nombre, error: err });
       responder(ack, fallo('ERROR_INTERNO', 'Error inesperado del servidor'));
+    } finally {
+      enCurso.terminar();
     }
   };
 }

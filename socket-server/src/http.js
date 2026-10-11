@@ -1,4 +1,5 @@
 const { log } = require('./log');
+const { enCurso } = require('./cierre');
 const crypto = require('crypto');
 
 const LIMITE_CUERPO = 100 * 1024; // 100 KB: de sobra para un pedido, corta abusos
@@ -90,6 +91,10 @@ function crearRouter(rutas, ctx) {
     const ruta = req.url.split('?')[0];
     const handler = rutas[`${req.method} ${ruta}`];
     if (!handler) return enviarJson(res, 404, { error: 'Ruta no encontrada' });
+    // Cerrando: lo nuevo se rechaza con 503 (Wompi y el backend reintentan) y
+    // lo que ya estaba en curso termina.
+    if (ctx.cerrando) return enviarJson(res, 503, { ok: false, codigo: 'ERROR_INTERNO', mensaje: 'Servidor reiniciándose; reintenta' });
+    enCurso.iniciar();
     try {
       await handler(req, res, ctx);
     } catch (err) {
@@ -98,6 +103,8 @@ function crearRouter(rutas, ctx) {
       }
       log.error('error inesperado en HTTP', { ruta, metodo: req.method, error: err });
       enviarJson(res, 500, { ok: false, codigo: 'ERROR_INTERNO', mensaje: 'Error inesperado del servidor' });
+    } finally {
+      enCurso.terminar();
     }
   };
 }

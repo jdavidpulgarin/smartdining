@@ -172,6 +172,8 @@ function crearServidor(config, deps = {}) {
 
   // Sin JWT válido no se entra: todo socket que llega a 'connection' ya tiene
   // una identidad verificada en socket.data.identidad.
+  // Durante el cierre ordenado no se aceptan sockets nuevos.
+  io.use((socket, next) => (ctx.cerrando ? next(new Error('SERVIDOR_CERRANDO')) : next()));
   io.use(autenticarSocket(config.jwtSecret, { sesionVigente }));
   // Después de autenticar (necesita la mesa del JWT): tope de comensales por mesa.
   ctx.limiteMesas = crearLimiteMesas({
@@ -198,7 +200,9 @@ function crearServidor(config, deps = {}) {
     socket.on('disconnect', (motivo) => log.info('socket desconectado', { socket: socket.id, motivo }));
   });
 
-  return { httpServer, io, ...ctx };
+  // ctx es el contexto real (el que leen el router y los middlewares): el
+  // cierre ordenado necesita marcarlo, no una copia.
+  return { httpServer, io, ctx, ...ctx };
 }
 
 module.exports = { crearServidor };
