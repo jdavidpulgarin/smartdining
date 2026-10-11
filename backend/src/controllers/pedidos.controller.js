@@ -51,6 +51,11 @@ const ingredienteSchema = z
     // 'normal' es la porción sin recargo: el valor por defecto más conservador.
     porcion: z.enum(PORCIONES).default('normal'),
   })
+  // passthrough porque zod descarta las claves desconocidas ANTES de los
+  // refinamientos, y sin ellas no se puede ver que llegó un precio. Lo que pasa
+  // al service no son estos objetos sino los que arma `crear` campo por campo,
+  // así que nada desconocido sigue viaje.
+  .passthrough()
   .superRefine(rechazarPrecios);
 
 /**
@@ -73,6 +78,7 @@ const itemSchema = z
     notas: z.string().max(200).refine(sinOverride, MENSAJE_OVERRIDE).optional(),
     ingredientes: z.array(ingredienteSchema).max(MAX_INGREDIENTES_POR_ITEM).optional(),
   })
+  .passthrough()
   .superRefine((item, ctx) => {
     rechazarPrecios(item, ctx);
 
@@ -145,7 +151,10 @@ async function crear(req, res, next) {
       cantidad: item.cantidad,
       comensal: aliasDelComensal(req, item),
       notas: item.notas ?? null,
-      ingredientes: item.ingredientes ?? [],
+      ingredientes: (item.ingredientes ?? []).map((i) => ({
+        id_ingrediente: i.id_ingrediente,
+        porcion: i.porcion,
+      })),
     }));
 
     const pedido = await pedidosService.crearConDetalles({

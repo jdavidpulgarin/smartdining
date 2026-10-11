@@ -1,0 +1,181 @@
+const test = require('node:test');
+const assert = require('node:assert');
+const request = require('supertest');
+const { instalarFakeDb, tokenStaff } = require('./helpers/fake-db');
+const app = require('../server');
+
+// GET /api/kds/comandas desde D-03: la cocina necesita ver quien pidio cada
+// item y con que ingredientes y porciones se arma, y el tablero se refresca
+// cada pocos segundos, asi que el numero de consultas no puede crecer con el
+// numero de comandas.
+
+const SQL_PEDIDOS = 'FROM pedidos p';
+const SQL_ITEMS = 'FROM detalles_pedido dp';
+
+function pedido(id_pedido) {
+  return {
+    id_pedido,
+    codigo_pedido: `PED-261011-0000${id_pedido}`,
+    id_mesa: id_pedido,
+    estado: 'recibido',
+    notas_generales: null,
+    creado_en: new Date().toISOString(),
+    mesa_numero: id_pedido,
+    minutos_transcurridos: 3,
+  };
+}
+
+const INGREDIENTES = [
+  { id_ingrediente: 1, nombre: 'Arroz Integral', porcion: 'normal', id_paso: 1, paso: 'Elige tu Base' },
+  { id_ingrediente: 4, nombre: 'Pollo a la Plancha', porcion: 'normal', id_paso: 2, paso: 'Elige tu Proteina' },
+  { id_ingrediente: 10, nombre: 'Aguacate', porcion: 'extra', id_paso: 3, paso: 'Anade Toppings' },
+];
+
+function item(id_detalle, id_pedido, extra = {}) {
+  return {
+    id_detalle,
+    id_pedido,
+    cantidad: 2,
+    notas_especiales: 'sin cebolla',
+    estado_item: 'pendiente',
+    comensal: 'Ana',
+    plato_nombre: 'Bowl Personalizado',
+    tiempo_preparacion_estimado: 12,
+    personalizable: true,
+    categoria_nombre: 'Fuertes',
+    ingredientes: INGREDIENTES,
+    ...extra,
+  };
+}
+
+/** Doble de la base con N comandas, cada una con un item armado. */
+function conComandas(cantidad) {
+  const pedidos = Array.from({ length: cantidad }, (_, i) => pedido(i + 1));
+  const items = pedidos.map((p) => item(700 + p.id_pedido, p.id_pedido));
+  return (sql, params) => {
+    if (sql.includes(SQL_PEDIDOS)) return { rows: pedidos };
+    if (sql.includes(SQL_ITEMS)) {
+      const ids = params[0];
+      return { rows: items.filter((it) => ids.includes(it.id_pedido)) };
+    }
+    return { rows: [] };
+  };
+}
+
+const jwtCocina = () => tokenStaff(9, 'cocina');
+
+test('las comandas llegan con comensal, ingredientes y porciones', async () => {
+  const db = instalarFakeDb(conComandas(1));
+  try {
+    const res = await request(app)
+      .get('/api/kds/comandas')
+      .set('Authorization', `Bearer ${jwtCocina()}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.comandas.length, 1);
+
+    const [itemDeLaComanda] = res.body.comandas[0].items;
+    assert.strictEqual(itemDeLaComanda.comensal, 'Ana');
+    assert.strictEqual(itemDeLaComanda.notas_especiales, 'sin cebolla');
+    assert.deepStrictEqual(
+      itemDeLaComanda.ingredientes.map((i) => [i.nombre, i.porcion]),
+      [['Arroz Integral', 'normal'], ['Pollo a la Plancha', 'normal'], ['Aguacate', 'extra']]
+    );
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('cada comanda recibe solo sus propios items', async () => {
+  const db = instalarFakeDb(conComandas(3));
+  try {
+    const res = await request(app)
+      .get('/api/kds/comandas')
+      .set('Authorization', `Bearer ${jwtCocina()}`);
+
+    assert.strictEqual(res.body.comandas.length, 3);
+    for (const comanda of res.body.comandas) {
+      assert.strictEqual(comanda.items.length, 1);
+      assert.strictEqual(comanda.items[0].id_pedido, comanda.id_pedido);
+    }
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('el numero de consultas no crece con el numero de comandas', async () => {
+  for (const cuantas of [1, 5, 20]) {
+    const db = instalarFakeDb(conComandas(cuantas));
+    try {
+      await request(app).get('/api/kds/comandas').set('Authorization', `Bearer ${jwtCocina()}`);
+
+      assert.strictEqual(
+        db.todas(SQL_PEDIDOS).length,
+        1,
+        `${cuantas} comandas: una sola consulta de pedidos`
+      );
+      assert.strictEqual(
+        db.todas(SQL_ITEMS).length,
+        1,
+        `${cuantas} comandas: una sola consulta de items (sin N+1)`
+      );
+    } finally {
+      db.restaurar();
+    }
+  }
+});
+
+test('sin comandas activas no se consultan items', async () => {
+  const db = instalarFakeDb(conComandas(0));
+  try {
+    const res = await request(app)
+      .get('/api/kds/comandas')
+      .set('Authorization', `Bearer ${jwtCocina()}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body.comandas, []);
+    assert.strictEqual(db.todas(SQL_ITEMS).length, 0);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('a la cocina no se le manda el precio de los ingredientes', async () => {
+  const db = instalarFakeDb(conComandas(1));
+  try {
+    await request(app).get('/api/kds/comandas').set('Authorization', `Bearer ${jwtCocina()}`);
+
+    const consulta = db.buscar(SQL_ITEMS);
+    assert.ok(!consulta.sql.includes('precio_aplicado'), 'la cocina no necesita precios');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('un item de plato simple llega con ingredientes vacios', async () => {
+  const db = instalarFakeDb((sql, params) => {
+    if (sql.includes(SQL_PEDIDOS)) return { rows: [pedido(1)] };
+    if (sql.includes(SQL_ITEMS)) {
+      return {
+        rows: [item(701, 1, {
+          plato_nombre: 'Limonada de Coco',
+          personalizable: false,
+          comensal: null,
+          notas_especiales: null,
+          ingredientes: [],
+        })],
+      };
+    }
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .get('/api/kds/comandas')
+      .set('Authorization', `Bearer ${jwtCocina()}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body.comandas[0].items[0].ingredientes, []);
+  } finally {
+    db.restaurar();
+  }
+});
