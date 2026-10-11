@@ -7,8 +7,9 @@ hace 5 cambios en el carrito compartido (`cart:update`) y cada cambio llega en v
 **Meta:** p95 de la latencia del ack **por debajo de 300 ms**, **sin errores** y todos los
 avisos entregados.
 
-**Resultado: cumple.** p95 entre **109 y 133 ms** en las 4 corridas, 0 errores y 1200/1200
-avisos entregados en cada una.
+**Resultado: cumple, en memoria y con Redis.** En el portátil (memoria), p95 entre **109 y
+133 ms** en 4 corridas. En GitHub Actions, con el mismo script, p95 de **21 ms en memoria y
+66 ms con Redis real**. 0 errores y 1200/1200 avisos entregados en todas las corridas.
 
 ## Cómo se midió
 
@@ -21,7 +22,7 @@ avisos entregados en cada una.
 - Los 80 comensales envían a la vez; cada uno manda sus 5 cambios en serie.
 - Fecha: 11 de octubre de 2026. Equipo: Windows 10 x64, Node 24.21. Sin Docker ni Redis en esa
   máquina, así que el almacén fue **memoria**. El script también corre con
-  `REDIS_URL=...` (ver "Pendiente").
+  `REDIS_URL=...` (ver "Memoria frente a Redis").
 
 ## Resultados
 
@@ -58,6 +59,27 @@ eso es lo que tarda; no es el servidor.
 Memoria del proceso (corridas 1 a 3, servidor **y** 80 clientes juntos): RSS de ~87 MB a
 ~116 MB y heap de ~22 MB a ~38–45 MB. El servidor solo ocupa una parte de eso.
 
+### Memoria frente a Redis (GitHub Actions)
+
+Las corridas 5 y 6 se hicieron el 11 de octubre de 2026 en `ubuntu-latest` de GitHub Actions,
+con Node 22.23 y `redis:7-alpine` del `docker-compose.yml` de desarrollo. Las ejecutó la
+validación temporal de Docker
+([corrida 38179419318](https://github.com/jdavidpulgarin/smartdining/actions/runs/38179419318)).
+El escenario es el mismo y servidor y clientes comparten proceso, como en las corridas 1 a 3.
+
+| Corrida | Almacén | ack p50 | ack p95 | ack p99 | ack máx. | broadcast p95 | Entregados | Eventos/s | Errores |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 5 | memoria | 15,9 | 21,1 | 21,6 | 21,8 | 21,0 | 1200 / 1200 | 4 762 | 0 |
+| 6 | **Redis** | 61,2 | **66,3** | 73,8 | 76,4 | 66,2 | 1200 / 1200 | 1 278 | 0 |
+
+Memoria del proceso con Redis: RSS de 98,9 a 119,1 MB y heap de 31,1 a 38,4 MB, casi igual que
+en memoria (98,4 → 121,9 MB).
+
+- **Redis suma unos 45 ms al p95** (21 → 66 ms). Es la transacción WATCH/MULTI con ida y vuelta
+  a Redis en cada `cart:update`. El p95 sigue en menos de una cuarta parte de la meta.
+- Las corridas 5 y 6 dan latencias más bajas que las 1 a 4 porque el runner es más rápido que
+  el portátil (Celeron N4020). Para comparar los almacenes, se miran entre sí.
+
 ## Lectura de los números
 
 - **Margen sobre la meta:** el peor p95 (132,8 ms) queda en menos de la mitad del límite de 300 ms.
@@ -71,10 +93,6 @@ Memoria del proceso (corridas 1 a 3, servidor **y** 80 clientes juntos): RSS de 
 
 ## Pendiente
 
-- **Repetir con Redis** (`docker compose up -d redis` y luego
-  `REDIS_URL=redis://localhost:6379 npm run carga`). Con Redis, cada `cart:update` hace una
-  transacción WATCH/MULTI. Se espera un poco más de latencia por la ida y vuelta a Redis,
-  sin cambiar la conclusión. Hay que medirlo antes de la sustentación.
 - Medir en el VPS de producción, detrás de Nginx y con TLS.
 
 ## Cómo repetirla
