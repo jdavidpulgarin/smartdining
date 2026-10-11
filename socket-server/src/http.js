@@ -1,3 +1,4 @@
+const { log } = require('./log');
 const crypto = require('crypto');
 
 const LIMITE_CUERPO = 100 * 1024; // 100 KB: de sobra para un pedido, corta abusos
@@ -95,7 +96,7 @@ function crearRouter(rutas, ctx) {
       if (err instanceof ErrorHttp) {
         return enviarJson(res, err.status, { ok: false, codigo: err.codigo, mensaje: err.message });
       }
-      console.error('[http] error inesperado:', err);
+      log.error('error inesperado en HTTP', { ruta, metodo: req.method, error: err });
       enviarJson(res, 500, { ok: false, codigo: 'ERROR_INTERNO', mensaje: 'Error inesperado del servidor' });
     }
   };

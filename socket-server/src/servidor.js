@@ -14,6 +14,7 @@ const {
 } = require('./suscripciones');
 const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
+const { log } = require('./log');
 const { crearConexionRedis } = require('./almacen/redis');
 const { crearClienteBackend } = require('./backend');
 const { crearRotadorQr } = require('./rotacion');
@@ -82,7 +83,7 @@ function crearServidor(config, deps = {}) {
   // responde "degradado" y los eventos que tocan estado, ERROR_INTERNO.
   const redis = deps.redis || (config.redisUrl ? crearConexionRedis({ url: config.redisUrl }) : null);
   if (redis) {
-    redis.conectar().catch((err) => console.error(`[redis] no se pudo conectar: ${err.code || err.name}`));
+    redis.conectar().catch((err) => log.error('redis: no se pudo conectar', { codigo: err.code || err.name }));
   }
 
   // Estado compartido por todos los sockets de esta instancia.
@@ -181,7 +182,8 @@ function crearServidor(config, deps = {}) {
   io.on('connection', (socket) => {
     // Primero el límite de frecuencia: aplica a todos los eventos que siguen.
     limitarEventos(socket, deps.limiteEventos || {});
-    console.log(`[socket] conectado ${socket.id} (${socket.data.identidad.rol})`);
+    const { rol, id_mesa: idMesaSocket } = socket.data.identidad;
+    log.info('socket conectado', { socket: socket.id, rol, id_mesa: idMesaSocket });
     registrarSalas(socket, {
       obtenerSnapshot: ctx.carritos.snapshot,
       sesionVigente,
@@ -193,7 +195,7 @@ function crearServidor(config, deps = {}) {
     registrarPedidos(socket, ctx);
     registrarSuscripcionesSocket(socket, ctx);
     registrarSala(socket, ctx);
-    socket.on('disconnect', (motivo) => console.log(`[socket] ${socket.id} desconectado: ${motivo}`));
+    socket.on('disconnect', (motivo) => log.info('socket desconectado', { socket: socket.id, motivo }));
   });
 
   return { httpServer, io, ...ctx };

@@ -1,3 +1,5 @@
+const { log } = require('./log');
+
 // Formato único de respuesta (ack) para todos los eventos. Tener un solo
 // formato evita que cada frontend tenga que adivinar cómo leer un error.
 
@@ -28,7 +30,7 @@ function manejar(nombre, handler) {
       const seguro = payload && typeof payload === 'object' ? payload : {};
       responder(ack, await handler(seguro));
     } catch (err) {
-      console.error(`[socket] error en ${nombre}:`, err);
+      log.error('error en evento de socket', { evento: nombre, error: err });
       responder(ack, fallo('ERROR_INTERNO', 'Error inesperado del servidor'));
     }
   };

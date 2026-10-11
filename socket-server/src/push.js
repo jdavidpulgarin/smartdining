@@ -1,4 +1,5 @@
 const { enviarJson, ErrorHttp } = require('./http');
+const { log } = require('./log');
 
 // Códigos con los que el servicio push (FCM, Mozilla...) indica que la
 // suscripción ya no existe: el usuario revocó el permiso o desinstaló la PWA.
@@ -22,7 +23,7 @@ function crearServicioPush(config, { webpush = require('web-push') } = {}) {
     // si son incorrectos: preferimos fallar al arrancar que al primer envío.
     webpush.setVapidDetails(vapidSubject, vapidPublica, vapidPrivada);
   } else {
-    console.warn('[push] VAPID no configurado: Web Push deshabilitado (usa "npm run vapid")');
+    log.warn('push: VAPID no configurado, Web Push deshabilitado (usa "npm run vapid")');
   }
 
   /**
@@ -41,7 +42,7 @@ function crearServicioPush(config, { webpush = require('web-push') } = {}) {
       return { ok: true };
     } catch (err) {
       const caducada = CODIGOS_SUSCRIPCION_CADUCADA.includes(err.statusCode);
-      if (!caducada) console.error('[push] error al enviar:', err.statusCode || err.message);
+      if (!caducada) log.error('push: error al enviar', { status: err.statusCode, codigo: err.code });
       return { ok: false, caducada, motivo: err.statusCode || 'error' };
     }
   }

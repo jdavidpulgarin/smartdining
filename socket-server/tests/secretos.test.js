@@ -84,8 +84,11 @@ test('el proceso termina con código 1 y un mensaje claro si los secretos son d�
     timeout: 5000,
   });
   assert.strictEqual(r.status, 1);
-  assert.match(r.stderr, /No se puede iniciar el socket-server/);
+  const linea = JSON.parse(r.stderr.trim().split('\n').pop());
+  assert.strictEqual(linea.nivel, 'error');
+  assert.match(linea.msg, /No se puede iniciar el socket-server/);
   assert.match(r.stderr, /JWT_SECRET todavía tiene un valor de ejemplo/);
   assert.match(r.stderr, /INTERNAL_API_KEY todavía tiene un valor de ejemplo/);
   assert.doesNotMatch(r.stderr, /at .*\.js:\d+/, 'sin traza de pila');
+  assert.ok(!r.stderr.includes('cambia-esto-por-un-secreto'), 'el log nunca repite el valor de un secreto');
 });

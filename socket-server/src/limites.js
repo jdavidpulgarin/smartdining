@@ -1,5 +1,6 @@
 const { fallo } = require('./ack');
 const { ROL_COMENSAL } = require('./auth');
+const { log: logPorDefecto } = require('./log');
 
 // 16 KB por mensaje: un cart:update con 30 ingredientes ocupa ~2 KB. Más que
 // eso solo sirve para hacer trabajar al servidor parseando basura.
@@ -41,7 +42,9 @@ function limitarEventos(socket, { max = MAX_EVENTOS_POR_SEGUNDO, ventanaMs = VEN
  * Se cuenta en el handshake, así una mesa llena rechaza la conexión antes de
  * que el socket exista (connect_error MESA_LLENA).
  */
-function crearLimiteMesas({ backend, capacidadPorDefecto = 6, ahora = Date.now, log = console } = {}) {
+function crearLimiteMesas({
+  backend, capacidadPorDefecto = 6, ahora = Date.now, log = logPorDefecto,
+} = {}) {
   const conexiones = new Map(); // idMesa -> sockets de comensal conectados
   const capacidades = new Map(); // idMesa -> { capacidad, vence }
 
@@ -56,7 +59,7 @@ function crearLimiteMesas({ backend, capacidadPorDefecto = 6, ahora = Date.now, 
           capacidad = r.cuerpo.capacidad;
         }
       } catch (err) {
-        log.warn?.(`[limites] capacidad de la mesa ${idMesa} no disponible (${err.codigo || err.message}); se usa ${capacidadPorDefecto}`);
+        log.warn?.('capacidad de la mesa no disponible; se usa la de por defecto', { id_mesa: idMesa, codigo: err.codigo || err.message, capacidad: capacidadPorDefecto });
       }
     }
     capacidades.set(idMesa, { capacidad, vence: ahora() + CAPACIDAD_CACHE_MS });

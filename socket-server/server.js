@@ -1,5 +1,6 @@
 const { cargarConfig } = require('./src/config');
 const { crearServidor } = require('./src/servidor');
+const { log } = require('./src/log');
 
 let config;
 try {
@@ -7,12 +8,13 @@ try {
 } catch (err) {
   // Configuración insegura o incompleta: se explica qué falta y se sale con
   // código 1, sin traza (el mensaje nunca incluye el valor de un secreto).
-  console.error(`\nNo se puede iniciar el socket-server de SmartDining.\n${err.message}\n`);
+  log.error('No se puede iniciar el socket-server de SmartDining', { detalle: err.message });
   process.exit(1);
 }
 const { httpServer } = crearServidor(config);
 
 httpServer.listen(config.puerto, () => {
-  console.log(`SmartDining socket-server en http://localhost:${config.puerto}`);
-  console.log(`Orígenes permitidos: ${config.origenes.join(', ')}`);
+  log.info('socket-server escuchando', {
+    puerto: config.puerto, entorno: config.entorno, origenes: config.origenes, redis: Boolean(config.redisUrl), pagos: Boolean(config.wompi),
+  });
 });

@@ -1,4 +1,5 @@
 const { exito, fallo, manejar } = require('./ack');
+const { log } = require('./log');
 const { esEventIdValido } = require('./idempotencia');
 const { salaMesa, SALA_KDS, SALA_ADMIN, esIdValido } = require('./salas');
 const { notificarCambioEstado } = require('./suscripciones');
@@ -128,7 +129,7 @@ async function difundirCambioEstado(ctx, p) {
   // Push para el comensal que ya cerró la PWA. Sin await a propósito: un
   // servicio push lento no debe retrasar el ack; y notificarCambioEstado
   // no lanza, pero el catch protege el proceso de un rechazo no capturado.
-  notificarCambioEstado(ctx, cambio).catch((err) => console.error('[push] fallo al notificar:', err));
+  notificarCambioEstado(ctx, cambio).catch((err) => log.error('push: fallo al notificar', { id_pedido: cambio.id_pedido, error: err }));
   return exito({ eventId: p.eventId, duplicado: false });
 }
 
