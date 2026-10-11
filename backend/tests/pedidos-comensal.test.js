@@ -38,13 +38,13 @@ test('un comensal no puede crear un pedido para otra mesa: se usa el id_mesa del
   }
 });
 
-test('el apodo del comensal se guarda en detalles_pedido.notas_especiales', async () => {
+test('el alias va en detalles_pedido.comensal y la nota sola en notas_especiales', async () => {
   const db = instalarFakeDb(responderCreacionOk);
   try {
     const res = await request(app)
       .post('/api/pedidos')
       .set('Authorization', `Bearer ${tokenComensal(5)}`)
-      .send({ items: [{ id_plato: 12, cantidad: 2, apodo: 'Ana', notas: 'sin cebolla' }] });
+      .send({ items: [{ id_plato: 12, cantidad: 2, comensal: 'Ana', notas: 'sin cebolla' }] });
 
     assert.strictEqual(res.status, 201);
     assert.ok(res.body.codigo_pedido, 'el pedido trae un codigo_pedido');
@@ -52,15 +52,45 @@ test('el apodo del comensal se guarda en detalles_pedido.notas_especiales', asyn
 
     const detalle = db.buscar('INSERT INTO detalles_pedido');
     assert.ok(detalle);
-    // (id_pedido, id_plato, cantidad, notas_especiales) — el backend ya no manda
-    // precio_unitario ni subtotal: el precio sale de una subconsulta a platos y
-    // el subtotal lo calcula el trigger tr_validar_detalle_pedido.
-    assert.deepStrictEqual(detalle.params, [87, 12, 2, 'Ana: sin cebolla']);
+    // (id_pedido, id_plato, cantidad, notas_especiales, comensal) — el backend
+    // sigue sin mandar precio_unitario ni subtotal: el precio sale de una
+    // subconsulta a platos y el subtotal lo calcula el trigger.
+    assert.deepStrictEqual(detalle.params, [87, 12, 2, 'sin cebolla', 'Ana']);
     assert.ok(
       detalle.sql.includes('(SELECT precio FROM platos WHERE id_plato = $2)'),
       'el precio lo congela la base en el propio INSERT'
     );
     assert.ok(!detalle.sql.includes('subtotal'), 'el backend no manda subtotal');
+    assert.ok(detalle.sql.includes('RETURNING id_detalle'), 'hace falta para los ingredientes');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('apodo sigue funcionando como alias de comensal (compatibilidad)', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [{ id_plato: 12, cantidad: 1, apodo: 'Pipe' }] });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[4], 'Pipe');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('si llegan comensal y apodo, manda comensal', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [{ id_plato: 12, cantidad: 1, comensal: 'Ana', apodo: 'Pipe' }] });
+
+    assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[4], 'Ana');
   } finally {
     db.restaurar();
   }
