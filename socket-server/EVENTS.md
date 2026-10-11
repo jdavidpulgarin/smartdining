@@ -298,6 +298,7 @@ Rol: `comensal`.
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, emitidoEn }` |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, monto, referencia_externa, emitidoEn }` |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
+| `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | `{ id_mesa, motivo, emitidoEn }` (`motivo`: `pagada` o `liberada`) |
 
 Notas para el frontend:
 
@@ -306,10 +307,41 @@ Notas para el frontend:
 - `order:created` y `order:status` pueden llegar repetidos si el servidor reintenta;
   deduplica por `eventId`.
 - El sender de `cart:update` **no** recibe `cart:updated` (usa el snapshot de su ack).
+- `mesa:liberada`: la sesión de mesa terminó (pago o liberación manual). Ver §5.1.
 - `qr:actualizado` no lleva `eventId` (no lo dispara un cliente, lo dispara el backend al
   rotar el token en la base). La pantalla de la mesa simplemente **redibuja el QR** con el
   `token_qr` recibido; no hace falta deduplicar porque redibujar con el mismo valor es
   inofensivo.
+
+### 5.1. `mesa:liberada`
+
+Lo emite el servidor cuando el backend llama a `POST /internal/mesa-liberada` **después** de
+confirmar en la base que la mesa quedó libre (pago completo o liberación manual).
+
+```json
+{ "id_mesa": 5, "motivo": "pagada", "emitidoEn": "2026-10-11T20:15:00.000Z" }
+```
+
+Orden de lo que pasa en el servidor:
+
+1. Se revocan todos los QR emitidos para esa mesa.
+2. Se emite `mesa:liberada` a `room:mesa-{ID}` y a `room:admin` (**antes** de vaciar el carrito).
+3. Se borran las suscripciones push y el carrito de la mesa.
+4. Se **desconecta a los comensales** de la sala (`disconnect` con motivo `io server disconnect`).
+   La **pantalla** de la mesa y el **personal** siguen conectados.
+5. Desde ese momento, un JWT de comensal emitido **antes** de la liberación ya no conecta
+   (`connect_error` → `TOKEN_INVALIDO`) ni puede hacer `join:table` (`NO_AUTORIZADO`).
+
+Qué debe hacer cada cliente:
+
+- **PWA del comensal:** mostrar "La mesa se cerró, gracias por tu visita", borrar el JWT y el
+  carrito locales y **no** reconectar automáticamente (Socket.io no reintenta tras un
+  `io server disconnect`).
+- **Panel (`room:admin`):** pintar la mesa como libre.
+- **Pantalla:** esperar el `qr:actualizado` del grupo siguiente.
+
+Es idempotente: si el backend repite el aviso, responde `{ "ok": true, "duplicado": true }` y
+no vuelve a emitir. La mesa vuelve a tener sesión cuando el personal genera un QR nuevo.
 
 ---
 
@@ -329,7 +361,7 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 | POST | `/internal/order-created` | Header `x-internal-key` | Solo backend. Mismo body que el evento `order:created` |
 | POST | `/internal/order-status` | Header `x-internal-key` | Solo backend. Mismo body que `order:status` |
 | POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` (token de 1 a 255 caracteres) → reenvía `qr:actualizado` a la pantalla de esa mesa |
-| POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5 }` → invalida los QR emitidos de esa mesa y borra su carrito y sus suscripciones push |
+| POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "motivo": "pagada" }` (`motivo` opcional: `pagada` o `liberada`, por defecto `liberada`) → revoca los QR, emite `mesa:liberada`, desconecta a los comensales y borra carrito y suscripciones. Responde `{ ok, duplicado }` |
 | POST | `/pagos/webhook` | Firma del proveedor | Ver sección 8 |
 
 ### 6.1. Token QR
