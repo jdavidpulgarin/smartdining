@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { salaMesa, SALA_ADMIN } = require('./salas');
 const {
   ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson,
 } = require('./http');
@@ -154,6 +155,43 @@ function compararTransaccion({ evento, tx, intencion }) {
   return null;
 }
 
+const aPesos = (centavos) => centavos / 100;
+
+/**
+ * Capa 6: el pago se registra en el backend (la base es la fuente de verdad)
+ * ANTES de anunciarlo. Contrato (pendiente: Daniel):
+ *   POST /api/transacciones/internal  (x-internal-key)
+ *   → 200/201 { ok, duplicado, saldo_restante_centavos, mesa_liberada }
+ * idempotente por referencia_externa: si el webhook se reintenta, el backend
+ * responde el mismo resultado sin registrar dos veces.
+ *
+ * Devuelve { registrado: true, saldo } o { rechazado: status } (4xx: el
+ * backend no acepta este pago). Lanza si el backend no respondió o dio 5xx:
+ * quien llama responde 503 para que la pasarela reintente.
+ */
+async function registrarEnBackend(ctx, { evento, tx, intencion }) {
+  const r = await ctx.backend.post('/api/transacciones/internal', {
+    referencia_externa: evento.referencia,
+    id_transaccion_pasarela: tx.id,
+    pasarela: ctx.pasarela.nombre,
+    id_mesa: intencion.id_mesa,
+    comensal: intencion.comensal,
+    modo: intencion.modo,
+    monto_centavos: tx.monto_centavos,
+    moneda: tx.moneda,
+    metodo_pago: 'online',
+  });
+  if (r.status >= 500) throw Object.assign(new Error(`el backend respondió ${r.status}`), { codigo: 'BACKEND_ERROR' });
+  if (!r.ok) return { rechazado: r.status };
+  const saldo = r.cuerpo && r.cuerpo.saldo_restante_centavos;
+  if (!Number.isSafeInteger(saldo) || saldo < 0) {
+    // Registrado pero con una respuesta que no entendemos: no se inventa un
+    // saldo. Se reintenta (el backend es idempotente por referencia_externa).
+    throw Object.assign(new Error('respuesta del backend sin saldo_restante_centavos'), { codigo: 'BACKEND_ERROR' });
+  }
+  return { registrado: true, saldo };
+}
+
 /** Un pago rechazado o con error libera al comensal para que pueda reintentar. */
 async function registrarFallo(ctx, evento) {
   const intencion = await ctx.almacenPagos.obtener(evento.referencia);
@@ -203,8 +241,29 @@ async function recibirEventoPasarela(req, res, ctx) {
       return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
     }
 
-    // Registro en el backend: siguiente paso. Hasta entonces, nada se emite.
-    return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false, verificado: true });
+    const registro = await registrarEnBackend(ctx, { evento, tx, intencion });
+    if (registro.rechazado) {
+      console.warn(`[pagos] el backend rechazó la transacción ${tx.id} (${registro.rechazado})`);
+      return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
+    }
+
+    await ctx.almacenPagos.actualizarEstado(evento.referencia, 'pagada', TTL_INTENCION_RESUELTA_SEG);
+    await ctx.almacenPagos.liberarPendiente(intencion.id_mesa, intencion.comensal);
+
+    // Recién ahora, con el pago guardado en la base, se anuncia. Si el saldo
+    // llegó a 0, el backend libera la mesa y avisa por /internal/mesa-liberada.
+    ctx.io.to(SALA_ADMIN).to(salaMesa(intencion.id_mesa)).emit('payment:confirmed', {
+      eventId: tx.id,
+      id_mesa: intencion.id_mesa,
+      comensal: intencion.comensal,
+      monto: aPesos(tx.monto_centavos),
+      saldo_restante: aPesos(registro.saldo),
+      monto_centavos: tx.monto_centavos,
+      saldo_restante_centavos: registro.saldo,
+      referencia_externa: evento.referencia,
+      emitidoEn: new Date().toISOString(),
+    });
+    return enviarJson(res, 200, { ok: true, duplicado: false, registrado: true });
   } catch (err) {
     // No se pudo terminar (pasarela o backend sin respuesta): se libera la
     // marca de idempotencia y se responde 5xx para que la pasarela reintente.
