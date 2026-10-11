@@ -125,6 +125,7 @@ function crearServidor(config, deps = {}) {
       emitidoEn: new Date().toISOString(),
     });
     await ctx.suscripciones.limpiarMesa(idMesa);
+    await ctx.estadoMesas.limpiarMesa(idMesa);
     await ctx.carritos.vaciar(idMesa);
     // Solo se echa a los comensales: la pantalla de la mesa sigue conectada
     // para mostrar el QR del siguiente grupo, y el personal sigue vigilando.

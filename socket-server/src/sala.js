@@ -11,7 +11,14 @@ const LIMITE_LLAMADA_SEG = 60;
 /** Estado de sala por mesa en memoria (desarrollo y pruebas, sin REDIS_URL). */
 function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
   const llamadas = new Map(); // idMesa -> ms en que vence el bloqueo
+  const cuentas = new Set(); // mesas que pidieron la cuenta
   return {
+    marcarCuenta(idMesa) { cuentas.add(idMesa); },
+    cuentaSolicitada(idMesa) { return cuentas.has(idMesa); },
+    limpiarMesa(idMesa) {
+      cuentas.delete(idMesa);
+      llamadas.delete(idMesa);
+    },
     reservarLlamada(idMesa, segundos) {
       if ((llamadas.get(idMesa) || 0) > ahora()) return false;
       llamadas.set(idMesa, ahora() + segundos * 1000);
@@ -67,6 +74,29 @@ function registrarSala(socket, ctx) {
       id_mesa: idMesa,
       comensal: socket.data.alias ?? null,
       motivo: typeof p.motivo === 'string' && p.motivo.trim() ? p.motivo.trim() : null,
+      emitidoEn: new Date().toISOString(),
+    });
+    return exito({ eventId: p.eventId, duplicado: false });
+  }));
+
+  /**
+   * cuenta:solicitada — el comensal pide la cuenta. Llega al panel (para que
+   * el cajero se acerque) y a la propia mesa (para que los demás comensales lo
+   * vean). Queda marcada en sd:mesa:{ID}:cuenta hasta que la mesa se libere.
+   */
+  socket.on('cuenta:solicitada', manejar('cuenta:solicitada', async (p) => {
+    const { idMesa, error } = validarComensalEnSala(socket, p);
+    if (error) return error;
+
+    if (!(await ctx.registro.reservar(`comensal:cuenta:${idMesa}:${p.eventId}`))) {
+      return exito({ eventId: p.eventId, duplicado: true });
+    }
+    await ctx.estadoMesas.marcarCuenta(idMesa);
+
+    ctx.io.to(SALA_ADMIN).to(salaMesa(idMesa)).emit('cuenta:solicitada', {
+      eventId: p.eventId,
+      id_mesa: idMesa,
+      comensal: socket.data.alias ?? null,
       emitidoEn: new Date().toISOString(),
     });
     return exito({ eventId: p.eventId, duplicado: false });
