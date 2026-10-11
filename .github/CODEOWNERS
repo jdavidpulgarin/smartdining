@@ -3,16 +3,16 @@
 #
 # DATO PENDIENTE: reemplazar los marcadores @USUARIO-X que quedan por los usuarios reales
 # de GitHub de cada integrante antes de activar "Require review from Code Owners".
-#   @USUARIO-ROBERTO   -> Roberto Buelvas
+#   @rcarlosbuelvas   -> Roberto Buelvas
 #   @jdavidpulgarin    -> Jarrinson Pulgarín (dueño del repo; confirmar)
 #   @carlosdospino     -> Daniel Ospino
 #   @USUARIO-JUAN      -> Juan Buelvas
 
 # Tiempo real, QR, pagos, push e infraestructura
-/socket-server/          @USUARIO-ROBERTO
-/.github/                @USUARIO-ROBERTO
-/infra/                  @USUARIO-ROBERTO
-/docker-compose*.yml     @USUARIO-ROBERTO
+/socket-server/          @rcarlosbuelvas
+/.github/                @rcarlosbuelvas
+/infra/                  @rcarlosbuelvas
+/docker-compose*.yml     @rcarlosbuelvas
 
 # Base de datos y panel del restaurante
 /database/               @jdavidpulgarin
