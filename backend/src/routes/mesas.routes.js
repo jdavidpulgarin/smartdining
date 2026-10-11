@@ -12,6 +12,9 @@ router.post('/qr/:token/sesion', ctrl.crearSesionPorToken);
 // Ciclo de vida de la sesión de mesa: el mesero abre (obtiene el QR) y cierra.
 router.post('/:id/abrir', requireAuth, requireRole('mesero', 'admin'), ctrl.abrir);
 router.post('/:id/liberar', requireAuth, requireRole('mesero', 'admin'), ctrl.liberar);
+// Rotación manual del QR de una mesa abierta. Ningún frontend llama a
+// /internal/* del socket-server: lo hace el backend tras guardar el token.
+router.post('/:id/rotar-qr', requireAuth, requireRole('mesero', 'admin'), ctrl.rotarQr);
 
 router.get('/:id', ctrl.obtener);
 router.post('/', requireAuth, requireRole('admin'), ctrl.crear);

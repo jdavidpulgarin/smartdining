@@ -267,6 +267,7 @@ expire).
 |---|---|---|---|
 | GET | /mesas | admin, cajero, mesero | Lista todas |
 | **POST** | **/mesas/:id/abrir** | **mesero, admin** | **Abre la mesa: obtiene su QR y la marca `ocupada`** |
+| **POST** | **/mesas/:id/rotar-qr** | **mesero, admin** | **Cambia el QR de una mesa `ocupada` y avisa a la tablet** |
 | **POST** | **/mesas/:id/liberar** | **mesero, admin** | **Cierra la mesa: `disponible` y `token_qr` a NULL. 409 si tiene pedidos abiertos** |
 | POST | /mesas/qr/:token/sesion | No | Abre la sesión del comensal y devuelve su JWT |
 | GET | /mesas/:id | No | Obtiene una |
@@ -371,6 +372,28 @@ Cuando el token es **nuevo**, después del commit se avisa a
 `POST /internal/qr-rotado` para que la tablet de la mesa lo muestre (ver *Tablet fija en
 la mesa* más abajo). Si el token se **reutiliza**, no se avisa. 404 mesa inexistente · 403 si el socket-server rechaza el rol · **503 si el
 socket-server no responde** (sin QR no se puede abrir, y la mesa no se toca).
+
+### POST /mesas/:id/rotar-qr — mesero, admin
+
+Cambia el QR de una mesa **ocupada** (por ejemplo, si alguien fotografió la tablet). Con la
+fila bloqueada (`FOR UPDATE`) pide un token nuevo a `/qr/generar` del socket-server
+reenviando el JWT del personal, lo guarda en `mesas.token_qr` y, **después del commit**,
+avisa a la tablet con `/internal/qr-rotado` (socket.notifier). Ningún frontend llama a
+`/internal/*`: la clave interna solo vive en los servidores.
+
+`201`:
+
+```json
+{ "url": "http://localhost:5173/?token=v1....", "expira_en": 1760000000000, "mesa": { "id_mesa": 5, "numero": 5, "estado": "ocupada" } }
+```
+
+El token solo viaja dentro de `url`. 400 id inválido · 404 mesa inexistente · **409 si la mesa
+no está `ocupada`** · 403 si el socket-server rechaza el rol · 503 si el socket-server no
+responde (no se guarda nada). Si falla solo el aviso a la tablet, responde 201 igual.
+
+> Hoy el middleware de sesión compara el `sid` del JWT del comensal con el `token_qr`
+> vigente, así que **rotar cierra las sesiones de quienes ya estaban sentados**. Si se quiere
+> que conserven su sesión tras una rotación, hay que cambiar ese criterio (pendiente).
 
 ### POST /mesas/:id/liberar — mesero, admin
 
