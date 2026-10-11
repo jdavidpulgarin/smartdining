@@ -7,6 +7,45 @@ const ROLES_CARRITO = ['comensal', 'mesero', 'admin'];
 const MAX_ITEMS_POR_MESA = 200; // tope para que una mesa no consuma memoria sin límite
 const MAX_APODO = 40;
 const MAX_NOTAS = 200;
+// Un plato armable tiene base, proteína, toppings y salsas: 30 sobra para un
+// plato real y acota cuánto puede crecer una línea del carrito en memoria.
+const MAX_INGREDIENTES = 30;
+const PORCIONES = ['ligera', 'normal', 'extra'];
+
+// isSafeInteger y no isInteger: 2^53 "es entero" pero ya no se distingue de
+// 2^53 + 1, y la base lo rechazaría (o peor, lo confundiría con otro id).
+const esIdIngredienteValido = (v) => Number.isSafeInteger(v) && v > 0;
+
+const esObjetoPlano = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+  && Object.getPrototypeOf(v) === Object.prototype;
+
+/**
+ * Valida la lista de ingredientes de un plato armable. Devuelve un mensaje de
+ * error o null. Solo se miran id_ingrediente y porcion: cualquier otro campo
+ * (en especial precio_aplicado) se descarta al normalizar, porque el precio lo
+ * calcula el backend con los datos de la base, nunca el cliente.
+ */
+function validarIngredientes(lista) {
+  if (!Array.isArray(lista)) return 'ingredientes debe ser un arreglo';
+  if (lista.length > MAX_INGREDIENTES) return `ingredientes admite como máximo ${MAX_INGREDIENTES} elementos`;
+  const vistos = new Set();
+  for (const ing of lista) {
+    if (!esObjetoPlano(ing)) return 'cada ingrediente debe ser un objeto { id_ingrediente, porcion }';
+    if (!esIdIngredienteValido(ing.id_ingrediente)) return 'id_ingrediente debe ser un entero positivo';
+    if (!PORCIONES.includes(ing.porcion)) return `porcion debe ser una de: ${PORCIONES.join(', ')}`;
+    // Repetir un ingrediente es ambiguo (¿qué porción vale?) y es la forma
+    // barata de inflar la línea: se rechaza en vez de elegir una en silencio.
+    if (vistos.has(ing.id_ingrediente)) return 'id_ingrediente repetido en ingredientes';
+    vistos.add(ing.id_ingrediente);
+  }
+  return null;
+}
+
+/** Copia solo los campos permitidos; null si el plato no es armable. */
+function normalizarIngredientes(lista) {
+  if (lista === undefined || lista === null) return null;
+  return lista.map(({ id_ingrediente, porcion }) => ({ id_ingrediente, porcion }));
+}
 
 /**
  * Almacén del carrito grupal de cada mesa (en memoria).
@@ -46,7 +85,7 @@ function crearAlmacenCarritos() {
         return { error: 'El carrito de la mesa alcanzó el máximo de ítems' };
       }
       c.items.set(op.id_linea, {
-        id_linea: op.id_linea, comensal: op.comensal, id_plato: op.id_plato, cantidad: op.cantidad, notas: op.notas ?? null, ingredientes: op.ingredientes ?? null,
+        id_linea: op.id_linea, comensal: op.comensal, id_plato: op.id_plato, cantidad: op.cantidad, notas: op.notas ?? null, ingredientes: normalizarIngredientes(op.ingredientes),
       });
     } else if (op.accion === 'remove') {
       c.items.delete(op.id_linea);
@@ -82,8 +121,10 @@ function validarOperacion(p) {
     if (p.notas !== undefined && p.notas !== null && (typeof p.notas !== 'string' || p.notas.length > MAX_NOTAS)) {
       return `notas debe ser un texto de hasta ${MAX_NOTAS} caracteres`;
     }
-    if (p.ingredientes !== undefined && p.ingredientes !== null && !Array.isArray(p.ingredientes)) {
-      return 'ingredientes debe ser un arreglo';
+    // Opcional: sin ingredientes la línea es un plato simple.
+    if (p.ingredientes !== undefined && p.ingredientes !== null) {
+      const error = validarIngredientes(p.ingredientes);
+      if (error) return error;
     }
   }
   return null;
@@ -137,4 +178,6 @@ function registrarCarrito(socket, { carritos, registro }) {
   }));
 }
 
-module.exports = { crearAlmacenCarritos, registrarCarrito, validarOperacion };
+module.exports = {
+  crearAlmacenCarritos, registrarCarrito, validarOperacion, validarIngredientes, normalizarIngredientes, MAX_INGREDIENTES, PORCIONES,
+};
