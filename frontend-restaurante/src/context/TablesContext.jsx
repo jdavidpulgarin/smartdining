@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { tables as defaultTables } from '../constants/mockData'
 import { generarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
-import { mesasApi, getAuthToken } from '../services/api'
+import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { useSocketListener } from '../hooks'
 import { TablesContext } from './tablesContextDef'
 
@@ -49,6 +49,7 @@ export function TablesProvider({ children }) {
     return defaultTables
   })
 
+  const [pedidosActivos, setPedidosActivos] = useState([])
   const [loading, setLoading] = useState(false)
   const [notification, setNotification] = useState(null)
 
@@ -93,31 +94,99 @@ export function TablesProvider({ children }) {
     }
   }, [])
 
-  // Cargar mesas al montar si hay token
-  useEffect(() => {
-    let activo = true
+  /**
+   * Carga los pedidos activos desde el backend real: GET /api/pedidos/activos
+   */
+  const cargarPedidosActivos = useCallback(async () => {
     const token = getAuthToken()
-    if (token) {
-      mesasApi
-        .listar()
-        .then((data) => {
-          if (activo && data?.mesas && Array.isArray(data.mesas)) {
-            setTables((prevTables) => {
-              const prevMap = new Map(prevTables.map((t) => [t.id, t]))
-              return data.mesas.map((m) =>
-                normalizarMesa(m, prevMap.get(m.id_mesa) || prevMap.get(m.numero) || {})
-              )
-            })
-          }
-        })
-        .catch((err) => {
-          console.warn('Aviso: error inicial cargando mesas:', err.message)
-        })
-    }
-    return () => {
-      activo = false
+    if (!token) return
+
+    try {
+      const data = await pedidosApi.listarActivos()
+      if (data?.pedidos && Array.isArray(data.pedidos)) {
+        setPedidosActivos(data.pedidos)
+      }
+    } catch (err) {
+      console.warn('Aviso: no se pudieron cargar los pedidos activos:', err.message)
     }
   }, [])
+
+  // Cargar mesas y pedidos al montar si hay token
+  useEffect(() => {
+    const token = getAuthToken()
+    if (token) {
+      cargarMesas()
+      cargarPedidosActivos()
+    }
+  }, [cargarMesas, cargarPedidosActivos])
+
+
+  // Escuchar cuando entra un pedido nuevo (order:created)
+  useSocketListener('order:created', (data) => {
+    if (data?.pedido) {
+      const p = data.pedido
+      const idMesa = Number(p.id_mesa)
+      setPedidosActivos((prev) => {
+        const existe = prev.some((item) => item.id_pedido === p.id_pedido)
+        if (existe) {
+          return prev.map((item) => (item.id_pedido === p.id_pedido ? { ...item, ...p } : item))
+        }
+        return [p, ...prev]
+      })
+
+      // Marcar la mesa como ocupada y activa en el plano
+      setTables((prev) =>
+        prev.map((t) =>
+          t.id === idMesa || t.number === idMesa
+            ? {
+                ...t,
+                status: 'Ocupada',
+                estado: 'ocupada',
+                active: true,
+                detail: `Comanda ${p.codigo_pedido || `#${p.id_pedido}`} · En cocina`,
+              }
+            : t
+        )
+      )
+      showNotification(`Nuevo pedido recibido: ${p.codigo_pedido || `#${p.id_pedido}`} (Mesa ${idMesa})`, 'info')
+    }
+  })
+
+  // Escuchar cambio de estado de pedido (order:status)
+  useSocketListener('order:status', (data) => {
+    if (data?.id_pedido) {
+      const idPedido = Number(data.id_pedido)
+      const nuevoEstado = data.estado
+      setPedidosActivos((prev) =>
+        prev
+          .map((p) => (p.id_pedido === idPedido ? { ...p, estado: nuevoEstado } : p))
+          .filter((p) => p.estado !== 'cancelado')
+      )
+
+      if (nuevoEstado === 'listo') {
+        showNotification(
+          `🍽️ ¡Pedido ${data.codigo_pedido || `#${idPedido}`} LISTO para servir (Mesa ${data.id_mesa})!`,
+          'success'
+        )
+      } else if (nuevoEstado === 'entregado') {
+        showNotification(
+          `Pedido ${data.codigo_pedido || `#${idPedido}`} entregado a los comensales`,
+          'info'
+        )
+      }
+    }
+  })
+
+  // Escuchar confirmación de pago (payment:confirmed)
+  useSocketListener('payment:confirmed', (data) => {
+    if (data?.id_mesa) {
+      const montoFormateado = Number(data.monto || 0).toLocaleString('es-CO')
+      showNotification(`💰 Pago confirmado de $${montoFormateado} para Mesa ${data.id_mesa}`, 'success')
+      cargarMesas()
+      cargarPedidosActivos()
+    }
+  })
+
 
   // Escuchar si el backend o socket-server avisa de una mesa liberada
   useSocketListener('table:released', (data) => {
@@ -282,6 +351,20 @@ export function TablesProvider({ children }) {
     }
   }, [tables, showNotification])
 
+  const marcarEntregado = useCallback(async (idPedido) => {
+    try {
+      const res = await pedidosApi.actualizarEstado(idPedido, 'entregado')
+      setPedidosActivos((prev) =>
+        prev.map((p) => (p.id_pedido === idPedido ? { ...p, estado: 'entregado' } : p))
+      )
+      showNotification(`Pedido #${idPedido} marcado como entregado a los comensales`, 'success')
+      return res
+    } catch (err) {
+      showNotification(err.message || 'Error al actualizar estado del pedido', 'error')
+      throw err
+    }
+  }, [showNotification])
+
   const obtenerInfoSesion = useCallback((token) => {
     return decodificarTokenQr(token)
   }, [])
@@ -290,9 +373,12 @@ export function TablesProvider({ children }) {
     <TablesContext.Provider
       value={{
         tables,
+        pedidosActivos,
         loading,
         notification,
         cargarMesas,
+        cargarPedidosActivos,
+        marcarEntregado,
         abrirMesa,
         liberarMesa,
         regenerarQr,
@@ -304,3 +390,4 @@ export function TablesProvider({ children }) {
     </TablesContext.Provider>
   )
 }
+
