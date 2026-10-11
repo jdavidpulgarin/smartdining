@@ -101,6 +101,9 @@ services:
       WOMPI_EVENTS_SECRET: ${WOMPI_EVENTS_SECRET:-}
       WOMPI_API_URL: ${WOMPI_API_URL:-}
       LOG_NIVEL: ${LOG_NIVEL:-info}
+      # Solo de nginx (IP fija abajo) se cree X-Real-IP; de cualquier otro
+      # contenedor de la red web, no (socket-server/src/ip-cliente.js).
+      TRUST_PROXY: 172.31.250.10
     depends_on:
       redis: { condition: service_healthy }
       backend: { condition: service_started }
@@ -126,7 +129,10 @@ services:
     depends_on:
       backend: { condition: service_healthy }
       socket-server: { condition: service_healthy }
-    networks: [web]
+    networks:
+      web:
+        # IP fija: es la única en la que confía TRUST_PROXY.
+        ipv4_address: 172.31.250.10
 
   certbot:
     <<: *servicio
@@ -142,6 +148,10 @@ networks:
   datos:
     internal: true
   web:
+    # Subred fija para poder fijar la IP de nginx.
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
 
 volumes:
   pgdata:

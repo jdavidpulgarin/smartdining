@@ -252,7 +252,7 @@ async function recibirEventoPasarela(req, res, ctx) {
   const v = ctx.pasarela.verificarEvento(crudo, req.headers);
   if (!v.valido) {
     // El motivo va al log, no al cliente: no le damos pistas a quien sondea.
-    log.warn('pagos: webhook rechazado', { motivo: v.motivo, ip: req.socket.remoteAddress });
+    log.warn('pagos: webhook rechazado', { motivo: v.motivo, ip: ctx.ipCliente(req) });
     throw new ErrorHttp(400, 'FIRMA_INVALIDA', 'Firma inválida');
   }
   const { evento } = v;

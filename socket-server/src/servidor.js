@@ -15,6 +15,7 @@ const {
 const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
 const { log } = require('./log');
+const { crearIpCliente } = require('./ip-cliente');
 const { crearConexionRedis } = require('./almacen/redis');
 const { crearClienteBackend } = require('./backend');
 const { crearRotadorQr } = require('./rotacion');
@@ -60,7 +61,7 @@ function crearServidor(config, deps = {}) {
 
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
-  const ctx = { config };
+  const ctx = { config, ipCliente: crearIpCliente(config.proxiesConfiables) };
   const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala }, ctx);
 
   const httpServer = http.createServer((req, res) => {
@@ -185,7 +186,9 @@ function crearServidor(config, deps = {}) {
     // Primero el límite de frecuencia: aplica a todos los eventos que siguen.
     limitarEventos(socket, deps.limiteEventos || {});
     const { rol, id_mesa: idMesaSocket } = socket.data.identidad;
-    log.info('socket conectado', { socket: socket.id, rol, id_mesa: idMesaSocket });
+    log.info('socket conectado', {
+      socket: socket.id, rol, id_mesa: idMesaSocket, ip: ctx.ipCliente(socket.request),
+    });
     registrarSalas(socket, {
       obtenerSnapshot: ctx.carritos.snapshot,
       sesionVigente,

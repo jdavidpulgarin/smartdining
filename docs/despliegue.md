@@ -267,4 +267,6 @@ dc exec -T postgres psql -v ON_ERROR_STOP=1 -U smartdining -d smartdining < data
 | socket-server *unhealthy* | Secretos débiles o de ejemplo, o Redis caído: `dc logs socket-server`. |
 | Los comensales se desconectan cada pocos minutos | Un proxy delante de nginx (Cloudflare, un balanceador) corta el WebSocket inactivo. |
 | El build del VPS se queda sin memoria | Agrega swap o compila con más RAM. |
+| `Pool overlaps with other one on this address space` | La subred fija `172.31.250.0/24` choca con otra red del VPS: cámbiala en `docker-compose.prod.yml` junto con la IP de nginx y `TRUST_PROXY`. |
+| Los logs del socket-server muestran `172.31.250.10` como IP de todos | `TRUST_PROXY` no coincide con la IP de nginx. |
 | Deploy: `Host key verification failed` | `VPS_KNOWN_HOSTS` no coincide con la huella actual del VPS. |
