@@ -2,6 +2,7 @@ const { z } = require('zod');
 const pedidosService = require('../services/pedidos.service');
 const { esComensal } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
+const aliasComensal = require('../services/alias-comensal');
 
 // El trigger tr_validar_disponibilidad_plato de Jarrison deja comandar un plato
 // agotado si notas_especiales contiene 'OVERRIDE_ADMIN' (bypass administrativo).
@@ -121,7 +122,10 @@ async function actualizarEstado(req, res, next) {
 
     // El cierre del pedido pudo liberar la mesa (ya ocurrió en la transacción):
     // se avisa para que el socket-server cierre la sesión de esa mesa.
-    if (pedido.mesaLiberada) socketNotifier.notificarMesaLiberada(pedido.id_mesa);
+    if (pedido.mesaLiberada) {
+      socketNotifier.notificarMesaLiberada(pedido.id_mesa);
+      aliasComensal.olvidarMesa(pedido.id_mesa);
+    }
 
     return res.json(pedido);
   } catch (err) {

@@ -12,6 +12,10 @@ const {
 const { instalarFakeSocket, socketCaido } = require('./helpers/fake-socket');
 const app = require('../server');
 
+// Alias distinto en cada llamada: la reserva de alias vive todo el proceso.
+let n = 0;
+const alias = () => `Comensal ${(n += 1)}`;
+
 const MESA = { id_mesa: 5, numero: 5, capacidad: 4, ubicacion: 'Terraza', estado: 'ocupada' };
 
 /** Doble de BD con esa mesa y ese token_qr en la columna. */
@@ -43,7 +47,7 @@ test('token válido y vigente en la mesa: emite un JWT de comensal con sid', asy
   const socket = socketQueValida(token);
   const db = dbConMesa(token);
   try {
-    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`);
+    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`).send({ comensal: alias() });
 
     assert.strictEqual(res.status, 201);
     const payload = jwt.verify(res.body.token, process.env.JWT_SECRET);
@@ -64,7 +68,7 @@ test('token que el socket-server rechaza: 401 con el motivo, sin emitir JWT', as
   const socket = instalarFakeSocket(() => ({ __status: 401, valido: false, motivo: 'expirado' }));
   const db = dbConMesa(null);
   try {
-    const res = await request(app).post('/api/mesas/qr/token-vencido/sesion');
+    const res = await request(app).post('/api/mesas/qr/token-vencido/sesion').send({ comensal: alias() });
 
     assert.strictEqual(res.status, 401);
     assert.strictEqual(res.body.motivo, 'expirado');
@@ -83,7 +87,7 @@ test('token firmado y vigente pero distinto al de la mesa: 401, no sirve un QR v
   // ...pero la mesa ya tiene otro token.
   const db = dbConMesa(tokenActual);
   try {
-    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(tokenViejo)}/sesion`);
+    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(tokenViejo)}/sesion`).send({ comensal: alias() });
 
     assert.strictEqual(res.status, 401);
     assert.strictEqual(res.body.motivo, 'no_es_el_vigente');
@@ -98,7 +102,7 @@ test('mesa sin sesión abierta (token_qr NULL): 401', async () => {
   const socket = instalarFakeSocket(() => ({ valido: true, id_mesa: 5 }));
   const db = dbConMesa(null);
   try {
-    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`);
+    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`).send({ comensal: alias() });
 
     assert.strictEqual(res.status, 401);
     assert.strictEqual(res.body.motivo, 'mesa_sin_sesion');
@@ -113,7 +117,7 @@ test('socket-server caído al abrir sesión: 503 (aquí sí debe fallar)', async
   const socket = socketCaido();
   const db = dbConMesa(token);
   try {
-    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`);
+    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`).send({ comensal: alias() });
 
     assert.strictEqual(res.status, 503);
     assert.strictEqual(res.body.token, undefined);

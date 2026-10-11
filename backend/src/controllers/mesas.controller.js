@@ -4,6 +4,7 @@ const mesasService = require('../services/mesas.service');
 const { ROL_COMENSAL } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
 const { extraerSid } = require('../services/qr.token');
+const aliasComensal = require('../services/alias-comensal');
 
 // Vigencia de la sesión del comensal: una estadía en la mesa (3 h por defecto).
 const COMENSAL_EXPIRES_IN = process.env.JWT_COMENSAL_EXPIRES_IN || '3h';
@@ -118,7 +119,11 @@ async function abrir(req, res, next) {
 
     // Después del commit (abrirSesion ya cerró su transacción) y aislado: si el
     // socket-server falla, la mesa queda abierta igual.
-    if (!r.reutilizado) socketNotifier.notificarQrRotado(idMesa, r.token);
+    if (!r.reutilizado) {
+      socketNotifier.notificarQrRotado(idMesa, r.token);
+      // Sesión nueva: los alias del grupo anterior quedan libres.
+      aliasComensal.olvidarMesa(idMesa);
+    }
 
     return res.status(201).json({
       token: r.token,
@@ -164,6 +169,7 @@ async function liberar(req, res, next) {
     // Después del commit y aislado: si el socket-server falla, la mesa ya quedó
     // liberada en la base y no se revierte (el notifier no lanza).
     socketNotifier.notificarMesaLiberada(idMesa);
+    aliasComensal.olvidarMesa(idMesa);
 
     return res.json({
       id_mesa: r.mesa.id_mesa,
@@ -186,11 +192,18 @@ async function liberar(req, res, next) {
  *     anterior, aunque siga siendo válido y firmado, no sirve una vez que la
  *     mesa se liberó o se le generó otro.
  *
- * Emite un JWT { id_mesa, sid, rol: 'comensal' }. El sid viene del propio token
- * y es lo que ata la sesión a ese QR (ver el middleware).
+ * Emite un JWT { id_mesa, sid, rol: 'comensal', comensal }. El sid viene del
+ * propio token y es lo que ata la sesión a ese QR (ver el middleware).
+ *
+ * Body: { "comensal": "Ana" }. El alias se valida, se reserva (único en la
+ * sesión de la mesa: 409 si ya lo tiene otro) y va FIRMADO en el JWT: el
+ * socket-server solo cree ese, así nadie edita, quita o paga como otro
+ * comensal (ver services/alias-comensal.js).
  */
 async function crearSesionPorToken(req, res, next) {
   const tokenQr = req.params.token;
+  const alias = aliasComensal.normalizarAlias(req.body && req.body.comensal);
+  if (alias.error) return res.status(400).json({ error: alias.error, campo: 'comensal' });
 
   try {
     const veredicto = await socketNotifier.validarTokenQr(tokenQr);
@@ -223,14 +236,27 @@ async function crearSesionPorToken(req, res, next) {
       return res.status(401).json({ error: 'Token de mesa inválido', motivo: 'formato' });
     }
 
+    // Al final, con el QR ya validado: un QR inválido no gasta alias.
+    const reserva = await aliasComensal.reservar(mesa.id_mesa, alias, { vigencia: COMENSAL_EXPIRES_IN });
+    if (reserva.enUso) {
+      return res.status(409).json({
+        error: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
+        motivo: 'alias_en_uso',
+      });
+    }
+    if (reserva.noDisponible) {
+      return res.status(503).json({ error: 'No se pudo abrir la sesión, intenta de nuevo en unos segundos', motivo: 'alias_no_disponible' });
+    }
+
     const token = jwt.sign(
-      { id_mesa: mesa.id_mesa, sid, rol: ROL_COMENSAL },
+      { id_mesa: mesa.id_mesa, sid, rol: ROL_COMENSAL, comensal: alias.alias },
       process.env.JWT_SECRET,
       { expiresIn: COMENSAL_EXPIRES_IN }
     );
 
     return res.status(201).json({
       token,
+      comensal: alias.alias,
       expira_en: COMENSAL_EXPIRES_IN,
       qr_expira_en: veredicto.expira_en ?? null,
       mesa: {

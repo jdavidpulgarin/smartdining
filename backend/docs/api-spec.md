@@ -81,7 +81,7 @@ La función `cancelar_pedido()` de Jarrison aplica la misma regla.
 | Rol | Origen | Payload del JWT | Vigencia |
 |---|---|---|---|
 | `admin`, `mesero`, `cajero`, `cocina` | Tabla `usuarios` (`usuarios.rol`), vía `POST /auth/login` | `{ id_usuario, rol }` | `JWT_EXPIRES_IN` (8 h) |
-| `comensal` | **No existe en la tabla usuarios.** Se emite al escanear el QR de la mesa, vía `POST /mesas/qr/:token/sesion` | `{ id_mesa, sid, rol: "comensal" }` | 3 h, y cae antes si la mesa se libera (ver *Ciclo de vida de la sesión de mesa*) |
+| `comensal` | **No existe en la tabla usuarios.** Se emite al escanear el QR de la mesa, vía `POST /mesas/qr/:token/sesion` | `{ id_mesa, sid, rol: "comensal", comensal }` (`comensal` = su alias, único en la sesión) | 3 h, y cae antes si la mesa se libera (ver *Ciclo de vida de la sesión de mesa*) |
 
 Notas del flujo del comensal (definido por Jarrison):
 
@@ -317,7 +317,7 @@ Modelo aprobado por el equipo:
 
 ```
 mesero  → POST /api/mesas/:id/abrir      → token del QR (+ url para imprimirlo)
-comensal→ POST /api/mesas/qr/:token/sesion → JWT { id_mesa, sid, rol: 'comensal' }
+comensal→ POST /api/mesas/qr/:token/sesion { comensal } → JWT { id_mesa, sid, rol: 'comensal', comensal }
           …pide, cambia de estado, paga…
           → la mesa se libera (manual o automáticamente) y token_qr queda en NULL
           → las sesiones de ese grupo caen en la siguiente petición (401)
@@ -446,11 +446,31 @@ Doble comprobación, porque cada una cubre algo distinto:
    aunque siga firmado y sin expirar, no sirve una vez que la mesa se liberó o se le
    generó otro.
 
+Body (obligatorio):
+
+```json
+{ "comensal": "Ana" }
+```
+
+El **alias** del comensal se valida, se reserva y va **firmado dentro del JWT**. El
+socket-server toma el alias solo del JWT (carrito, push, llamar al mesero, pedir la
+cuenta, presencia y pago "propio"), así nadie puede editar, quitar o pagar como otro
+comensal de su mesa.
+
+- Se recortan los espacios y se colapsan los dobles. De 2 a 40 caracteres: letras (con
+  tildes y ñ), números, espacio y `. _ ' -`.
+- **Único dentro de la sesión de la mesa.** `Ana`, `ana`, `ÁNA` y `A.na` cuentan como el
+  mismo. La reserva vive en Redis (`sd:mesa:{id}:alias`, `HSETNX`) con la vigencia del
+  JWT, y se borra al abrir una sesión nueva de la mesa o al liberarla.
+- En producción, sin Redis no hay sesión (503): sin unicidad garantizada volvería la
+  suplantación. Fuera de producción y sin `REDIS_URL` se usa un respaldo en memoria.
+
 201:
 
 ```json
 {
-  "token": "<jwt con { id_mesa, sid, rol: 'comensal' }>",
+  "token": "<jwt con { id_mesa, sid, rol: 'comensal', comensal: 'Ana' }>",
+  "comensal": "Ana",
   "expira_en": "3h",
   "qr_expira_en": 1790651940443,
   "mesa": { "id_mesa": 5, "numero": 5, "capacidad": 4, "ubicacion": "Terraza", "estado": "ocupada" }
@@ -466,7 +486,15 @@ Doble comprobación, porque cada una cubre algo distinto:
 | `no_es_el_vigente` | Está bien firmado, pero la mesa ya tiene otro QR |
 | `mesa_sin_sesion` | `mesas.token_qr` está en NULL: la mesa no está abierta |
 
-**503** si el socket-server no responde: sin validar no se puede dejar entrar a nadie.
+**400** `{ "error": "...", "campo": "comensal" }` si falta el alias o no cumple las reglas.
+
+**409** `{ "motivo": "alias_en_uso" }` si otro comensal de la sesión ya tiene ese alias:
+la PWA debe pedir otro nombre.
+
+**503** si el socket-server no responde (sin validar no se puede dejar entrar a nadie) o,
+con `motivo: "alias_no_disponible"`, si no se pudo reservar el alias.
+
+El QR se valida **antes** de reservar el alias: un QR inválido no gasta el nombre.
 Las 3 h son la vigencia de la *sesión*, no la del token QR (`qr_expira_en`).
 
 ### Criterios de aceptación del QR (propuesta de Roberto)

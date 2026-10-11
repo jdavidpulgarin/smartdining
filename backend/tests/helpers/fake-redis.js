@@ -57,6 +57,25 @@ function instalarFakeRedis(opciones = {}) {
       fallar('del');
       return almacen.delete(clave) ? 1 : 0;
     },
+    // Hash (alias de comensal por mesa): el valor guardado es un objeto campo -> texto.
+    async hSetNX(clave, campo, valor) {
+      operaciones.push({ op: 'hSetNX', clave, campo });
+      fallar('hSetNX');
+      const guardado = almacen.get(clave) || { valor: '{}', ttl: null };
+      const hash = JSON.parse(guardado.valor);
+      if (Object.prototype.hasOwnProperty.call(hash, campo)) return false;
+      hash[campo] = valor;
+      almacen.set(clave, { ...guardado, valor: JSON.stringify(hash) });
+      return true;
+    },
+    async expire(clave, ttlSegundos) {
+      operaciones.push({ op: 'expire', clave, ttl: ttlSegundos });
+      fallar('expire');
+      const guardado = almacen.get(clave);
+      if (!guardado) return false;
+      almacen.set(clave, { ...guardado, ttl: ttlSegundos });
+      return true;
+    },
   };
 
   redis.connectRedis = async () => {

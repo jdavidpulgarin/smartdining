@@ -186,7 +186,9 @@ function instalarEscenario() {
     liberarMesa: () =>
       request(app).post(`/api/mesas/${ID_MESA}/liberar`).set('Authorization', `Bearer ${jwtStaff('mesero')}`),
 
-    abrirSesion: (token) => request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`),
+    // Alias único por llamada: dos comensales de la misma sesión no pueden repetirlo.
+    abrirSesion: (token, comensal = `Comensal ${(estado.alias = (estado.alias || 0) + 1)}`) =>
+      request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`).send({ comensal }),
 
     crearPedido: (jwtComensal, apodo = 'Ana') =>
       request(app)
