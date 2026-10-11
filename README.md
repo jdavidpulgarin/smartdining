@@ -75,6 +75,12 @@ para `develop`:
 3. *Dismiss stale pull request approvals when new commits are pushed*.
 4. *Require status checks to pass* → marcar los jobs del workflow **CI**
    (`.github/workflows/ci.yml`) y *Require branches to be up to date before merging*.
+   GitHub solo ofrece un check en el buscador después de que haya corrido al menos una vez
+   (abre un PR primero). Los nombres exactos son:
+   - `backend · pruebas`
+   - `socket-server · pruebas (con Redis)`
+   - `frontend-cliente · lint y build`
+   - `frontend-restaurante · lint y build`
 5. *Require conversation resolution before merging*.
 6. *Block force pushes* y *Restrict deletions*.
 7. En `main`, además: restringir quién puede hacer push (solo el líder).
