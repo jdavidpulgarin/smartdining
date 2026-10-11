@@ -1,0 +1,150 @@
+# SmartDining — PRODUCCIÓN (VPS). Guía completa: docs/despliegue.md
+#
+#   docker compose -f docker-compose.prod.yml --env-file infra/.env up -d --build
+#
+# Redes:
+#   datos: INTERNA (sin salida a Internet). Postgres y Redis viven solo aquí y
+#          no publican puertos: nadie de fuera llega a ellos.
+#   web:   nginx, backend y socket-server. El socket-server necesita salir a
+#          Internet (API de Wompi, servicios de Web Push).
+# Solo nginx publica puertos (80 y 443).
+
+name: smartdining
+
+x-servicio: &servicio
+  restart: unless-stopped
+  # tini como PID 1: entrega SIGTERM a node (cierre ordenado) y recoge zombis.
+  init: true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  postgres:
+    <<: *servicio
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smartdining}
+      POSTGRES_USER: ${POSTGRES_USER:-smartdining}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en infra/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database:/smartdining-db:ro
+      - ./database/docker-init.sh:/docker-entrypoint-initdb.d/10-smartdining.sh:ro
+    networks: [datos]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    <<: *servicio
+    image: redis:7-alpine
+    # Con contraseña aunque esté en una red interna: defensa en profundidad si
+    # otro contenedor de esa red quedara comprometido.
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Define REDIS_PASSWORD en infra/.env}
+    volumes:
+      - redisdata:/data
+    networks: [datos]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    <<: *servicio
+    build:
+      context: ./backend
+      dockerfile: ../infra/docker/backend.Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-smartdining}
+      PGUSER: ${POSTGRES_USER:-smartdining}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en infra/.env}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Define INTERNAL_API_KEY en infra/.env}
+      SOCKET_URL: http://socket-server:4001
+      FRONTEND_CLIENTE_URL: https://app.${DOMINIO}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [datos, web]
+
+  socket-server:
+    <<: *servicio
+    build:
+      context: ./socket-server
+      dockerfile: ../infra/docker/socket-server.Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: "4001"
+      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      QR_SECRET: ${QR_SECRET:?Define QR_SECRET en infra/.env}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      BACKEND_URL: http://backend:4000
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      WOMPI_PUBLIC_KEY: ${WOMPI_PUBLIC_KEY:-}
+      WOMPI_PRIVATE_KEY: ${WOMPI_PRIVATE_KEY:-}
+      WOMPI_INTEGRITY_SECRET: ${WOMPI_INTEGRITY_SECRET:-}
+      WOMPI_EVENTS_SECRET: ${WOMPI_EVENTS_SECRET:-}
+      WOMPI_API_URL: ${WOMPI_API_URL:-}
+      LOG_NIVEL: ${LOG_NIVEL:-info}
+    depends_on:
+      redis: { condition: service_healthy }
+      backend: { condition: service_started }
+    # Margen para el cierre ordenado (espera hasta 10 s los acks en curso).
+    stop_grace_period: 15s
+    networks: [datos, web]
+
+  nginx:
+    <<: *servicio
+    build:
+      context: .
+      dockerfile: infra/nginx/Dockerfile
+      args:
+        DOMINIO: ${DOMINIO:?Define DOMINIO en infra/.env}
+    environment:
+      DOMINIO: ${DOMINIO}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - certificados:/etc/letsencrypt:ro
+      - acme:/var/www/certbot:ro
+    depends_on:
+      backend: { condition: service_healthy }
+      socket-server: { condition: service_healthy }
+    networks: [web]
+
+  certbot:
+    <<: *servicio
+    image: certbot/certbot:latest
+    # Intenta renovar cada 12 h; certbot solo renueva si faltan < 30 días.
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    volumes:
+      - certificados:/etc/letsencrypt
+      - acme:/var/www/certbot
+    networks: [web]
+
+networks:
+  datos:
+    internal: true
+  web:
+
+volumes:
+  pgdata:
+  redisdata:
+  certificados:
+  acme:
