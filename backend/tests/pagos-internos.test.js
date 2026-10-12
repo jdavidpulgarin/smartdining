@@ -378,22 +378,192 @@ test('la busqueda del duplicado bloquea la fila para dos reintentos a la vez', a
   }
 });
 
-test('una moneda distinta de COP se rechaza con 400', async () => {
+test('una moneda distinta de COP se registra, no se rechaza', async () => {
   const clave = conClaveInterna(CLAVE_FALSA);
   const db = instalarFakeDb(responderIntentos());
   try {
     const res = await request(app)
       .post(RUTA_INTENTOS)
       .set('x-internal-key', CLAVE_FALSA)
-      .send({ ...INTENTO, moneda: 'USD' });
+      .send({ ...INTENTO, moneda: 'USD', motivo: 'moneda_distinta' });
 
-    assert.strictEqual(res.status, 400);
-    assert.strictEqual(db.buscar('INSERT INTO intentos_pago_fallidos'), undefined);
+    assert.strictEqual(res.status, 201, 'una moneda rara ES la alerta: hay que guardarla');
+    const insert = db.buscar('INSERT INTO intentos_pago_fallidos');
+    assert.strictEqual(insert.params[4], 'USD', 'la moneda se guarda tal como llego');
+    assert.strictEqual(insert.params[7], 'moneda_distinta', 'razon_rechazo');
   } finally {
     db.restaurar();
     clave.restaurar();
   }
 });
+
+test('la moneda se normaliza a mayusculas', async () => {
+  const clave = conClaveInterna(CLAVE_FALSA);
+  const db = instalarFakeDb(responderIntentos());
+  try {
+    const res = await request(app)
+      .post(RUTA_INTENTOS)
+      .set('x-internal-key', CLAVE_FALSA)
+      .send({ ...INTENTO, moneda: 'usd' });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(
+      db.buscar('INSERT INTO intentos_pago_fallidos').params[4],
+      'USD',
+      "'usd' y 'USD' no pueden quedar como dos monedas distintas en la bitacora"
+    );
+  } finally {
+    db.restaurar();
+    clave.restaurar();
+  }
+});
+
+test('una moneda de mas de 3 caracteres si se rechaza (la columna es VARCHAR(3))', async () => {
+  const clave = conClaveInterna(CLAVE_FALSA);
+  const db = instalarFakeDb(responderIntentos());
+  try {
+    const res = await request(app)
+      .post(RUTA_INTENTOS)
+      .set('x-internal-key', CLAVE_FALSA)
+      .send({ ...INTENTO, moneda: 'PESOS' });
+
+    assert.strictEqual(res.status, 400);
+  } finally {
+    db.restaurar();
+    clave.restaurar();
+  }
+});
+
+test('id_mesa null y monto_esperado_centavos null se aceptan y guardan la mesa en NULL', async () => {
+  const clave = conClaveInterna(CLAVE_FALSA);
+  const db = instalarFakeDb(responderIntentos());
+  try {
+    const res = await request(app)
+      .post(RUTA_INTENTOS)
+      .set('x-internal-key', CLAVE_FALSA)
+      .send({
+        ...INTENTO,
+        id_mesa: null,
+        monto_esperado_centavos: null,
+        motivo: 'referencia_desconocida',
+      });
+
+    assert.strictEqual(res.status, 201);
+    const insert = db.buscar('INSERT INTO intentos_pago_fallidos');
+    assert.strictEqual(insert.params[0], null, 'id_mesa NULL en la fila');
+    assert.strictEqual(
+      db.buscar('SELECT id_mesa FROM mesas WHERE id_mesa'),
+      undefined,
+      'con id_mesa null no hace falta preguntarle nada a la tabla mesas'
+    );
+  } finally {
+    db.restaurar();
+    clave.restaurar();
+  }
+});
+
+test('sin id_mesa (ausente) tambien se guarda, con la mesa en NULL', async () => {
+  const clave = conClaveInterna(CLAVE_FALSA);
+  const db = instalarFakeDb(responderIntentos());
+  try {
+    const { id_mesa, ...sinMesa } = INTENTO;
+    const res = await request(app).post(RUTA_INTENTOS).set('x-internal-key', CLAVE_FALSA).send(sinMesa);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(db.buscar('INSERT INTO intentos_pago_fallidos').params[0], null);
+  } finally {
+    db.restaurar();
+    clave.restaurar();
+  }
+});
+
+for (const [caso, valor] of [
+  ['ausente', undefined],
+  ['en cero', 0],
+  ['negativo', -500],
+  ['null', null],
+]) {
+  test(`monto_centavos ${caso}: 201 y monto NULL (la CHECK exige monto > 0)`, async () => {
+    const clave = conClaveInterna(CLAVE_FALSA);
+    const db = instalarFakeDb(responderIntentos());
+    try {
+      const cuerpo = { ...INTENTO };
+      if (valor === undefined) delete cuerpo.monto_centavos;
+      else cuerpo.monto_centavos = valor;
+
+      const res = await request(app).post(RUTA_INTENTOS).set('x-internal-key', CLAVE_FALSA).send(cuerpo);
+
+      assert.strictEqual(res.status, 201);
+      assert.strictEqual(
+        db.buscar('INSERT INTO intentos_pago_fallidos').params[6],
+        null,
+        'un 0 reventaria la CHECK y se perderia la alerta'
+      );
+    } finally {
+      db.restaurar();
+      clave.restaurar();
+    }
+  });
+}
+
+test('sin pasarela y sin moneda tambien se guarda', async () => {
+  const clave = conClaveInterna(CLAVE_FALSA);
+  const db = instalarFakeDb(responderIntentos());
+  try {
+    const { pasarela, moneda, ...minimo } = INTENTO;
+    const res = await request(app).post(RUTA_INTENTOS).set('x-internal-key', CLAVE_FALSA).send(minimo);
+
+    assert.strictEqual(res.status, 201);
+    const insert = db.buscar('INSERT INTO intentos_pago_fallidos');
+    assert.strictEqual(insert.params[3], null, 'pasarela');
+    assert.strictEqual(insert.params[4], null, 'moneda');
+    assert.strictEqual(insert.params[5], 'online', 'metodo_pago mantiene su valor por omision');
+  } finally {
+    db.restaurar();
+    clave.restaurar();
+  }
+});
+
+test('lo minimo imprescindible es referencia, transaccion y motivo', async () => {
+  const clave = conClaveInterna(CLAVE_FALSA);
+  const db = instalarFakeDb(responderIntentos());
+  try {
+    const res = await request(app).post(RUTA_INTENTOS).set('x-internal-key', CLAVE_FALSA).send({
+      referencia_externa: 'SD-9-solo-lo-minimo',
+      id_transaccion_pasarela: '1132-000-minimo',
+      motivo: 'estado_no_aprobado',
+    });
+
+    assert.strictEqual(res.status, 201);
+    assert.ok(db.buscar('INSERT INTO intentos_pago_fallidos'));
+  } finally {
+    db.restaurar();
+    clave.restaurar();
+  }
+});
+
+for (const [caso, parche] of [
+  ['sin referencia_externa', { referencia_externa: undefined }],
+  ['sin id_transaccion_pasarela', { id_transaccion_pasarela: undefined }],
+  ['sin motivo', { motivo: undefined }],
+]) {
+  test(`${caso}: 400, porque es lo que identifica la alerta`, async () => {
+    const clave = conClaveInterna(CLAVE_FALSA);
+    const db = instalarFakeDb(responderIntentos());
+    try {
+      const res = await request(app)
+        .post(RUTA_INTENTOS)
+        .set('x-internal-key', CLAVE_FALSA)
+        .send({ ...INTENTO, ...parche });
+
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(db.buscar('INSERT INTO intentos_pago_fallidos'), undefined);
+    } finally {
+      db.restaurar();
+      clave.restaurar();
+    }
+  });
+}
 
 test('un monto_centavos no entero se rechaza con 400', async () => {
   const clave = conClaveInterna(CLAVE_FALSA);

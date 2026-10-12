@@ -272,6 +272,116 @@ test('un pago se reparte entre dos pedidos, del mas viejo al mas nuevo', async (
   }
 });
 
+test('un monto no divisible se reparte completo, llenando primero el pedido mas antiguo', async () => {
+  const socket = instalarFakeSocket();
+  // Tres pedidos abiertos con saldos que no dividen el monto de forma exacta.
+  const db = instalarFakeDb(
+    responderPagos({
+      pedidos: [
+        { id_pedido: 70, estado: 'entregado', saldo_centavos: 1000033 },
+        { id_pedido: 80, estado: 'entregado', saldo_centavos: 1000033 },
+        { id_pedido: 87, estado: 'entregado', saldo_centavos: 1000034 },
+      ],
+      saldoFinal: 1,
+    }),
+    { pedidosAbiertos: 1 }
+  );
+  try {
+    // 30.000,99 pesos: un tercio exacto no existe en centavos.
+    const monto = 3000099;
+    const res = await enviar({ ...PAGO, monto_centavos: monto });
+
+    assert.strictEqual(res.status, 201);
+
+    const inserts = db.todas('INSERT INTO transacciones');
+    const repartido = inserts.map((q) => q.params[2]);
+
+    assert.strictEqual(
+      repartido.reduce((suma, x) => suma + x, 0),
+      monto,
+      'la suma de lo repartido es EXACTAMENTE el monto cobrado: ni un centavo de mas ni de menos'
+    );
+
+    // El mas antiguo se llena hasta su saldo antes de pasar al siguiente, asi
+    // que el "sobrante" cae siempre hacia los primeros, no se promedia.
+    assert.deepStrictEqual(
+      inserts.map((q) => q.params[0]),
+      [70, 80, 87],
+      'del mas viejo al mas nuevo'
+    );
+    assert.deepStrictEqual(repartido, [1000033, 1000033, 1000033]);
+
+    // Y las referencias no se repiten, por el indice unico.
+    assert.deepStrictEqual(
+      inserts.map((q) => q.params[3]),
+      [PAGO.referencia_externa, `${PAGO.referencia_externa}#2`, `${PAGO.referencia_externa}#3`]
+    );
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('un monto que cubre dos pedidos y parte del tercero no deja centavos sueltos', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(
+    responderPagos({
+      pedidos: [
+        { id_pedido: 70, estado: 'entregado', saldo_centavos: 777 },
+        { id_pedido: 80, estado: 'entregado', saldo_centavos: 333 },
+        { id_pedido: 87, estado: 'entregado', saldo_centavos: 10000 },
+      ],
+      saldoFinal: 9889,
+    }),
+    { pedidosAbiertos: 1 }
+  );
+  try {
+    const monto = 1221; // 777 + 333 + 111
+    const res = await enviar({ ...PAGO, monto_centavos: monto });
+
+    assert.strictEqual(res.status, 201);
+
+    const inserts = db.todas('INSERT INTO transacciones');
+    assert.deepStrictEqual(
+      inserts.map((q) => [q.params[0], q.params[2]]),
+      [[70, 777], [80, 333], [87, 111]],
+      'cada pedido recibe hasta su saldo y el resto pasa al siguiente'
+    );
+    assert.strictEqual(
+      inserts.reduce((suma, q) => suma + q.params[2], 0),
+      monto
+    );
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('un monto de un solo centavo va al pedido mas antiguo', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(
+    responderPagos({
+      pedidos: [
+        { id_pedido: 70, estado: 'entregado', saldo_centavos: 5000 },
+        { id_pedido: 87, estado: 'entregado', saldo_centavos: 5000 },
+      ],
+      saldoFinal: 9999,
+    }),
+    { pedidosAbiertos: 1 }
+  );
+  try {
+    const res = await enviar({ ...PAGO, monto_centavos: 1 });
+
+    assert.strictEqual(res.status, 201);
+    const inserts = db.todas('INSERT INTO transacciones');
+    assert.strictEqual(inserts.length, 1, 'no se abren filas de 0 centavos para los demas pedidos');
+    assert.deepStrictEqual([inserts[0].params[0], inserts[0].params[2]], [70, 1]);
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
 test('el ordenamiento del reparto lo hace la base, por fecha de creacion', async () => {
   const socket = instalarFakeSocket();
   const db = instalarFakeDb(responderPagos());
