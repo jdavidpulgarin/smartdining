@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 
-function Header({ numeroMesa, cantidadCarrito = 0 }) {
+function Header({ numeroMesa, comensal, cantidadCarrito = 0 }) {
   return (
     <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
       <div className="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
@@ -11,10 +11,15 @@ function Header({ numeroMesa, cantidadCarrito = 0 }) {
           </span>
         </Link>
 
-        {/* Indicador de Mesa y Carrito */}
-        <div className="flex items-center gap-3">
+        {/* Indicador de Mesa, Comensal y Carrito */}
+        <div className="flex items-center gap-2.5">
+          {comensal && (
+            <span className="text-xs font-medium text-cafe truncate max-w-28">
+              Hola, <strong className="font-semibold">{comensal}</strong>
+            </span>
+          )}
           {numeroMesa && (
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary">
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary shrink-0">
               Mesa {numeroMesa}
             </span>
           )}
