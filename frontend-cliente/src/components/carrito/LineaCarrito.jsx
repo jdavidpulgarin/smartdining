@@ -18,6 +18,13 @@ function LineaCarrito({ linea, onActualizarCantidad, onEliminar }) {
               </span>
             )}
           </div>
+          {Array.isArray(linea.detalle) && linea.detalle.length > 0 && (
+            <p className="text-xs text-gray-600 leading-snug mb-1">
+              {linea.detalle
+                .map((item) => `${item.nombre} (${item.porcion})`)
+                .join(' · ')}
+            </p>
+          )}
           {linea.notas && (
             <p className="text-xs text-gray-600 italic leading-snug">
               {linea.notas}
