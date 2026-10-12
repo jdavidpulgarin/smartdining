@@ -784,14 +784,19 @@ Body:
   cuadra con el extracto de la pasarela— y las siguientes llevan
   `referencia#2`, `referencia#3`… El sufijo es un detalle del almacenamiento: el
   contrato con el socket-server sigue hablando de una sola referencia.
-- Un pedido pasa a `pagado` **solo si su saldo llegó a 0 y ya estaba `entregado`**
-  (es la única transición que acepta `tr_validar_transicion_estado`). Si está en
-  cocina, el pago queda registrado y el pedido sigue su curso. El cambio se registra en
-  `historial_estados` con `id_usuario` **NULL** y `observaciones` `"Pago en linea"`:
-  no lo cobró una persona.
-- Si con este pago no quedan pedidos abiertos, **la mesa se libera en la misma
-  transacción**. Después del commit —y aislado— se avisa `order:status` por cada
-  pedido liquidado y `/internal/mesa-liberada` con `{ "motivo": "pagada" }`.
+- Un pedido pasa a `pagado` **solo si se cumplen las dos cosas**: su saldo llegó a **0**
+  **y** ya estaba en **`entregado`** (es la única transición que acepta
+  `tr_validar_transicion_estado`). Si todavía está en cocina, el pago queda registrado y
+  el pedido sigue su curso; cuando llegue a `entregado` su saldo ya será 0 y la caja no
+  volverá a cobrarlo. El cambio se registra en `historial_estados` con `id_usuario`
+  **NULL** y `observaciones` `"Pago en linea"`: no lo cobró una persona.
+- **La mesa se libera solo si algún pedido llegó a `pagado` por este pago y a la mesa no
+  le queda ningún otro pedido abierto**, todo en la misma transacción. Dos consecuencias
+  que conviene tener claras: un pago que deja saldo **no** libera la mesa, y un pago que
+  liquida el saldo de un pedido que sigue en cocina **tampoco** la libera (el pedido no
+  pasó a `pagado`, así que sigue contando como abierto). Después del commit —y aislado—
+  se avisa `order:status` por cada pedido liquidado y `/internal/mesa-liberada` con
+  `{ "motivo": "pagada" }`.
 
 201:
 
@@ -803,29 +808,55 @@ Body:
   reintento de la pasarela no vuelve a cobrar ni a avisar al socket-server). Si la
   carrera la pierde el `INSERT` y choca con el índice único (`23505`), se revierte y se
   responde igual como duplicado.
-- **409** si el pago **excede el saldo** de la mesa (incluye `saldo_centavos`) o si la
-  mesa **no tiene cuenta abierta**. También 409, con el mensaje del trigger, para
-  cualquier regla que rechace la base.
-- **404** si la mesa no existe · **400** si el cuerpo no cumple el esquema.
+Errores:
+
+| Status | Cuándo | Cuerpo |
+|---|---|---|
+| **404** | La mesa no existe (se comprueba con la fila bloqueada, antes de repartir nada) | `{ "error": "Mesa no encontrada" }` |
+| **409** | El pago **excede el saldo** de la mesa | `{ "error": "El pago excede el saldo de la mesa", "saldo_centavos": 2400000 }` |
+| **409** | La mesa **no tiene cuenta abierta** (ningún pedido no cancelado con saldo > 0) | `{ "error": "La mesa no tiene una cuenta abierta por pagar" }` |
+| **409** | Cualquier regla que rechace un trigger de la base | El mensaje del trigger, tal cual |
+| **400** | El cuerpo no cumple el esquema | El primer problema que encontró zod |
+| **401** / **503** | Clave interna inválida / canal interno sin configurar | Ver el inicio de esta sección |
+
+A diferencia de la bitácora de intentos fallidos, **aquí sí se rechaza de verdad**:
+este endpoint mueve dinero, y registrar un pago a medias sería peor que devolver un
+error. El cuerpo exige `referencia_externa`, `id_transaccion_pasarela`, `pasarela`,
+`id_mesa`, `modo`, `monto_centavos` (entero > 0) y `moneda` **exactamente `"COP"`**;
+solo `comensal` admite `null` y solo `metodo_pago` tiene valor por omisión.
+Nada se degrada a NULL en silencio.
 
 ### POST /pagos/intentos-fallidos/interno
 
-Body: `referencia_externa`, `id_transaccion_pasarela`, `pasarela`, `id_mesa`,
-`motivo`, `monto_centavos`, `monto_esperado_centavos` (opcional), `moneda`,
-`metodo_pago`.
+Body: solo tres campos son **obligatorios** — `referencia_externa`,
+`id_transaccion_pasarela` y `motivo` (lo que identifica la alerta y por qué se rechazó).
+El resto es opcional y admite `null`: `pasarela`, `id_mesa`, `monto_centavos`,
+`monto_esperado_centavos`, `moneda`, `metodo_pago`.
 
 201: `{ "ok": true }`
 
 - Guarda en `intentos_pago_fallidos` con `razon_rechazo` = `motivo` tal cual,
   `monto` = centavos / 100 e `id_pedido` en **NULL** (una referencia rechazada puede no
   corresponder a ningún pedido).
-- Si la mesa **no existe**, se guarda `id_mesa` en **NULL** en vez de fallar: una alerta
-  no se pierde porque la referencia sea de otra instalación.
 - **Idempotente** por (`referencia_externa`, `id_transaccion_pasarela`,
   `razon_rechazo`): un reintento no inserta otra fila y responde 201 igual, porque para
   el socket-server lo que importa es que quedó registrado.
-- `monto_esperado_centavos` **se valida pero no se guarda**: la tabla no tiene columna
-  para él.
+
+**Por qué este endpoint es tan tolerante.** El socket-server **solo reintenta ante 5xx o
+error de red**: un 4xx lo da por resuelto y la alerta se pierde para siempre. Como esto
+es una bitácora y no un cobro, guardar un registro incompleto siempre es mejor que
+rechazarlo, así que lo que no se puede guardar se degrada a `NULL`:
+
+| Caso | Qué hace |
+|---|---|
+| `id_mesa: null`, ausente, o una mesa que no existe | Guarda `id_mesa` en **NULL** (la FK `fk_intento_mesa` no se rompe). Con `null` ni se consulta la tabla `mesas` |
+| `moneda` distinta de COP (`"USD"`) | **Se guarda tal cual** y responde 201: una moneda inesperada *es* la alerta (motivo `moneda_distinta`). Se normaliza a mayúsculas, para que `usd` y `USD` no queden como dos monedas en la bitácora. La columna es `VARCHAR(3)`, así que más de 3 caracteres sí da 400 |
+| `monto_centavos` ausente, `null`, `0` o negativo | Guarda `monto` en **NULL**. `intentos_pago_fallidos` tiene `CHECK (monto > 0)`: un 0 reventaría el INSERT y se perdería el registro |
+| `monto_esperado_centavos` (incl. `null`) | **Se valida pero no se guarda**: la tabla no tiene columna para él |
+| Sin `pasarela` o sin `moneda` | Se guardan en `NULL`; `metodo_pago` mantiene su valor por omisión (`online`) |
+
+**400** solo si falta uno de los tres obligatorios, o si un campo presente no cumple su
+forma (p. ej. `moneda` de más de 3 caracteres, `monto_centavos` no entero).
 
 ---
 
