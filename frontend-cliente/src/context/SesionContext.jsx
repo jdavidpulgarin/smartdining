@@ -13,21 +13,25 @@ import { CLAVE_SESION, leerExpiracionJwt, validarNombre } from '../utils/sesion'
 
 const SesionContext = createContext(null);
 
-const CLAVES_OBSOLETAS = ['smartdining_mesa_session', 'smartdining_apodo'];
+const CLAVES_OBSOLETAS = [
+  'smartdining_mesa_session',
+  'smartdining_apodo',
+  CLAVE_SESION,
+];
 
 function leerSesionAlmacenada() {
   try {
-    const crudo = localStorage.getItem(CLAVE_SESION);
+    const crudo = sessionStorage.getItem(CLAVE_SESION);
     if (!crudo) return null;
     const datos = JSON.parse(crudo);
     if (!datos || !datos.token || !datos.idMesa) {
-      localStorage.removeItem(CLAVE_SESION);
+      sessionStorage.removeItem(CLAVE_SESION);
       return null;
     }
 
     const expMs = leerExpiracionJwt(datos.token);
     if (expMs !== null && expMs <= Date.now()) {
-      localStorage.removeItem(CLAVE_SESION);
+      sessionStorage.removeItem(CLAVE_SESION);
       return null;
     }
 
@@ -127,6 +131,11 @@ export function SesionProvider({ children }) {
     setState((prev) => {
       const idMesaActual = prev.sesion?.idMesa;
       try {
+        sessionStorage.removeItem(CLAVE_SESION);
+      } catch {
+        // Ignorar errores de sessionStorage
+      }
+      try {
         localStorage.removeItem(CLAVE_SESION);
         if (idMesaActual !== undefined && idMesaActual !== null) {
           localStorage.removeItem(`smartdining_carrito_mesa_${idMesaActual}`);
@@ -222,9 +231,9 @@ export function SesionProvider({ children }) {
         };
 
         try {
-          localStorage.setItem(CLAVE_SESION, JSON.stringify(nuevaSesion));
+          sessionStorage.setItem(CLAVE_SESION, JSON.stringify(nuevaSesion));
         } catch {
-          // Ignorar si localStorage no está disponible
+          // Ignorar si sessionStorage no está disponible
         }
 
         setState({

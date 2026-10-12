@@ -2,7 +2,7 @@ import { CLAVE_SESION } from './sesion';
 
 export function obtenerApodo() {
   try {
-    const guardado = localStorage.getItem(CLAVE_SESION);
+    const guardado = sessionStorage.getItem(CLAVE_SESION);
     if (!guardado) return '';
     const parsed = JSON.parse(guardado);
     return typeof parsed?.comensal === 'string' ? parsed.comensal.trim() : '';

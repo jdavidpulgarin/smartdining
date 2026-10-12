@@ -19,7 +19,7 @@ const ESTADO_INICIAL = {
 function obtenerMesaInicial() {
   try {
     if (typeof window !== 'undefined') {
-      const sesionGuardada = localStorage.getItem(CLAVE_SESION);
+      const sesionGuardada = sessionStorage.getItem(CLAVE_SESION);
       if (sesionGuardada) {
         const parsed = JSON.parse(sesionGuardada);
         if (parsed?.idMesa && !isNaN(Number(parsed.idMesa))) {
@@ -28,7 +28,7 @@ function obtenerMesaInicial() {
       }
     }
   } catch {
-    // Si ocurre un error al acceder a localStorage o parsear, continuar con null
+    // Si ocurre un error al acceder a sessionStorage o parsear, continuar con null
   }
   return null;
 }
