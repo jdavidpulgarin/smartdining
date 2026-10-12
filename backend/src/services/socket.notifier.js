@@ -260,9 +260,15 @@ async function notificarQrRotado(id_mesa, token_qr) {
  * POST /internal/mesa-liberada — invalida los QR emitidos de esa mesa y borra
  * su carrito y sus suscripciones push, para que el grupo siguiente empiece
  * limpio. Se llama tras un pago efectivo (estado_transaccion 'completada').
+ *
+ * `motivo` es opcional y solo viaja si se pasa: un pago en línea manda
+ * 'pagada' (EVENTS.md §8.3), mientras que liberar a mano o cobrar en caja no
+ * manda nada, para no cambiar el cuerpo que ya recibe el socket-server.
  */
-async function notificarMesaLiberada(id_mesa) {
-  return enviar('/internal/mesa-liberada', { id_mesa });
+async function notificarMesaLiberada(id_mesa, motivo) {
+  const cuerpo = { id_mesa };
+  if (motivo !== undefined && motivo !== null) cuerpo.motivo = motivo;
+  return enviar('/internal/mesa-liberada', cuerpo);
 }
 
 module.exports = {

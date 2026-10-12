@@ -14,6 +14,10 @@ const ESTADOS_MESA = ['disponible', 'ocupada', 'reservada', 'mantenimiento'];
 const ESTADO_MESA_LIBRE = 'disponible';
 const ESTADO_MESA_OCUPADA = 'ocupada';
 
+// Unica moneda del proyecto. Va explicita en la cuenta interna porque el
+// contrato de Wompi la exige y el socket-server rechaza cualquier otra.
+const MONEDA = 'COP';
+
 async function listar() {
   const result = await pool.query('SELECT * FROM mesas ORDER BY numero ASC');
   return result.rows;
@@ -264,6 +268,59 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
   return liberada.rows.length > 0;
 }
 
+/**
+ * Cuenta de la mesa para el socket-server (EVENTS.md §8.2), en centavos.
+ *
+ * Los centavos se calculan EN SQL (`ROUND(x * 100)::bigint`) y no en
+ * JavaScript: `33333.33 * 100` en coma flotante da 3333332.9999999995, y un
+ * peso perdido al redondear en el lado equivocado deja una cuenta que nunca
+ * cuadra. La base ya guarda DECIMAL(10,2); multiplicar ahí mantiene el entero
+ * exacto.
+ *
+ * El desglose sale de obtener_cuenta_mesa_json() de Jarrison, que es la
+ * autoridad sobre quién consumió qué y cuánto se ha pagado. `por_comensal` solo
+ * lleva a quien todavía debe algo: a quien ya pagó no hay que volver a
+ * cobrarle, y el comensal lo usa para elegir "pago lo mío".
+ *
+ * @returns {Promise<null|{id_mesa, moneda, total_centavos, saldo_centavos, por_comensal}>}
+ *          null si la mesa no existe (el endpoint responde 404; la función SQL
+ *          lanzaría un RAISE, que el manejador central traduciría a 409).
+ */
+async function cuentaInterna(idMesa) {
+  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
+  if (existe.rows.length === 0) return null;
+
+  const result = await pool.query(
+    `WITH cuenta AS (SELECT obtener_cuenta_mesa_json($1) AS j)
+     SELECT
+       ROUND(COALESCE((j->>'total_mesa')::numeric, 0) * 100)::bigint AS total_centavos,
+       ROUND(COALESCE((j->>'saldo_mesa')::numeric, 0) * 100)::bigint AS saldo_centavos,
+       COALESCE((
+         SELECT json_agg(
+                  json_build_object(
+                    'comensal', e->>'comensal',
+                    'saldo_centavos', ROUND((e->>'saldo')::numeric * 100)::bigint
+                  ) ORDER BY e->>'comensal' ASC
+                )
+         FROM json_array_elements(j->'comensales') AS e
+         WHERE (e->>'saldo')::numeric > 0
+       ), '[]'::json) AS por_comensal
+     FROM cuenta`,
+    [idMesa]
+  );
+
+  const fila = result.rows[0];
+  return {
+    id_mesa: Number(idMesa),
+    moneda: MONEDA,
+    // pg devuelve bigint como string para no perder precisión; aquí los montos
+    // en centavos caben de sobra en un entero de JavaScript.
+    total_centavos: Number(fila.total_centavos),
+    saldo_centavos: Number(fila.saldo_centavos),
+    por_comensal: fila.por_comensal,
+  };
+}
+
 /** token_qr vigente de la mesa, o null. Lo usa el middleware de sesión. */
 async function tokenQrDeMesa(idMesa) {
   const result = await pool.query('SELECT token_qr FROM mesas WHERE id_mesa = $1', [idMesa]);
@@ -286,7 +343,9 @@ module.exports = {
   rotarQr,
   liberarSesion,
   liberarSiNoQuedanPedidosAbiertos,
+  cuentaInterna,
   tokenQrDeMesa,
+  MONEDA,
   listar,
   obtenerPorId,
   crear,
