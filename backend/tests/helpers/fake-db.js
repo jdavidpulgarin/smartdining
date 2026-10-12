@@ -63,6 +63,10 @@ function instalarFakeDb(responder, opciones = {}) {
     // cobro liquida el pedido, que es el caso corriente. Una prueba de abono
     // parcial pasa el saldo que queda pendiente.
     if (sql.includes('obtener_saldo_pendiente')) {
+      // Si la prueba contesta ella misma (por ejemplo para encadenar dos
+      // abonos), manda su respuesta.
+      const propio = responder(sql, params);
+      if (propio && propio.rows && propio.rows.length > 0) return propio;
       const saldo = opciones.saldoTrasPago ?? 0;
       return { rows: [{ liquidado: saldo <= 0, saldo_pendiente: saldo.toFixed(2) }] };
     }
