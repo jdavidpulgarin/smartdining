@@ -8,6 +8,7 @@ import Constructor from './pages/Constructor'
 import Carrito from './pages/Carrito'
 import Seguimiento from './pages/Seguimiento'
 import Pago from './pages/Pago'
+import Despedida from './pages/Despedida'
 import UiShowcase from './pages/dev/UiShowcase'
 
 function App() {
@@ -57,6 +58,7 @@ function App() {
                 </Layout>
               }
             />
+            <Route path="/despedida" element={<Despedida />} />
             {import.meta.env.DEV && (
               <Route path="/dev/ui" element={<UiShowcase />} />
             )}

@@ -6,6 +6,8 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { setManejadorSesionInvalida } from '../services/api';
 import { crearSesion } from '../services/sesionService';
 import { CLAVE_SESION, leerExpiracionJwt, validarNombre } from '../utils/sesion';
 
@@ -92,6 +94,7 @@ function obtenerEstadoInicial() {
 }
 
 export function SesionProvider({ children }) {
+  const navigate = useNavigate();
   const [state, setState] = useState(obtenerEstadoInicial);
 
   useEffect(() => {
@@ -143,6 +146,28 @@ export function SesionProvider({ children }) {
       };
     });
   }, []);
+
+  /**
+   * Cierra la sesión actual, limpia el carrito de la mesa y redirige a /despedida.
+   * La actividad J-06 también invocará despedir(motivo) al recibir el evento
+   * `mesa:liberada` del socket cuando la cuenta quede pagada o el restaurante libere la mesa.
+   */
+  const despedir = useCallback(
+    (motivo = null) => {
+      cerrarSesion(motivo);
+      navigate('/despedida', { replace: true, state: { motivo } });
+    },
+    [cerrarSesion, navigate]
+  );
+
+  useEffect(() => {
+    setManejadorSesionInvalida((motivo) => {
+      despedir(motivo);
+    });
+    return () => {
+      setManejadorSesionInvalida(null);
+    };
+  }, [despedir]);
 
   const unirse = useCallback(
     async (nombreCrudo) => {
@@ -249,9 +274,10 @@ export function SesionProvider({ children }) {
       motivoCierre: state.motivoCierre,
       unirse,
       cerrarSesion,
+      despedir,
       limpiarError,
     }),
-    [state, unirse, cerrarSesion, limpiarError]
+    [state, unirse, cerrarSesion, despedir, limpiarError]
   );
 
   return (
