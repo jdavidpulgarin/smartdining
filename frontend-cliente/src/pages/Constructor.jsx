@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useReducer, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { obtenerPlatoArmable } from '../services/menuService';
+import {
+  constructorReducer,
+  estadoInicial,
+} from '../components/constructor/constructorReducer';
+import PasoConstructor from '../components/constructor/PasoConstructor';
+import ProgressBar from '../components/ui/ProgressBar';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 
@@ -11,11 +17,14 @@ function Constructor() {
     idCargado: null,
     plato: null,
   });
+  const [estado, despachador] = useReducer(constructorReducer, estadoInicial);
+
   const cargando = estadoCarga.idCargado !== idPlato;
   const plato = cargando ? null : estadoCarga.plato;
 
   useEffect(() => {
     let activo = true;
+    despachador({ type: 'REINICIAR' });
 
     async function cargarPlato() {
       try {
@@ -62,8 +71,32 @@ function Constructor() {
     );
   }
 
+  const pasos = plato.pasos || [];
+  const totalPasos = pasos.length;
+  const pasoActualObj = pasos[estado.pasoActual] || null;
+  const seleccionesPasoActual = pasoActualObj
+    ? estado.selecciones[pasoActualObj.id_paso] || {}
+    : {};
+  const cantidadElegidaActual = Object.keys(seleccionesPasoActual).length;
+  const minSelActual = pasoActualObj ? Number(pasoActualObj.min_sel) || 0 : 0;
+  const faltanEnPaso = Math.max(0, minSelActual - cantidadElegidaActual);
+  const cumpleMinimoPaso = faltanEnPaso === 0;
+
+  const manejarAnterior = () => {
+    if (!estado.enResumen && estado.pasoActual === 0) {
+      navigate('/menu');
+      return;
+    }
+    despachador({ type: 'ANTERIOR' });
+  };
+
+  const manejarSiguiente = () => {
+    if (!cumpleMinimoPaso) return;
+    despachador({ type: 'SIGUIENTE', totalPasos });
+  };
+
   return (
-    <div className="space-y-4 pb-8">
+    <div className="space-y-4 pb-10">
       <header className="space-y-1">
         <h1 className="font-titulo text-2xl font-bold text-cafe">
           {plato.nombre}
@@ -72,6 +105,60 @@ function Constructor() {
           <p className="text-sm text-gray-600">{plato.descripcion}</p>
         )}
       </header>
+
+      <ProgressBar
+        pasoActual={estado.enResumen ? totalPasos : estado.pasoActual + 1}
+        totalPasos={totalPasos}
+        etiqueta={
+          estado.enResumen
+            ? 'Resumen de tu plato'
+            : pasoActualObj?.nombre || ''
+        }
+      />
+
+      {estado.enResumen ? (
+        <Card className="space-y-3">
+          <h2 className="font-titulo text-xl font-bold text-cafe">Tu plato</h2>
+          <p className="text-sm text-gray-600">
+            Revisa tu selección antes de continuar.
+          </p>
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <Button variante="secundario" onClick={manejarAnterior}>
+              Anterior
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <>
+          <PasoConstructor
+            paso={pasoActualObj}
+            seleccionesDelPaso={seleccionesPasoActual}
+            despachador={despachador}
+          />
+
+          {!cumpleMinimoPaso && (
+            <p
+              role="status"
+              className="text-xs font-semibold text-primary text-right"
+            >
+              Elige al menos {minSelActual}
+            </p>
+          )}
+
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <Button variante="secundario" onClick={manejarAnterior}>
+              Anterior
+            </Button>
+            <Button
+              variante="primario"
+              disabled={!cumpleMinimoPaso}
+              onClick={manejarSiguiente}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
