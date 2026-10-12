@@ -41,19 +41,43 @@ restaurante-app/
 
 ---
 
-## 🌿 Flujo de Trabajo en Git (GitFlow)
+## 🌿 Flujo de ramas (develop)
 
-Para evitar conflictos y coordinar de forma ordenada:
+| Rama | Para qué | Quién escribe |
+| :--- | :--- | :--- |
+| `main` | Versión estable. Solo se actualiza **al cierre de cada sprint** con un PR `develop → main`. | Nadie directo: solo el PR de cierre |
+| `develop` | Integración del sprint. Todas las ramas de trabajo salen de aquí y vuelven aquí. | Nadie directo: solo PRs |
+| `tipo/descripcion` | Una rama por actividad: `feature/`, `fix/`, `chore/`, `docs/`, `test/`, `ci/`. | Su autor |
 
-1. **Rama Principal (`main`):** Código estable y probado.
-2. **Ramas de Funcionalidad (`feature/...`):** Cada integrante crea su rama desde `main` para trabajar sus tareas:
-   - `feature/base-datos` (Jarrison)
-   - `feature/frontend-restaurante` (Jarrison)
-   - `feature/frontend-cliente` (Juan)
-   - `feature/backend-api` (Carlos)
-   - `feature/frontend-kds` (Carlos)
-   - `feature/socket-server` (Roberto)
-3. **Pull Requests (PR):** Antes de fusionar con `main`, se realiza revisión de código entre los integrantes correspondientes.
+1. Actualiza develop y crea tu rama desde ahí:
+   ```bash
+   git checkout develop && git pull
+   git checkout -b feature/mi-actividad
+   ```
+2. Commits pequeños con el formato `tipo(scope): descripcion` (minúsculas, infinitivo, sin
+   tildes ni ñ, sin punto final, máximo 72 caracteres). Agrega archivos por nombre
+   (`git add ruta/archivo`), nunca `git add .`.
+3. Antes de abrir el PR: `npm test` en verde (sin fallidas ni canceladas) en cada carpeta
+   que tocaste, y `git pull origin develop` para resolver conflictos en tu rama.
+4. Abre el PR **contra `develop`** con la plantilla (`.github/pull_request_template.md`).
+   GitHub pide revisión al dueño de cada carpeta (`.github/CODEOWNERS`) y el CI debe pasar.
+5. Si tu cambio necesita tocar una carpeta ajena, hazlo en una rama aparte, mínima, y pide
+   revisión a su dueño. No se refactoriza código ajeno.
+6. Al cierre del sprint, el líder abre `develop → main`, se revisa y se fusiona.
+
+### Protección de ramas (paso manual del dueño del repo)
+
+En GitHub → *Settings* → *Branches* → *Add branch ruleset*, una regla para `main` y otra
+para `develop`:
+
+1. *Require a pull request before merging* → 1 aprobación como mínimo.
+2. *Require review from Code Owners* (cuando CODEOWNERS tenga los usuarios reales).
+3. *Dismiss stale pull request approvals when new commits are pushed*.
+4. *Require status checks to pass* → marcar los jobs del workflow **CI**
+   (`.github/workflows/ci.yml`) y *Require branches to be up to date before merging*.
+5. *Require conversation resolution before merging*.
+6. *Block force pushes* y *Restrict deletions*.
+7. En `main`, además: restringir quién puede hacer push (solo el líder).
 
 ---
 

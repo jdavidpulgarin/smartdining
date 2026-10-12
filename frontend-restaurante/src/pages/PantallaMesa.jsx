@@ -66,6 +66,8 @@ export function PantallaMesa() {
   const [hostIp, setHostIp] = useState(defaultHost)
   const [clientPort, setClientPort] = useState('5173')
   const [loadingAction, setLoadingAction] = useState(false)
+  // Error visible en la tablet (rotación o credencial de pantalla fallidas)
+  const [errorPantalla, setErrorPantalla] = useState('')
 
   const activeHost = useWifiIp ? hostIp : 'localhost'
   const diningUrl = tokenQr
@@ -133,8 +135,17 @@ export function PantallaMesa() {
 
     async function initSocketPantalla() {
       // 1. Obtener credencial JWT para esta tablet de mesa (POST /qr/pantalla)
-      const cred = await solicitarTokenPantalla(numMesa)
+      let cred
+      try {
+        cred = await solicitarTokenPantalla(numMesa)
+      } catch (err) {
+        if (isCancelled) return
+        setSocketStatus('desconectado')
+        setErrorPantalla(err.message)
+        return
+      }
       if (isCancelled) return
+      setErrorPantalla('')
       setPantallaToken(cred.token)
 
       // 2. Conectar al socket server con el token emitido
@@ -204,18 +215,24 @@ export function PantallaMesa() {
     }
   }
 
-  // Simulación para pruebas: rotar QR manualmente
+  // Rotación manual: la hace el backend (POST /api/mesas/:id/rotar-qr) con el
+  // JWT del personal; la tablet también recibirá qr:actualizado por el socket.
   const handleSimularRotacion = async () => {
     setLoadingAction(true)
-    const nuevoToken = `qr-mesa-${numMesa}-${Math.random().toString(36).substring(2, 10)}`
-    await notificarQrRotado(numMesa, nuevoToken)
-    setTokenQr(nuevoToken)
-    setSegundosRestantes(ROTACION_INTERVALO)
-    setJustRotated(true)
-    setTimeout(() => {
-      setJustRotated(false)
+    setErrorPantalla('')
+    try {
+      const { token } = await notificarQrRotado(numMesa)
+      if (token) {
+        setTokenQr(token)
+        setSegundosRestantes(ROTACION_INTERVALO)
+        setJustRotated(true)
+        setTimeout(() => setJustRotated(false), 2000)
+      }
+    } catch (err) {
+      setErrorPantalla(`No se pudo rotar el QR: ${err.message}`)
+    } finally {
       setLoadingAction(false)
-    }, 2000)
+    }
   }
 
   // Formato mm:ss
@@ -298,6 +315,13 @@ export function PantallaMesa() {
         <div className="tablet-rotation-banner animate-fade-in">
           <Sparkles size={18} className="text-emerald" />
           <span>¡Código QR renovado automáticamente para tu mesa!</span>
+        </div>
+      )}
+
+      {errorPantalla && (
+        <div className="tablet-rotation-banner animate-fade-in" role="alert">
+          <Info size={18} />
+          <span>{errorPantalla}</span>
         </div>
       )}
 
