@@ -1,5 +1,6 @@
 import IngredientCard from '../ui/IngredientCard';
 import Badge from '../ui/Badge';
+import SelectorPorcion from './SelectorPorcion';
 
 function obtenerTextoRegla(paso) {
   const min = Number(paso.min_sel) || 0;
@@ -61,6 +62,7 @@ function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) {
             seleccionesDelPaso,
             idIng
           );
+          const porcionElegida = seleccionesDelPaso[idIng] || 'normal';
           const agotado = !ingrediente.disponible;
           const deshabilitado = agotado || (maxAlcanzado && !seleccionado);
 
@@ -86,6 +88,21 @@ function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) {
                   })
                 }
               />
+              {seleccionado && (
+                <SelectorPorcion
+                  nombreIngrediente={ingrediente.nombre}
+                  porcionActual={porcionElegida}
+                  precioExtra={ingrediente.precio_extra}
+                  onCambiar={(nuevaPorcion) =>
+                    despachador({
+                      type: 'CAMBIAR_PORCION',
+                      id_paso: paso.id_paso,
+                      id_ingrediente: idIng,
+                      porcion: nuevaPorcion,
+                    })
+                  }
+                />
+              )}
             </div>
           );
         })}
