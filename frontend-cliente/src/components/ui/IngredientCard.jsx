@@ -7,10 +7,11 @@ import Imagen from './Imagen';
  * Props:
  * - nombre: nombre del ingrediente
  * - imagen: URL de la foto del ingrediente
- * - precioExtra: valor adicional en COP (0 si está incluido)
+ * - precioExtra: valor adicional en COP al elegir porción Extra (0 si está incluido)
  * - calorias: cantidad de calorías (kcal)
  * - seleccionado: booleano que indica si el ingrediente está activo
- * - disabled: booleano que indica si el ingrediente está agotado
+ * - disabled: booleano que indica si la tarjeta está deshabilitada
+ * - agotado: booleano opcional que muestra la insignia "Agotado" (por defecto igual a disabled)
  * - onToggle: función llamada al activar/desactivar el ingrediente
  * - onClick: alias opcional de onToggle
  * - className: clases adicionales de Tailwind CSS
@@ -22,6 +23,7 @@ function IngredientCard({
   calorias,
   seleccionado = false,
   disabled = false,
+  agotado = disabled,
   onToggle,
   onClick,
   className = '',
@@ -73,7 +75,7 @@ function IngredientCard({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <h3 className="text-base font-bold text-cafe truncate">{nombre}</h3>
-          {disabled && (
+          {agotado && (
             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-700">
               Agotado
             </span>
@@ -82,7 +84,9 @@ function IngredientCard({
 
         <div className="mt-1 flex items-center gap-2 text-xs text-gray-600 flex-wrap">
           <span className="font-semibold text-cafe">
-            {precioExtra > 0 ? `+${formatearPrecio(precioExtra)}` : 'Incluido'}
+            {precioExtra > 0
+              ? `Extra +${formatearPrecio(precioExtra)}`
+              : 'Incluido'}
           </span>
           {calorias !== undefined && calorias !== null && (
             <>

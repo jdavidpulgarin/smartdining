@@ -48,6 +48,11 @@ function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) {
           <p className="text-xs text-gray-600 font-medium mt-0.5">
             {obtenerTextoRegla(paso)}
           </p>
+          {maxAlcanzado && (
+            <p className="text-xs text-primary font-medium mt-0.5">
+              Máximo alcanzado: quita uno para cambiarlo
+            </p>
+          )}
         </div>
 
         <Badge variante={esObligatorio ? 'alerta' : 'neutro'}>
@@ -68,17 +73,13 @@ function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) {
 
           return (
             <div key={idIng} className="space-y-1.5">
-              {agotado && (
-                <div className="flex justify-end">
-                  <Badge variante="neutro">Agotado</Badge>
-                </div>
-              )}
               <IngredientCard
                 nombre={ingrediente.nombre}
                 imagen={ingrediente.url_imagen}
                 precioExtra={ingrediente.precio_extra}
                 calorias={ingrediente.calorias}
                 seleccionado={seleccionado}
+                agotado={agotado}
                 disabled={deshabilitado}
                 onToggle={() =>
                   despachador({

@@ -261,19 +261,6 @@ function Constructor() {
               Falta completar: {pendientes.join(', ')}
             </p>
           )}
-
-          <div className="flex items-center justify-between gap-3 pt-2">
-            <Button variante="secundario" onClick={manejarAnterior}>
-              Editar
-            </Button>
-            <Button
-              variante="primario"
-              disabled={pendientes.length > 0}
-              onClick={manejarAgregarAMesa}
-            >
-              Agregar a la mesa
-            </Button>
-          </div>
         </Card>
       ) : (
         <>
