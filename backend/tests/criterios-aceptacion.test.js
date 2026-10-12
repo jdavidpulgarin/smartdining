@@ -25,6 +25,11 @@ const ID_MESA = 5;
  * Levanta el escenario: una mesa, un socket-server que firma y revoca tokens, y
  * el registro de lo que fue pasando. Devuelve helpers para actuar como cada rol.
  */
+// Total con el que responde el doble al releer el pedido. Se usa tambien para
+// calcular el saldo pendiente, de modo que un cobro por este monto liquide la
+// cuenta y uno menor no.
+const TOTAL_DEL_PEDIDO = 34000;
+
 function instalarEscenario() {
   const queryOriginal = pool.query;
   const connectOriginal = pool.connect;
@@ -45,6 +50,7 @@ function instalarEscenario() {
     },
     pedidos: [],
     siguienteIdPedido: 1,
+    pagos: [],
     // Tokens que el socket-server emitió (los da por bien firmados) y los que
     // revocó al recibir /internal/mesa-liberada.
     emitidos: new Set(),
@@ -93,7 +99,7 @@ function instalarEscenario() {
     }
     if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) {
       const p = estado.pedidos.find((x) => x.id_pedido === Number(params[0]));
-      return { rows: p ? [{ ...p, total: 34000 }] : [] };
+      return { rows: p ? [{ ...p, total: TOTAL_DEL_PEDIDO }] : [] };
     }
     if (sql.includes('SELECT estado FROM pedidos WHERE id_pedido')) {
       const p = estado.pedidos.find((x) => x.id_pedido === Number(params[0]));
@@ -114,15 +120,25 @@ function instalarEscenario() {
       return { rows: estado.pedidos.filter((p) => p.id_mesa === Number(params[0])).map((p) => ({ ...p })) };
     }
     if (sql.includes('INSERT INTO transacciones')) {
-      return {
-        rows: [{
-          id_transaccion: 1,
-          id_pedido: params[0],
-          metodo_pago: params[1],
-          monto: params[2],
-          estado_transaccion: params[3],
-        }],
+      const pago = {
+        id_transaccion: estado.pagos.length + 1,
+        id_pedido: Number(params[0]),
+        metodo_pago: params[1],
+        monto: Number(params[2]),
+        estado_transaccion: params[3],
       };
+      estado.pagos.push(pago);
+      return { rows: [{ ...pago }] };
+    }
+    // Saldo del pedido: total menos lo ya cobrado. Asi el doble distingue un
+    // abono parcial de un pago que liquida la cuenta, como hace la base.
+    if (sql.includes('obtener_saldo_pendiente')) {
+      const idPedido = Number(params[0]);
+      const cobrado = estado.pagos
+        .filter((x) => x.id_pedido === idPedido && x.estado_transaccion === 'completada')
+        .reduce((suma, x) => suma + x.monto, 0);
+      const saldo = TOTAL_DEL_PEDIDO - cobrado;
+      return { rows: [{ liquidado: saldo <= 0, saldo_pendiente: saldo.toFixed(2) }] };
     }
     if (sql.includes('FROM detalles_pedido dp')) {
       return { rows: [{ id_detalle: 1, id_plato: 3, cantidad: 1, notas_especiales: 'Ana', plato_nombre: 'Hamburguesa Smart Angus' }] };

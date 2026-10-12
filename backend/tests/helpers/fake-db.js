@@ -30,7 +30,8 @@ function construirTokenQr(id_mesa, sid = crypto.randomBytes(12).toString('base64
  * @param {(sql: string, params: any[]) => {rows: any[]}|undefined} responder
  *        devuelve las filas de cada query; si devuelve undefined, { rows: [] }.
  * @param {{sesionCerrada?: boolean, tokenQrDeMesa?: string,
- *           pedidosAbiertos?: number, mesaYaLiberada?: boolean}} opciones
+ *           pedidosAbiertos?: number, mesaYaLiberada?: boolean,
+ *           saldoTrasPago?: number}} opciones
  *        Por omisión la sesión de mesa del comensal está vigente. Con
  *        sesionCerrada la columna token_qr responde NULL (mesa liberada), y con
  *        tokenQrDeMesa se fija otro token (para simular un QR distinto).
@@ -58,6 +59,14 @@ function instalarFakeDb(responder, opciones = {}) {
     if (sql.includes('count(*)::int AS n FROM pedidos')) {
       return { rows: [{ n: opciones.pedidosAbiertos ?? 0 }] };
     }
+    // Saldo del pedido tras registrar el pago: con 0 (el valor por omisión) el
+    // cobro liquida el pedido, que es el caso corriente. Una prueba de abono
+    // parcial pasa el saldo que queda pendiente.
+    if (sql.includes('obtener_saldo_pendiente')) {
+      const saldo = opciones.saldoTrasPago ?? 0;
+      return { rows: [{ liquidado: saldo <= 0, saldo_pendiente: saldo.toFixed(2) }] };
+    }
+
     if (sql.includes('UPDATE mesas SET estado = $1, token_qr = NULL')) {
       // Se devuelve la fila como la daría RETURNING *, para que sirva tanto a la
       // liberación automática (que solo mira si afectó filas) como a
