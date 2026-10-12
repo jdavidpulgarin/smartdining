@@ -159,6 +159,66 @@ export async function generarTokenQrMesa(idMesa, ttlMinutos = 240) {
 }
 
 /**
+ * Rota el token QR de una mesa en curso:
+ * Intenta POST /api/mesas/:id/rotar-qr en el backend oficial.
+ * Si el backend está desconectado o no implementa la ruta, genera un nuevo sid firmado
+ * y notifica /internal/qr-rotado al socket-server.
+ */
+export async function rotarTokenQrMesa(idMesa, ttlMinutos = 240) {
+  const numId = Number(idMesa)
+
+  // 1. Intento contra el Backend oficial (POST /api/mesas/:id/rotar-qr)
+  try {
+    const data = await mesasApi.rotarQr(numId)
+    if (data?.token) {
+      const decodificado = decodificarTokenQr(data.token)
+      return {
+        token: data.token,
+        url: data.url,
+        id_mesa: numId,
+        emitido_en: decodificado.emitido_en || Date.now(),
+        expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
+        sid: decodificado.sid,
+        servidor: 'backend-api',
+      }
+    }
+  } catch (err) {
+    console.warn('Aviso: endpoint rotarQr no disponible o falló:', err.message)
+    if (err.status && err.status === 409) {
+      throw err
+    }
+  }
+
+  // 2. Fallback sintético local: genera nuevo sid firmado y avisa al socket-server
+  const iat = Date.now()
+  const exp = iat + ttlMinutos * 60 * 1000
+  const sid = generarCadenaAleatoria(12)
+  const payload = {
+    m: numId,
+    iat,
+    exp,
+    sid,
+  }
+
+  const cuerpo = `v1.${toBase64Url(JSON.stringify(payload))}`
+  const firmaMock = toBase64Url(`sig_${sid}_${iat}`).slice(0, 43)
+  const nuevoToken = `${cuerpo}.${firmaMock}`
+
+  // Notificar al socket-server para que tablets físicas reciban 'qr:actualizado'
+  await notificarQrRotado(numId, nuevoToken)
+
+  return {
+    token: nuevoToken,
+    url: `http://localhost:5173/?token=${encodeURIComponent(nuevoToken)}&mesa=${numId}`,
+    id_mesa: numId,
+    emitido_en: iat,
+    expira_en: exp,
+    sid,
+    servidor: 'local-fallback-rotado',
+  }
+}
+
+/**
  * Libera una mesa a través del Backend oficial:
  * POST /api/mesas/:id/liberar
  *

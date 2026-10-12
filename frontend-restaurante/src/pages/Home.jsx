@@ -5,30 +5,46 @@ import {
   OrderPanel,
   MenuSection,
 } from '../components'
-import { stats, tables, orders, menu } from '../constants/mockData'
+import { stats, menu } from '../constants/mockData'
+import { useTables } from '../hooks'
 
 export function Home() {
-  const [selectedOrder, setSelectedOrder] = useState(orders[0])
+  const { tables, pedidosActivos, marcarEntregado } = useTables()
+  const [selectedOrder, setSelectedOrder] = useState(null)
+
 
   const handleSelectTable = (table) => {
-    const tableId = table.id || table.number
+    const tableId = Number(table.id || table.number)
     const tableName = table.name || `Mesa ${tableId}`
-    const foundOrder = orders.find(
-      (o) =>
-        o.table.toLowerCase() === tableName.toLowerCase() ||
-        o.tableId === tableId
-    )
 
-    if (foundOrder) {
-      setSelectedOrder(foundOrder)
-    } else {
-      // Si la mesa no tiene comanda activa en mockData, mostramos una comanda sintética o null
+    const liveOrder = pedidosActivos?.find((p) => Number(p.id_mesa) === tableId)
+
+    if (liveOrder) {
       setSelectedOrder({
-        id: `#10${tableId || 99}`,
+        id: liveOrder.codigo_pedido || `#${liveOrder.id_pedido}`,
+        id_pedido: liveOrder.id_pedido,
         tableId: tableId,
         table: tableName,
-        client: 'Mesa Ocupada',
-        time: 'Reciente',
+        client: liveOrder.detalles?.[0]?.comensal || 'Comensales en mesa',
+        time: liveOrder.creado_en
+          ? new Date(liveOrder.creado_en).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : 'En vivo',
+        total: `$${Number(liveOrder.total || 0).toLocaleString('es-CO')}`,
+        state: liveOrder.estado || 'recibido',
+        items: (liveOrder.detalles || []).map((d) => ({
+          name: d.plato_nombre || d.nombre || 'Plato',
+          qty: d.cantidad || 1,
+          subtotal: `$${Number(d.subtotal || 0).toLocaleString('es-CO')}`,
+          notes: d.notas_especiales || null,
+        })),
+      })
+    } else {
+      setSelectedOrder({
+        id: `#MESA-${tableId}`,
+        tableId: tableId,
+        table: tableName,
+        client: table.status === 'Ocupada' ? 'Grupo en estadía' : 'Sin comanda',
+        time: 'En vivo',
         total: '$0.00',
         state: table.status || 'Disponible',
         items: [],
@@ -42,7 +58,8 @@ export function Home() {
 
       <section className="content-grid">
         <TablesPanel tables={tables} onSelectTable={handleSelectTable} />
-        <OrderPanel order={selectedOrder} />
+
+        <OrderPanel order={selectedOrder} onDeliver={marcarEntregado} />
       </section>
 
       <MenuSection menu={menu} />

@@ -136,6 +136,56 @@ async function abrir(req, res, next) {
 }
 
 /**
+ * POST /api/mesas/:id/rotar-qr — el mesero cambia el QR de una mesa abierta
+ * (p. ej. porque alguien fotografió la tablet).
+ *
+ * Reemplaza a la llamada que el panel hacía directo a /internal/qr-rotado con
+ * la clave interna en el navegador: ahora el panel solo usa su JWT y es el
+ * backend quien, después del commit, avisa al socket-server.
+ *
+ * El token viaja únicamente dentro de `url`, que es lo que el panel necesita
+ * para dibujar el QR; no se repite en otros campos para no multiplicar los
+ * sitios donde puede quedar copiado (logs, caché, herramientas de depuración).
+ */
+async function rotarQr(req, res, next) {
+  const idMesa = Number(req.params.id);
+  if (!Number.isInteger(idMesa) || idMesa <= 0) {
+    return res.status(400).json({ error: 'id de mesa inválido' });
+  }
+
+  try {
+    const jwtStaff = (req.headers.authorization || '').replace(/^Bearer /, '');
+    const r = await mesasService.rotarQr(idMesa, { jwtStaff });
+
+    if (r.noExiste) return res.status(404).json({ error: 'Mesa no encontrada' });
+    if (r.noOcupada) {
+      return res.status(409).json({ error: 'Solo se puede rotar el QR de una mesa abierta (ocupada)', estado: r.estado });
+    }
+    if (r.socketCaido) {
+      return res.status(503).json({
+        error: 'No se pudo rotar el QR: el servicio de tiempo real no responde',
+        motivo: r.motivo,
+      });
+    }
+    if (r.rechazado) {
+      return res.status(r.status === 403 ? 403 : 502).json({ error: r.mensaje });
+    }
+
+    // Después del commit y aislado: si el aviso falla, el token nuevo ya es el
+    // vigente y el mesero puede volver a mostrar el QR desde el panel.
+    socketNotifier.notificarQrRotado(idMesa, r.token);
+
+    return res.status(201).json({
+      url: urlDelComensal(r.token),
+      expira_en: r.expira_en,
+      mesa: { id_mesa: r.mesa.id_mesa, numero: r.mesa.numero, estado: r.mesa.estado },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
  * POST /api/mesas/:id/liberar — el mesero cierra la mesa.
  *
  * Deja la mesa 'disponible' y token_qr en NULL, con lo que el QR anterior deja
@@ -285,6 +335,7 @@ module.exports = {
   listar,
   obtener,
   abrir,
+  rotarQr,
   liberar,
   crearSesionPorToken,
   crear,

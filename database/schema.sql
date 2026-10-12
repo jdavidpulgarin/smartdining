@@ -171,6 +171,8 @@ CREATE TABLE transacciones (
     estado_transaccion VARCHAR(20) NOT NULL DEFAULT 'completada'
         CHECK (estado_transaccion IN ('pendiente', 'completada', 'fallida', 'reembolsada')),
     referencia_externa VARCHAR(100),
+    comensal VARCHAR(40)
+        CHECK (comensal IS NULL OR length(btrim(comensal)) > 0),
     creado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_transacciones_pedido
@@ -322,6 +324,7 @@ CREATE INDEX idx_detalles_pedido_plato ON detalles_pedido(id_plato);
 CREATE INDEX idx_detalles_pedido_estado ON detalles_pedido(estado_item);
 CREATE INDEX idx_detalles_estado_pedido_prioritario ON detalles_pedido(estado_item, id_pedido, id_plato) WHERE estado_item IN ('pendiente', 'cocinando');
 CREATE INDEX idx_transacciones_pedido ON transacciones(id_pedido);
+CREATE INDEX idx_transacciones_comensal ON transacciones(comensal);
 CREATE INDEX idx_transacciones_estado_fecha ON transacciones(estado_transaccion, creado_en DESC, monto);
 CREATE INDEX idx_historial_pedido ON historial_estados(id_pedido);
 CREATE INDEX idx_historial_fecha_usuario ON historial_estados(fecha_cambio DESC, id_usuario);

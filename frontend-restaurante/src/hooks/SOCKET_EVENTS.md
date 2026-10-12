@@ -36,9 +36,32 @@ Se emite cuando se confirma un pago.
 
 ```javascript
 useSocketListener('payment:confirmed', (data) => {
-  // data = { id_pedido, monto, metodo_pago }
+  // data = { id_pedido, id_mesa, monto, referencia_externa }
 })
 ```
+
+---
+
+### `mesa:llamar_mesero`
+Se emite cuando un comensal solicita asistencia de personal en su mesa.
+
+```javascript
+useSocketListener('mesa:llamar_mesero', (data) => {
+  // data = { id_mesa, motivo }
+})
+```
+
+---
+
+### `cuenta:solicitada`
+Se emite cuando la mesa solicita la liquidación o factura de su cuenta.
+
+```javascript
+useSocketListener('cuenta:solicitada', (data) => {
+  // data = { id_mesa }
+})
+```
+
 
 ---
 

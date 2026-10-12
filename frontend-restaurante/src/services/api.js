@@ -149,4 +149,51 @@ export const mesasApi = {
       body: JSON.stringify({ estado }),
     })
   },
+
+  /**
+   * Rota el QR de una mesa en curso: POST /api/mesas/:id/rotar-qr
+   */
+  async rotarQr(id) {
+    return apiFetch(`/mesas/${id}/rotar-qr`, {
+      method: 'POST',
+    })
+  },
 }
+
+// Submódulo de Pedidos
+export const pedidosApi = {
+  /**
+   * Obtiene la lista de pedidos activos para sala/cocina: GET /api/pedidos/activos
+   */
+  async listarActivos() {
+    return apiFetch('/pedidos/activos')
+  },
+
+  /**
+   * Obtiene el detalle completo de un pedido con sus platos e ingredientes: GET /api/pedidos/:id
+   */
+  async obtener(id) {
+    return apiFetch(`/pedidos/${id}`)
+  },
+
+  /**
+   * Actualiza el estado de un pedido (ej. listo -> entregado): PATCH /api/pedidos/:id/estado
+   */
+  async actualizarEstado(id, estado, observaciones = null) {
+    return apiFetch(`/pedidos/${id}/estado`, {
+      method: 'PATCH',
+      body: JSON.stringify({ estado, observaciones }),
+    })
+  },
+
+  /**
+   * Cancela un pedido abierto: POST /api/pedidos/:id/cancelar
+   */
+  async cancelar(id, razon = null) {
+    return apiFetch(`/pedidos/${id}/cancelar`, {
+      method: 'POST',
+      body: JSON.stringify({ razon }),
+    })
+  },
+}
+
