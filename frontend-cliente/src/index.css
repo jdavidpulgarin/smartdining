@@ -1,1 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --color-primary: #8B1E1E;
+  --color-primary-hover: #6E1717;
+  --color-cafe: #3B2414;
+  --color-crema: #F7F1E8;
+  --color-verde: #2F6B3A;
+  --font-titulo: 'Oswald', sans-serif;
+  --font-cuerpo: 'Inter', sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-crema text-cafe font-cuerpo;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-titulo;
+  }
+}

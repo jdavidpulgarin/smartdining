@@ -9,17 +9,17 @@ function LineaCarrito({ linea, onActualizarCantidad, onEliminar }) {
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
-            <h3 className="font-bold text-gray-900 text-base leading-tight">
+            <h3 className="font-bold text-cafe text-base leading-tight">
               {linea.nombre}
             </h3>
             {linea.comensal && (
-              <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+              <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
                 Para {linea.comensal}
               </span>
             )}
           </div>
           {linea.notas && (
-            <p className="text-xs text-gray-500 italic leading-snug">
+            <p className="text-xs text-gray-600 italic leading-snug">
               {linea.notas}
             </p>
           )}
@@ -30,7 +30,7 @@ function LineaCarrito({ linea, onActualizarCantidad, onEliminar }) {
           type="button"
           onClick={() => onEliminar(linea.id_linea)}
           aria-label={`Eliminar ${linea.nombre} del carrito`}
-          className="w-11 h-11 flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors shrink-0 -mr-2 -mt-2"
+          className="w-12 h-12 min-h-12 flex items-center justify-center text-gray-600 hover:text-primary hover:bg-primary/10 active:bg-primary/20 rounded-lg transition-colors shrink-0 -mr-2 -mt-2 cursor-pointer"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -61,13 +61,13 @@ function LineaCarrito({ linea, onActualizarCantidad, onEliminar }) {
             }
             disabled={linea.cantidad <= 1}
             aria-label={`Disminuir cantidad de ${linea.nombre}`}
-            className="w-11 h-11 flex items-center justify-center rounded-lg border border-gray-200 text-gray-700 text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="w-12 h-12 min-h-12 flex items-center justify-center rounded-lg border border-gray-200 text-cafe text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             −
           </button>
           <span
             aria-live="polite"
-            className="min-w-8 text-center font-bold text-gray-900 text-base"
+            className="min-w-8 text-center font-bold text-cafe text-base"
           >
             {linea.cantidad}
           </span>
@@ -78,7 +78,7 @@ function LineaCarrito({ linea, onActualizarCantidad, onEliminar }) {
             }
             disabled={linea.cantidad >= 20}
             aria-label={`Aumentar cantidad de ${linea.nombre}`}
-            className="w-11 h-11 flex items-center justify-center rounded-lg border border-gray-200 text-gray-700 text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="w-12 h-12 min-h-12 flex items-center justify-center rounded-lg border border-gray-200 text-cafe text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             +
           </button>
@@ -86,11 +86,11 @@ function LineaCarrito({ linea, onActualizarCantidad, onEliminar }) {
 
         {/* Precio y subtotal */}
         <div className="text-right">
-          <div className="font-extrabold text-blue-600 text-base">
+          <div className="font-extrabold text-primary text-base">
             {formatearPrecio(subtotal)}
           </div>
           {linea.cantidad > 1 && (
-            <div className="text-xs text-gray-400">
+            <div className="text-xs text-gray-600">
               {formatearPrecio(linea.precioUnitario)} c/u
             </div>
           )}

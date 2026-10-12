@@ -20,17 +20,17 @@ function SelectorPersonalizacion({
 
   return (
     <fieldset className="space-y-2">
-      <legend className="w-full text-sm font-semibold text-gray-900 mb-1">
+      <legend className="w-full text-sm font-semibold text-cafe mb-1">
         <span className="flex items-center justify-between gap-2">
           <span>{grupo.nombre}</span>
-          <span className="flex items-center gap-1.5 text-xs font-normal">
+          <span className="flex items-center gap-1.5 text-xs font-normal font-cuerpo">
             {!esUnica && grupo.max && (
-              <span className="text-gray-500">
+              <span className="text-gray-600">
                 Elige hasta {grupo.max}
               </span>
             )}
             {grupo.obligatorio ? (
-              <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-bold uppercase tracking-wider border border-blue-200">
+              <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wider border border-primary/30">
                 Obligatorio
               </span>
             ) : (
@@ -51,9 +51,9 @@ function SelectorPersonalizacion({
           return (
             <label
               key={opcion.id}
-              className={`flex items-center justify-between w-full min-h-11 px-3 py-2 rounded-lg border transition-colors ${
+              className={`flex items-center justify-between w-full min-h-12 px-3 py-2 rounded-lg border transition-colors ${
                 estaSeleccionada
-                  ? 'border-blue-500 bg-blue-50/40'
+                  ? 'border-primary bg-primary/10'
                   : 'border-gray-200 hover:border-gray-300 bg-white'
               } ${
                 opcionDeshabilitada
@@ -79,10 +79,10 @@ function SelectorPersonalizacion({
                       }
                     }
                   }}
-                  className="w-4 h-4 accent-blue-600 shrink-0 cursor-pointer disabled:cursor-not-allowed"
+                  className="w-4 h-4 accent-primary shrink-0 cursor-pointer disabled:cursor-not-allowed"
                 />
                 <span className="block min-w-0 flex-1">
-                  <span className="text-sm font-medium text-gray-900 block">
+                  <span className="text-sm font-medium text-cafe block">
                     {opcion.nombre}
                   </span>
                   {opcion.alergenos && opcion.alergenos.length > 0 && (
