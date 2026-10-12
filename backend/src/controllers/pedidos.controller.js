@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const pedidosService = require('../services/pedidos.service');
+const mesasService = require('../services/mesas.service');
 const { esComensal } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
 
@@ -154,4 +155,33 @@ async function listarPorMesa(req, res, next) {
   }
 }
 
-module.exports = { crear, listarActivos, obtener, actualizarEstado, cancelar, listarPorMesa };
+/**
+ * GET /api/pedidos/mesa/cuenta — la cuenta de SU mesa, para el comensal.
+ *
+ * La mesa sale del JWT y de ningún otro sitio, igual que en listarPorMesa: si
+ * se aceptara un id por la URL o por el body, un comensal podría leer la cuenta
+ * (y los alias) de otra mesa. Por eso la ruta no tiene parámetro.
+ *
+ * Devuelve lo mismo que la cuenta del personal, con los montos en pesos.
+ */
+async function cuentaDeMiMesa(req, res, next) {
+  try {
+    const cuenta = await mesasService.cuentaPorComensal(req.user.id_mesa);
+    // La sesión vive mientras la mesa tenga su token_qr, así que no existir
+    // aquí es raro; igual se contesta 404 en vez de dejar pasar un null.
+    if (!cuenta) return res.status(404).json({ error: 'Mesa no encontrada' });
+    return res.json(cuenta);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = {
+  crear,
+  listarActivos,
+  obtener,
+  actualizarEstado,
+  cancelar,
+  listarPorMesa,
+  cuentaDeMiMesa,
+};

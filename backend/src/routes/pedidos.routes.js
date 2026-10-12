@@ -9,6 +9,8 @@ router.get('/activos', requireAuth, requireRole('admin', 'cajero', 'mesero'), ct
 
 // Debe declararse antes de /:id para que 'mesa' no se lea como un id.
 router.get('/mesa', requireAuth, requireRole('comensal'), ctrl.listarPorMesa);
+// Sin parámetro a propósito: la mesa sale del JWT, nunca de la URL.
+router.get('/mesa/cuenta', requireAuth, requireRole('comensal'), ctrl.cuentaDeMiMesa);
 
 router.get('/:id', requireAuth, ctrl.obtener);
 router.patch('/:id/estado', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.actualizarEstado);

@@ -22,6 +22,11 @@ router.post('/:id/rotar-qr', requireAuth, requireRole('mesero', 'admin'), ctrl.r
 // la capture la ruta pública de la mesa.
 router.get('/:id/cuenta/interno', requireInternalKey, ctrl.cuentaInterna);
 
+// La cuenta del personal. Va antes de GET /:id (si no, 'cuenta' se leería como
+// parte del id) y después de /cuenta/interno, que es ruta distinta por el
+// segmento extra y no se solapa con esta.
+router.get('/:id/cuenta', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.cuenta);
+
 router.get('/:id', ctrl.obtener);
 router.post('/', requireAuth, requireRole('admin'), ctrl.crear);
 router.patch('/:id/estado', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.actualizarEstado);

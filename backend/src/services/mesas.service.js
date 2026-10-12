@@ -321,6 +321,32 @@ async function cuentaInterna(idMesa) {
   };
 }
 
+/**
+ * Cuenta de la mesa por comensal, tal como la devuelve
+ * obtener_cuenta_mesa_json() de Jarrison (scripts 15 y 16).
+ *
+ * Los montos van en PESOS con decimales, que es la unidad de la función y de la
+ * base: esta cuenta la leen personas (la lee el cajero en el panel y el
+ * comensal en su teléfono), no la pasarela. La versión en centavos enteros es
+ * cuentaInterna(), que es la que consume el socket-server; aquí no se convierte
+ * nada para no tener dos verdades sobre el mismo número.
+ *
+ * Se devuelve el JSON de la función sin recomponerlo: sus campos son el
+ * contrato (id_mesa, numero, estado_mesa, ubicacion, total_mesa, pagado_mesa,
+ * saldo_mesa, items_totales, pedidos[], comensales[]), y copiarlos a mano aquí
+ * solo añadiría un sitio más que actualizar cuando Jarrison los cambie.
+ *
+ * @returns {Promise<null|object>} null si la mesa no existe (404). La función
+ *          SQL lanzaría un RAISE, que el manejador central daría como 409.
+ */
+async function cuentaPorComensal(idMesa) {
+  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
+  if (existe.rows.length === 0) return null;
+
+  const result = await pool.query('SELECT obtener_cuenta_mesa_json($1) AS cuenta', [idMesa]);
+  return result.rows[0].cuenta;
+}
+
 /** token_qr vigente de la mesa, o null. Lo usa el middleware de sesión. */
 async function tokenQrDeMesa(idMesa) {
   const result = await pool.query('SELECT token_qr FROM mesas WHERE id_mesa = $1', [idMesa]);
@@ -344,6 +370,7 @@ module.exports = {
   liberarSesion,
   liberarSiNoQuedanPedidosAbiertos,
   cuentaInterna,
+  cuentaPorComensal,
   tokenQrDeMesa,
   MONEDA,
   listar,

@@ -159,6 +159,31 @@ async function cuentaInterna(req, res, next) {
 }
 
 /**
+ * GET /api/mesas/:id/cuenta — la cuenta de la mesa para el personal.
+ *
+ * Es la misma cuenta que ve el comensal (GET /api/pedidos/mesa/cuenta), con los
+ * montos en PESOS: la leen personas. La variante en centavos es
+ * /cuenta/interno, que consume el socket-server.
+ *
+ * El desglose por comensal lo calcula obtener_cuenta_mesa_json: aquí no se suma
+ * ni se reparte nada.
+ */
+async function cuenta(req, res, next) {
+  const idMesa = Number(req.params.id);
+  if (!Number.isInteger(idMesa) || idMesa <= 0) {
+    return res.status(400).json({ error: 'id de mesa inválido' });
+  }
+
+  try {
+    const cuentaMesa = await mesasService.cuentaPorComensal(idMesa);
+    if (!cuentaMesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+    return res.json(cuentaMesa);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
  * POST /api/mesas/:id/rotar-qr — el mesero cambia el QR de una mesa abierta
  * (p. ej. porque alguien fotografió la tablet).
  *
@@ -360,6 +385,7 @@ module.exports = {
   abrir,
   rotarQr,
   cuentaInterna,
+  cuenta,
   liberar,
   crearSesionPorToken,
   crear,
