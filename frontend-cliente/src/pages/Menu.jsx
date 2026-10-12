@@ -1,15 +1,28 @@
 import { useState, useEffect, useRef } from 'react';
-import { obtenerCategorias, obtenerPlatos } from '../services/menuService';
+import { useNavigate } from 'react-router-dom';
+import {
+  obtenerCategorias,
+  obtenerPlatos,
+  obtenerPlatosArmables,
+} from '../services/menuService';
 import CategoriaFiltro from '../components/menu/CategoriaFiltro';
 import PlatoCard from '../components/menu/PlatoCard';
 import PlatoDetalleModal from '../components/menu/PlatoDetalleModal';
+import Card from '../components/ui/Card';
+import Imagen from '../components/ui/Imagen';
+import Button from '../components/ui/Button';
 import { useCarrito } from '../context/CarritoContext';
 import { obtenerApodo } from '../utils/apodo';
 import { generarIdLinea } from '../utils/id';
+import { formatearPrecio } from '../utils/formato';
 
 function Menu() {
+  const navigate = useNavigate();
   const [categorias, setCategorias] = useState([]);
   const [platos, setPlatos] = useState([]);
+  const [platosArmables, setPlatosArmables] = useState([]);
+  const [cargandoArmables, setCargandoArmables] = useState(true);
+  const [errorArmables, setErrorArmables] = useState(false);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState(null);
   const [platoSeleccionado, setPlatoSeleccionado] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -43,6 +56,32 @@ function Menu() {
     }
 
     cargarDatos();
+  }, []);
+
+  useEffect(() => {
+    let activo = true;
+    async function cargarArmables() {
+      try {
+        const armables = await obtenerPlatosArmables();
+        if (activo) {
+          setPlatosArmables(Array.isArray(armables) ? armables : []);
+        }
+      } catch (error) {
+        console.error('Error al cargar platos armables:', error);
+        if (activo) {
+          setErrorArmables(true);
+        }
+      } finally {
+        if (activo) {
+          setCargandoArmables(false);
+        }
+      }
+    }
+
+    cargarArmables();
+    return () => {
+      activo = false;
+    };
   }, []);
 
   const platosFiltrados = categoriaSeleccionada
@@ -86,6 +125,88 @@ function Menu() {
 
   return (
     <div className="space-y-4 pb-6">
+      {/* Sección Arma tu plato */}
+      {!errorArmables && (cargandoArmables || platosArmables.length > 0) && (
+        <section aria-labelledby="titulo-arma-tu-plato" className="space-y-2.5">
+          <div className="flex items-baseline justify-between gap-2">
+            <h2
+              id="titulo-arma-tu-plato"
+              className="font-titulo text-xl font-bold text-cafe tracking-tight"
+            >
+              Arma tu plato
+            </h2>
+            <span className="text-xs text-gray-600">Paso a paso a tu gusto</span>
+          </div>
+
+          {cargandoArmables ? (
+            <div
+              className="flex gap-3 overflow-x-auto pb-2"
+              aria-label="Cargando platos armables"
+            >
+              {[1, 2, 3].map((item) => (
+                <Card
+                  key={item}
+                  className="w-64 shrink-0 space-y-3 animate-pulse"
+                >
+                  <div className="w-full aspect-4/3 rounded-xl bg-gray-200" />
+                  <div className="h-4 bg-gray-200 rounded w-3/4" />
+                  <div className="h-3 bg-gray-200 rounded w-full" />
+                  <div className="h-12 bg-gray-200 rounded-xl w-full" />
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
+              {platosArmables.map((plato) => (
+                <Card
+                  key={plato.id_plato}
+                  className="w-64 shrink-0 snap-start flex flex-col justify-between gap-3"
+                >
+                  <div className="space-y-2">
+                    <Imagen
+                      src={plato.url_imagen}
+                      alt={plato.nombre}
+                      aspecto="4/3"
+                      className="w-full rounded-xl"
+                    />
+                    <div>
+                      <h3 className="font-titulo text-base font-bold text-cafe leading-snug">
+                        {plato.nombre}
+                      </h3>
+                      {plato.descripcion && (
+                        <p className="text-xs text-gray-600 mt-1 line-clamp-2 leading-relaxed">
+                          {plato.descripcion}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5 pt-1 border-t border-gray-100">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-primary text-sm">
+                        Desde {formatearPrecio(plato.precio)}
+                      </span>
+                      {plato.calorias != null && (
+                        <span className="text-gray-600 font-medium">
+                          ≈ {plato.calorias} kcal
+                        </span>
+                      )}
+                    </div>
+                    <Button
+                      variante="primario"
+                      className="w-full"
+                      onClick={() => navigate(`/armar/${plato.id_plato}`)}
+                    >
+                      Armar mi plato
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Filtro horizontal de categorías */}
       <CategoriaFiltro
         categorias={categorias}
