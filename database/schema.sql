@@ -269,11 +269,16 @@ CREATE TABLE kds_metricas (
 
 CREATE TABLE intentos_pago_fallidos (
     id_intento SERIAL PRIMARY KEY,
-    id_pedido INTEGER NOT NULL,
+    id_pedido INTEGER,
     id_usuario INTEGER,
+    id_mesa INTEGER,
     metodo_pago VARCHAR(20),
     monto DECIMAL(10,2) CHECK (monto > 0),
     razon_rechazo TEXT NOT NULL,
+    referencia_externa VARCHAR(100),
+    id_transaccion_pasarela VARCHAR(100),
+    pasarela VARCHAR(20),
+    moneda VARCHAR(3),
     ip_origen VARCHAR(45) DEFAULT '127.0.0.1',
     fecha_intento TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_intento_pedido
@@ -283,6 +288,10 @@ CREATE TABLE intentos_pago_fallidos (
     CONSTRAINT fk_intento_usuario
         FOREIGN KEY (id_usuario)
         REFERENCES usuarios(id_usuario)
+        ON DELETE SET NULL,
+    CONSTRAINT fk_intento_mesa
+        FOREIGN KEY (id_mesa)
+        REFERENCES mesas(id_mesa)
         ON DELETE SET NULL
 );
 
@@ -326,6 +335,7 @@ CREATE INDEX idx_detalles_estado_pedido_prioritario ON detalles_pedido(estado_it
 CREATE INDEX idx_transacciones_pedido ON transacciones(id_pedido);
 CREATE INDEX idx_transacciones_comensal ON transacciones(comensal);
 CREATE INDEX idx_transacciones_estado_fecha ON transacciones(estado_transaccion, creado_en DESC, monto);
+CREATE UNIQUE INDEX idx_transacciones_referencia_externa ON transacciones(referencia_externa) WHERE referencia_externa IS NOT NULL;
 CREATE INDEX idx_historial_pedido ON historial_estados(id_pedido);
 CREATE INDEX idx_historial_fecha_usuario ON historial_estados(fecha_cambio DESC, id_usuario);
 CREATE INDEX idx_push_pedido ON suscripciones_push(id_pedido);
@@ -337,6 +347,8 @@ CREATE INDEX idx_kds_metricas_pedido ON kds_metricas(id_pedido);
 CREATE INDEX idx_kds_metricas_fecha ON kds_metricas(fecha_metrica DESC);
 CREATE INDEX idx_intentos_pago_pedido ON intentos_pago_fallidos(id_pedido);
 CREATE INDEX idx_intentos_pago_fecha ON intentos_pago_fallidos(fecha_intento DESC);
+CREATE INDEX idx_intentos_pago_referencia ON intentos_pago_fallidos(referencia_externa) WHERE referencia_externa IS NOT NULL;
+CREATE INDEX idx_intentos_pago_mesa ON intentos_pago_fallidos(id_mesa) WHERE id_mesa IS NOT NULL;
 CREATE INDEX idx_token_hist_mesa ON token_qr_historico(id_mesa);
 CREATE INDEX idx_token_hist_antiguo ON token_qr_historico(token_antiguo);
 CREATE INDEX idx_kds_alertas_pedido ON kds_alertas(id_pedido);
