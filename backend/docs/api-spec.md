@@ -770,13 +770,29 @@ Cobrar desde otro estado responde 409 con el mensaje del trigger (ver *Regla de 
 `fallida` o `reembolsada` la transacción se registra igual (201) pero el pedido se queda
 en `entregado` y la mesa no se libera, así que se puede reintentar el cobro.
 
+**Se admiten abonos parciales.** Un cobro `completada` por menos del saldo se registra
+(201) y **no** cambia el pedido ni la mesa: el pedido pasa a `pagado` únicamente cuando
+el saldo llega a **0** y está en `entregado`. Tras insertar la transacción, el backend
+le pregunta el saldo a la base (`obtener_saldo_pendiente`) dentro de la misma
+transacción SQL, así que la cuenta la cierra la base y no una suma en JavaScript.
+
+Hace falta porque `tr_validar_transaccion_financiera` solo rechaza que se pague de
+**más**, nunca de menos: sin esta comprobación, abonar $1.000 de una cuenta de $56.000
+dejaría el pedido como cobrado, liberaría la mesa, invalidaría el QR del grupo y el resto
+no se volvería a cobrar.
+
+Mientras quede saldo tampoco se avisa al socket-server (`order:status` y
+`mesa:liberada` salen solo cuando el pedido se liquida de verdad). Para ver cuánto falta:
+`GET /transacciones/pedido/:id_pedido`, o la cuenta de la mesa en el canal interno.
+
 409 también si el monto excede el saldo del pedido (`tr_validar_transaccion_financiera`,
 que además deja constancia en `intentos_pago_fallidos`).
 
-Liberar la mesa y rotar su `token_qr` lo hace el trigger `tr_regenerar_token_qr` cuando
-el pedido llega a `pagado` o `cancelado` y la mesa no tiene otros pedidos abiertos: el
-backend **no** toca la tabla `mesas` al cobrar. El QR impreso queda invalidado y el token
-anterior se archiva en `token_qr_historico`.
+Liberar la mesa lo hace el backend en la misma transacción del cobro, y solo cuando el
+pedido quedó liquidado y a la mesa no le quedan otros pedidos abiertos (ver *Liberación
+automática*, en la sección de Mesas). Con un abono parcial la mesa sigue `ocupada` y su
+QR vale: el grupo no ha terminado. El trigger `tr_regenerar_token_qr` que hacía esto
+antes fue retirado por Jarrison.
 
 ---
 

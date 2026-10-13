@@ -9,11 +9,17 @@ const mesasService = require('./mesas.service');
 const ESTADO_COBRADO = 'completada';
 
 /**
- * Registra el pago de un pedido y, si el cobro fue efectivo, lo marca 'pagado'.
+ * Registra el pago de un pedido y, si con él se liquidó la cuenta, lo marca
+ * 'pagado'.
+ *
+ * Admite **abonos parciales**: se registran y el pedido sigue abierto hasta que
+ * el saldo llega a cero. Quién decide eso es la base (obtener_saldo_pendiente),
+ * no este archivo.
  *
  * La base es la fuente de verdad y aquí no se replica su lógica:
  * - Que el monto no exceda el total del pedido lo valida el trigger
- *   tr_validar_transaccion_financiera (409 con su mensaje).
+ *   tr_validar_transaccion_financiera (409 con su mensaje). Ojo: ese trigger
+ *   solo rechaza el exceso, no el pago de menos.
  * - Que el pedido pueda pasar a 'pagado' lo valida tr_validar_transicion_estado
  *   contra transiciones_validas (solo es legal desde 'entregado').
  * - Liberar la mesa y rotar su token_qr lo hace el trigger tr_regenerar_token_qr
@@ -48,10 +54,35 @@ async function registrarPago({
       [id_pedido, metodo_pago, monto, estado, referencia_externa || null]
     );
 
-    // Solo un cobro efectivo liquida el pedido. Una transacción 'pendiente' o
-    // 'fallida' queda registrada, pero el pedido NO pasa a 'pagado': si pasara,
-    // un pago rechazado liberaría la mesa y dejaría la cuenta como cobrada.
+    // Un cobro efectivo liquida el pedido SOLO si no queda saldo.
+    //
+    // No basta con que la transacción sea 'completada': el trigger
+    // tr_validar_transaccion_financiera únicamente rechaza que se pague de MÁS,
+    // así que un abono parcial entra sin problema. Si eso marcara el pedido
+    // 'pagado', abonar 1.000 de una cuenta de 56.000 la dejaría como cobrada,
+    // liberaría la mesa, invalidaría el QR del grupo y el resto no se volvería
+    // a cobrar nunca.
+    //
+    // El saldo lo calcula la base dentro de esta misma transacción, así que la
+    // consulta ya ve el INSERT de arriba. Se compara contra cero en SQL y no en
+    // JavaScript: obtener_saldo_pendiente devuelve DECIMAL exacto y pasarlo por
+    // un Number sería meter coma flotante en una cuenta.
+    //
+    // Una transacción 'pendiente', 'fallida' o 'reembolsada' no liquida nada,
+    // igual que antes: un pago rechazado no puede cerrar la cuenta.
+    let pedidoLiquidado = false;
     if (estado === ESTADO_COBRADO) {
+      const saldo = await client.query(
+        'SELECT obtener_saldo_pendiente($1) <= 0 AS liquidado',
+        [id_pedido]
+      );
+      pedidoLiquidado = saldo.rows[0].liquidado === true;
+    }
+
+    if (pedidoLiquidado) {
+      // Que el pedido pueda pasar a 'pagado' lo decide el trigger
+      // tr_validar_transicion_estado: solo es legal desde 'entregado'. Cobrar
+      // desde otro estado sigue respondiendo 409 con su mensaje.
       await client.query(`UPDATE pedidos SET estado = 'pagado' WHERE id_pedido = $1`, [id_pedido]);
       await client.query(
         `INSERT INTO historial_estados
@@ -63,17 +94,19 @@ async function registrarPago({
 
     // El pedido quedó cerrado: si la mesa no tiene otros pedidos abiertos, se
     // libera en esta misma transacción (estado 'disponible' y token_qr en NULL).
+    // Con saldo pendiente la mesa sigue ocupada: el grupo no ha terminado.
     let mesaLiberada = false;
-    if (estado === ESTADO_COBRADO) {
+    if (pedidoLiquidado) {
       mesaLiberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, pedido.id_mesa);
     }
 
     await client.query('COMMIT');
     // Se devuelve qué pasó, para que el controller avise al socket-server
-    // después del commit sin volver a consultar.
+    // después del commit sin volver a consultar. Un abono parcial no cambió
+    // nada que el tiempo real deba anunciar.
     return {
       transaccion: transaccionResult.rows[0],
-      pedidoLiquidado: estado === ESTADO_COBRADO,
+      pedidoLiquidado,
       mesaLiberada,
       id_mesa: pedido.id_mesa,
     };
