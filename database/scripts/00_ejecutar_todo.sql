@@ -70,12 +70,16 @@
 \echo '===> [20/21] Ejecutando 20_fix_h02_sesion_mesa_cuenta.sql...'
 \i 20_fix_h02_sesion_mesa_cuenta.sql
 
-\echo '===> [21/21] Ejecutando 21_fix_h06_limites_pedido.sql...'
+\echo '===> [21/22] Ejecutando 21_fix_h06_limites_pedido.sql...'
 \i 21_fix_h06_limites_pedido.sql
+
+\echo '===> [22/22] Ejecutando 22_fix_h03_estado_pago.sql...'
+\i 22_fix_h03_estado_pago.sql
 
 \echo '===> Finalizando bootstrap...'
 \echo '====================================================='
 \echo '  SmartDining: bootstrap del esquema y scripts completado. '
+
 
 
 
