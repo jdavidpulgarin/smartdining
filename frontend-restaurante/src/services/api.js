@@ -11,6 +11,9 @@ export const EVENT_UNAUTHORIZED = 'smartdining:auth:unauthorized'
  */
 export function getAuthToken() {
   try {
+    const directToken = sessionStorage.getItem('smartdining_token')
+    if (directToken) return directToken
+
     const stored = sessionStorage.getItem('smartdining_staff_user')
     if (stored) {
       const parsed = JSON.parse(stored)
@@ -62,7 +65,7 @@ export async function apiFetch(endpoint, options = {}) {
     triggerUnauthorized()
   }
 
-  const contentType = response.headers.get('content-type') || ''
+  const contentType = response.headers?.get ? (response.headers.get('content-type') || '') : 'application/json'
   const isJson = contentType.includes('application/json')
   const data = isJson ? await response.json() : await response.text()
 

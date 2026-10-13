@@ -14,7 +14,7 @@ import {
   RefreshCw,
   Tag,
 } from 'lucide-react'
-import { mesasApi, pedidosApi, transaccionesApi } from '../services/api'
+import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
 import { useSocketEmit, useSocketListener, useTables } from '../hooks'
 
 function formatCOP(monto) {
@@ -715,8 +715,9 @@ export function Caja() {
                   {paymentMethod === 'efectivo' && (
                     <div className="cash-calculator-box">
                       <div className="cash-input-group">
-                        <label>Efectivo Recibido (COP):</label>
+                        <label htmlFor="efectivo-input">Efectivo Recibido (COP):</label>
                         <input
+                          id="efectivo-input"
                           type="number"
                           step="1000"
                           min={financialDetails.total}
