@@ -190,14 +190,21 @@ test('si el socket-server rechaza el rol (403), abrir responde 403', async () =>
 });
 
 test('abrir exige rol mesero o admin', async () => {
-  for (const rol of ['cajero', 'cocina']) {
-    const res = await request(app)
-      .post('/api/mesas/5/abrir')
-      .set('Authorization', `Bearer ${tokenStaff(9, rol)}`);
-    assert.strictEqual(res.status, 403, `${rol} no debe poder abrir mesas`);
+  // Hace falta el doble de base porque desde H-09 el middleware comprueba en
+  // cada peticion del personal que la cuenta siga activa, antes de mirar el rol.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    for (const rol of ['cajero', 'cocina']) {
+      const res = await request(app)
+        .post('/api/mesas/5/abrir')
+        .set('Authorization', `Bearer ${tokenStaff(9, rol)}`);
+      assert.strictEqual(res.status, 403, `${rol} no debe poder abrir mesas`);
+    }
+    const sinToken = await request(app).post('/api/mesas/5/abrir');
+    assert.strictEqual(sinToken.status, 401);
+  } finally {
+    db.restaurar();
   }
-  const sinToken = await request(app).post('/api/mesas/5/abrir');
-  assert.strictEqual(sinToken.status, 401);
 });
 
 test('abrir una mesa que no existe: 404', async () => {
@@ -262,10 +269,19 @@ test('si el socket-server falla, la liberación no se revierte', async () => {
 });
 
 test('liberar exige rol mesero o admin', async () => {
-  const res = await request(app)
-    .post('/api/mesas/5/liberar')
-    .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`);
-  assert.strictEqual(res.status, 403);
+  // El doble de base es necesario desde H-09: el middleware comprueba en cada
+  // peticion del personal que la cuenta siga activa, antes de mirar el rol. Sin
+  // el, la consulta va a PostgreSQL de verdad y en un entorno sin base (el CI)
+  // la peticion falla con 500 en vez de llegar al control de roles.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/liberar')
+      .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`);
+    assert.strictEqual(res.status, 403);
+  } finally {
+    db.restaurar();
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -81,12 +81,21 @@ test('un error de CHECK responde 500 genérico y no expone el mensaje interno', 
 });
 
 test('metodo_pago solo acepta los valores del CHECK del schema', async () => {
-  const res = await request(app)
-    .post('/api/transacciones')
-    .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
-    .send({ id_pedido: 1, monto: 1000, metodo_pago: 'tarjeta' });
+  // El doble de base es necesario desde H-09: el middleware comprueba en cada
+  // peticion del personal que la cuenta siga activa, antes de mirar el rol. Sin
+  // el, la consulta va a PostgreSQL de verdad y en un entorno sin base (el CI)
+  // la peticion falla con 500 en vez de llegar al control de roles.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    const res = await request(app)
+      .post('/api/transacciones')
+      .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
+      .send({ id_pedido: 1, monto: 1000, metodo_pago: 'tarjeta' });
 
-  assert.strictEqual(res.status, 400, "'tarjeta' no existe en el schema: se rechaza en el body");
+    assert.strictEqual(res.status, 400, "'tarjeta' no existe en el schema: se rechaza en el body");
+  } finally {
+    db.restaurar();
+  }
 });
 
 test('el pago libera la mesa desde el backend (el trigger tr_regenerar_token_qr ya no existe)', async () => {

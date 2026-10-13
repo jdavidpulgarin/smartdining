@@ -2,13 +2,16 @@ const express = require('express');
 const ctrl = require('../controllers/mesas.controller');
 const { requireAuth, requireRole } = require('../middleware/auth.middleware');
 const { requireInternalKey } = require('../middleware/interno.middleware');
+const { crearLimitadorQr } = require('../middleware/limites.middleware');
 
 const router = express.Router();
 
 router.get('/', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.listar);
 
 // Pública: la usa la PWA del comensal al escanear el QR de la mesa.
-router.post('/qr/:token/sesion', ctrl.crearSesionPorToken);
+// H-27: es la otra ruta sin sesión previa, así que también va limitada (más
+// holgada que el login: una mesa entera escanea desde la misma IP del local).
+router.post('/qr/:token/sesion', crearLimitadorQr(), ctrl.crearSesionPorToken);
 
 // Ciclo de vida de la sesión de mesa: el mesero abre (obtiene el QR) y cierra.
 router.post('/:id/abrir', requireAuth, requireRole('mesero', 'admin'), ctrl.abrir);

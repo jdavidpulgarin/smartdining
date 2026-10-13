@@ -31,7 +31,8 @@ function construirTokenQr(id_mesa, sid = crypto.randomBytes(12).toString('base64
  *        devuelve las filas de cada query; si devuelve undefined, { rows: [] }.
  * @param {{sesionCerrada?: boolean, tokenQrDeMesa?: string,
  *           pedidosAbiertos?: number, mesaYaLiberada?: boolean,
- *           saldoTrasPago?: number}} opciones
+ *           saldoTrasPago?: number, usuarioInactivo?: boolean,
+ *           usuarioSinRegistro?: boolean, usuarioConsultaFalla?: boolean}} opciones
  *        Por omisión la sesión de mesa del comensal está vigente. Con
  *        sesionCerrada la columna token_qr responde NULL (mesa liberada), y con
  *        tokenQrDeMesa se fija otro token (para simular un QR distinto).
@@ -44,6 +45,17 @@ function instalarFakeDb(responder, opciones = {}) {
 
   const ejecutar = async (sql, params = []) => {
     ejecutadas.push({ sql, params });
+
+    // H-09: el middleware comprueba en cada petición del personal que la cuenta
+    // siga activa. Se contesta aquí para que ninguna prueba tenga que saber que
+    // existe; con usuarioInactivo se simula una cuenta desactivada.
+    if (sql.includes('FROM usuarios WHERE id_usuario')) {
+      if (opciones.usuarioConsultaFalla) throw new Error('la base no responde');
+      if (opciones.usuarioSinRegistro) return { rows: [] };
+      return {
+        rows: [{ id_usuario: params[0], rol: 'admin', activo: !opciones.usuarioInactivo }],
+      };
+    }
 
     // La consulta del middleware se contesta aquí para que cada prueba no tenga
     // que saber que existe; se puede forzar con las opciones.
