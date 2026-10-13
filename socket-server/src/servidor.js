@@ -17,6 +17,10 @@ const { crearRouter, enviarJson } = require('./http');
 const { crearConexionRedis } = require('./almacen/redis');
 const { crearClienteBackend } = require('./backend');
 const { crearRotadorQr } = require('./rotacion');
+const { crearPasarelaWompi } = require('./pasarelas/wompi');
+const {
+  crearAlmacenPagosMemoria, crearAlmacenPagosRedis, crearLimitesMemoria, crearLimitesRedis,
+} = require('./almacen/pagos');
 const { crearAlmacenCarritosRedis } = require('./almacen/carritos-redis');
 const { crearRegistroIdempotenciaRedis } = require('./almacen/idempotencia-redis');
 const { crearRevocacionesRedis } = require('./almacen/revocaciones-redis');
@@ -94,6 +98,10 @@ function crearServidor(config, deps = {}) {
       ? crearRegistroIdempotenciaRedis({ cliente, ttlMs: TTL_PAGOS_MS })
       : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
     estadoMesas: cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria(),
+    // Pagos: pasarela (null = pagos apagados), intenciones y límites.
+    pasarela: deps.pasarela || (config.wompi ? crearPasarelaWompi(config.wompi) : null),
+    almacenPagos: cliente ? crearAlmacenPagosRedis({ cliente }) : crearAlmacenPagosMemoria(),
+    limites: cliente ? crearLimitesRedis({ cliente }) : crearLimitesMemoria(),
     presencia: crearPresencia({ io, ...(deps.presencia || {}) }),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),

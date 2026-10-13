@@ -47,6 +47,13 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
       for (const x of ks) if (vigente(x)) { datos.delete(x); version += 1; n += 1; }
       return n;
     },
+    async incr(k) {
+      verificar();
+      const e = vigente(k);
+      const n = (e ? Number(e.valor) : 0) + 1;
+      escribir(k, String(n), e ? e.expira : null);
+      return n;
+    },
     async expire(k, seg) { verificar(); const e = vigente(k); if (!e) return 0; e.expira = ahora() + seg * 1000; return 1; },
     async hSet(k, campo, valor) {
       verificar();
