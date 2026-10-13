@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const transaccionesService = require('../services/transacciones.service');
 const socketNotifier = require('../services/socket.notifier');
+const { esComensal } = require('../middleware/auth.middleware');
 const aliasComensal = require('../services/alias-comensal');
 
 // Valores exactos de los CHECK de la tabla transacciones en el schema.sql de
@@ -23,15 +24,19 @@ const pagoSchema = z.object({
 /**
  * Alias que queda en la transacción.
  *
- * Si el JWT trae un alias firmado, ESE manda y el del body se ignora: un alias
- * firmado por el servidor no se puede suplantar escribiendo otro en el cuerpo
- * (misma regla que al crear un pedido en D-03). Hoy esta ruta es de
- * admin/cajero, así que en la práctica el alias sale del body; la regla queda
- * puesta para cuando el comensal pague desde su sesión.
+ * Misma regla que al crear un pedido (H-05): si el JWT trae alias firmado, ese
+ * manda; y si quien paga es un comensal **sin** alias en el token, queda `null`
+ * en vez de creerle al body. Un alias escrito en el cuerpo decidiría de quién
+ * se descuenta el pago en obtener_cuenta_mesa.
+ *
+ * Hoy esta ruta es de admin/cajero —su JWT no lleva alias, así que el alias
+ * viene del body, que es lo correcto para un cobro en caja— pero la regla queda
+ * puesta para cuando el comensal pague desde su propia sesión.
  */
 function aliasDelComensal(req, cuerpo) {
   const firmado = req.user?.comensal;
   if (typeof firmado === 'string' && firmado.trim()) return firmado.trim();
+  if (esComensal(req)) return null;
   return cuerpo.comensal ?? null;
 }
 

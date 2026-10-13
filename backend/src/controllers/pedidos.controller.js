@@ -108,17 +108,25 @@ const crearPedidoSchema = z.object({
 /**
  * Alias del comensal que queda guardado en el ítem.
  *
- * Si el JWT trae `comensal` (alias firmado al abrir la sesión de mesa; llega con
- * el PR #13 de Roberto), ESE manda y el del body se ignora: un alias firmado por
- * el servidor no se puede suplantar escribiendo otro en el cuerpo, que es justo
- * lo que permitiría cargarle un ítem a otra persona de la mesa.
+ * H-05: para un COMENSAL el alias sale **solo del JWT**. Lo que venga en el
+ * body (`comensal` o `apodo`) se ignora por completo, incluso si el token no
+ * trae alias: en ese caso queda `null`.
  *
- * Sin alias en el token se usa el del body, que es el caso de hoy y el del
- * personal: el mesero escribe de parte de quién va cada ítem.
+ * El alias no es decoración, es a quién se le cobra: con el body como respaldo,
+ * cualquiera en la mesa podía escribir el nombre de otro y cargarle sus platos,
+ * y la cuenta por persona dejaba de ser fiable. Un alias firmado por el
+ * servidor no se puede suplantar; uno escrito en el cuerpo sí.
+ *
+ * Para mesero y admin el body sigue valiendo: ellos piden de parte de alguien y
+ * su JWT no lleva alias, sino `id_usuario`.
  */
 function aliasDelComensal(req, item) {
   const firmado = req.user?.comensal;
   if (typeof firmado === 'string' && firmado.trim()) return firmado.trim();
+
+  // Un comensal sin alias firmado se queda sin alias: el body no es autoridad.
+  if (esComensal(req)) return null;
+
   return item.comensal ?? item.apodo ?? null;
 }
 

@@ -41,10 +41,12 @@ test('un comensal no puede crear un pedido para otra mesa: se usa el id_mesa del
 test('el alias va en detalles_pedido.comensal y la nota sola en notas_especiales', async () => {
   const db = instalarFakeDb(responderCreacionOk);
   try {
+    // Lo pide el mesero: desde H-05 el alias del body solo vale para el personal
+    // (un comensal lo toma de su JWT firmado y nunca del cuerpo).
     const res = await request(app)
       .post('/api/pedidos')
-      .set('Authorization', `Bearer ${tokenComensal(5)}`)
-      .send({ items: [{ id_plato: 12, cantidad: 2, comensal: 'Ana', notas: 'sin cebolla' }] });
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 2, comensal: 'Ana', notas: 'sin cebolla' }] });
 
     assert.strictEqual(res.status, 201);
     assert.ok(res.body.codigo_pedido, 'el pedido trae un codigo_pedido');
@@ -72,8 +74,8 @@ test('apodo sigue funcionando como alias de comensal (compatibilidad)', async ()
   try {
     const res = await request(app)
       .post('/api/pedidos')
-      .set('Authorization', `Bearer ${tokenComensal(5)}`)
-      .send({ items: [{ id_plato: 12, cantidad: 1, apodo: 'Pipe' }] });
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1, apodo: 'Pipe' }] });
 
     assert.strictEqual(res.status, 201);
     assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[4], 'Pipe');
@@ -87,8 +89,8 @@ test('si llegan comensal y apodo, manda comensal', async () => {
   try {
     await request(app)
       .post('/api/pedidos')
-      .set('Authorization', `Bearer ${tokenComensal(5)}`)
-      .send({ items: [{ id_plato: 12, cantidad: 1, comensal: 'Ana', apodo: 'Pipe' }] });
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1, comensal: 'Ana', apodo: 'Pipe' }] });
 
     assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[4], 'Ana');
   } finally {

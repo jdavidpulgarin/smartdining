@@ -319,7 +319,7 @@ test('el alias firmado en el JWT gana sobre el del body', async () => {
   }
 });
 
-test('sin alias en el JWT se usa el del body', async () => {
+test('un comensal sin alias firmado no toma el del body (h-05)', async () => {
   const db = instalarFakeDb(responderCreacionOk);
   try {
     await request(app)
@@ -327,7 +327,11 @@ test('sin alias en el JWT se usa el del body', async () => {
       .set('Authorization', `Bearer ${tokenComensal(5)}`)
       .send({ items: [{ id_plato: 12, cantidad: 1, comensal: 'Pipe' }] });
 
-    assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[4], 'Pipe');
+    assert.strictEqual(
+      db.buscar('INSERT INTO detalles_pedido').params[4],
+      null,
+      'el alias decide a quien se le cobra: sin uno firmado, queda sin alias'
+    );
   } finally {
     db.restaurar();
   }
@@ -545,6 +549,119 @@ test('GET /api/pedidos/:id lee los detalles en una sola consulta', async () => {
   try {
     await request(app).get('/api/pedidos/87').set('Authorization', `Bearer ${tokenComensal(5)}`);
     assert.strictEqual(db.todas('FROM detalles_pedido dp').length, 1);
+  } finally {
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// H-05: el alias de un comensal sale SOLO de su JWT
+// ---------------------------------------------------------------------------
+
+test('h-05: un comensal con alias firmado "Ana" que manda "Beto" guarda Ana', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensalConAlias(5, 'Ana')}`)
+      .send({ items: [{ id_plato: 12, cantidad: 1, comensal: 'Beto' }] });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(
+      db.buscar('INSERT INTO detalles_pedido').params[4],
+      'Ana',
+      'nadie puede cargarle un plato a otra persona de la mesa escribiendo su nombre'
+    );
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-05: tampoco sirve el apodo del body para suplantar', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensalConAlias(5, 'Ana')}`)
+      .send({ items: [{ id_plato: 12, cantidad: 1, apodo: 'Beto' }] });
+
+    assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[4], 'Ana');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-05: un comensal sin alias en el token que manda "Beto" guarda null', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [{ id_plato: 12, cantidad: 1, comensal: 'Beto', apodo: 'Beto' }] });
+
+    assert.strictEqual(res.status, 201, 'el pedido se crea igual, solo sin alias');
+    assert.strictEqual(
+      db.buscar('INSERT INTO detalles_pedido').params[4],
+      null,
+      'el body no es autoridad sobre quien pidio'
+    );
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-05: el alias del body SI vale para un mesero', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1, comensal: 'Mesa 5' }] });
+
+    assert.strictEqual(
+      db.buscar('INSERT INTO detalles_pedido').params[4],
+      'Mesa 5',
+      'el mesero pide de parte de alguien y su JWT no lleva alias'
+    );
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-05: y tambien para un admin', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenStaff(1, 'admin')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1, comensal: 'Ana' }] });
+
+    assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[4], 'Ana');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-05: varios items de un comensal reciben todos su alias firmado', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensalConAlias(5, 'Ana')}`)
+      .send({
+        items: [
+          { id_plato: 12, cantidad: 1, comensal: 'Beto' },
+          { id_plato: 13, cantidad: 2, comensal: 'Cami' },
+        ],
+      });
+
+    const inserts = db.todas('INSERT INTO detalles_pedido');
+    assert.strictEqual(inserts.length, 2);
+    assert.deepStrictEqual(
+      inserts.map((q) => q.params[4]),
+      ['Ana', 'Ana'],
+      'un comensal solo puede pedir para si mismo'
+    );
   } finally {
     db.restaurar();
   }
