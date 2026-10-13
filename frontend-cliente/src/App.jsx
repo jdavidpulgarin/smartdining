@@ -3,6 +3,7 @@ import { CarritoProvider } from './context/CarritoContext'
 import Layout from './components/layout/Layout'
 import Inicio from './pages/Inicio'
 import Menu from './pages/Menu'
+import Constructor from './pages/Constructor'
 import Carrito from './pages/Carrito'
 import Seguimiento from './pages/Seguimiento'
 import Pago from './pages/Pago'
@@ -19,6 +20,14 @@ function App() {
             element={
               <Layout>
                 <Menu />
+              </Layout>
+            }
+          />
+          <Route
+            path="/armar/:idPlato"
+            element={
+              <Layout>
+                <Constructor />
               </Layout>
             }
           />
