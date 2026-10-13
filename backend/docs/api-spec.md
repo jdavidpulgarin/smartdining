@@ -1059,6 +1059,37 @@ forma (p. ej. `moneda` de más de 3 caracteres, `monto_centavos` no entero).
 
 ---
 
+## Códigos de error de la base de datos
+
+El manejador central ([`errores.middleware.js`](../src/middleware/errores.middleware.js))
+es el único sitio donde se decide el status. Traduce lo que lanza PostgreSQL así:
+
+| Origen | Status | Cuerpo |
+|---|---|---|
+| Error de negocio del backend (`{ status, message }`) | ese status | su mensaje |
+| `RAISE EXCEPTION` de un trigger (**P0001**) | **409** | el mensaje del trigger, tal cual — está escrito para leerse ("Transición de estado no autorizada: de \"listo\" hacia \"en_preparacion\"") |
+| Error de **datos** de PostgreSQL (**clase 22**: 22003 desbordamiento numérico, 22001 texto largo, 22012 división por cero, 22P02 sintaxis…) | **422** | `No se pudo registrar esta operación: un dato está fuera del rango permitido. Avisa al equipo.` |
+| Cualquier otro error de PostgreSQL (CHECK 23514, FK 23503, unique 23505…) o inesperado | **500** | `Error interno del servidor` |
+
+**Por qué 422 y no 500 en la clase 22.** Un dato que no cabe no es una caída del
+servidor: reintentar nunca va a funcionar, y un 500 lo hace indistinguible de un fallo
+pasajero. Con 422 el cliente sabe que el problema es el dato y no insiste.
+
+El mensaje del 422 es **siempre el mismo** y no dice qué dato ni dónde: el texto real de
+PostgreSQL nombra funciones, columnas y precisiones internas (`función PL/pgSQL
+fn_tr_calcular_tiempo_preparacion() en la línea 28`), que es un mapa del esquema para
+quien lo lea. El detalle completo —código, `detail` y `where`— se registra en el log del
+servidor junto al método y la ruta.
+
+> **Caso real:** `PATCH /kds/comandas/:id/estado` sobre una comanda que lleva días en
+> `en_preparacion` da 22003, porque `fn_tr_calcular_tiempo_preparacion` calcula la
+> variación porcentual en `NUMERIC(6,2)` (tope 9999.99 %) y una comanda parada 20.000
+> minutos la desborda. Se cruza cuando el tiempo real supera ~101× el estimado (unas 8 h
+> para un plato de 5 min). El arreglo de fondo es ampliar esa precisión en `database/`;
+> hasta entonces, el KDS al menos muestra un mensaje que se entiende.
+
+---
+
 ## Pendiente por acordar con el equipo
 
 Ya resueltos contra el `schema.sql` de Jarrison: `mesas.estado` es

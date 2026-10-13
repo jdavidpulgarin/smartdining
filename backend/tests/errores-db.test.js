@@ -123,3 +123,165 @@ test('el codigo_pedido generado cabe en el VARCHAR(16) del schema', () => {
     assert.ok(codigo.length <= 16, `"${codigo}" mide ${codigo.length}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Clase 22 de SQLSTATE: errores de datos -> 422, no 500
+// ---------------------------------------------------------------------------
+
+/**
+ * Simula el 22003 real que lanza fn_tr_calcular_tiempo_preparacion() cuando una
+ * comanda lleva dias en preparacion: la variacion porcentual no cabe en
+ * NUMERIC(6,2). El texto es el de PostgreSQL, con el nombre de la funcion
+ * dentro, que es justo lo que NO debe salir al cliente.
+ */
+function errorDesbordamiento() {
+  const err = new Error('desbordamiento de campo numeric');
+  err.code = '22003';
+  err.detail = 'Un campo con precisión 6, escala 2 debe redondear a un valor absoluto menor que 10^4.';
+  err.where = 'función PL/pgSQL fn_tr_calcular_tiempo_preparacion() en la línea 28 en asignación';
+  return err;
+}
+
+const MENSAJE_422 =
+  'No se pudo registrar esta operación: un dato está fuera del rango permitido. Avisa al equipo.';
+
+test('un 22003 al avanzar la comanda responde 422 con un mensaje util', async () => {
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'en_preparacion' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) throw errorDesbordamiento();
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch('/api/kds/comandas/1/estado')
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'listo' });
+
+    assert.strictEqual(res.status, 422, 'no es un fallo del servidor: el dato no cabe');
+    assert.strictEqual(res.body.error, MENSAJE_422);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('el 422 no filtra el texto interno de postgres', async () => {
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'en_preparacion' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) throw errorDesbordamiento();
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch('/api/kds/comandas/1/estado')
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'listo' });
+
+    const cuerpo = JSON.stringify(res.body);
+    for (const fuga of [
+      'fn_tr_calcular_tiempo_preparacion',
+      'PL/pgSQL',
+      'NUMERIC',
+      'precisión 6',
+      'numeric',
+      '22003',
+      'línea 28',
+    ]) {
+      assert.ok(!cuerpo.includes(fuga), `no debe aparecer "${fuga}" en la respuesta`);
+    }
+  } finally {
+    db.restaurar();
+  }
+});
+
+for (const [codigo, caso] of [
+  ['22003', 'desbordamiento numerico'],
+  ['22001', 'texto demasiado largo'],
+  ['22007', 'formato de fecha invalido'],
+  ['22012', 'division por cero'],
+  ['22P02', 'sintaxis de entrada invalida'],
+]) {
+  test(`${codigo} (${caso}) responde 422`, async () => {
+    const db = instalarFakeDb((sql) => {
+      if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+      if (sql.includes('UPDATE pedidos SET estado')) {
+        const err = new Error(`fallo de datos ${codigo}`);
+        err.code = codigo;
+        throw err;
+      }
+      return { rows: [] };
+    });
+    try {
+      const res = await request(app)
+        .patch('/api/kds/comandas/1/estado')
+        .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+        .send({ estado: 'en_preparacion' });
+
+      assert.strictEqual(res.status, 422);
+      assert.strictEqual(res.body.error, MENSAJE_422);
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+test('un P0001 sigue dando 409 con el mensaje del trigger', async () => {
+  const mensaje = 'Transición de estado no autorizada: de "listo" hacia "en_preparacion"';
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'listo' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) throw errorTrigger(mensaje);
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch('/api/kds/comandas/1/estado')
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'en_preparacion' });
+
+    assert.strictEqual(res.status, 409, 'las reglas de negocio no se vuelven 422');
+    assert.strictEqual(res.body.error, mensaje);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('un error que no es de clase 22 ni P0001 sigue dando 500', async () => {
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) throw errorCheck();
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch('/api/kds/comandas/1/estado')
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'en_preparacion' });
+
+    assert.strictEqual(res.status, 500);
+    assert.strictEqual(res.body.error, 'Error interno del servidor');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('un codigo que empieza por 22 pero no es un SQLSTATE no se confunde', async () => {
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) {
+      // Un error de red de Node, por ejemplo: 'ECONNRESET' o un '22' suelto.
+      const err = new Error('fallo raro');
+      err.code = '22';
+      throw err;
+    }
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch('/api/kds/comandas/1/estado')
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'en_preparacion' });
+
+    assert.strictEqual(res.status, 500, 'un SQLSTATE tiene 5 caracteres: esto no lo es');
+  } finally {
+    db.restaurar();
+  }
+});
