@@ -192,6 +192,25 @@ async function obtenerConDetalles(id) {
 // Estados en los que un pedido deja de ocupar la mesa.
 const ESTADOS_CIERRE = ['pagado', 'cancelado'];
 
+const ESTADO_ENTREGADO = 'entregado';
+const ESTADO_PAGADO = 'pagado';
+
+// Valor de pedidos.estado_pago (script 22) que significa cuenta cubierta. Esa
+// columna la mantiene el trigger tr_sincronizar_estado_pago_pedido sobre
+// transacciones; aquí solo se lee.
+const ESTADO_PAGO_CUBIERTO = 'pagado';
+
+/**
+ * Estados cuyo cambio puede acabar tocando la tabla mesas, y que por eso tienen
+ * que bloquear la mesa ANTES del pedido.
+ *
+ * 'entregado' está en la lista desde que marcar entregado puede cerrar el pedido
+ * en 'pagado' y liberar la mesa (ver la regla de cierre más abajo). Sin esto el
+ * camino iría pedido -> mesa mientras los pagos van mesa -> pedido, que es
+ * exactamente el interbloqueo que se midió en 19 de 20 intentos.
+ */
+const ESTADOS_QUE_BLOQUEAN_LA_MESA = [...ESTADOS_CIERRE, ESTADO_ENTREGADO];
+
 /**
  * Cambia el estado del pedido y lo registra en historial_estados.
  *
@@ -220,14 +239,14 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
     // operaciones simultáneas sobre el mismo pedido se interbloquean: medido en
     // 19 de 20 intentos (SQLSTATE 40P01) antes de este cambio.
     //
-    // Solo para los estados de cierre: una transición del KDS
-    // (en_preparacion/listo) no toca la mesa en ningún momento, así que
-    // bloquearla ahí sería serializar las comandas de una mesa sin motivo.
+    // Solo para los estados que pueden tocar la mesa: una transición del KDS
+    // (en_preparacion/listo) no la toca en ningún momento, así que bloquearla
+    // ahí sería serializar las comandas de una mesa sin motivo.
     //
     // La mesa se identifica con una subconsulta en la misma sentencia, para no
     // leer y después bloquear (entre las dos cosas el pedido podría cambiar de
     // mesa, y además ahorra un viaje).
-    if (ESTADOS_CIERRE.includes(estado)) {
+    if (ESTADOS_QUE_BLOQUEAN_LA_MESA.includes(estado)) {
       await client.query(
         `SELECT m.id_mesa FROM mesas m
           WHERE m.id_mesa = (SELECT p.id_mesa FROM pedidos p WHERE p.id_pedido = $1)
@@ -248,19 +267,59 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
       [id, id_usuario, estadoAnterior, estado, observaciones || null]
     );
 
+    let pedido = result.rows[0];
+
+    // REGLA DE CIERRE: un pedido pasa a 'pagado' cuando está entregado Y
+    // totalmente pagado, en cualquiera de los dos órdenes. Aquí se resuelve el
+    // orden "primero se paga, después sale la comida", que es el del pago en
+    // línea: el cobro ya ocurrió y dejó la cuenta en cero sin poder mover el
+    // estado (el trigger solo deja pasar a 'pagado' desde 'entregado'), así que
+    // el pedido se cierra en el momento en que el mesero lo entrega.
+    //
+    // Sin esto la mesa se quedaba ocupada para siempre: el pedido nunca volvía a
+    // 'pagado', liberarSiNoQuedanPedidosAbiertos lo seguía contando como abierto
+    // y ni el mesero ni la caja podían cerrar la mesa (medido: 409 "pedidos
+    // abiertos" incluso después de entregar).
+    //
+    // Se mira estado_pago, que mantiene el trigger del script 22, y se confirma
+    // con obtener_saldo_pendiente antes de cerrar: estado_pago se recalcula al
+    // tocar transacciones, así que es la columna la que podría quedarse atrás
+    // respecto del total, nunca el saldo. Dos fuentes de acuerdo para mover
+    // dinero; con una sola se podría cerrar un pedido con saldo vivo.
+    let cerradoPorPago = false;
+    if (estado === ESTADO_ENTREGADO && pedido.estado_pago === ESTADO_PAGO_CUBIERTO) {
+      const saldo = await client.query('SELECT obtener_saldo_pendiente($1) <= 0 AS liquidado', [id]);
+      if (saldo.rows[0]?.liquidado === true) {
+        const cerrado = await client.query(
+          `UPDATE pedidos SET estado = 'pagado' WHERE id_pedido = $1 RETURNING *`,
+          [id]
+        );
+        pedido = { ...pedido, ...(cerrado.rows[0] || {}), estado: ESTADO_PAGADO };
+        await client.query(
+          `INSERT INTO historial_estados
+            (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones)
+           VALUES ($1, $2, $3, 'pagado', 'Cuenta ya cubierta al entregar')`,
+          [id, id_usuario, ESTADO_ENTREGADO]
+        );
+        cerradoPorPago = true;
+      }
+    }
+
     // Si el pedido se cerró y la mesa no tiene otros pedidos abiertos, la mesa
     // se libera en esta misma transacción: el QR impreso deja de valer y las
-    // sesiones de comensal de ese grupo caen.
-    const pedido = result.rows[0];
+    // sesiones de comensal de ese grupo caen. Se mira el estado FINAL, que con
+    // la regla de cierre puede no ser el que pidió quien llamó.
     let mesaLiberada = false;
-    if (ESTADOS_CIERRE.includes(estado)) {
+    if (ESTADOS_CIERRE.includes(pedido.estado)) {
       mesaLiberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, pedido.id_mesa);
     }
 
     await client.query('COMMIT');
     // estado_anterior no es una columna de pedidos: se agrega al resultado
     // porque lo necesitan el payload de order:status y quien audite el cambio.
-    return { ...pedido, estado_anterior: estadoAnterior, mesaLiberada };
+    // Es el estado del que se venía, aunque en medio se haya pasado por
+    // 'entregado' camino de 'pagado'.
+    return { ...pedido, estado_anterior: estadoAnterior, mesaLiberada, cerradoPorPago };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
