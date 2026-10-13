@@ -599,10 +599,24 @@ Body:
 - `comensal` (1 a 40 caracteres, se recorta) se guarda en `detalles_pedido.comensal` y
   `notas` en `detalles_pedido.notas_especiales`, cada uno en su columna. `apodo` sigue
   aceptándose como **alias de compatibilidad**; si llegan los dos, manda `comensal`.
-- **Si el JWT trae un alias firmado** (`comensal` en el payload del token de sesión de
-  mesa), ese valor **manda** y el del body se ignora: así nadie carga un ítem a otra
-  persona de la mesa escribiendo su nombre. Sin alias en el token se usa el del body,
-  que es también el caso del mesero pidiendo de parte de alguien.
+- **El alias de un comensal sale SOLO de su JWT (H-05).** Si el token de sesión de mesa
+  trae `comensal`, ese valor manda; y si **no** lo trae, el ítem queda **sin alias**
+  (`null`). Lo que venga en el body (`comensal` o `apodo`) se ignora por completo cuando
+  quien pide es un comensal.
+
+  El alias no es decoración: es a quién se le cobra. Con el body como respaldo, cualquiera
+  en la mesa podía escribir el nombre de otro y cargarle sus platos, y la cuenta por
+  persona dejaba de ser fiable. Para **mesero y admin** el body sigue valiendo, porque
+  piden de parte de alguien y su JWT no lleva alias.
+- **Topes del pedido (H-06):** hasta **50 ítems** por pedido y `cantidad` entre **1 y 20**
+  por ítem. Más que eso responde **400**. Antes `cantidad` solo pedía ser positiva y un
+  `100000000` llegaba a la base, desbordaba el `DECIMAL` del subtotal y salía como 500.
+  Son números de sala, no técnicos: 20 unidades del mismo plato ya es una mesa grande
+  pidiendo lo mismo, y 50 ítems distintos no caben en una comanda.
+
+  > El CHECK equivalente en `detalles_pedido.cantidad` es de Jarrison (`database/`): este
+  > tope vive solo en el backend, así que un INSERT directo a la base lo esquiva.
+
 - **Platos personalizables (constructor):** `ingredientes` es un arreglo de hasta **20**
   `{ id_ingrediente, porcion }` por ítem, con `porcion` en `ligera | normal | extra`
   (por omisión `normal`). Repetir un `id_ingrediente` dentro del mismo ítem responde
@@ -841,7 +855,13 @@ Body:
 
 - `metodo_pago` es obligatorio, con los valores del CHECK del schema: `efectivo`,
   `tarjeta_debito`, `tarjeta_credito`, `transferencia`, `online`.
-- `estado_transaccion`: `completada` (por defecto), `pendiente`, `fallida` o `reembolsada`.
+- **`estado_transaccion` lo fija el servidor (H-07).** Se acepta omitirlo (queda
+  `completada`) o mandar exactamente `"completada"` por compatibilidad con el panel;
+  **`pendiente`, `fallida` y `reembolsada` responden 400**. Antes el body decidía el
+  estado, así que con el token de un cajero se podía registrar un pago como
+  `reembolsada` y dejar la cuenta sin cobrar pero con una transacción encima, sin rastro
+  de quién lo decidió. **Un reembolso no se registra por esta ruta**: es otra operación,
+  con su propia autorización, y todavía no existe.
 - `referencia_externa` es la referencia de la pasarela de pago que integra Roberto —
   este endpoint solo la guarda.
 - `comensal` es **opcional** (1 a 40 caracteres, o `null`) y se guarda en
@@ -864,6 +884,22 @@ Cobrar desde otro estado responde 409 con el mensaje del trigger (ver *Regla de 
 **Solo `estado_transaccion = 'completada'` liquida el pedido.** Con `pendiente`,
 `fallida` o `reembolsada` la transacción se registra igual (201) pero el pedido se queda
 en `entregado` y la mesa no se libera, así que se puede reintentar el cobro.
+
+**Los pagos de un mismo pedido se serializan (H-01).** Al abrir la transacción se bloquea
+la fila de la mesa y después la del pedido (`SELECT … FOR UPDATE`), antes de calcular el
+saldo y de insertar. Sin ese bloqueo, dos cobros simultáneos leían el mismo saldo y los
+dos pasaban la validación del trigger —que mira "lo pagado hasta ahora"—, así que un
+pedido de $34.000 se podía cobrar dos veces de $20.000. Está comprobado con una prueba
+de concurrencia real (`npm run test:integracion`): 5 pagos en paralelo dan **1 × 201 y
+4 × 409**, diez veces seguidas.
+
+El **orden de los bloqueos es siempre el mismo** —mesa primero, pedidos por `id_pedido`
+después— en esta ruta y en `POST /transacciones/internal`. Dos caminos que bloqueen en
+orden distinto sobre las mismas filas se interbloquean: la caja tendría el pedido
+esperando la mesa mientras la pasarela tiene la mesa esperando el pedido.
+
+> El `FOR UPDATE` dentro del trigger `fn_tr_validar_transaccion_financiera` es de
+> Jarrison (`database/`) y cerraría el hueco también para un INSERT directo a la base.
 
 **Se admiten abonos parciales.** Un cobro `completada` por menos del saldo se registra
 (201) y **no** cambia el pedido ni la mesa: el pedido pasa a `pagado` únicamente cuando
