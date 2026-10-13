@@ -190,14 +190,21 @@ test('si el socket-server rechaza el rol (403), abrir responde 403', async () =>
 });
 
 test('abrir exige rol mesero o admin', async () => {
-  for (const rol of ['cajero', 'cocina']) {
-    const res = await request(app)
-      .post('/api/mesas/5/abrir')
-      .set('Authorization', `Bearer ${tokenStaff(9, rol)}`);
-    assert.strictEqual(res.status, 403, `${rol} no debe poder abrir mesas`);
+  // Hace falta el doble de base porque desde H-09 el middleware comprueba en
+  // cada peticion del personal que la cuenta siga activa, antes de mirar el rol.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    for (const rol of ['cajero', 'cocina']) {
+      const res = await request(app)
+        .post('/api/mesas/5/abrir')
+        .set('Authorization', `Bearer ${tokenStaff(9, rol)}`);
+      assert.strictEqual(res.status, 403, `${rol} no debe poder abrir mesas`);
+    }
+    const sinToken = await request(app).post('/api/mesas/5/abrir');
+    assert.strictEqual(sinToken.status, 401);
+  } finally {
+    db.restaurar();
   }
-  const sinToken = await request(app).post('/api/mesas/5/abrir');
-  assert.strictEqual(sinToken.status, 401);
 });
 
 test('abrir una mesa que no existe: 404', async () => {

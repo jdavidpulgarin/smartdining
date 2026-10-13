@@ -82,6 +82,12 @@ function instalarEscenario() {
       return yaLiberada ? { rows: [] } : { rows: [{ ...estado.mesa }] };
     }
 
+    // H-09: el middleware pregunta en cada peticion del personal si la cuenta
+    // sigue activa. Aqui todos los usuarios del escenario estan activos.
+    if (sql.includes('FROM usuarios WHERE id_usuario')) {
+      return { rows: [{ id_usuario: params[0], rol: 'admin', activo: true }] };
+    }
+
     if (sql.includes('count(*)::int AS n FROM pedidos')) {
       const abiertos = estado.pedidos.filter((p) => !['pagado', 'cancelado'].includes(p.estado));
       return { rows: [{ n: abiertos.length }] };

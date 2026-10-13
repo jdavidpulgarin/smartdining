@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const mesasService = require('../services/mesas.service');
+const usuarioActivo = require('../services/usuario-activo');
 const { extraerSid } = require('../services/qr.token');
 
 /**
@@ -22,7 +23,8 @@ const ROL_COMENSAL = 'comensal';
  *   - comensal: { id_mesa, sid, rol: 'comensal' }
  *
  * Para un comensal comprueba además que su sesión siga siendo la vigente de la
- * mesa. Va aquí, y no en cada controller, para que ninguna ruta pueda olvidarlo.
+ * mesa, y para el personal que su cuenta siga activa (H-09). Va aquí, y no en
+ * cada controller, para que ninguna ruta pueda olvidarlo.
  */
 async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -42,7 +44,22 @@ async function requireAuth(req, res, next) {
 
   req.user = payload;
 
-  if (payload.rol !== ROL_COMENSAL) return next();
+  if (payload.rol !== ROL_COMENSAL) {
+    // H-09: un JWT válido no basta. El token vive 8 horas y no se puede
+    // retirar, así que tras desactivar a alguien su token seguía abriendo la
+    // API hasta que caducaba. Se comprueba en cada petición, con caché en
+    // Redis para no añadir una consulta por llamada (ver usuario-activo.js).
+    try {
+      if (!(await usuarioActivo.estaActivo(payload.id_usuario))) {
+        return res.status(401).json({ error: MENSAJE_CUENTA_INACTIVA });
+      }
+    } catch (err) {
+      // Si la base no responde no se deja pasar a ciegas: falla cerrada, igual
+      // que la comprobación de sesión del comensal.
+      return next(err);
+    }
+    return next();
+  }
 
   try {
     if (!(await sesionDeMesaVigente(payload))) {
@@ -57,6 +74,7 @@ async function requireAuth(req, res, next) {
 }
 
 const MENSAJE_SESION_CERRADA = 'Sesión de mesa cerrada, escanea el QR de nuevo';
+const MENSAJE_CUENTA_INACTIVA = 'Tu cuenta está desactivada, habla con administración';
 
 /**
  * ¿El JWT de este comensal corresponde al QR que la mesa tiene ahora?
@@ -104,4 +122,5 @@ module.exports = {
   ROLES_STAFF,
   ROL_COMENSAL,
   MENSAJE_SESION_CERRADA,
+  MENSAJE_CUENTA_INACTIVA,
 };

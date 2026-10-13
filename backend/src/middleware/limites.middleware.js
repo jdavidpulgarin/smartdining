@@ -1,4 +1,5 @@
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { enPruebas } = require('../config/entorno');
 
 /**
  * Límites de intentos para las dos rutas públicas que se pueden martillear:
@@ -24,18 +25,6 @@ const UN_MINUTO_MS = 60 * 1000;
 function entero(valor, porDefecto) {
   const n = Number(valor);
   return Number.isInteger(n) && n > 0 ? n : porDefecto;
-}
-
-/**
- * ¿Estamos corriendo las pruebas?
- *
- * No basta con NODE_ENV: `npm test` arranca `node --test` sin definirla. El
- * runner de Node sí marca cada proceso hijo con NODE_TEST_CONTEXT, y eso es
- * fiable. Con el límite activo, una prueba que llame dos veces al login
- * empezaría a fallar en cuanto alguien añada la sexta.
- */
-function enPruebas(env = process.env) {
-  return env.NODE_ENV === 'test' || Boolean(env.NODE_TEST_CONTEXT);
 }
 
 const MENSAJE_LOGIN =
