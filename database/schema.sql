@@ -59,6 +59,7 @@ CREATE TABLE mesas (
     estado VARCHAR(20) NOT NULL DEFAULT 'disponible'
         CHECK (estado IN ('disponible', 'ocupada', 'reservada', 'mantenimiento')),
     token_qr VARCHAR(255) UNIQUE,
+    sesion_iniciada_en TIMESTAMPTZ,
     version_control INTEGER NOT NULL DEFAULT 1,
     actualizado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
