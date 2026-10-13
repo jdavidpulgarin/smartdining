@@ -33,10 +33,23 @@ const SQL_ITEMS_DE_COMANDAS = `
   ORDER BY dp.id_detalle ASC`;
 
 /**
- * Devuelve las comandas activas (recibido, en_preparacion) con sus ítems ya
- * enriquecidos con nombre del plato y categoría, más el número de mesa y los
- * minutos transcurridos desde que se creó el pedido — lo que el frontend-kds
- * necesita para el tablero Kanban y el semáforo de tiempos (>15 min = rojo).
+ * Estados que siguen siendo asunto de la cocina y por tanto aparecen en el
+ * tablero: las tres columnas del KDS.
+ *
+ * 'listo' se incluye aunque la cocina ya terminó: la comanda sigue en el pase
+ * esperando que el mesero la recoja y la marque 'entregado'. Si no viniera en
+ * esta consulta, la columna "Listas" se vaciaría en cada recarga del KDS y la
+ * cocina perdería de vista lo que está esperando salir. Sale del tablero con
+ * 'entregado', 'pagado' o 'cancelado'.
+ */
+const ESTADOS_EN_EL_TABLERO = ['recibido', 'en_preparacion', 'listo'];
+
+/**
+ * Devuelve las comandas del tablero (recibido, en_preparacion, listo) con sus
+ * ítems ya enriquecidos con nombre del plato, categoría, quién pidió cada ítem
+ * y sus ingredientes, más el número de mesa y los minutos transcurridos desde
+ * que se creó el pedido — lo que el frontend-kds necesita para el tablero
+ * Kanban y el semáforo de tiempos.
  *
  * Nombres de columnas según docs/modelo-er.md.
  */
@@ -47,8 +60,9 @@ async function comandasActivas() {
             EXTRACT(EPOCH FROM (NOW() - p.creado_en)) / 60 AS minutos_transcurridos
      FROM pedidos p
      JOIN mesas m ON m.id_mesa = p.id_mesa
-     WHERE p.estado IN ('recibido', 'en_preparacion')
-     ORDER BY p.creado_en ASC`
+     WHERE p.estado = ANY($1::text[])
+     ORDER BY p.creado_en ASC`,
+    [ESTADOS_EN_EL_TABLERO]
   );
 
   const pedidos = pedidosResult.rows;
@@ -74,4 +88,4 @@ async function cambiarEstado(pedidoId, estado, observaciones, idUsuario) {
   return pedidosService.actualizarEstado(pedidoId, estado, observaciones, idUsuario);
 }
 
-module.exports = { comandasActivas, cambiarEstado };
+module.exports = { comandasActivas, cambiarEstado, ESTADOS_EN_EL_TABLERO };

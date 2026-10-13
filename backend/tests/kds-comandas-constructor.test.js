@@ -179,3 +179,63 @@ test('un item de plato simple llega con ingredientes vacios', async () => {
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// D-09: la columna "Listas" tiene que sobrevivir a una recarga
+// ---------------------------------------------------------------------------
+
+test('el tablero pide los tres estados de cocina, incluido listo', async () => {
+  const db = instalarFakeDb(conComandas(1));
+  try {
+    await request(app).get('/api/kds/comandas').set('Authorization', `Bearer ${jwtCocina()}`);
+
+    const consulta = db.buscar(SQL_PEDIDOS);
+    assert.ok(consulta, 'se consultan los pedidos del tablero');
+    assert.deepStrictEqual(
+      consulta.params[0],
+      ['recibido', 'en_preparacion', 'listo'],
+      'listo entra porque la comanda sigue en el pase esperando al mesero'
+    );
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('una comanda lista llega en la carga inicial', async () => {
+  const lista = { ...pedido(42), estado: 'listo' };
+  const db = instalarFakeDb((sql, params) => {
+    if (sql.includes(SQL_PEDIDOS)) return { rows: [lista] };
+    if (sql.includes(SQL_ITEMS)) return { rows: [item(742, 42)] };
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .get('/api/kds/comandas')
+      .set('Authorization', `Bearer ${jwtCocina()}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.comandas.length, 1);
+    assert.strictEqual(res.body.comandas[0].estado, 'listo');
+    assert.strictEqual(
+      res.body.comandas[0].items.length,
+      1,
+      'una comanda lista trae sus items igual que las demas'
+    );
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('los estados que ya salieron del tablero no se piden', async () => {
+  const db = instalarFakeDb(conComandas(1));
+  try {
+    await request(app).get('/api/kds/comandas').set('Authorization', `Bearer ${jwtCocina()}`);
+
+    const pedidos = db.buscar(SQL_PEDIDOS).params[0];
+    for (const fuera of ['entregado', 'pagado', 'cancelado']) {
+      assert.ok(!pedidos.includes(fuera), `${fuera} ya no es asunto de la cocina`);
+    }
+  } finally {
+    db.restaurar();
+  }
+});

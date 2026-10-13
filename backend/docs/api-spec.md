@@ -701,8 +701,16 @@ con el mensaje del trigger.
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| GET | /kds/comandas | **cocina, admin** | Comandas activas, con ítems enriquecidos con plato, categoría, comensal e ingredientes, mesa y minutos transcurridos |
+| GET | /kds/comandas | **cocina, admin** | Comandas del tablero (`recibido`, `en_preparacion`, `listo`), con ítems enriquecidos con plato, categoría, comensal e ingredientes, mesa y minutos transcurridos |
 | PATCH | /kds/comandas/:id/estado | **cocina, admin** | Cambia a `en_preparacion` o `listo` (únicos estados permitidos desde cocina) |
+
+Devuelve los **tres estados del tablero**: `recibido`, `en_preparacion` y `listo`.
+
+`listo` se incluye aunque la cocina ya terminó, porque la comanda sigue en el pase
+esperando que el mesero la recoja y la marque `entregado`. Si no viniera aquí, la
+columna "Listas" del KDS se vaciaría en cada recarga o reconexión y la cocina perdería de
+vista lo que está esperando salir. Una comanda sale del tablero cuando pasa a
+`entregado`, `pagado` o `cancelado`.
 
 Respuesta de `GET /kds/comandas`:
 
