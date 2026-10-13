@@ -73,6 +73,9 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Define INTERNAL_API_KEY en infra/.env}
       SOCKET_URL: http://socket-server:4001
       FRONTEND_CLIENTE_URL: https://app.${DOMINIO}
+      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO}
+      # Solo de nginx (IP fija abajo) se cree X-Forwarded-For; de cualquier otro contenedor no (backend/server.js).
+      TRUST_PROXY: 172.31.250.10
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
