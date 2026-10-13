@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "description": "Ejemplos de referencia para los frontends (ESM, como en Vite). No es un paquete publicable.",
+  "type": "module"
+}
