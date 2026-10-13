@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { salaMesa, SALA_ADMIN } = require('./salas');
+const { log } = require('./log');
 const {
   ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson,
 } = require('./http');
@@ -91,16 +92,16 @@ async function crearIntencionPago(req, res, ctx) {
   try {
     cuenta = await ctx.backend.get(`/api/mesas/${idMesa}/cuenta/interno`);
   } catch (err) {
-    console.error(`[pagos] cuenta de la mesa ${idMesa}: ${err.codigo || err.message}`);
+    log.error('pagos: no se pudo consultar la cuenta', { id_mesa: idMesa, codigo: err.codigo || err.message });
     throw new ErrorHttp(503, 'ERROR_INTERNO', 'No se pudo consultar la cuenta; intenta de nuevo');
   }
   if (!cuenta.ok) {
-    console.error(`[pagos] cuenta de la mesa ${idMesa}: el backend respondió ${cuenta.status}`);
+    log.error('pagos: el backend respondió error a la cuenta', { id_mesa: idMesa, status: cuenta.status });
     throw new ErrorHttp(502, 'ERROR_INTERNO', 'No se pudo consultar la cuenta; intenta de nuevo');
   }
   const errorCuenta = validarCuenta(cuenta.cuerpo, idMesa);
   if (errorCuenta) {
-    console.error(`[pagos] cuenta de la mesa ${idMesa} inválida: ${errorCuenta}`);
+    log.error('pagos: cuenta inválida del backend', { id_mesa: idMesa, motivo: errorCuenta });
     throw new ErrorHttp(502, 'ERROR_INTERNO', 'No se pudo consultar la cuenta; intenta de nuevo');
   }
 
@@ -251,7 +252,7 @@ async function recibirEventoPasarela(req, res, ctx) {
   const v = ctx.pasarela.verificarEvento(crudo, req.headers);
   if (!v.valido) {
     // El motivo va al log, no al cliente: no le damos pistas a quien sondea.
-    console.warn(`[pagos] webhook rechazado (${v.motivo}) desde ${req.socket.remoteAddress}`);
+    log.warn('pagos: webhook rechazado', { motivo: v.motivo, ip: req.socket.remoteAddress });
     throw new ErrorHttp(400, 'FIRMA_INVALIDA', 'Firma inválida');
   }
   const { evento } = v;
@@ -271,7 +272,7 @@ async function recibirEventoPasarela(req, res, ctx) {
     const intencion = await ctx.almacenPagos.obtener(evento.referencia);
     const problema = compararTransaccion({ evento, tx, intencion });
     if (problema) {
-      console.warn(`[pagos] transacción ${evento.id_transaccion} no coincide: ${problema}`);
+      log.warn('pagos: la transacción no coincide con lo esperado', { id_transaccion: evento.id_transaccion, motivo: problema });
       await alertarPago(ctx, {
         evento, tx, intencion, motivo: problema,
       });
@@ -281,7 +282,7 @@ async function recibirEventoPasarela(req, res, ctx) {
 
     const registro = await registrarEnBackend(ctx, { evento, tx, intencion });
     if (registro.rechazado) {
-      console.warn(`[pagos] el backend rechazó la transacción ${tx.id} (${registro.rechazado})`);
+      log.warn('pagos: el backend rechazó el registro', { id_transaccion: tx.id, status: registro.rechazado });
       await alertarPago(ctx, {
         evento, tx, intencion, motivo: `backend_rechazo_${registro.rechazado}`,
       });
@@ -309,7 +310,7 @@ async function recibirEventoPasarela(req, res, ctx) {
     // No se pudo terminar (pasarela o backend sin respuesta): se libera la
     // marca de idempotencia y se responde 5xx para que la pasarela reintente.
     await ctx.registroPagos.liberar(clave);
-    console.error(`[pagos] transacción ${evento.id_transaccion}: ${err.codigo || err.message}; se pide reintento`);
+    log.error('pagos: no se pudo procesar el evento; se pide reintento', { id_transaccion: evento.id_transaccion, codigo: err.codigo || err.message });
     throw new ErrorHttp(503, 'ERROR_INTERNO', 'No se pudo procesar el evento; reintenta');
   }
 }

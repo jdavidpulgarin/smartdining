@@ -1,4 +1,5 @@
 const { salaMesa } = require('./salas');
+const { log: logPorDefecto } = require('./log');
 
 const INTERVALO_POR_DEFECTO_MS = 3 * 60 * 1000;
 
@@ -27,7 +28,7 @@ function crearRotadorQr({
   intervaloMs = INTERVALO_POR_DEFECTO_MS,
   programar = (fn, ms) => setTimeout(fn, ms),
   cancelar = (h) => clearTimeout(h),
-  log = console,
+  log = logPorDefecto,
 }) {
   // idMesa -> { temporizador, tokenActual } solo para mesas abiertas y aún sin comensales.
   const mesas = new Map();
@@ -43,7 +44,7 @@ function crearRotadorQr({
   function siguiente(idMesa) {
     const m = mesas.get(idMesa);
     if (!m) return;
-    const h = programar(() => { ciclo(idMesa).catch((err) => log.error?.(`[rotacion] mesa ${idMesa}: ${err.message}`)); }, intervaloMs);
+    const h = programar(() => { ciclo(idMesa).catch((err) => log.error?.('rotación: falló el ciclo', { id_mesa: idMesa, error: err })); }, intervaloMs);
     if (h && h.unref) h.unref(); // no impide el cierre ordenado del proceso
     m.temporizador = h;
   }
@@ -68,7 +69,7 @@ function crearRotadorQr({
         token_anterior: m.tokenActual,
       });
     } catch (err) {
-      log.error?.(`[rotacion] mesa ${idMesa}: backend sin respuesta (${err.codigo || err.message}); se reintenta`);
+      log.error?.('rotación: backend sin respuesta; se reintenta', { id_mesa: idMesa, codigo: err.codigo || err.message });
       siguiente(idMesa);
       return;
     }
@@ -90,7 +91,7 @@ function crearRotadorQr({
       detener(idMesa);
       return;
     }
-    log.error?.(`[rotacion] mesa ${idMesa}: el backend respondió ${r.status}; se reintenta`);
+    log.error?.('rotación: el backend respondió error; se reintenta', { id_mesa: idMesa, status: r.status });
     siguiente(idMesa);
   }
 

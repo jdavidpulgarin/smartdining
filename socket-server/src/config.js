@@ -111,8 +111,15 @@ function cargarConfig(env = process.env) {
 
   const wompi = leerWompi(env, backendUrl);
 
+  const capacidadMesa = env.MESA_CAPACIDAD_POR_DEFECTO === undefined ? 6 : Number(env.MESA_CAPACIDAD_POR_DEFECTO);
+  if (!Number.isInteger(capacidadMesa) || capacidadMesa < 1 || capacidadMesa > 50) {
+    throw new Error('MESA_CAPACIDAD_POR_DEFECTO debe ser un entero entre 1 y 50');
+  }
+
   return {
     puerto: Number(env.PORT) || 4001,
+    // Si el backend no informa la capacidad de una mesa (límite de conexiones).
+    capacidadMesaPorDefecto: capacidadMesa,
     backendUrl,
     // null = pagos apagados. Ojo: este objeto lleva secretos, nunca se registra.
     wompi,

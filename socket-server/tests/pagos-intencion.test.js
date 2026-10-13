@@ -136,7 +136,7 @@ test('responde solo lo necesario para el widget, con la firma correcta y monto d
   for (const secreto of [WOMPI_ENV.WOMPI_PRIVATE_KEY, WOMPI_ENV.WOMPI_INTEGRITY_SECRET, WOMPI_ENV.WOMPI_EVENTS_SECRET]) {
     assert.ok(!texto.includes(secreto), 'ningún secreto en la respuesta');
   }
-  assert.strictEqual(backend.llamadas[0].ruta, '/api/mesas/5/cuenta/interno', 'la mesa sale del JWT');
+  assert.deepStrictEqual(backend.llamadas.filter((l) => l.ruta.includes('/cuenta/')).map((l) => l.ruta), ['/api/mesas/5/cuenta/interno'], 'la mesa sale del JWT');
   const guardada = await s.almacenPagos.obtener(b.referencia);
   assert.deepStrictEqual(
     { ...guardada, creada_en: undefined },
@@ -172,7 +172,7 @@ test('una sola intención pendiente por comensal: otra petición devuelve la mis
   const b = await r2.json();
   assert.strictEqual(b.referencia, a.referencia);
   assert.strictEqual(b.monto_en_centavos, a.monto_en_centavos);
-  assert.strictEqual(backend.llamadas.length, 1, 'no vuelve a pedir la cuenta');
+  assert.strictEqual(backend.llamadas.filter((l) => l.ruta.includes('/cuenta/')).length, 1, 'no vuelve a pedir la cuenta');
 });
 
 test('mismo eventId: misma respuesta', async (t) => {

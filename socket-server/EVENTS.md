@@ -23,7 +23,7 @@ const socket = io('http://localhost:4001', {
 });
 
 socket.on('connect_error', (err) => {
-  // err.message: 'AUTH_REQUERIDA' | 'TOKEN_INVALIDO'
+  // err.message: 'AUTH_REQUERIDA' | 'TOKEN_INVALIDO' | 'MESA_LLENA' | 'SERVIDOR_CERRANDO' | 'ERROR_INTERNO'
 });
 ```
 
@@ -47,6 +47,15 @@ fallará** con `TOKEN_INVALIDO`: el frontend debe pedir un JWT nuevo (para el co
 de nuevo).
 
 ---
+
+### 1.1. Límites de la conexión
+
+| Límite | Valor | Qué pasa al superarlo |
+|---|---|---|
+| Tamaño de un mensaje | 16 KB | El servidor corta esa conexión (`transport close`) |
+| Eventos por socket | 20 en cualquier ventana de 1 s | El evento no se procesa; su ack es `RATE_LIMIT` |
+| Comensales conectados por mesa | capacidad de la mesa + 4 | `connect_error` con `MESA_LLENA` |
+| Durante un reinicio | — | `connect_error` con `SERVIDOR_CERRANDO`: Socket.io reintenta solo y entra a la instancia nueva |
 
 ## 2. Salas (rooms)
 
@@ -765,3 +774,5 @@ Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 | `PAGOS_TTL_MINUTOS` | Vida de una intención de pago (30) |
 | `REDIS_URL` | Estado persistente (obligatoria en producción) |
 | `ROTACION_QR_MINUTOS` | Rotación automática del QR con la mesa vacía (3) |
+| `MESA_CAPACIDAD_POR_DEFECTO` | Capacidad si el backend no la informa; comensales por mesa = capacidad + 4 (6) |
+| `LOG_NIVEL` | `debug`, `info` (por defecto), `warn`, `error` o `silencio`. Logs en JSON, sin secretos |

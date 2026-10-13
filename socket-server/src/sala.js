@@ -1,4 +1,5 @@
 const { exito, fallo, manejar } = require('./ack');
+const { log } = require('./log');
 const { ROL_COMENSAL } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
 const { salaMesa, SALA_ADMIN, estaEnMesa } = require('./salas');
@@ -63,7 +64,7 @@ function crearPresencia({ io, ventanaMs = VENTANA_PRESENCIA_MS }) {
       return;
     }
     abrirVentana(idMesa);
-    emitir(idMesa).catch((err) => console.error('[presencia] no se pudo emitir:', err.message));
+    emitir(idMesa).catch((err) => log.error('presencia: no se pudo emitir', { id_mesa: idMesa, error: err }));
   }
 
   return { calcular, programar };

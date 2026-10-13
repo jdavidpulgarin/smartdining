@@ -1,4 +1,5 @@
 const { createClient } = require('redis');
+const { log: logPorDefecto } = require('../log');
 
 // Prefijo común de todas las llaves del socket-server. El backend comparte la
 // misma instancia de Redis (caché del menú): con el prefijo no hay choques.
@@ -17,7 +18,7 @@ const PREFIJO = 'sd:';
  * - El error de conexión solo va al log (sin la URL, que puede llevar la
  *   contraseña): un 'error' sin escuchar tumbaría el proceso.
  */
-function crearConexionRedis({ url, crearCliente = createClient, log = console } = {}) {
+function crearConexionRedis({ url, crearCliente = createClient, log = logPorDefecto } = {}) {
   if (!url) throw new Error('crearConexionRedis requiere url');
 
   const cliente = crearCliente({
@@ -31,7 +32,7 @@ function crearConexionRedis({ url, crearCliente = createClient, log = console } 
 
   let estado = 'desconectado';
   let ultimoErrorLog = 0;
-  cliente.on('ready', () => { estado = 'conectado'; log.info?.('[redis] conectado'); });
+  cliente.on('ready', () => { estado = 'conectado'; log.info?.('redis conectado'); });
   cliente.on('end', () => { estado = 'desconectado'; });
   cliente.on('reconnecting', () => { estado = 'reconectando'; });
   cliente.on('error', (err) => {
@@ -40,7 +41,7 @@ function crearConexionRedis({ url, crearCliente = createClient, log = console } 
     const t = Date.now();
     if (t - ultimoErrorLog > 10000) {
       ultimoErrorLog = t;
-      log.error?.(`[redis] error de conexión: ${err.code || err.name || 'desconocido'}`);
+      log.error?.('redis: error de conexión', { codigo: err.code || err.name || 'desconocido' });
     }
   });
 

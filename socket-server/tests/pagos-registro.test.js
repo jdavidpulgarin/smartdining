@@ -55,6 +55,8 @@ async function escenario(t, { api = { [ID_TX]: txApi() }, apiCaida = false, ruta
   };
 }
 const llamadasA = (backend, ruta) => backend.llamadas.filter((l) => l.ruta === ruta);
+// Llamadas de pagos (sin contar la consulta de capacidad de la mesa al conectar).
+const llamadasDePago = (backend) => backend.llamadas.filter((l) => l.metodo === 'POST');
 
 test('pago aprobado y coherente: se registra en el backend y SOLO después se anuncia', async (t) => {
   const {
@@ -92,7 +94,7 @@ test('checksum inválido: 400, sin consultar la API, sin registrar ni emitir', a
   const r = await enviar(malo);
   assert.strictEqual(r.status, 400);
   assert.strictEqual(fetch.llamadas.length, 0);
-  assert.strictEqual(backend.llamadas.length, 0);
+  assert.strictEqual(llamadasDePago(backend).length, 0);
   assert.strictEqual(await nada, null);
 });
 
@@ -204,7 +206,7 @@ test('API de la pasarela caída: 503 para que Wompi reintente', async (t) => {
   const { backend, enviar, evento } = await escenario(t, { apiCaida: true });
   const r = await enviar(evento());
   assert.strictEqual(r.status, 503);
-  assert.strictEqual(backend.llamadas.length, 0);
+  assert.strictEqual(llamadasDePago(backend).length, 0);
 });
 
 test('no se puede guardar el intento fallido: 503 (la evidencia no se pierde)', async (t) => {
@@ -227,7 +229,7 @@ test('DECLINED y ERROR: sin consultar ni registrar; el comensal queda libre para
     });
     assert.strictEqual(await nada, null);
     assert.strictEqual(fetch.llamadas.length, 0);
-    assert.strictEqual(backend.llamadas.length, 0);
+    assert.strictEqual(llamadasDePago(backend).length, 0);
     assert.strictEqual((await s.almacenPagos.obtener(REF)).estado, guardado);
     assert.strictEqual(await s.almacenPagos.obtenerPendiente(5, 'Ana'), null);
   }
