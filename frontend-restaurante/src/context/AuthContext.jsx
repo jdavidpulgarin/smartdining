@@ -31,6 +31,7 @@ export function AuthProvider({ children }) {
   const logout = useCallback(() => {
     setUser(null)
     sessionStorage.removeItem('smartdining_staff_user')
+    sessionStorage.removeItem('smartdining_token')
   }, [])
 
   // Escuchar respuestas 401 emitidas por cualquier llamada apiFetch
