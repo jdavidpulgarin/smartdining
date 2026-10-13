@@ -312,7 +312,7 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 | DELETE | `/push/suscripcion` | Bearer JWT `comensal` | Body `{ "endpoint": "..." }` → 200 |
 | POST | `/internal/order-created` | Header `x-internal-key` | Solo backend. Mismo body que el evento `order:created` |
 | POST | `/internal/order-status` | Header `x-internal-key` | Solo backend. Mismo body que `order:status` |
-| POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` → reenvía `qr:actualizado` a la pantalla de esa mesa |
+| POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` (token de 1 a 255 caracteres) → reenvía `qr:actualizado` a la pantalla de esa mesa |
 | POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5 }` → invalida los QR emitidos de esa mesa y borra su carrito y sus suscripciones push |
 | POST | `/pagos/webhook` | Firma del proveedor | Ver sección 8 |
 

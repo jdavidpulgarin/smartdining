@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { exigirSecretos } = require('./secretos');
 
 // Se lee el entorno en una función (y no al cargar el módulo) para que las
 // pruebas puedan cambiar process.env y volver a construir la configuración.
@@ -17,21 +18,18 @@ function cargarConfig(env = process.env) {
     throw new Error('CORS_ORIGINS es obligatorio (orígenes separados por comas)');
   }
 
-  // Sin el secreto compartido con el backend no podemos verificar ningún JWT
-  // y cualquiera podría conectarse; es mejor no arrancar.
-  if (!env.JWT_SECRET) {
-    throw new Error('JWT_SECRET es obligatorio (el mismo que usa backend/)');
-  }
+  // Sin secretos fuertes y propios no se arranca: un JWT_SECRET de ejemplo
+  // dejaría a cualquiera firmar tokens de personal, y una INTERNAL_API_KEY de
+  // ejemplo, liberar mesas o inventar comandas por /internal/* (ver secretos.js).
+  exigirSecretos(env);
 
   return {
     puerto: Number(env.PORT) || 4001,
     entorno: env.NODE_ENV || 'development',
     origenes,
     jwtSecret: env.JWT_SECRET,
-    // Opcional: sin ella los endpoints /internal/* responden 503 (cerrados).
-    internalApiKey: env.INTERNAL_API_KEY || null,
-    // Si falta, se deriva de JWT_SECRET (ver derivarSecretoQr en qr.js).
-    qrSecret: env.QR_SECRET || null,
+    internalApiKey: env.INTERNAL_API_KEY,
+    qrSecret: env.QR_SECRET,
     qrTtlMinutos: Number(env.QR_TTL_MINUTOS) || 360,
     // Vigencia del JWT de la pantalla de mesa (modelo "QR en vidrio"): larga a
     // propósito, la tablet queda montada de sesión en sesión, no por horas.

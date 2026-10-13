@@ -1,9 +1,16 @@
+const crypto = require('node:crypto');
 const jwt = require('jsonwebtoken');
 const { io: cliente } = require('socket.io-client');
 const { cargarConfig } = require('../src/config');
 const { crearServidor } = require('../src/servidor');
 
-const SECRETO = 'secreto-de-pruebas';
+// Secretos aleatorios por ejecución: ninguno queda escrito en el repositorio y
+// todos cumplen las reglas de arranque (32+ caracteres, distintos entre sí).
+const aleatorio = () => crypto.randomBytes(32).toString('hex');
+const SECRETO = aleatorio();
+const CLAVE_INTERNA = aleatorio();
+const SECRETO_QR = aleatorio();
+const ENV_BASE = { JWT_SECRET: SECRETO, INTERNAL_API_KEY: CLAVE_INTERNA, QR_SECRET: SECRETO_QR };
 const ORIGEN = 'http://localhost:5173';
 
 const firmar = (payload, secreto = SECRETO, opts = {}) => jwt.sign(payload, secreto, { expiresIn: '1h', ...opts });
@@ -12,7 +19,7 @@ const tokenPantalla = (id_mesa) => firmar({ id_mesa, rol: 'pantalla' });
 const tokenPersonal = (rol, id_usuario = 1) => firmar({ id_usuario, rol });
 
 async function levantar(extraEnv = {}, deps = {}) {
-  const config = cargarConfig({ CORS_ORIGINS: ORIGEN, JWT_SECRET: SECRETO, ...extraEnv });
+  const config = cargarConfig({ CORS_ORIGINS: ORIGEN, ...ENV_BASE, ...extraEnv });
   const servidor = crearServidor(config, deps);
   await new Promise((r) => servidor.httpServer.listen(0, r));
   const url = `http://localhost:${servidor.httpServer.address().port}`;
@@ -44,5 +51,5 @@ const esperar = (socket, evento, ms = 300) => new Promise((res) => {
 });
 
 module.exports = {
-  levantar, emitir, esperar, tokenComensal, tokenPantalla, tokenPersonal, firmar, SECRETO, ORIGEN,
+  levantar, emitir, esperar, tokenComensal, tokenPantalla, tokenPersonal, firmar, aleatorio, SECRETO, CLAVE_INTERNA, ENV_BASE, ORIGEN,
 };
