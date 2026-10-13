@@ -266,8 +266,11 @@ test('un pago que excede el saldo sigue saliendo como 409 del trigger', async ()
   }
 });
 
+// H-07: el body ya no puede traer estos estados, asi que ni se llega a abrir la
+// transaccion. La regla de "un pago no efectivo no liquida el pedido" sigue
+// viva en el service para el canal interno y para un 'completada' parcial.
 for (const estado of ['pendiente', 'fallida', 'reembolsada']) {
-  test(`una transaccion '${estado}' no consulta el saldo ni cambia el pedido`, async () => {
+  test(`una transaccion '${estado}' se rechaza con 400 y no toca la base`, async () => {
     const socket = instalarFakeSocket();
     const db = instalarFakeDb(responderCobro, { saldoTrasPago: 0 });
     try {
@@ -278,12 +281,9 @@ for (const estado of ['pendiente', 'fallida', 'reembolsada']) {
         estado_transaccion: estado,
       });
 
-      assert.strictEqual(res.status, 201, 'la transaccion se registra igual');
-      assert.strictEqual(
-        db.buscar('obtener_saldo_pendiente'),
-        undefined,
-        'un pago no efectivo no liquida nada, asi que no hace falta el saldo'
-      );
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined);
+      assert.strictEqual(db.buscar('obtener_saldo_pendiente'), undefined);
       assert.strictEqual(db.buscar("UPDATE pedidos SET estado = 'pagado'"), undefined);
       assert.strictEqual(db.buscar('UPDATE mesas SET estado = $1, token_qr = NULL'), undefined);
       assert.strictEqual(socket.buscar('/internal/order-status'), undefined);
@@ -418,6 +418,86 @@ test('h-01: el estado del historial sale de la relectura bajo bloqueo', async ()
       'entregado',
       'estado_anterior es el de la fila bloqueada, no el que se vio antes de esperar'
     );
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// H-07: el estado de la transaccion lo fija el servidor
+// ---------------------------------------------------------------------------
+
+for (const estado of ['reembolsada', 'fallida', 'pendiente']) {
+  test(`h-07: estado_transaccion '${estado}' se rechaza con 400`, async () => {
+    const socket = instalarFakeSocket();
+    const db = instalarFakeDb(responderCobro, { saldoTrasPago: 0 });
+    try {
+      const res = await cobrar({ ...PAGO_COMPLETO, estado_transaccion: estado });
+
+      assert.strictEqual(res.status, 400);
+      assert.match(res.body.error, /El estado del pago lo fija el servidor/);
+      assert.match(res.body.error, /reembolso no se registra por esta ruta/);
+      assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined);
+    } finally {
+      db.restaurar();
+      socket.restaurar();
+    }
+  });
+}
+
+test("h-07: 'completada' se sigue aceptando por compatibilidad", async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderCobro, { saldoTrasPago: 0 });
+  try {
+    const res = await cobrar({ ...PAGO_COMPLETO, estado_transaccion: 'completada' });
+
+    assert.strictEqual(res.status, 201, 'es lo que ya manda el panel');
+    assert.strictEqual(db.buscar('INSERT INTO transacciones').params[3], 'completada');
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('h-07: sin el campo se registra como completada, igual que antes', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderCobro, { saldoTrasPago: 0 });
+  try {
+    const res = await cobrar(PAGO_COMPLETO);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(db.buscar('INSERT INTO transacciones').params[3], 'completada');
+    assert.ok(db.buscar("UPDATE pedidos SET estado = 'pagado'"), 'y liquida el pedido');
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('h-07: un valor inventado tambien se rechaza', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderCobro, { saldoTrasPago: 0 });
+  try {
+    const res = await cobrar({ ...PAGO_COMPLETO, estado_transaccion: 'anulada_por_el_cajero' });
+
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined);
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('h-07: el abono parcial sigue funcionando sin tocar el estado', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderCobro, { saldoTrasPago: 46000 });
+  try {
+    const res = await cobrar({ id_pedido: 87, monto: 10000, metodo_pago: 'efectivo' });
+
+    assert.strictEqual(res.status, 201, 'lo de #35 no se rompe');
+    assert.strictEqual(db.buscar('INSERT INTO transacciones').params[3], 'completada');
+    assert.strictEqual(db.buscar("UPDATE pedidos SET estado = 'pagado'"), undefined);
   } finally {
     db.restaurar();
     socket.restaurar();

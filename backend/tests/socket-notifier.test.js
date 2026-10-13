@@ -375,8 +375,10 @@ test("un cobro 'completada' avisa mesa-liberada y el cambio a pagado", async () 
   }
 });
 
+// H-07: estos estados ya no se aceptan en el body (400), asi que no hay cobro
+// que pueda liberar la mesa ni aviso que mandar.
 for (const estado of ['fallida', 'pendiente', 'reembolsada']) {
-  test(`un cobro '${estado}' NO libera la mesa`, async () => {
+  test(`un cobro '${estado}' se rechaza y no avisa nada`, async () => {
     const db = instalarFakeDb(dbPago());
     const socket = instalarFakeSocket();
     try {
@@ -385,7 +387,7 @@ for (const estado of ['fallida', 'pendiente', 'reembolsada']) {
         .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
         .send({ id_pedido: 87, monto: 80000, metodo_pago: 'tarjeta_credito', estado_transaccion: estado });
 
-      assert.strictEqual(res.status, 201, 'la transacción se registra igual');
+      assert.strictEqual(res.status, 400);
       assert.strictEqual(socket.buscar('/internal/mesa-liberada'), undefined);
       assert.strictEqual(socket.buscar('/internal/order-status'), undefined);
     } finally {
