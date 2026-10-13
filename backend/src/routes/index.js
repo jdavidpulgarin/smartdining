@@ -8,6 +8,7 @@ const mesasRoutes = require('./mesas.routes');
 const pedidosRoutes = require('./pedidos.routes');
 const kdsRoutes = require('./kds.routes');
 const transaccionesRoutes = require('./transacciones.routes');
+const pagosRoutes = require('./pagos.routes');
 
 const router = express.Router();
 
@@ -21,5 +22,6 @@ router.use('/mesas', mesasRoutes);
 router.use('/pedidos', pedidosRoutes);
 router.use('/kds', kdsRoutes);
 router.use('/transacciones', transaccionesRoutes);
+router.use('/pagos', pagosRoutes);
 
 module.exports = router;

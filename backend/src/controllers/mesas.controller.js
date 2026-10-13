@@ -141,6 +141,29 @@ async function abrir(req, res, next) {
 }
 
 /**
+ * GET /api/mesas/:id/cuenta/interno — la llama el socket-server de Roberto con
+ * x-internal-key, no un navegador (EVENTS.md §8.2).
+ *
+ * Es la cuenta que el comensal ve antes de pagar: total y saldo de la mesa en
+ * centavos, y cuánto debe cada alias. Los montos los calcula la base; aquí no
+ * se suma nada.
+ */
+async function cuentaInterna(req, res, next) {
+  const idMesa = Number(req.params.id);
+  if (!Number.isInteger(idMesa) || idMesa <= 0) {
+    return res.status(400).json({ error: 'id de mesa inválido' });
+  }
+
+  try {
+    const cuenta = await mesasService.cuentaInterna(idMesa);
+    if (!cuenta) return res.status(404).json({ error: 'Mesa no encontrada' });
+    return res.json(cuenta);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
  * POST /api/mesas/:id/rotar-qr — el mesero cambia el QR de una mesa abierta
  * (p. ej. porque alguien fotografió la tablet).
  *
@@ -362,6 +385,7 @@ module.exports = {
   obtener,
   abrir,
   rotarQr,
+  cuentaInterna,
   liberar,
   crearSesionPorToken,
   crear,

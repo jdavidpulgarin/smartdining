@@ -822,6 +822,169 @@ se registra un parser por OID 1700 en `src/config/db.js`.
 
 ---
 
+## Canal interno (socket-server)
+
+Tres rutas que **no llevan JWT**: las llama el socket-server de Roberto, servidor a
+servidor, con la clave compartida en la cabecera
+
+```
+x-internal-key: <INTERNAL_API_KEY>
+```
+
+Contrato: `socket-server/EVENTS.md` §8.2, §8.4 y §8.5. Ningún frontend las usa.
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | /mesas/:id/cuenta/interno | Cuenta de la mesa en centavos, con el saldo de cada comensal |
+| POST | /transacciones/internal | Registra un pago ya cobrado por la pasarela y lo reparte entre los pedidos de la mesa |
+| POST | /pagos/intentos-fallidos/interno | Bitácora de un pago rechazado o descartado al reverificarlo |
+
+Respuestas del middleware:
+
+- **401** si falta la cabecera o la clave no coincide (se compara en tiempo constante,
+  con `crypto.timingSafeEqual`).
+- **503** si el servidor **no tiene** `INTERNAL_API_KEY`, o todavía tiene el
+  placeholder del `.env.example`. Falla cerrada a propósito: con el canal abierto
+  cualquiera en la red podría registrar pagos y liberar mesas, y un 503 se nota y se
+  arregla.
+
+Todos los montos de estas rutas viajan en **centavos enteros** (`monto_centavos`,
+`saldo_centavos`…) y la conversión a pesos se hace **en SQL**
+(`($n::bigint)::numeric / 100`), nunca con coma flotante en JavaScript.
+
+### GET /mesas/:id/cuenta/interno
+
+200:
+
+```json
+{
+  "id_mesa": 5,
+  "moneda": "COP",
+  "total_centavos": 9000000,
+  "saldo_centavos": 6000000,
+  "por_comensal": [ { "comensal": "Ana", "saldo_centavos": 3000000 } ]
+}
+```
+
+- Sale de `obtener_cuenta_mesa_json()`; los centavos se calculan con
+  `ROUND(x * 100)::bigint` en la misma consulta.
+- `por_comensal` solo incluye a quien **todavía debe algo** (saldo > 0).
+- **404** si la mesa no existe (se comprueba antes de llamar a la función, que
+  lanzaría un `RAISE` y saldría como 409). **400** si el id no es un entero.
+
+> ⚠️ **Limitación conocida (no es de este endpoint):** `obtener_cuenta_mesa` toma todos
+> los pedidos de la mesa con `estado != 'cancelado'`, **sin distinguir la sesión**, así
+> que un pedido ya pagado de un grupo anterior sigue sumando en `total_centavos` y
+> descuadra `por_comensal`. Ver *Pendiente por acordar con el equipo*.
+
+### POST /transacciones/internal
+
+Body:
+
+```json
+{
+  "referencia_externa": "SD-5-1760212345678-Qm9vX2E",
+  "id_transaccion_pasarela": "1132-903100443-27458",
+  "pasarela": "wompi",
+  "id_mesa": 5,
+  "comensal": "Ana",
+  "modo": "igual",
+  "monto_centavos": 3000000,
+  "moneda": "COP",
+  "metodo_pago": "online"
+}
+```
+
+- `moneda` solo acepta `"COP"`; `monto_centavos` es un entero > 0; `comensal` puede
+  ir `null` (pago de la mesa completa); `metodo_pago` por omisión es `online`.
+- `modo` e `id_transaccion_pasarela` se validan porque son del contrato, pero hoy **no
+  hay columna** donde guardarlos.
+- **El pago es de la mesa, no de un pedido.** Todo ocurre en una sola transacción SQL:
+  se bloquea la fila de la mesa (`FOR UPDATE`), se reparte el monto entre sus pedidos
+  no cancelados con saldo, **del más antiguo al más nuevo** (orden de la base, por
+  `creado_en`), y cada pedido recibe hasta su propio saldo.
+- **Una fila de `transacciones` por pedido.** `transacciones.referencia_externa` tiene
+  un índice único (`uq_transacciones_referencia_externa`), así que **la primera fila
+  lleva la referencia tal cual** —es la que se busca para la idempotencia y la que
+  cuadra con el extracto de la pasarela— y las siguientes llevan
+  `referencia#2`, `referencia#3`… El sufijo es un detalle del almacenamiento: el
+  contrato con el socket-server sigue hablando de una sola referencia.
+- Un pedido pasa a `pagado` **solo si se cumplen las dos cosas**: su saldo llegó a **0**
+  **y** ya estaba en **`entregado`** (es la única transición que acepta
+  `tr_validar_transicion_estado`). Si todavía está en cocina, el pago queda registrado y
+  el pedido sigue su curso; cuando llegue a `entregado` su saldo ya será 0 y la caja no
+  volverá a cobrarlo. El cambio se registra en `historial_estados` con `id_usuario`
+  **NULL** y `observaciones` `"Pago en linea"`: no lo cobró una persona.
+- **La mesa se libera solo si algún pedido llegó a `pagado` por este pago y a la mesa no
+  le queda ningún otro pedido abierto**, todo en la misma transacción. Dos consecuencias
+  que conviene tener claras: un pago que deja saldo **no** libera la mesa, y un pago que
+  liquida el saldo de un pedido que sigue en cocina **tampoco** la libera (el pedido no
+  pasó a `pagado`, así que sigue contando como abierto). Después del commit —y aislado—
+  se avisa `order:status` por cada pedido liquidado y `/internal/mesa-liberada` con
+  `{ "motivo": "pagada" }`.
+
+201:
+
+```json
+{ "ok": true, "duplicado": false, "saldo_restante_centavos": 6000000, "mesa_liberada": false }
+```
+
+- **200** con `"duplicado": true` si esa `referencia_externa` ya estaba registrada (un
+  reintento de la pasarela no vuelve a cobrar ni a avisar al socket-server). Si la
+  carrera la pierde el `INSERT` y choca con el índice único (`23505`), se revierte y se
+  responde igual como duplicado.
+Errores:
+
+| Status | Cuándo | Cuerpo |
+|---|---|---|
+| **404** | La mesa no existe (se comprueba con la fila bloqueada, antes de repartir nada) | `{ "error": "Mesa no encontrada" }` |
+| **409** | El pago **excede el saldo** de la mesa | `{ "error": "El pago excede el saldo de la mesa", "saldo_centavos": 2400000 }` |
+| **409** | La mesa **no tiene cuenta abierta** (ningún pedido no cancelado con saldo > 0) | `{ "error": "La mesa no tiene una cuenta abierta por pagar" }` |
+| **409** | Cualquier regla que rechace un trigger de la base | El mensaje del trigger, tal cual |
+| **400** | El cuerpo no cumple el esquema | El primer problema que encontró zod |
+| **401** / **503** | Clave interna inválida / canal interno sin configurar | Ver el inicio de esta sección |
+
+A diferencia de la bitácora de intentos fallidos, **aquí sí se rechaza de verdad**:
+este endpoint mueve dinero, y registrar un pago a medias sería peor que devolver un
+error. El cuerpo exige `referencia_externa`, `id_transaccion_pasarela`, `pasarela`,
+`id_mesa`, `modo`, `monto_centavos` (entero > 0) y `moneda` **exactamente `"COP"`**;
+solo `comensal` admite `null` y solo `metodo_pago` tiene valor por omisión.
+Nada se degrada a NULL en silencio.
+
+### POST /pagos/intentos-fallidos/interno
+
+Body: solo tres campos son **obligatorios** — `referencia_externa`,
+`id_transaccion_pasarela` y `motivo` (lo que identifica la alerta y por qué se rechazó).
+El resto es opcional y admite `null`: `pasarela`, `id_mesa`, `monto_centavos`,
+`monto_esperado_centavos`, `moneda`, `metodo_pago`.
+
+201: `{ "ok": true }`
+
+- Guarda en `intentos_pago_fallidos` con `razon_rechazo` = `motivo` tal cual,
+  `monto` = centavos / 100 e `id_pedido` en **NULL** (una referencia rechazada puede no
+  corresponder a ningún pedido).
+- **Idempotente** por (`referencia_externa`, `id_transaccion_pasarela`,
+  `razon_rechazo`): un reintento no inserta otra fila y responde 201 igual, porque para
+  el socket-server lo que importa es que quedó registrado.
+
+**Por qué este endpoint es tan tolerante.** El socket-server **solo reintenta ante 5xx o
+error de red**: un 4xx lo da por resuelto y la alerta se pierde para siempre. Como esto
+es una bitácora y no un cobro, guardar un registro incompleto siempre es mejor que
+rechazarlo, así que lo que no se puede guardar se degrada a `NULL`:
+
+| Caso | Qué hace |
+|---|---|
+| `id_mesa: null`, ausente, o una mesa que no existe | Guarda `id_mesa` en **NULL** (la FK `fk_intento_mesa` no se rompe). Con `null` ni se consulta la tabla `mesas` |
+| `moneda` distinta de COP (`"USD"`) | **Se guarda tal cual** y responde 201: una moneda inesperada *es* la alerta (motivo `moneda_distinta`). Se normaliza a mayúsculas, para que `usd` y `USD` no queden como dos monedas en la bitácora. La columna es `VARCHAR(3)`, así que más de 3 caracteres sí da 400 |
+| `monto_centavos` ausente, `null`, `0` o negativo | Guarda `monto` en **NULL**. `intentos_pago_fallidos` tiene `CHECK (monto > 0)`: un 0 reventaría el INSERT y se perdería el registro |
+| `monto_esperado_centavos` (incl. `null`) | **Se valida pero no se guarda**: la tabla no tiene columna para él |
+| Sin `pasarela` o sin `moneda` | Se guardan en `NULL`; `metodo_pago` mantiene su valor por omisión (`online`) |
+
+**400** solo si falta uno de los tres obligatorios, o si un campo presente no cumple su
+forma (p. ej. `moneda` de más de 3 caracteres, `monto_centavos` no entero).
+
+---
+
 ## Pendiente por acordar con el equipo
 
 Ya resueltos contra el `schema.sql` de Jarrison: `mesas.estado` es
@@ -841,3 +1004,16 @@ Sigue abierto:
 - `suscripciones_push` está en el modelo ER pero todavía no la consume ningún endpoint
   de este backend (las notificaciones Web Push son módulo de Roberto).
 - ¿Debe el comensal poder cancelar su propio pedido? Hoy cancelar es solo de staff.
+- **`obtener_cuenta_mesa` mezcla sesiones de la misma mesa.** Filtra por
+  `estado != 'cancelado'`, así que los pedidos ya pagados del grupo anterior siguen
+  contando. Con un pedido viejo de $10.000 pagado (ítem de 'Ana', pago sin alias) y uno
+  nuevo de $30.000 de 'Beto': `total_mesa` = 40.000 en vez de 30.000, y por comensal sale
+  Ana debiendo 10.000 que ya pagó, mientras el pago aparece bajo 'General'. La suma de
+  los saldos por comensal (40.000) no cuadra con `saldo_mesa` (30.000). Hace falta
+  delimitar la sesión: una columna de apertura en `mesas` o un `id_sesion` en
+  `pedidos` (hoy `mesas` no tiene ninguna columna que sirva).
+- **`registrarPago` marca el pedido `pagado` con cualquier cobro `completada`, aunque
+  sea parcial.** El trigger solo rechaza el exceso, no el pago de menos, así que abonar
+  $1 de una cuenta de $56.000 la deja como cobrada y libera la mesa. `POST
+  /transacciones/internal` no tiene ese problema (compara contra el saldo), pero
+  `POST /transacciones` sí.
