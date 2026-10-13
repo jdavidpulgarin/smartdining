@@ -158,6 +158,13 @@ export const mesasApi = {
       method: 'POST',
     })
   },
+
+  /**
+   * Obtiene la cuenta detallada y saldo de una mesa: GET /api/mesas/:id/cuenta
+   */
+  async obtenerCuenta(id) {
+    return apiFetch(`/mesas/${id}/cuenta`)
+  },
 }
 
 // Submódulo de Pedidos
@@ -194,6 +201,27 @@ export const pedidosApi = {
       method: 'POST',
       body: JSON.stringify({ razon }),
     })
+  },
+}
+
+// Submódulo de Transacciones / Caja
+export const transaccionesApi = {
+  /**
+   * Registra un pago en caja (admin/cajero): POST /api/transacciones
+   * @param {{ id_pedido: number, monto: number, metodo_pago: string, referencia_externa?: string, comensal?: string|null }} datos
+   */
+  async registrarPago(datos) {
+    return apiFetch('/transacciones', {
+      method: 'POST',
+      body: JSON.stringify(datos),
+    })
+  },
+
+  /**
+   * Obtiene las transacciones registradas para un pedido: GET /api/transacciones/pedido/:id_pedido
+   */
+  async obtenerPorPedido(idPedido) {
+    return apiFetch(`/transacciones/pedido/${idPedido}`)
   },
 }
 
