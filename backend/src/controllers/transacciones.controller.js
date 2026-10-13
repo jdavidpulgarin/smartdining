@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const transaccionesService = require('../services/transacciones.service');
 const socketNotifier = require('../services/socket.notifier');
+const aliasComensal = require('../services/alias-comensal');
 
 // Valores exactos de los CHECK de la tabla transacciones en el schema.sql de
 // Jarrison. referencia_externa es la referencia de la pasarela de Roberto.
@@ -38,7 +39,10 @@ async function crear(req, res, next) {
     // La mesa se liberó en la transacción del cobro solo si no le quedaban
     // pedidos abiertos. Se avisa para que el socket-server cierre esa sesión:
     // aislado, porque la liberación ya está hecha y no se revierte.
-    if (mesaLiberada) socketNotifier.notificarMesaLiberada(id_mesa);
+    if (mesaLiberada) {
+      socketNotifier.notificarMesaLiberada(id_mesa);
+      aliasComensal.olvidarMesa(id_mesa);
+    }
 
     return res.status(201).json(transaccion);
   } catch (err) {
