@@ -191,13 +191,34 @@ async function listarActivos(req, res, next) {
   }
 }
 
+/**
+ * ¿El pedido es de la visita que está sentada ahora en la mesa?
+ *
+ * Misma regla que el SQL (`creado_en >= sesion_iniciada_en`), aquí en
+ * JavaScript porque es una comprobación de permiso sobre una fila que ya se
+ * leyó, no una consulta. Sin sesión delimitada (NULL) se acepta, igual que en
+ * la base.
+ */
+function esDeLaVisitaActual(pedido, mesa) {
+  if (!mesa || !mesa.sesion_iniciada_en) return true;
+  return new Date(pedido.creado_en) >= new Date(mesa.sesion_iniciada_en);
+}
+
 async function obtener(req, res, next) {
   try {
     const pedido = await pedidosService.obtenerConDetalles(req.params.id);
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
-    // Un comensal solo puede ver los pedidos de su propia mesa.
+    // Un comensal solo puede ver los pedidos de su propia mesa...
     if (esComensal(req) && pedido.id_mesa !== req.user.id_mesa) {
+      return res.status(403).json({ error: 'Ese pedido no pertenece a tu mesa' });
+    }
+
+    // ...y solo los de SU visita. Sin esto, un comensal podría leer por id un
+    // pedido del grupo anterior sentado en la misma mesa (sus platos, su alias
+    // y su total), que es la misma fuga que cierra el filtro de
+    // GET /api/pedidos/mesa. El personal sí ve el histórico completo.
+    if (esComensal(req) && !esDeLaVisitaActual(pedido, await mesasService.obtenerPorId(pedido.id_mesa))) {
       return res.status(403).json({ error: 'Ese pedido no pertenece a tu mesa' });
     }
 
