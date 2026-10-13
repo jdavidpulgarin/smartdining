@@ -3,6 +3,7 @@ const { enviarJson, ErrorHttp } = require('./http');
 // Códigos con los que el servicio push (FCM, Mozilla...) indica que la
 // suscripción ya no existe: el usuario revocó el permiso o desinstaló la PWA.
 const CODIGOS_SUSCRIPCION_CADUCADA = [404, 410];
+const TTL_PUSH_SEG = 30 * 60;
 
 /**
  * Servicio de Web Push. Se inyecta `webpush` para poder probarlo sin salir a
@@ -33,9 +34,10 @@ function crearServicioPush(config, { webpush = require('web-push') } = {}) {
   async function enviar(suscripcion, payload) {
     if (!habilitado) return { ok: false, caducada: false, motivo: 'deshabilitado' };
     try {
-      // TTL: si el dispositivo está apagado, el aviso "tu pedido está listo"
-      // pierde sentido pasada una hora, así que no se encola más tiempo.
-      await webpush.sendNotification(suscripcion, JSON.stringify(payload), { TTL: 3600, urgency: 'high' });
+      // TTL 30 min: si el dispositivo está apagado más tiempo, "tu plato está
+      // listo" ya no sirve (o ya lo recogieron). urgency high: que no lo
+      // retrase el ahorro de batería.
+      await webpush.sendNotification(suscripcion, JSON.stringify(payload), { TTL: TTL_PUSH_SEG, urgency: 'high' });
       return { ok: true };
     } catch (err) {
       const caducada = CODIGOS_SUSCRIPCION_CADUCADA.includes(err.statusCode);
@@ -56,4 +58,6 @@ const rutasPush = {
   },
 };
 
-module.exports = { crearServicioPush, rutasPush, CODIGOS_SUSCRIPCION_CADUCADA };
+module.exports = {
+  crearServicioPush, rutasPush, CODIGOS_SUSCRIPCION_CADUCADA, TTL_PUSH_SEG,
+};

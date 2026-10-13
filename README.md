@@ -87,6 +87,15 @@ para `develop`:
 
 ---
 
+## 🔔 Notificaciones push en iPhone
+
+En iPhone el Web Push solo funciona con iOS 16.4 o posterior **y** la PWA instalada en la
+pantalla de inicio. Por eso el aviso principal ("¡Tu plato está listo!") es el evento en vivo
+por socket dentro de la página; el push es un extra. Detalles en
+[socket-server/README.md](socket-server/README.md#notificaciones-push-y-iphone).
+
+---
+
 ## 🚀 Levantar SmartDining en 5 minutos
 
 Requisitos: **Node 22** y **Docker Desktop** (o Docker Engine con el plugin `compose`).

@@ -481,27 +481,49 @@ seguro.
 
 ## 7. Web Push
 
+El aviso **principal** es el evento de socket dentro de la página (`order:status`). El push es
+un extra para cuando el comensal cerró la PWA. En **iPhone** Web Push solo funciona con la PWA
+**instalada** en la pantalla de inicio (iOS 16.4 o posterior); en Safari normal no llega.
+
 1. El frontend pide la clave pública: `GET /push/clave-publica`.
 2. `registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })`.
-3. Envía la suscripción con `POST /push/suscripcion` o el evento `push:subscribe`.
-4. Cuando cambia el estado de un pedido de su mesa, el servidor envía una notificación
-   con el payload:
+3. Hace `join:table` **con su alias** (`{ comensal: "Ana" }`) y envía la suscripción:
+   - por socket: `push:subscribe { eventId, subscription }`. El alias es el del `join:table`
+     de ese socket (`SIN_SALA` sin join; `PAYLOAD_INVALIDO` si el join no llevó alias); o
+   - por HTTP: `POST /push/suscripcion { subscription, comensal }`. El alias debe estar sentado
+     ahora en la mesa del JWT; si no, `403`.
+4. Service worker de referencia: [`examples/sw-push.js`](examples/sw-push.js) (muestra la
+   notificación y, al tocarla, abre `/seguimiento`).
+
+> **Cambio de contrato:** la suscripción ahora queda ligada al **comensal** (alias). Sin alias
+> ya no se puede suscribir.
+
+Qué se envía:
+
+| Estado del pedido | A quién | Título |
+|---|---|---|
+| `en_preparacion` | Todas las suscripciones de la mesa | Tu pedido está en preparación |
+| `listo` | **Solo a los dueños del pedido** | ¡Tu plato está listo! |
+| `cancelado` | Todas las suscripciones de la mesa | Tu pedido fue cancelado |
+
+Los dueños se anotan al crear el pedido: el `comensal` de cada ítem (si el backend lo envía en
+`order:created`) y los comensales de las líneas del carrito que se convirtieron en ese pedido.
+Si no se sabe de quién es, el push de `listo` no se envía (la sala igual recibe `order:status`).
+
+Payload **mínimo** (sin nombres, montos ni mesa). TTL de 30 min y `urgency: high`:
 
 ```json
-{ "titulo": "Tu pedido está listo", "cuerpo": "PED-260922-K3F9AQ", "id_pedido": 87, "estado": "listo", "id_mesa": 5 }
+{ "titulo": "¡Tu plato está listo!", "cuerpo": "PED-260922-K3F9AQ", "id_pedido": 87, "estado": "listo", "url": "/seguimiento" }
 ```
-
-Las suscripciones caducadas (HTTP 404/410 del servicio push) se eliminan solas.
 
 Reglas:
 
-- Solo se envía push para `en_preparacion` ("Tu pedido está en preparación"), `listo` y
-  `cancelado`.
-- El `endpoint` debe ser una URL `https` de un servicio push (no IPs ni `localhost`); si no,
-  `PAYLOAD_INVALIDO`. Máximo 20 suscripciones por mesa.
+- El `endpoint` debe ser una URL `https` de un servicio push (no IPs ni `localhost`): evita
+  que el servidor haga peticiones a la red interna (SSRF). Si no, `PAYLOAD_INVALIDO`.
+  Máximo 20 suscripciones por mesa.
 - Suscribirse dos veces con el mismo `endpoint` no duplica.
-- Las suscripciones son de la **sesión de mesa**: se borran cuando el backend llama a
-  `/internal/mesa-liberada`, para que el siguiente grupo no reciba avisos ajenos.
+- Las suscripciones caducadas (HTTP 404/410 del servicio push) se eliminan solas.
+- Son de la **sesión de mesa**: se borran al liberarla.
 
 ---
 

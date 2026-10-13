@@ -27,6 +27,7 @@ const { crearRegistroIdempotenciaRedis } = require('./almacen/idempotencia-redis
 const { crearRevocacionesRedis } = require('./almacen/revocaciones-redis');
 const { crearAlmacenSuscripcionesRedis } = require('./almacen/suscripciones-redis');
 const { crearEstadoMesasRedis } = require('./almacen/mesas-redis');
+const { crearDuenosMemoria, crearDuenosRedis } = require('./almacen/duenos');
 const {
   registrarSala, crearEstadoMesasMemoria, crearPresencia, rutasSala,
 } = require('./sala');
@@ -99,6 +100,7 @@ function crearServidor(config, deps = {}) {
       ? crearRegistroIdempotenciaRedis({ cliente, ttlMs: TTL_PAGOS_MS })
       : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
     estadoMesas: cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria(),
+    duenosPedidos: cliente ? crearDuenosRedis({ cliente }) : crearDuenosMemoria(),
     // Pagos: pasarela (null = pagos apagados), intenciones y límites.
     pasarela: deps.pasarela || (config.wompi ? verificarImplementacion(crearPasarelaWompi(config.wompi)) : null),
     almacenPagos: cliente ? crearAlmacenPagosRedis({ cliente }) : crearAlmacenPagosMemoria(),

@@ -38,6 +38,20 @@ socket.emit('cart:update', {
 }, (ack) => { /* ack.carrito trae el snapshot resultante */ });
 ```
 
+### Notificaciones push y iPhone
+
+El aviso principal de "tu plato está listo" es el evento de socket `order:status` dentro de la
+PWA. El Web Push es un extra para cuando el comensal cerró la app:
+
+- **Android (Chrome, Edge, Firefox) y escritorio:** funciona desde el navegador.
+- **iPhone/iPad:** solo con **iOS 16.4 o posterior** y con la PWA **instalada** (Compartir →
+  "Agregar a pantalla de inicio"), abierta desde ese ícono y después de que el comensal
+  acepte el permiso. En Safari sin instalar, `PushManager` no existe y el push no llega.
+- Por eso la PWA no debe depender del push: tiene que mostrar el estado del pedido en vivo
+  con el socket, y ofrecer las notificaciones solo cuando `'PushManager' in window`.
+
+Service worker de referencia: [examples/sw-push.js](examples/sw-push.js).
+
 ### Persistencia con Redis
 
 Con `REDIS_URL` el estado vive en Redis y sobrevive a reinicios (sin ella, solo en desarrollo,
