@@ -20,11 +20,11 @@ export function getSocket() {
     })
 
     socketInstance.on('connect', () => {
-      console.log('✓ Conectado a socket server en', SOCKET_URL)
+      // Conexión establecida
     })
 
-    socketInstance.on('disconnect', (reason) => {
-      console.log('✗ Desconectado de socket server:', reason)
+    socketInstance.on('disconnect', () => {
+      // Desconectado de socket server
     })
 
     socketInstance.on('connect_error', (error) => {
