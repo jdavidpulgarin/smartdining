@@ -74,10 +74,27 @@ export function login(email, password) {
 }
 
 /**
- * GET /api/kds/comandas. Solo devuelve 'recibido' y 'en_preparacion': la
- * columna "Listas" se llena con eventos en vivo (ver README).
+ * GET /api/kds/comandas. Devuelve los tres estados del tablero: 'recibido',
+ * 'en_preparacion' y 'listo', asi que la columna "Listas" sobrevive a una
+ * recarga o a una reconexion.
  */
 export async function obtenerComandas(token) {
   const datos = await pedir('/kds/comandas', { token })
   return datos?.comandas || []
+}
+
+/**
+ * PATCH /api/kds/comandas/:id/estado — avanza la comanda COMPLETA.
+ *
+ * El backend solo acepta 'en_preparacion' y 'listo'; la transicion concreta la
+ * valida un trigger de la base, que puede rechazarla (409 con su mensaje). Por
+ * eso el error se devuelve tal cual: es texto escrito para que lo lea el
+ * cocinero, no un codigo interno.
+ */
+export function cambiarEstadoComanda(token, idPedido, estado) {
+  return pedir(`/kds/comandas/${idPedido}/estado`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify({ estado }),
+  })
 }

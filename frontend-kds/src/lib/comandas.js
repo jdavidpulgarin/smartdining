@@ -47,6 +47,9 @@ export function estadoInicial() {
  * caido pudieron pasar cosas que no llegaron, asi que mezclar dejaria comandas
  * fantasma. La API manda, el estado anterior se descarta.
  *
+ * Desde D-09 la API tambien devuelve las comandas en 'listo', asi que la
+ * columna "Listas" ya no se vacia al recargar ni al reconectar.
+ *
  * Los eventId vistos tambien se olvidan: son de la sesion anterior del socket y
  * guardarlos solo podria hacer que se ignore un evento legitimo.
  */
@@ -176,6 +179,46 @@ export function aplicarEstado(estado, evento) {
       c.id_pedido === evento.id_pedido ? { ...c, estado: evento.estado } : c
     ),
     eventos,
+  }
+}
+
+/**
+ * Siguiente estado al que puede avanzar una comanda desde el tablero.
+ *
+ * Es el boton de la tarjeta: "Empezar" en Nuevas y "Listo" en En preparacion.
+ * Una comanda ya lista no tiene boton — sacarla del tablero es del mesero, que
+ * la marca 'entregado' desde su panel, y el KDS lo recibe por order:status.
+ *
+ * Solo devuelve los dos estados que acepta PATCH /api/kds/comandas/:id/estado;
+ * la transicion la valida igualmente el trigger de la base.
+ *
+ * @returns {{estado: string, etiqueta: string}|null}
+ */
+export function siguientePaso(estadoActual) {
+  if (estadoActual === 'recibido') return { estado: 'en_preparacion', etiqueta: 'Empezar' }
+  if (estadoActual === 'en_preparacion') return { estado: 'listo', etiqueta: 'Listo' }
+  return null
+}
+
+/**
+ * Mueve una comanda de columna sin esperar al evento del socket.
+ *
+ * Se aplica con la respuesta del PATCH para que la tarjeta se mueva en el acto:
+ * en una pantalla tactil, tocar y que no pase nada hasta que vuelva el socket
+ * invita a tocar otra vez. Si el evento llega despues con el mismo estado, el
+ * resultado es el mismo (es idempotente).
+ */
+export function marcarEstadoLocal(estado, idPedido, nuevoEstado) {
+  if (ESTADOS_QUE_SALEN.includes(nuevoEstado)) {
+    return { ...estado, comandas: estado.comandas.filter((c) => c.id_pedido !== idPedido) }
+  }
+  if (!ESTADOS_EN_TABLERO.includes(nuevoEstado)) return estado
+
+  return {
+    ...estado,
+    comandas: estado.comandas.map((c) =>
+      c.id_pedido === idPedido ? { ...c, estado: nuevoEstado } : c
+    ),
   }
 }
 
