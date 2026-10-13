@@ -1,12 +1,125 @@
-# Catálogo de eventos — socket-server
+# Catálogo de eventos — socket-server · v2
 
 Contrato de tiempo real entre `socket-server` y los frontends
 (`frontend-cliente`, `frontend-restaurante`, `frontend-kds`) y el `backend`.
-Responsable: Roberto Buelvas.
+Responsable: Roberto Buelvas. **Fuente única de verdad del tiempo real**: si el
+código y este documento no coinciden, es un error y se corrige en el mismo PR.
 
-- URL local: `http://localhost:4001` (backend REST: `4000`).
-- Librería cliente: `socket.io-client` v4.
+- URL local: `http://localhost:4001` (backend REST: `4000`). En producción:
+  `https://rt.<dominio>` ([docs/despliegue.md](../docs/despliegue.md)).
+- Librería cliente: `socket.io-client` v4. Guía de integración:
+  [docs/cliente.md](docs/cliente.md). Diagramas de secuencia: [README.md](README.md#diagramas-de-secuencia).
 - Todos los eventos y ejemplos usan JSON.
+
+## Índice
+
+- [Catálogo completo](#catálogo-completo)
+- [Códigos de error](#códigos-de-error)
+- [1. Conexión y autenticación](#1-conexión-y-autenticación) · [1.1. Límites](#11-límites-de-la-conexión)
+- [2. Salas](#2-salas-rooms)
+- [3. Convenciones](#3-convenciones): idempotencia, formato del ack, reconexión
+- [4. Eventos cliente → servidor](#4-eventos-cliente--servidor)
+- [5. Eventos servidor → cliente](#5-eventos-servidor--cliente)
+- [6. Endpoints HTTP](#6-endpoints-http)
+- [7. Web Push](#7-web-push)
+- [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox)
+- [9. Variables de entorno](#9-variables-de-entorno)
+- [10. Historial de cambios de contrato](#10-historial-de-cambios-de-contrato)
+
+## Catálogo completo
+
+Estado: **Estable** = implementado, probado y usable hoy. **Espera backend** =
+el socket-server ya lo implementa y lo prueba contra dobles, pero falta la parte
+del backend que lo dispara o lo alimenta (contrato en la sección indicada).
+
+### Cliente → servidor (por socket, con ack)
+
+| Evento | Roles | `eventId` | Estado | Detalle |
+|---|---|---|---|---|
+| `join:table` | `comensal`, `mesero`, `cajero`, `admin` | — | Estable | [§4](#jointable) |
+| `leave:table` | los mismos | — | Estable | [§4](#leavetable) |
+| `cart:update` | `comensal`; `mesero`/`admin` con `join:table` | Obligatorio | Estable | [§4](#cartupdate) |
+| `order:created` | `mesero`, `admin` (lo normal es el backend por HTTP) | Obligatorio | Estable | [§4](#ordercreated) |
+| `order:status` | `cocina`, `mesero`, `cajero`, `admin` | Obligatorio | Estable | [§4](#orderstatus) |
+| `push:subscribe` | `comensal` | Obligatorio | Estable | [§4](#pushsubscribe), [§7](#7-web-push) |
+| `push:unsubscribe` | `comensal` | — | Estable | [§4](#pushunsubscribe) |
+| `mesa:llamar_mesero` | `comensal` | Obligatorio | Estable | [§4](#mesallamar_mesero) |
+| `cuenta:solicitada` | `comensal` | Obligatorio | Estable | [§4](#cuentasolicitada) |
+
+`pantalla` no puede emitir ningún evento: solo escucha.
+
+### Servidor → cliente
+
+| Evento | Destino | `eventId` | Estado | Detalle |
+|---|---|---|---|---|
+| `cart:updated` | `room:mesa-{ID}` menos quien emitió | Sí | Estable | [§5](#5-eventos-servidor--cliente) |
+| `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§5](#5-eventos-servidor--cliente) |
+| `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§5](#5-eventos-servidor--cliente) |
+| `qr:actualizado` | `room:mesa-{ID}` (incluye la pantalla) | No | Estable | [§6.2](#62-cómo-avisa-el-backend-una-rotación-de-token_qr-pantalla-de-mesa) |
+| `mesa:llamar_mesero` | `room:admin` | Sí | Estable | [§4](#mesallamar_mesero) |
+| `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§4](#cuentasolicitada) |
+| `mesa:presencia` | `room:admin` | No (estado completo) | Estable | [§5.2](#52-mesapresencia) |
+| `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable; `motivo: "pagada"` espera backend | [§5.1](#51-mesaliberada) |
+| `ingrediente:disponibilidad` | todos los sockets | Opcional | Espera backend (nadie llama aún al endpoint) | [§5.3](#53-ingredientedisponibilidad) |
+| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Espera backend ([§8.2](#82-contrato-que-necesita-del-backend-pendiente-daniel), [§8.4](#84-contrato-de-registro-que-necesita-del-backend-pendiente-daniel)) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6) |
+| `pago:alerta` | `room:admin` | Sí | Espera backend ([§8.5](#85-pagoalerta-e-intentos-fallidos)) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
+
+### HTTP
+
+| Ruta | Quién la llama | Estado | Detalle |
+|---|---|---|---|
+| `GET /health` | Docker, nginx, Deploy | Estable | [§6](#6-endpoints-http) |
+| `POST /qr/generar`, `/qr/validar`, `/qr/pantalla` | personal / cualquiera / personal | Estable | [§6.1](#61-token-qr) |
+| `GET /push/clave-publica`, `POST`/`DELETE /push/suscripcion` | PWA del comensal | Estable | [§7](#7-web-push) |
+| `POST /pagos/intencion` | PWA del comensal | Espera backend (cuenta de la mesa) | [§8.1](#81-post-pagosintencion) |
+| `POST /pagos/webhook` | Wompi | Espera backend (registro) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6) |
+| `POST /internal/order-created`, `/internal/order-status` | backend | Estable (el backend ya las usa) | [§6.3](#63-cómo-emite-el-backend-ordercreated--orderstatus) |
+| `POST /internal/qr-rotado`, `/internal/mesa-liberada` | backend | Estable (el backend ya las usa) | [§6](#6-endpoints-http) |
+| `POST /internal/ingrediente-disponibilidad` | backend | Espera backend | [§5.3](#53-ingredientedisponibilidad) |
+
+`/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
+responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
+
+## Códigos de error
+
+Los mensajes al cliente son genéricos a propósito: el detalle (firma inválida,
+motivo exacto) va solo al log del servidor.
+
+### `connect_error` (al conectar el socket)
+
+| `err.message` | Cuándo | Qué hacer |
+|---|---|---|
+| `AUTH_REQUERIDA` | No se envió `auth.token` | Pedir sesión (escanear el QR o iniciar sesión) |
+| `TOKEN_INVALIDO` | JWT inválido, vencido o de una sesión de mesa ya liberada | Pedir un JWT nuevo; no reintentar con el mismo |
+| `MESA_LLENA` | La mesa ya tiene capacidad + 4 comensales conectados | Avisar al comensal; reintentar más tarde |
+| `SERVIDOR_CERRANDO` | El servidor se está reiniciando | Nada: Socket.io reintenta solo |
+| `ERROR_INTERNO` | Fallo inesperado (p. ej. Redis caído) | Reintentar con espera |
+
+### `codigo` en el ack de un evento
+
+| `codigo` | Cuándo |
+|---|---|
+| `PAYLOAD_INVALIDO` | Falta un campo o tiene un tipo/valor inválido |
+| `NO_AUTORIZADO` | El rol no puede emitir ese evento o tocar esa mesa |
+| `SIN_SALA` | El comensal no hizo `join:table` antes de emitir |
+| `RATE_LIMIT` | 20 eventos/s por socket, o 1 llamada al mesero por mesa cada 60 s |
+| `ERROR_INTERNO` | Fallo inesperado del servidor o de Redis; reenviar con el **mismo** `eventId` |
+
+### Respuestas HTTP (`{ ok: false, codigo, mensaje }`)
+
+| Status · `codigo` | Cuándo |
+|---|---|
+| `400 PAYLOAD_INVALIDO` | Cuerpo o campo inválido |
+| `400 JSON_INVALIDO` | El cuerpo no es JSON |
+| `400 FIRMA_INVALIDA` | Webhook con checksum o antigüedad inválidos |
+| `401 NO_AUTORIZADO` | Sin credencial, credencial inválida o sesión de mesa liberada |
+| `403 NO_AUTORIZADO` | Credencial válida sin permiso (rol, alias que no está en la mesa) |
+| `404` | Ruta inexistente (y toda `/internal/*` desde Internet, en nginx) |
+| `409 SIN_SALDO` | Intención de pago sin nada que cobrar |
+| `413 CUERPO_DEMASIADO_GRANDE` | Cuerpo de más de 100 KB |
+| `429 RATE_LIMIT` | Más de 5 intenciones de pago por minuto (o límite de nginx en login y pagos) |
+| `500/502/503 ERROR_INTERNO` | Fallo propio, del backend o reinicio en curso; reintentar |
+| `503 NO_CONFIGURADO` | Pagos, Web Push o `INTERNAL_API_KEY` sin configurar |
 
 ---
 
@@ -777,3 +890,21 @@ Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 | `MESA_CAPACIDAD_POR_DEFECTO` | Capacidad si el backend no la informa; comensales por mesa = capacidad + 4 (6) |
 | `TRUST_PROXY` | IPs o CIDR del proxy (nginx) del que se cree `X-Real-IP` para logs y límites. Vacía = la IP de la conexión. `/0` no se admite |
 | `LOG_NIVEL` | `debug`, `info` (por defecto), `warn`, `error` o `silencio`. Logs en JSON, sin secretos |
+
+---
+
+## 10. Historial de cambios de contrato
+
+Todos son **compatibles hacia atrás** salvo el webhook de pagos, que nadie usaba.
+
+| Cambio | Antes | Ahora | Quién debe adaptarse |
+|---|---|---|---|
+| `cart:update` · `ingredientes` | Solo se validaba que fuera arreglo; se guardaba `precio_aplicado` | 0–30 `{ id_ingrediente, porcion }` validados; el resto se descarta | PWA: calcular subtotales con `GET /api/menu` |
+| `mesa:liberada` | El panel lo escuchaba, pero nunca se emitía | Se emite y desconecta a los comensales; `motivo` opcional | PWA: pantalla de cierre. Backend: enviar `motivo: "pagada"` |
+| `join:table` | Solo `id_mesa` | `comensal` (alias) opcional | PWA: enviarlo (lo necesitan presencia, push y pagos) |
+| `mesa:llamar_mesero`, `cuenta:solicitada`, `mesa:presencia`, `ingrediente:disponibilidad` | — | Nuevos | Panel y PWA: escucharlos |
+| Suscripción push | Por mesa | Por mesa **y** alias del comensal | PWA: hacer `join:table` con alias antes de suscribirse |
+| `POST /pagos/webhook` | `x-signature` propio y `payment.succeeded` | Checksum y eventos de Wompi | Nadie (no se usaba) |
+| `payment:confirmed` | Con `id_pedido` | Sin `id_pedido`; con `comensal`, `saldo_restante` y centavos | Panel (Caja): dejar de emitirlo desde el navegador |
+| `/internal/qr-rotado` | `token_qr` de hasta 128 caracteres | Hasta 255 (caben los tokens v1 reales) | Nadie |
+| Arranque | Aceptaba secretos cortos o de ejemplo | No arranca sin secretos de 32+ caracteres, distintos y propios | Todo el equipo: regenerar `.env` |
