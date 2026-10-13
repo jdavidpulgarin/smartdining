@@ -23,6 +23,22 @@ const PORCIONES = ['ligera', 'normal', 'extra'];
 // validar_selecciones_detalle en la base.
 const MAX_INGREDIENTES_POR_ITEM = 20;
 
+/**
+ * Topes del pedido (H-06).
+ *
+ * Antes `cantidad` solo pedía ser positiva: un `100000000` llegaba a la base,
+ * desbordaba el DECIMAL del subtotal y salía como 500. Y `items` no tenía tope,
+ * así que un cuerpo con miles de ítems hacía miles de INSERT dentro de una
+ * transacción.
+ *
+ * Los números son de sala, no técnicos: 20 unidades del mismo plato ya es una
+ * mesa grande pidiendo lo mismo, y 50 ítems distintos es más de lo que cabe en
+ * una comanda. Lo que pase de ahí es un error de quien llama o un abuso, y en
+ * los dos casos un 400 explica mejor que un 500.
+ */
+const MAX_ITEMS_POR_PEDIDO = 50;
+const MAX_CANTIDAD_POR_ITEM = 20;
+
 // Campos de precio que un cliente podría intentar imponer. El precio lo fija
 // SIEMPRE la base (platos.precio e ingredientes.precio_extra vía trigger), así
 // que se rechazan en voz alta en vez de ignorarlos en silencio: quien los manda
@@ -74,7 +90,7 @@ const aliasSchema = z.string().trim().min(1).max(40).refine(sinOverride, MENSAJE
 const itemSchema = z
   .object({
     id_plato: z.number().int(),
-    cantidad: z.number().int().positive(),
+    cantidad: z.number().int().min(1).max(MAX_CANTIDAD_POR_ITEM),
     comensal: aliasSchema.optional(),
     apodo: aliasSchema.optional(),
     notas: z.string().max(200).refine(sinOverride, MENSAJE_OVERRIDE).optional(),
@@ -102,7 +118,7 @@ const itemSchema = z
 const crearPedidoSchema = z.object({
   id_mesa: z.number().int().optional(),
   notas_generales: z.string().max(500).refine(sinOverride, MENSAJE_OVERRIDE).optional(),
-  items: z.array(itemSchema).min(1),
+  items: z.array(itemSchema).min(1).max(MAX_ITEMS_POR_PEDIDO),
 });
 
 /**

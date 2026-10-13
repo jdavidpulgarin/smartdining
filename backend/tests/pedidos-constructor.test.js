@@ -666,3 +666,149 @@ test('h-05: varios items de un comensal reciben todos su alias firmado', async (
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// H-06: topes del pedido
+// ---------------------------------------------------------------------------
+
+const unItem = (extra = {}) => ({ id_plato: 12, cantidad: 1, ...extra });
+
+test('h-06: 51 items se rechazan con 400', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: Array.from({ length: 51 }, () => unItem()) });
+
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(db.buscar('INSERT INTO pedidos'), undefined, 'no se abre la transaccion');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-06: 50 items pasan', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: Array.from({ length: 50 }, () => unItem()) });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(db.todas('INSERT INTO detalles_pedido').length, 50);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-06: cantidad 21 se rechaza con 400', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [unItem({ cantidad: 21 })] });
+
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(db.buscar('INSERT INTO pedidos'), undefined);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-06: cantidad 20 pasa', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [unItem({ cantidad: 20 })] });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[2], 20);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-06: cantidad 100000000 da 400 y NUNCA 500', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [unItem({ cantidad: 100000000 })] });
+
+    assert.strictEqual(
+      res.status,
+      400,
+      'antes llegaba a la base, desbordaba el subtotal y salia como 500'
+    );
+    assert.notStrictEqual(res.status, 500);
+    assert.strictEqual(db.buscar('INSERT INTO pedidos'), undefined);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-06: 50 items con cantidad 20 cada uno pasa (el tope exacto)', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: Array.from({ length: 50 }, () => unItem({ cantidad: 20 })) });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(db.todas('INSERT INTO detalles_pedido').length, 50);
+  } finally {
+    db.restaurar();
+  }
+});
+
+for (const cantidad of [0, -1, 1.5]) {
+  test(`h-06: cantidad ${cantidad} sigue dando 400`, async () => {
+    const db = instalarFakeDb(responderCreacionOk);
+    try {
+      const res = await request(app)
+        .post('/api/pedidos')
+        .set('Authorization', `Bearer ${tokenComensal(5)}`)
+        .send({ items: [unItem({ cantidad })] });
+
+      assert.strictEqual(res.status, 400);
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+test('h-06: el tope de ingredientes por item sigue en 20', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const muchos = Array.from({ length: 21 }, (_, i) => ({ id_ingrediente: i + 1 }));
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [unItem({ id_plato: BOWL, ingredientes: muchos })] });
+
+    assert.strictEqual(res.status, 400);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('h-06: una lista de items vacia sigue dando 400', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [] });
+
+    assert.strictEqual(res.status, 400);
+  } finally {
+    db.restaurar();
+  }
+});
