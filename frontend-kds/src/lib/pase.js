@@ -66,6 +66,51 @@ export function textoSinRecoger(minutos) {
 }
 
 /**
+ * Qué cifra muestra el reloj grande de la tarjeta.
+ *
+ * En el pase manda el tiempo **en el pase**: es el único que el mesero puede
+ * cambiar, y es el que explica el aviso de debajo. Si no se sabe cuándo quedó
+ * lista se cae al total, que es lo que había antes; mejor un dato real aunque
+ * sea otro, que un 0 inventado.
+ *
+ * En Nuevas y En preparación no cambia nada: ahí el reloj es el total desde que
+ * se pidió, que es lo que mide la espera del comensal.
+ *
+ * @returns {{minutos: number, enPase: boolean}}
+ */
+export function minutosDelReloj(comanda, minutosTotales, ahoraEnMs = Date.now()) {
+  if (comanda?.estado !== 'listo') return { minutos: minutosTotales, enPase: false }
+
+  const pase = minutosEnPase(comanda, ahoraEnMs)
+  if (pase === null) return { minutos: minutosTotales, enPase: false }
+
+  return { minutos: pase, enPase: true }
+}
+
+/**
+ * Tooltip del reloj en el pase: conserva los dos tiempos, porque el total
+ * sigue siendo útil para saber cuánto lleva esperando el comensal.
+ */
+export function tituloDelPase(minutosPase, minutosTotales) {
+  if (minutosPase === null) return `Pedida hace ${textoDeEspera(minutosTotales)}`
+  return `En el pase desde hace ${textoDeEspera(minutosPase)} · pedida hace ${textoDeEspera(minutosTotales)}`
+}
+
+/**
+ * Aviso de "sin recoger" sin repetir la cifra que ya está arriba.
+ *
+ * Cuando el reloj grande ya muestra el tiempo en el pase, los dos números son
+ * el mismo y escribirlo dos veces en la misma tarjeta solo hace dudar de si son
+ * cosas distintas. Si por lo que sea difieren (reloj con el total porque no se
+ * sabe la hora de listo), el aviso sí lleva su cifra.
+ */
+export function avisoSinRecoger(minutosPase, minutosDelRelojGrande) {
+  if (minutosPase === null) return 'Sin recoger'
+  if (textoDeEspera(minutosPase) === textoDeEspera(minutosDelRelojGrande)) return 'Sin recoger'
+  return textoSinRecoger(minutosPase)
+}
+
+/**
  * Ordena el pase con la más reciente arriba.
  *
  * Al revés que las otras columnas: en Nuevas y En preparación lo urgente es lo

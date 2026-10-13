@@ -2,7 +2,13 @@ import { AlertTriangle, Check, ChefHat, Clock, Hash, LoaderCircle, StickyNote, U
 import { useState } from 'react'
 import { ingredientesPorPaso, siguientePaso } from '../lib/comandas'
 import { minutosDesdeCreacion, senalDeEsperaDeComanda, textoDeEspera } from '../lib/espera'
-import { minutosEnPase, sinRecoger, textoSinRecoger } from '../lib/pase'
+import {
+  avisoSinRecoger,
+  minutosDelReloj,
+  minutosEnPase,
+  sinRecoger,
+  tituloDelPase,
+} from '../lib/pase'
 
 /**
  * Tarjeta de una comanda: lo que la cocina lee y toca.
@@ -73,9 +79,11 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
   const colorEspera = COLOR_ESPERA[espera.nivel]
   const conSemaforo = espera.nivel !== 'neutro'
 
-  // En el pase se cuenta otro reloj: cuanto lleva HECHA sin que la recojan.
+  // En el pase se cuenta otro reloj: cuanto lleva HECHA sin que la recojan, y
+  // es ese el que va en grande (el total queda en el tooltip).
   const enPase = comanda.estado === 'listo' ? minutosEnPase(comanda, ahora) : null
   const olvidada = comanda.estado === 'listo' && sinRecoger(comanda, ahora)
+  const reloj = minutosDelReloj(comanda, minutos, ahora)
 
   // El socket no manda el numero de mesa: se cae al id, que al menos identifica.
   const mesa = comanda.mesa_numero ?? comanda.id_mesa ?? '—'
@@ -125,14 +133,12 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
           title={
             conSemaforo
               ? `${espera.etiqueta}: ${textoDeEspera(minutos)}`
-              : enPase === null
-                ? `Pedida hace ${textoDeEspera(minutos)}`
-                : `En el pase desde hace ${textoDeEspera(enPase)} · pedida hace ${textoDeEspera(minutos)}`
+              : tituloDelPase(enPase, minutos)
           }
         >
           <span className="flex items-center gap-1">
             <Clock size={20} aria-hidden="true" />
-            {textoDeEspera(minutos)}
+            {textoDeEspera(reloj.minutos)}
           </span>
           {conSemaforo && (
             <span className="text-sm font-bold uppercase tracking-wide">
@@ -143,7 +149,7 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
               su parte, esto es que nadie ha venido a recogerla. */}
           {olvidada && (
             <span className="text-sm font-semibold normal-case text-[color:var(--color-texto-suave)]">
-              {textoSinRecoger(enPase)}
+              {avisoSinRecoger(enPase, reloj.minutos)}
             </span>
           )}
         </p>

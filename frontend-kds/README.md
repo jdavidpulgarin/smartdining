@@ -117,11 +117,20 @@ pidió, sino cuánto lleva **hecha y sin recoger**, que es lo que el mesero pued
 Se cuenta desde que pasó a `listo`: `listo_en` de la API (sale de `historial_estados`) o,
 si la transición llegó en vivo, el `emitidoEn` del `order:status`.
 
+En esa columna **el reloj grande muestra ese tiempo**, no el total: es el único que el
+mesero puede cambiar, y es el que explica el aviso de debajo. El total sigue a mano en el
+tooltip (*"En el pase desde hace 35 min · pedida hace 40 min"*). Si no se sabe cuándo
+quedó lista, el reloj cae al total en vez de inventar un 0. En Nuevas y En preparación no
+cambia nada: ahí el reloj es el total, que es lo que mide la espera del comensal.
+
 - El pase va ordenado **al revés** que las otras columnas: arriba lo que acaba de salir.
   Las comandas sin hora de `listo` (de antes de que existiera el dato) caen al final.
 - Pasados **30 minutos** en el pase (`UMBRAL_SIN_RECOGER_MIN`, en
   [`src/lib/pase.js`](src/lib/pase.js)), la tarjeta se **atenúa** y aparece *"Sin recoger
-  hace N min"*, con el mismo tope `+99 min`. Atenuada, **no escondida**: una comanda
+  hace N min"*, con el mismo tope `+99 min`. Cuando esa cifra es la misma que la del reloj
+  grande (el caso normal) el aviso se queda en *"Sin recoger"*, sin repetir el número:
+  verlo dos veces en la misma tarjeta hace dudar de si son cosas distintas. Atenuada,
+  **no escondida**: una comanda
   olvidada tiene que seguir viéndose, solo deja de competir por la atención con las
   recién salidas. Sin rojo y sin "RETRASADA": la cocina ya hizo su parte.
 

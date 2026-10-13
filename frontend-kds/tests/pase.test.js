@@ -2,6 +2,7 @@ import assert from 'node:assert'
 import test from 'node:test'
 import * as lib from '../src/lib/comandas.js'
 import * as pase from '../src/lib/pase.js'
+import { textoDeEspera } from '../src/lib/espera.js'
 
 // La columna LISTAS (el pase): orden, aviso de "sin recoger" y de donde sale la
 // hora de paso a 'listo'. Logica pura.
@@ -216,4 +217,102 @@ test('la hora de listo sobrevive a una recarga porque la manda la API', () => {
 
   assert.strictEqual(pase.minutosEnPase(comanda, AHORA), 40)
   assert.strictEqual(pase.sinRecoger(comanda, AHORA), true, 'y sigue marcada como olvidada')
+})
+
+// ---------------------------------------------------------------------------
+// El reloj grande: en el pase cuenta el tiempo en el pase
+// ---------------------------------------------------------------------------
+
+test('en LISTAS el reloj muestra el tiempo en el pase, no el total', () => {
+  // Pedida hace 40 minutos, lista hace 35: el reloj dice 35.
+  const comanda = COMANDA(1, { listo_en: haceMinutos(35), minutos_transcurridos: 40 })
+  const reloj = pase.minutosDelReloj(comanda, 40, AHORA)
+
+  assert.strictEqual(reloj.minutos, 35)
+  assert.strictEqual(reloj.enPase, true)
+  assert.notStrictEqual(reloj.minutos, 40, 'ya no se mezclan las dos cifras')
+})
+
+test('sin hora de listo el reloj cae al total, sin inventar un 0', () => {
+  const comanda = COMANDA(1, { minutos_transcurridos: 40 })
+  const reloj = pase.minutosDelReloj(comanda, 40, AHORA)
+
+  assert.strictEqual(reloj.minutos, 40)
+  assert.strictEqual(reloj.enPase, false)
+})
+
+test('el reloj del pase respeta el tope +99', () => {
+  const comanda = COMANDA(1, { listo_en: haceMinutos(1410) })
+  const reloj = pase.minutosDelReloj(comanda, 1500, AHORA)
+
+  assert.strictEqual(reloj.minutos, 1410)
+  assert.strictEqual(textoDeEspera(reloj.minutos), '+99 min')
+})
+
+for (const estado of ['recibido', 'en_preparacion']) {
+  test(`en ${estado} el reloj sigue siendo el total`, () => {
+    // Aunque la comanda traiga un listo_en viejo (paso por listo y volvio), en
+    // estas columnas manda el total: es la espera del comensal.
+    const comanda = COMANDA(1, { estado, listo_en: haceMinutos(2) })
+    const reloj = pase.minutosDelReloj(comanda, 40, AHORA)
+
+    assert.strictEqual(reloj.minutos, 40, 'no cambia nada en las columnas de cocina')
+    assert.strictEqual(reloj.enPase, false)
+  })
+}
+
+test('el tooltip conserva los dos tiempos', () => {
+  assert.strictEqual(
+    pase.tituloDelPase(35, 40),
+    'En el pase desde hace 35 min · pedida hace 40 min'
+  )
+})
+
+test('sin hora de listo el tooltip solo habla del total', () => {
+  assert.strictEqual(pase.tituloDelPase(null, 40), 'Pedida hace 40 min')
+})
+
+// ---------------------------------------------------------------------------
+// El aviso no repite la cifra del reloj
+// ---------------------------------------------------------------------------
+
+test('si el reloj ya muestra el tiempo en el pase, el aviso no repite el numero', () => {
+  assert.strictEqual(
+    pase.avisoSinRecoger(35, 35),
+    'Sin recoger',
+    'la misma cifra dos veces en la misma tarjeta hace dudar de si son cosas distintas'
+  )
+})
+
+test('si el reloj muestra otra cifra, el aviso si lleva la suya', () => {
+  assert.strictEqual(pase.avisoSinRecoger(35, 40), 'Sin recoger hace 35 min')
+})
+
+test('dos cifras que se formatean igual cuentan como la misma', () => {
+  // Ambas por encima del tope: las dos se pintan "+99 min".
+  assert.strictEqual(pase.avisoSinRecoger(1410, 1500), 'Sin recoger')
+})
+
+test('sin minutos de pase el aviso va sin cifra', () => {
+  assert.strictEqual(pase.avisoSinRecoger(null, 40), 'Sin recoger')
+})
+
+test('el aviso sigue sin hablar de retraso', () => {
+  for (const texto of [pase.avisoSinRecoger(35, 35), pase.avisoSinRecoger(35, 40)]) {
+    assert.ok(!/retras/i.test(texto))
+    assert.ok(/sin recoger/i.test(texto))
+  }
+})
+
+test('el caso del reporte: reloj 35 y aviso sin numero repetido', () => {
+  const comanda = COMANDA(1, { listo_en: haceMinutos(35), minutos_transcurridos: 40 })
+  const reloj = pase.minutosDelReloj(comanda, 40, AHORA)
+
+  assert.strictEqual(textoDeEspera(reloj.minutos), '35 min', 'el reloj grande')
+  assert.strictEqual(pase.avisoSinRecoger(35, reloj.minutos), 'Sin recoger', 'el aviso de debajo')
+  assert.strictEqual(
+    pase.tituloDelPase(35, 40),
+    'En el pase desde hace 35 min · pedida hace 40 min',
+    'y el total sigue consultable en el tooltip'
+  )
 })
