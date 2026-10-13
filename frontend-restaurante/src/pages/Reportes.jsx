@@ -13,6 +13,7 @@ import {
   ArrowUpRight,
   RefreshCw,
   FileCode,
+  Layers,
 } from 'lucide-react'
 import { reportesApi } from '../services/api'
 
@@ -20,7 +21,8 @@ export function Reportes() {
   const [timeRange, setTimeRange] = useState('hoy') // 'hoy' | 'semana' | 'mes'
   const [loading, setLoading] = useState(true)
   const [reportData, setReportData] = useState(null)
-  const [contractPending, setContractPending] = useState(true)
+  const [contractPending, setContractPending] = useState(false)
+  const [showContractDetails, setShowContractDetails] = useState(false)
 
   const handleSelectRange = (range) => {
     if (range === timeRange) return
@@ -36,7 +38,7 @@ export function Reportes() {
       .then((data) => {
         if (!isMounted) return
         setReportData(data)
-        setContractPending(false)
+        setContractPending(Boolean(data?.isFallback))
       })
       .catch(() => {
         if (!isMounted) return
@@ -103,60 +105,83 @@ export function Reportes() {
             </button>
           </div>
         </div>
-      </section>      {loading ? (
-        <section className="panel" style={{ padding: '3rem', textAlign: 'center' }}>
-          <RefreshCw size={40} className="spin text-emerald" style={{ margin: '0 auto 1rem' }} />
-          <h3>Cargando métricas de reporte...</h3>
-          <p>Consultando analíticas desde el servidor.</p>
-        </section>
-      ) : contractPending || !currentData ? (
-        <section className="panel" style={{ padding: '2.5rem', textAlign: 'center' }}>
-          <div style={{ maxWidth: '640px', margin: '0 auto' }}>
-            <FileCode size={48} className="text-emerald" style={{ margin: '0 auto 1rem', display: 'block' }} />
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>
-              Módulo de Reportes & BI (RF-21) — Pendiente en Backend
-            </h3>
-            <p style={{ color: 'var(--text-secondary, #6b7280)', marginBottom: '1.5rem', lineHeight: '1.6' }}>
-              La ruta <code>GET /api/reportes?rango={timeRange}</code> no existe actualmente en el backend.
-              El contrato REST requerido para Daniel ha sido especificado para su implementación:
-            </p>
+      </section>
 
+      {/* Banner de Fallback cuando D-07 no está en backend */}
+      {contractPending && (
+        <div
+          role="status"
+          style={{
+            background: 'rgba(245, 158, 11, 0.1)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            borderRadius: '12px',
+            padding: '0.85rem 1.25rem',
+            margin: '1rem 0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            color: '#f8fafc',
+            fontSize: '0.875rem',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <AlertTriangle size={18} style={{ color: '#fbbf24', flexShrink: 0 }} />
+            <span>
+              <strong style={{ color: '#fbbf24' }}>Modo simulación analítica:</strong> Visualizando métricas estructuradas según las vistas SQL de <code>24_vistas_reportes.sql</code>. Esperando despliegue de la ruta <code>GET /api/reportes</code> (D-07 en Backend).
+            </span>
+          </div>
+          <button
+            type="button"
+            className="ghost-button small"
+            style={{ whiteSpace: 'nowrap', borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24' }}
+            onClick={() => setShowContractDetails((prev) => !prev)}
+          >
+            <FileCode size={14} />
+            <span>{showContractDetails ? 'Ocultar Contrato' : 'Ver Contrato D-07'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Detalle del Contrato REST si se expande */}
+      {showContractDetails && (
+        <section className="panel" style={{ padding: '1.25rem', marginBottom: '1.25rem' }}>
+          <div style={{ maxWidth: '720px' }}>
+            <h4 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: '#10b981' }}>
+              Contrato REST esperado para Daniel (D-07):
+            </h4>
             <div
               style={{
                 background: 'rgba(15, 118, 110, 0.08)',
                 border: '1px solid rgba(15, 118, 110, 0.25)',
                 borderRadius: '8px',
-                padding: '1.25rem',
-                textAlign: 'left',
-                fontSize: '0.875rem',
+                padding: '1rem',
+                fontSize: '0.8rem',
                 fontFamily: 'monospace',
               }}
             >
               <div><strong>Método:</strong> GET</div>
               <div><strong>Path:</strong> /api/reportes?rango={timeRange}</div>
               <div><strong>Rol:</strong> admin</div>
-              <div style={{ marginTop: '0.5rem' }}><strong>Respuesta JSON esperada:</strong></div>
-              <pre style={{ margin: '0.5rem 0 0', whiteSpace: 'pre-wrap', color: 'var(--text-primary, #111827)' }}>
-{`{
-  "totalVentas": "$2,480.00",
-  "totalPedidos": 48,
-  "tiempoCocinaPromedio": "13.8 min",
-  "ocupacionMesas": "78%",
-  "ticketPromedio": "$51.66",
-  "kdsAlertsCount": 3,
-  "topPlatos": [
-    { "name": "Hamburguesa Smart Angus", "category": "Fuertes", "qty": 22, "total": "$748.00", "percentage": 85 }
-  ],
-  "metodosPago": [
-    { "metodo": "Tarjeta", "porcentaje": 48, "monto": "$1,190.40", "color": "#0f766e" }
-  ],
-  "horasPico": [
-    { "hora": "12:00 - 13:00", "volumen": 65 }
-  ]
-}`}
-              </pre>
+              <div><strong>Vistas SQL disponibles:</strong> v_ventas_diarias, v_ingredientes_top, v_platos_top, v_tiempos_kds</div>
             </div>
           </div>
+        </section>
+      )}
+
+      {loading ? (
+        <section className="panel" style={{ padding: '3rem', textAlign: 'center' }}>
+          <RefreshCw size={40} className="spin text-emerald" style={{ margin: '0 auto 1rem' }} />
+          <h3>Cargando métricas de reporte...</h3>
+          <p>Consultando analíticas desde el servidor.</p>
+        </section>
+      ) : !currentData ? (
+        <section className="panel" style={{ padding: '2.5rem', textAlign: 'center' }}>
+          <FileCode size={48} className="text-emerald" style={{ margin: '0 auto 1rem', display: 'block' }} />
+          <h3>No se pudieron cargar los datos de reporte</h3>
+          <p style={{ color: 'var(--text-secondary, #6b7280)' }}>
+            Intenta recargar o verificar la conexión con el servidor.
+          </p>
         </section>
       ) : (
         <>
@@ -202,7 +227,7 @@ export function Reportes() {
           </section>
 
           {/* Grid de Reportes Detallados */}
-          <section className="reportes-grid">
+          <section className="reportes-grid" style={{ marginTop: '1.5rem' }}>
             {/* Top Platos Más Vendidos */}
             <div className="panel ranking-panel">
               <div className="panel-header">
@@ -239,7 +264,7 @@ export function Reportes() {
             </div>
 
             {/* Métodos de Pago & Horas Pico */}
-            <div className="reportes-right-col">
+            <div className="reportes-right-col" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               {/* Métodos de Pago */}
               <div className="panel">
                 <div className="panel-header">
@@ -320,6 +345,88 @@ export function Reportes() {
                   {currentData.kdsAlertsCount || 0} demoras registradas
                 </span>
               </div>
+            </div>
+          </section>
+
+          {/* Sección de Ingredientes Top del Constructor (v_ingredientes_top) */}
+          <section className="panel" style={{ marginTop: '1.5rem' }}>
+            <div className="panel-header">
+              <div className="panel-title-with-icon">
+                <Layers size={18} className="text-teal" />
+                <h3>Ingredientes Top en Constructor de Platos (Personalización)</h3>
+              </div>
+              <span className="badge-count">Vista SQL: v_ingredientes_top</span>
+            </div>
+
+            <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '0.75rem 1rem' }}>Ingrediente</th>
+                    <th style={{ padding: '0.75rem 1rem' }}>Paso / Plato</th>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Veces Solicitado</th>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Porciones Extra</th>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Porciones Normal</th>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Ingresos Extras</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(currentData.topIngredientes || []).map((ing, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                      <td style={{ padding: '0.75rem 1rem', fontWeight: 600, color: '#ffffff' }}>{ing.nombre_ingrediente}</td>
+                      <td style={{ padding: '0.75rem 1rem', color: 'var(--text-muted)' }}>{ing.nombre_paso} · {ing.nombre_plato}</td>
+                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>
+                        <span className="badge-count" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
+                          {ing.veces_solicitado}
+                        </span>
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center', color: '#fbbf24' }}>{ing.porciones_extra}</td>
+                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>{ing.porciones_normal}</td>
+                      <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 700, color: '#34d399' }}>
+                        {ing.ingresos_extras_recaudados}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* Sección de Eficiencia Operativa KDS (v_tiempos_kds) */}
+          <section className="panel" style={{ marginTop: '1.5rem', marginBottom: '2rem' }}>
+            <div className="panel-header">
+              <div className="panel-title-with-icon">
+                <Clock size={18} className="text-teal" />
+                <h3>Métricas de Eficiencia Cocina KDS</h3>
+              </div>
+              <span className="badge-count">Vista SQL: v_tiempos_kds</span>
+            </div>
+
+            <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '0.75rem 1rem' }}>Periodo / Fecha</th>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Platos Preparados</th>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Tiempo Estimado Promedio</th>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Tiempo Real Promedio</th>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Variación vs Estimado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(currentData.tiemposKds || []).map((t, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                      <td style={{ padding: '0.75rem 1rem', fontWeight: 600, color: '#ffffff' }}>{t.fecha}</td>
+                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>{t.platos_preparados} comandas</td>
+                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>{t.tiempo_estimado_promedio_min} min</td>
+                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center', color: '#60a5fa', fontWeight: 600 }}>{t.tiempo_real_promedio_min} min</td>
+                      <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 700, color: t.variacion_promedio_porcentaje <= 0 ? '#34d399' : '#fbbf24' }}>
+                        {t.variacion_promedio_porcentaje > 0 ? `+${t.variacion_promedio_porcentaje}%` : `${t.variacion_promedio_porcentaje}%`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </section>
         </>
