@@ -1,13 +1,14 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { crearPedido } from './pedidoService';
+import { crearPedido, NOTAS_MAX_SERVIDOR, NOTAS_GENERALES_MAX_SERVIDOR } from './pedidoService';
 import * as apiModule from './api';
 import { CLAVE_SESION } from '../utils/sesion';
 
-describe('pedidoService (H-05, H-06)', () => {
+describe('pedidoService (H-05, H-06, J-05)', () => {
   let store = {};
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.stubEnv('VITE_MODO_SIMULADO', 'false');
     store = {};
 
     globalThis.sessionStorage = {
@@ -23,6 +24,7 @@ describe('pedidoService (H-05, H-06)', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     delete globalThis.sessionStorage;
     delete globalThis.window;
   });
@@ -42,7 +44,7 @@ describe('pedidoService (H-05, H-06)', () => {
         id_linea: 'linea-1',
         id_plato: 5,
         cantidad: 2,
-        comensal: 'Ana', // Provisto en el cliente para la UI
+        comensal: 'Ana',
         apodo: 'Ana',
         notas: 'Sin cebolla',
       },
@@ -57,7 +59,6 @@ describe('pedidoService (H-05, H-06)', () => {
     expect(opciones.method).toBe('POST');
     expect(opciones.token).toBe('jwt.comensal.ana');
 
-    // Comprobar que en body.items NO se manda 'comensal' ni 'apodo' (H-05)
     expect(opciones.body.items[0]).toEqual({
       id_plato: 5,
       cantidad: 2,
@@ -99,5 +100,148 @@ describe('pedidoService (H-05, H-06)', () => {
     await expect(crearPedido({ lineas: muchasLineas })).rejects.toThrow(
       /no puede contener más de 50 ítems/
     );
+  });
+
+  it('J-05: mapea ingredientes de platos armados desde el constructor (linea.ingredientes)', async () => {
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({ id_pedido: 12, total: 30000 });
+
+    const lineas = [
+      {
+        id_linea: 'linea-armada',
+        id_plato: 1001,
+        cantidad: 1,
+        precioUnitario: 30000,
+        precio: 30000,
+        subtotal: 30000,
+        comensal: 'Carlos',
+        apodo: 'Carlos',
+        id_mesa: 5,
+        ingredientes: [
+          { id_ingrediente: 10, porcion: 'extra' },
+          { id_ingrediente: 15, porcion: 'ligera' },
+        ],
+        detalle: [{ nombre: 'Arroz' }],
+      },
+    ];
+
+    await crearPedido({ lineas });
+
+    const body = spyPedirJson.mock.calls[0][1].body;
+    const item = body.items[0];
+
+    expect(item).toEqual({
+      id_plato: 1001,
+      cantidad: 1,
+      ingredientes: [
+        { id_ingrediente: 10, porcion: 'extra' },
+        { id_ingrediente: 15, porcion: 'ligera' },
+      ],
+    });
+    // Verifica que no se filtran precios, mesa ni comensal
+    expect(item.precio).toBeUndefined();
+    expect(item.precioUnitario).toBeUndefined();
+    expect(item.precio_unitario).toBeUndefined();
+    expect(item.subtotal).toBeUndefined();
+    expect(item.total).toBeUndefined();
+    expect(item.comensal).toBeUndefined();
+    expect(item.apodo).toBeUndefined();
+    expect(item.id_mesa).toBeUndefined();
+    expect(body.id_mesa).toBeUndefined();
+    expect(body.total).toBeUndefined();
+  });
+
+  it('J-05: omite la propiedad ingredientes si el plato no tiene ingredientes', async () => {
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({ id_pedido: 15, total: 10000 });
+
+    const lineas = [
+      {
+        id_plato: 50,
+        cantidad: 1,
+        ingredientes: [],
+      },
+    ];
+
+    await crearPedido({ lineas });
+    const item = spyPedirJson.mock.calls[0][1].body.items[0];
+
+    expect(item.id_plato).toBe(50);
+    expect(item.cantidad).toBe(1);
+    expect('ingredientes' in item).toBe(false);
+  });
+
+  it('J-05: rechaza platos con mas de 20 ingredientes o con ingredientes repetidos', async () => {
+    const masDe20 = Array.from({ length: 21 }, (_, i) => ({
+      id_ingrediente: i + 1,
+      porcion: 'normal',
+    }));
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1, cantidad: 1, ingredientes: masDe20 }],
+      })
+    ).rejects.toThrow(/no puede superar 20 ingredientes/);
+
+    const repetidos = [
+      { id_ingrediente: 5, porcion: 'normal' },
+      { id_ingrediente: 5, porcion: 'extra' },
+    ];
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1, cantidad: 1, ingredientes: repetidos }],
+      })
+    ).rejects.toThrow(/repetir ingredientes/);
+  });
+
+  it('J-05: corta notas individuales a 200 y notas generales a 500 caracteres', async () => {
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({ id_pedido: 20 });
+
+    const notaLarga = 'A'.repeat(300);
+    const notasGenLarga = 'B'.repeat(600);
+
+    await crearPedido({
+      lineas: [{ id_plato: 1, cantidad: 1, notas: notaLarga }],
+      notasGenerales: notasGenLarga,
+    });
+
+    const body = spyPedirJson.mock.calls[0][1].body;
+    expect(body.items[0].notas.length).toBe(NOTAS_MAX_SERVIDOR);
+    expect(body.notas_generales.length).toBe(NOTAS_GENERALES_MAX_SERVIDOR);
+  });
+
+  it('J-05: en modo simulado delega en crearPedidoSimulado', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+
+    const res = await crearPedido({
+      lineas: [
+        { id_plato: 1, cantidad: 2, precioUnitario: 15000 },
+        { id_plato: 2, cantidad: 1, precioUnitario: 20000 },
+      ],
+    });
+
+    expect(res).toHaveProperty('id_pedido');
+    expect(res).toHaveProperty('codigo_pedido');
+    expect(res.codigo_pedido).toMatch(/^PED-[A-Z0-9]{4}$/);
+    expect(res.total).toBe(50000);
+    expect(res.estado).toBe('recibido');
+  });
+
+  it('J-05: en modo simulado lanza 409 si alguna nota dice "agotado"', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1, cantidad: 1, notas: 'con salsa, pero si está agotado no' }],
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      motivo: 'agotado',
+    });
   });
 });
