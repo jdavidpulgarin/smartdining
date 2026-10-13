@@ -65,42 +65,17 @@ export function Caja() {
   // Historial de transacciones de la jornada
   const [history, setHistory] = useState(() => {
     try {
-      const stored = localStorage.getItem('smartdining_caja_history')
-      return stored
-        ? JSON.parse(stored)
-        : [
-            {
-              id_transaccion: 'TRX-1042',
-              id_pedido: 86,
-              mesa: 'Mesa 2',
-              comensal: 'Total Mesa',
-              metodo_pago: 'tarjeta_debito',
-              monto: 78000,
-              hora: '12:15',
-              estado: 'completada',
-              referencia: 'DAT-48912',
-            },
-            {
-              id_transaccion: 'TRX-1041',
-              id_pedido: 85,
-              mesa: 'Mesa 4',
-              comensal: 'Beto',
-              metodo_pago: 'transferencia',
-              monto: 34500,
-              hora: '11:50',
-              estado: 'completada',
-              referencia: 'NEQ-88219',
-            },
-          ]
+      const stored = sessionStorage.getItem('smartdining_caja_history')
+      return stored ? JSON.parse(stored) : []
     } catch {
       return []
     }
   })
 
-  // Sincronizar historial con localStorage
+  // Sincronizar historial con sessionStorage
   useEffect(() => {
     try {
-      localStorage.setItem('smartdining_caja_history', JSON.stringify(history))
+      sessionStorage.setItem('smartdining_caja_history', JSON.stringify(history))
     } catch {
       // Ignorar error de almacenamiento
     }

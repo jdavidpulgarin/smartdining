@@ -42,7 +42,7 @@ function normalizarMesa(backendMesa, prev = {}) {
 export function TablesProvider({ children }) {
   const [tables, setTables] = useState(() => {
     try {
-      const stored = localStorage.getItem('smartdining_tables_state')
+      const stored = sessionStorage.getItem('smartdining_tables_state')
       if (stored) return JSON.parse(stored)
     } catch {
       // fallback
@@ -87,7 +87,7 @@ export function TablesProvider({ children }) {
   // Guardar estado persistente en el navegador
   useEffect(() => {
     try {
-      localStorage.setItem('smartdining_tables_state', JSON.stringify(tables))
+      sessionStorage.setItem('smartdining_tables_state', JSON.stringify(tables))
     } catch {
       // ignorar
     }

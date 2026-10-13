@@ -20,25 +20,25 @@ const DEMO_EMAILS_BY_ROLE = {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
-      const stored = localStorage.getItem('smartdining_staff_user')
+      const stored = sessionStorage.getItem('smartdining_staff_user')
       return stored ? JSON.parse(stored) : DEMO_USERS[0]
     } catch {
       return DEMO_USERS[0]
     }
   })
 
-  // Sincronizar usuario y token en localStorage
+  // Sincronizar usuario y token en sessionStorage
   useEffect(() => {
     if (user) {
-      localStorage.setItem('smartdining_staff_user', JSON.stringify(user))
+      sessionStorage.setItem('smartdining_staff_user', JSON.stringify(user))
     } else {
-      localStorage.removeItem('smartdining_staff_user')
+      sessionStorage.removeItem('smartdining_staff_user')
     }
   }, [user])
 
   const logout = useCallback(() => {
     setUser(null)
-    localStorage.removeItem('smartdining_staff_user')
+    sessionStorage.removeItem('smartdining_staff_user')
   }, [])
 
   // Escuchar respuestas 401 emitidas por cualquier llamada apiFetch

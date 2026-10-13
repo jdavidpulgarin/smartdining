@@ -7,11 +7,11 @@ export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/ap
 export const EVENT_UNAUTHORIZED = 'smartdining:auth:unauthorized'
 
 /**
- * Obtiene el token JWT del usuario de staff desde localStorage
+ * Obtiene el token JWT del usuario de staff desde sessionStorage
  */
 export function getAuthToken() {
   try {
-    const stored = localStorage.getItem('smartdining_staff_user')
+    const stored = sessionStorage.getItem('smartdining_staff_user')
     if (stored) {
       const parsed = JSON.parse(stored)
       return parsed?.token || null
@@ -147,15 +147,6 @@ export const mesasApi = {
     return apiFetch(`/mesas/${id}/estado`, {
       method: 'PATCH',
       body: JSON.stringify({ estado }),
-    })
-  },
-
-  /**
-   * Rota el QR de una mesa en curso: POST /api/mesas/:id/rotar-qr
-   */
-  async rotarQr(id) {
-    return apiFetch(`/mesas/${id}/rotar-qr`, {
-      method: 'POST',
     })
   },
 

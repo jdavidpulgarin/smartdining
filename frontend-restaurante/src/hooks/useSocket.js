@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client'
-import { DEMO_USERS } from '../constants/demoUsers'
+import { getAuthToken } from '../services/api'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
 
@@ -7,16 +7,7 @@ let socketInstance = null
 
 export function getSocket() {
   if (!socketInstance) {
-    let token = DEMO_USERS[0].token
-    try {
-      const stored = localStorage.getItem('smartdining_staff_user')
-      if (stored) {
-        const u = JSON.parse(stored)
-        if (u.token) token = u.token
-      }
-    } catch {
-      // Ignorar error de JSON parse y usar token por defecto
-    }
+    const token = getAuthToken() || ''
 
     socketInstance = io(SOCKET_URL, {
       auth: { token },
