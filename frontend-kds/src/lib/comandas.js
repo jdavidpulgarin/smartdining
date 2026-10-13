@@ -10,6 +10,8 @@
  * recibe, para que React detecte el cambio por identidad.
  */
 
+import { ordenarPase } from './pase.js'
+
 /** Columnas del tablero, en el orden en que se muestran. */
 export const COLUMNAS = [
   { estado: 'recibido', titulo: 'Nuevas' },
@@ -46,6 +48,9 @@ export function estadoInicial() {
  * Se usa en la carga inicial y en CADA reconexion: mientras el socket estuvo
  * caido pudieron pasar cosas que no llegaron, asi que mezclar dejaria comandas
  * fantasma. La API manda, el estado anterior se descarta.
+ *
+ * Desde D-09 la API tambien devuelve las comandas en 'listo', asi que la
+ * columna "Listas" ya no se vacia al recargar ni al reconectar.
  *
  * Los eventId vistos tambien se olvidan: son de la sesion anterior del socket y
  * guardarlos solo podria hacer que se ignore un evento legitimo.
@@ -104,6 +109,8 @@ export function comandaDesdePedido(pedido, llegadaEnMs = Date.now()) {
     mesa_numero: pedido.mesa_numero ?? null,
     estado: pedido.estado || 'recibido',
     notas_generales: pedido.notas_generales ?? null,
+    // Hora de paso a 'listo' (historial_estados), cuando la API la manda.
+    listo_en: pedido.listo_en ?? null,
     minutos_transcurridos: 0,
     recibidoEnMs: llegadaEnMs,
     items: (pedido.items || []).map((item) => ({
@@ -173,15 +180,88 @@ export function aplicarEstado(estado, evento) {
   return {
     ...estado,
     comandas: estado.comandas.map((c) =>
-      c.id_pedido === evento.id_pedido ? { ...c, estado: evento.estado } : c
+      c.id_pedido === evento.id_pedido ? { ...c, ...cambioDeEstado(evento) } : c
     ),
     eventos,
   }
 }
 
-/** Comandas de una columna, en el orden en que estan en el estado. */
+/**
+ * Campos que deja un order:status en la comanda.
+ *
+ * Al pasar a 'listo' se anota CUANDO, para poder contar el tiempo en el pase y
+ * no el total desde que se pidio. La hora preferida es el `emitidoEn` del
+ * evento (la pone el socket-server al difundirlo, a milisegundos del cambio en
+ * la base); si no viniera, la hora de llegada local, que es igual de buena
+ * porque el evento acaba de llegar.
+ */
+function cambioDeEstado(evento) {
+  if (evento.estado !== 'listo') return { estado: evento.estado }
+
+  const emitido = evento.emitidoEn ? Date.parse(evento.emitidoEn) : NaN
+  return {
+    estado: evento.estado,
+    listoEnMs: Number.isFinite(emitido) ? emitido : Date.now(),
+  }
+}
+
+/**
+ * Siguiente estado al que puede avanzar una comanda desde el tablero.
+ *
+ * Es el boton de la tarjeta: "Empezar" en Nuevas y "Listo" en En preparacion.
+ * Una comanda ya lista no tiene boton — sacarla del tablero es del mesero, que
+ * la marca 'entregado' desde su panel, y el KDS lo recibe por order:status.
+ *
+ * Solo devuelve los dos estados que acepta PATCH /api/kds/comandas/:id/estado;
+ * la transicion la valida igualmente el trigger de la base.
+ *
+ * @returns {{estado: string, etiqueta: string}|null}
+ */
+export function siguientePaso(estadoActual) {
+  if (estadoActual === 'recibido') return { estado: 'en_preparacion', etiqueta: 'Empezar' }
+  if (estadoActual === 'en_preparacion') return { estado: 'listo', etiqueta: 'Listo' }
+  return null
+}
+
+/**
+ * Mueve una comanda de columna sin esperar al evento del socket.
+ *
+ * Se aplica con la respuesta del PATCH para que la tarjeta se mueva en el acto:
+ * en una pantalla tactil, tocar y que no pase nada hasta que vuelva el socket
+ * invita a tocar otra vez. Si el evento llega despues con el mismo estado, el
+ * resultado es el mismo (es idempotente).
+ */
+export function marcarEstadoLocal(estado, idPedido, nuevoEstado) {
+  if (ESTADOS_QUE_SALEN.includes(nuevoEstado)) {
+    return { ...estado, comandas: estado.comandas.filter((c) => c.id_pedido !== idPedido) }
+  }
+  if (!ESTADOS_EN_TABLERO.includes(nuevoEstado)) return estado
+
+  return {
+    ...estado,
+    comandas: estado.comandas.map((c) =>
+      c.id_pedido === idPedido
+        ? {
+            ...c,
+            estado: nuevoEstado,
+            // La marca la pone el PATCH propio: acaba de pasar a listo.
+            ...(nuevoEstado === 'listo' ? { listoEnMs: Date.now() } : {}),
+          }
+        : c
+    ),
+  }
+}
+
+/**
+ * Comandas de una columna.
+ *
+ * Nuevas y En preparacion conservan el orden del estado (la API las da de la
+ * mas vieja a la mas nueva, que es el orden en que hay que atenderlas). El pase
+ * se invierte: arriba lo que acaba de salir (ver ordenarPase).
+ */
 export function comandasDeColumna(estado, estadoColumna) {
-  return estado.comandas.filter((c) => c.estado === estadoColumna)
+  const deLaColumna = estado.comandas.filter((c) => c.estado === estadoColumna)
+  return estadoColumna === 'listo' ? ordenarPase(deLaColumna) : deLaColumna
 }
 
 /**

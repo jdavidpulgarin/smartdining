@@ -701,8 +701,29 @@ con el mensaje del trigger.
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| GET | /kds/comandas | **cocina, admin** | Comandas activas, con ítems enriquecidos con plato, categoría, comensal e ingredientes, mesa y minutos transcurridos |
-| PATCH | /kds/comandas/:id/estado | **cocina, admin** | Cambia a `en_preparacion` o `listo` (únicos estados permitidos desde cocina) |
+| GET | /kds/comandas | **cocina, admin** | Comandas del tablero (`recibido`, `en_preparacion`, `listo`), con ítems enriquecidos con plato, categoría, comensal e ingredientes, mesa y minutos transcurridos |
+| PATCH | /kds/comandas/:id/estado | **cocina, admin** | Cambia a `en_preparacion` o `listo` (únicos estados permitidos desde cocina). **Idempotente** |
+
+Devuelve los **tres estados del tablero**: `recibido`, `en_preparacion` y `listo`.
+
+`listo` se incluye aunque la cocina ya terminó, porque la comanda sigue en el pase
+esperando que el mesero la recoja y la marque `entregado`. Si no viniera aquí, la
+columna "Listas" del KDS se vaciaría en cada recarga o reconexión y la cocina perdería de
+vista lo que está esperando salir. Una comanda sale del tablero cuando pasa a
+`entregado`, `pagado` o `cancelado`.
+
+**Las `listo` se recortan a las últimas 12 horas** (`HORAS_VISIBLES_LISTO` en
+`kds.service.js`). Si el mesero nunca marca `entregado`, la comanda se quedaría en el
+pase para siempre y las de días pasados taparían las de hoy; doce horas cubren un turno
+con margen. El recorte es **solo para `listo`**: una comanda `recibido` o
+`en_preparacion` aparece por antigua que sea, porque eso sí es trabajo pendiente de
+cocina y esconderlo sería peor. Una `listo` **sin** fila de historial (no se sabe cuándo
+quedó lista) también se muestra: no se oculta nada por un dato que falta.
+
+Cada comanda trae **`listo_en`**: la hora en que pasó a `listo`, tomada de la última
+transición en `historial_estados`. Es `null` mientras no haya pasado por ese estado. El
+KDS la usa para contar el tiempo **en el pase**, que no es el mismo que el total desde
+que se pidió. No se usa `pedidos.actualizado_en` porque cambia con cualquier UPDATE.
 
 Respuesta de `GET /kds/comandas`:
 
@@ -712,6 +733,7 @@ Respuesta de `GET /kds/comandas`:
     {
       "id_pedido": 87, "codigo_pedido": "PED-260922-K3F9AQ", "id_mesa": 5, "mesa_numero": 5,
       "estado": "recibido", "notas_generales": null, "minutos_transcurridos": 3.2,
+      "listo_en": null,
       "items": [
         {
           "id_detalle": 201, "id_pedido": 87, "cantidad": 2, "plato_nombre": "Bowl Personalizado",
@@ -731,6 +753,39 @@ Respuesta de `GET /kds/comandas`:
 
 > El semáforo (verde/amarillo/rojo a los 15 min) se calcula en el frontend-kds a
 > partir de `minutos_transcurridos` — el backend solo entrega el dato crudo.
+
+### PATCH /kds/comandas/:id/estado
+
+Body: `{ "estado": "en_preparacion" | "listo" }`. Mueve la **comanda completa**, no plato
+a plato. Cualquier otro estado responde **400**; `404` si la comanda no existe (también si
+el id no es un entero positivo).
+
+**Es idempotente.** Si la comanda ya está en el estado pedido, responde **200** con la
+comanda tal como está y añade `"sin_cambios": true`; no ejecuta el `UPDATE`, no escribe en
+`historial_estados` (y por tanto tampoco en `kds_metricas`, que la alimenta un trigger de
+esa tabla) y **no avisa al socket-server**. Cuando sí cambia, la respuesta trae
+`"sin_cambios": false` y el flujo normal: historial, métricas y `order:status`.
+
+```json
+{ "id_pedido": 87, "estado": "listo", "estado_anterior": "listo", "sin_cambios": true }
+```
+
+Hace falta porque el trigger de transiciones **no rechaza** pasar a `listo` estando en
+`listo`: sin este guard, dos toques en la pantalla táctil o el reintento de una petición
+cuya respuesta se perdió dejarían dos entradas de historial y dos filas de métricas, y el
+comensal vería "pedido listo" dos veces.
+
+La comprobación y el cambio van bajo un **advisory lock de PostgreSQL por `id_pedido`**
+(`pg_advisory_lock`), no bajo `SELECT … FOR UPDATE`: el `UPDATE` ocurre en la transacción
+propia de `pedidos.service.actualizarEstado`, y retener aquí el bloqueo de la fila la
+bloquearía contra sí misma.
+
+> **Alcance del guard:** serializa a quien toma el mismo lock, o sea las peticiones del
+> KDS entre sí, incluso entre instancias del backend (el lock vive en el servidor de base
+> de datos). Un `PATCH /pedidos/:id/estado` del panel de sala **no** lo toma, así que esa
+> carrera concreta sigue abierta; cerrarla pide mover el guard dentro de la transacción de
+> `actualizarEstado` —compartida con los demás endpoints— o un UPDATE condicional en
+> `database/`.
 
 Los ingredientes llegan con su `porcion` y **sin precio**: a la cocina el precio no le
 sirve. Van ordenados por el orden del paso, igual que en la API de pedidos, y un plato
@@ -1048,6 +1103,37 @@ rechazarlo, así que lo que no se puede guardar se degrada a `NULL`:
 
 **400** solo si falta uno de los tres obligatorios, o si un campo presente no cumple su
 forma (p. ej. `moneda` de más de 3 caracteres, `monto_centavos` no entero).
+
+---
+
+## Códigos de error de la base de datos
+
+El manejador central ([`errores.middleware.js`](../src/middleware/errores.middleware.js))
+es el único sitio donde se decide el status. Traduce lo que lanza PostgreSQL así:
+
+| Origen | Status | Cuerpo |
+|---|---|---|
+| Error de negocio del backend (`{ status, message }`) | ese status | su mensaje |
+| `RAISE EXCEPTION` de un trigger (**P0001**) | **409** | el mensaje del trigger, tal cual — está escrito para leerse ("Transición de estado no autorizada: de \"listo\" hacia \"en_preparacion\"") |
+| Error de **datos** de PostgreSQL (**clase 22**: 22003 desbordamiento numérico, 22001 texto largo, 22012 división por cero, 22P02 sintaxis…) | **422** | `No se pudo registrar esta operación: un dato está fuera del rango permitido. Avisa al equipo.` |
+| Cualquier otro error de PostgreSQL (CHECK 23514, FK 23503, unique 23505…) o inesperado | **500** | `Error interno del servidor` |
+
+**Por qué 422 y no 500 en la clase 22.** Un dato que no cabe no es una caída del
+servidor: reintentar nunca va a funcionar, y un 500 lo hace indistinguible de un fallo
+pasajero. Con 422 el cliente sabe que el problema es el dato y no insiste.
+
+El mensaje del 422 es **siempre el mismo** y no dice qué dato ni dónde: el texto real de
+PostgreSQL nombra funciones, columnas y precisiones internas (`función PL/pgSQL
+fn_tr_calcular_tiempo_preparacion() en la línea 28`), que es un mapa del esquema para
+quien lo lea. El detalle completo —código, `detail` y `where`— se registra en el log del
+servidor junto al método y la ruta.
+
+> **Caso real:** `PATCH /kds/comandas/:id/estado` sobre una comanda que lleva días en
+> `en_preparacion` da 22003, porque `fn_tr_calcular_tiempo_preparacion` calcula la
+> variación porcentual en `NUMERIC(6,2)` (tope 9999.99 %) y una comanda parada 20.000
+> minutos la desborda. Se cruza cuando el tiempo real supera ~101× el estimado (unas 8 h
+> para un plato de 5 min). El arreglo de fondo es ampliar esa precisión en `database/`;
+> hasta entonces, el KDS al menos muestra un mensaje que se entiende.
 
 ---
 

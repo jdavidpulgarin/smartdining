@@ -62,7 +62,9 @@ limpia el storage y desconecta el socket.
 
 1. Al entrar (y en **cada reconexión** del socket) se pide `GET /api/kds/comandas` y se
    **reemplaza** el estado completo. No se mezcla: mientras el socket estuvo caído pudieron
-   pasar cosas que no llegaron, y mezclar dejaría comandas fantasma.
+   pasar cosas que no llegaron, y mezclar dejaría comandas fantasma. Desde D-09 ese
+   endpoint **también devuelve las comandas en `listo`**, así que la columna "Listas"
+   sobrevive a recargar y a reconectar.
 2. `order:created` agrega la comanda en **Nuevas**; `order:status` la mueve de columna, o
    la quita del tablero si pasa a `entregado`, `pagado` o `cancelado`.
 3. Los eventos se deduplican por `eventId` (el socket-server reintenta, EVENTS.md §3.1) y
@@ -70,23 +72,89 @@ limpia el storage y desconecta el socket.
 4. Los minutos de cada tarjeta parten de `minutos_transcurridos` de la API y avanzan con
    el reloj local, refrescándose cada 30 s **sin pedir nada al servidor**.
 
-Toda esa lógica está en [`src/lib/comandas.js`](src/lib/comandas.js) como funciones puras,
-y se prueba con `npm test` sin montar React. Los efectos (pedir, conectar, reconectar)
-están aparte en [`src/lib/useTablero.js`](src/lib/useTablero.js).
+Toda esa lógica está en funciones puras y se prueba con `npm test` sin montar React:
+[`src/lib/comandas.js`](src/lib/comandas.js) (columnas, eventos, deduplicación),
+[`src/lib/espera.js`](src/lib/espera.js) (umbrales y formato del cronómetro) y
+[`src/lib/preferencias.js`](src/lib/preferencias.js) (tema y sonido). Los efectos (pedir,
+conectar, reconectar, PATCH) están aparte en
+[`src/lib/useTablero.js`](src/lib/useTablero.js), y el reloj compartido en
+[`src/hooks/useCronometro.js`](src/hooks/useCronometro.js).
 
-## Limitaciones de esta etapa (D-08)
+## Operación (D-09)
 
-- **La columna "Listas" se vacía al recargar.** `GET /api/kds/comandas` solo devuelve
-  pedidos en `recibido` y `en_preparacion`, así que esa columna se llena únicamente con
-  los `order:status` que llegan en vivo. Es una limitación conocida del endpoint, no un
-  error del KDS; arreglarlo es tocar el backend y no corresponde a esta actividad.
-- **Sin botones de acción.** Mover una comanda a "En preparación" o "Listo" desde la
-  pantalla es **D-09**, junto con el semáforo de tiempos, el sonido de aviso y la pantalla
-  completa. El panel de agotados es **D-10**.
-- **`comensal` e `ingredientes` por ítem** llegan con el PR #32 (constructor de platos).
-  Hasta que se fusione, el backend no los manda y las tarjetas se dibujan igual, sin
-  errores; cuando lleguen, se muestran solos (el alias como etiqueta y los ingredientes
-  agrupados por paso, marcando la porción cuando no es `normal`).
+**Botones por comanda.** El avance es de la **comanda completa**, no plato a plato, que es
+lo que acepta `PATCH /api/kds/comandas/:id/estado`:
+
+| Columna | Botón | Pasa a |
+|---|---|---|
+| Nuevas | **Empezar** | `en_preparacion` |
+| En preparación | **Listo** | `listo` |
+| Listas | *(sin botón)* | La saca el mesero marcando `entregado` |
+
+El botón mide 64 px de alto (más que el mínimo táctil de 48) y **se deshabilita mientras la
+petición está en vuelo**, para que un segundo toque impaciente no mande dos PATCH. La
+tarjeta se mueve con la respuesta, sin esperar el evento del socket; si el aviso llega
+después con el mismo estado, el resultado es idéntico. Si la base rechaza la transición
+(lo decide un trigger), el mensaje sale **en la propia tarjeta** y el tablero se recarga,
+porque significa que lo que se ve ya no es lo que hay guardado.
+
+**Cronómetro y semáforo.** Un solo intervalo de 1 s para todo el tablero (no uno por
+tarjeta) alimenta los minutos desde `creado_en`:
+
+| Espera | Nivel |
+|---|---|
+| < 10 min | normal |
+| 10 a 15 min | ámbar |
+| > 15 min | rojo |
+
+A partir de 100 minutos se muestra **"+99 min"**: los datos sembrados traen comandas de
+hace semanas (19.000 min) y un número de cinco dígitos no informa de nada. El nivel **no
+se señala solo con color**: lleva signo (`•`, `!`, `!!`) y texto ("En tiempo", "Va lenta",
+"Retrasada"), por si el monitor está mal calibrado o quien mira no distingue rojo de ámbar.
+
+**La columna LISTAS (el pase).** Ahí el reloj que importa no es el total desde que se
+pidió, sino cuánto lleva **hecha y sin recoger**, que es lo que el mesero puede arreglar.
+Se cuenta desde que pasó a `listo`: `listo_en` de la API (sale de `historial_estados`) o,
+si la transición llegó en vivo, el `emitidoEn` del `order:status`.
+
+En esa columna **el reloj grande muestra ese tiempo**, no el total: es el único que el
+mesero puede cambiar, y es el que explica el aviso de debajo. El total sigue a mano en el
+tooltip (*"En el pase desde hace 35 min · pedida hace 40 min"*). Si no se sabe cuándo
+quedó lista, el reloj cae al total en vez de inventar un 0. En Nuevas y En preparación no
+cambia nada: ahí el reloj es el total, que es lo que mide la espera del comensal.
+
+- El pase va ordenado **al revés** que las otras columnas: arriba lo que acaba de salir.
+  Las comandas sin hora de `listo` (de antes de que existiera el dato) caen al final.
+- Pasados **30 minutos** en el pase (`UMBRAL_SIN_RECOGER_MIN`, en
+  [`src/lib/pase.js`](src/lib/pase.js)), la tarjeta se **atenúa** y aparece *"Sin recoger
+  hace N min"*, con el mismo tope `+99 min`. Cuando esa cifra es la misma que la del reloj
+  grande (el caso normal) el aviso se queda en *"Sin recoger"*, sin repetir el número:
+  verlo dos veces en la misma tarjeta hace dudar de si son cosas distintas. Atenuada,
+  **no escondida**: una comanda
+  olvidada tiene que seguir viéndose, solo deja de competir por la atención con las
+  recién salidas. Sin rojo y sin "RETRASADA": la cocina ya hizo su parte.
+
+**Detalle del plato.** El alias del comensal aparece como etiqueta junto al plato, y los
+ingredientes van agrupados por paso del constructor, en ese orden, marcando **EXTRA** y
+**LIGERA**; `normal` no se adorna, que es la que no sorprende. Un plato sin ingredientes se
+ve como siempre.
+
+**Sonido, pantalla y tema.**
+
+- Aviso sonoro con Web Audio (dos tonos cortos, sin archivos) **solo cuando entra una
+  comanda nueva por `order:created`** — nunca al recargar ni al reconectar. Los navegadores
+  bloquean el audio sin un gesto previo, así que hay un botón **Activar sonido** y la
+  elección se recuerda en `localStorage`.
+- Botón de **pantalla completa** (Fullscreen API), con su salida.
+- **Oscuro por defecto**, con interruptor claro/oscuro recordado. `prefers-color-scheme`
+  solo decide la primera vez, si nadie eligió todavía.
+
+Todas las preferencias leen y escriben `localStorage` dentro de `try/catch`: si está
+bloqueado, el KDS funciona igual y solo se pierde recordar la elección.
+
+## Limitaciones
+
+- **El panel de agotados es D-10**, todavía no está.
 - Un `order:status` de un pedido que no está en pantalla **no** crea una tarjeta: ese
   payload no trae los ítems, y una comanda sin ítems no le sirve a la cocina. La siguiente
   recarga lo pone en su sitio.

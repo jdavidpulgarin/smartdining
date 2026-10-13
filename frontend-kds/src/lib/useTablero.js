@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { obtenerComandas } from '../services/api'
+import { cambiarEstadoComanda, obtenerComandas } from '../services/api'
 import { crearSocket, esErrorDeToken } from '../services/socket'
 import {
   aplicarCreado,
@@ -8,6 +8,8 @@ import {
   estadoInicial,
   marcarCargando,
   marcarError,
+  marcarEstadoLocal,
+  esEventoRepetido,
 } from './comandas'
 
 /**
@@ -24,6 +26,8 @@ const ACCIONES = {
   error: marcarError,
   creado: aplicarCreado,
   estado: aplicarEstado,
+  // Movimiento optimista tras un PATCH propio: no espera al socket.
+  local: (estado, { id_pedido, nuevoEstado }) => marcarEstadoLocal(estado, id_pedido, nuevoEstado),
 }
 
 function reducer(estado, accion) {
@@ -34,7 +38,7 @@ function reducer(estado, accion) {
 /** Cada cuanto se repinta el cronometro de las tarjetas, sin pedir nada. */
 const REFRESCO_RELOJ_MS = 30_000
 
-export function useTablero({ token, alCaducarSesion }) {
+export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
   const [estado, despachar] = useReducer(reducer, undefined, estadoInicial)
   const [conectado, setConectado] = useState(false)
 
@@ -48,6 +52,20 @@ export function useTablero({ token, alCaducarSesion }) {
   useEffect(() => {
     alCaducarRef.current = alCaducarSesion
   }, [alCaducarSesion])
+
+  const alLlegarRef = useRef(alLlegarComandaNueva)
+  useEffect(() => {
+    alLlegarRef.current = alLlegarComandaNueva
+  }, [alLlegarComandaNueva])
+
+  // El aviso sonoro solo debe sonar por una comanda que ENTRA por el socket, no
+  // al recargar ni al reconectar. Para saber si el evento aporta algo nuevo hay
+  // que mirar el estado vigente dentro del callback, y el del render en que se
+  // suscribio el socket ya estaria viejo: de ahi la ref.
+  const estadoRef = useRef(estado)
+  useEffect(() => {
+    estadoRef.current = estado
+  }, [estado])
 
   /**
    * Pide las comandas y REEMPLAZA el tablero.
@@ -102,7 +120,18 @@ export function useTablero({ token, alCaducarSesion }) {
     })
 
     socket.on('order:created', (evento) => {
-      if (vivo) despachar({ tipo: 'creado', datos: evento })
+      if (!vivo) return
+
+      const actual = estadoRef.current
+      const idPedido = evento?.pedido?.id_pedido
+      const esNueva =
+        idPedido !== undefined &&
+        idPedido !== null &&
+        !esEventoRepetido(actual, evento?.eventId) &&
+        !actual.comandas.some((c) => c.id_pedido === idPedido)
+
+      despachar({ tipo: 'creado', datos: evento })
+      if (esNueva) alLlegarRef.current?.(evento)
     })
 
     socket.on('order:status', (evento) => {
@@ -121,5 +150,32 @@ export function useTablero({ token, alCaducarSesion }) {
     return () => clearInterval(reloj)
   }, [])
 
-  return { estado, conectado, ahora, recargar }
+  /**
+   * Avanza una comanda (PATCH) y mueve la tarjeta en el acto.
+   *
+   * Devuelve { ok } o { ok: false, mensaje } para que la tarjeta muestre el
+   * fallo donde el cocinero lo esta mirando. Si la base rechaza la transicion
+   * (trigger), se recarga el tablero: significa que lo que hay en pantalla ya
+   * no es lo que hay en la base.
+   */
+  const avanzar = useCallback(
+    async (idPedido, nuevoEstado) => {
+      try {
+        const comanda = await cambiarEstadoComanda(token, idPedido, nuevoEstado)
+        despachar({
+          tipo: 'local',
+          datos: { id_pedido: idPedido, nuevoEstado: comanda?.estado || nuevoEstado },
+        })
+        return { ok: true }
+      } catch (error) {
+        // 401 ya cerro la sesion en el servicio. Para el resto, el tablero se
+        // vuelve a leer porque puede estar desincronizado.
+        if (error.status !== 401) recargar()
+        return { ok: false, mensaje: error.message || 'No se pudo cambiar el estado' }
+      }
+    },
+    [token, recargar]
+  )
+
+  return { estado, conectado, ahora, recargar, avanzar }
 }

@@ -14,7 +14,7 @@ const COLOR = {
   listo: 'var(--color-listas)',
 }
 
-export default function Columna({ estado, titulo, comandas, ahora, nota }) {
+export default function Columna({ estado, titulo, comandas, ahora, nota, onAvanzar }) {
   const color = COLOR[estado] || 'var(--color-texto-suave)'
 
   return (
@@ -43,7 +43,12 @@ export default function Columna({ estado, titulo, comandas, ahora, nota }) {
           </p>
         ) : (
           comandas.map((comanda) => (
-            <ComandaCard key={comanda.id_pedido} comanda={comanda} ahora={ahora} />
+            <ComandaCard
+              key={comanda.id_pedido}
+              comanda={comanda}
+              ahora={ahora}
+              onAvanzar={onAvanzar}
+            />
           ))
         )}
       </div>
