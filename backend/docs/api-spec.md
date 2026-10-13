@@ -745,8 +745,28 @@ base no debe crecer con la cantidad de comandas abiertas.
 ### GET /mesas/:id/cuenta — admin, cajero, mesero
 
 La cuenta de la mesa con el desglose **por comensal**: es lo que el cajero mira para
-cobrar y para dividir la cuenta. Sale de `obtener_cuenta_mesa_json()` (scripts 15 y 16) y
-se devuelve tal cual: sus campos son el contrato.
+cobrar y para dividir la cuenta. Sale de `obtener_cuenta_mesa_json()` (scripts 15, 16
+y 17) y se devuelve tal cual: sus campos son el contrato.
+
+**Es la cuenta de la VISITA ACTUAL, no el histórico de la mesa.** `mesas.sesion_iniciada_en`
+marca cuándo se sentó el grupo que está ahora, y solo cuentan los pedidos creados desde
+entonces: si el grupo anterior dejó algo sin pagar, no se le cobra a este. La respuesta
+incluye ese `sesion_iniciada_en` para que el cliente sepa de qué visita habla (es `null`
+en una mesa que nunca se ha abierto desde el script 17, y entonces entran todos los
+pedidos no cancelados).
+
+El backend fija `sesion_iniciada_en = NOW()` **solo cuando la mesa pasa de no ocupada a
+`ocupada`**, en la misma sentencia que el estado y el token:
+
+| Momento | Qué pasa con `sesion_iniciada_en` |
+|---|---|
+| `POST /mesas/:id/abrir` con la mesa libre, reservada o en mantenimiento | **Se fija**: visita nueva |
+| `POST /mesas/:id/abrir` con la mesa ya `ocupada` y QR vigente (idempotente) | No se toca |
+| `POST /mesas/:id/abrir` con la mesa ya `ocupada` y QR caducado | **No se toca**: el QR es nuevo pero la visita es la misma, y lo ya pedido sigue en su cuenta |
+| `POST /mesas/:id/rotar-qr` | No se toca: cambia la credencial, no el grupo |
+| `POST /mesas/:id/liberar` y la liberación automática | No se borra: queda como historial hasta la próxima apertura |
+| `PATCH /mesas/:id/estado` a `ocupada` desde otro estado | **Se fija**: también empieza una visita |
+| `POST /mesas` creando la mesa ya `ocupada` | **Se fija** al insertar |
 
 > **Unidad: pesos con decimales**, como los guarda la base (`total_mesa: 90000`). La
 > versión en **centavos enteros** es `GET /mesas/:id/cuenta/interno`, que es solo para el
