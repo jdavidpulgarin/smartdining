@@ -98,4 +98,63 @@ describe('Flujo de Login en frontend-restaurante', () => {
       expect(screen.getByText('Credenciales inválidas')).toBeInTheDocument()
     })
   })
+
+  it('debe mostrar banner de advertencia cuando hay un mensaje de sesión inválida en sessionStorage (401)', () => {
+    sessionStorage.setItem(
+      'smartdining_auth_message',
+      'Tu sesión no es válida o tu cuenta fue desactivada'
+    )
+
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Login />
+        </AuthProvider>
+      </MemoryRouter>
+    )
+
+    expect(
+      screen.getByText('Tu sesión no es válida o tu cuenta fue desactivada')
+    ).toBeInTheDocument()
+  })
+
+  it('debe mostrar cuenta regresiva y deshabilitar botón al recibir 429 con Retry-After', async () => {
+    const mockRateLimitResponse = {
+      ok: false,
+      status: 429,
+      headers: new Headers({
+        'content-type': 'application/json',
+        'retry-after': '30',
+      }),
+      json: async () => ({
+        error: 'Demasiados intentos de inicio de sesión. Espera un momento y vuelve a intentarlo.',
+      }),
+    }
+    vi.spyOn(global, 'fetch').mockResolvedValue(mockRateLimitResponse)
+
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Login />
+        </AuthProvider>
+      </MemoryRouter>
+    )
+
+    const emailInput = screen.getByPlaceholderText('admin@smartdining.com')
+    const passInput = screen.getByPlaceholderText('••••••••')
+    const submitBtn = screen.getByRole('button', { name: /ingresar al sistema/i })
+
+    fireEvent.change(emailInput, { target: { value: 'admin@smartdining.com' } })
+    fireEvent.change(passInput, { target: { value: 'WrongPassword' } })
+    fireEvent.click(submitBtn)
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/30s/i)
+    })
+
+    // El botón debe quedar deshabilitado mientras dura la cuenta regresiva
+    expect(screen.getByRole('button')).toBeDisabled()
+    expect(screen.getByText(/espera 30s para reintentar/i)).toBeInTheDocument()
+  })
 })
+
