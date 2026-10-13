@@ -6,7 +6,7 @@ import LineaCarrito from '../components/carrito/LineaCarrito';
 import Button from '../components/ui/Button';
 import { crearPedido } from '../services/pedidoService';
 import { recargarMenu } from '../services/menuService';
-import { ErrorApi } from '../services/api';
+import { traducirErrorPedido } from '../utils/erroresPedido';
 
 function Carrito() {
   const navigate = useNavigate();
@@ -55,51 +55,16 @@ function Carrito() {
       vaciarCarrito();
       navigate('/seguimiento', { state: { pedido: respuesta } });
     } catch (err) {
-      if (err?.status === 401) {
-        // El manejador central en api.js borra sesión y redirige a /despedida
-        return;
-      }
+      const infoError = traducirErrorPedido(err);
+      if (infoError.ignorar) return;
 
-      if (err instanceof ErrorApi || err?.name === 'ErrorApi') {
-        if (err.status === 409) {
-          recargarMenu();
-          setErrorPedido({
-            tipo: 409,
-            mensaje:
-              err.mensaje || 'El plato o ingrediente seleccionado se agotó.',
-            ayuda: 'Revisa tu pedido: algo se agotó en cocina',
-          });
-        } else if (err.status === 429) {
-          const seg = err.retryAfter || 60;
-          setBloqueoSegundos(seg);
-          setErrorPedido({
-            tipo: 429,
-            mensaje: `Demasiados intentos. Espera ${seg} segundos`,
-          });
-        } else if (err.status === 0 || err.motivo === 'sin_conexion') {
-          setErrorPedido({
-            tipo: 0,
-            mensaje:
-              'No pudimos enviar tu pedido. Revisa tu conexión a internet e intenta de nuevo',
-            esConexion: true,
-          });
-        } else if (err.status === 400 || err.status === 422) {
-          setErrorPedido({
-            tipo: err.status,
-            mensaje: err.mensaje || 'Revisa los datos del pedido',
-          });
-        } else {
-          setErrorPedido({
-            tipo: err.status,
-            mensaje: err.mensaje || 'Ocurrió un error al enviar el pedido',
-          });
-        }
-      } else {
-        setErrorPedido({
-          tipo: 'local',
-          mensaje: err.message || 'Error al procesar el pedido',
-        });
+      if (infoError.recargarMenu) {
+        recargarMenu();
       }
+      if (infoError.bloquearSegundos) {
+        setBloqueoSegundos(infoError.bloquearSegundos);
+      }
+      setErrorPedido(infoError);
     } finally {
       setEnviando(false);
     }
