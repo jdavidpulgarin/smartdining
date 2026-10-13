@@ -1,27 +1,122 @@
-import { AlertCircle, ChefHat, LogOut, RefreshCw } from 'lucide-react'
-import { useCallback } from 'react'
+import {
+  AlertCircle,
+  ChefHat,
+  LogOut,
+  Maximize,
+  Minimize,
+  Moon,
+  RefreshCw,
+  Sun,
+  Volume2,
+  VolumeX,
+} from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 import Columna from '../components/Columna'
 import IndicadorConexion from '../components/IndicadorConexion'
 import { MENSAJE_SESION_CAIDA, useAuth } from '../context/AuthContext'
+import { cerrarSonido, prepararSonido, sonarAvisoDeComanda } from '../lib/aviso-sonoro'
 import { COLUMNAS, comandasDeColumna } from '../lib/comandas'
+import {
+  CLAVE_SONIDO,
+  CLAVE_TEMA,
+  guardarPreferencia,
+  leerPreferencia,
+  sonidoInicial,
+  temaInicial,
+} from '../lib/preferencias'
+import { useCronometro } from '../hooks/useCronometro'
 import { useTablero } from '../lib/useTablero'
 
 /**
- * Tablero de cocina: tres columnas por estado.
+ * Tablero de cocina: tres columnas por estado, con los botones de avance.
  *
- * "Listas" queda vacia tras recargar la pagina a proposito: GET
- * /api/kds/comandas solo devuelve 'recibido' y 'en_preparacion', asi que esa
- * columna se llena con los order:status que llegan en vivo. Está documentado en
- * el README; cambiar el backend es otra actividad.
+ * Desde D-09 la columna "Listas" también viene de la API, así que sobrevive a
+ * una recarga o a una reconexión.
  */
 export default function Tablero() {
   const { usuario, token, cerrarSesion } = useAuth()
+
+  const [tema, setTema] = useState(() =>
+    temaInicial(
+      leerPreferencia(CLAVE_TEMA),
+      typeof window !== 'undefined' && window.matchMedia
+        ? window.matchMedia('(prefers-color-scheme: light)').matches
+        : null
+    )
+  )
+  const [sonido, setSonido] = useState(() => sonidoInicial(leerPreferencia(CLAVE_SONIDO)))
+  const [pantallaCompleta, setPantallaCompleta] = useState(false)
+
+  // El tema se aplica en <html> para que lo vean también los estilos base.
+  useEffect(() => {
+    document.documentElement.dataset.tema = tema
+  }, [tema])
+
+  // Si el sonido venía activado de una sesión anterior, el AudioContext no se
+  // puede crear hasta que haya un gesto; el primer toque en cualquier botón de
+  // la barra lo prepara. Se intenta aquí por si el navegador ya lo permite.
+  useEffect(() => {
+    if (sonido) prepararSonido()
+    return () => {
+      if (!sonido) cerrarSonido()
+    }
+  }, [sonido])
+
+  useEffect(() => {
+    const alCambiar = () => setPantallaCompleta(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', alCambiar)
+    return () => document.removeEventListener('fullscreenchange', alCambiar)
+  }, [])
 
   const alCaducarSesion = useCallback(() => {
     cerrarSesion(MENSAJE_SESION_CAIDA)
   }, [cerrarSesion])
 
-  const { estado, conectado, ahora, recargar } = useTablero({ token, alCaducarSesion })
+  // Solo suena por una comanda que entra por el socket (nunca al recargar ni al
+  // reconectar: eso lo decide useTablero).
+  const alLlegarComandaNueva = useCallback(() => {
+    if (sonido) sonarAvisoDeComanda()
+  }, [sonido])
+
+  const { estado, conectado, recargar, avanzar } = useTablero({
+    token,
+    alCaducarSesion,
+    alLlegarComandaNueva,
+  })
+
+  // Un solo intervalo de 1 s para todas las tarjetas.
+  const ahora = useCronometro()
+
+  async function alternarSonido() {
+    if (sonido) {
+      setSonido(false)
+      guardarPreferencia(CLAVE_SONIDO, false)
+      cerrarSonido()
+      return
+    }
+    // Este clic ES el gesto que el navegador exige para permitir audio.
+    const listo = await prepararSonido()
+    setSonido(listo)
+    guardarPreferencia(CLAVE_SONIDO, listo)
+  }
+
+  function alternarTema() {
+    const siguiente = tema === 'oscuro' ? 'claro' : 'oscuro'
+    setTema(siguiente)
+    guardarPreferencia(CLAVE_TEMA, siguiente)
+  }
+
+  async function alternarPantallaCompleta() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await document.documentElement.requestFullscreen()
+    } catch {
+      // Algunos navegadores la bloquean o no la soportan: no es crítico.
+    }
+  }
+
+  const botonBarra =
+    'flex h-12 items-center gap-2 rounded-lg border border-[color:var(--color-borde)] px-3 text-base font-semibold'
 
   return (
     <div className="flex h-full flex-col">
@@ -36,14 +131,45 @@ export default function Tablero() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <IndicadorConexion conectado={conectado} />
 
           <button
             type="button"
-            onClick={recargar}
-            className="flex items-center gap-2 rounded-lg border border-[color:var(--color-borde)] px-3 py-2 text-base font-semibold"
+            onClick={alternarSonido}
+            className={botonBarra}
+            aria-pressed={sonido}
+            title={sonido ? 'Silenciar el aviso de comanda nueva' : 'Activar el aviso sonoro'}
           >
+            {sonido ? <Volume2 size={18} aria-hidden="true" /> : <VolumeX size={18} aria-hidden="true" />}
+            {sonido ? 'Sonido' : 'Activar sonido'}
+          </button>
+
+          <button
+            type="button"
+            onClick={alternarTema}
+            className={botonBarra}
+            title="Cambiar entre claro y oscuro"
+          >
+            {tema === 'oscuro' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
+            {tema === 'oscuro' ? 'Claro' : 'Oscuro'}
+          </button>
+
+          <button
+            type="button"
+            onClick={alternarPantallaCompleta}
+            className={botonBarra}
+            title="Pantalla completa"
+          >
+            {pantallaCompleta ? (
+              <Minimize size={18} aria-hidden="true" />
+            ) : (
+              <Maximize size={18} aria-hidden="true" />
+            )}
+            {pantallaCompleta ? 'Salir' : 'Pantalla'}
+          </button>
+
+          <button type="button" onClick={recargar} className={botonBarra}>
             <RefreshCw
               size={18}
               className={estado.cargando ? 'animate-spin' : undefined}
@@ -54,8 +180,11 @@ export default function Tablero() {
 
           <button
             type="button"
-            onClick={() => cerrarSesion()}
-            className="flex items-center gap-2 rounded-lg border border-[color:var(--color-alerta)] px-3 py-2 text-base font-semibold text-[color:var(--color-alerta)]"
+            onClick={() => {
+              cerrarSonido()
+              cerrarSesion()
+            }}
+            className={`${botonBarra} border-[color:var(--color-alerta)] text-[color:var(--color-alerta)]`}
           >
             <LogOut size={18} aria-hidden="true" />
             Salir
@@ -72,7 +201,7 @@ export default function Tablero() {
           <button
             type="button"
             onClick={recargar}
-            className="rounded-lg bg-[color:var(--color-alerta)] px-4 py-2 text-base font-bold text-[color:var(--color-fondo)]"
+            className="h-12 rounded-lg bg-[color:var(--color-alerta)] px-4 text-base font-bold text-[color:var(--color-fondo)]"
           >
             Reintentar
           </button>
@@ -87,9 +216,10 @@ export default function Tablero() {
             titulo={columna.titulo}
             comandas={comandasDeColumna(estado, columna.estado)}
             ahora={ahora}
+            onAvanzar={avanzar}
             nota={
               columna.estado === 'listo'
-                ? 'Esta columna se llena con los avisos en vivo y se vacía al recargar'
+                ? 'Esperando que el mesero las recoja'
                 : null
             }
           />
