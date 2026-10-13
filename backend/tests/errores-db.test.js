@@ -294,3 +294,167 @@ test('un codigo que empieza por 22 pero no es un SQLSTATE no se confunde', async
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Choques de concurrencia: 40P01 y 40001 -> 409, no 500
+// ---------------------------------------------------------------------------
+
+/**
+ * Simula el 40P01 real de PostgreSQL. El texto nombra procesos, transacciones y
+ * modos de bloqueo, que es justo lo que NO debe salir al cliente.
+ */
+function errorDeadlock() {
+  const err = new Error('se ha detectado un deadlock');
+  err.code = '40P01';
+  err.detail =
+    'El proceso 12345 espera ShareLock en la transacción 678; bloqueado por el proceso 12346.';
+  err.where = 'sentencia SQL «UPDATE pedidos SET estado = $1 WHERE id_pedido = $2»';
+  return err;
+}
+
+/** Simula el 40001: la transaccion no se pudo serializar con otra. */
+function errorSerializacion() {
+  const err = new Error(
+    'no se pudo serializar el acceso debido a una actualización concurrente'
+  );
+  err.code = '40001';
+  err.detail = 'La transacción podría tener éxito si se reintenta.';
+  return err;
+}
+
+const MENSAJE_409_CONCURRENCIA = 'La operación chocó con otra en curso, vuelve a intentarlo';
+
+for (const [codigo, lanzar, caso] of [
+  ['40P01', errorDeadlock, 'deadlock detectado'],
+  ['40001', errorSerializacion, 'fallo de serializacion'],
+]) {
+  test(`${codigo} (${caso}) responde 409 invitando a reintentar`, async () => {
+    const db = instalarFakeDb((sql) => {
+      if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+      if (sql.includes('UPDATE pedidos SET estado')) throw lanzar();
+      return { rows: [] };
+    });
+    try {
+      const res = await request(app)
+        .patch('/api/kds/comandas/1/estado')
+        .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+        .send({ estado: 'en_preparacion' });
+
+      assert.strictEqual(res.status, 409, 'no es una caida del servidor: reintentar sirve');
+      assert.strictEqual(res.body.error, MENSAJE_409_CONCURRENCIA);
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+test('el 409 de concurrencia no filtra el texto interno de postgres', async () => {
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) throw errorDeadlock();
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch('/api/kds/comandas/1/estado')
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'en_preparacion' });
+
+    const cuerpo = JSON.stringify(res.body);
+    for (const fuga of [
+      'deadlock',
+      'ShareLock',
+      '12345',
+      '12346',
+      'transacción 678',
+      'UPDATE pedidos',
+      '40P01',
+    ]) {
+      assert.ok(!cuerpo.includes(fuga), `no debe aparecer "${fuga}" en la respuesta`);
+    }
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('el 409 de concurrencia tiene la misma forma de JSON que el resto', async () => {
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) throw errorSerializacion();
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch('/api/kds/comandas/1/estado')
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'en_preparacion' });
+
+    assert.deepStrictEqual(Object.keys(res.body), ['error'], 'una sola clave: error');
+    assert.strictEqual(typeof res.body.error, 'string');
+  } finally {
+    db.restaurar();
+  }
+});
+
+for (const [codigo, caso] of [
+  ['40002', 'violacion de integridad diferida'],
+  ['40003', 'resultado de la transaccion desconocido'],
+  ['40000', 'rollback de la transaccion a secas'],
+]) {
+  test(`${codigo} (${caso}) sigue dando 500: reintentarlo no es seguro`, async () => {
+    // La lista es explicita, no la clase 40 entera. Reintentar a ciegas un
+    // 40002 o un 40003 seria cobrar dos veces o guardar basura.
+    const db = instalarFakeDb((sql) => {
+      if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+      if (sql.includes('UPDATE pedidos SET estado')) {
+        const err = new Error(`fallo de transaccion ${codigo}`);
+        err.code = codigo;
+        throw err;
+      }
+      return { rows: [] };
+    });
+    try {
+      const res = await request(app)
+        .patch('/api/kds/comandas/1/estado')
+        .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+        .send({ estado: 'en_preparacion' });
+
+      assert.strictEqual(res.status, 500);
+      assert.strictEqual(res.body.error, 'Error interno del servidor');
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+test('un codigo desconocido sigue dando 500', async () => {
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) {
+      const err = new Error('la conexion se cerro');
+      err.code = 'ECONNRESET';
+      throw err;
+    }
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch('/api/kds/comandas/1/estado')
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'en_preparacion' });
+
+    assert.strictEqual(res.status, 500);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('el clasificador reconoce solo esos dos codigos', () => {
+  const { esErrorDeConcurrencia } = require('../src/middleware/errores.middleware');
+
+  assert.strictEqual(esErrorDeConcurrencia('40P01'), true);
+  assert.strictEqual(esErrorDeConcurrencia('40001'), true);
+  for (const otro of ['40002', '40003', '40000', '22003', 'P0001', '', null, undefined, 40001]) {
+    assert.strictEqual(esErrorDeConcurrencia(otro), false, `${otro} no es un choque de concurrencia`);
+  }
+});
