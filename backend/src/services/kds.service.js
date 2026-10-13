@@ -45,6 +45,20 @@ const SQL_ITEMS_DE_COMANDAS = `
 const ESTADOS_EN_EL_TABLERO = ['recibido', 'en_preparacion', 'listo'];
 
 /**
+ * Cuánto tiempo sigue una comanda 'listo' en el tablero.
+ *
+ * Si el mesero nunca la marca 'entregado', se queda ahí para siempre y el pase
+ * acaba lleno de comandas de días pasados que tapan las de hoy. Doce horas
+ * cubren un turno completo con margen: lo que lleve más que eso no es una
+ * comanda pendiente, es un pedido que nadie cerró.
+ *
+ * El recorte es SOLO para 'listo'. Un 'recibido' o 'en_preparacion' viejo
+ * aparece igual, por antiguo que sea: eso sí es trabajo pendiente de cocina y
+ * esconderlo sería peor (es el caso de ORD-001 del seed).
+ */
+const HORAS_VISIBLES_LISTO = 12;
+
+/**
  * Devuelve las comandas del tablero (recibido, en_preparacion, listo) con sus
  * ítems ya enriquecidos con nombre del plato, categoría, quién pidió cada ítem
  * y sus ingredientes, más el número de mesa y los minutos transcurridos desde
@@ -57,12 +71,31 @@ async function comandasActivas() {
   const pedidosResult = await pool.query(
     `SELECT p.id_pedido, p.codigo_pedido, p.id_mesa, p.estado, p.notas_generales,
             p.creado_en, m.numero AS mesa_numero,
-            EXTRACT(EPOCH FROM (NOW() - p.creado_en)) / 60 AS minutos_transcurridos
+            EXTRACT(EPOCH FROM (NOW() - p.creado_en)) / 60 AS minutos_transcurridos,
+            -- Cuándo pasó a 'listo': con esto el KDS cuenta el tiempo EN EL PASE
+            -- y no el total desde que se pidió, que son dos cosas distintas.
+            -- pedidos.actualizado_en no sirve: cambia con cualquier UPDATE.
+            h.fecha_cambio AS listo_en
      FROM pedidos p
      JOIN mesas m ON m.id_mesa = p.id_mesa
+     LEFT JOIN LATERAL (
+       SELECT he.fecha_cambio
+       FROM historial_estados he
+       WHERE he.id_pedido = p.id_pedido AND he.estado_nuevo = 'listo'
+       ORDER BY he.fecha_cambio DESC
+       LIMIT 1
+     ) h ON TRUE
      WHERE p.estado = ANY($1::text[])
+       -- Las 'listo' solo mientras sigan siendo del turno; el resto sin límite.
+       -- Si no hay fila de historial no se puede saber cuándo quedó lista, y
+       -- esconderla por un dato que falta sería peor que mostrarla: se muestra.
+       AND (
+         p.estado <> 'listo'
+         OR h.fecha_cambio IS NULL
+         OR h.fecha_cambio > NOW() - ($2 || ' hours')::interval
+       )
      ORDER BY p.creado_en ASC`,
-    [ESTADOS_EN_EL_TABLERO]
+    [ESTADOS_EN_EL_TABLERO, String(HORAS_VISIBLES_LISTO)]
   );
 
   const pedidos = pedidosResult.rows;
@@ -151,4 +184,10 @@ async function cambiarEstado(pedidoId, estado, observaciones, idUsuario) {
   }
 }
 
-module.exports = { comandasActivas, cambiarEstado, ESTADOS_EN_EL_TABLERO, LOCK_KDS };
+module.exports = {
+  comandasActivas,
+  cambiarEstado,
+  ESTADOS_EN_EL_TABLERO,
+  HORAS_VISIBLES_LISTO,
+  LOCK_KDS,
+};

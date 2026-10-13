@@ -712,6 +712,19 @@ columna "Listas" del KDS se vaciaría en cada recarga o reconexión y la cocina 
 vista lo que está esperando salir. Una comanda sale del tablero cuando pasa a
 `entregado`, `pagado` o `cancelado`.
 
+**Las `listo` se recortan a las últimas 12 horas** (`HORAS_VISIBLES_LISTO` en
+`kds.service.js`). Si el mesero nunca marca `entregado`, la comanda se quedaría en el
+pase para siempre y las de días pasados taparían las de hoy; doce horas cubren un turno
+con margen. El recorte es **solo para `listo`**: una comanda `recibido` o
+`en_preparacion` aparece por antigua que sea, porque eso sí es trabajo pendiente de
+cocina y esconderlo sería peor. Una `listo` **sin** fila de historial (no se sabe cuándo
+quedó lista) también se muestra: no se oculta nada por un dato que falta.
+
+Cada comanda trae **`listo_en`**: la hora en que pasó a `listo`, tomada de la última
+transición en `historial_estados`. Es `null` mientras no haya pasado por ese estado. El
+KDS la usa para contar el tiempo **en el pase**, que no es el mismo que el total desde
+que se pidió. No se usa `pedidos.actualizado_en` porque cambia con cualquier UPDATE.
+
 Respuesta de `GET /kds/comandas`:
 
 ```json
@@ -720,6 +733,7 @@ Respuesta de `GET /kds/comandas`:
     {
       "id_pedido": 87, "codigo_pedido": "PED-260922-K3F9AQ", "id_mesa": 5, "mesa_numero": 5,
       "estado": "recibido", "notas_generales": null, "minutos_transcurridos": 3.2,
+      "listo_en": null,
       "items": [
         {
           "id_detalle": 201, "id_pedido": 87, "cantidad": 2, "plato_nombre": "Bowl Personalizado",

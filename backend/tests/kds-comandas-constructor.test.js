@@ -239,3 +239,100 @@ test('los estados que ya salieron del tablero no se piden', async () => {
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// D-09: hora de paso a 'listo' y recorte de 12 horas
+// ---------------------------------------------------------------------------
+
+const kdsService = require('../src/services/kds.service');
+
+test('la consulta trae listo_en desde historial_estados', async () => {
+  const db = instalarFakeDb(conComandas(1));
+  try {
+    await request(app).get('/api/kds/comandas').set('Authorization', `Bearer ${jwtCocina()}`);
+
+    const consulta = db.buscar(SQL_PEDIDOS);
+    assert.ok(consulta.sql.includes('h.fecha_cambio AS listo_en'), 'se expone listo_en');
+    assert.ok(
+      consulta.sql.includes('FROM historial_estados he'),
+      'sale de historial_estados, no de pedidos.actualizado_en (que cambia con cualquier UPDATE)'
+    );
+    assert.ok(consulta.sql.includes("he.estado_nuevo = 'listo'"), 'la ultima transicion a listo');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('listo_en llega al cliente tal como lo da la base', async () => {
+  const listoEn = new Date('2026-10-13T02:15:25.200Z').toISOString();
+  const db = instalarFakeDb((sql, params) => {
+    if (sql.includes(SQL_PEDIDOS)) {
+      return { rows: [{ ...pedido(42), estado: 'listo', listo_en: listoEn }] };
+    }
+    if (sql.includes(SQL_ITEMS)) return { rows: [item(742, 42)] };
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .get('/api/kds/comandas')
+      .set('Authorization', `Bearer ${jwtCocina()}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(new Date(res.body.comandas[0].listo_en).toISOString(), listoEn);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('las comandas listas se recortan a las ultimas 12 horas', async () => {
+  const db = instalarFakeDb(conComandas(1));
+  try {
+    await request(app).get('/api/kds/comandas').set('Authorization', `Bearer ${jwtCocina()}`);
+
+    const consulta = db.buscar(SQL_PEDIDOS);
+    assert.strictEqual(
+      consulta.params[1],
+      String(kdsService.HORAS_VISIBLES_LISTO),
+      'el tope va como parametro, desde una constante nombrada'
+    );
+    assert.strictEqual(kdsService.HORAS_VISIBLES_LISTO, 12);
+    assert.ok(
+      consulta.sql.includes("($2 || ' hours')::interval"),
+      'el recorte se calcula en SQL'
+    );
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('el recorte aplica SOLO a listo: recibido y en_preparacion no caducan', async () => {
+  const db = instalarFakeDb(conComandas(1));
+  try {
+    await request(app).get('/api/kds/comandas').set('Authorization', `Bearer ${jwtCocina()}`);
+
+    const sql = db.buscar(SQL_PEDIDOS).sql;
+    assert.ok(
+      sql.includes("p.estado <> 'listo'"),
+      'una comanda vieja en preparacion sigue siendo trabajo pendiente de cocina'
+    );
+    // El orden de la condicion importa: primero se deja pasar todo lo que no es
+    // 'listo', y solo despues se mira la antiguedad.
+    assert.ok(sql.indexOf("p.estado <> 'listo'") < sql.indexOf("hours')::interval"));
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('una comanda listo sin historial no se esconde por un dato que falta', async () => {
+  const db = instalarFakeDb(conComandas(1));
+  try {
+    await request(app).get('/api/kds/comandas').set('Authorization', `Bearer ${jwtCocina()}`);
+
+    assert.ok(
+      db.buscar(SQL_PEDIDOS).sql.includes('h.fecha_cambio IS NULL'),
+      'sin hora de listo se muestra: ocultarla en silencio seria peor'
+    );
+  } finally {
+    db.restaurar();
+  }
+});
