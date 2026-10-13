@@ -15,6 +15,8 @@ const {
 const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
 const { crearConexionRedis } = require('./almacen/redis');
+const { crearClienteBackend } = require('./backend');
+const { crearRotadorQr } = require('./rotacion');
 const { crearAlmacenCarritosRedis } = require('./almacen/carritos-redis');
 const { crearRegistroIdempotenciaRedis } = require('./almacen/idempotencia-redis');
 const { crearRevocacionesRedis } = require('./almacen/revocaciones-redis');
@@ -105,6 +107,14 @@ function crearServidor(config, deps = {}) {
     }),
   });
 
+  // Cliente hacia el backend (servidor a servidor, con x-internal-key).
+  ctx.backend = deps.backend || (config.backendUrl
+    ? crearClienteBackend({ url: config.backendUrl, claveInterna: config.internalApiKey })
+    : null);
+  ctx.rotador = crearRotadorQr({
+    io, qr: ctx.qr, presencia: ctx.presencia, backend: ctx.backend, intervaloMs: config.rotacionQrMs, ...(deps.rotacion || {}),
+  });
+
   // Mesas ya liberadas que aún no tienen sesión nueva. Hace idempotente a
   // liberarMesa: el backend puede reintentar el aviso sin que se repita el
   // evento ni se revoquen los QR de una sesión que acaba de empezar.
@@ -119,6 +129,7 @@ function crearServidor(config, deps = {}) {
   ctx.liberarMesa = async (idMesa, motivo = 'liberada') => {
     if (mesasLiberadas.has(idMesa)) return { duplicado: true };
     mesasLiberadas.add(idMesa);
+    ctx.rotador.cerrar(idMesa);
     await ctx.qr.revocarMesa(idMesa);
     // ANTES de vaciar el carrito: quien lo reciba todavía puede mostrar qué
     // quedó sin pedir. Al panel le sirve para pintar la mesa libre al instante.
@@ -151,7 +162,11 @@ function crearServidor(config, deps = {}) {
   io.on('connection', (socket) => {
     console.log(`[socket] conectado ${socket.id} (${socket.data.identidad.rol})`);
     registrarSalas(socket, {
-      obtenerSnapshot: ctx.carritos.snapshot, sesionVigente, alCambiarSala: ctx.presencia.programar,
+      obtenerSnapshot: ctx.carritos.snapshot,
+      sesionVigente,
+      alCambiarSala: ctx.presencia.programar,
+      // Con el primer comensal en la sala, el QR de la mesa deja de rotar.
+      alEntrarComensal: ctx.rotador.fijar,
     });
     registrarCarrito(socket, ctx);
     registrarPedidos(socket, ctx);

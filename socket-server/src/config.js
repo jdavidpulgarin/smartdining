@@ -32,8 +32,21 @@ function cargarConfig(env = process.env) {
     throw new Error('REDIS_URL es obligatoria con NODE_ENV=production (el estado no puede vivir solo en memoria)');
   }
 
+  // URL del backend para llamadas servidor a servidor (rotación automática del
+  // QR y, más adelante, pagos). Opcional: sin ella esas funciones quedan apagadas.
+  const backendUrl = (env.BACKEND_URL || '').trim().replace(/\/+$/, '') || null;
+  if (backendUrl && !/^https?:\/\/[^/\s]+/.test(backendUrl)) {
+    throw new Error('BACKEND_URL debe ser una URL http(s), p. ej. http://localhost:4000');
+  }
+  const rotacionMin = env.ROTACION_QR_MINUTOS === undefined ? 3 : Number(env.ROTACION_QR_MINUTOS);
+  if (!Number.isFinite(rotacionMin) || rotacionMin < 1 || rotacionMin > 60) {
+    throw new Error('ROTACION_QR_MINUTOS debe ser un número entre 1 y 60');
+  }
+
   return {
     puerto: Number(env.PORT) || 4001,
+    backendUrl,
+    rotacionQrMs: rotacionMin * 60 * 1000,
     entorno,
     // Sin REDIS_URL (solo fuera de producción) el estado vive en memoria.
     redisUrl,

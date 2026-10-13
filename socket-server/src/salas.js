@@ -41,7 +41,9 @@ function resolverMesa(identidad, idPayload) {
  */
 const MAX_ALIAS = 40;
 
-function registrarSalas(socket, { obtenerSnapshot, sesionVigente = () => true, alCambiarSala = () => {} } = {}) {
+function registrarSalas(socket, {
+  obtenerSnapshot, sesionVigente = () => true, alCambiarSala = () => {}, alEntrarComensal = () => {},
+} = {}) {
   const identidad = socket.data.identidad;
 
   // Las pantallas de personal escuchan sus salas desde que conectan: no
@@ -73,7 +75,10 @@ function registrarSalas(socket, { obtenerSnapshot, sesionVigente = () => true, a
     }
 
     socket.join(salaMesa(idMesa));
-    if (identidad.rol === ROL_COMENSAL) alCambiarSala(idMesa);
+    if (identidad.rol === ROL_COMENSAL) {
+      alEntrarComensal(idMesa);
+      alCambiarSala(idMesa);
+    }
     const respuesta = { id_mesa: idMesa, sala: salaMesa(idMesa) };
     if (obtenerSnapshot) respuesta.carrito = await obtenerSnapshot(idMesa);
     return exito(respuesta);

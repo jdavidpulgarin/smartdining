@@ -159,6 +159,9 @@ const rutasQr = {
       const qr = ctx.qr.generar(cuerpo.id_mesa, ttl);
       // QR nuevo = sesión nueva: una liberación posterior vuelve a contar.
       if (ctx.reabrirMesa) ctx.reabrirMesa(cuerpo.id_mesa);
+      // Y empieza (o reinicia) la cuenta de la rotación automática con este
+      // token como el vigente esperado en el backend.
+      if (ctx.rotador) ctx.rotador.abrir(cuerpo.id_mesa, qr.token);
       enviarJson(res, 201, qr);
     } catch (err) {
       if (err instanceof RangeError) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', err.message);
