@@ -329,7 +329,8 @@ hasta que se libere.
 | `cart:updated` | `room:mesa-{ID}` (todos **menos** quien emitió) | `{ eventId, origen, carrito: { version, items } }` |
 | `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, emitidoEn }` |
-| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, monto, referencia_externa, emitidoEn }` |
+| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, emitidoEn }` (§8.3) |
+| `pago:alerta` | `room:admin` | `{ eventId, id_mesa, referencia_externa, id_transaccion_pasarela, motivo, emitidoEn }` (§8.5) |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
@@ -422,7 +423,8 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 | POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` (token de 1 a 255 caracteres) → reenvía `qr:actualizado` a la pantalla de esa mesa |
 | POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "motivo": "pagada" }` (`motivo` opcional: `pagada` o `liberada`, por defecto `liberada`) → revoca los QR, emite `mesa:liberada`, desconecta a los comensales y borra carrito y suscripciones. Responde `{ ok, duplicado }` |
 | POST | `/internal/ingrediente-disponibilidad` | Header `x-internal-key` | Solo backend. `{ "id_ingrediente": 12, "disponible": false, "eventId": "<uuid opcional>" }` → emite `ingrediente:disponibilidad`. Con `eventId`, un reintento responde `duplicado: true` |
-| POST | `/pagos/webhook` | Firma del proveedor | Ver sección 8 |
+| POST | `/pagos/intencion` | Bearer JWT `comensal` | Intención de pago (§8.1) |
+| POST | `/pagos/webhook` | Checksum de Wompi | Eventos de Wompi (§8.3) |
 
 ### 6.1. Token QR
 
@@ -605,29 +607,117 @@ x-internal-key: <INTERNAL_API_KEY>
 - `por_comensal`: por alias (el `apodo`/`comensal` de cada ítem), menos lo que ya pagó.
 - `404` si la mesa no existe. El socket-server trata cualquier otra forma como error (`502`).
 
-### 8.3. Webhook de pagos
+### 8.3. Webhook: `POST /pagos/webhook` (capas 4, 5 y 6)
 
-`POST /pagos/webhook` recibe confirmaciones del proveedor de pagos.
+Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún frontend.
 
-- El servidor **verifica la firma sobre el cuerpo crudo (raw)** antes de parsear nada.
-  Sin firma válida responde `400` y **no procesa** el evento.
-- Cabecera: `x-signature: t=<unix_seg>,v1=<hex>` donde `v1 = HMAC-SHA256(secreto, "<t>.<cuerpo raw>")`.
-- Se rechazan firmas con `t` a más de 5 minutos (anti-replay).
-- Idempotente por `id` del evento del proveedor.
+> **Cambio de contrato:** el formato anterior (`x-signature: t=…,v1=…` y
+> `type: "payment.succeeded"`, con `PAYMENT_WEBHOOK_SECRET`) se reemplazó por el de Wompi.
+> Nadie lo usaba en producción: el backend nunca lo llamó.
 
-Cuerpo esperado:
+1. **Checksum** sobre el cuerpo crudo: SHA-256 de los valores de `signature.properties` (en el
+   orden recibido, rutas dentro de `data`) + `timestamp` + `WOMPI_EVENTS_SECRET`. Se compara
+   en tiempo constante con `signature.checksum` y, si viene, con `X-Event-Checksum`. Si falla
+   → `400 FIRMA_INVALIDA` sin detalles.
+2. **Antigüedad**: se aceptan eventos de hasta **25 h** de antigüedad (Wompi reintenta a los
+   30 min, 3 h y 24 h si no recibe `200`) y hasta 5 min en el futuro
+   (`PAGOS_WEBHOOK_TOLERANCIA_SEG`). El replay de un evento viejo no tiene efecto: la
+   idempotencia lo descarta y el estado siempre se consulta en la API.
+3. Solo se procesa `transaction.updated`; cualquier otro evento → `200 { ignorado: true }`.
+4. **Idempotencia** por (transacción, estado): un duplicado → `200 { duplicado: true }` sin
+   efectos.
+5. `DECLINED`, `ERROR`, `VOIDED`: la intención queda `rechazada`, `error` o `anulada` y el
+   comensal puede pedir otra. No se registra ni se anuncia nada.
+6. `APPROVED` → **reverificación** con `GET /v1/transactions/{id}` (llave privada, 5 s de
+   timeout). Debe coincidir: `status APPROVED`, la misma referencia, una intención conocida y
+   **pendiente**, `amount_in_cents` **exactamente** igual al esperado y `currency COP`.
+   Si algo no cuadra → intento fallido + `pago:alerta` (§8.5), `200`.
+7. **Registro** en el backend (`POST /api/transacciones/internal`, §8.4). **Solo si el backend
+   confirma** se emite `payment:confirmed`.
+8. Si la pasarela o el backend no responden (o dan 5xx) → `503`, se libera la marca de
+   idempotencia y **no se emite nada**; Wompi reintenta.
+
+`payment:confirmed` → `room:admin` y `room:mesa-{ID}`:
 
 ```json
 {
-  "id": "evt_123",
-  "type": "payment.succeeded",
-  "data": { "id_pedido": 87, "id_mesa": 5, "monto": 56000, "referencia_externa": "ch_123" }
+  "eventId": "1132-903100443-27458",
+  "id_mesa": 5,
+  "comensal": "Ana",
+  "monto": 33333,
+  "saldo_restante": 66667,
+  "monto_centavos": 3333300,
+  "saldo_restante_centavos": 6666700,
+  "referencia_externa": "SD-5-1760212345678-Qm9vX2FfdGVzdF9f",
+  "emitidoEn": "2026-10-11T20:15:00.000Z"
 }
 ```
 
-Al confirmarse se emite `payment:confirmed` a `room:admin` y `room:mesa-{ID}`. El
-socket-server **no escribe en la base de datos**: registrar la transacción
-(`POST /api/transacciones`) sigue siendo responsabilidad del backend/cajero.
+> **Cambio de contrato:** ya no lleva `id_pedido` (el pago es de la mesa, no de un pedido) y
+> agrega `comensal` y `saldo_restante`. `monto` sigue en pesos. Cuando `saldo_restante` llega a
+> 0, el backend libera la mesa y llega `mesa:liberada` con `motivo: "pagada"`.
+
+### 8.4. Contrato de registro que necesita del backend (pendiente: Daniel)
+
+```
+POST /api/transacciones/internal
+x-internal-key: <INTERNAL_API_KEY>
+
+{
+  "referencia_externa": "SD-5-1760212345678-Qm9vX2FfdGVzdF9f",
+  "id_transaccion_pasarela": "1132-903100443-27458",
+  "pasarela": "wompi",
+  "id_mesa": 5,
+  "comensal": "Ana",
+  "modo": "igual",
+  "monto_centavos": 3333300,
+  "moneda": "COP",
+  "metodo_pago": "online"
+}
+
+→ 201 { "ok": true, "duplicado": false, "saldo_restante_centavos": 6666700, "mesa_liberada": false }
+→ 200 { "ok": true, "duplicado": true, … }   (misma referencia_externa: no registra dos veces)
+→ 409 { "error": "…" }                       (excede el saldo, mesa sin cuenta abierta…)
+```
+
+- **Idempotente por `referencia_externa`** (índice único). Un reintento devuelve el mismo
+  resultado.
+- `transacciones` se liga a `id_pedido`: el backend reparte el monto entre los pedidos abiertos
+  de la mesa (los más antiguos primero), con la misma `referencia_externa`, en **una
+  transacción SQL**. Los triggers (`tr_validar_transaccion_financiera`) siguen siendo la
+  autoridad.
+- Si con este pago el saldo llega a 0: liberar la mesa en la misma transacción y, **después
+  del commit**, llamar a `/internal/mesa-liberada` con `{ "id_mesa": 5, "motivo": "pagada" }`.
+- 5xx o sin respuesta en 1,5 s → el socket-server responde 503 a Wompi y reintenta más tarde.
+
+### 8.5. `pago:alerta` e intentos fallidos
+
+`pago:alerta` → `room:admin`, para que el personal revise. Sin datos del pagador:
+
+```json
+{ "eventId": "1132-903100443-27458:monto_distinto", "id_mesa": 5, "referencia_externa": "SD-5-…", "id_transaccion_pasarela": "1132-903100443-27458", "motivo": "monto_distinto", "emitidoEn": "…" }
+```
+
+`motivo`: `monto_distinto`, `moneda_distinta`, `estado_no_aprobado`, `transaccion_inexistente`,
+`transaccion_distinta`, `referencia_distinta`, `referencia_desconocida`,
+`intencion_no_pendiente`, `backend_rechazo_<status>`.
+
+Contrato pendiente (Daniel; y Jarrinson para la tabla):
+
+```
+POST /api/pagos/intentos-fallidos/interno
+x-internal-key: <INTERNAL_API_KEY>
+
+{ "referencia_externa": "SD-5-…", "id_transaccion_pasarela": "1132-…", "pasarela": "wompi", "id_mesa": 5,
+  "motivo": "monto_distinto", "monto_centavos": 100, "monto_esperado_centavos": 3333300, "moneda": "COP", "metodo_pago": "online" }
+→ 201 { "ok": true }
+```
+
+Guarda en `intentos_pago_fallidos` (`razon_rechazo` = motivo). Ojo: hoy `id_pedido` es
+`NOT NULL` y una referencia desconocida no tiene pedido; hace falta permitir `NULL` o agregar
+`id_mesa` y `referencia_externa`. Si responde 5xx, el webhook responde 503 y Wompi reintenta.
+
+Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 
 ---
 
@@ -643,7 +733,7 @@ socket-server **no escribe en la base de datos**: registrar la transacción
 | `QR_TTL_MINUTOS` | Vigencia por defecto del QR (360) |
 | `PANTALLA_TOKEN_EXPIRES_IN` | Vigencia del JWT de la pantalla de mesa (30d por defecto) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push (`npm run vapid` las genera) |
-| `PAYMENT_WEBHOOK_SECRET` | Secreto compartido con el proveedor de pagos |
+| `PAGOS_WEBHOOK_TOLERANCIA_SEG` | Antigüedad máxima de un evento de Wompi (90000 = 25 h) |
 | `BACKEND_URL` | URL del backend para llamadas servidor a servidor (cuenta, registro de pagos, rotación de QR) |
 | `WOMPI_PUBLIC_KEY` | Llave pública (`pub_test_…`). La **única** que llega al cliente |
 | `WOMPI_PRIVATE_KEY` | Llave privada (`prv_test_…`). Solo para consultar transacciones en la API |

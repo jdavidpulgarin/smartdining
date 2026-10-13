@@ -50,6 +50,8 @@ function crearRegistroIdempotencia({ ttlMs = 10 * 60 * 1000, maxEntradas = 50000
       this.guardar(clave, respuesta);
       return true;
     },
+    /** Quita una reserva: el evento se podrá procesar de nuevo (reintento tras un fallo). */
+    liberar(clave) { entradas.delete(clave); },
     get tamano() { return entradas.size; },
   };
 }

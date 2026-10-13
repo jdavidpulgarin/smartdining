@@ -18,6 +18,7 @@ const { crearConexionRedis } = require('./almacen/redis');
 const { crearClienteBackend } = require('./backend');
 const { crearRotadorQr } = require('./rotacion');
 const { crearPasarelaWompi } = require('./pasarelas/wompi');
+const { verificarImplementacion } = require('./pasarelas/PasarelaPago');
 const {
   crearAlmacenPagosMemoria, crearAlmacenPagosRedis, crearLimitesMemoria, crearLimitesRedis,
 } = require('./almacen/pagos');
@@ -99,7 +100,7 @@ function crearServidor(config, deps = {}) {
       : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
     estadoMesas: cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria(),
     // Pagos: pasarela (null = pagos apagados), intenciones y límites.
-    pasarela: deps.pasarela || (config.wompi ? crearPasarelaWompi(config.wompi) : null),
+    pasarela: deps.pasarela || (config.wompi ? verificarImplementacion(crearPasarelaWompi(config.wompi)) : null),
     almacenPagos: cliente ? crearAlmacenPagosRedis({ cliente }) : crearAlmacenPagosMemoria(),
     limites: cliente ? crearLimitesRedis({ cliente }) : crearLimitesMemoria(),
     presencia: crearPresencia({ io, ...(deps.presencia || {}) }),

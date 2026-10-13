@@ -44,8 +44,45 @@ function backendFalso(rutas = {}) {
   };
 }
 
+/**
+ * fetch falso para la API de Wompi: `transacciones` mapea id -> data de
+ * GET /transactions/{id}. Lo que no esté mapeado responde 404. Cualquier URL
+ * que no sea la API de sandbox hace fallar la prueba (nunca se sale a la red).
+ */
+function fetchWompiFalso(transacciones = {}, { caido = false } = {}) {
+  const llamadas = [];
+  const fn = async (url, opts = {}) => {
+    llamadas.push({ url, opts });
+    if (!String(url).startsWith(`${WOMPI_ENV.WOMPI_API_URL}/transactions/`)) {
+      throw new Error(`La prueba intentó salir a la red: ${url}`);
+    }
+    if (caido) throw new TypeError('fetch failed');
+    const id = decodeURIComponent(String(url).split('/').pop());
+    const data = transacciones[id];
+    if (!data) return { ok: false, status: 404, text: async () => '{"error":{"type":"NOT_FOUND_ERROR"}}' };
+    return { ok: true, status: 200, text: async () => JSON.stringify({ data }) };
+  };
+  fn.llamadas = llamadas;
+  return fn;
+}
+
+/** Pasarela Wompi real con la API falsa. */
+function pasarelaFalsa(transacciones, opciones) {
+  const { crearPasarelaWompi } = require('../src/pasarelas/wompi');
+  const fetch = fetchWompiFalso(transacciones, opciones);
+  const pasarela = crearPasarelaWompi({
+    llavePublica: WOMPI_ENV.WOMPI_PUBLIC_KEY,
+    llavePrivada: WOMPI_ENV.WOMPI_PRIVATE_KEY,
+    secretoIntegridad: WOMPI_ENV.WOMPI_INTEGRITY_SECRET,
+    secretoEventos: WOMPI_ENV.WOMPI_EVENTS_SECRET,
+    apiUrl: WOMPI_ENV.WOMPI_API_URL,
+    fetch,
+  });
+  return { pasarela, fetch };
+}
+
 const sinRespuesta = () => Object.assign(new Error('El backend no respondió a tiempo'), { codigo: 'BACKEND_TIMEOUT' });
 
 module.exports = {
-  WOMPI_ENV, cuenta, backendFalso, sinRespuesta, hex,
+  WOMPI_ENV, cuenta, backendFalso, sinRespuesta, hex, fetchWompiFalso, pasarelaFalsa,
 };

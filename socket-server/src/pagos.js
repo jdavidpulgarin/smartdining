@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { esIdValido, salaMesa, SALA_ADMIN } = require('./salas');
+const { salaMesa, SALA_ADMIN } = require('./salas');
 const {
   ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson,
 } = require('./http');
@@ -132,121 +132,194 @@ async function crearIntencionPago(req, res, ctx) {
   return responder({ ...intencion, referencia }, 201);
 }
 
-const TOLERANCIA_SEGUNDOS_POR_DEFECTO = 300; // 5 min: absorbe desfases de reloj sin dejar reutilizar capturas viejas
-const TIPO_PAGO_EXITOSO = 'payment.succeeded';
-const MAX_ID_EVENTO = 100;
+// Una intención ya resuelta se conserva 7 días para reconocer reintentos tardíos.
+const TTL_INTENCION_RESUELTA_SEG = 7 * 24 * 60 * 60;
+const ESTADOS_FALLIDOS = { DECLINED: 'rechazada', ERROR: 'error', VOIDED: 'anulada' };
 
 /**
- * Verifica la firma del proveedor de pagos sobre el cuerpo CRUDO.
- *
- * Esquema (estilo Stripe): cabecera `x-signature: t=<unix_seg>,v1=<hex>`,
- * donde v1 = HMAC-SHA256(secreto, "<t>.<cuerpo crudo>").
- *   - Se firma el timestamp junto con el cuerpo: sin él, quien capture un
- *     webhook legítimo podría reenviarlo indefinidamente (replay).
- *   - Se admiten varios v1 en la cabecera para poder rotar el secreto sin
- *     perder pagos durante el cambio.
- *
- * Devuelve { valida: true } o { valida: false, motivo }.
- * NO parsea el cuerpo: hasta no saber que es auténtico no se le da ningún
- * tratamiento a lo que dice.
+ * Capa 5: aunque la firma sea válida, se cree a la API de la pasarela, no al
+ * evento, y se compara contra lo que ESTE servidor esperaba cobrar.
+ * Devuelve null si todo coincide o el motivo de la discrepancia.
  */
-function verificarFirmaWebhook(cuerpoCrudo, cabecera, secreto, { toleranciaSegundos = TOLERANCIA_SEGUNDOS_POR_DEFECTO, ahora = Date.now } = {}) {
-  if (!Buffer.isBuffer(cuerpoCrudo)) return { valida: false, motivo: 'cuerpo' };
-  if (typeof cabecera !== 'string' || !cabecera) return { valida: false, motivo: 'sin_firma' };
-
-  let marca = null;
-  const candidatas = [];
-  for (const parte of cabecera.split(',')) {
-    const i = parte.indexOf('=');
-    if (i < 0) continue;
-    const clave = parte.slice(0, i).trim();
-    const valor = parte.slice(i + 1).trim();
-    if (clave === 't') marca = valor;
-    if (clave === 'v1') candidatas.push(valor);
-  }
-  if (!/^\d{1,12}$/.test(marca || '') || candidatas.length === 0) return { valida: false, motivo: 'formato' };
-
-  const t = Number(marca);
-  if (Math.abs(Math.floor(ahora() / 1000) - t) > toleranciaSegundos) return { valida: false, motivo: 'timestamp' };
-
-  const esperada = crypto.createHmac('sha256', secreto)
-    .update(Buffer.concat([Buffer.from(`${marca}.`), cuerpoCrudo]))
-    .digest();
-
-  const coincide = candidatas.some((hex) => {
-    if (!/^[0-9a-f]{64}$/i.test(hex)) return false;
-    // timingSafeEqual: no revela por tiempo cuántos bytes de la firma acertó el atacante.
-    return crypto.timingSafeEqual(Buffer.from(hex, 'hex'), esperada);
-  });
-  return coincide ? { valida: true } : { valida: false, motivo: 'firma' };
+function compararTransaccion({ evento, tx, intencion }) {
+  if (!tx) return 'transaccion_inexistente';
+  if (tx.id !== evento.id_transaccion) return 'transaccion_distinta';
+  if (tx.estado !== 'APPROVED') return 'estado_no_aprobado';
+  if (tx.referencia !== evento.referencia) return 'referencia_distinta';
+  if (!intencion) return 'referencia_desconocida';
+  if (intencion.estado !== 'pendiente') return 'intencion_no_pendiente';
+  // EXACTAMENTE igual: ni un centavo de menos (pago parcial con la firma de
+  // otra intención) ni de más.
+  if (tx.monto_centavos !== intencion.monto_centavos) return 'monto_distinto';
+  if (tx.moneda !== 'COP') return 'moneda_distinta';
+  return null;
 }
 
-/** Valida la estructura del evento YA autenticado. Devuelve mensaje de error o null. */
-function validarEventoPago(e) {
-  if (typeof e.id !== 'string' || !e.id || e.id.length > MAX_ID_EVENTO) return 'id del evento inválido';
-  if (typeof e.type !== 'string') return 'type inválido';
-  if (e.type !== TIPO_PAGO_EXITOSO) return null; // otros tipos se ignoran, no son error
-  const d = e.data;
-  if (!d || typeof d !== 'object') return 'data es obligatoria';
-  if (!esIdValido(d.id_pedido)) return 'data.id_pedido debe ser un entero positivo';
-  if (!esIdValido(d.id_mesa)) return 'data.id_mesa debe ser un entero positivo';
-  if (typeof d.monto !== 'number' || !Number.isFinite(d.monto) || d.monto <= 0) return 'data.monto debe ser un número positivo';
-  if (typeof d.referencia_externa !== 'string' || !d.referencia_externa || d.referencia_externa.length > 100) {
-    return 'data.referencia_externa inválida';
+const aPesos = (centavos) => centavos / 100;
+
+/**
+ * Capa 6: el pago se registra en el backend (la base es la fuente de verdad)
+ * ANTES de anunciarlo. Contrato (pendiente: Daniel):
+ *   POST /api/transacciones/internal  (x-internal-key)
+ *   → 200/201 { ok, duplicado, saldo_restante_centavos, mesa_liberada }
+ * idempotente por referencia_externa: si el webhook se reintenta, el backend
+ * responde el mismo resultado sin registrar dos veces.
+ *
+ * Devuelve { registrado: true, saldo } o { rechazado: status } (4xx: el
+ * backend no acepta este pago). Lanza si el backend no respondió o dio 5xx:
+ * quien llama responde 503 para que la pasarela reintente.
+ */
+async function registrarEnBackend(ctx, { evento, tx, intencion }) {
+  const r = await ctx.backend.post('/api/transacciones/internal', {
+    referencia_externa: evento.referencia,
+    id_transaccion_pasarela: tx.id,
+    pasarela: ctx.pasarela.nombre,
+    id_mesa: intencion.id_mesa,
+    comensal: intencion.comensal,
+    modo: intencion.modo,
+    monto_centavos: tx.monto_centavos,
+    moneda: tx.moneda,
+    metodo_pago: 'online',
+  });
+  if (r.status >= 500) throw Object.assign(new Error(`el backend respondió ${r.status}`), { codigo: 'BACKEND_ERROR' });
+  if (!r.ok) return { rechazado: r.status };
+  const saldo = r.cuerpo && r.cuerpo.saldo_restante_centavos;
+  if (!Number.isSafeInteger(saldo) || saldo < 0) {
+    // Registrado pero con una respuesta que no entendemos: no se inventa un
+    // saldo. Se reintenta (el backend es idempotente por referencia_externa).
+    throw Object.assign(new Error('respuesta del backend sin saldo_restante_centavos'), { codigo: 'BACKEND_ERROR' });
   }
-  return null;
+  return { registrado: true, saldo };
+}
+
+/**
+ * Un pago que no cuadra (monto distinto, referencia desconocida, transacción
+ * que la API no confirma o que el backend rechaza) NO se registra como pago:
+ * se guarda como intento fallido (vía backend, tabla intentos_pago_fallidos)
+ * y se avisa al panel para que el personal lo revise.
+ *
+ * Contrato (pendiente: Daniel): POST /api/pagos/intentos-fallidos/interno
+ * (x-internal-key), idempotente por (id_transaccion_pasarela, motivo).
+ * Si el backend no lo puede guardar, se lanza: el webhook responde 503 y la
+ * pasarela reintenta (no se pierde la evidencia).
+ */
+async function alertarPago(ctx, { evento, tx, intencion, motivo }) {
+  const r = await ctx.backend.post('/api/pagos/intentos-fallidos/interno', {
+    referencia_externa: evento.referencia,
+    id_transaccion_pasarela: evento.id_transaccion,
+    pasarela: ctx.pasarela.nombre,
+    id_mesa: intencion ? intencion.id_mesa : null,
+    motivo,
+    monto_centavos: tx ? tx.monto_centavos : evento.monto_centavos,
+    monto_esperado_centavos: intencion ? intencion.monto_centavos : null,
+    moneda: tx ? tx.moneda : evento.moneda,
+    metodo_pago: 'online',
+  });
+  if (r.status >= 500) throw Object.assign(new Error(`el backend respondió ${r.status}`), { codigo: 'BACKEND_ERROR' });
+  // Al panel: qué pasó y dónde, sin datos del pagador.
+  ctx.io.to(SALA_ADMIN).emit('pago:alerta', {
+    eventId: `${evento.id_transaccion}:${motivo}`,
+    id_mesa: intencion ? intencion.id_mesa : null,
+    referencia_externa: evento.referencia,
+    id_transaccion_pasarela: evento.id_transaccion,
+    motivo,
+    emitidoEn: new Date().toISOString(),
+  });
+}
+
+/** Un pago rechazado o con error libera al comensal para que pueda reintentar. */
+async function registrarFallo(ctx, evento) {
+  const intencion = await ctx.almacenPagos.obtener(evento.referencia);
+  if (!intencion || intencion.estado !== 'pendiente') return;
+  await ctx.almacenPagos.actualizarEstado(evento.referencia, ESTADOS_FALLIDOS[evento.estado] || 'fallida', TTL_INTENCION_RESUELTA_SEG);
+  await ctx.almacenPagos.liberarPendiente(intencion.id_mesa, intencion.comensal);
+}
+
+/**
+ * POST /pagos/webhook — eventos de la pasarela (capa 4).
+ *
+ * 1. Cuerpo CRUDO; la pasarela verifica su checksum en tiempo constante y la
+ *    antigüedad del evento. Sin eso, nada de lo que dice el evento se usa.
+ * 2. Solo interesa transaction.updated; el resto responde 200 para que el
+ *    proveedor no reintente.
+ * 3. Idempotencia por (transacción, estado): un reintento responde 200 sin
+ *    efectos.
+ */
+async function recibirEventoPasarela(req, res, ctx) {
+  if (!ctx.pasarela) throw new ErrorHttp(503, 'NO_CONFIGURADO', 'Los pagos no están configurados');
+  const crudo = await leerCuerpoCrudo(req);
+  const v = ctx.pasarela.verificarEvento(crudo, req.headers);
+  if (!v.valido) {
+    // El motivo va al log, no al cliente: no le damos pistas a quien sondea.
+    console.warn(`[pagos] webhook rechazado (${v.motivo}) desde ${req.socket.remoteAddress}`);
+    throw new ErrorHttp(400, 'FIRMA_INVALIDA', 'Firma inválida');
+  }
+  const { evento } = v;
+  if (evento.tipo !== 'transaction.updated') return enviarJson(res, 200, { ok: true, ignorado: true });
+
+  const clave = `pago:${ctx.pasarela.nombre}:${evento.id_transaccion}:${evento.estado}`;
+  if (!(await ctx.registroPagos.reservar(clave))) return enviarJson(res, 200, { ok: true, duplicado: true });
+
+  try {
+    if (evento.estado !== 'APPROVED') {
+      // DECLINED, ERROR, VOIDED: nada que cobrar ni que anunciar como pago.
+      if (ESTADOS_FALLIDOS[evento.estado]) await registrarFallo(ctx, evento);
+      return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false, estado: evento.estado });
+    }
+
+    const tx = await ctx.pasarela.consultarTransaccion(evento.id_transaccion);
+    const intencion = await ctx.almacenPagos.obtener(evento.referencia);
+    const problema = compararTransaccion({ evento, tx, intencion });
+    if (problema) {
+      console.warn(`[pagos] transacción ${evento.id_transaccion} no coincide: ${problema}`);
+      await alertarPago(ctx, {
+        evento, tx, intencion, motivo: problema,
+      });
+      // 200: reintentar no lo arreglaría (la pasarela devolvería lo mismo).
+      return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
+    }
+
+    const registro = await registrarEnBackend(ctx, { evento, tx, intencion });
+    if (registro.rechazado) {
+      console.warn(`[pagos] el backend rechazó la transacción ${tx.id} (${registro.rechazado})`);
+      await alertarPago(ctx, {
+        evento, tx, intencion, motivo: `backend_rechazo_${registro.rechazado}`,
+      });
+      return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
+    }
+
+    await ctx.almacenPagos.actualizarEstado(evento.referencia, 'pagada', TTL_INTENCION_RESUELTA_SEG);
+    await ctx.almacenPagos.liberarPendiente(intencion.id_mesa, intencion.comensal);
+
+    // Recién ahora, con el pago guardado en la base, se anuncia. Si el saldo
+    // llegó a 0, el backend libera la mesa y avisa por /internal/mesa-liberada.
+    ctx.io.to(SALA_ADMIN).to(salaMesa(intencion.id_mesa)).emit('payment:confirmed', {
+      eventId: tx.id,
+      id_mesa: intencion.id_mesa,
+      comensal: intencion.comensal,
+      monto: aPesos(tx.monto_centavos),
+      saldo_restante: aPesos(registro.saldo),
+      monto_centavos: tx.monto_centavos,
+      saldo_restante_centavos: registro.saldo,
+      referencia_externa: evento.referencia,
+      emitidoEn: new Date().toISOString(),
+    });
+    return enviarJson(res, 200, { ok: true, duplicado: false, registrado: true });
+  } catch (err) {
+    // No se pudo terminar (pasarela o backend sin respuesta): se libera la
+    // marca de idempotencia y se responde 5xx para que la pasarela reintente.
+    await ctx.registroPagos.liberar(clave);
+    console.error(`[pagos] transacción ${evento.id_transaccion}: ${err.codigo || err.message}; se pide reintento`);
+    throw new ErrorHttp(503, 'ERROR_INTERNO', 'No se pudo procesar el evento; reintenta');
+  }
 }
 
 const rutasPagos = {
   'POST /pagos/intencion': crearIntencionPago,
 
-  'POST /pagos/webhook': async (req, res, ctx) => {
-    // Sin secreto no hay forma de autenticar al proveedor: se cierra el
-    // endpoint en vez de aceptar pagos "sin firma".
-    if (!ctx.config.pagosWebhookSecret) {
-      throw new ErrorHttp(503, 'NO_CONFIGURADO', 'PAYMENT_WEBHOOK_SECRET no está configurado');
-    }
-
-    // 1) Cuerpo crudo, sin parsear.
-    const crudo = await leerCuerpoCrudo(req);
-
-    // 2) Firma. Nada de lo que sigue ocurre si esto falla.
-    const firma = verificarFirmaWebhook(crudo, req.headers['x-signature'], ctx.config.pagosWebhookSecret, {
-      toleranciaSegundos: ctx.config.pagosToleranciaSegundos,
-    });
-    if (!firma.valida) {
-      // El motivo va al log, no al cliente: no le damos pistas a quien sondea.
-      console.warn(`[pagos] webhook rechazado (${firma.motivo}) desde ${req.socket.remoteAddress}`);
-      throw new ErrorHttp(400, 'FIRMA_INVALIDA', 'Firma inválida');
-    }
-
-    // 3) Recién ahora se interpreta el contenido.
-    const evento = parsearJson(crudo);
-    const error = validarEventoPago(evento);
-    if (error) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', error);
-    if (evento.type !== TIPO_PAGO_EXITOSO) {
-      // 200 para que el proveedor no reintente eventos que no nos interesan.
-      return enviarJson(res, 200, { ok: true, ignorado: true });
-    }
-
-    // 4) Idempotencia: los proveedores reintentan (a veces durante días) y
-    // pueden entregar el mismo evento dos veces.
-    const clave = `pago:${evento.id}`;
-    if (!(await ctx.registroPagos.reservar(clave))) return enviarJson(res, 200, { ok: true, duplicado: true });
-
-    const { data } = evento;
-    ctx.io.to(SALA_ADMIN).to(salaMesa(data.id_mesa)).emit('payment:confirmed', {
-      eventId: evento.id,
-      id_pedido: data.id_pedido,
-      id_mesa: data.id_mesa,
-      monto: data.monto,
-      referencia_externa: data.referencia_externa,
-      emitidoEn: new Date().toISOString(),
-    });
-    enviarJson(res, 200, { ok: true, duplicado: false });
-  },
+  'POST /pagos/webhook': recibirEventoPasarela,
 };
 
 module.exports = {
-  verificarFirmaWebhook, validarEventoPago, rutasPagos, TIPO_PAGO_EXITOSO, generarReferencia, LIMITE_INTENCIONES,
+  rutasPagos, generarReferencia, compararTransaccion, LIMITE_INTENCIONES,
 };

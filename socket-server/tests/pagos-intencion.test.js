@@ -5,7 +5,7 @@ const {
   levantar, emitir, tokenComensal, tokenPersonal, firmar, CLAVE_INTERNA, ENV_BASE, ORIGEN,
 } = require('./helpers');
 const {
-  WOMPI_ENV, cuenta, backendFalso, sinRespuesta,
+  WOMPI_ENV, cuenta, backendFalso, sinRespuesta, pasarelaFalsa,
 } = require('./pagos-helpers');
 const { calcularMonto, validarCuenta } = require('../src/cuenta');
 const { firmaIntegridad } = require('../src/pasarelas/wompi');
@@ -100,7 +100,7 @@ const CUENTA_5 = cuenta(5, 9_000_000, 9_000_000, { Ana: 4_000_000, Beto: 5_000_0
 
 async function escenario(t, { rutas, env = {} } = {}) {
   const backend = backendFalso(rutas || { 'GET /api/mesas/5/cuenta/interno': () => ({ status: 200, cuerpo: CUENTA_5 }) });
-  const s = await levantar({ ...WOMPI_ENV, ...env }, { backend });
+  const s = await levantar({ ...WOMPI_ENV, ...env }, { backend, pasarela: pasarelaFalsa({}).pasarela });
   t.after(() => s.cerrar());
   const sentar = async (alias, mesa = 5, token = tokenComensal(mesa)) => {
     const c = await s.conectar(token);
