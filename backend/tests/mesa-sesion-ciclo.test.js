@@ -269,10 +269,19 @@ test('si el socket-server falla, la liberación no se revierte', async () => {
 });
 
 test('liberar exige rol mesero o admin', async () => {
-  const res = await request(app)
-    .post('/api/mesas/5/liberar')
-    .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`);
-  assert.strictEqual(res.status, 403);
+  // El doble de base es necesario desde H-09: el middleware comprueba en cada
+  // peticion del personal que la cuenta siga activa, antes de mirar el rol. Sin
+  // el, la consulta va a PostgreSQL de verdad y en un entorno sin base (el CI)
+  // la peticion falla con 500 en vez de llegar al control de roles.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    const res = await request(app)
+      .post('/api/mesas/5/liberar')
+      .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`);
+    assert.strictEqual(res.status, 403);
+  } finally {
+    db.restaurar();
+  }
 });
 
 // ---------------------------------------------------------------------------

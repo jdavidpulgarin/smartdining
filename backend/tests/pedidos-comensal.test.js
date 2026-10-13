@@ -128,12 +128,21 @@ test('un mesero debe mandar el id_mesa en el body', async () => {
 });
 
 test('un cajero no puede crear pedidos', async () => {
-  const res = await request(app)
-    .post('/api/pedidos')
-    .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
-    .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1 }] });
+  // El doble de base es necesario desde H-09: el middleware comprueba en cada
+  // peticion del personal que la cuenta siga activa, antes de mirar el rol. Sin
+  // el, la consulta va a PostgreSQL de verdad y en un entorno sin base (el CI)
+  // la peticion falla con 500 en vez de llegar al control de roles.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1 }] });
 
-  assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.status, 403);
+  } finally {
+    db.restaurar();
+  }
 });
 
 test('un comensal no puede consultar un pedido de otra mesa', async () => {

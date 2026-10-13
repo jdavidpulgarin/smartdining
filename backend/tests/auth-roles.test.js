@@ -13,12 +13,21 @@ test('POST /api/auth/register sin token responde 401', async () => {
 });
 
 test('POST /api/auth/register con token de mesero responde 403: solo admin registra', async () => {
-  const res = await request(app)
-    .post('/api/auth/register')
-    .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
-    .send({ nombre: 'Ana Ríos', email: 'ana@mail.com', password: '123456', rol: 'cajero' });
+  // El doble de base es necesario desde H-09: el middleware comprueba en cada
+  // peticion del personal que la cuenta siga activa, antes de mirar el rol. Sin
+  // el, la consulta va a PostgreSQL de verdad y en un entorno sin base (el CI)
+  // la peticion falla con 500 en vez de llegar al control de roles.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
+      .send({ nombre: 'Ana Ríos', email: 'ana@mail.com', password: '123456', rol: 'cajero' });
 
-  assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.status, 403);
+  } finally {
+    db.restaurar();
+  }
 });
 
 test('el rol cliente ya no se acepta al registrar', async () => {
@@ -66,11 +75,20 @@ test('GET /api/kds/comandas con rol cocina pasa el control de roles', async () =
 });
 
 test('GET /api/kds/comandas con rol mesero responde 403', async () => {
-  const res = await request(app)
-    .get('/api/kds/comandas')
-    .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+  // El doble de base es necesario desde H-09: el middleware comprueba en cada
+  // peticion del personal que la cuenta siga activa, antes de mirar el rol. Sin
+  // el, la consulta va a PostgreSQL de verdad y en un entorno sin base (el CI)
+  // la peticion falla con 500 en vez de llegar al control de roles.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    const res = await request(app)
+      .get('/api/kds/comandas')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
 
-  assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.status, 403);
+  } finally {
+    db.restaurar();
+  }
 });
 
 test('un comensal con sesión vigente no puede entrar al KDS', async () => {
