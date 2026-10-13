@@ -121,6 +121,8 @@ CREATE TABLE pedidos (
     codigo_pedido VARCHAR(16) NOT NULL UNIQUE,
     estado VARCHAR(20) NOT NULL DEFAULT 'recibido'
         CHECK (estado IN ('recibido', 'en_preparacion', 'listo', 'entregado', 'pagado', 'cancelado')),
+    estado_pago VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado_pago IN ('pendiente', 'parcial', 'pagado')),
     total DECIMAL(10,2) NOT NULL DEFAULT 0.00 CHECK (total >= 0),
     notas_generales TEXT,
     creado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -140,7 +142,7 @@ CREATE TABLE detalles_pedido (
     id_detalle SERIAL PRIMARY KEY,
     id_pedido INTEGER NOT NULL,
     id_plato INTEGER NOT NULL,
-    cantidad INTEGER NOT NULL CHECK (cantidad > 0),
+    cantidad INTEGER NOT NULL CHECK (cantidad BETWEEN 1 AND 20),
     precio_unitario DECIMAL(10,2) NOT NULL CHECK (precio_unitario >= 0),
     subtotal DECIMAL(10,2) NOT NULL CHECK (subtotal >= 0),
     notas_especiales TEXT,

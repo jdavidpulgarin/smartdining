@@ -146,4 +146,36 @@ describe('Flujo de Caja en frontend-restaurante', () => {
       expect(screen.getByText('TRX-99')).toBeInTheDocument()
     })
   })
+
+  it('H-07: registrarPago omite cualquier estado_transaccion distinto a "completada"', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ id_transaccion: 101 }),
+    })
+
+    const { transaccionesApi } = await import('../../services/api')
+
+    // Si se envía 'fallida' o 'pendiente', se elimina del payload
+    await transaccionesApi.registrarPago({
+      id_pedido: 1,
+      monto: 15000,
+      metodo_pago: 'efectivo',
+      estado_transaccion: 'fallida',
+    })
+
+    const bodyEnviado = JSON.parse(fetchSpy.mock.calls[0][1].body)
+    expect(bodyEnviado.estado_transaccion).toBeUndefined()
+
+    // Si se envía 'completada', se mantiene
+    await transaccionesApi.registrarPago({
+      id_pedido: 1,
+      monto: 15000,
+      metodo_pago: 'efectivo',
+      estado_transaccion: 'completada',
+    })
+
+    const bodyCompletada = JSON.parse(fetchSpy.mock.calls[1][1].body)
+    expect(bodyCompletada.estado_transaccion).toBe('completada')
+  })
 })

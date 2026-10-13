@@ -71,8 +71,20 @@ export function leerExpiracionJwt(token) {
   }
 }
 
+export function obtenerSesion() {
+  try {
+    if (typeof window === 'undefined') return null;
+    const raw = sessionStorage.getItem(CLAVE_SESION);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export default {
   CLAVE_SESION,
   validarNombre,
   leerExpiracionJwt,
+  obtenerSesion,
 };

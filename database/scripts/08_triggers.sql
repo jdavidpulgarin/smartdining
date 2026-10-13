@@ -21,7 +21,8 @@ BEGIN
     IF NEW.estado_transaccion = 'completada' THEN
         SELECT total INTO v_total_pedido 
         FROM pedidos 
-        WHERE id_pedido = NEW.id_pedido;
+        WHERE id_pedido = NEW.id_pedido
+        FOR UPDATE;
 
         SELECT COALESCE(SUM(monto), 0.00) INTO v_total_pagado
         FROM transacciones

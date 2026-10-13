@@ -60,7 +60,7 @@ BEGIN
     SELECT total INTO v_total
     FROM pedidos
     WHERE id_pedido = id_pedido_param
-    FOR SHARE;
+    FOR UPDATE;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'El pedido % no existe para validar transacción', id_pedido_param;

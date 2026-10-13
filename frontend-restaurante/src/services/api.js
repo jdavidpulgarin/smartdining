@@ -205,9 +205,14 @@ export const transaccionesApi = {
    * @param {{ id_pedido: number, monto: number, metodo_pago: string, referencia_externa?: string, comensal?: string|null }} datos
    */
   async registrarPago(datos) {
+    // H-07: El estado de la transacción lo fija el servidor. Solo se acepta omitirlo o 'completada'.
+    const payload = { ...datos }
+    if (payload.estado_transaccion && payload.estado_transaccion !== 'completada') {
+      delete payload.estado_transaccion
+    }
     return apiFetch('/transacciones', {
       method: 'POST',
-      body: JSON.stringify(datos),
+      body: JSON.stringify(payload),
     })
   },
 
