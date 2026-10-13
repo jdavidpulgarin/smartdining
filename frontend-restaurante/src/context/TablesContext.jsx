@@ -134,14 +134,42 @@ export function TablesProvider({ children }) {
     }
   }, [])
 
-  // Cargar mesas y pedidos al montar si hay token
+  // Cargar mesas y pedidos al montar de forma asíncrona si hay sesión activa
   useEffect(() => {
+    let isSubscribed = true
     const token = getAuthToken()
-    if (token) {
-      cargarMesas()
-      cargarPedidosActivos()
+    if (!token) return
+
+    const fetchInitialData = async () => {
+      try {
+        const [mesasRes, pedidosRes] = await Promise.allSettled([
+          mesasApi.listar(),
+          pedidosApi.listarActivos(),
+        ])
+        if (!isSubscribed) return
+
+        if (mesasRes.status === 'fulfilled' && mesasRes.value?.mesas) {
+          setTables((prevTables) => {
+            const prevMap = new Map(prevTables.map((t) => [t.id, t]))
+            return mesasRes.value.mesas.map((m) =>
+              normalizarMesa(m, prevMap.get(m.id_mesa) || prevMap.get(m.numero) || {})
+            )
+          })
+        }
+        if (pedidosRes.status === 'fulfilled' && pedidosRes.value?.pedidos) {
+          setPedidosActivos(pedidosRes.value.pedidos)
+        }
+      } catch {
+        // error manejado
+      }
     }
-  }, [cargarMesas, cargarPedidosActivos])
+
+    fetchInitialData()
+
+    return () => {
+      isSubscribed = false
+    }
+  }, [])
 
 
   // Escuchar cuando entra un pedido nuevo (order:created)
