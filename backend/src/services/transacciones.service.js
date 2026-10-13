@@ -40,7 +40,34 @@ async function registrarPago({
   try {
     await client.query('BEGIN');
 
-    const pedidoResult = await client.query('SELECT * FROM pedidos WHERE id_pedido = $1', [id_pedido]);
+    // Primera lectura sin bloquear, solo para saber de qué mesa es y poder
+    // tomar los bloqueos en el orden correcto (ver más abajo).
+    const previo = await client.query('SELECT * FROM pedidos WHERE id_pedido = $1', [id_pedido]);
+    if (previo.rows.length === 0) {
+      throw { status: 404, message: 'Pedido no encontrado' };
+    }
+
+    // ORDEN DE BLOQUEOS, SIEMPRE EL MISMO: primero la mesa, después los pedidos
+    // por id. registrarPagoInterno (el pago en línea) hace lo mismo, y dos
+    // caminos que bloquean en orden distinto sobre las mismas filas se
+    // interbloquean: la caja tendría el pedido esperando la mesa mientras Wompi
+    // tiene la mesa esperando el pedido.
+    await client.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE', [
+      previo.rows[0].id_mesa,
+    ]);
+
+    // H-01: la fila del pedido se bloquea ANTES de calcular el saldo e insertar.
+    // Sin esto, dos cobros simultáneos del mismo pedido leen el mismo saldo y
+    // los dos pasan la validación del trigger, que mira "lo pagado hasta ahora":
+    // un pedido de 34.000 se podía cobrar dos veces de 20.000. Con el bloqueo el
+    // segundo espera, vuelve a leer y el trigger lo rechaza con su 409.
+    //
+    // Se relee la fila completa estando bloqueada: el estado que había antes de
+    // esperar puede haber cambiado, y es ese el que se registra en el historial.
+    const pedidoResult = await client.query(
+      'SELECT * FROM pedidos WHERE id_pedido = $1 FOR UPDATE',
+      [id_pedido]
+    );
     if (pedidoResult.rows.length === 0) {
       throw { status: 404, message: 'Pedido no encontrado' };
     }
@@ -231,6 +258,22 @@ async function registrarPagoInterno({
       await client.query('ROLLBACK');
       return { duplicado: true, saldo_restante_centavos: saldo };
     }
+
+    // H-01: los pedidos entre los que se va a repartir también se bloquean,
+    // ORDENADOS POR id_pedido y después de la mesa. Es el mismo orden que usa
+    // registrarPago (mesa primero, pedidos por id), que es lo que evita el
+    // interbloqueo entre el cobro en caja y el pago en línea.
+    //
+    // Sin este bloqueo, dos webhooks sobre mesas distintas que comparten un
+    // pedido no pueden chocar, pero un webhook y una caja sobre el MISMO pedido
+    // sí: los dos leerían el mismo saldo pendiente.
+    await client.query(
+      `SELECT id_pedido FROM pedidos
+        WHERE id_mesa = $1 AND estado <> 'cancelado'
+        ORDER BY id_pedido ASC
+        FOR UPDATE`,
+      [id_mesa]
+    );
 
     const pedidos = (await client.query(SQL_PEDIDOS_CON_SALDO, [id_mesa])).rows
       .map((p) => ({ ...p, saldo_centavos: Number(p.saldo_centavos) }))

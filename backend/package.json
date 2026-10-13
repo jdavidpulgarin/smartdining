@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:integracion": "node --test --test-force-exit tests/integracion/*.test.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

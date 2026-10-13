@@ -325,3 +325,101 @@ test('la respuesta sigue siendo la transaccion registrada', async () => {
     socket.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// H-01: el pago se serializa con bloqueos, y siempre en el mismo orden
+// ---------------------------------------------------------------------------
+
+test('h-01: el pedido se bloquea con FOR UPDATE antes de insertar el pago', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderCobro, { saldoTrasPago: 0 });
+  try {
+    const res = await cobrar(PAGO_COMPLETO);
+    assert.strictEqual(res.status, 201);
+
+    const bloqueo = db
+      .todas('SELECT * FROM pedidos WHERE id_pedido')
+      .find((q) => q.sql.includes('FOR UPDATE'));
+    assert.ok(bloqueo, 'se bloquea la fila del pedido');
+
+    const orden = db.ejecutadas.map((q) => q.sql);
+    const iBloqueo = orden.findIndex((s) => s.includes('FROM pedidos WHERE id_pedido = $1 FOR UPDATE'));
+    const iInsert = orden.findIndex((s) => s.includes('INSERT INTO transacciones'));
+    const iSaldo = orden.findIndex((s) => s.includes('obtener_saldo_pendiente'));
+
+    assert.ok(iBloqueo >= 0, 'hay bloqueo del pedido');
+    assert.ok(iBloqueo < iInsert, 'el bloqueo va ANTES del INSERT del pago');
+    assert.ok(iBloqueo < iSaldo, 'y antes de calcular el saldo');
+    assert.ok(orden.findIndex((s) => s.includes('BEGIN')) < iBloqueo, 'dentro de la transaccion');
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('h-01: el orden de bloqueos es mesa y despues pedido', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderCobro, { saldoTrasPago: 0 });
+  try {
+    await cobrar(PAGO_COMPLETO);
+
+    const orden = db.ejecutadas.map((q) => q.sql);
+    const iMesa = orden.findIndex((s) => s.includes('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE'));
+    const iPedido = orden.findIndex((s) => s.includes('FROM pedidos WHERE id_pedido = $1 FOR UPDATE'));
+
+    assert.ok(iMesa >= 0, 'se bloquea la mesa');
+    assert.ok(
+      iMesa < iPedido,
+      'mesa primero y pedido despues: el mismo orden que el pago en linea, para no interbloquearse'
+    );
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('h-01: un pedido inexistente sigue dando 404 sin bloquear nada', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) return { rows: [] };
+    return responderCobro(sql);
+  });
+  try {
+    const res = await cobrar(PAGO_COMPLETO);
+
+    assert.strictEqual(res.status, 404);
+    assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined);
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('h-01: el estado del historial sale de la relectura bajo bloqueo', async () => {
+  const socket = instalarFakeSocket();
+  // La primera lectura dice 'listo' y la relectura (ya bloqueada) 'entregado':
+  // mientras se esperaba el bloqueo, otro cobro movio el pedido. Lo que vale es
+  // lo segundo.
+  let leidas = 0;
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) {
+      leidas += 1;
+      const estado = leidas === 1 ? 'listo' : 'entregado';
+      return { rows: [{ ...PEDIDO, estado }] };
+    }
+    return responderCobro(sql);
+  }, { saldoTrasPago: 0 });
+  try {
+    const res = await cobrar(PAGO_COMPLETO);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(
+      db.buscar('INSERT INTO historial_estados').params[2],
+      'entregado',
+      'estado_anterior es el de la fila bloqueada, no el que se vio antes de esperar'
+    );
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
