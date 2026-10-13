@@ -64,11 +64,15 @@
 \echo '===> [18/19] Ejecutando 18_kds_variacion_tiempo.sql...'
 \i 18_kds_variacion_tiempo.sql
 
-\echo '===> [19/19] Ejecutando 19_fix_h01_bloqueo_pedidos.sql...'
+\echo '===> [19/20] Ejecutando 19_fix_h01_bloqueo_pedidos.sql...'
 \i 19_fix_h01_bloqueo_pedidos.sql
+
+\echo '===> [20/20] Ejecutando 20_fix_h02_sesion_mesa_cuenta.sql...'
+\i 20_fix_h02_sesion_mesa_cuenta.sql
 
 \echo '===> Finalizando bootstrap...'
 \echo '====================================================='
 \echo '  SmartDining: bootstrap del esquema y scripts completado. '
+
 
 
