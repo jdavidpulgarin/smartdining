@@ -89,8 +89,10 @@ Notas del flujo del comensal (definido por Jarrison):
 - La sesión del comensal pertenece a **la mesa**, no a una persona: el modelo ER no
   relaciona `pedidos` con `usuarios`, el pedido es de la mesa.
 - Varios comensales comparten la misma mesa y, por tanto, el mismo pedido. A cada uno
-  lo identifica su **apodo**, que viaja por ítem y se guarda en
-  `detalles_pedido.notas_especiales`.
+  lo identifica su **alias**, que viaja por ítem en `comensal` y se guarda en
+  `detalles_pedido.comensal` (columna propia desde D-03, para poder dividir la cuenta
+  por persona sin parsear texto libre). `notas_especiales` lleva **solo la nota** del
+  ítem.
 - En `historial_estados`, `id_usuario` va `null` cuando el cambio lo hizo un comensal.
 
 **Estados de un pedido (flujo estricto):**
@@ -540,7 +542,7 @@ Notas de lo que quedó demostrado al escribirlas:
 
 - **CA2** es la razón por la que el QR es *de la sesión* y no de un solo uso: los tres
   comensales reciben JWT distintos pero con el **mismo `sid`**, o sea una sola sesión de
-  mesa, y cada uno pide con su apodo sobre la cuenta compartida.
+  mesa, y cada uno pide con su alias sobre la cuenta compartida.
 - **CA3** está cubierto por **dos defensas independientes**: el socket-server revoca los
   tokens de la mesa al recibir `/internal/mesa-liberada` (`motivo: revocado`), y además el
   backend rechaza el QR porque `mesas.token_qr` quedó en NULL (`motivo: mesa_sin_sesion`).
@@ -573,8 +575,17 @@ Body:
   "id_mesa": 5,
   "notas_generales": "Somos alergicos al mani",
   "items": [
-    { "id_plato": 12, "cantidad": 2, "apodo": "Ana", "notas": "sin cebolla" },
-    { "id_plato": 31, "cantidad": 1, "apodo": "Pipe" }
+    { "id_plato": 12, "cantidad": 2, "comensal": "Ana", "notas": "sin cebolla" },
+    {
+      "id_plato": 1001,
+      "cantidad": 2,
+      "comensal": "Pipe",
+      "ingredientes": [
+        { "id_ingrediente": 1, "porcion": "normal" },
+        { "id_ingrediente": 4, "porcion": "normal" },
+        { "id_ingrediente": 10, "porcion": "extra" }
+      ]
+    }
   ]
 }
 ```
@@ -583,13 +594,25 @@ Body:
   body**. Así una mesa no puede ordenar a nombre de otra.
 - **Si el token es de staff (mesero/admin):** `id_mesa` es obligatorio en el body
   (400 si falta).
-- `apodo` + `notas` se guardan juntos en `detalles_pedido.notas_especiales`
-  (`"Ana: sin cebolla"`).
-- **`apodo`, `notas` y `notas_generales` no pueden contener `OVERRIDE_ADMIN`** (sin
+- `comensal` (1 a 40 caracteres, se recorta) se guarda en `detalles_pedido.comensal` y
+  `notas` en `detalles_pedido.notas_especiales`, cada uno en su columna. `apodo` sigue
+  aceptándose como **alias de compatibilidad**; si llegan los dos, manda `comensal`.
+- **Si el JWT trae un alias firmado** (`comensal` en el payload del token de sesión de
+  mesa), ese valor **manda** y el del body se ignora: así nadie carga un ítem a otra
+  persona de la mesa escribiendo su nombre. Sin alias en el token se usa el del body,
+  que es también el caso del mesero pidiendo de parte de alguien.
+- **Platos personalizables (constructor):** `ingredientes` es un arreglo de hasta **20**
+  `{ id_ingrediente, porcion }` por ítem, con `porcion` en `ligera | normal | extra`
+  (por omisión `normal`). Repetir un `id_ingrediente` dentro del mismo ítem responde
+  **400**; en ítems distintos sí se permite.
+- **No se aceptan campos de precio en el body** (`precio`, `precio_unitario`,
+  `precio_extra`, `precio_aplicado`, `precio_extras`, `subtotal`, `total`), ni en el
+  ítem ni en el ingrediente: responde **400**. El precio lo fija siempre la base.
+- **`comensal`, `apodo`, `notas` y `notas_generales` no pueden contener `OVERRIDE_ADMIN`** (sin
   distinguir mayúsculas): responde 400. El trigger `tr_validar_disponibilidad_plato`
   usa ese marcador en `notas_especiales` como bypass administrativo para comandar un
   plato agotado, y ese campo lo escribe el comensal — sin este filtro bastaría con
-  ponerse de apodo `OVERRIDE_ADMIN` para saltarse el control de disponibilidad.
+  ponerse de alias `OVERRIDE_ADMIN` para saltarse el control de disponibilidad.
 - `precio_unitario` se congela desde `platos.precio` dentro del propio INSERT (regla
   de negocio "Inmutabilidad de Precios"), nunca se toma del body.
 - `subtotal` y `total` los calculan los triggers; el backend relee el pedido antes de
@@ -597,7 +620,23 @@ Body:
 - `codigo_pedido` lo genera el backend (formato `PED-AAMMDD-XXXXX`, 16 caracteres, que
   es el largo de la columna) y es único.
 - Cada ítem nace con `estado_item = 'pendiente'` (DEFAULT de la columna).
+- `precio_aplicado` de cada ingrediente **lo fija el trigger**
+  `tr_validar_detalle_ingrediente`: solo la porción `extra` cobra
+  `ingredientes.precio_extra`; `ligera` y `normal` van en 0. El backend inserta
+  `(id_detalle, id_ingrediente, porcion)` y nada más.
+- `detalles_pedido.precio_extras` (suma por unidad de los recargos) y el `subtotal` los
+  calculan los triggers del script 13.
+- Tras insertar los ingredientes de un ítem, el backend llama
+  `validar_selecciones_detalle(id_detalle)` **en la misma transacción**: ahí se revisan
+  `min_sel`/`max_sel` de cada paso. Cualquier error revierte el pedido completo — no
+  queda un pedido a medio armar.
 - 409 si el plato no existe o no está disponible: lo decide el trigger.
+- **409** también para todo lo que rechaza la base sobre los ingredientes, con **su
+  mensaje tal cual**: ingrediente agotado (*El ingrediente "Panceta Crujiente" está
+  agotado*), ingrediente que no pertenece al plato, plato no personalizable, y
+  `min_sel`/`max_sel` incumplido (*En "Elige tu Base" debes elegir al menos 1
+  opción(es) (elegiste 0)*). Un plato personalizable **sin** `ingredientes` cae aquí si
+  algún paso es obligatorio.
 
 201:
 
@@ -607,10 +646,39 @@ Body:
 
 400: plato inexistente o no disponible, `id_mesa` faltante para staff · 403: rol no permitido
 
+### GET /pedidos/:id
+
+200: el pedido con `detalles`. Cada detalle trae `comensal` (quién pidió el ítem),
+`notas_especiales` (solo la nota), `precio_extras` y sus `ingredientes`:
+
+```json
+{
+  "id_pedido": 87, "codigo_pedido": "PED-261011-ABC12", "id_mesa": 5,
+  "estado": "recibido", "total": "43000.00",
+  "detalles": [
+    {
+      "id_detalle": 700, "id_plato": 1001, "plato_nombre": "Bowl Personalizado",
+      "cantidad": 2, "comensal": "Ana", "notas_especiales": "sin cebolla",
+      "precio_unitario": "20000.00", "precio_extras": "1500.00", "subtotal": "43000.00",
+      "ingredientes": [
+        { "id_ingrediente": 1, "nombre": "Arroz Integral", "porcion": "normal", "precio_aplicado": "0.00", "id_paso": 1, "paso": "Elige tu Base" },
+        { "id_ingrediente": 10, "nombre": "Aguacate", "porcion": "extra", "precio_aplicado": "1500.00", "id_paso": 3, "paso": "Añade Toppings" }
+      ]
+    }
+  ]
+}
+```
+
+Los `ingredientes` van **ordenados por el orden del paso** (Base, Proteína, Toppings,
+Salsa), no por el orden en que los mandó el cliente. Un plato simple trae `[]`. Un
+comensal solo ve los pedidos de su mesa (403 si no).
+
 ### GET /pedidos/mesa
 
 200: `{ "id_mesa": 5, "pedidos": [ ... ] }` — todos los pedidos de la mesa del token,
-más recientes primero.
+más recientes primero, cada uno con sus `detalles` en el mismo formato que
+`GET /pedidos/:id` (ítems con `comensal` e `ingredientes`, que es lo que necesita la
+cuenta dividida por persona).
 
 ### PATCH /pedidos/:id/estado
 
@@ -631,7 +699,7 @@ con el mensaje del trigger.
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| GET | /kds/comandas | **cocina, admin** | Comandas activas, con ítems enriquecidos con plato y categoría, mesa y minutos transcurridos |
+| GET | /kds/comandas | **cocina, admin** | Comandas activas, con ítems enriquecidos con plato, categoría, comensal e ingredientes, mesa y minutos transcurridos |
 | PATCH | /kds/comandas/:id/estado | **cocina, admin** | Cambia a `en_preparacion` o `listo` (únicos estados permitidos desde cocina) |
 
 Respuesta de `GET /kds/comandas`:
@@ -644,9 +712,14 @@ Respuesta de `GET /kds/comandas`:
       "estado": "recibido", "notas_generales": null, "minutos_transcurridos": 3.2,
       "items": [
         {
-          "id_detalle": 201, "cantidad": 2, "plato_nombre": "Bandeja paisa",
+          "id_detalle": 201, "id_pedido": 87, "cantidad": 2, "plato_nombre": "Bowl Personalizado",
           "categoria_nombre": "Platos fuertes", "tiempo_preparacion_estimado": 20,
-          "notas_especiales": "Ana: sin cebolla", "estado_item": "pendiente"
+          "personalizable": true, "comensal": "Ana",
+          "notas_especiales": "sin cebolla", "estado_item": "pendiente",
+          "ingredientes": [
+            { "id_ingrediente": 1, "nombre": "Arroz Integral", "porcion": "normal", "id_paso": 1, "paso": "Elige tu Base" },
+            { "id_ingrediente": 10, "nombre": "Aguacate", "porcion": "extra", "id_paso": 3, "paso": "Añade Toppings" }
+          ]
         }
       ]
     }
@@ -656,6 +729,14 @@ Respuesta de `GET /kds/comandas`:
 
 > El semáforo (verde/amarillo/rojo a los 15 min) se calcula en el frontend-kds a
 > partir de `minutos_transcurridos` — el backend solo entrega el dato crudo.
+
+Los ingredientes llegan con su `porcion` y **sin precio**: a la cocina el precio no le
+sirve. Van ordenados por el orden del paso, igual que en la API de pedidos, y un plato
+simple trae `[]`.
+
+Son **dos consultas fijas** (una de pedidos y una de ítems de todas las comandas), no
+una por comanda: el tablero se refresca cada pocos segundos y el número de viajes a la
+base no debe crecer con la cantidad de comandas abiertas.
 
 ---
 

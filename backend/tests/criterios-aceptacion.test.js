@@ -45,6 +45,7 @@ function instalarEscenario() {
     },
     pedidos: [],
     siguienteIdPedido: 1,
+    siguienteIdDetalle: 1,
     // Tokens que el socket-server emitió (los da por bien firmados) y los que
     // revocó al recibir /internal/mesa-liberada.
     emitidos: new Set(),
@@ -124,8 +125,24 @@ function instalarEscenario() {
         }],
       };
     }
+    // El detalle devuelve su id_detalle: con él se insertan los ingredientes del
+    // ítem y se llama validar_selecciones_detalle en la misma transacción.
+    if (sql.includes('INSERT INTO detalles_pedido')) {
+      return { rows: [{ id_detalle: estado.siguienteIdDetalle++ }] };
+    }
     if (sql.includes('FROM detalles_pedido dp')) {
-      return { rows: [{ id_detalle: 1, id_plato: 3, cantidad: 1, notas_especiales: 'Ana', plato_nombre: 'Hamburguesa Smart Angus' }] };
+      return {
+        rows: [{
+          id_detalle: 1,
+          id_pedido: Number(Array.isArray(params[0]) ? params[0][0] : params[0]),
+          id_plato: 3,
+          cantidad: 1,
+          comensal: 'Ana',
+          notas_especiales: null,
+          plato_nombre: 'Hamburguesa Smart Angus',
+          ingredientes: [],
+        }],
+      };
     }
     return { rows: [] };
   };

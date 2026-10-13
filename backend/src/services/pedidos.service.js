@@ -12,13 +12,40 @@ const ESTADOS_VALIDOS = ['recibido', 'en_preparacion', 'listo', 'entregado', 'pa
 
 const MAX_INTENTOS_CODIGO = 5;
 
-// Detalles con el nombre del plato. Lo usan crearConDetalles (para el payload de
-// order:created) y obtenerConDetalles (para GET /pedidos/:id).
-const SQL_DETALLES_CON_PLATO = `
-  SELECT dp.*, pl.nombre AS plato_nombre
+/**
+ * Detalles con el nombre del plato y los ingredientes elegidos de cada ítem.
+ *
+ * Los ingredientes se traen en el mismo viaje con json_agg en vez de una
+ * consulta por detalle: así leer un pedido es una sola consulta por más ítems
+ * que tenga. Van ordenados por pasos_constructor.orden (Base, Proteína,
+ * Toppings, Salsa) para que el KDS y la cuenta los muestren como se armaron, no
+ * en el orden en que el cliente los mandó.
+ *
+ * precio_aplicado y precio_extras salen tal como los dejó la base; aquí no se
+ * suma nada. FILTER evita que un ítem sin ingredientes traiga [null].
+ *
+ * Lo usan crearConDetalles (payload de order:created), obtenerConDetalles
+ * (GET /pedidos/:id) y el KDS, que pasa una lista de pedidos.
+ */
+const SQL_DETALLES_CON_INGREDIENTES = `
+  SELECT dp.*, pl.nombre AS plato_nombre, pl.personalizable,
+         COALESCE(json_agg(
+           json_build_object(
+             'id_ingrediente', i.id_ingrediente,
+             'nombre', i.nombre,
+             'porcion', di.porcion,
+             'precio_aplicado', di.precio_aplicado,
+             'id_paso', pc.id_paso,
+             'paso', pc.nombre
+           ) ORDER BY pc.orden ASC, i.id_ingrediente ASC
+         ) FILTER (WHERE di.id_ingrediente IS NOT NULL), '[]'::json) AS ingredientes
   FROM detalles_pedido dp
   JOIN platos pl ON pl.id_plato = dp.id_plato
-  WHERE dp.id_pedido = $1
+  LEFT JOIN detalles_ingredientes di ON di.id_detalle = dp.id_detalle
+  LEFT JOIN ingredientes i ON i.id_ingrediente = di.id_ingrediente
+  LEFT JOIN pasos_constructor pc ON pc.id_paso = i.id_paso
+  WHERE dp.id_pedido = ANY($1::int[])
+  GROUP BY dp.id_detalle, pl.nombre, pl.personalizable
   ORDER BY dp.id_detalle ASC`;
 
 /**
@@ -32,14 +59,14 @@ function generarCodigoPedido(fecha = new Date()) {
 }
 
 /**
- * detalles_pedido solo tiene notas_especiales para el texto libre del ítem, así
- * que ahí va el apodo del comensal que lo agregó al carrito colaborativo, junto
- * con su nota si la escribió: "Ana: sin cebolla".
+ * Lee los detalles (con ingredientes) de uno o varios pedidos en una sola
+ * consulta. Recibe el ejecutor para poder usarse dentro de una transacción
+ * (crearConDetalles) o sobre el pool (lecturas sueltas y KDS).
  */
-function componerNotasEspeciales(apodo, notas) {
-  const partes = [apodo, notas].map((t) => (typeof t === 'string' ? t.trim() : '')).filter(Boolean);
-  if (partes.length === 0) return null;
-  return partes.join(': ');
+async function detallesDePedidos(idsPedido, ejecutor = pool) {
+  if (idsPedido.length === 0) return [];
+  const result = await ejecutor.query(SQL_DETALLES_CON_INGREDIENTES, [idsPedido]);
+  return result.rows;
 }
 
 /**
@@ -84,17 +111,41 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     }
 
     for (const item of items) {
-      await client.query(
+      const detalle = await client.query(
         `INSERT INTO detalles_pedido
-          (id_pedido, id_plato, cantidad, precio_unitario, notas_especiales)
-         VALUES ($1, $2, $3, (SELECT precio FROM platos WHERE id_plato = $2), $4)`,
+          (id_pedido, id_plato, cantidad, precio_unitario, notas_especiales, comensal)
+         VALUES ($1, $2, $3, (SELECT precio FROM platos WHERE id_plato = $2), $4, $5)
+         RETURNING id_detalle`,
         [
           pedido.id_pedido,
           item.id_plato,
           item.cantidad,
-          componerNotasEspeciales(item.apodo, item.notas),
+          // Solo la nota del ítem: el alias del comensal va en su propia columna.
+          item.notas || null,
+          item.comensal || null,
         ]
       );
+      const idDetalle = detalle.rows[0].id_detalle;
+
+      // precio_aplicado NO se manda: lo fija tr_validar_detalle_ingrediente
+      // según la porción (solo 'extra' cobra ingredientes.precio_extra). Ese
+      // mismo trigger rechaza un ingrediente que no sea del plato, uno agotado o
+      // un pedido que ya salió de 'recibido', con un RAISE EXCEPTION que el
+      // manejador central traduce a 409.
+      for (const ingrediente of item.ingredientes || []) {
+        await client.query(
+          `INSERT INTO detalles_ingredientes (id_detalle, id_ingrediente, porcion)
+           VALUES ($1, $2, $3)`,
+          [idDetalle, ingrediente.id_ingrediente, ingrediente.porcion]
+        );
+      }
+
+      // min_sel/max_sel de cada paso solo se pueden revisar cuando ya están
+      // TODAS las selecciones del ítem, por eso es una llamada aparte y no un
+      // trigger por fila. Va en esta misma transacción: si falta un paso
+      // obligatorio, el error aborta todo y no queda pedido a medio armar.
+      // Un plato no personalizable sale por el RETURN temprano de la función.
+      await client.query('SELECT validar_selecciones_detalle($1)', [idDetalle]);
     }
 
     await client.query(
@@ -112,10 +163,10 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     // Los detalles ya enriquecidos se devuelven junto al pedido: los necesita el
     // payload de order:created (socket-server/EVENTS.md) y así se leen dentro de
     // la misma transacción, sin una consulta extra después del COMMIT.
-    const detalles = await client.query(SQL_DETALLES_CON_PLATO, [pedido.id_pedido]);
+    const detalles = await detallesDePedidos([pedido.id_pedido], client);
 
     await client.query('COMMIT');
-    return { ...conTotal.rows[0], detalles: detalles.rows };
+    return { ...conTotal.rows[0], detalles };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -134,8 +185,8 @@ async function listarActivos() {
 async function obtenerConDetalles(id) {
   const pedido = await pool.query('SELECT * FROM pedidos WHERE id_pedido = $1', [id]);
   if (pedido.rows.length === 0) return null;
-  const detalles = await pool.query(SQL_DETALLES_CON_PLATO, [id]);
-  return { ...pedido.rows[0], detalles: detalles.rows };
+  const detalles = await detallesDePedidos([pedido.rows[0].id_pedido]);
+  return { ...pedido.rows[0], detalles };
 }
 
 // Estados en los que un pedido deja de ocupar la mesa.
@@ -194,19 +245,33 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
   }
 }
 
-/** Pedidos de una mesa — reemplaza el viejo historial por cliente. */
+/**
+ * Pedidos de una mesa — reemplaza el viejo historial por cliente.
+ *
+ * Trae los ítems con sus ingredientes porque con esto se pinta la cuenta de la
+ * mesa, y dividirla por persona necesita saber qué pidió cada comensal. Son dos
+ * consultas fijas (pedidos + detalles de todos ellos), no una por pedido.
+ */
 async function listarPorMesa(idMesa) {
   const result = await pool.query(
     'SELECT * FROM pedidos WHERE id_mesa = $1 ORDER BY creado_en DESC',
     [idMesa]
   );
-  return result.rows;
+  return agruparDetalles(result.rows, await detallesDePedidos(result.rows.map((p) => p.id_pedido)));
+}
+
+/** Reparte una lista plana de detalles entre sus pedidos, sin consultas extra. */
+function agruparDetalles(pedidos, detalles) {
+  const porPedido = new Map(pedidos.map((p) => [p.id_pedido, []]));
+  for (const detalle of detalles) porPedido.get(detalle.id_pedido)?.push(detalle);
+  return pedidos.map((p) => ({ ...p, detalles: porPedido.get(p.id_pedido) || [] }));
 }
 
 module.exports = {
   ESTADOS_VALIDOS,
   generarCodigoPedido,
-  componerNotasEspeciales,
+  detallesDePedidos,
+  agruparDetalles,
   crearConDetalles,
   listarActivos,
   obtenerConDetalles,

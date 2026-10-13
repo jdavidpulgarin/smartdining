@@ -110,8 +110,10 @@ entregado      -> pagado
 | | tiempo_preparacion_estimado | INTEGER | NOT NULL DEFAULT 15 · CHECK > 0 · minutos |
 | | creado_en | TIMESTAMPTZ | NOT NULL DEFAULT now |
 
-> No existen `personalizaciones` ni `alergenos`. Las preferencias del comensal van por ítem,
-> en `detalles_pedido.notas_especiales`.
+> No existe una tabla `alergenos`. Las preferencias en texto libre van por ítem en
+> `detalles_pedido.notas_especiales`; las opciones de un plato armado **sí** están
+> modeladas, en `pasos_constructor` / `ingredientes` / `detalles_ingredientes`
+> (script 13), no como texto.
 
 ## 6. pedidos
 
@@ -138,7 +140,9 @@ entregado      -> pagado
 | | cantidad | INTEGER | NOT NULL · CHECK > 0 |
 | | precio_unitario | DECIMAL(10,2) | NOT NULL · CHECK >= 0 · precio congelado |
 | | subtotal | DECIMAL(10,2) | NOT NULL · CHECK >= 0 · **lo calcula el trigger** |
-| | notas_especiales | TEXT | apodo del comensal + su nota |
+| | notas_especiales | TEXT | solo la nota del ítem ("sin cebolla") |
+| | comensal | VARCHAR(40) | alias de quien pidió el ítem (script 13) · antes iba dentro de `notas_especiales` |
+| | precio_extras | DECIMAL(10,2) | NOT NULL DEFAULT 0 · recargos por unidad · **los calcula la base** |
 | | estado_item | VARCHAR(20) | NOT NULL DEFAULT `'pendiente'` · CHECK: `pendiente`, `cocinando`, `listo`, `servido`, `cancelado` |
 | | creado_en | TIMESTAMPTZ | NOT NULL DEFAULT now |
 

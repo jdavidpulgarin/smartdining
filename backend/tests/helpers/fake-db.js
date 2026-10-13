@@ -39,6 +39,7 @@ function instalarFakeDb(responder, opciones = {}) {
   const queryOriginal = pool.query;
   const connectOriginal = pool.connect;
   const ejecutadas = [];
+  let siguienteIdDetalle = opciones.primerIdDetalle ?? 500;
 
   const ejecutar = async (sql, params = []) => {
     ejecutadas.push({ sql, params });
@@ -64,6 +65,19 @@ function instalarFakeDb(responder, opciones = {}) {
       // liberarSesion (que responde con el estado de la mesa).
       if (opciones.mesaYaLiberada) return { rows: [] };
       return { rows: [{ id_mesa: params[1], numero: params[1], estado: params[0], token_qr: null }] };
+    }
+
+    // El INSERT del detalle lleva RETURNING id_detalle porque con ese id se
+    // insertan los ingredientes y se llama validar_selecciones_detalle. Se
+    // contesta aquí, como el resto del andamiaje, porque los responder de las
+    // pruebas devuelven { rows: [] } para lo que no conocen y eso dejaría el
+    // id_detalle vacío. Una prueba que necesite ids concretos usa
+    // opciones.primerIdDetalle, y una que quiera simular el fallo del trigger
+    // responde ella misma lanzando desde su responder.
+    if (sql.includes('INSERT INTO detalles_pedido')) {
+      const propio = responder(sql, params);
+      if (propio && propio.rows && propio.rows.length > 0) return propio;
+      return { rows: [{ id_detalle: siguienteIdDetalle++ }] };
     }
 
     return responder(sql, params) || { rows: [] };
