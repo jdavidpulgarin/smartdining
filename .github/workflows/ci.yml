@@ -66,6 +66,20 @@ jobs:
       - name: npm test (falla si hay pruebas canceladas)
         run: bash "$GITHUB_WORKSPACE/.github/scripts/npm-test-sin-canceladas.sh"
 
+  infra:
+    name: infra · scripts de despliegue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sintaxis de los scripts de shell
+        run: for f in infra/scripts/*.sh; do sh -n "$f"; done
+      - name: Pruebas (contraseñas del personal)
+        run: node --test "infra/scripts/*.test.cjs"
+
   frontends:
     name: ${{ matrix.app }} · lint y build
     runs-on: ubuntu-latest

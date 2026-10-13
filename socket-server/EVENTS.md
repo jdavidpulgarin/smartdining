@@ -775,4 +775,5 @@ Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 | `REDIS_URL` | Estado persistente (obligatoria en producción) |
 | `ROTACION_QR_MINUTOS` | Rotación automática del QR con la mesa vacía (3) |
 | `MESA_CAPACIDAD_POR_DEFECTO` | Capacidad si el backend no la informa; comensales por mesa = capacidad + 4 (6) |
+| `TRUST_PROXY` | IPs o CIDR del proxy (nginx) del que se cree `X-Real-IP` para logs y límites. Vacía = la IP de la conexión. `/0` no se admite |
 | `LOG_NIVEL` | `debug`, `info` (por defecto), `warn`, `error` o `silencio`. Logs en JSON, sin secretos |

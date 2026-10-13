@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { exigirSecretos, esDeEjemplo } = require('./secretos');
 const { API_PERMITIDAS } = require('./pasarelas/wompi');
+const { parsearProxiesConfiables } = require('./ip-cliente');
 
 const VARIABLES_WOMPI = ['WOMPI_PUBLIC_KEY', 'WOMPI_PRIVATE_KEY', 'WOMPI_INTEGRITY_SECRET', 'WOMPI_EVENTS_SECRET', 'WOMPI_API_URL'];
 
@@ -116,8 +117,12 @@ function cargarConfig(env = process.env) {
     throw new Error('MESA_CAPACIDAD_POR_DEFECTO debe ser un entero entre 1 y 50');
   }
 
+  // IP de Nginx en la red interna: solo de ella se cree X-Real-IP (ip-cliente.js).
+  const proxiesConfiables = parsearProxiesConfiables(env.TRUST_PROXY);
+
   return {
     puerto: Number(env.PORT) || 4001,
+    proxiesConfiables,
     // Si el backend no informa la capacidad de una mesa (límite de conexiones).
     capacidadMesaPorDefecto: capacidadMesa,
     backendUrl,

@@ -1,0 +1,10 @@
+# Contexto: backend/. Nada de secretos, dependencias locales ni pruebas.
+node_modules
+.env
+.env.*
+!.env.example
+tests
+docs
+scripts
+coverage
+*.log

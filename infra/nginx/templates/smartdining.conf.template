@@ -1,0 +1,177 @@
+# SmartDining en producción. La imagen oficial de nginx sustituye ${DOMINIO}
+# al arrancar (envsubst sobre /etc/nginx/templates). Las variables propias de
+# nginx ($host, $remote_addr...) no se tocan porque no son de entorno.
+#
+#   app.${DOMINIO}     PWA del comensal       (estático: frontend-cliente)
+#   staff.${DOMINIO}   panel del restaurante  (estático: frontend-restaurante)
+#   cocina.${DOMINIO}  pantalla de cocina     (estático: frontend-kds)
+#   api.${DOMINIO}     backend REST           (proxy a backend:4000)
+#   rt.${DOMINIO}      tiempo real y pagos    (proxy WebSocket a socket-server:4001)
+
+server_tokens off;
+
+# Límites de frecuencia por IP: el login y los pagos son los blancos típicos
+# de fuerza bruta. El resto lo cubren los límites propios de cada servicio.
+limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=pagos:10m rate=30r/m;
+limit_req_status 429;
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+upstream backend { server backend:4000; keepalive 16; }
+upstream tiempo_real { server socket-server:4001; }
+
+# --- HTTP: solo el reto de Let's Encrypt; todo lo demás va a HTTPS.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMINIO} app.${DOMINIO} staff.${DOMINIO} cocina.${DOMINIO} api.${DOMINIO} rt.${DOMINIO};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# Un solo certificado con todos los subdominios (ver infra/scripts/primer-certificado.sh).
+ssl_certificate     /etc/letsencrypt/live/${DOMINIO}/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/${DOMINIO}/privkey.pem;
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+ssl_session_cache shared:SSL:10m;
+ssl_session_timeout 1d;
+ssl_session_tickets off;
+
+# --- Dominio raíz: a la PWA.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${DOMINIO};
+    include /etc/nginx/snippets/seguridad.conf;
+    return 301 https://app.${DOMINIO}$request_uri;
+}
+
+# --- PWA del comensal
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name app.${DOMINIO};
+    root /usr/share/nginx/html/app;
+    client_max_body_size 64k;
+
+    include /etc/nginx/snippets/seguridad.conf;
+    include /etc/nginx/snippets/bloqueo-interno.conf;
+    # CSP básica: solo código propio y el widget de Wompi; la app solo habla
+    # con la API y el tiempo real de este dominio. 'unsafe-inline' en estilos
+    # porque React y Tailwind los usan; revisar al endurecer.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://checkout.wompi.co; frame-src https://checkout.wompi.co https://*.wompi.co; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO} https://*.wompi.co; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self' https://checkout.wompi.co; frame-ancestors 'none'" always;
+
+    # El service worker y el HTML no se cachean: una versión nueva llega al instante.
+    location = /sw.js { add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/seguridad.conf; }
+    location /assets/ { expires 1y; add_header Cache-Control "public, immutable" always; include /etc/nginx/snippets/seguridad.conf; }
+    location / { try_files $uri $uri/ /index.html; }
+}
+
+# --- Panel del restaurante
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name staff.${DOMINIO};
+    root /usr/share/nginx/html/staff;
+    client_max_body_size 64k;
+
+    include /etc/nginx/snippets/seguridad.conf;
+    include /etc/nginx/snippets/bloqueo-interno.conf;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+
+    location /assets/ { expires 1y; add_header Cache-Control "public, immutable" always; include /etc/nginx/snippets/seguridad.conf; }
+    location / { try_files $uri $uri/ /index.html; }
+}
+
+# --- Pantalla de cocina
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name cocina.${DOMINIO};
+    root /usr/share/nginx/html/cocina;
+    client_max_body_size 64k;
+
+    include /etc/nginx/snippets/seguridad.conf;
+    include /etc/nginx/snippets/bloqueo-interno.conf;
+    add_header Content-Security-Policy "default-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'" always;
+
+    location / { try_files $uri $uri/ /index.html; }
+}
+
+# --- API REST
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name api.${DOMINIO};
+    client_max_body_size 1m;
+
+    include /etc/nginx/snippets/seguridad.conf;
+    include /etc/nginx/snippets/bloqueo-interno.conf;
+    # Una API JSON no carga nada ni se deja enmarcar.
+    add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
+
+    location = /api/auth/login {
+        limit_req zone=login burst=5 nodelay;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_set_header Connection "";
+        proxy_pass http://backend;
+    }
+    location / {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_set_header Connection "";
+        proxy_read_timeout 30s;
+        proxy_pass http://backend;
+    }
+}
+
+# --- Tiempo real (Socket.io), QR, push y pagos
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name rt.${DOMINIO};
+    # El socket-server ya corta en 100 KB (HTTP) y 16 KB (mensajes de socket).
+    client_max_body_size 100k;
+
+    include /etc/nginx/snippets/seguridad.conf;
+    include /etc/nginx/snippets/bloqueo-interno.conf;
+    add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
+
+    # WebSocket: Upgrade/Connection hacia el socket-server. 120 s de lectura:
+    # más que el ping de Socket.io (25 s), así una conexión inactiva no se corta.
+    location /socket.io/ {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_buffering off;
+        proxy_pass http://tiempo_real;
+    }
+    location ^~ /pagos/ {
+        limit_req zone=pagos burst=10 nodelay;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_read_timeout 30s;
+        proxy_pass http://tiempo_real;
+    }
+    location / {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_read_timeout 30s;
+        proxy_pass http://tiempo_real;
+    }
+}

@@ -81,6 +81,7 @@ para `develop`:
    - `socket-server · pruebas (con Redis)`
    - `frontend-cliente · lint y build`
    - `frontend-restaurante · lint y build`
+   - `infra · scripts de despliegue`
 5. *Require conversation resolution before merging*.
 6. *Block force pushes* y *Restrict deletions*.
 7. En `main`, además: restringir quién puede hacer push (solo el líder).
@@ -195,6 +196,11 @@ curl http://localhost:4001/health        # {"estado":"ok"}
 Invoke-RestMethod http://localhost:4000/api/health
 Invoke-RestMethod http://localhost:4001/health
 ```
+
+## 🌐 Producción
+
+Un VPS con Docker Compose, HTTPS de Let's Encrypt y despliegue automático al fusionar en
+`main`. Guía completa: [`docs/despliegue.md`](docs/despliegue.md).
 
 ---
 
