@@ -16,7 +16,8 @@ function verificarJwt(token, secreto) {
     const p = jwt.verify(token, secreto, { algorithms: ['HS256'] });
     if (p.rol === ROL_COMENSAL || p.rol === ROL_PANTALLA) {
       if (!Number.isInteger(p.id_mesa)) return null;
-      return { rol: p.rol, id_mesa: p.id_mesa };
+      // iat permite saber si la sesión es anterior a la liberación de la mesa.
+      return { rol: p.rol, id_mesa: p.id_mesa, iat: p.iat };
     }
     if (ROLES_PERSONAL.includes(p.rol)) {
       return { rol: p.rol, id_usuario: p.id_usuario };
@@ -32,12 +33,17 @@ function verificarJwt(token, secreto) {
  * handshake (y no en un evento posterior) para que un socket anónimo nunca
  * llegue a estar dentro de ninguna sala.
  */
-function autenticarSocket(secreto) {
+function autenticarSocket(secreto, { sesionVigente = () => true } = {}) {
   return (socket, next) => {
     const token = socket.handshake.auth && socket.handshake.auth.token;
     if (!token) return next(new Error('AUTH_REQUERIDA'));
     const identidad = verificarJwt(token, secreto);
-    if (!identidad) return next(new Error('TOKEN_INVALIDO'));
+    // Un comensal del grupo anterior conserva un JWT vigente (3 h) después de
+    // que la mesa se libera: sin esta comprobación podría reconectarse y ver
+    // el carrito del grupo siguiente. Se responde TOKEN_INVALIDO, igual que un
+    // JWT vencido, para que el cliente pida sesión nueva (y el backend lo
+    // mande a escanear el QR actual).
+    if (!identidad || !sesionVigente(identidad)) return next(new Error('TOKEN_INVALIDO'));
     socket.data.identidad = identidad;
     next();
   };

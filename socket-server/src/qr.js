@@ -13,6 +13,7 @@ const ROLES_GENERAN_QR = ['admin', 'mesero', 'cajero'];
 // 255: un token v1 firmado mide ~150 caracteres (payload + HMAC en base64url).
 // Con 128 se rechazaban los tokens reales y la tablet nunca refrescaba el QR.
 const MAX_TOKEN_QR_MOSTRADO = 255;
+const MOTIVOS_LIBERACION = ['pagada', 'liberada'];
 
 const b64 = (buf) => Buffer.from(buf).toString('base64url');
 
@@ -90,7 +91,19 @@ function crearServicioQr({ secreto, ttlMinutosPorDefecto = 360, ahora = Date.now
     revocadoDesde.set(idMesa, ahora() + 1);
   }
 
-  return { generar, validar, revocarMesa };
+  /**
+   * ¿Se liberó la mesa después de emitir una credencial en `emitidoSeg`
+   * (iat de un JWT, en segundos)? Se compara contra el final de ese segundo:
+   * ante la duda se acepta, porque el backend también comprueba el sid.
+   */
+  function revocadaDespuesDe(idMesa, emitidoSeg) {
+    const desde = revocadoDesde.get(idMesa);
+    if (!desde) return false;
+    if (!Number.isFinite(emitidoSeg)) return true; // sin iat no hay forma de saberlo
+    return (emitidoSeg + 1) * 1000 <= desde;
+  }
+
+  return { generar, validar, revocarMesa, revocadaDespuesDe };
 }
 
 /** Deriva una clave de firma propia si no se configuró QR_SECRET. */
@@ -129,6 +142,8 @@ const rutasQr = {
     try {
       const ttl = cuerpo.ttl_minutos === undefined ? undefined : Number(cuerpo.ttl_minutos);
       const qr = ctx.qr.generar(cuerpo.id_mesa, ttl);
+      // QR nuevo = sesión nueva: una liberación posterior vuelve a contar.
+      if (ctx.reabrirMesa) ctx.reabrirMesa(cuerpo.id_mesa);
       enviarJson(res, 201, qr);
     } catch (err) {
       if (err instanceof RangeError) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', err.message);
@@ -189,8 +204,13 @@ const rutasQr = {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
     if (!esIdValido(cuerpo.id_mesa)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'id_mesa debe ser un entero positivo');
-    ctx.liberarMesa(cuerpo.id_mesa);
-    enviarJson(res, 200, { ok: true });
+    // motivo es opcional para no romper al backend actual, que solo manda id_mesa.
+    const motivo = cuerpo.motivo === undefined ? 'liberada' : cuerpo.motivo;
+    if (!MOTIVOS_LIBERACION.includes(motivo)) {
+      throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', `motivo debe ser uno de: ${MOTIVOS_LIBERACION.join(', ')}`);
+    }
+    const r = await ctx.liberarMesa(cuerpo.id_mesa, motivo);
+    enviarJson(res, 200, { ok: true, duplicado: r.duplicado });
   },
 };
 
