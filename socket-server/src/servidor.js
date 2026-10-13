@@ -19,6 +19,10 @@ const { crearAlmacenCarritosRedis } = require('./almacen/carritos-redis');
 const { crearRegistroIdempotenciaRedis } = require('./almacen/idempotencia-redis');
 const { crearRevocacionesRedis } = require('./almacen/revocaciones-redis');
 const { crearAlmacenSuscripcionesRedis } = require('./almacen/suscripciones-redis');
+const { crearEstadoMesasRedis } = require('./almacen/mesas-redis');
+const {
+  registrarSala, crearEstadoMesasMemoria, crearPresencia, rutasSala,
+} = require('./sala');
 
 const rutasBase = {
   /**
@@ -47,7 +51,7 @@ function crearServidor(config, deps = {}) {
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
   const ctx = { config };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos }, ctx);
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));
@@ -87,6 +91,8 @@ function crearServidor(config, deps = {}) {
     registroPagos: cliente
       ? crearRegistroIdempotenciaRedis({ cliente, ttlMs: TTL_PAGOS_MS })
       : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
+    estadoMesas: cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria(),
+    presencia: crearPresencia({ io, ...(deps.presencia || {}) }),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),
     suscripciones: cliente
@@ -122,6 +128,7 @@ function crearServidor(config, deps = {}) {
       emitidoEn: new Date().toISOString(),
     });
     await ctx.suscripciones.limpiarMesa(idMesa);
+    await ctx.estadoMesas.limpiarMesa(idMesa);
     await ctx.carritos.vaciar(idMesa);
     // Solo se echa a los comensales: la pantalla de la mesa sigue conectada
     // para mostrar el QR del siguiente grupo, y el personal sigue vigilando.
@@ -143,10 +150,13 @@ function crearServidor(config, deps = {}) {
 
   io.on('connection', (socket) => {
     console.log(`[socket] conectado ${socket.id} (${socket.data.identidad.rol})`);
-    registrarSalas(socket, { obtenerSnapshot: ctx.carritos.snapshot, sesionVigente });
+    registrarSalas(socket, {
+      obtenerSnapshot: ctx.carritos.snapshot, sesionVigente, alCambiarSala: ctx.presencia.programar,
+    });
     registrarCarrito(socket, ctx);
     registrarPedidos(socket, ctx);
     registrarSuscripcionesSocket(socket, ctx);
+    registrarSala(socket, ctx);
     socket.on('disconnect', (motivo) => console.log(`[socket] ${socket.id} desconectado: ${motivo}`));
   });
 

@@ -104,7 +104,8 @@ function crearRouter(rutas, ctx) {
 /** Convierte un ack ({ok:false,...}) en la respuesta HTTP equivalente. */
 function enviarAck(res, ack) {
   if (ack.ok) return enviarJson(res, 200, ack);
-  const status = ack.codigo === 'PAYLOAD_INVALIDO' ? 400 : ack.codigo === 'NO_AUTORIZADO' ? 403 : 500;
+  const STATUS = { PAYLOAD_INVALIDO: 400, NO_AUTORIZADO: 403, RATE_LIMIT: 429 };
+  const status = STATUS[ack.codigo] || 500;
   return enviarJson(res, status, ack);
 }
 
