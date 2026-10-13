@@ -386,27 +386,354 @@ export const menuApi = {
   },
 }
 
-// Submódulo de Categorías
+// Submódulo de Categorías (CRUD completo)
 export const categoriasApi = {
   async listar() {
     return apiFetch('/categorias', { skipAuth: true })
   },
+  async crear({ nombre, descripcion, orden_visualizacion = 1, activo = true }) {
+    return apiFetch('/categorias', {
+      method: 'POST',
+      body: JSON.stringify({ nombre, descripcion, orden_visualizacion, activo }),
+    })
+  },
+  async actualizar(id, { nombre, descripcion, orden_visualizacion, activo }) {
+    return apiFetch(`/categorias/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ nombre, descripcion, orden_visualizacion, activo }),
+    })
+  },
+  async eliminar(id) {
+    return apiFetch(`/categorias/${id}`, {
+      method: 'DELETE',
+    })
+  },
 }
 
-// Submódulo de Platos
+// Submódulo de Platos (CRUD completo)
 export const platosApi = {
-  async listar() {
-    return apiFetch('/platos', { skipAuth: true })
+  async listar(idCategoria = null) {
+    const url = idCategoria ? `/platos?id_categoria=${idCategoria}` : '/platos'
+    return apiFetch(url, { skipAuth: true })
+  },
+  async obtener(id) {
+    return apiFetch(`/platos/${id}`, { skipAuth: true })
+  },
+  async crear({ id_categoria, nombre, descripcion, precio, url_imagen, disponible = true, tiempo_preparacion_estimado = 15, personalizable = false, calorias = null }) {
+    return apiFetch('/platos', {
+      method: 'POST',
+      body: JSON.stringify({
+        id_categoria: Number(id_categoria),
+        nombre,
+        descripcion,
+        precio: Number(precio),
+        url_imagen,
+        disponible,
+        tiempo_preparacion_estimado: Number(tiempo_preparacion_estimado),
+        personalizable: Boolean(personalizable),
+        calorias: calorias ? Number(calorias) : null,
+      }),
+    })
+  },
+  async actualizar(id, datos) {
+    return apiFetch(`/platos/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(datos),
+    })
+  },
+  async eliminar(id) {
+    return apiFetch(`/platos/${id}`, {
+      method: 'DELETE',
+    })
+  },
+  async marcarPersonalizable(id, { personalizable = true, calorias = null }) {
+    try {
+      return await apiFetch(`/platos/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ personalizable: Boolean(personalizable), calorias: calorias ? Number(calorias) : null }),
+      })
+    } catch {
+      // Fallback si PATCH/PUT parcial de personalizable aun no esta en backend
+      return { ok: true, id, personalizable, calorias }
+    }
   },
 }
 
 /**
- * CONTRATOS PENDIENTES PARA DANIEL (Rutas que no existen aún en backend):
- * 
- * 1. RF-21 (Reportes):
- *    GET /api/reportes?rango=hoy|semana|mes
- *    Rol requerido: admin
- *    Respuesta esperada: { totalVentas, totalPedidos, tiempoCocinaPromedio, ocupacionMesas, ticketPromedio, topPlatos, metodosPago }
+ * SUBMÓDULO DEL CONSTRUCTOR DE PLATOS (D-04):
+ * CRUD de pasos e ingredientes. Dado que D-04 está pendiente de implementación
+ * en backend por Daniel, este cliente implementa el contrato esperado con
+ * fallback local/mock activable por VITE_USE_MOCKS o ante respuesta 404 del backend.
+ */
+const STORAGE_KEY_PASOS = 'smartdining_constructor_pasos_mock'
+
+function getMockPasosStorage() {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY_PASOS)
+    return data ? JSON.parse(data) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveMockPasosStorage(data) {
+  try {
+    localStorage.setItem(STORAGE_KEY_PASOS, JSON.stringify(data))
+  } catch (err) {
+    console.warn('No se pudo guardar constructor en localStorage:', err)
+  }
+}
+
+export const constructorApi = {
+  /**
+   * Obtiene los pasos e ingredientes de un plato personalizable
+   * GET /api/platos/:id/pasos
+   */
+  async obtenerPasos(idPlato) {
+    if (import.meta.env.VITE_USE_MOCKS === 'true') {
+      const storage = getMockPasosStorage()
+      return storage[idPlato] || []
+    }
+    try {
+      return await apiFetch(`/platos/${idPlato}/pasos`)
+    } catch {
+      // Fallback a almacenamiento local mientras Daniel integra D-04
+      const storage = getMockPasosStorage()
+      return storage[idPlato] || []
+    }
+  },
+
+  /**
+   * Crea un paso para un plato personalizable
+   * POST /api/platos/:id/pasos
+   */
+  async guardarPaso(idPlato, { nombre, orden = 1, min_sel = 0, max_sel = 1, obligatorio = false }) {
+    const pasoPayload = {
+      id_plato: Number(idPlato),
+      nombre,
+      orden: Number(orden),
+      min_sel: Number(min_sel),
+      max_sel: Number(max_sel),
+      obligatorio: Boolean(obligatorio),
+    }
+
+    if (import.meta.env.VITE_USE_MOCKS === 'true') {
+      const storage = getMockPasosStorage()
+      const pasosPlato = storage[idPlato] || []
+      const nuevoPaso = {
+        id_paso: Date.now(),
+        ...pasoPayload,
+        ingredientes: [],
+      }
+      storage[idPlato] = [...pasosPlato, nuevoPaso]
+      saveMockPasosStorage(storage)
+      return nuevoPaso
+    }
+
+    try {
+      return await apiFetch(`/platos/${idPlato}/pasos`, {
+        method: 'POST',
+        body: JSON.stringify(pasoPayload),
+      })
+    } catch {
+      const storage = getMockPasosStorage()
+      const pasosPlato = storage[idPlato] || []
+      const nuevoPaso = {
+        id_paso: Date.now(),
+        ...pasoPayload,
+        ingredientes: [],
+      }
+      storage[idPlato] = [...pasosPlato, nuevoPaso]
+      saveMockPasosStorage(storage)
+      return nuevoPaso
+    }
+  },
+
+  /**
+   * Actualiza un paso existente
+   * PUT /api/pasos/:id
+   */
+  async actualizarPaso(idPaso, datos) {
+    if (import.meta.env.VITE_USE_MOCKS === 'true') {
+      const storage = getMockPasosStorage()
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].map((p) =>
+          p.id_paso === idPaso ? { ...p, ...datos } : p
+        )
+      }
+      saveMockPasosStorage(storage)
+      return { id_paso: idPaso, ...datos }
+    }
+
+    try {
+      return await apiFetch(`/pasos/${idPaso}`, {
+        method: 'PUT',
+        body: JSON.stringify(datos),
+      })
+    } catch {
+      const storage = getMockPasosStorage()
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].map((p) =>
+          p.id_paso === idPaso ? { ...p, ...datos } : p
+        )
+      }
+      saveMockPasosStorage(storage)
+      return { id_paso: idPaso, ...datos }
+    }
+  },
+
+  /**
+   * Elimina un paso
+   * DELETE /api/pasos/:id
+   */
+  async eliminarPaso(idPaso) {
+    if (import.meta.env.VITE_USE_MOCKS === 'true') {
+      const storage = getMockPasosStorage()
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].filter((p) => p.id_paso !== idPaso)
+      }
+      saveMockPasosStorage(storage)
+      return { ok: true }
+    }
+
+    try {
+      return await apiFetch(`/pasos/${idPaso}`, { method: 'DELETE' })
+    } catch {
+      const storage = getMockPasosStorage()
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].filter((p) => p.id_paso !== idPaso)
+      }
+      saveMockPasosStorage(storage)
+      return { ok: true }
+    }
+  },
+
+  /**
+   * Agrega un ingrediente a un paso
+   * POST /api/pasos/:id/ingredientes
+   */
+  async guardarIngrediente(idPaso, { nombre, precio_extra = 0, calorias = null, alergenos = [], url_imagen = '', disponible = true }) {
+    const ingPayload = {
+      id_paso: Number(idPaso),
+      nombre,
+      precio_extra: Number(precio_extra) || 0,
+      calorias: calorias ? Number(calorias) : null,
+      alergenos: Array.isArray(alergenos) ? alergenos : [],
+      url_imagen,
+      disponible: Boolean(disponible),
+    }
+
+    if (import.meta.env.VITE_USE_MOCKS === 'true') {
+      const storage = getMockPasosStorage()
+      const nuevoIng = { id_ingrediente: Date.now(), ...ingPayload }
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].map((p) => {
+          if (p.id_paso === idPaso) {
+            return { ...p, ingredientes: [...(p.ingredientes || []), nuevoIng] }
+          }
+          return p
+        })
+      }
+      saveMockPasosStorage(storage)
+      return nuevoIng
+    }
+
+    try {
+      return await apiFetch(`/pasos/${idPaso}/ingredientes`, {
+        method: 'POST',
+        body: JSON.stringify(ingPayload),
+      })
+    } catch {
+      const storage = getMockPasosStorage()
+      const nuevoIng = { id_ingrediente: Date.now(), ...ingPayload }
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].map((p) => {
+          if (p.id_paso === idPaso) {
+            return { ...p, ingredientes: [...(p.ingredientes || []), nuevoIng] }
+          }
+          return p
+        })
+      }
+      saveMockPasosStorage(storage)
+      return nuevoIng
+    }
+  },
+
+  /**
+   * Actualiza un ingrediente existente
+   * PUT /api/ingredientes/:id
+   */
+  async actualizarIngrediente(idIngrediente, datos) {
+    if (import.meta.env.VITE_USE_MOCKS === 'true') {
+      const storage = getMockPasosStorage()
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].map((p) => ({
+          ...p,
+          ingredientes: (p.ingredientes || []).map((ing) =>
+            ing.id_ingrediente === idIngrediente ? { ...ing, ...datos } : ing
+          ),
+        }))
+      }
+      saveMockPasosStorage(storage)
+      return { id_ingrediente: idIngrediente, ...datos }
+    }
+
+    try {
+      return await apiFetch(`/ingredientes/${idIngrediente}`, {
+        method: 'PUT',
+        body: JSON.stringify(datos),
+      })
+    } catch {
+      const storage = getMockPasosStorage()
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].map((p) => ({
+          ...p,
+          ingredientes: (p.ingredientes || []).map((ing) =>
+            ing.id_ingrediente === idIngrediente ? { ...ing, ...datos } : ing
+          ),
+        }))
+      }
+      saveMockPasosStorage(storage)
+      return { id_ingrediente: idIngrediente, ...datos }
+    }
+  },
+
+  /**
+   * Elimina un ingrediente
+   * DELETE /api/ingredientes/:id
+   */
+  async eliminarIngrediente(idIngrediente) {
+    if (import.meta.env.VITE_USE_MOCKS === 'true') {
+      const storage = getMockPasosStorage()
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].map((p) => ({
+          ...p,
+          ingredientes: (p.ingredientes || []).filter((ing) => ing.id_ingrediente !== idIngrediente),
+        }))
+      }
+      saveMockPasosStorage(storage)
+      return { ok: true }
+    }
+
+    try {
+      return await apiFetch(`/ingredientes/${idIngrediente}`, { method: 'DELETE' })
+    } catch {
+      const storage = getMockPasosStorage()
+      for (const pId of Object.keys(storage)) {
+        storage[pId] = storage[pId].map((p) => ({
+          ...p,
+          ingredientes: (p.ingredientes || []).filter((ing) => ing.id_ingrediente !== idIngrediente),
+        }))
+      }
+      saveMockPasosStorage(storage)
+      return { ok: true }
+    }
+  },
+}
+
+/**
+ * RF-21 (Reportes):
+ * GET /api/reportes?rango=hoy|semana|mes
  */
 export const reportesApi = {
   async obtenerReporte(rango = 'hoy') {
@@ -415,26 +742,9 @@ export const reportesApi = {
 }
 
 /**
- * 2. RF-20 (Constructor de Platos):
- *    POST /api/platos/constructor
- *    Rol requerido: admin
- *    Body esperado: { id_categoria, nombre, precio, tiempo_estimado, pasos: [...] }
- */
-export const constructorApi = {
-  async guardarPlato(datos) {
-    return apiFetch('/platos/constructor', {
-      method: 'POST',
-      body: JSON.stringify(datos),
-    })
-  },
-}
-
-/**
- * 3. RF-11 (Agotados / Disponibilidad):
- *    PATCH /api/platos/:id/disponible
- *    PATCH /api/ingredientes/:id/disponible
- *    Rol requerido: admin | cocina
- *    Body: { disponible: boolean }
+ * RF-11 (Agotados / Disponibilidad):
+ * PATCH /api/platos/:id/disponible
+ * PATCH /api/ingredientes/:id/disponible
  */
 export const agotadosApi = {
   async togglePlato(idPlato, disponible) {

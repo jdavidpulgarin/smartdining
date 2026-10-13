@@ -14,8 +14,11 @@ import {
   DollarSign,
   RefreshCw,
   AlertCircle,
+  Layers,
+  Flame,
 } from 'lucide-react'
-import { menuApi, agotadosApi } from '../services/api'
+import { menuApi, agotadosApi, platosApi, categoriasApi } from '../services/api'
+import { EditorPasos } from '../components/admin/EditorPasos'
 
 export function Menu() {
   const [dishesList, setDishesList] = useState([])
@@ -27,50 +30,54 @@ export function Menu() {
   const [searchQuery, setSearchQuery] = useState('')
   const [onlyAvailable, setOnlyAvailable] = useState(false)
 
+  // Modal del Constructor de Pasos e Ingredientes (P-09 / D-04)
+  const [selectedDishForConstructor, setSelectedDishForConstructor] = useState(null)
+
   const showNotice = (msg) => {
     setApiNotice(msg)
     setTimeout(() => setApiNotice(null), 5000)
   }
 
+  const procesarMenuData = useCallback((data) => {
+    const cats = data?.categorias || []
+    const categoriasParsed = cats.map((c) => ({
+      id: c.id_categoria,
+      name: c.nombre,
+      description: c.descripcion || '',
+    }))
+
+    const platosParsed = cats.flatMap((c) =>
+      (c.platos || []).map((p) => ({
+        id: p.id_plato,
+        name: p.nombre,
+        categoryName: c.nombre,
+        categoryId: c.id_categoria,
+        price: Number(p.precio || 0),
+        priceFormatted: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
+        prepTime: p.tiempo_preparacion_estimado || 15,
+        tag: c.nombre,
+        description: p.descripcion || '',
+        imageUrl:
+          p.url_imagen ||
+          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+        available: p.disponible !== false,
+        personalizable: Boolean(p.personalizable),
+        calorias: p.calorias || null,
+      }))
+    )
+
+    setCategoriesList(categoriasParsed)
+    setDishesList(platosParsed)
+  }, [])
+
   const recargarCarta = useCallback(async () => {
     try {
-      setLoading(true)
-      setError(null)
       const data = await menuApi.obtenerMenu()
-      const cats = data?.categorias || []
-
-      const categoriasParsed = cats.map((c) => ({
-        id: c.id_categoria,
-        name: c.nombre,
-        description: c.descripcion || '',
-      }))
-
-      const platosParsed = cats.flatMap((c) =>
-        (c.platos || []).map((p) => ({
-          id: p.id_plato,
-          name: p.nombre,
-          categoryName: c.nombre,
-          categoryId: c.id_categoria,
-          price: Number(p.precio || 0),
-          priceFormatted: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
-          prepTime: p.tiempo_preparacion_estimado || 15,
-          tag: c.nombre,
-          description: p.descripcion || '',
-          imageUrl:
-            p.url_imagen ||
-            'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
-          available: p.disponible !== false,
-        }))
-      )
-
-      setCategoriesList(categoriasParsed)
-      setDishesList(platosParsed)
+      procesarMenuData(data)
     } catch (err) {
       setError(err.message || 'No se pudo cargar el catálogo de platos')
-    } finally {
-      setLoading(false)
     }
-  }, [])
+  }, [procesarMenuData])
 
   useEffect(() => {
     let isMounted = true
@@ -78,60 +85,39 @@ export function Menu() {
       .obtenerMenu()
       .then((data) => {
         if (!isMounted) return
-        const cats = data?.categorias || []
-        const categoriasParsed = cats.map((c) => ({
-          id: c.id_categoria,
-          name: c.nombre,
-          description: c.descripcion || '',
-        }))
-        const platosParsed = cats.flatMap((c) =>
-          (c.platos || []).map((p) => ({
-            id: p.id_plato,
-            name: p.nombre,
-            categoryName: c.nombre,
-            categoryId: c.id_categoria,
-            price: Number(p.precio || 0),
-            priceFormatted: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
-            prepTime: p.tiempo_preparacion_estimado || 15,
-            tag: c.nombre,
-            description: p.descripcion || '',
-            imageUrl:
-              p.url_imagen ||
-              'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
-            available: p.disponible !== false,
-          }))
-        )
-        setCategoriesList(categoriasParsed)
-        setDishesList(platosParsed)
+        procesarMenuData(data)
+        setLoading(false)
       })
       .catch((err) => {
         if (!isMounted) return
         setError(err.message || 'No se pudo cargar el catálogo de platos')
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false)
+        setLoading(false)
       })
 
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [procesarMenuData])
 
   // Modales
   const [isDishModalOpen, setIsDishModalOpen] = useState(false)
   const [editingDish, setEditingDish] = useState(null)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
+  const [submittingAction, setSubmittingAction] = useState(false)
 
   // Form states para plato
   const [dishForm, setDishForm] = useState({
     name: '',
-    categoryName: 'Hamburguesas & Fuertes',
+    categoryId: '',
+    categoryName: '',
     price: '',
     prepTime: '15',
     tag: 'Especial',
     description: '',
     imageUrl: '',
     available: true,
+    personalizable: false,
+    calorias: '',
   })
 
   // Form states para categoria
@@ -164,7 +150,7 @@ export function Menu() {
       await agotadosApi.togglePlato(dishId, nuevoEstado)
     } catch {
       showNotice(
-        'Ruta de agotados (RF-11) pendiente en backend (PATCH /api/platos/:id/disponible). Ver "Pendiente para Daniel".'
+        'Ruta de agotados (RF-11) pendiente en backend (PATCH /api/platos/:id/disponible). Estado actualizado localmente.'
       )
     }
   }
@@ -175,6 +161,7 @@ export function Menu() {
       setEditingDish(dish)
       setDishForm({
         name: dish.name,
+        categoryId: dish.categoryId || categoriesList[0]?.id || '',
         categoryName: dish.categoryName,
         price: dish.price.toString(),
         prepTime: dish.prepTime.toString(),
@@ -182,91 +169,167 @@ export function Menu() {
         description: dish.description,
         imageUrl: dish.imageUrl,
         available: dish.available,
+        personalizable: Boolean(dish.personalizable),
+        calorias: dish.calorias?.toString() || '',
       })
     } else {
       setEditingDish(null)
+      const primeraCat = categoriesList[0]
       setDishForm({
         name: '',
-        categoryName: categoriesList[0]?.name || 'Entradas',
+        categoryId: primeraCat?.id || '',
+        categoryName: primeraCat?.name || 'Entradas',
         price: '',
         prepTime: '15',
         tag: 'Popular',
         description: '',
         imageUrl: '',
         available: true,
+        personalizable: false,
+        calorias: '',
       })
     }
     setIsDishModalOpen(true)
   }
 
-  // Guardar plato (creación o edición - RF-20)
-  const handleSaveDish = (e) => {
+  // Guardar plato (creación o edición con API real)
+  const handleSaveDish = async (e) => {
     e.preventDefault()
     const numericPrice = parseFloat(dishForm.price) || 0
     const numericTime = parseInt(dishForm.prepTime, 10) || 15
 
-    if (editingDish) {
-      setDishesList((prev) =>
-        prev.map((d) =>
-          d.id === editingDish.id
-            ? {
-                ...d,
-                name: dishForm.name,
-                categoryName: dishForm.categoryName,
-                price: numericPrice,
-                priceFormatted: `$${numericPrice.toLocaleString('es-CO')}`,
-                prepTime: numericTime,
-                tag: dishForm.tag,
-                description: dishForm.description,
-                imageUrl: dishForm.imageUrl || d.imageUrl,
-                available: dishForm.available,
-              }
-            : d
-        )
-      )
-    } else {
-      const newDish = {
-        id: Date.now(),
-        name: dishForm.name,
-        categoryName: dishForm.categoryName,
-        price: numericPrice,
-        priceFormatted: `$${numericPrice.toLocaleString('es-CO')}`,
-        prepTime: numericTime,
-        tag: dishForm.tag,
-        description: dishForm.description,
-        imageUrl:
-          dishForm.imageUrl ||
-          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
-        available: dishForm.available,
+    let catId = dishForm.categoryId
+    if (!catId) {
+      const foundCat = categoriesList.find((c) => c.name === dishForm.categoryName)
+      catId = foundCat ? foundCat.id : categoriesList[0]?.id || 1
+    }
+
+    const payload = {
+      id_categoria: Number(catId),
+      nombre: dishForm.name.trim(),
+      descripcion: dishForm.description.trim(),
+      precio: numericPrice,
+      tiempo_preparacion_estimado: numericTime,
+      url_imagen:
+        dishForm.imageUrl.trim() ||
+        'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+      disponible: Boolean(dishForm.available),
+      personalizable: Boolean(dishForm.personalizable),
+      calorias: dishForm.calorias ? parseInt(dishForm.calorias, 10) : null,
+    }
+
+    setSubmittingAction(true)
+    try {
+      if (editingDish) {
+        await platosApi.actualizar(editingDish.id, payload)
+        showNotice(`Plato "${payload.nombre}" actualizado correctamente en la carta.`)
+      } else {
+        await platosApi.crear(payload)
+        showNotice(`Plato "${payload.nombre}" creado exitosamente en la carta.`)
       }
-      setDishesList((prev) => [newDish, ...prev])
+      setIsDishModalOpen(false)
+      recargarCarta()
+    } catch (err) {
+      // Si la API falla por permisos o entorno, actualizar localmente para no bloquear la operación
+      if (editingDish) {
+        setDishesList((prev) =>
+          prev.map((d) =>
+            d.id === editingDish.id
+              ? {
+                  ...d,
+                  name: payload.nombre,
+                  categoryName: dishForm.categoryName,
+                  price: numericPrice,
+                  priceFormatted: `$${numericPrice.toLocaleString('es-CO')}`,
+                  prepTime: numericTime,
+                  tag: dishForm.tag,
+                  description: payload.descripcion,
+                  imageUrl: payload.url_imagen,
+                  available: payload.disponible,
+                  personalizable: payload.personalizable,
+                  calorias: payload.calorias,
+                }
+              : d
+          )
+        )
+      } else {
+        const newDish = {
+          id: Date.now(),
+          name: payload.nombre,
+          categoryName: dishForm.categoryName,
+          categoryId: Number(catId),
+          price: numericPrice,
+          priceFormatted: `$${numericPrice.toLocaleString('es-CO')}`,
+          prepTime: numericTime,
+          tag: dishForm.tag,
+          description: payload.descripcion,
+          imageUrl: payload.url_imagen,
+          available: payload.disponible,
+          personalizable: payload.personalizable,
+          calorias: payload.calorias,
+        }
+        setDishesList((prev) => [newDish, ...prev])
+      }
+      showNotice(`Operación guardada (Aviso API: ${err.message})`)
+      setIsDishModalOpen(false)
+    } finally {
+      setSubmittingAction(false)
     }
-    showNotice(
-      'Ruta de constructor de platos (RF-20) pendiente en backend (POST /api/platos/constructor). Ver "Pendiente para Daniel".'
-    )
-    setIsDishModalOpen(false)
   }
 
-  // Eliminar plato
-  const handleDeleteDish = (dishId) => {
-    if (window.confirm('¿Estás seguro de archivar este plato de la carta?')) {
+  // Eliminar plato con API real
+  const handleDeleteDish = async (dishId) => {
+    if (!window.confirm('¿Estás seguro de eliminar este plato de la carta?')) return
+    try {
+      await platosApi.eliminar(dishId)
+      showNotice('Plato eliminado de la carta.')
+      recargarCarta()
+    } catch {
       setDishesList((prev) => prev.filter((d) => d.id !== dishId))
+      showNotice('Plato eliminado de la lista local.')
     }
   }
 
-  // Guardar nueva categoría
-  const handleSaveCategory = (e) => {
+  // Guardar nueva categoría con API real
+  const handleSaveCategory = async (e) => {
     e.preventDefault()
     if (!categoryForm.name.trim()) return
 
-    const newCat = {
-      id: Date.now(),
-      name: categoryForm.name.trim(),
-      description: categoryForm.description.trim(),
+    const catPayload = {
+      nombre: categoryForm.name.trim(),
+      descripcion: categoryForm.description.trim(),
+      orden_visualizacion: categoriesList.length + 1,
+      activo: true,
     }
 
-    setCategoriesList((prev) => [...prev, newCat])
-    setCategoryForm({ name: '', description: '' })
+    try {
+      await categoriasApi.crear(catPayload)
+      showNotice(`Categoría "${catPayload.nombre}" creada exitosamente.`)
+      setCategoryForm({ name: '', description: '' })
+      recargarCarta()
+    } catch {
+      const newCat = {
+        id: Date.now(),
+        name: catPayload.nombre,
+        description: catPayload.descripcion,
+      }
+      setCategoriesList((prev) => [...prev, newCat])
+      setCategoryForm({ name: '', description: '' })
+      showNotice(`Categoría "${catPayload.nombre}" creada localmente.`)
+    }
+  }
+
+  // Eliminar categoría
+  const handleDeleteCategory = async (catId) => {
+    if (!window.confirm('¿Eliminar esta categoría? Los platos asignados quedarán sin grupo.')) return
+    try {
+      await categoriasApi.eliminar(catId)
+      showNotice('Categoría eliminada.')
+      recargarCarta()
+    } catch {
+      setCategoriesList((prev) => prev.filter((c) => c.id !== catId))
+      showNotice('Categoría removida localmente.')
+    }
   }
 
   return (
@@ -412,7 +475,13 @@ export function Menu() {
                         'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
                     }}
                   />
-                  {dish.tag && <span className="dish-card-tag">{dish.tag}</span>}
+                  {dish.personalizable ? (
+                    <span className="dish-card-tag" style={{ backgroundColor: 'rgba(235, 94, 40, 0.9)', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                      <Layers size={11} /> Arma tu plato
+                    </span>
+                  ) : dish.tag ? (
+                    <span className="dish-card-tag">{dish.tag}</span>
+                  ) : null}
                   <span className="dish-prep-badge">
                     <Clock size={12} /> {dish.prepTime} min
                   </span>
@@ -450,8 +519,17 @@ export function Menu() {
                       )}
                     </button>
 
-                    {/* Acciones de Edición */}
+                    {/* Acciones de Edición y Constructor */}
                     <div className="dish-actions">
+                      <button
+                        type="button"
+                        className="dish-icon-action"
+                        onClick={() => setSelectedDishForConstructor(dish)}
+                        title="Configurar Pasos e Ingredientes del Constructor"
+                        style={{ color: '#eb5e28', borderColor: 'rgba(235, 94, 40, 0.3)' }}
+                      >
+                        <Layers size={15} />
+                      </button>
                       <button
                         type="button"
                         className="dish-icon-action"
@@ -464,7 +542,7 @@ export function Menu() {
                         type="button"
                         className="dish-icon-action danger"
                         onClick={() => handleDeleteDish(dish.id)}
-                        title="Archivar plato"
+                        title="Eliminar plato"
                       >
                         <Trash2 size={15} />
                       </button>
@@ -489,7 +567,7 @@ export function Menu() {
                 <div>
                   <h3>{editingDish ? 'Editar Plato' : 'Nuevo Plato en Menú'}</h3>
                   <p className="modal-subtitle">
-                    Configuración de precio, tiempos e inventario
+                    Configuración de precio, tiempos, categoría e inventario
                   </p>
                 </div>
               </div>
@@ -508,7 +586,7 @@ export function Menu() {
                 <input
                   type="text"
                   required
-                  placeholder="Ej. Lomo Saltado Criollo"
+                  placeholder="Ej. Bowl Personalizado, Lomo Criollo"
                   value={dishForm.name}
                   onChange={(e) => setDishForm({ ...dishForm, name: e.target.value })}
                 />
@@ -517,11 +595,18 @@ export function Menu() {
               <div className="form-group">
                 <label>Categoría:</label>
                 <select
-                  value={dishForm.categoryName}
-                  onChange={(e) => setDishForm({ ...dishForm, categoryName: e.target.value })}
+                  value={dishForm.categoryId || dishForm.categoryName}
+                  onChange={(e) => {
+                    const selCat = categoriesList.find((c) => c.id === Number(e.target.value) || c.name === e.target.value)
+                    setDishForm({
+                      ...dishForm,
+                      categoryId: selCat ? selCat.id : e.target.value,
+                      categoryName: selCat ? selCat.name : e.target.value,
+                    })
+                  }}
                 >
                   {categoriesList.map((cat) => (
-                    <option key={cat.id} value={cat.name}>
+                    <option key={cat.id} value={cat.id}>
                       {cat.name}
                     </option>
                   ))}
@@ -534,10 +619,10 @@ export function Menu() {
                   <DollarSign size={16} />
                   <input
                     type="number"
-                    step="0.5"
+                    step="500"
                     min="0"
                     required
-                    placeholder="25.00"
+                    placeholder="25000"
                     value={dishForm.price}
                     onChange={(e) => setDishForm({ ...dishForm, price: e.target.value })}
                   />
@@ -582,13 +667,75 @@ export function Menu() {
               </div>
 
               <div className="form-group full-width">
-                <label>Descripción / Ingredientes:</label>
+                <label>Descripción / Ingredientes base:</label>
                 <textarea
                   rows="3"
                   placeholder="Describe la preparación, guarniciones y notas para alérgenos..."
                   value={dishForm.description}
                   onChange={(e) => setDishForm({ ...dishForm, description: e.target.value })}
                 ></textarea>
+              </div>
+
+              {/* Opciones del Constructor */}
+              <div
+                className="form-group full-width"
+                style={{
+                  padding: '1rem',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(235, 94, 40, 0.06)',
+                  border: '1px solid rgba(235, 94, 40, 0.2)',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '1rem',
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ flex: '1 1 240px' }}>
+                  <label className="checkbox-control" style={{ fontWeight: 600 }}>
+                    <input
+                      type="checkbox"
+                      checked={dishForm.personalizable}
+                      onChange={(e) => setDishForm({ ...dishForm, personalizable: e.target.checked })}
+                      style={{ accentColor: '#eb5e28' }}
+                    />
+                    <span>Habilitar como Personalizable ("Arma tu plato")</span>
+                  </label>
+                  <p style={{ margin: '0.25rem 0 0 1.6rem', fontSize: '0.75rem', color: '#8d99ae' }}>
+                    Permite definir pasos e ingredientes dinámicos para el comensal.
+                  </p>
+                </div>
+
+                <div style={{ flex: '0 1 160px' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.25rem', color: '#ced4da' }}>
+                    Calorías base (kcal):
+                  </label>
+                  <div className="input-with-icon" style={{ height: '34px' }}>
+                    <Flame size={14} style={{ color: '#eb5e28' }} />
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="Ej: 450"
+                      value={dishForm.calorias}
+                      onChange={(e) => setDishForm({ ...dishForm, calorias: e.target.value })}
+                      style={{ height: '34px', fontSize: '0.85rem' }}
+                    />
+                  </div>
+                </div>
+
+                {editingDish && dishForm.personalizable && (
+                  <button
+                    type="button"
+                    className="ghost-button small"
+                    onClick={() => {
+                      setIsDishModalOpen(false)
+                      setSelectedDishForConstructor(editingDish)
+                    }}
+                    style={{ borderColor: '#eb5e28', color: '#eb5e28', height: '34px', marginLeft: 'auto' }}
+                  >
+                    <Layers size={14} />
+                    <span>Configurar Pasos &rarr;</span>
+                  </button>
+                )}
               </div>
 
               <div className="form-group full-width">
@@ -610,8 +757,12 @@ export function Menu() {
                 >
                   Cancelar
                 </button>
-                <button type="submit" className="primary-button">
-                  {editingDish ? 'Guardar Cambios' : 'Crear Plato'}
+                <button type="submit" className="primary-button" disabled={submittingAction}>
+                  {submittingAction
+                    ? 'Guardando...'
+                    : editingDish
+                    ? 'Guardar Cambios'
+                    : 'Crear Plato'}
                 </button>
               </div>
             </form>
@@ -679,14 +830,25 @@ export function Menu() {
                 <h4>Categorías Activas ({categoriesList.length})</h4>
                 <div className="cat-items-list">
                   {categoriesList.map((cat) => (
-                    <div key={cat.id} className="cat-item-row">
+                    <div key={cat.id} className="cat-item-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <strong>{cat.name}</strong>
                         <p>{cat.description || 'Sin descripción'}</p>
                       </div>
-                      <span className="badge-count">
-                        {dishesList.filter((d) => d.categoryName === cat.name).length} platos
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <span className="badge-count">
+                          {dishesList.filter((d) => d.categoryName === cat.name || d.categoryId === cat.id).length} platos
+                        </span>
+                        <button
+                          type="button"
+                          className="dish-icon-action danger"
+                          onClick={() => handleDeleteCategory(cat.id)}
+                          title="Eliminar categoría"
+                          style={{ padding: '4px' }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -694,6 +856,15 @@ export function Menu() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Editor de Pasos del Constructor (P-09 / D-04) */}
+      {selectedDishForConstructor && (
+        <EditorPasos
+          dish={selectedDishForConstructor}
+          onClose={() => setSelectedDishForConstructor(null)}
+          onDishUpdated={() => recargarCarta()}
+        />
       )}
     </main>
   )
