@@ -702,7 +702,7 @@ con el mensaje del trigger.
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | GET | /kds/comandas | **cocina, admin** | Comandas del tablero (`recibido`, `en_preparacion`, `listo`), con ítems enriquecidos con plato, categoría, comensal e ingredientes, mesa y minutos transcurridos |
-| PATCH | /kds/comandas/:id/estado | **cocina, admin** | Cambia a `en_preparacion` o `listo` (únicos estados permitidos desde cocina) |
+| PATCH | /kds/comandas/:id/estado | **cocina, admin** | Cambia a `en_preparacion` o `listo` (únicos estados permitidos desde cocina). **Idempotente** |
 
 Devuelve los **tres estados del tablero**: `recibido`, `en_preparacion` y `listo`.
 
@@ -739,6 +739,39 @@ Respuesta de `GET /kds/comandas`:
 
 > El semáforo (verde/amarillo/rojo a los 15 min) se calcula en el frontend-kds a
 > partir de `minutos_transcurridos` — el backend solo entrega el dato crudo.
+
+### PATCH /kds/comandas/:id/estado
+
+Body: `{ "estado": "en_preparacion" | "listo" }`. Mueve la **comanda completa**, no plato
+a plato. Cualquier otro estado responde **400**; `404` si la comanda no existe (también si
+el id no es un entero positivo).
+
+**Es idempotente.** Si la comanda ya está en el estado pedido, responde **200** con la
+comanda tal como está y añade `"sin_cambios": true`; no ejecuta el `UPDATE`, no escribe en
+`historial_estados` (y por tanto tampoco en `kds_metricas`, que la alimenta un trigger de
+esa tabla) y **no avisa al socket-server**. Cuando sí cambia, la respuesta trae
+`"sin_cambios": false` y el flujo normal: historial, métricas y `order:status`.
+
+```json
+{ "id_pedido": 87, "estado": "listo", "estado_anterior": "listo", "sin_cambios": true }
+```
+
+Hace falta porque el trigger de transiciones **no rechaza** pasar a `listo` estando en
+`listo`: sin este guard, dos toques en la pantalla táctil o el reintento de una petición
+cuya respuesta se perdió dejarían dos entradas de historial y dos filas de métricas, y el
+comensal vería "pedido listo" dos veces.
+
+La comprobación y el cambio van bajo un **advisory lock de PostgreSQL por `id_pedido`**
+(`pg_advisory_lock`), no bajo `SELECT … FOR UPDATE`: el `UPDATE` ocurre en la transacción
+propia de `pedidos.service.actualizarEstado`, y retener aquí el bloqueo de la fila la
+bloquearía contra sí misma.
+
+> **Alcance del guard:** serializa a quien toma el mismo lock, o sea las peticiones del
+> KDS entre sí, incluso entre instancias del backend (el lock vive en el servidor de base
+> de datos). Un `PATCH /pedidos/:id/estado` del panel de sala **no** lo toma, así que esa
+> carrera concreta sigue abierta; cerrarla pide mover el guard dentro de la transacción de
+> `actualizarEstado` —compartida con los demás endpoints— o un UPDATE condicional en
+> `database/`.
 
 Los ingredientes llegan con su `porcion` y **sin precio**: a la cocina el precio no le
 sirve. Van ordenados por el orden del paso, igual que en la API de pedidos, y un plato

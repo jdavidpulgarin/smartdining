@@ -81,11 +81,74 @@ async function comandasActivas() {
 }
 
 /**
- * Cambia el estado de una comanda. La validación de qué transiciones son
- * válidas desde el KDS (solo en_preparacion / listo) vive en el controller.
+ * Espacio de nombres de los advisory locks del KDS, para no chocar con otro
+ * código que use locks con la misma clave numérica.
+ */
+const LOCK_KDS = 4209;
+
+/**
+ * Cambia el estado de una comanda desde el KDS.
+ *
+ * Qué transiciones puede pedir el KDS (solo en_preparacion / listo) lo decide el
+ * controller, y si la transición es legal lo decide el trigger de la base. Lo
+ * que se resuelve aquí es otra cosa: **no repetir trabajo**.
+ *
+ * Si la comanda YA está en el estado pedido no se toca nada. Dos toques
+ * seguidos en la pantalla, o el reintento de una petición cuya respuesta se
+ * perdió, dejarían si no dos filas en historial_estados y dos en kds_metricas
+ * (el trigger de transiciones no se queja de pasar a 'listo' estando en
+ * 'listo'), y las métricas de cocina quedarían infladas.
+ *
+ * SERIALIZACIÓN: la comprobación y el cambio ocurren bajo un advisory lock de
+ * PostgreSQL por id_pedido. No se usa SELECT ... FOR UPDATE porque el UPDATE lo
+ * hace pedidosService.actualizarEstado en su PROPIA transacción: mantener aquí
+ * el lock de la fila la bloquearía a sí misma. El advisory lock sí cruza
+ * transacciones y conexiones.
+ *
+ * ALCANCE REAL: serializa a quien tome el mismo lock, o sea las peticiones del
+ * KDS entre sí (también entre instancias del backend, porque el lock es del
+ * servidor de base de datos). Un PATCH /api/pedidos/:id/estado del panel de sala
+ * no lo toma, así que esa carrera concreta sigue existiendo; cerrarla del todo
+ * pide mover el guard dentro de la transacción de actualizarEstado, que es
+ * compartida con los demás endpoints, o un UPDATE condicional en database/.
+ *
+ * @returns null si la comanda no existe · { ...pedido, sin_cambios: true } si ya
+ *          estaba en ese estado · { ...pedido, sin_cambios: false } si cambió
  */
 async function cambiarEstado(pedidoId, estado, observaciones, idUsuario) {
-  return pedidosService.actualizarEstado(pedidoId, estado, observaciones, idUsuario);
+  const id = Number(pedidoId);
+  // Un id que no es un entero positivo no puede existir: se contesta como
+  // "no encontrada" en vez de dejar que la base falle con un error de sintaxis.
+  if (!Number.isInteger(id) || id <= 0) return null;
+
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock($1, $2)', [LOCK_KDS, id]);
+
+    const actual = await client.query('SELECT estado FROM pedidos WHERE id_pedido = $1', [id]);
+    if (actual.rows.length === 0) return null;
+
+    if (actual.rows[0].estado === estado) {
+      // Ya está donde se pedía: se devuelve la comanda como está, sin UPDATE,
+      // sin historial, sin métricas y sin aviso al socket (eso lo mira el
+      // controller con sin_cambios).
+      const pedido = await client.query('SELECT * FROM pedidos WHERE id_pedido = $1', [id]);
+      const fila = pedido.rows[0] || { id_pedido: id, estado };
+      return { ...fila, estado_anterior: estado, sin_cambios: true };
+    }
+
+    const pedido = await pedidosService.actualizarEstado(id, estado, observaciones, idUsuario);
+    return pedido ? { ...pedido, sin_cambios: false } : null;
+  } finally {
+    // El unlock va en el finally y se traga su propio error: si falla, la
+    // sesión se cierra al liberar el client y PostgreSQL suelta el lock igual.
+    try {
+      await client.query('SELECT pg_advisory_unlock($1, $2)', [LOCK_KDS, id]);
+    } catch {
+      // Nada que hacer: el lock muere con la conexión.
+    }
+    client.release();
+  }
 }
 
-module.exports = { comandasActivas, cambiarEstado, ESTADOS_EN_EL_TABLERO };
+module.exports = { comandasActivas, cambiarEstado, ESTADOS_EN_EL_TABLERO, LOCK_KDS };
