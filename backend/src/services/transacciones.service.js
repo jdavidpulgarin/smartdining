@@ -33,6 +33,7 @@ async function registrarPago({
   metodo_pago,
   referencia_externa,
   estado_transaccion,
+  comensal = null,
   id_usuario = null,
 }) {
   const client = await pool.connect();
@@ -47,11 +48,13 @@ async function registrarPago({
 
     const estado = estado_transaccion || ESTADO_COBRADO;
 
+    // comensal queda NULL en un cobro de la mesa completa (lo normal en caja).
+    // Con alias, obtener_cuenta_mesa descuenta el pago del saldo de esa persona.
     const transaccionResult = await client.query(
       `INSERT INTO transacciones
-        (id_pedido, metodo_pago, monto, estado_transaccion, referencia_externa, creado_en)
-       VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
-      [id_pedido, metodo_pago, monto, estado, referencia_externa || null]
+        (id_pedido, metodo_pago, monto, estado_transaccion, referencia_externa, comensal, creado_en)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *`,
+      [id_pedido, metodo_pago, monto, estado, referencia_externa || null, comensal || null]
     );
 
     // Un cobro efectivo liquida el pedido SOLO si no queda saldo.

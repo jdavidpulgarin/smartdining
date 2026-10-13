@@ -268,6 +268,7 @@ expire).
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | GET | /mesas | admin, cajero, mesero | Lista todas |
+| **GET** | **/mesas/:id/cuenta** | **admin, cajero, mesero** | **Cuenta de la mesa por comensal (pesos)** |
 | **POST** | **/mesas/:id/abrir** | **mesero, admin** | **Abre la mesa: obtiene su QR y la marca `ocupada`** |
 | **POST** | **/mesas/:id/rotar-qr** | **mesero, admin** | **Cambia el QR de una mesa `ocupada` y avisa a la tablet** |
 | **POST** | **/mesas/:id/liberar** | **mesero, admin** | **Cierra la mesa: `disponible` y `token_qr` a NULL. 409 si tiene pedidos abiertos** |
@@ -562,6 +563,7 @@ Notas de lo que quedó demostrado al escribirlas:
 | POST | /pedidos | **comensal, mesero, admin** | Crea un pedido con sus ítems |
 | GET | /pedidos/activos | admin, cajero, mesero | Pedidos en `recibido`/`en_preparacion` |
 | **GET** | **/pedidos/mesa** | **comensal** | **Pedidos de la mesa de la sesión** *(reemplaza a `/pedidos/historial`)* |
+| **GET** | **/pedidos/mesa/cuenta** | **comensal** | **Cuenta de SU mesa por comensal; la mesa sale del JWT** |
 | GET | /pedidos/:id | autenticado | Detalle con sus ítems; un comensal solo ve los de su mesa (403 si no) |
 | PATCH | /pedidos/:id/estado | admin, cajero, mesero | Cambia el estado (cualquiera de los 6 válidos) |
 | POST | /pedidos/:id/cancelar | admin, cajero, mesero | Atajo que fija `estado = cancelado`. **Solo desde `recibido` o `en_preparacion`**; desde `listo`/`entregado` responde 409 |
@@ -740,6 +742,59 @@ base no debe crecer con la cantidad de comandas abiertas.
 
 ---
 
+### GET /mesas/:id/cuenta — admin, cajero, mesero
+
+La cuenta de la mesa con el desglose **por comensal**: es lo que el cajero mira para
+cobrar y para dividir la cuenta. Sale de `obtener_cuenta_mesa_json()` (scripts 15 y 16) y
+se devuelve tal cual: sus campos son el contrato.
+
+> **Unidad: pesos con decimales**, como los guarda la base (`total_mesa: 90000`). La
+> versión en **centavos enteros** es `GET /mesas/:id/cuenta/interno`, que es solo para el
+> socket-server. Son la misma cuenta en dos unidades, a propósito: esta la leen personas
+> y aquella la consume una pasarela.
+
+200:
+
+```json
+{
+  "id_mesa": 5,
+  "numero": 5,
+  "estado_mesa": "ocupada",
+  "ubicacion": "Terraza",
+  "total_mesa": 90000,
+  "pagado_mesa": 30000,
+  "saldo_mesa": 60000,
+  "items_totales": 6,
+  "pedidos": [
+    { "id_pedido": 87, "codigo_pedido": "PED-261012-ABC12", "estado": "entregado", "total": 90000, "creado_en": "…" }
+  ],
+  "comensales": [
+    { "comensal": "Ana",  "items_pedidos": 2, "subtotal": 30000, "pagado": 0,     "saldo": 30000 },
+    { "comensal": "Cami", "items_pedidos": 2, "subtotal": 30000, "pagado": 30000, "saldo": 0 }
+  ]
+}
+```
+
+- `comensales` incluye **a todos**, también a quien ya pagó (con `saldo: 0`): el cajero
+  necesita ver quién va cubierto. La ruta interna, en cambio, solo lista a quien debe.
+- Los ítems sin alias se agrupan bajo `"General"`, y los pagos sin `comensal` también:
+  así la suma por comensal cuadra con el total de la mesa.
+- **400** si el id no es un entero positivo · **404** si la mesa no existe (se comprueba
+  antes de llamar a la función, que lanzaría un `RAISE` y saldría como 409).
+
+### GET /pedidos/mesa/cuenta — comensal
+
+La **misma** respuesta, para el comensal desde su sesión de QR.
+
+**La mesa sale del JWT y de ningún otro sitio**: la ruta no tiene parámetro, y un id en la
+URL o en el query string no sirve para nada. Si se aceptara, un comensal podría leer la
+cuenta y los alias de otra mesa.
+
+- **401** sin token o con la sesión de mesa ya cerrada · **403** si el token no es de
+  comensal (el personal usa la ruta de arriba).
+
+---
+
 ## Transacciones
 
 | Método | Ruta | Auth | Descripción |
@@ -752,7 +807,7 @@ base no debe crecer con la cantidad de comandas abiertas.
 Body:
 
 ```json
-{ "id_pedido": 87, "monto": 56000, "metodo_pago": "tarjeta_credito", "referencia_externa": "ch_123", "estado_transaccion": "completada" }
+{ "id_pedido": 87, "monto": 56000, "metodo_pago": "tarjeta_credito", "referencia_externa": "ch_123", "estado_transaccion": "completada", "comensal": "Ana" }
 ```
 
 - `metodo_pago` es obligatorio, con los valores del CHECK del schema: `efectivo`,
@@ -760,6 +815,17 @@ Body:
 - `estado_transaccion`: `completada` (por defecto), `pendiente`, `fallida` o `reembolsada`.
 - `referencia_externa` es la referencia de la pasarela de pago que integra Roberto —
   este endpoint solo la guarda.
+- `comensal` es **opcional** (1 a 40 caracteres, o `null`) y se guarda en
+  `transacciones.comensal`. Es lo que permite que `obtener_cuenta_mesa` descuente el
+  pago del saldo **de esa persona** en vez del montón, o sea lo que hace posible dividir
+  la cuenta. Un cobro de la mesa completa no lo lleva y queda en `NULL` (cae bajo
+  `"General"` en la cuenta).
+- Si el **JWT trae un alias firmado** (`comensal` en el payload), **ese manda** y el del
+  body se ignora: un alias firmado por el servidor no se puede suplantar escribiendo otro
+  nombre en el cuerpo, que es justo lo que permitiría cargarle un pago a otra persona de
+  la mesa. Es la misma regla que al crear un pedido. Hoy esta ruta es de admin/cajero, así
+  que en la práctica el alias viene del body; la regla queda puesta para cuando el
+  comensal pague desde su propia sesión.
 
 201: fila insertada en `transacciones`.
 

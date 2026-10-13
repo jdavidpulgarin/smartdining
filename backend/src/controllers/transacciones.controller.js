@@ -14,7 +14,26 @@ const pagoSchema = z.object({
   metodo_pago: z.enum(METODOS_PAGO),
   referencia_externa: z.string().optional(),
   estado_transaccion: z.enum(ESTADOS_TRANSACCION).optional(),
+  // Quién pagó, cuando la mesa divide la cuenta: va a transacciones.comensal y
+  // es lo que permite que obtener_cuenta_mesa descuente el pago del saldo de esa
+  // persona y no del montón. Opcional: un cobro de la mesa completa no lleva alias.
+  comensal: z.string().min(1).max(40).nullish(),
 });
+
+/**
+ * Alias que queda en la transacción.
+ *
+ * Si el JWT trae un alias firmado, ESE manda y el del body se ignora: un alias
+ * firmado por el servidor no se puede suplantar escribiendo otro en el cuerpo
+ * (misma regla que al crear un pedido en D-03). Hoy esta ruta es de
+ * admin/cajero, así que en la práctica el alias sale del body; la regla queda
+ * puesta para cuando el comensal pague desde su sesión.
+ */
+function aliasDelComensal(req, cuerpo) {
+  const firmado = req.user?.comensal;
+  if (typeof firmado === 'string' && firmado.trim()) return firmado.trim();
+  return cuerpo.comensal ?? null;
+}
 
 async function crear(req, res, next) {
   const parsed = pagoSchema.safeParse(req.body);
@@ -24,6 +43,7 @@ async function crear(req, res, next) {
     const { transaccion, pedidoLiquidado, mesaLiberada, id_mesa } =
       await transaccionesService.registrarPago({
         ...parsed.data,
+        comensal: aliasDelComensal(req, parsed.data),
         id_usuario: req.user.id_usuario,
       });
 
@@ -157,6 +177,7 @@ async function obtenerPorPedido(req, res, next) {
 module.exports = {
   crear,
   crearInterno,
+  aliasDelComensal,
   obtenerPorPedido,
   METODOS_PAGO,
   ESTADOS_TRANSACCION,
