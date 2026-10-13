@@ -19,14 +19,26 @@ function Inicio() {
   } = useSesion();
   const [nombre, setNombre] = useState('');
   const [tocado, setTocado] = useState(false);
+  const [cuentaRegresiva, setCuentaRegresiva] = useState(() =>
+    error?.status === 429 ? (error.retryAfter || 60) : 0
+  );
 
   const validacion = validarNombre(nombre);
   const esErrorQr401 = error?.status === 401;
+  const esErrorRateLimit429 = error?.status === 429 || cuentaRegresiva > 0;
   const esErrorAlias409 =
     error?.status === 409 || error?.motivo === 'alias_en_uso';
   const esErrorCampo400 = error?.status === 400;
   const esErrorServicio503 =
     error?.status === 503 || error?.status === 0 || error?.motivo === 'sin_conexion';
+
+  useEffect(() => {
+    if (cuentaRegresiva <= 0) return;
+    const timer = setInterval(() => {
+      setCuentaRegresiva((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cuentaRegresiva]);
 
   useEffect(() => {
     if (esErrorAlias409 && inputRef.current) {
@@ -38,13 +50,19 @@ function Inicio() {
   const manejarSubmit = async (e) => {
     e.preventDefault();
     setTocado(true);
-    if (!validacion.valido || enviando) return;
-    await unirse(nombre);
+    if (!validacion.valido || enviando || cuentaRegresiva > 0) return;
+    const res = await unirse(nombre);
+    if (res && !res.ok && res.error?.status === 429) {
+      setCuentaRegresiva(res.error.retryAfter || 60);
+    }
   };
 
   const manejarReintentar = async () => {
-    if (!validacion.valido || enviando) return;
-    await unirse(nombre);
+    if (!validacion.valido || enviando || cuentaRegresiva > 0) return;
+    const res = await unirse(nombre);
+    if (res && !res.ok && res.error?.status === 429) {
+      setCuentaRegresiva(res.error.retryAfter || 60);
+    }
   };
 
   return (
@@ -158,7 +176,7 @@ function Inicio() {
               )}
             </div>
 
-            {esErrorServicio503 && (
+            {esErrorServicio503 && !esErrorRateLimit429 && (
               <div
                 role="alert"
                 aria-live="polite"
@@ -184,13 +202,38 @@ function Inicio() {
               </div>
             )}
 
+            {esErrorRateLimit429 && (
+              <div
+                role="alert"
+                aria-live="polite"
+                className="rounded-xl bg-primary/10 border border-primary/25 p-4 text-left space-y-2"
+              >
+                <div className="flex items-center gap-2 text-primary font-bold text-sm">
+                  <span>⏱️</span>
+                  <span>Demasiados intentos</span>
+                </div>
+                <p className="text-xs text-cafe">
+                  {error.mensaje || 'Demasiados intentos. Espera un minuto e inténtalo de nuevo.'}
+                </p>
+                {cuentaRegresiva > 0 && (
+                  <p className="text-xs font-semibold text-primary">
+                    Podrás volver a intentar en {cuentaRegresiva} segundos.
+                  </p>
+                )}
+              </div>
+            )}
+
             <Button
               type="submit"
               variante="primario"
-              disabled={!validacion.valido || enviando}
+              disabled={!validacion.valido || enviando || cuentaRegresiva > 0}
               className="w-full py-3 px-6 text-base shadow-md"
             >
-              {enviando ? 'Entrando...' : 'Entrar a la mesa'}
+              {enviando
+                ? 'Entrando...'
+                : cuentaRegresiva > 0
+                  ? `Espera ${cuentaRegresiva}s para reintentar`
+                  : 'Entrar a la mesa'}
             </Button>
           </form>
         )}

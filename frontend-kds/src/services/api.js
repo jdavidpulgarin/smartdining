@@ -12,16 +12,17 @@ export const EVENTO_NO_AUTORIZADO = 'kds:auth:no-autorizado'
 
 /** Error con el status HTTP, para que quien llame decida qué hacer. */
 export class ErrorApi extends Error {
-  constructor(mensaje, status) {
+  constructor(mensaje, status, retryAfter = null) {
     super(mensaje)
     this.name = 'ErrorApi'
     this.status = status
+    this.retryAfter = retryAfter
   }
 }
 
-export function avisarNoAutorizado() {
+export function avisarNoAutorizado(mensaje = null) {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent(EVENTO_NO_AUTORIZADO))
+    window.dispatchEvent(new CustomEvent(EVENTO_NO_AUTORIZADO, { detail: { mensaje } }))
   }
 }
 
@@ -42,6 +43,17 @@ async function pedir(ruta, { token, ...opciones } = {}) {
     },
   })
 
+  const retryHeader = respuesta.headers?.get
+    ? (respuesta.headers.get('retry-after') || respuesta.headers.get('Retry-After'))
+    : null
+  const retryParsed = retryHeader ? parseInt(retryHeader, 10) : null
+  const retryAfter =
+    Number.isFinite(retryParsed) && retryParsed > 0
+      ? retryParsed
+      : respuesta.status === 429
+        ? 60
+        : null
+
   const texto = await respuesta.text()
   let datos = null
   try {
@@ -51,11 +63,18 @@ async function pedir(ruta, { token, ...opciones } = {}) {
   }
 
   if (respuesta.status === 401) {
-    avisarNoAutorizado()
+    const isLogin = ruta.includes('/auth/login')
+    if (!isLogin) {
+      avisarNoAutorizado(datos?.error || 'Tu sesión no es válida o tu cuenta fue desactivada')
+    }
     throw new ErrorApi(datos?.error || 'Sesión expirada', 401)
   }
   if (!respuesta.ok) {
-    throw new ErrorApi(datos?.error || `Error ${respuesta.status}`, respuesta.status)
+    const errorMsg =
+      respuesta.status === 429 && !datos?.error
+        ? 'Demasiados intentos. Espera un minuto e inténtalo de nuevo'
+        : datos?.error || `Error ${respuesta.status}`
+    throw new ErrorApi(errorMsg, respuesta.status, retryAfter)
   }
   return datos
 }
