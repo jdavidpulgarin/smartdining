@@ -112,6 +112,19 @@ hace semanas (19.000 min) y un número de cinco dígitos no informa de nada. El 
 se señala solo con color**: lleva signo (`•`, `!`, `!!`) y texto ("En tiempo", "Va lenta",
 "Retrasada"), por si el monitor está mal calibrado o quien mira no distingue rojo de ámbar.
 
+**La columna LISTAS (el pase).** Ahí el reloj que importa no es el total desde que se
+pidió, sino cuánto lleva **hecha y sin recoger**, que es lo que el mesero puede arreglar.
+Se cuenta desde que pasó a `listo`: `listo_en` de la API (sale de `historial_estados`) o,
+si la transición llegó en vivo, el `emitidoEn` del `order:status`.
+
+- El pase va ordenado **al revés** que las otras columnas: arriba lo que acaba de salir.
+  Las comandas sin hora de `listo` (de antes de que existiera el dato) caen al final.
+- Pasados **30 minutos** en el pase (`UMBRAL_SIN_RECOGER_MIN`, en
+  [`src/lib/pase.js`](src/lib/pase.js)), la tarjeta se **atenúa** y aparece *"Sin recoger
+  hace N min"*, con el mismo tope `+99 min`. Atenuada, **no escondida**: una comanda
+  olvidada tiene que seguir viéndose, solo deja de competir por la atención con las
+  recién salidas. Sin rojo y sin "RETRASADA": la cocina ya hizo su parte.
+
 **Detalle del plato.** El alias del comensal aparece como etiqueta junto al plato, y los
 ingredientes van agrupados por paso del constructor, en ese orden, marcando **EXTRA** y
 **LIGERA**; `normal` no se adorna, que es la que no sorprende. Un plato sin ingredientes se

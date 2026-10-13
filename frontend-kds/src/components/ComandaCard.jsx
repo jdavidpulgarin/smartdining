@@ -2,6 +2,7 @@ import { AlertTriangle, Check, ChefHat, Clock, Hash, LoaderCircle, StickyNote, U
 import { useState } from 'react'
 import { ingredientesPorPaso, siguientePaso } from '../lib/comandas'
 import { minutosDesdeCreacion, senalDeEsperaDeComanda, textoDeEspera } from '../lib/espera'
+import { minutosEnPase, sinRecoger, textoSinRecoger } from '../lib/pase'
 
 /**
  * Tarjeta de una comanda: lo que la cocina lee y toca.
@@ -72,6 +73,10 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
   const colorEspera = COLOR_ESPERA[espera.nivel]
   const conSemaforo = espera.nivel !== 'neutro'
 
+  // En el pase se cuenta otro reloj: cuanto lleva HECHA sin que la recojan.
+  const enPase = comanda.estado === 'listo' ? minutosEnPase(comanda, ahora) : null
+  const olvidada = comanda.estado === 'listo' && sinRecoger(comanda, ahora)
+
   // El socket no manda el numero de mesa: se cae al id, que al menos identifica.
   const mesa = comanda.mesa_numero ?? comanda.id_mesa ?? '—'
   const paso = siguientePaso(comanda.estado)
@@ -91,7 +96,11 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
 
   return (
     <article
-      className="rounded-xl border-2 bg-[color:var(--color-panel-alto)] p-4 shadow-lg"
+      // Atenuada, no escondida: una comanda olvidada tiene que seguir viendose,
+      // solo deja de competir por la atencion con las que acaban de salir.
+      className={`rounded-xl border-2 bg-[color:var(--color-panel-alto)] p-4 shadow-lg${
+        olvidada ? ' opacity-60' : ''
+      }`}
       style={{
         borderColor:
           conSemaforo && espera.nivel !== 'normal' ? colorEspera : 'var(--color-borde)',
@@ -116,7 +125,9 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
           title={
             conSemaforo
               ? `${espera.etiqueta}: ${textoDeEspera(minutos)}`
-              : `En el pase desde hace ${textoDeEspera(minutos)}`
+              : enPase === null
+                ? `Pedida hace ${textoDeEspera(minutos)}`
+                : `En el pase desde hace ${textoDeEspera(enPase)} · pedida hace ${textoDeEspera(minutos)}`
           }
         >
           <span className="flex items-center gap-1">
@@ -126,6 +137,13 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
           {conSemaforo && (
             <span className="text-sm font-bold uppercase tracking-wide">
               {espera.signo} {espera.etiqueta}
+            </span>
+          )}
+          {/* Aviso para el mesero, sin rojo ni "retrasada": la cocina ya hizo
+              su parte, esto es que nadie ha venido a recogerla. */}
+          {olvidada && (
+            <span className="text-sm font-semibold normal-case text-[color:var(--color-texto-suave)]">
+              {textoSinRecoger(enPase)}
             </span>
           )}
         </p>

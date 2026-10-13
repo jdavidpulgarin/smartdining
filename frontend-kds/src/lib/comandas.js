@@ -10,6 +10,8 @@
  * recibe, para que React detecte el cambio por identidad.
  */
 
+import { ordenarPase } from './pase.js'
+
 /** Columnas del tablero, en el orden en que se muestran. */
 export const COLUMNAS = [
   { estado: 'recibido', titulo: 'Nuevas' },
@@ -107,6 +109,8 @@ export function comandaDesdePedido(pedido, llegadaEnMs = Date.now()) {
     mesa_numero: pedido.mesa_numero ?? null,
     estado: pedido.estado || 'recibido',
     notas_generales: pedido.notas_generales ?? null,
+    // Hora de paso a 'listo' (historial_estados), cuando la API la manda.
+    listo_en: pedido.listo_en ?? null,
     minutos_transcurridos: 0,
     recibidoEnMs: llegadaEnMs,
     items: (pedido.items || []).map((item) => ({
@@ -176,9 +180,28 @@ export function aplicarEstado(estado, evento) {
   return {
     ...estado,
     comandas: estado.comandas.map((c) =>
-      c.id_pedido === evento.id_pedido ? { ...c, estado: evento.estado } : c
+      c.id_pedido === evento.id_pedido ? { ...c, ...cambioDeEstado(evento) } : c
     ),
     eventos,
+  }
+}
+
+/**
+ * Campos que deja un order:status en la comanda.
+ *
+ * Al pasar a 'listo' se anota CUANDO, para poder contar el tiempo en el pase y
+ * no el total desde que se pidio. La hora preferida es el `emitidoEn` del
+ * evento (la pone el socket-server al difundirlo, a milisegundos del cambio en
+ * la base); si no viniera, la hora de llegada local, que es igual de buena
+ * porque el evento acaba de llegar.
+ */
+function cambioDeEstado(evento) {
+  if (evento.estado !== 'listo') return { estado: evento.estado }
+
+  const emitido = evento.emitidoEn ? Date.parse(evento.emitidoEn) : NaN
+  return {
+    estado: evento.estado,
+    listoEnMs: Number.isFinite(emitido) ? emitido : Date.now(),
   }
 }
 
@@ -217,14 +240,28 @@ export function marcarEstadoLocal(estado, idPedido, nuevoEstado) {
   return {
     ...estado,
     comandas: estado.comandas.map((c) =>
-      c.id_pedido === idPedido ? { ...c, estado: nuevoEstado } : c
+      c.id_pedido === idPedido
+        ? {
+            ...c,
+            estado: nuevoEstado,
+            // La marca la pone el PATCH propio: acaba de pasar a listo.
+            ...(nuevoEstado === 'listo' ? { listoEnMs: Date.now() } : {}),
+          }
+        : c
     ),
   }
 }
 
-/** Comandas de una columna, en el orden en que estan en el estado. */
+/**
+ * Comandas de una columna.
+ *
+ * Nuevas y En preparacion conservan el orden del estado (la API las da de la
+ * mas vieja a la mas nueva, que es el orden en que hay que atenderlas). El pase
+ * se invierte: arriba lo que acaba de salir (ver ordenarPase).
+ */
 export function comandasDeColumna(estado, estadoColumna) {
-  return estado.comandas.filter((c) => c.estado === estadoColumna)
+  const deLaColumna = estado.comandas.filter((c) => c.estado === estadoColumna)
+  return estadoColumna === 'listo' ? ordenarPase(deLaColumna) : deLaColumna
 }
 
 /**
