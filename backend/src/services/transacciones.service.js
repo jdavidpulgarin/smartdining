@@ -125,19 +125,39 @@ async function registrarPago({
 // Es la única transición legal hacia pagado (transiciones_validas).
 const ESTADO_ENTREGADO = 'entregado';
 
-// Pedidos que ya no cuentan para la cuenta de la mesa.
+/**
+ * Pedidos de la mesa que cuentan para la cuenta, con su saldo en centavos.
+ *
+ * Solo los de la VISITA ACTUAL: `mesas.sesion_iniciada_en` (script 17) marca
+ * cuándo se sentó el grupo que está ahora. Sin ese filtro, un pedido sin pagar
+ * del grupo anterior se mezclaría en la cuenta de este y el pago en línea de
+ * alguien que solo debe lo suyo se repartiría hacia una deuda que no es suya.
+ *
+ * Es el mismo criterio que usan las funciones de Jarrison
+ * (obtener_cuenta_mesa, procesar_pago_comensal_mesa), para que la cuenta que se
+ * muestra y el pago que se reparte hablen de los mismos pedidos.
+ *
+ * sesion_iniciada_en en NULL (mesa que nunca se abrió desde el script 17)
+ * significa "sin sesión delimitada": entran todos, como antes.
+ */
 const SQL_PEDIDOS_CON_SALDO = `
   SELECT p.id_pedido, p.estado,
          ROUND(obtener_saldo_pendiente(p.id_pedido) * 100)::bigint AS saldo_centavos
   FROM pedidos p
-  WHERE p.id_mesa = $1 AND p.estado <> 'cancelado'
+  JOIN mesas m ON m.id_mesa = p.id_mesa
+  WHERE p.id_mesa = $1
+    AND p.estado <> 'cancelado'
+    AND (m.sesion_iniciada_en IS NULL OR p.creado_en >= m.sesion_iniciada_en)
   ORDER BY p.creado_en ASC, p.id_pedido ASC`;
 
 const SQL_SALDO_DE_LA_MESA = `
   SELECT COALESCE(SUM(ROUND(obtener_saldo_pendiente(p.id_pedido) * 100)::bigint), 0)::bigint
          AS saldo_centavos
   FROM pedidos p
-  WHERE p.id_mesa = $1 AND p.estado <> 'cancelado'`;
+  JOIN mesas m ON m.id_mesa = p.id_mesa
+  WHERE p.id_mesa = $1
+    AND p.estado <> 'cancelado'
+    AND (m.sesion_iniciada_en IS NULL OR p.creado_en >= m.sesion_iniciada_en)`;
 
 /** Saldo de la mesa en centavos, con el ejecutor que se le pase. */
 async function saldoDeLaMesaEnCentavos(ejecutor, idMesa) {

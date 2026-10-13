@@ -31,19 +31,50 @@ async function obtenerPorId(id) {
 async function crear({ numero, capacidad, ubicacion, estado, token_qr }) {
   // capacidad, ubicacion y actualizado_en tienen DEFAULT en el schema: si no
   // vienen, se deja que la base ponga el suyo.
+  //
+  // Una mesa que nace 'ocupada' (caso raro, al dar de alta el salón con gente
+  // sentada) ya está en una visita, así que arranca con su sesion_iniciada_en.
+  // Si nace libre queda NULL, y la primera apertura la fijará.
   const result = await pool.query(
-    `INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr)
-     VALUES ($1, COALESCE($2, 4), COALESCE($3, 'Principal'), $4, $5) RETURNING *`,
-    [numero, capacidad ?? null, ubicacion || null, estado || ESTADO_MESA_LIBRE, token_qr || null]
+    `INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr, sesion_iniciada_en)
+     VALUES ($1, COALESCE($2, 4), COALESCE($3, 'Principal'), $4, $5,
+             CASE WHEN $4 = $6 THEN NOW() ELSE NULL END) RETURNING *`,
+    [
+      numero,
+      capacidad ?? null,
+      ubicacion || null,
+      estado || ESTADO_MESA_LIBRE,
+      token_qr || null,
+      ESTADO_MESA_OCUPADA,
+    ]
   );
   return result.rows[0];
 }
 
+/**
+ * Cambia el estado de la mesa a mano (PATCH /api/mesas/:id/estado).
+ *
+ * Este camino también puede empezar una visita: un mesero que marca la mesa
+ * 'ocupada' desde el panel, sin pasar por "abrir" (y por tanto sin QR). Se
+ * aplica la misma regla que en abrirSesion, porque si no la cuenta de ese grupo
+ * arrastraría los pedidos del anterior.
+ *
+ * El CASE compara contra el estado VIEJO: en una misma sentencia SQL el lado
+ * derecho del SET ve los valores previos a la fila, así que esto distingue
+ * "pasa a ocupada" de "ya estaba ocupada" sin una lectura aparte ni una
+ * carrera entre el SELECT y el UPDATE.
+ *
+ * actualizado_en y version_control los maneja el trigger tr_control_concurrencia_mesa.
+ */
 async function actualizarEstado(id, estado) {
-  // actualizado_en y version_control los maneja el trigger tr_control_concurrencia_mesa.
   const result = await pool.query(
-    `UPDATE mesas SET estado = COALESCE($1, estado) WHERE id_mesa = $2 RETURNING *`,
-    [estado, id]
+    `UPDATE mesas SET estado = COALESCE($1, estado),
+            sesion_iniciada_en = CASE
+              WHEN $1 = $3 AND estado <> $3 THEN NOW()
+              ELSE sesion_iniciada_en
+            END
+      WHERE id_mesa = $2 RETURNING *`,
+    [estado, id, ESTADO_MESA_OCUPADA]
   );
   return result.rows[0] || null;
 }
@@ -104,9 +135,20 @@ async function abrirSesion(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
       return { rechazado: true, status: generado.status, mensaje: generado.mensaje };
     }
 
+    // sesion_iniciada_en marca el comienzo de la VISITA, no del QR: delimita qué
+    // pedidos entran en la cuenta (scripts 17, obtener_cuenta_mesa). Se pone
+    // solo si la mesa NO estaba ocupada, en la misma UPDATE y la misma
+    // transacción que el estado y el token.
+    //
+    // Si ya estaba ocupada no se toca, aunque aquí se esté generando un QR
+    // nuevo: eso pasa cuando el anterior caducó, y sigue siendo la misma visita.
+    // Pisarlo dejaría fuera de la cuenta todo lo que el grupo ya pidió.
+    const visitaNueva = mesa.estado !== ESTADO_MESA_OCUPADA;
     const actualizada = await client.query(
-      `UPDATE mesas SET token_qr = $1, estado = 'ocupada' WHERE id_mesa = $2 RETURNING *`,
-      [generado.token, idMesa]
+      `UPDATE mesas SET token_qr = $1, estado = 'ocupada',
+              sesion_iniciada_en = CASE WHEN $3 THEN NOW() ELSE sesion_iniciada_en END
+        WHERE id_mesa = $2 RETURNING *`,
+      [generado.token, idMesa, visitaNueva]
     );
 
     await client.query('COMMIT');
@@ -204,8 +246,14 @@ async function liberarSesion(idMesa) {
     }
 
     const abiertos = await client.query(
-      `SELECT count(*)::int AS n FROM pedidos
-       WHERE id_mesa = $1 AND estado NOT IN ('pagado', 'cancelado')`,
+      // Solo los de la visita actual: un pedido abierto que quedó colgado de un
+      // grupo anterior no debe impedir cerrar la mesa de este (y, si no se
+      // filtrara, la mesa no se liberaría nunca más).
+      `SELECT count(*)::int AS n FROM pedidos p
+       JOIN mesas m ON m.id_mesa = p.id_mesa
+       WHERE p.id_mesa = $1
+         AND p.estado NOT IN ('pagado', 'cancelado')
+         AND (m.sesion_iniciada_en IS NULL OR p.creado_en >= m.sesion_iniciada_en)`,
       [idMesa]
     );
     const n = abiertos.rows[0] && abiertos.rows[0].n;
@@ -250,8 +298,12 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
   await client.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE', [idMesa]);
 
   const abiertos = await client.query(
-    `SELECT count(*)::int AS n FROM pedidos
-     WHERE id_mesa = $1 AND estado NOT IN ('pagado', 'cancelado')`,
+    // Mismo criterio de visita que liberarSesion.
+    `SELECT count(*)::int AS n FROM pedidos p
+     JOIN mesas m ON m.id_mesa = p.id_mesa
+     WHERE p.id_mesa = $1
+       AND p.estado NOT IN ('pagado', 'cancelado')
+       AND (m.sesion_iniciada_en IS NULL OR p.creado_en >= m.sesion_iniciada_en)`,
     [idMesa]
   );
   // Si por alguna razón no se puede leer el conteo, NO se libera: es más
