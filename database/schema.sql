@@ -256,7 +256,7 @@ CREATE TABLE kds_metricas (
     id_plato INTEGER,
     tiempo_preparacion_real NUMERIC(8,2) NOT NULL CHECK (tiempo_preparacion_real >= 0),
     tiempo_preparacion_estimado INTEGER NOT NULL CHECK (tiempo_preparacion_estimado > 0),
-    variacion_porcentaje NUMERIC(6,2) NOT NULL,
+    variacion_porcentaje NUMERIC(10,2) NOT NULL,
     fecha_metrica TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_kds_pedido
         FOREIGN KEY (id_pedido)
@@ -311,7 +311,7 @@ CREATE TABLE kds_alertas (
     id_alerta SERIAL PRIMARY KEY,
     id_pedido INTEGER NOT NULL,
     mensaje TEXT NOT NULL,
-    variacion_porcentaje NUMERIC(6,2),
+    variacion_porcentaje NUMERIC(10,2),
     fecha_alerta TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_kds_alertas_pedido
         FOREIGN KEY (id_pedido)
