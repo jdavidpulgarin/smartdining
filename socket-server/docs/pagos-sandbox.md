@@ -49,19 +49,19 @@ En el panel de Wompi → **Desarrolladores** → **URL de eventos** (sandbox), p
 
 ## 3. Crear una intención
 
-Necesitas un JWT de comensal **sentado** en la mesa con un alias:
+Necesitas un JWT de comensal con su alias firmado (el backend lo pone al abrir la sesión):
 
 ```bash
-npm run token:comensal -- --mesa 5      # copia el token
+npm run token:comensal -- --mesa 5 --comensal Ana      # copia el token
 ```
 
 Conecta un cliente (por ejemplo `examples/clienteMesa.js` o la PWA) y haz
-`join:table { comensal: "Ana" }`. Luego:
+`join:table` (el alias sale del JWT). Luego:
 
 ```bash
 curl -s -X POST http://localhost:4001/pagos/intencion \
   -H "Authorization: Bearer <JWT>" -H "Content-Type: application/json" \
-  -d '{"modo":"total","eventId":"'"$(node -e "console.log(crypto.randomUUID())")"'","comensal":"Ana"}'
+  -d '{"modo":"total","eventId":"'"$(node -e "console.log(crypto.randomUUID())")"'"}'
 ```
 
 Responde `referencia`, `monto_en_centavos`, `moneda`, `llave_publica`, `firma_integridad` y

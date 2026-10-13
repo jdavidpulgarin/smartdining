@@ -4,7 +4,7 @@ const { esEventIdValido } = require('./idempotencia');
 const {
   ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson,
 } = require('./http');
-const { verificarJwt, ROL_COMENSAL } = require('./auth');
+const { verificarJwt, esComensalSinAlias, ROL_COMENSAL } = require('./auth');
 const { estaEnMesa } = require('./salas');
 
 const MAX_SUSCRIPCIONES_POR_MESA = 20; // una mesa tiene pocos comensales; evita llenar memoria
@@ -98,12 +98,9 @@ function registrarSuscripcionesSocket(socket, ctx) {
     if (identidad.rol !== ROL_COMENSAL) {
       return fallo('NO_AUTORIZADO', 'Solo el comensal se suscribe a push', { eventId: p.eventId });
     }
-    // El alias sale del join:table de ESTE socket: ya está validado y presente.
+    // El alias es el del JWT (join:table lo copia en socket.data.alias).
     if (!estaEnMesa(socket, identidad.id_mesa)) {
       return fallo('SIN_SALA', 'Haz join:table antes de suscribirte', { eventId: p.eventId });
-    }
-    if (!socket.data.alias) {
-      return fallo('PAYLOAD_INVALIDO', 'Haz join:table con tu nombre (comensal) antes de suscribirte', { eventId: p.eventId });
     }
     const clave = `push:${identidad.id_mesa}:${p.eventId}`;
     if (await ctx.registro.obtener(clave)) return exito({ eventId: p.eventId, duplicado: true });
@@ -127,23 +124,26 @@ function registrarSuscripcionesSocket(socket, ctx) {
 /** Identifica al comensal desde el Bearer; la mesa sale del JWT, nunca del cuerpo. */
 function comensalDeRequest(req, ctx) {
   const auth = req.headers.authorization || '';
-  const identidad = auth.startsWith('Bearer ') ? verificarJwt(auth.slice(7), ctx.config.jwtSecret) : null;
-  if (!identidad) throw new ErrorHttp(401, 'NO_AUTORIZADO', 'Se requiere un JWT válido');
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const identidad = token ? verificarJwt(token, ctx.config.jwtSecret) : null;
+  if (!identidad) {
+    if (token && esComensalSinAlias(token, ctx.config.jwtSecret)) {
+      throw new ErrorHttp(401, 'TOKEN_INVALIDO', 'Sesión antigua sin nombre: escanea el QR de nuevo');
+    }
+    throw new ErrorHttp(401, 'NO_AUTORIZADO', 'Se requiere un JWT válido');
+  }
   if (identidad.rol !== ROL_COMENSAL) throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Solo el comensal puede suscribirse');
   return identidad;
 }
 
 const rutasSuscripciones = {
   'POST /push/suscripcion': async (req, res, ctx) => {
-    const { id_mesa: idMesa } = comensalDeRequest(req, ctx);
+    const { id_mesa: idMesa, comensal } = comensalDeRequest(req, ctx);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    // Por HTTP no hay socket: el alias se valida contra quienes están sentados
-    // ahora en esa mesa (presencia real de la sala).
-    const comensal = typeof cuerpo.comensal === 'string' ? cuerpo.comensal.trim() : '';
-    if (!comensal) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'comensal es obligatorio');
-    const { comensales } = await ctx.presencia.calcular(idMesa);
-    if (!comensales.includes(comensal)) {
-      throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Únete a la mesa (join:table) con ese nombre antes de suscribirte');
+    // El alias es el del JWT. `comensal` en el cuerpo es opcional; si viene
+    // distinto, alguien intenta recibir los avisos de otro.
+    if (cuerpo.comensal !== undefined && cuerpo.comensal !== comensal) {
+      throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Solo puedes suscribirte con tu propio nombre');
     }
     const r = await suscribir(ctx, idMesa, cuerpo.subscription, comensal);
     if (!r.ok) throw new ErrorHttp(400, r.codigo, r.mensaje);

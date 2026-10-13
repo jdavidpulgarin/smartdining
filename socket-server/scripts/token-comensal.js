@@ -1,9 +1,11 @@
 // Genera un JWT de comensal para probar el socket-server (join:table,
 // cart:update, etc.) sin depender de que el backend esté corriendo. Firma
-// { id_mesa, rol: 'comensal' } (+ sid si se indica) con el JWT_SECRET del
-// .env, que debe ser el MISMO que usa el servidor para poder validarlo.
+// { id_mesa, rol: 'comensal', comensal } (+ sid si se indica) con el JWT_SECRET
+// del .env, que debe ser el MISMO que usa el servidor para poder validarlo.
+// El alias (comensal) va en el JWT igual que lo firma el backend: el servidor
+// no acepta JWT de comensal sin alias.
 //
-// Uso: npm run token:comensal -- --mesa 5 [--sid <texto>] [--horas 3]
+// Uso: npm run token:comensal -- --mesa 5 [--comensal Ana] [--sid <texto>] [--horas 3]
 require('dotenv').config();
 const jwt = require('jsonwebtoken');
 
@@ -44,12 +46,18 @@ function main() {
     process.exit(1);
   }
 
-  const payload = { id_mesa: idMesa, rol: 'comensal' };
+  const comensal = (args.comensal === undefined ? 'Ana' : String(args.comensal)).trim();
+  if (!comensal || comensal.length > 40) {
+    console.error('--comensal debe ser un texto de 1 a 40 caracteres.');
+    process.exit(1);
+  }
+
+  const payload = { id_mesa: idMesa, rol: 'comensal', comensal };
   if (args.sid) payload.sid = args.sid;
 
   const token = jwt.sign(payload, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: `${horas}h` });
 
-  console.log(`# Token de comensal para la mesa ${idMesa} (vence en ${horas}h)`);
+  console.log(`# Token de comensal "${comensal}" para la mesa ${idMesa} (vence en ${horas}h)`);
   console.log(token);
 }
 

@@ -28,8 +28,8 @@ async function escenario(t) {
   const s = await levantar({}, { push });
   t.after(() => s.cerrar());
   const sentar = async (alias, n) => {
-    const c = await s.conectar(tokenComensal(5));
-    await emitir(c, 'join:table', { comensal: alias });
+    const c = await s.conectar(tokenComensal(5, alias));
+    await emitir(c, 'join:table', {});
     await emitir(c, 'push:subscribe', { eventId: randomUUID(), subscription: sub(n) });
     return c;
   };

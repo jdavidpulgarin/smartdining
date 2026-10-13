@@ -65,24 +65,25 @@ async function servidorLocal() {
   const jwt = require('jsonwebtoken');
   return {
     url: `http://localhost:${s.httpServer.address().port}`,
-    // Mismo payload que firma scripts/token-comensal.js.
-    token: (idMesa) => jwt.sign({ id_mesa: idMesa, rol: 'comensal' }, jwtSecret, { algorithm: 'HS256', expiresIn: '1h' }),
+    // Mismo payload que firma scripts/token-comensal.js (con el alias, como el backend).
+    token: (idMesa, comensal) => jwt.sign({ id_mesa: idMesa, rol: 'comensal', comensal }, jwtSecret, { algorithm: 'HS256', expiresIn: '1h' }),
     almacen: s.redis ? 'redis' : 'memoria',
     cerrar: async () => { await new Promise((r) => s.io.close(r)); if (s.redis) await s.redis.cerrar(); },
   };
 }
 
-/** Servidor externo: tokens con `npm run token:comensal -- --mesa N`. */
+/** Servidor externo: tokens con `npm run token:comensal -- --mesa N --comensal C`. */
 function servidorExterno(url) {
   const cache = new Map();
   return {
     url,
-    token(idMesa) {
-      if (!cache.has(idMesa)) {
-        const salida = execFileSync(process.execPath, ['scripts/token-comensal.js', '--mesa', String(idMesa), '--horas', '1'], { cwd: RAIZ, encoding: 'utf8' });
-        cache.set(idMesa, salida.trim().split('\n').pop().trim());
+    token(idMesa, comensal) {
+      const clave = `${idMesa}:${comensal}`;
+      if (!cache.has(clave)) {
+        const salida = execFileSync(process.execPath, ['scripts/token-comensal.js', '--mesa', String(idMesa), '--comensal', comensal, '--horas', '1'], { cwd: RAIZ, encoding: 'utf8' });
+        cache.set(clave, salida.trim().split('\n').pop().trim());
       }
-      return cache.get(idMesa);
+      return cache.get(clave);
     },
     almacen: 'externo',
     cerrar: async () => {},
@@ -112,8 +113,8 @@ async function main() {
   for (let m = 1; m <= MESAS; m += 1) {
     for (let k = 0; k < COMENSALES; k += 1) {
       const idMesa = 1000 + m; // mesas altas: no chocan con datos de desarrollo
-      const c = await conectar(objetivo.url, objetivo.token(idMesa));
-      const join = await emitirAck(c, 'join:table', { comensal: `C${k + 1}` });
+      const c = await conectar(objetivo.url, objetivo.token(idMesa, `C${k + 1}`));
+      const join = await emitirAck(c, 'join:table', {});
       if (!join || !join.ok) errores.push({ fase: 'join', codigo: join && join.codigo });
       c.on('cart:updated', (ev) => {
         const t0 = emitidos.get(ev.eventId);

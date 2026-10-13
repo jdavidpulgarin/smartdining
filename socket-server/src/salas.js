@@ -39,8 +39,6 @@ function resolverMesa(identidad, idPayload) {
  * `obtenerSnapshot(idMesa)` permite que el ack de join:table incluya el
  * carrito actual; se inyecta para no acoplar este módulo al del carrito.
  */
-const MAX_ALIAS = 40;
-
 function registrarSalas(socket, {
   obtenerSnapshot, sesionVigente = () => true, alCambiarSala = () => {}, alEntrarComensal = () => {},
 } = {}) {
@@ -64,14 +62,14 @@ function registrarSalas(socket, {
     // sala (por eso no lo desconectamos) tampoco puede entrar después.
     if (!(await sesionVigente(identidad))) return fallo('NO_AUTORIZADO', 'La sesión de esta mesa ya se cerró');
 
-    // Alias opcional del comensal ("Ana"): es como lo ven los demás en la
-    // presencia y en los avisos al mesero. Solo lo fija el propio socket.
-    if (identidad.rol === ROL_COMENSAL && payload.comensal !== undefined) {
-      const alias = typeof payload.comensal === 'string' ? payload.comensal.trim() : '';
-      if (!alias || alias.length > MAX_ALIAS) {
-        return fallo('PAYLOAD_INVALIDO', `comensal debe ser un texto de 1 a ${MAX_ALIAS} caracteres`);
+    // El alias del comensal ("Ana") sale SOLO de su JWT, que el backend firmó
+    // al abrir la sesión (único en la mesa). Si el cliente manda otro, intenta
+    // presentarse como otra persona: se rechaza.
+    if (identidad.rol === ROL_COMENSAL) {
+      if (payload.comensal !== undefined && payload.comensal !== identidad.comensal) {
+        return fallo('NO_AUTORIZADO', 'El comensal es el de tu sesión; no se puede cambiar');
       }
-      socket.data.alias = alias;
+      socket.data.alias = identidad.comensal;
     }
 
     socket.join(salaMesa(idMesa));

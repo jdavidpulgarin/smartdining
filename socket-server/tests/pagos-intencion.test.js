@@ -102,9 +102,9 @@ async function escenario(t, { rutas, env = {} } = {}) {
   const backend = backendFalso(rutas || { 'GET /api/mesas/5/cuenta/interno': () => ({ status: 200, cuerpo: CUENTA_5 }) });
   const s = await levantar({ ...WOMPI_ENV, ...env }, { backend, pasarela: pasarelaFalsa({}).pasarela });
   t.after(() => s.cerrar());
-  const sentar = async (alias, mesa = 5, token = tokenComensal(mesa)) => {
+  const sentar = async (alias, mesa = 5, token = tokenComensal(mesa, alias)) => {
     const c = await s.conectar(token);
-    await emitir(c, 'join:table', { comensal: alias });
+    await emitir(c, 'join:table', {});
     return token;
   };
   const pedir = (token, cuerpo) => fetch(`${s.url}/pagos/intencion`, {
@@ -189,28 +189,28 @@ test('autorización: sin token 401, personal 403, sesión de mesa ya liberada 40
   const { s, sentar, pedir } = await escenario(t);
   assert.strictEqual((await pedir(null, cuerpo('total'))).status, 401);
   assert.strictEqual((await pedir(tokenPersonal('cajero'), cuerpo('total'))).status, 403);
-  const viejo = firmar({ id_mesa: 5, rol: 'comensal', iat: Math.floor(Date.now() / 1000) - 60 });
+  const viejo = tokenComensal(5, 'Ana', { iat: Math.floor(Date.now() / 1000) - 60 });
   await sentar('Ana', 5, viejo);
   await fetch(`${s.url}/internal/mesa-liberada`, { method: 'POST', headers: { 'x-internal-key': CLAVE_INTERNA }, body: JSON.stringify({ id_mesa: 5 }) });
   assert.strictEqual((await pedir(viejo, cuerpo('total'))).status, 401);
 });
 
-test('payload inválido: modo, eventId o comensal', async (t) => {
+test('payload inválido: modo o eventId', async (t) => {
   const { sentar, pedir } = await escenario(t);
   const ana = await sentar('Ana');
-  for (const malo of [cuerpo('todo'), cuerpo('total', { eventId: 'x' }), cuerpo('total', { comensal: '' }), cuerpo('total', { comensal: 'x'.repeat(41) }), { eventId: crypto.randomUUID(), comensal: 'Ana' }]) {
+  for (const malo of [cuerpo('todo'), cuerpo('total', { eventId: 'x' }), { eventId: crypto.randomUUID(), comensal: 'Ana' }]) {
     const r = await pedir(ana, malo);
     assert.deepStrictEqual([r.status, (await r.json()).codigo], [400, 'PAYLOAD_INVALIDO'], JSON.stringify(malo));
   }
 });
 
-test('el alias debe estar sentado en la mesa (presencia real)', async (t) => {
+test('quien paga es el alias del JWT; `comensal` en el cuerpo es opcional', async (t) => {
   const { sentar, pedir } = await escenario(t);
-  const ana = await sentar('Ana');
-  const r = await pedir(ana, cuerpo('propio', { comensal: 'Beto' }));
-  assert.strictEqual(r.status, 403);
-  await sentar('Beto', 6); // Beto en OTRA mesa no cuenta
-  assert.strictEqual((await pedir(ana, cuerpo('propio', { comensal: 'Beto' }))).status, 403);
+  const beto = await sentar('Beto');
+  const sinAlias = { modo: 'propio', eventId: crypto.randomUUID() };
+  const r = await pedir(beto, sinAlias);
+  assert.strictEqual(r.status, 201);
+  assert.strictEqual((await r.json()).monto_en_centavos, 5_000_000, 'lo propio de Beto');
 });
 
 test('límite: 5 intenciones por minuto por comensal', async (t) => {

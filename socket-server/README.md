@@ -15,7 +15,7 @@ Servidor de comunicación bidireccional en tiempo real con **Socket.io** para si
    - `CORS_ORIGINS` ya trae por defecto los puertos de Vite 5173 a 5175
      (`frontend-cliente`, `frontend-restaurante`, `frontend-kds`); ajústalo si usas otro.
 3. `npm run dev` → escucha en `http://localhost:4001` (el backend REST usa el `4000`).
-4. Token de prueba sin depender del backend: `npm run token:comensal -- --mesa 5`
+4. Token de prueba sin depender del backend: `npm run token:comensal -- --mesa 5 --comensal Ana`
    (opcional `--sid <texto>` y `--horas <n>`, por defecto 3). Se niega a correr si falta
    `JWT_SECRET` o si `NODE_ENV=production`.
 
@@ -31,8 +31,7 @@ socket.emit('cart:update', {
   eventId: crypto.randomUUID(),
   accion: 'set',
   id_linea: crypto.randomUUID(), // uno por línea añadida; reusarlo edita esa línea
-  comensal: 'Ana',
-  id_plato: 3,
+  id_plato: 3,                   // sin `comensal`: el servidor usa el alias del JWT
   cantidad: 2,
   notas: 'sin cebolla',
 }, (ack) => { /* ack.carrito trae el snapshot resultante */ });
@@ -75,7 +74,7 @@ comensal se rechazan con `ERROR_INTERNO`. Nunca se pasa a memoria en silencio.
 **Prueba manual (persistencia tras reinicio):**
 
 1. `docker compose up -d redis` en la raíz y `REDIS_URL=redis://localhost:6379` en `.env`.
-2. `npm run dev` y `npm run token:comensal -- --mesa 5` (copia el token).
+2. `npm run dev` y `npm run token:comensal -- --mesa 5 --comensal Ana` (copia el token).
 3. Conecta un cliente, haz `join:table` y dos `cart:update` (ver el ejemplo de abajo).
 4. Detén el servidor (Ctrl+C) y vuelve a correr `npm run dev`.
 5. Conecta otro cliente con el mismo token y haz `join:table`: el `carrito` del ack debe ser
@@ -110,11 +109,11 @@ sequenceDiagram
   B->>S: POST /internal/qr-rotado (x-internal-key)
   S->>P: qr:actualizado { id_mesa, token_qr }
   Note over S,P: Mientras no haya comensales, el QR rota cada 3 min (docs/rotacion-qr.md)
-  C->>B: escanea · POST /api/mesas/qr/:token/sesion
-  B-->>C: JWT de comensal { id_mesa, rol, sid }
+  C->>B: escanea · POST /api/mesas/qr/:token/sesion { comensal: Ana }
+  B-->>C: JWT de comensal { id_mesa, rol, sid, comensal } (alias único en la mesa)
   C->>S: connect · auth.token
   S->>S: JWT válido · mesa no liberada · cupo (capacidad + 4)
-  C->>S: join:table { comensal: "Ana" }
+  C->>S: join:table (el alias sale del JWT)
   S-->>C: ack { carrito: snapshot completo }
   S->>M: mesa:presencia { comensales, total } (room:admin)
   Note over S: Con el primer comensal sentado, el QR deja de rotar

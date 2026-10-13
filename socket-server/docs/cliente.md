@@ -21,10 +21,35 @@ const socket = io(import.meta.env.VITE_SOCKET_URL, {
 });
 ```
 
+### El alias va dentro del JWT
+
+El comensal elige su nombre **una vez**, al abrir la sesión:
+
+```js
+const r = await fetch(`${API_URL}/mesas/qr/${encodeURIComponent(tokenQr)}/sesion`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ comensal: 'Ana' }),
+});
+// 201 { token, comensal: 'Ana', ... }  ·  409 alias_en_uso → pedir otro nombre
+```
+
+El backend lo valida (2–40 caracteres, único en la mesa) y lo **firma** en el JWT. Desde ahí:
+
+- **No mandes `comensal`** en `join:table`, `cart:update`, `push:subscribe`,
+  `/push/suscripcion` ni `/pagos/intencion`: el servidor usa el del JWT. Si mandas uno
+  distinto, responde `NO_AUTORIZADO` (403 por HTTP). Así nadie edita, quita o paga como otro.
+- Un comensal solo puede editar o quitar **sus** líneas del carrito; las de otro responden
+  `NO_AUTORIZADO`.
+- Para mostrar "eres Ana", usa `aliasDelToken(token)` de `examples/clienteMesa.js` (el hook
+  lo expone como `comensal`). Solo decodifica: no sirve para decidir nada.
+- Un JWT **antiguo sin alias** ya no conecta: `connect_error` con `TOKEN_INVALIDO` (y 401
+  `TOKEN_INVALIDO` por HTTP). Hay que volver a escanear el QR.
+
 - El JWT va en `auth.token`, **nunca** en la URL (quedaría en logs y en el historial).
 - `VITE_SOCKET_URL` es pública (no es un secreto). Ningún secreto va con prefijo `VITE_`.
 - Si el handshake falla, llega `connect_error` con `err.message`:
-  - `AUTH_REQUERIDA` / `TOKEN_INVALIDO`: el JWT falta, venció o la mesa ya se liberó. Socket.io
+  - `AUTH_REQUERIDA` / `TOKEN_INVALIDO`: el JWT falta, venció, no trae alias o la mesa ya se liberó. Socket.io
     **no** reintenta solo en este caso. Hay que pedir sesión nueva (volver a escanear el QR).
   - `ERROR_INTERNO`: el servidor no pudo comprobar la sesión (p. ej. Redis caído). Reintenta
     más tarde.
@@ -35,7 +60,7 @@ El evento `connect` se dispara en la primera conexión **y** en cada reconexión
 
 ```js
 socket.on('connect', () => {
-  socket.emit('join:table', { comensal: 'Ana' }, (ack) => {
+  socket.emit('join:table', {}, (ack) => {        // el alias sale del JWT
     if (ack.ok) reemplazarCarrito(ack.carrito);   // REEMPLAZAR, no mezclar
   });
 });

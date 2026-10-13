@@ -14,7 +14,8 @@ const ENV_BASE = { JWT_SECRET: SECRETO, INTERNAL_API_KEY: CLAVE_INTERNA, QR_SECR
 const ORIGEN = 'http://localhost:5173';
 
 const firmar = (payload, secreto = SECRETO, opts = {}) => jwt.sign(payload, secreto, { expiresIn: '1h', ...opts });
-const tokenComensal = (id_mesa) => firmar({ id_mesa, rol: 'comensal' });
+// Como el backend: el alias del comensal va FIRMADO en el JWT (R-18).
+const tokenComensal = (id_mesa, comensal = 'Ana', extra = {}) => firmar({ id_mesa, rol: 'comensal', comensal, ...extra });
 const tokenPantalla = (id_mesa) => firmar({ id_mesa, rol: 'pantalla' });
 const tokenPersonal = (rol, id_usuario = 1) => firmar({ id_usuario, rol });
 

@@ -9,7 +9,7 @@ const set = (comensal, id_plato, cantidad, extra = {}) => ({
 
 async function mesaConDos(s, id = 1) {
   const ana = await s.conectar(tokenComensal(id));
-  const beto = await s.conectar(tokenComensal(id));
+  const beto = await s.conectar(tokenComensal(id, 'Beto'));
   await emitir(ana, 'join:table', {});
   await emitir(beto, 'join:table', {});
   return { ana, beto };
@@ -54,7 +54,7 @@ test('reconexión: el snapshot del join:table reemplaza el estado sin duplicar',
   const eventoBeto = set('Beto', 4, 1);
   await emitir(beto, 'cart:update', eventoBeto);
   beto.close(); // Beto se desconecta y vuelve con un socket nuevo
-  const beto2 = await s.conectar(tokenComensal(1));
+  const beto2 = await s.conectar(tokenComensal(1, 'Beto'));
   const join = await emitir(beto2, 'join:table', {});
   assert.strictEqual(join.carrito.items.length, 2);
   // Reenvía lo que creía no entregado: mismo eventId → no se duplica.
@@ -175,7 +175,8 @@ test('validaciones: sin join, eventId inválido, cantidad fuera de rango, rol no
   assert.strictEqual((await emitir(ana, 'cart:update', { ...set('Ana', 3, 2), eventId: 'x' })).codigo, 'PAYLOAD_INVALIDO');
   assert.strictEqual((await emitir(ana, 'cart:update', set('Ana', 3, 0))).codigo, 'PAYLOAD_INVALIDO');
   assert.strictEqual((await emitir(ana, 'cart:update', set('Ana', 3, 100))).codigo, 'PAYLOAD_INVALIDO');
-  assert.strictEqual((await emitir(ana, 'cart:update', set('', 3, 1))).codigo, 'PAYLOAD_INVALIDO');
+  // Otro alias (aunque sea vacío) que el del JWT es suplantación, no un dato mal formado.
+  assert.strictEqual((await emitir(ana, 'cart:update', set('', 3, 1))).codigo, 'NO_AUTORIZADO');
   assert.strictEqual((await emitir(ana, 'cart:update', { ...set('Ana', 3, 1), accion: 'explotar' })).codigo, 'PAYLOAD_INVALIDO');
   const cocina = await s.conectar(tokenPersonal('cocina'));
   assert.strictEqual((await emitir(cocina, 'cart:update', set('X', 1, 1, { id_mesa: 1 }))).codigo, 'NO_AUTORIZADO');
