@@ -23,7 +23,7 @@ código y este documento no coinciden, es un error y se corrige en el mismo PR.
 - [5. Eventos servidor → cliente](#5-eventos-servidor--cliente)
 - [6. Endpoints HTTP](#6-endpoints-http)
 - [7. Web Push](#7-web-push)
-- [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox)
+- [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox) · [8.6. Cobros de caja](#86-cobros-de-caja-post-internalpayment-confirmed)
 - [9. Variables de entorno](#9-variables-de-entorno)
 - [10. Historial de cambios de contrato](#10-historial-de-cambios-de-contrato)
 
@@ -77,7 +77,7 @@ del backend que lo dispara o lo alimenta (contrato en la sección indicada).
 | `mesa:presencia` | `room:admin` | No (estado completo) | Estable | [§5.2](#52-mesapresencia) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable; `motivo: "pagada"` espera backend | [§5.1](#51-mesaliberada) |
 | `ingrediente:disponibilidad` | todos los sockets | Opcional | Espera backend (nadie llama aún al endpoint) | [§5.3](#53-ingredientedisponibilidad) |
-| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Espera backend ([§8.2](#82-contrato-que-necesita-del-backend-pendiente-daniel), [§8.4](#84-contrato-de-registro-que-necesita-del-backend-pendiente-daniel)) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6) |
+| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Caja: ruta lista, espera que el backend la llame ([§8.6](#86-cobros-de-caja-post-internalpayment-confirmed)). Wompi: espera backend ([§8.2](#82-contrato-que-necesita-del-backend-pendiente-daniel), [§8.4](#84-contrato-de-registro-que-necesita-del-backend-pendiente-daniel)) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6), [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 | `pago:alerta` | `room:admin` | Sí | Espera backend ([§8.5](#85-pagoalerta-e-intentos-fallidos)) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
 
 ### HTTP
@@ -92,6 +92,7 @@ del backend que lo dispara o lo alimenta (contrato en la sección indicada).
 | `POST /internal/order-created`, `/internal/order-status` | backend | Estable (el backend ya las usa) | [§6.3](#63-cómo-emite-el-backend-ordercreated--orderstatus) |
 | `POST /internal/qr-rotado`, `/internal/mesa-liberada` | backend | Estable (el backend ya las usa) | [§6](#6-endpoints-http) |
 | `POST /internal/ingrediente-disponibilidad` | backend | Espera backend | [§5.3](#53-ingredientedisponibilidad) |
+| `POST /internal/payment-confirmed` | backend (cobros de caja) | Ruta lista, espera que el backend la llame | [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
 responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
@@ -466,7 +467,7 @@ hasta que se libere.
 | `cart:updated` | `room:mesa-{ID}` (todos **menos** quien emitió) | `{ eventId, origen, carrito: { version, items } }` |
 | `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, emitidoEn }` |
-| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, emitidoEn }` (§8.3) |
+| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, emitidoEn }` (mismo payload para Wompi, §8.3, y caja, §8.6) |
 | `pago:alerta` | `room:admin` | `{ eventId, id_mesa, referencia_externa, id_transaccion_pasarela, motivo, emitidoEn }` (§8.5) |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
@@ -482,6 +483,8 @@ Notas para el frontend:
 - `order:created` y `order:status` pueden llegar repetidos si el servidor reintenta;
   deduplica por `eventId`.
 - El sender de `cart:update` **no** recibe `cart:updated` (usa el snapshot de su ack).
+- `payment:confirmed` trae el **mismo payload** venga de Wompi (§8.3) o de la caja (§8.6):
+  el panel y la mesa no necesitan distinguir el origen. Deduplica por `eventId`.
 - `mesa:liberada`: la sesión de mesa terminó (pago o liberación manual). Ver §5.1.
 - `qr:actualizado` no lleva `eventId` (no lo dispara un cliente, lo dispara el backend al
   rotar el token en la base). La pantalla de la mesa simplemente **redibuja el QR** con el
@@ -560,6 +563,7 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 | POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` (token de 1 a 255 caracteres) → reenvía `qr:actualizado` a la pantalla de esa mesa |
 | POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "motivo": "pagada" }` (`motivo` opcional: `pagada` o `liberada`, por defecto `liberada`) → revoca los QR, emite `mesa:liberada`, desconecta a los comensales y borra carrito y suscripciones. Responde `{ ok, duplicado }` |
 | POST | `/internal/ingrediente-disponibilidad` | Header `x-internal-key` | Solo backend. `{ "id_ingrediente": 12, "disponible": false, "eventId": "<uuid opcional>" }` → emite `ingrediente:disponibilidad`. Con `eventId`, un reintento responde `duplicado: true` |
+| POST | `/internal/payment-confirmed` | Header `x-internal-key` | Solo backend. Cobro de caja (efectivo, datáfono o abono) ya registrado → emite `payment:confirmed` con el mismo payload que Wompi (§8.6) |
 | POST | `/pagos/intencion` | Bearer JWT `comensal` | Intención de pago (§8.1) |
 | POST | `/pagos/webhook` | Checksum de Wompi | Eventos de Wompi (§8.3) |
 
@@ -875,6 +879,92 @@ Guarda en `intentos_pago_fallidos` (`razon_rechazo` = motivo). Ojo: hoy `id_pedi
 `NOT NULL` y una referencia desconocida no tiene pedido; hace falta permitir `NULL` o agregar
 `id_mesa` y `referencia_externa`. Si responde 5xx, el webhook responde 503 y Wompi reintenta.
 
+### 8.6. Cobros de caja: `POST /internal/payment-confirmed`
+
+Cuando la caja cobra en efectivo o con datáfono, o registra un **abono parcial**, el pago no
+pasa por Wompi: lo guarda el backend. Esta ruta sirve para que **todas las cajas** y la
+**mesa** vean el saldo nuevo al instante, con el mismo `payment:confirmed` que emite el
+webhook (§8.3). No depende de la pasarela: funciona aunque Wompi no esté configurado.
+
+**Quién la llama:** el backend, desde `registrarPago`, **después del COMMIT** (nunca antes:
+no se anuncia un pago que podría revertirse). La llamada va aislada con `try/catch` y un
+timeout corto (p. ej. 1,5 s): si el socket-server no responde, el pago **ya quedó guardado**
+y no se revierte; solo se pierde el aviso en vivo (las pantallas lo verán al recargar la
+cuenta).
+
+```
+POST http://localhost:4001/internal/payment-confirmed
+x-internal-key: <INTERNAL_API_KEY>
+Content-Type: application/json
+
+{
+  "eventId": "6f1c2b9e-4d3a-4f8e-9a51-2c7d8e0b1a34",
+  "id_mesa": 5,
+  "comensal": "Ana",
+  "monto_centavos": 2000000,
+  "saldo_restante_centavos": 1450000,
+  "referencia_externa": "CAJA-123",
+  "id_transaccion": 901
+}
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `eventId` | Sí | UUID (`crypto.randomUUID()`), uno por cobro |
+| `id_mesa` | Sí | Entero positivo |
+| `monto_centavos` | Sí | Entero > 0 y ≤ 10 000 000 000 (centavos: `Math.round(monto * 100)`) |
+| `saldo_restante_centavos` | Sí | Entero ≥ 0 y ≤ 10 000 000 000. Saldo de la mesa **después** de este cobro |
+| `comensal` | No | Texto de 1 a 40 caracteres (alias), o `null` si se paga la mesa completa |
+| `referencia_externa` | No | Texto de 1 a 255 caracteres (voucher del datáfono, recibo…), o `null` |
+| `id_transaccion` | No (recomendado) | Entero positivo: id de la fila en `transacciones`. Segunda guardia de idempotencia |
+
+Cualquier otro campo (`metodo_pago`, notas…) se **descarta**: no llega a las pantallas.
+
+**Por qué en centavos:** el dinero en `float` pierde precisión (`0.1 + 0.2 !== 0.3`). Con
+enteros en centavos no hay redondeos al sumar abonos ni al comparar con el saldo; el
+socket-server convierte a pesos (`monto`, `saldo_restante`) solo para mostrar. Por eso un
+monto con decimales o como texto se rechaza.
+
+**Idempotencia:** se reserva `eventId` y, si viene, `id_transaccion`. Si **cualquiera** ya se
+había visto, responde `duplicado: true` y no emite nada. Así un reintento del backend con el
+mismo `eventId`, o con un `eventId` nuevo pero el mismo `id_transaccion`, no muestra el pago
+dos veces.
+
+Respuestas:
+
+| Status | Cuerpo | Cuándo |
+|---|---|---|
+| `200` | `{ "ok": true, "eventId": "…", "duplicado": false }` | Emitido |
+| `200` | `{ "ok": true, "eventId": "…", "duplicado": true }` | Ya se había anunciado (mismo `eventId` o `id_transaccion`); no emite |
+| `400` | `{ "ok": false, "codigo": "PAYLOAD_INVALIDO", "mensaje": "…", "eventId": "…" }` | Algún campo no cumple la tabla |
+| `400` | `{ "ok": false, "codigo": "JSON_INVALIDO", … }` | El cuerpo no es un objeto JSON |
+| `401` | `{ "ok": false, "codigo": "NO_AUTORIZADO", … }` | Falta `x-internal-key` o no coincide |
+| `503` | `{ "ok": false, "codigo": "NO_CONFIGURADO", … }` | El socket-server no tiene `INTERNAL_API_KEY` |
+
+`payment:confirmed` → `room:admin` y `room:mesa-{ID}`, con el **mismo payload** que §8.3:
+
+```json
+{
+  "eventId": "6f1c2b9e-4d3a-4f8e-9a51-2c7d8e0b1a34",
+  "id_mesa": 5,
+  "comensal": "Ana",
+  "monto": 20000,
+  "saldo_restante": 14500,
+  "monto_centavos": 2000000,
+  "saldo_restante_centavos": 1450000,
+  "referencia_externa": "CAJA-123",
+  "emitidoEn": "2026-10-13T20:15:00.000Z"
+}
+```
+
+**Abonos parciales:** una llamada **por abono**, cada una con su `eventId` (y su
+`id_transaccion`) y el `saldo_restante_centavos` que queda después de ese abono.
+
+**Si el saldo queda en 0:** llamar **primero** a `/internal/payment-confirmed` y **después**
+a `/internal/mesa-liberada` con `{ "id_mesa": 5, "motivo": "pagada" }`. El orden importa:
+`mesa-liberada` desconecta a los comensales, y si se llama antes, la mesa nunca ve el
+pago final.
+
 Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 
 ---
@@ -921,6 +1011,7 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Suscripción push | Por mesa | Por mesa **y** alias del comensal | PWA: hacer `join:table` con alias antes de suscribirse |
 | `POST /pagos/webhook` | `x-signature` propio y `payment.succeeded` | Checksum y eventos de Wompi | Nadie (no se usaba) |
 | `payment:confirmed` | Con `id_pedido` | Sin `id_pedido`; con `comensal`, `saldo_restante` y centavos | Panel (Caja): dejar de emitirlo desde el navegador |
+| `POST /internal/payment-confirmed` | Los cobros de caja no se anunciaban en vivo | Nueva: emite `payment:confirmed` (mismo payload que Wompi) para efectivo, datáfono y abonos | Backend: llamarla desde `registrarPago` después del COMMIT (§8.6) |
 | `/internal/qr-rotado` | `token_qr` de hasta 128 caracteres | Hasta 255 (caben los tokens v1 reales) | Nadie |
 | Arranque | Aceptaba secretos cortos o de ejemplo | No arranca sin secretos de 32+ caracteres, distintos y propios | Todo el equipo: regenerar `.env` |
 | Alias del comensal (R-18) | Lo mandaba el cliente en cada evento (`join:table`, `cart:update`, pago, push) | Sale **solo del JWT**; otro alias → `NO_AUTORIZADO`; JWT sin alias → `TOKEN_INVALIDO`; solo se tocan las líneas propias | PWA: enviar `{ comensal }` al abrir la sesión y dejar de mandarlo en los eventos. Backend: `feature/mesas-alias-en-jwt` |
