@@ -61,11 +61,37 @@ const SENALES = {
   normal: { signo: '•', etiqueta: 'En tiempo' },
   ambar: { signo: '!', etiqueta: 'Va lenta' },
   rojo: { signo: '!!', etiqueta: 'Retrasada' },
+  // Sin semáforo: ni color ni etiqueta, solo el tiempo.
+  neutro: { signo: '', etiqueta: '' },
 }
 
 export function senalDeEspera(minutos) {
   const nivel = nivelDeEspera(minutos)
   return { nivel, ...SENALES[nivel] }
+}
+
+/**
+ * Estados en los que el semáforo dice algo útil.
+ *
+ * Solo mientras la comanda depende de la cocina. Una comanda 'listo' ya está
+ * hecha: el reloj sigue corriendo porque está esperando al mesero, pero pintarla
+ * de rojo y llamarla "Retrasada" culparía a la cocina de una demora que no es
+ * suya, y además llenaría la columna de alarmas que nadie puede atender desde
+ * ahí. En Listas se muestra el tiempo y nada más.
+ */
+export const ESTADOS_CON_SEMAFORO = ['recibido', 'en_preparacion']
+
+export function aplicaSemaforo(estado) {
+  return ESTADOS_CON_SEMAFORO.includes(estado)
+}
+
+/**
+ * Señal de espera según el estado de la comanda: con semáforo en Nuevas y En
+ * preparación, neutra en Listas.
+ */
+export function senalDeEsperaDeComanda(estado, minutos) {
+  if (!aplicaSemaforo(estado)) return { nivel: 'neutro', ...SENALES.neutro }
+  return senalDeEspera(minutos)
 }
 
 /**

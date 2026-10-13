@@ -1,7 +1,7 @@
 import { AlertTriangle, Check, ChefHat, Clock, Hash, LoaderCircle, StickyNote, User } from 'lucide-react'
 import { useState } from 'react'
 import { ingredientesPorPaso, siguientePaso } from '../lib/comandas'
-import { minutosDesdeCreacion, senalDeEspera, textoDeEspera } from '../lib/espera'
+import { minutosDesdeCreacion, senalDeEsperaDeComanda, textoDeEspera } from '../lib/espera'
 
 /**
  * Tarjeta de una comanda: lo que la cocina lee y toca.
@@ -30,6 +30,7 @@ const COLOR_ESPERA = {
   normal: 'var(--color-texto-suave)',
   ambar: 'var(--color-preparacion)',
   rojo: 'var(--color-alerta)',
+  neutro: 'var(--color-texto-suave)',
 }
 
 function Ingredientes({ item }) {
@@ -66,8 +67,10 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
   const [error, setError] = useState(null)
 
   const minutos = minutosDesdeCreacion(comanda, ahora)
-  const espera = senalDeEspera(minutos)
+  // En Listas la señal es neutra: la comanda ya salió de la cocina.
+  const espera = senalDeEsperaDeComanda(comanda.estado, minutos)
   const colorEspera = COLOR_ESPERA[espera.nivel]
+  const conSemaforo = espera.nivel !== 'neutro'
 
   // El socket no manda el numero de mesa: se cae al id, que al menos identifica.
   const mesa = comanda.mesa_numero ?? comanda.id_mesa ?? '—'
@@ -89,7 +92,10 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
   return (
     <article
       className="rounded-xl border-2 bg-[color:var(--color-panel-alto)] p-4 shadow-lg"
-      style={{ borderColor: espera.nivel === 'normal' ? 'var(--color-borde)' : colorEspera }}
+      style={{
+        borderColor:
+          conSemaforo && espera.nivel !== 'normal' ? colorEspera : 'var(--color-borde)',
+      }}
     >
       <header className="flex items-start justify-between gap-3 border-b border-[color:var(--color-borde)] pb-3">
         <div>
@@ -107,15 +113,21 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
         <p
           className="flex shrink-0 flex-col items-end text-2xl font-semibold tabular-nums"
           style={{ color: colorEspera }}
-          title={`${espera.etiqueta}: ${textoDeEspera(minutos)}`}
+          title={
+            conSemaforo
+              ? `${espera.etiqueta}: ${textoDeEspera(minutos)}`
+              : `En el pase desde hace ${textoDeEspera(minutos)}`
+          }
         >
           <span className="flex items-center gap-1">
             <Clock size={20} aria-hidden="true" />
             {textoDeEspera(minutos)}
           </span>
-          <span className="text-sm font-bold uppercase tracking-wide">
-            {espera.signo} {espera.etiqueta}
-          </span>
+          {conSemaforo && (
+            <span className="text-sm font-bold uppercase tracking-wide">
+              {espera.signo} {espera.etiqueta}
+            </span>
+          )}
         </p>
       </header>
 

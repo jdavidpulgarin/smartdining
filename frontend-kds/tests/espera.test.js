@@ -141,3 +141,56 @@ test('un reloj atrasado no produce minutos negativos', () => {
   const ahora = Date.parse(creado) - 60000
   assert.strictEqual(espera.minutosDesdeCreacion({ creado_en: creado }, ahora), 0)
 })
+
+// ---------------------------------------------------------------------------
+// El semaforo solo aplica a Nuevas y En preparacion
+// ---------------------------------------------------------------------------
+
+test('en Nuevas y En preparacion el semaforo sigue funcionando', () => {
+  for (const estado of ['recibido', 'en_preparacion']) {
+    assert.strictEqual(espera.aplicaSemaforo(estado), true, estado)
+    assert.strictEqual(espera.senalDeEsperaDeComanda(estado, 3).nivel, 'normal')
+    assert.strictEqual(espera.senalDeEsperaDeComanda(estado, 12).nivel, 'ambar')
+    assert.strictEqual(espera.senalDeEsperaDeComanda(estado, 30).nivel, 'rojo')
+  }
+})
+
+test('una comanda lista se muestra neutra, aunque lleve horas', () => {
+  for (const minutos of [1, 12, 30, 19056]) {
+    const senal = espera.senalDeEsperaDeComanda('listo', minutos)
+    assert.strictEqual(senal.nivel, 'neutro', `${minutos} min`)
+  }
+})
+
+test('en Listas no hay etiqueta ni signo: nada de "Retrasada"', () => {
+  const senal = espera.senalDeEsperaDeComanda('listo', 300)
+
+  assert.strictEqual(senal.etiqueta, '', 'sin texto de nivel')
+  assert.strictEqual(senal.signo, '', 'sin signo')
+  assert.notStrictEqual(senal.etiqueta, 'Retrasada')
+})
+
+test('el tiempo si se muestra en Listas, con el tope +99', () => {
+  // La señal es neutra pero el reloj sigue: la comanda espera al mesero.
+  assert.strictEqual(espera.senalDeEsperaDeComanda('listo', 300).nivel, 'neutro')
+  assert.strictEqual(espera.textoDeEspera(300), '+99 min')
+  assert.strictEqual(espera.textoDeEspera(42), '42 min')
+})
+
+test('los estados que ya salieron del tablero tampoco llevan semaforo', () => {
+  for (const estado of ['entregado', 'pagado', 'cancelado', undefined, null]) {
+    assert.strictEqual(espera.aplicaSemaforo(estado), false, String(estado))
+    assert.strictEqual(espera.senalDeEsperaDeComanda(estado, 999).nivel, 'neutro')
+  }
+})
+
+test('senalDeEspera (sin estado) conserva su comportamiento de siempre', () => {
+  // La version por minutos se sigue usando y no cambia: solo se agrego la
+  // variante que mira el estado.
+  assert.strictEqual(espera.senalDeEspera(30).nivel, 'rojo')
+  assert.strictEqual(espera.senalDeEspera(30).etiqueta, 'Retrasada')
+})
+
+test('la lista de estados con semaforo son las dos columnas de cocina', () => {
+  assert.deepStrictEqual(espera.ESTADOS_CON_SEMAFORO, ['recibido', 'en_preparacion'])
+})
