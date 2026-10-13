@@ -73,11 +73,14 @@
 \echo '===> [21/24] Ejecutando 21_fix_h06_limites_pedido.sql...'
 \i 21_fix_h06_limites_pedido.sql
 
-\echo '===> [22/24] Ejecutando 22_fix_h03_estado_pago.sql...'
+\echo '===> [22/25] Ejecutando 22_fix_h03_estado_pago.sql...'
 \i 22_fix_h03_estado_pago.sql
 
-\echo '===> [23/24] Ejecutando 23_fix_h08_intentos_pago_fallidos.sql...'
+\echo '===> [23/25] Ejecutando 23_fix_h08_intentos_pago_fallidos.sql...'
 \i 23_fix_h08_intentos_pago_fallidos.sql
+
+\echo '===> [24/25] Ejecutando 24_vistas_reportes.sql...'
+\i 24_vistas_reportes.sql
 
 \echo '===> Finalizando bootstrap...'
 \echo '====================================================='
