@@ -677,10 +677,19 @@ comensal solo ve los pedidos de su mesa (403 si no).
 
 ### GET /pedidos/mesa
 
-200: `{ "id_mesa": 5, "pedidos": [ ... ] }` — todos los pedidos de la mesa del token,
-más recientes primero, cada uno con sus `detalles` en el mismo formato que
-`GET /pedidos/:id` (ítems con `comensal` e `ingredientes`, que es lo que necesita la
+200: `{ "id_mesa": 5, "pedidos": [ ... ] }` — los pedidos de la **visita actual** de la
+mesa del token, más recientes primero, cada uno con sus `detalles` en el mismo formato
+que `GET /pedidos/:id` (ítems con `comensal` e `ingredientes`, que es lo que necesita la
 cuenta dividida por persona).
+
+**Solo la visita actual** (`creado_en >= mesas.sesion_iniciada_en`): sin ese filtro el
+grupo que se acaba de sentar vería lo que pidió el anterior, con sus alias y sus platos.
+Un pedido creado en el instante exacto de la apertura **sí** entra. Con
+`sesion_iniciada_en` en `null` se devuelven todos, como antes del script 17.
+
+La misma regla se aplica a **`GET /pedidos/:id` cuando quien pregunta es un comensal**:
+un pedido de su mesa pero de otra visita responde **403**. El personal sí ve el histórico
+completo.
 
 ### PATCH /pedidos/:id/estado
 

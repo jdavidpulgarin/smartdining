@@ -251,10 +251,28 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
  * Trae los ítems con sus ingredientes porque con esto se pinta la cuenta de la
  * mesa, y dividirla por persona necesita saber qué pidió cada comensal. Son dos
  * consultas fijas (pedidos + detalles de todos ellos), no una por pedido.
+ *
+ * Solo los de la VISITA ACTUAL (mesas.sesion_iniciada_en, script 17). Lo usa el
+ * comensal desde su sesión de QR: sin este filtro vería lo que pidió el grupo
+ * anterior sentado en su mesa, con sus alias y sus platos, que no es asunto
+ * suyo. Mismo criterio que obtener_cuenta_mesa y que el reparto de pagos.
+ *
+ * El `>=` incluye un pedido creado en el instante exacto de la apertura: si se
+ * excluyera, el primer pedido de una mesa que se abre y pide de inmediato
+ * quedaría fuera de su propia cuenta.
+ *
+ * COALESCE sobre la comparación resuelve el caso sin sesión: con
+ * sesion_iniciada_en en NULL, `creado_en >= NULL` da NULL y se traduce a TRUE,
+ * o sea entran todos los pedidos, como antes del script 17.
  */
 async function listarPorMesa(idMesa) {
   const result = await pool.query(
-    'SELECT * FROM pedidos WHERE id_mesa = $1 ORDER BY creado_en DESC',
+    `SELECT * FROM pedidos WHERE id_mesa = $1
+       AND COALESCE(
+             creado_en >= (SELECT m.sesion_iniciada_en FROM mesas m WHERE m.id_mesa = $1),
+             TRUE
+           )
+     ORDER BY creado_en DESC`,
     [idMesa]
   );
   return agruparDetalles(result.rows, await detallesDePedidos(result.rows.map((p) => p.id_pedido)));

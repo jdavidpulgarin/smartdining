@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
-const { instalarFakeDb, tokenStaff, construirTokenQr } = require('./helpers/fake-db');
+const { instalarFakeDb, tokenStaff, tokenComensal, construirTokenQr } = require('./helpers/fake-db');
 const { instalarFakeSocket, CLAVE_FALSA } = require('./helpers/fake-socket');
 const app = require('../server');
 
@@ -388,6 +388,215 @@ test('la cuenta de la mesa la delimita la funcion de la base, no el backend', as
       ['Carla'],
       'solo el grupo actual'
     );
+  } finally {
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// El comensal solo ve los pedidos de SU visita
+// ---------------------------------------------------------------------------
+
+const SQL_PEDIDOS_DE_LA_MESA = 'SELECT * FROM pedidos WHERE id_mesa = $1';
+
+/** Pedidos de dos visitas distintas de la misma mesa. */
+const VISITA_ANTERIOR = [
+  { id_pedido: 23, id_mesa: ID_MESA, codigo_pedido: 'PED-ANA', estado: 'pagado', total: '48000.00', creado_en: '2026-10-13T01:00:00.000Z' },
+  { id_pedido: 24, id_mesa: ID_MESA, codigo_pedido: 'PED-BETO', estado: 'pagado', total: '24000.00', creado_en: '2026-10-13T01:05:00.000Z' },
+];
+const VISITA_ACTUAL = [
+  { id_pedido: 25, id_mesa: ID_MESA, codigo_pedido: 'PED-CARLA', estado: 'recibido', total: '72000.00', creado_en: '2026-10-13T03:10:00.000Z' },
+  { id_pedido: 26, id_mesa: ID_MESA, codigo_pedido: 'PED-DIEGO', estado: 'recibido', total: '24000.00', creado_en: '2026-10-13T03:11:00.000Z' },
+];
+
+/**
+ * Doble que imita el filtro de la base: devuelve los pedidos cuyo creado_en es
+ * >= sesion_iniciada_en, o todos si la mesa no tiene sesion delimitada.
+ */
+function responderPedidosDeLaMesa(sesionIniciadaEn, pedidos = [...VISITA_ANTERIOR, ...VISITA_ACTUAL]) {
+  return (sql) => {
+    if (sql.includes(SQL_PEDIDOS_DE_LA_MESA)) {
+      const visibles = sesionIniciadaEn
+        ? pedidos.filter((p) => new Date(p.creado_en) >= new Date(sesionIniciadaEn))
+        : pedidos;
+      return { rows: visibles.map((p) => ({ ...p })) };
+    }
+    if (sql.includes('FROM detalles_pedido dp')) return { rows: [] };
+    return { rows: [] };
+  };
+}
+
+test('la consulta de los pedidos de la mesa filtra por sesion en SQL', async () => {
+  const db = instalarFakeDb(responderPedidosDeLaMesa('2026-10-13T03:00:00.000Z'));
+  try {
+    const res = await request(app)
+      .get('/api/pedidos/mesa')
+      .set('Authorization', `Bearer ${tokenComensal(ID_MESA)}`);
+
+    assert.strictEqual(res.status, 200);
+    const consulta = db.buscar(SQL_PEDIDOS_DE_LA_MESA);
+    assert.ok(consulta, 'se consultan los pedidos de la mesa');
+    assert.ok(
+      consulta.sql.includes('creado_en >= (SELECT m.sesion_iniciada_en FROM mesas m WHERE m.id_mesa = $1)'),
+      'la regla es la misma que la de obtener_cuenta_mesa'
+    );
+    assert.ok(consulta.sql.includes('COALESCE('), 'sin sesion delimitada entran todos');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('el comensal solo ve los pedidos de la visita actual', async () => {
+  const db = instalarFakeDb(responderPedidosDeLaMesa('2026-10-13T03:00:00.000Z'));
+  try {
+    const res = await request(app)
+      .get('/api/pedidos/mesa')
+      .set('Authorization', `Bearer ${tokenComensal(ID_MESA)}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(
+      res.body.pedidos.map((p) => p.codigo_pedido),
+      ['PED-CARLA', 'PED-DIEGO'],
+      'los de Ana y Beto son de otra visita'
+    );
+    assert.strictEqual(res.body.pedidos.length, 2);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('con sesion_iniciada_en NULL el comensal ve todos (retrocompatible)', async () => {
+  const db = instalarFakeDb(responderPedidosDeLaMesa(null));
+  try {
+    const res = await request(app)
+      .get('/api/pedidos/mesa')
+      .set('Authorization', `Bearer ${tokenComensal(ID_MESA)}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(
+      res.body.pedidos.length,
+      4,
+      'una mesa que nunca se abrio desde el script 17 se comporta como antes'
+    );
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('un pedido creado en el instante exacto de la apertura SI entra', async () => {
+  const inicio = '2026-10-13T03:00:00.000Z';
+  const enElInstante = {
+    id_pedido: 30,
+    id_mesa: ID_MESA,
+    codigo_pedido: 'PED-JUSTO',
+    estado: 'recibido',
+    total: '10000.00',
+    creado_en: inicio,
+  };
+  const db = instalarFakeDb(responderPedidosDeLaMesa(inicio, [...VISITA_ANTERIOR, enElInstante]));
+  try {
+    const res = await request(app)
+      .get('/api/pedidos/mesa')
+      .set('Authorization', `Bearer ${tokenComensal(ID_MESA)}`);
+
+    assert.deepStrictEqual(
+      res.body.pedidos.map((p) => p.codigo_pedido),
+      ['PED-JUSTO'],
+      'el >= evita que el primer pedido de la mesa quede fuera de su propia cuenta'
+    );
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('una mesa sin pedidos en la visita actual devuelve la lista vacia', async () => {
+  const db = instalarFakeDb(responderPedidosDeLaMesa('2026-10-13T05:00:00.000Z'));
+  try {
+    const res = await request(app)
+      .get('/api/pedidos/mesa')
+      .set('Authorization', `Bearer ${tokenComensal(ID_MESA)}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body.pedidos, [], 'y no los de la visita anterior');
+  } finally {
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /pedidos/:id tampoco deja leer otra visita
+// ---------------------------------------------------------------------------
+
+/** @param {{pedido: object, sesionIniciadaEn: string|null}} opciones */
+function responderUnPedido({ pedido, sesionIniciadaEn }) {
+  return (sql) => {
+    if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) return { rows: [{ ...pedido }] };
+    if (sql.includes('SELECT * FROM mesas WHERE id_mesa')) {
+      return { rows: [{ id_mesa: ID_MESA, numero: ID_MESA, estado: 'ocupada', sesion_iniciada_en: sesionIniciadaEn }] };
+    }
+    if (sql.includes('FROM detalles_pedido dp')) return { rows: [] };
+    return { rows: [] };
+  };
+}
+
+test('un comensal no puede leer por id un pedido de la visita anterior', async () => {
+  const db = instalarFakeDb(
+    responderUnPedido({ pedido: VISITA_ANTERIOR[0], sesionIniciadaEn: '2026-10-13T03:00:00.000Z' })
+  );
+  try {
+    const res = await request(app)
+      .get('/api/pedidos/23')
+      .set('Authorization', `Bearer ${tokenComensal(ID_MESA)}`);
+
+    assert.strictEqual(res.status, 403, 'es su mesa, pero no su visita');
+    assert.match(res.body.error, /no pertenece a tu mesa/);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('un comensal si lee un pedido de su propia visita', async () => {
+  const db = instalarFakeDb(
+    responderUnPedido({ pedido: VISITA_ACTUAL[0], sesionIniciadaEn: '2026-10-13T03:00:00.000Z' })
+  );
+  try {
+    const res = await request(app)
+      .get('/api/pedidos/25')
+      .set('Authorization', `Bearer ${tokenComensal(ID_MESA)}`);
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.codigo_pedido, 'PED-CARLA');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('el personal si ve el historico completo de la mesa por id', async () => {
+  const db = instalarFakeDb(
+    responderUnPedido({ pedido: VISITA_ANTERIOR[0], sesionIniciadaEn: '2026-10-13T03:00:00.000Z' })
+  );
+  try {
+    const res = await request(app)
+      .get('/api/pedidos/23')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`);
+
+    assert.strictEqual(res.status, 200, 'el filtro de visita es solo para el comensal');
+    assert.strictEqual(res.body.codigo_pedido, 'PED-ANA');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('sin sesion delimitada el comensal puede leer cualquier pedido de su mesa', async () => {
+  const db = instalarFakeDb(
+    responderUnPedido({ pedido: VISITA_ANTERIOR[0], sesionIniciadaEn: null })
+  );
+  try {
+    const res = await request(app)
+      .get('/api/pedidos/23')
+      .set('Authorization', `Bearer ${tokenComensal(ID_MESA)}`);
+
+    assert.strictEqual(res.status, 200, 'retrocompatible');
   } finally {
     db.restaurar();
   }
