@@ -126,6 +126,87 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 
 ---
 
+## Seguridad del transporte y del acceso
+
+### Cabeceras y CORS (H-10)
+
+El backend usa **helmet** (`nosniff`, `X-Frame-Options`, `Referrer-Policy`, CSP por
+defecto…) y ya **no anuncia `x-powered-by`**.
+
+**CORS con lista blanca**, nunca `*`. Los orígenes salen de `CORS_ORIGINS` (separados por
+comas):
+
+| Entorno | Si falta `CORS_ORIGINS` |
+|---|---|
+| `NODE_ENV=production` | **Ningún origen cruzado permitido**: un despliegue sin configurar se queda corto, no abierto |
+| desarrollo y pruebas | `http://localhost:5173`, `:5174`, `:5175` (cliente, restaurante y KDS) |
+
+Cabeceras permitidas: `Content-Type`, `Authorization` y `x-internal-key`. **No** se
+habilitan credenciales: la API autentica con `Authorization: Bearer`, no con cookies.
+
+Una petición **sin** cabecera `Origin` (curl, el socket-server, una prueba) se deja pasar:
+CORS protege al navegador y esas peticiones no vienen de uno. Lo que decide el acceso ahí
+es el JWT o la clave interna.
+
+### Límite de intentos (H-04 y H-27)
+
+Las dos rutas públicas —las que no piden sesión previa— están limitadas y responden **429**
+con `Retry-After`:
+
+| Ruta | Límite por defecto | Clave del contador | Qué cuenta |
+|---|---|---|---|
+| `POST /auth/login` | **5 / minuto** | IP **+ email** | Solo los intentos **fallidos** |
+| `POST /mesas/qr/:token/sesion` | **20 / minuto** | IP | Todos los intentos |
+
+```json
+{ "error": "Demasiados intentos de inicio de sesión. Espera un momento y vuelve a intentarlo." }
+```
+
+La clave del login combina IP y email a propósito: por IP sola, una botnet esquiva el
+límite; por email solo, cualquiera podría bloquear la cuenta de otro. Y solo cuentan los
+fallos, para que un cajero que entra y sale varias veces no se bloquee a sí mismo. El QR
+va más holgado porque una mesa entera escanea desde la misma IP del local, y ahí sí
+cuentan los aciertos: reusar un token válido muchas veces por segundo tampoco debería
+pasar.
+
+**Variables:** `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS`, `RATE_LIMIT_QR_MAX`,
+`RATE_LIMIT_QR_VENTANA_MS`. Los límites se desactivan solos dentro de las pruebas.
+
+> **Detrás de un proxy** (nginx, Docker), `req.ip` es la IP del proxy y el límite contaría
+> a todo el mundo como un solo visitante. Hay que poner **`TRUST_PROXY`** (`true`, un
+> número de saltos, o una lista de IPs/rangos). Está **apagada por defecto**: confiar en
+> `X-Forwarded-For` sin un proxy delante permite falsificar la IP.
+>
+> **Limitación:** el contador vive en memoria del proceso. Con varias instancias el límite
+> es por instancia (con N instancias, el techo real es 5×N). Para hacerlo global haría
+> falta un store compartido en Redis.
+
+### Cuenta desactivada (H-09)
+
+El middleware de autenticación comprueba en **cada petición del personal** que la cuenta
+siga `activo`, no solo que el JWT sea válido. Antes, al desactivar a alguien su token
+seguía abriendo la API hasta caducar (8 h).
+
+- Cuenta desactivada o borrada → **401** `Tu cuenta está desactivada, habla con administración`.
+- Se comprueba **antes** del rol, así que un desactivado recibe 401 y no 403.
+- **No afecta** al token del **comensal** (el rol `comensal` no existe en `usuarios`), ni
+  al **canal interno** con `x-internal-key` (detrás no hay un usuario, es un servicio), ni
+  al **login** (todavía no hay JWT que comprobar).
+
+El resultado se guarda en Redis (`sd:usuario:{id}:activo`) con TTL **`CACHE_USUARIO_TTL_SEG`**,
+60 s por defecto, para no añadir una consulta por petición.
+
+> **Ventana aceptada:** con la caché de 60 s, **un usuario recién desactivado puede seguir
+> entrando hasta un minuto**. Es el precio de no consultar la base en cada llamada; si hace
+> falta cerrar antes, se baja el TTL o se borra la llave al desactivar
+> (`usuario-activo.olvidar`).
+>
+> Redis aquí es **solo caché** y nunca tumba una petición: si falla al leer o al escribir,
+> se consulta PostgreSQL y se sigue. Si falla **la base**, la petición falla cerrada (no se
+> deja pasar a ciegas).
+
+---
+
 ## Categorías
 
 | Método | Ruta | Auth | Descripción |
