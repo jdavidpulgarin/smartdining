@@ -212,6 +212,30 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
     }
     const estadoAnterior = actual.rows[0].estado;
 
+    // ORDEN DE BLOQUEOS: la mesa ANTES del pedido, igual que en los pagos.
+    //
+    // Un estado de cierre acaba llamando a liberarSiNoQuedanPedidosAbiertos,
+    // que bloquea la mesa. Si el UPDATE del pedido fuera primero, este camino
+    // iría pedido -> mesa mientras registrarPago va mesa -> pedido, y dos
+    // operaciones simultáneas sobre el mismo pedido se interbloquean: medido en
+    // 19 de 20 intentos (SQLSTATE 40P01) antes de este cambio.
+    //
+    // Solo para los estados de cierre: una transición del KDS
+    // (en_preparacion/listo) no toca la mesa en ningún momento, así que
+    // bloquearla ahí sería serializar las comandas de una mesa sin motivo.
+    //
+    // La mesa se identifica con una subconsulta en la misma sentencia, para no
+    // leer y después bloquear (entre las dos cosas el pedido podría cambiar de
+    // mesa, y además ahorra un viaje).
+    if (ESTADOS_CIERRE.includes(estado)) {
+      await client.query(
+        `SELECT m.id_mesa FROM mesas m
+          WHERE m.id_mesa = (SELECT p.id_mesa FROM pedidos p WHERE p.id_pedido = $1)
+          FOR UPDATE`,
+        [id]
+      );
+    }
+
     const result = await client.query(
       'UPDATE pedidos SET estado = $1 WHERE id_pedido = $2 RETURNING *',
       [estado, id]

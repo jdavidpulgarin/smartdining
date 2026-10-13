@@ -1,6 +1,8 @@
 const { z } = require('zod');
 const transaccionesService = require('../services/transacciones.service');
+const { ESTADO_COBRADO } = transaccionesService;
 const socketNotifier = require('../services/socket.notifier');
+const { esComensal } = require('../middleware/auth.middleware');
 const aliasComensal = require('../services/alias-comensal');
 
 // Valores exactos de los CHECK de la tabla transacciones en el schema.sql de
@@ -8,12 +10,35 @@ const aliasComensal = require('../services/alias-comensal');
 const METODOS_PAGO = ['efectivo', 'tarjeta_debito', 'tarjeta_credito', 'transferencia', 'online'];
 const ESTADOS_TRANSACCION = ['pendiente', 'completada', 'fallida', 'reembolsada'];
 
+/**
+ * H-07: el estado de la transacción lo fija el SERVIDOR, no la caja.
+ *
+ * Antes el body podía mandar `estado_transaccion`, así que un cajero (o
+ * cualquiera con su token) podía registrar un pago como `reembolsada` o
+ * `fallida` y dejar la cuenta sin cobrar pero con una transacción encima, sin
+ * ningún rastro de quién decidió eso. Un reembolso es una operación distinta,
+ * con su propia autorización, y no se hace por esta ruta.
+ *
+ * Se sigue aceptando `"completada"` por compatibilidad con lo que ya manda el
+ * panel; cualquier otro valor responde 400. Si no viene el campo, el service
+ * usa 'completada' como siempre.
+ */
+const ESTADO_UNICO_EN_CAJA = ESTADO_COBRADO;
+const MENSAJE_ESTADO_FIJO =
+  'El estado del pago lo fija el servidor: no envíes estado_transaccion '
+  + '(un reembolso no se registra por esta ruta)';
+
 const pagoSchema = z.object({
   id_pedido: z.number().int(),
   monto: z.number().positive(),
   metodo_pago: z.enum(METODOS_PAGO),
   referencia_externa: z.string().optional(),
-  estado_transaccion: z.enum(ESTADOS_TRANSACCION).optional(),
+  // refine y no z.literal: así el mensaje que ve la caja explica la regla, en
+  // vez del 'Invalid literal value, expected "completada"' de zod.
+  estado_transaccion: z
+    .string()
+    .refine((valor) => valor === ESTADO_UNICO_EN_CAJA, { message: MENSAJE_ESTADO_FIJO })
+    .optional(),
   // Quién pagó, cuando la mesa divide la cuenta: va a transacciones.comensal y
   // es lo que permite que obtener_cuenta_mesa descuente el pago del saldo de esa
   // persona y no del montón. Opcional: un cobro de la mesa completa no lleva alias.
@@ -23,15 +48,19 @@ const pagoSchema = z.object({
 /**
  * Alias que queda en la transacción.
  *
- * Si el JWT trae un alias firmado, ESE manda y el del body se ignora: un alias
- * firmado por el servidor no se puede suplantar escribiendo otro en el cuerpo
- * (misma regla que al crear un pedido en D-03). Hoy esta ruta es de
- * admin/cajero, así que en la práctica el alias sale del body; la regla queda
- * puesta para cuando el comensal pague desde su sesión.
+ * Misma regla que al crear un pedido (H-05): si el JWT trae alias firmado, ese
+ * manda; y si quien paga es un comensal **sin** alias en el token, queda `null`
+ * en vez de creerle al body. Un alias escrito en el cuerpo decidiría de quién
+ * se descuenta el pago en obtener_cuenta_mesa.
+ *
+ * Hoy esta ruta es de admin/cajero —su JWT no lleva alias, así que el alias
+ * viene del body, que es lo correcto para un cobro en caja— pero la regla queda
+ * puesta para cuando el comensal pague desde su propia sesión.
  */
 function aliasDelComensal(req, cuerpo) {
   const firmado = req.user?.comensal;
   if (typeof firmado === 'string' && firmado.trim()) return firmado.trim();
+  if (esComensal(req)) return null;
   return cuerpo.comensal ?? null;
 }
 

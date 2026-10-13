@@ -23,6 +23,22 @@ const PORCIONES = ['ligera', 'normal', 'extra'];
 // validar_selecciones_detalle en la base.
 const MAX_INGREDIENTES_POR_ITEM = 20;
 
+/**
+ * Topes del pedido (H-06).
+ *
+ * Antes `cantidad` solo pedía ser positiva: un `100000000` llegaba a la base,
+ * desbordaba el DECIMAL del subtotal y salía como 500. Y `items` no tenía tope,
+ * así que un cuerpo con miles de ítems hacía miles de INSERT dentro de una
+ * transacción.
+ *
+ * Los números son de sala, no técnicos: 20 unidades del mismo plato ya es una
+ * mesa grande pidiendo lo mismo, y 50 ítems distintos es más de lo que cabe en
+ * una comanda. Lo que pase de ahí es un error de quien llama o un abuso, y en
+ * los dos casos un 400 explica mejor que un 500.
+ */
+const MAX_ITEMS_POR_PEDIDO = 50;
+const MAX_CANTIDAD_POR_ITEM = 20;
+
 // Campos de precio que un cliente podría intentar imponer. El precio lo fija
 // SIEMPRE la base (platos.precio e ingredientes.precio_extra vía trigger), así
 // que se rechazan en voz alta en vez de ignorarlos en silencio: quien los manda
@@ -74,7 +90,7 @@ const aliasSchema = z.string().trim().min(1).max(40).refine(sinOverride, MENSAJE
 const itemSchema = z
   .object({
     id_plato: z.number().int(),
-    cantidad: z.number().int().positive(),
+    cantidad: z.number().int().min(1).max(MAX_CANTIDAD_POR_ITEM),
     comensal: aliasSchema.optional(),
     apodo: aliasSchema.optional(),
     notas: z.string().max(200).refine(sinOverride, MENSAJE_OVERRIDE).optional(),
@@ -102,23 +118,31 @@ const itemSchema = z
 const crearPedidoSchema = z.object({
   id_mesa: z.number().int().optional(),
   notas_generales: z.string().max(500).refine(sinOverride, MENSAJE_OVERRIDE).optional(),
-  items: z.array(itemSchema).min(1),
+  items: z.array(itemSchema).min(1).max(MAX_ITEMS_POR_PEDIDO),
 });
 
 /**
  * Alias del comensal que queda guardado en el ítem.
  *
- * Si el JWT trae `comensal` (alias firmado al abrir la sesión de mesa; llega con
- * el PR #13 de Roberto), ESE manda y el del body se ignora: un alias firmado por
- * el servidor no se puede suplantar escribiendo otro en el cuerpo, que es justo
- * lo que permitiría cargarle un ítem a otra persona de la mesa.
+ * H-05: para un COMENSAL el alias sale **solo del JWT**. Lo que venga en el
+ * body (`comensal` o `apodo`) se ignora por completo, incluso si el token no
+ * trae alias: en ese caso queda `null`.
  *
- * Sin alias en el token se usa el del body, que es el caso de hoy y el del
- * personal: el mesero escribe de parte de quién va cada ítem.
+ * El alias no es decoración, es a quién se le cobra: con el body como respaldo,
+ * cualquiera en la mesa podía escribir el nombre de otro y cargarle sus platos,
+ * y la cuenta por persona dejaba de ser fiable. Un alias firmado por el
+ * servidor no se puede suplantar; uno escrito en el cuerpo sí.
+ *
+ * Para mesero y admin el body sigue valiendo: ellos piden de parte de alguien y
+ * su JWT no lleva alias, sino `id_usuario`.
  */
 function aliasDelComensal(req, item) {
   const firmado = req.user?.comensal;
   if (typeof firmado === 'string' && firmado.trim()) return firmado.trim();
+
+  // Un comensal sin alias firmado se queda sin alias: el body no es autoridad.
+  if (esComensal(req)) return null;
+
   return item.comensal ?? item.apodo ?? null;
 }
 

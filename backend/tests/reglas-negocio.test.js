@@ -146,8 +146,11 @@ test('sin estado_transaccion el cobro es completada y liquida el pedido', async 
   }
 });
 
+// H-07: el estado lo fija el servidor. Antes estos estados se aceptaban y solo
+// se comprobaba que no liquidaran el pedido; ahora el cuerpo se rechaza de
+// entrada, porque un cajero no decide que un pago fue 'reembolsada'.
 for (const estado of ['fallida', 'pendiente', 'reembolsada']) {
-  test(`un pago '${estado}' se guarda pero NO marca el pedido como pagado`, async () => {
+  test(`un pago '${estado}' se rechaza con 400: el estado lo fija el servidor`, async () => {
     const db = instalarFakeDb(responderPagoOk);
     try {
       const res = await request(app)
@@ -155,22 +158,17 @@ for (const estado of ['fallida', 'pendiente', 'reembolsada']) {
         .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
         .send({ id_pedido: 1, monto: 70000, metodo_pago: 'tarjeta_credito', estado_transaccion: estado });
 
-      assert.strictEqual(res.status, 201, 'la transacción sí queda registrada');
-      const insert = db.buscar('INSERT INTO transacciones');
-      assert.ok(insert, 'debe insertarse la transacción');
-      assert.strictEqual(insert.params[3], estado);
+      assert.strictEqual(res.status, 400);
+      assert.match(res.body.error, /El estado del pago lo fija el servidor/);
 
       assert.strictEqual(
-        db.buscar("UPDATE pedidos SET estado = 'pagado'"),
+        db.buscar('INSERT INTO transacciones'),
         undefined,
-        'el pedido NO debe quedar pagado'
+        'no se registra nada'
       );
-      assert.strictEqual(
-        db.buscar('INSERT INTO historial_estados'),
-        undefined,
-        'tampoco debe registrarse el cambio de estado'
-      );
-      assert.strictEqual(db.buscar('UPDATE mesas'), undefined, 'ni liberarse la mesa');
+      assert.strictEqual(db.buscar("UPDATE pedidos SET estado = 'pagado'"), undefined);
+      assert.strictEqual(db.buscar('INSERT INTO historial_estados'), undefined);
+      assert.strictEqual(db.buscar('UPDATE mesas'), undefined);
     } finally {
       db.restaurar();
     }
