@@ -1,0 +1,40 @@
+@import 'tailwindcss';
+
+/*
+ * Tema oscuro fijo y de alto contraste: el KDS vive en un monitor de cocina que
+ * se mira de lejos y a veces con reflejos, asi que no sigue la preferencia del
+ * sistema. Los tamanos base son grandes a proposito.
+ */
+@theme {
+  --color-fondo: #0b0f14;
+  --color-panel: #151b23;
+  --color-panel-alto: #1e2732;
+  --color-borde: #2c3845;
+  --color-texto: #f5f7fa;
+  --color-texto-suave: #9aa8b8;
+  --color-nuevas: #38bdf8;
+  --color-preparacion: #fbbf24;
+  --color-listas: #4ade80;
+  --color-alerta: #f87171;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-fondo);
+  color: var(--color-texto);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Tipografia base mas grande que la de una web normal: se lee a distancia. */
+  font-size: 18px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* En una pantalla tactil de cocina, seleccionar texto por accidente estorba. */
+button {
+  user-select: none;
+}
