@@ -9,12 +9,30 @@ const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
 const { registrarPedidos, rutasPedidos } = require('./pedidos');
 const { crearServicioQr, derivarSecretoQr, rutasQr } = require('./qr');
 const { crearServicioPush, rutasPush } = require('./push');
-const { crearAlmacenSuscripciones, registrarSuscripcionesSocket, rutasSuscripciones } = require('./suscripciones');
+const {
+  crearAlmacenSuscripciones, registrarSuscripcionesSocket, rutasSuscripciones, MAX_SUSCRIPCIONES_POR_MESA,
+} = require('./suscripciones');
 const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
+const { crearConexionRedis } = require('./almacen/redis');
+const { crearAlmacenCarritosRedis } = require('./almacen/carritos-redis');
+const { crearRegistroIdempotenciaRedis } = require('./almacen/idempotencia-redis');
+const { crearRevocacionesRedis } = require('./almacen/revocaciones-redis');
+const { crearAlmacenSuscripcionesRedis } = require('./almacen/suscripciones-redis');
 
 const rutasBase = {
-  'GET /health': async (req, res) => enviarJson(res, 200, { estado: 'ok' }),
+  /**
+   * Estado para Docker, Nginx y el despliegue. Con Redis configurado pero sin
+   * conexión responde 503 "degradado": el proceso vive, pero no puede atender
+   * eventos que cambian estado (responden ERROR_INTERNO) y no debe recibir
+   * tráfico nuevo. Sin REDIS_URL (solo desarrollo) informa "memoria".
+   */
+  'GET /health': async (req, res, ctx) => {
+    if (!ctx.redis) return enviarJson(res, 200, { estado: 'ok', redis: 'memoria' });
+    const redis = ctx.redis.estado();
+    if (!ctx.redis.disponible()) return enviarJson(res, 503, { estado: 'degradado', redis });
+    return enviarJson(res, 200, { estado: 'ok', redis });
+  },
 };
 
 /**
@@ -44,18 +62,41 @@ function crearServidor(config, deps = {}) {
     connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
   });
 
+  // Redis solo si hay REDIS_URL (en producción es obligatorio, ver config.js).
+  // No se espera la conexión para escuchar: mientras no esté lista, /health
+  // responde "degradado" y los eventos que tocan estado, ERROR_INTERNO.
+  const redis = deps.redis || (config.redisUrl ? crearConexionRedis({ url: config.redisUrl }) : null);
+  if (redis) {
+    redis.conectar().catch((err) => console.error(`[redis] no se pudo conectar: ${err.code || err.name}`));
+  }
+
   // Estado compartido por todos los sockets de esta instancia.
+  // Con Redis todo el estado sobrevive a un reinicio y se comparte entre
+  // instancias (carritos atómicos, idempotencia con SET NX, revocaciones de
+  // QR y suscripciones); sin REDIS_URL, fuera de producción, vive en memoria.
+  const cliente = redis ? redis.cliente : null;
+  // Registro de pagos con TTL de 7 días: los proveedores de pago reintentan
+  // durante días, mucho más que los 10 min de los eventos de socket.
+  const TTL_PAGOS_MS = 7 * 24 * 60 * 60 * 1000;
+  const registro = cliente ? crearRegistroIdempotenciaRedis({ cliente }) : crearRegistroIdempotencia();
   Object.assign(ctx, {
     io,
-    registro: crearRegistroIdempotencia(),
-    carritos: crearAlmacenCarritos(),
-    // Registro aparte con TTL de 7 días: los proveedores de pago reintentan
-    // durante días, mucho más que los 10 min de los eventos de socket.
-    registroPagos: crearRegistroIdempotencia({ ttlMs: 7 * 24 * 60 * 60 * 1000 }),
+    redis,
+    registro,
+    carritos: cliente ? crearAlmacenCarritosRedis({ cliente }) : crearAlmacenCarritos({ registro }),
+    registroPagos: cliente
+      ? crearRegistroIdempotenciaRedis({ cliente, ttlMs: TTL_PAGOS_MS })
+      : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),
-    suscripciones: crearAlmacenSuscripciones(),
-    qr: crearServicioQr({ secreto: derivarSecretoQr(config), ttlMinutosPorDefecto: config.qrTtlMinutos }),
+    suscripciones: cliente
+      ? crearAlmacenSuscripcionesRedis({ cliente, maxPorMesa: MAX_SUSCRIPCIONES_POR_MESA })
+      : crearAlmacenSuscripciones(),
+    qr: crearServicioQr({
+      secreto: derivarSecretoQr(config),
+      ttlMinutosPorDefecto: config.qrTtlMinutos,
+      ...(cliente ? { revocaciones: crearRevocacionesRedis({ cliente }) } : {}),
+    }),
   });
 
   // Mesas ya liberadas que aún no tienen sesión nueva. Hace idempotente a
@@ -72,7 +113,7 @@ function crearServidor(config, deps = {}) {
   ctx.liberarMesa = async (idMesa, motivo = 'liberada') => {
     if (mesasLiberadas.has(idMesa)) return { duplicado: true };
     mesasLiberadas.add(idMesa);
-    ctx.qr.revocarMesa(idMesa);
+    await ctx.qr.revocarMesa(idMesa);
     // ANTES de vaciar el carrito: quien lo reciba todavía puede mostrar qué
     // quedó sin pedir. Al panel le sirve para pintar la mesa libre al instante.
     io.to(salaMesa(idMesa)).to(SALA_ADMIN).emit('mesa:liberada', {
@@ -80,8 +121,8 @@ function crearServidor(config, deps = {}) {
       motivo,
       emitidoEn: new Date().toISOString(),
     });
-    ctx.suscripciones.limpiarMesa(idMesa);
-    ctx.carritos.vaciar(idMesa);
+    await ctx.suscripciones.limpiarMesa(idMesa);
+    await ctx.carritos.vaciar(idMesa);
     // Solo se echa a los comensales: la pantalla de la mesa sigue conectada
     // para mostrar el QR del siguiente grupo, y el personal sigue vigilando.
     const enSala = await io.in(salaMesa(idMesa)).fetchSockets();
@@ -93,8 +134,8 @@ function crearServidor(config, deps = {}) {
 
   // Sesión de comensal vigente = su JWT es posterior a la última liberación de
   // su mesa. El personal y la pantalla no dependen de la sesión de mesa.
-  const sesionVigente = (identidad) => identidad.rol !== ROL_COMENSAL
-    || !ctx.qr.revocadaDespuesDe(identidad.id_mesa, identidad.iat);
+  const sesionVigente = async (identidad) => identidad.rol !== ROL_COMENSAL
+    || !(await ctx.qr.revocadaDespuesDe(identidad.id_mesa, identidad.iat));
 
   // Sin JWT válido no se entra: todo socket que llega a 'connection' ya tiene
   // una identidad verificada en socket.data.identidad.

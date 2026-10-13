@@ -43,9 +43,16 @@ function autenticarSocket(secreto, { sesionVigente = () => true } = {}) {
     // el carrito del grupo siguiente. Se responde TOKEN_INVALIDO, igual que un
     // JWT vencido, para que el cliente pida sesión nueva (y el backend lo
     // mande a escanear el QR actual).
-    if (!identidad || !sesionVigente(identidad)) return next(new Error('TOKEN_INVALIDO'));
-    socket.data.identidad = identidad;
-    next();
+    if (!identidad) return next(new Error('TOKEN_INVALIDO'));
+    Promise.resolve(sesionVigente(identidad)).then((vigente) => {
+      if (!vigente) return next(new Error('TOKEN_INVALIDO'));
+      socket.data.identidad = identidad;
+      return next();
+    }, () => {
+      // No se pudo comprobar (Redis caído): se rechaza en vez de dejar pasar
+      // una sesión que podría ser de un grupo anterior.
+      next(new Error('ERROR_INTERNO'));
+    });
   };
 }
 

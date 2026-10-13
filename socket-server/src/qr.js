@@ -35,10 +35,25 @@ const b64 = (buf) => Buffer.from(buf).toString('base64url');
  * Es un token firmado (no cifrado): no lleva secretos, y la firma impide que
  * alguien fabrique uno para otra mesa o alargue su expiración.
  */
-function crearServicioQr({ secreto, ttlMinutosPorDefecto = 360, ahora = Date.now }) {
-  // Última liberación por mesa (ms). Un token emitido ANTES de ese instante
-  // ya no vale, aunque no haya expirado ni tenga la firma alterada.
-  const revocadoDesde = new Map();
+/**
+ * Revocaciones por mesa en memoria: { obtener(idMesa) -> ms|null, fijar(idMesa, ms) }.
+ * La versión Redis (almacen/revocaciones-redis.js) tiene la misma interfaz.
+ */
+function crearRevocacionesMemoria() {
+  const desde = new Map();
+  return {
+    obtener: (idMesa) => desde.get(idMesa) || null,
+    fijar: (idMesa, ms) => { desde.set(idMesa, ms); },
+  };
+}
+
+function crearServicioQr({
+  secreto, ttlMinutosPorDefecto = 360, ahora = Date.now, revocaciones = crearRevocacionesMemoria(),
+}) {
+  // Última liberación por mesa (ms), en `revocaciones`. Un token emitido ANTES
+  // de ese instante ya no vale, aunque no haya expirado ni tenga la firma
+  // alterada. Con Redis esto sobrevive a un reinicio: si viviera solo en
+  // memoria, reiniciar el servidor volvería a aceptar los QR de mesas pagadas.
 
   const firmar = (contenido) => crypto.createHmac('sha256', secreto).update(contenido).digest();
 
@@ -57,7 +72,7 @@ function crearServicioQr({ secreto, ttlMinutosPorDefecto = 360, ahora = Date.now
   }
 
   /** Valida en el servidor: formato, firma, expiración y revocación. */
-  function validar(token) {
+  async function validar(token) {
     if (typeof token !== 'string' || token.length > 512) return { valido: false, motivo: 'formato' };
     const partes = token.split('.');
     if (partes.length !== 3 || partes[0] !== VERSION) return { valido: false, motivo: 'formato' };
@@ -80,15 +95,15 @@ function crearServicioQr({ secreto, ttlMinutosPorDefecto = 360, ahora = Date.now
       return { valido: false, motivo: 'formato' };
     }
     if (ahora() >= p.exp) return { valido: false, motivo: 'expirado' };
-    if (p.iat < (revocadoDesde.get(p.m) || 0)) return { valido: false, motivo: 'revocado' };
+    if (p.iat < ((await revocaciones.obtener(p.m)) || 0)) return { valido: false, motivo: 'revocado' };
     return { valido: true, id_mesa: p.m, expira_en: p.exp };
   }
 
   /** La mesa se liberó: invalida todos los QR emitidos hasta este momento. */
-  function revocarMesa(idMesa) {
+  async function revocarMesa(idMesa) {
     // +1 ms para que también quede fuera un token emitido en este mismo
     // milisegundo; el QR nuevo de la mesa siguiente se genera después.
-    revocadoDesde.set(idMesa, ahora() + 1);
+    await revocaciones.fijar(idMesa, ahora() + 1);
   }
 
   /**
@@ -96,8 +111,8 @@ function crearServicioQr({ secreto, ttlMinutosPorDefecto = 360, ahora = Date.now
    * (iat de un JWT, en segundos)? Se compara contra el final de ese segundo:
    * ante la duda se acepta, porque el backend también comprueba el sid.
    */
-  function revocadaDespuesDe(idMesa, emitidoSeg) {
-    const desde = revocadoDesde.get(idMesa);
+  async function revocadaDespuesDe(idMesa, emitidoSeg) {
+    const desde = await revocaciones.obtener(idMesa);
     if (!desde) return false;
     if (!Number.isFinite(emitidoSeg)) return true; // sin iat no hay forma de saberlo
     return (emitidoSeg + 1) * 1000 <= desde;
@@ -154,7 +169,7 @@ const rutasQr = {
   // Público a propósito: el comensal aún no tiene sesión cuando escanea.
   'POST /qr/validar': async (req, res, ctx) => {
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    const resultado = ctx.qr.validar(cuerpo.token);
+    const resultado = await ctx.qr.validar(cuerpo.token);
     enviarJson(res, resultado.valido ? 200 : 401, resultado);
   },
 
@@ -215,5 +230,5 @@ const rutasQr = {
 };
 
 module.exports = {
-  crearServicioQr, derivarSecretoQr, generarTokenPantalla, rutasQr, TTL_MAX_MINUTOS,
+  crearServicioQr, crearRevocacionesMemoria, derivarSecretoQr, generarTokenPantalla, rutasQr, TTL_MAX_MINUTOS,
 };

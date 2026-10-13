@@ -50,7 +50,7 @@ function registrarSalas(socket, { obtenerSnapshot, sesionVigente = () => true } 
   // sola a esa sala, sin depender de que emita join:table.
   if (identidad.rol === ROL_PANTALLA) socket.join(salaMesa(identidad.id_mesa));
 
-  socket.on('join:table', manejar('join:table', (payload) => {
+  socket.on('join:table', manejar('join:table', async (payload) => {
     if (identidad.rol === 'cocina') {
       return fallo('NO_AUTORIZADO', 'La cocina no se une a salas de mesa');
     }
@@ -58,11 +58,11 @@ function registrarSalas(socket, { obtenerSnapshot, sesionVigente = () => true } 
     if (error) return error;
     // Un comensal conectado antes de liberar la mesa pero que no estaba en la
     // sala (por eso no lo desconectamos) tampoco puede entrar después.
-    if (!sesionVigente(identidad)) return fallo('NO_AUTORIZADO', 'La sesión de esta mesa ya se cerró');
+    if (!(await sesionVigente(identidad))) return fallo('NO_AUTORIZADO', 'La sesión de esta mesa ya se cerró');
 
     socket.join(salaMesa(idMesa));
     const respuesta = { id_mesa: idMesa, sala: salaMesa(idMesa) };
-    if (obtenerSnapshot) respuesta.carrito = obtenerSnapshot(idMesa);
+    if (obtenerSnapshot) respuesta.carrito = await obtenerSnapshot(idMesa);
     return exito(respuesta);
   }));
 
