@@ -216,3 +216,79 @@ export const transaccionesApi = {
   },
 }
 
+// Submódulo de Menú y Catálogo
+export const menuApi = {
+  /**
+   * Obtiene la carta completa del restaurante con categorías y platos: GET /api/menu
+   */
+  async obtenerMenu() {
+    return apiFetch('/menu', { skipAuth: true })
+  },
+}
+
+// Submódulo de Categorías
+export const categoriasApi = {
+  async listar() {
+    return apiFetch('/categorias', { skipAuth: true })
+  },
+}
+
+// Submódulo de Platos
+export const platosApi = {
+  async listar() {
+    return apiFetch('/platos', { skipAuth: true })
+  },
+}
+
+/**
+ * CONTRATOS PENDIENTES PARA DANIEL (Rutas que no existen aún en backend):
+ * 
+ * 1. RF-21 (Reportes):
+ *    GET /api/reportes?rango=hoy|semana|mes
+ *    Rol requerido: admin
+ *    Respuesta esperada: { totalVentas, totalPedidos, tiempoCocinaPromedio, ocupacionMesas, ticketPromedio, topPlatos, metodosPago }
+ */
+export const reportesApi = {
+  async obtenerReporte(rango = 'hoy') {
+    return apiFetch(`/reportes?rango=${encodeURIComponent(rango)}`)
+  },
+}
+
+/**
+ * 2. RF-20 (Constructor de Platos):
+ *    POST /api/platos/constructor
+ *    Rol requerido: admin
+ *    Body esperado: { id_categoria, nombre, precio, tiempo_estimado, pasos: [...] }
+ */
+export const constructorApi = {
+  async guardarPlato(datos) {
+    return apiFetch('/platos/constructor', {
+      method: 'POST',
+      body: JSON.stringify(datos),
+    })
+  },
+}
+
+/**
+ * 3. RF-11 (Agotados / Disponibilidad):
+ *    PATCH /api/platos/:id/disponible
+ *    PATCH /api/ingredientes/:id/disponible
+ *    Rol requerido: admin | cocina
+ *    Body: { disponible: boolean }
+ */
+export const agotadosApi = {
+  async togglePlato(idPlato, disponible) {
+    return apiFetch(`/platos/${idPlato}/disponible`, {
+      method: 'PATCH',
+      body: JSON.stringify({ disponible }),
+    })
+  },
+  async toggleIngrediente(idIngrediente, disponible) {
+    return apiFetch(`/ingredientes/${idIngrediente}/disponible`, {
+      method: 'PATCH',
+      body: JSON.stringify({ disponible }),
+    })
+  },
+}
+
+

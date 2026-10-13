@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   UtensilsCrossed,
   Clock,
@@ -12,12 +12,70 @@ import {
   FileText,
   User,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react'
-import { orders as initialOrders } from '../constants/mockData'
+import { pedidosApi } from '../services/api'
 import { useSocketListener, useSocketEmit } from '../hooks'
 
+function backendEstadoAUI(estado) {
+  switch (estado) {
+    case 'recibido':
+      return 'Pendiente'
+    case 'en_preparacion':
+      return 'En cocina'
+    case 'listo':
+      return 'Por servir'
+    case 'entregado':
+    case 'pagado':
+      return 'Entregado'
+    default:
+      return 'Pendiente'
+  }
+}
+
+function uiEstadoABackend(estadoUi) {
+  switch (estadoUi) {
+    case 'Pendiente':
+      return 'en_preparacion'
+    case 'En cocina':
+      return 'listo'
+    case 'Por servir':
+      return 'entregado'
+    default:
+      return 'entregado'
+  }
+}
+
+function normalizarPedido(p) {
+  const minElapsed = p.creado_en
+    ? Math.max(0, Math.floor((Date.now() - new Date(p.creado_en).getTime()) / 60000))
+    : 0
+
+  return {
+    id: p.codigo_pedido || `#${p.id_pedido}`,
+    rawId: p.id_pedido,
+    table: p.mesa_numero ? `Mesa ${p.mesa_numero}` : p.id_mesa ? `Mesa ${p.id_mesa}` : 'Barra',
+    client: p.detalles?.[0]?.comensal || 'Comensal General',
+    waiter: p.mesero || 'Mesero Asignado',
+    state: backendEstadoAUI(p.estado),
+    rawEstado: p.estado,
+    time: p.creado_en
+      ? new Date(p.creado_en).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : 'En vivo',
+    elapsedMin: minElapsed,
+    total: `$${Number(p.total || 0).toLocaleString('es-CO')}`,
+    items: (p.detalles || []).map((d) => ({
+      name: d.nombre || d.plato_nombre || 'Plato',
+      qty: d.cantidad || 1,
+      notes: d.notas_especiales || d.notas || null,
+    })),
+  }
+}
+
 export function Pedidos() {
-  const [ordersList, setOrdersList] = useState(initialOrders)
+  const [ordersList, setOrdersList] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [selectedStatus, setSelectedStatus] = useState('Todos')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedOrder, setSelectedOrder] = useState(null)
@@ -29,14 +87,49 @@ export function Pedidos() {
     setTimeout(() => setToastMsg(null), 3500)
   }
 
+  const recargarPedidos = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await pedidosApi.listarActivos()
+      const raw = data?.pedidos || []
+      setOrdersList(raw.map(normalizarPedido))
+    } catch (err) {
+      setError(err.message || 'No se pudieron cargar los pedidos activos')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+    pedidosApi
+      .listarActivos()
+      .then((data) => {
+        if (!isMounted) return
+        const raw = data?.pedidos || []
+        setOrdersList(raw.map(normalizarPedido))
+      })
+      .catch((err) => {
+        if (!isMounted) return
+        setError(err.message || 'No se pudieron cargar los pedidos activos')
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
   // Escuchar eventos en vivo desde el socket-server / backend
   useSocketListener('order:status', (data) => {
-    console.log('📦 Estado de pedido recibido vía Socket:', data)
     if (data?.id_pedido) {
       setOrdersList((prev) =>
         prev.map((ord) =>
-          ord.id === data.id_pedido
-            ? { ...ord, state: data.estado || ord.state }
+          ord.rawId === data.id_pedido
+            ? { ...ord, state: backendEstadoAUI(data.estado), rawEstado: data.estado }
             : ord
         )
       )
@@ -45,32 +138,39 @@ export function Pedidos() {
   })
 
   useSocketListener('order:new', (newOrder) => {
-    console.log('🔔 Nuevo pedido comensal recibido:', newOrder)
-    setOrdersList((prev) => [newOrder, ...prev])
-    showToast(`¡Nuevo pedido comensal en ${newOrder.table}!`)
+    if (newOrder) {
+      const normalizado = normalizarPedido(newOrder)
+      setOrdersList((prev) => [normalizado, ...prev])
+      showToast(`¡Nuevo pedido comensal en ${normalizado.table}!`)
+    }
   })
 
-  // Avanzar estado de comanda
-  const handleAdvanceStatus = (orderId, currentState) => {
-    let nextState = 'En cocina'
-    if (currentState === 'Pendiente') nextState = 'En cocina'
-    else if (currentState === 'En cocina') nextState = 'Por servir'
-    else if (currentState === 'Por servir') nextState = 'Entregado'
-    else return
+  // Avanzar estado de comanda contra la API real
+  const handleAdvanceStatus = async (orderId, currentState) => {
+    const nextBackendState = uiEstadoABackend(currentState)
+    const targetOrder = ordersList.find((ord) => ord.id === orderId)
+    if (!targetOrder) return
 
-    setOrdersList((prev) =>
-      prev.map((ord) =>
-        ord.id === orderId ? { ...ord, state: nextState } : ord
+    try {
+      await pedidosApi.actualizarEstado(targetOrder.rawId, nextBackendState)
+
+      const nextUiState = backendEstadoAUI(nextBackendState)
+      setOrdersList((prev) =>
+        prev.map((ord) =>
+          ord.id === orderId ? { ...ord, state: nextUiState, rawEstado: nextBackendState } : ord
+        )
       )
-    )
 
-    emit('order:status_update', {
-      id_pedido: orderId,
-      estado: nextState,
-      timestamp: new Date().toISOString(),
-    })
+      emit('order:status_update', {
+        id_pedido: targetOrder.rawId,
+        estado: nextBackendState,
+        timestamp: new Date().toISOString(),
+      })
 
-    showToast(`Comanda ${orderId} actualizada a "${nextState}"`)
+      showToast(`Comanda ${orderId} actualizada a "${nextUiState}"`)
+    } catch (err) {
+      showToast(`Error al actualizar comanda: ${err.message}`)
+    }
   }
 
   // Filtrado
@@ -225,7 +325,23 @@ export function Pedidos() {
 
       {/* Grid de Comandas KDS */}
       <section className="pedidos-grid-layout">
-        {filteredOrders.length === 0 ? (
+        {loading ? (
+          <div className="panel empty-kds-panel">
+            <RefreshCw size={40} className="spin text-emerald" />
+            <h3>Cargando comandas en vivo...</h3>
+            <p>Sincronizando pedidos activos desde el backend.</p>
+          </div>
+        ) : error ? (
+          <div className="panel empty-kds-panel">
+            <AlertCircle size={40} className="text-amber" />
+            <h3>Error al conectar con comandas</h3>
+            <p>{error}</p>
+            <button type="button" className="primary-button inline-flex-center" onClick={recargarPedidos} style={{ marginTop: '0.75rem' }}>
+              <RefreshCw size={14} />
+              <span>Reintentar</span>
+            </button>
+          </div>
+        ) : filteredOrders.length === 0 ? (
           <div className="panel empty-kds-panel">
             <ChefHat size={46} className="text-muted" />
             <h3>No hay comandas que coincidan</h3>

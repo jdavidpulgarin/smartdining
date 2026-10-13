@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ShieldCheck, Mail, Lock, LogIn, ArrowRight } from 'lucide-react'
+import { ShieldCheck, Mail, Lock, LogIn } from 'lucide-react'
 import { useAuth } from '../hooks'
-import { DEMO_USERS } from '../constants/demoUsers'
 
 export function Login() {
-  const { login, loginAsDemo } = useAuth()
+  const { login } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -25,19 +24,6 @@ export function Login() {
       navigate('/')
     } catch (err) {
       setError(err.message || 'Error al iniciar sesión')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleQuickDemo = async (role) => {
-    setError('')
-    setLoading(true)
-    try {
-      await loginAsDemo(role)
-      navigate('/')
-    } catch (err) {
-      setError(err.message || 'Error al iniciar sesión con demo')
     } finally {
       setLoading(false)
     }
@@ -85,6 +71,7 @@ export function Login() {
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                required
               />
             </div>
           </div>
@@ -95,35 +82,9 @@ export function Login() {
           </button>
         </form>
 
-        {/* Acceso Rápido Demo (Exposoftware / Evaluación) */}
-        <div className="quick-access-section">
-          <div className="quick-access-divider">
-            <span>o ingresar con perfil demo</span>
-          </div>
-
-          <div className="demo-roles-grid">
-            {DEMO_USERS.map((demo) => (
-              <button
-                key={demo.role}
-                type="button"
-                className="demo-role-btn"
-                disabled={loading}
-                onClick={() => handleQuickDemo(demo.role)}
-              >
-                <div className="demo-role-avatar">{demo.avatar}</div>
-                <div className="demo-role-info">
-                  <strong>{demo.name}</strong>
-                  <span>{demo.roleLabel}</span>
-                </div>
-                <ArrowRight size={14} className="demo-arrow" />
-              </button>
-            ))}
-          </div>
-        </div>
-
         <div className="login-footer">
           <ShieldCheck size={14} />
-          <span>Acceso protegido con Control de Roles (RBAC) y PostgreSQL</span>
+          <span>Acceso autenticado con PostgreSQL y JWT</span>
         </div>
       </div>
     </div>

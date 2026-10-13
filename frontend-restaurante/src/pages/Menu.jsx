@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Search,
   Plus,
@@ -12,18 +12,110 @@ import {
   UtensilsCrossed,
   Tag,
   DollarSign,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react'
-import {
-  dishes as initialDishes,
-  categories as initialCategories,
-} from '../constants/mockData'
+import { menuApi, agotadosApi } from '../services/api'
 
 export function Menu() {
-  const [dishesList, setDishesList] = useState(initialDishes)
-  const [categoriesList, setCategoriesList] = useState(initialCategories)
+  const [dishesList, setDishesList] = useState([])
+  const [categoriesList, setCategoriesList] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [apiNotice, setApiNotice] = useState(null)
   const [activeCategory, setActiveCategory] = useState('Todas')
   const [searchQuery, setSearchQuery] = useState('')
   const [onlyAvailable, setOnlyAvailable] = useState(false)
+
+  const showNotice = (msg) => {
+    setApiNotice(msg)
+    setTimeout(() => setApiNotice(null), 5000)
+  }
+
+  const recargarCarta = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const data = await menuApi.obtenerMenu()
+      const cats = data?.categorias || []
+
+      const categoriasParsed = cats.map((c) => ({
+        id: c.id_categoria,
+        name: c.nombre,
+        description: c.descripcion || '',
+      }))
+
+      const platosParsed = cats.flatMap((c) =>
+        (c.platos || []).map((p) => ({
+          id: p.id_plato,
+          name: p.nombre,
+          categoryName: c.nombre,
+          categoryId: c.id_categoria,
+          price: Number(p.precio || 0),
+          priceFormatted: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
+          prepTime: p.tiempo_preparacion_estimado || 15,
+          tag: c.nombre,
+          description: p.descripcion || '',
+          imageUrl:
+            p.url_imagen ||
+            'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+          available: p.disponible !== false,
+        }))
+      )
+
+      setCategoriesList(categoriasParsed)
+      setDishesList(platosParsed)
+    } catch (err) {
+      setError(err.message || 'No se pudo cargar el catálogo de platos')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+    menuApi
+      .obtenerMenu()
+      .then((data) => {
+        if (!isMounted) return
+        const cats = data?.categorias || []
+        const categoriasParsed = cats.map((c) => ({
+          id: c.id_categoria,
+          name: c.nombre,
+          description: c.descripcion || '',
+        }))
+        const platosParsed = cats.flatMap((c) =>
+          (c.platos || []).map((p) => ({
+            id: p.id_plato,
+            name: p.nombre,
+            categoryName: c.nombre,
+            categoryId: c.id_categoria,
+            price: Number(p.precio || 0),
+            priceFormatted: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
+            prepTime: p.tiempo_preparacion_estimado || 15,
+            tag: c.nombre,
+            description: p.descripcion || '',
+            imageUrl:
+              p.url_imagen ||
+              'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+            available: p.disponible !== false,
+          }))
+        )
+        setCategoriesList(categoriasParsed)
+        setDishesList(platosParsed)
+      })
+      .catch((err) => {
+        if (!isMounted) return
+        setError(err.message || 'No se pudo cargar el catálogo de platos')
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   // Modales
   const [isDishModalOpen, setIsDishModalOpen] = useState(false)
@@ -60,11 +152,21 @@ export function Menu() {
     return matchesCategory && matchesSearch && matchesAvailability
   })
 
-  // Toggle de disponibilidad (Control de Inventario)
-  const handleToggleAvailability = (dishId) => {
+  // Toggle de disponibilidad (Control de Inventario - RF-11)
+  const handleToggleAvailability = async (dishId) => {
+    const dish = dishesList.find((d) => d.id === dishId)
+    if (!dish) return
+    const nuevoEstado = !dish.available
     setDishesList((prev) =>
-      prev.map((d) => (d.id === dishId ? { ...d, available: !d.available } : d))
+      prev.map((d) => (d.id === dishId ? { ...d, available: nuevoEstado } : d))
     )
+    try {
+      await agotadosApi.togglePlato(dishId, nuevoEstado)
+    } catch {
+      showNotice(
+        'Ruta de agotados (RF-11) pendiente en backend (PATCH /api/platos/:id/disponible). Ver "Pendiente para Daniel".'
+      )
+    }
   }
 
   // Abrir modal de creación/edición de plato
@@ -97,7 +199,7 @@ export function Menu() {
     setIsDishModalOpen(true)
   }
 
-  // Guardar plato (creación o edición)
+  // Guardar plato (creación o edición - RF-20)
   const handleSaveDish = (e) => {
     e.preventDefault()
     const numericPrice = parseFloat(dishForm.price) || 0
@@ -112,7 +214,7 @@ export function Menu() {
                 name: dishForm.name,
                 categoryName: dishForm.categoryName,
                 price: numericPrice,
-                priceFormatted: `$${numericPrice.toFixed(2)}`,
+                priceFormatted: `$${numericPrice.toLocaleString('es-CO')}`,
                 prepTime: numericTime,
                 tag: dishForm.tag,
                 description: dishForm.description,
@@ -128,7 +230,7 @@ export function Menu() {
         name: dishForm.name,
         categoryName: dishForm.categoryName,
         price: numericPrice,
-        priceFormatted: `$${numericPrice.toFixed(2)}`,
+        priceFormatted: `$${numericPrice.toLocaleString('es-CO')}`,
         prepTime: numericTime,
         tag: dishForm.tag,
         description: dishForm.description,
@@ -139,6 +241,9 @@ export function Menu() {
       }
       setDishesList((prev) => [newDish, ...prev])
     }
+    showNotice(
+      'Ruta de constructor de platos (RF-20) pendiente en backend (POST /api/platos/constructor). Ver "Pendiente para Daniel".'
+    )
     setIsDishModalOpen(false)
   }
 
@@ -166,6 +271,13 @@ export function Menu() {
 
   return (
     <main className="main-panel menu-page">
+      {apiNotice && (
+        <div className="table-toast-banner info" style={{ marginBottom: '1rem' }}>
+          <AlertCircle size={16} />
+          <span>{apiNotice}</span>
+        </div>
+      )}
+
       {/* Encabezado con buscador y acciones */}
       <section className="menu-header-panel panel">
         <div className="menu-title-block">
@@ -256,7 +368,28 @@ export function Menu() {
 
       {/* Grid de Platos */}
       <section className="dishes-grid-container">
-        {filteredDishes.length === 0 ? (
+        {loading ? (
+          <div className="empty-state panel">
+            <RefreshCw size={44} className="spin text-emerald" />
+            <h3>Cargando catálogo en vivo...</h3>
+            <p>Consultando carta gastronómica desde el servidor.</p>
+          </div>
+        ) : error ? (
+          <div className="empty-state panel">
+            <AlertCircle size={44} className="text-amber" />
+            <h3>Error al cargar el menú</h3>
+            <p>{error}</p>
+            <button
+              type="button"
+              className="primary-button inline-flex-center"
+              onClick={recargarCarta}
+              style={{ marginTop: '0.75rem' }}
+            >
+              <RefreshCw size={14} />
+              <span>Reintentar</span>
+            </button>
+          </div>
+        ) : filteredDishes.length === 0 ? (
           <div className="empty-state panel">
             <UtensilsCrossed size={48} className="text-muted" />
             <h3>No se encontraron platos</h3>

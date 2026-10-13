@@ -12,12 +12,9 @@ import {
   Users,
   Sparkles,
   RefreshCw,
-  AlertCircle,
   Tag,
-  Check,
 } from 'lucide-react'
-import { orders as fallbackOrders } from '../constants/mockData'
-import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
+import { mesasApi, pedidosApi, transaccionesApi } from '../services/api'
 import { useSocketEmit, useSocketListener, useTables } from '../hooks'
 
 function formatCOP(monto) {
@@ -39,11 +36,10 @@ function getCurrentTime() {
 
 export function Caja() {
   const emit = useSocketEmit()
-  const { tables, cargarMesas } = useTables()
+  const { cargarMesas } = useTables()
 
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(() => Boolean(getAuthToken()))
   const [processingPayment, setProcessingPayment] = useState(false)
-  const [errorMessage, setErrorMessage] = useState(null)
 
   // Cuentas reales cargadas desde el backend
   const [cuentasMesas, setCuentasMesas] = useState([])
@@ -141,10 +137,75 @@ export function Caja() {
     }
   }, [])
 
-  // Cargar cuentas al montar
+  const handleSelectMesa = useCallback((mesaId) => {
+    setSelectedMesaId(mesaId)
+    setSelectedComensal('TOTAL')
+  }, [])
+
+  // Cargar cuentas al montar de forma asíncrona
   useEffect(() => {
-    cargarCuentas()
-  }, [cargarCuentas])
+    let cancel = false
+    const token = getAuthToken()
+    if (!token) return
+
+    mesasApi
+      .listar()
+      .then(async (mesasRes) => {
+        if (cancel) return
+        const listaMesas = mesasRes?.mesas || []
+        const mesasOcupadas = listaMesas.filter(
+          (m) => m.estado === 'ocupada' || Boolean(m.sesion_abierta)
+        )
+
+        if (mesasOcupadas.length === 0) {
+          if (!cancel) {
+            setCuentasMesas([])
+            setLoading(false)
+          }
+          return
+        }
+
+        const promesas = mesasOcupadas.map(async (mesa) => {
+          try {
+            const cuenta = await mesasApi.obtenerCuenta(mesa.id_mesa)
+            if (cuenta) {
+              return {
+                ...cuenta,
+                numero_mesa: mesa.numero,
+                ubicacion_mesa: mesa.ubicacion,
+              }
+            }
+          } catch {
+            // Ignorar
+          }
+          return null
+        })
+
+        const cuentas = (await Promise.all(promesas)).filter(
+          (c) => c && (Number(c.saldo_mesa) > 0 || Number(c.total_mesa) > 0)
+        )
+
+        if (!cancel) {
+          setCuentasMesas(cuentas)
+          setSelectedMesaId((prev) => {
+            if (prev && cuentas.some((c) => c.id_mesa === prev)) return prev
+            return cuentas[0]?.id_mesa || null
+          })
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        if (!cancel) {
+          console.warn('Aviso al cargar cuentas de caja:', err.message)
+          setErrorMessage('No se pudieron consultar las cuentas del salón.')
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      cancel = true
+    }
+  }, [])
 
   // Escuchar eventos de WebSockets en tiempo real para mantener la caja sincronizada
   useSocketListener('order:created', () => cargarCuentas())
@@ -160,7 +221,7 @@ export function Caja() {
   useSocketListener('cuenta:solicitada', (data) => {
     cargarCuentas()
     if (data?.id_mesa) {
-      setSelectedMesaId(Number(data.id_mesa))
+      handleSelectMesa(Number(data.id_mesa))
     }
   })
 
@@ -168,11 +229,6 @@ export function Caja() {
   const selectedCuenta = useMemo(() => {
     return cuentasMesas.find((c) => c.id_mesa === selectedMesaId) || null
   }, [cuentasMesas, selectedMesaId])
-
-  // Reset de comensal seleccionado al cambiar de mesa
-  useEffect(() => {
-    setSelectedComensal('TOTAL')
-  }, [selectedMesaId])
 
   // Cargar detalle de ítems del pedido activo cuando se selecciona una mesa
   useEffect(() => {
@@ -446,7 +502,7 @@ export function Caja() {
                     <div
                       key={cuenta.id_mesa}
                       className={`caja-order-card ${isSelected ? 'selected' : ''}`}
-                      onClick={() => setSelectedMesaId(cuenta.id_mesa)}
+                      onClick={() => handleSelectMesa(cuenta.id_mesa)}
                     >
                       <div className="caja-card-header">
                         <strong>Mesa {cuenta.numero || cuenta.numero_mesa}</strong>

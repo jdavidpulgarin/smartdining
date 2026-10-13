@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import { tables as defaultTables } from '../constants/mockData'
 import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
@@ -47,7 +46,7 @@ export function TablesProvider({ children }) {
     } catch {
       // fallback
     }
-    return defaultTables
+    return []
   })
 
   const [pedidosActivos, setPedidosActivos] = useState([])
