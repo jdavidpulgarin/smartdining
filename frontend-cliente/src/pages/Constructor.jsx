@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useReducer, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { obtenerPlatoArmable } from '../services/menuService';
+import { obtenerPlatoArmable, recargarMenu } from '../services/menuService';
 import {
   constructorReducer,
   estadoInicial,
@@ -37,9 +37,11 @@ function Constructor() {
     idCargado: null,
     plato: null,
   });
+  const [error, setError] = useState(null);
+  const [reintentando, setReintentando] = useState(false);
   const [estado, despachador] = useReducer(constructorReducer, estadoInicial);
 
-  const cargando = estadoCarga.idCargado !== idPlato;
+  const cargando = reintentando || estadoCarga.idCargado !== idPlato;
   const plato = cargando ? null : estadoCarga.plato;
 
   useEffect(() => {
@@ -51,11 +53,13 @@ function Constructor() {
         const resultado = await obtenerPlatoArmable(idPlato);
         if (activo) {
           setEstadoCarga({ idCargado: idPlato, plato: resultado });
+          setError(null);
         }
-      } catch (error) {
-        console.error('Error al cargar plato armable:', error);
+      } catch (err) {
+        console.error('Error al cargar plato armable:', err);
         if (activo) {
           setEstadoCarga({ idCargado: idPlato, plato: null });
+          setError(err);
         }
       }
     }
@@ -66,6 +70,21 @@ function Constructor() {
       activo = false;
     };
   }, [idPlato]);
+
+  const manejarReintentar = async () => {
+    recargarMenu();
+    setReintentando(true);
+    setError(null);
+    try {
+      const resultado = await obtenerPlatoArmable(idPlato);
+      setEstadoCarga({ idCargado: idPlato, plato: resultado });
+    } catch (err) {
+      console.error('Error al reintentar plato armable:', err);
+      setError(err);
+    } finally {
+      setReintentando(false);
+    }
+  };
 
   const calculo = useMemo(
     () => calcularPlato(plato, estado.selecciones),
@@ -79,11 +98,30 @@ function Constructor() {
 
   if (cargando) {
     return (
-      <div className="flex flex-col items-center justify-center py-16">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent mb-3" />
-        <p className="text-gray-600 text-sm font-medium">
-          Cargando constructor...
+      <div className="space-y-6 pb-24" aria-busy="true" aria-label="Cargando constructor">
+        <div className="animate-pulse space-y-3">
+          <div className="h-6 w-48 bg-gray-200 rounded" />
+          <div className="h-4 w-64 bg-gray-200 rounded" />
+          <div className="h-2 w-full bg-gray-200 rounded-full" />
+        </div>
+        <div className="space-y-3">
+          <div className="h-28 bg-gray-200 rounded-2xl animate-pulse" />
+          <div className="h-28 bg-gray-200 rounded-2xl animate-pulse" />
+          <div className="h-28 bg-gray-200 rounded-2xl animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12 px-4 space-y-4">
+        <p className="text-red-600 font-medium">
+          {error.mensaje || error.message || 'No pudimos cargar el plato'}
         </p>
+        <Button variante="secundario" onClick={manejarReintentar}>
+          Reintentar
+        </Button>
       </div>
     );
   }
@@ -92,7 +130,7 @@ function Constructor() {
     return (
       <Card className="text-center space-y-4 py-8">
         <p className="text-cafe font-semibold text-base">
-          Este plato no está disponible
+          Este plato ya no está disponible
         </p>
         <Button variante="secundario" onClick={() => navigate('/menu')}>
           Volver al menú
