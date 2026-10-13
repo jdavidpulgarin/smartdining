@@ -161,13 +161,11 @@ export function PantallaMesa() {
         if (isCancelled) return
         setSocketStatus('conectado')
         setSocketId(socket.id)
-        console.log(`[Tablet Mesa ${numMesa}] Conectado a socket server. Sala: room:mesa-${numMesa}`)
       })
 
-      socket.on('disconnect', (reason) => {
+      socket.on('disconnect', () => {
         if (isCancelled) return
         setSocketStatus('desconectado')
-        console.log(`[Tablet Mesa ${numMesa}] Desconectado:`, reason)
       })
 
       socket.on('connect_error', (err) => {
@@ -179,7 +177,6 @@ export function PantallaMesa() {
       // 3. Escuchar evento de Roberto: 'qr:actualizado'
       socket.on('qr:actualizado', (data) => {
         if (isCancelled) return
-        console.log(`[Tablet Mesa ${numMesa}] Evento qr:actualizado recibido:`, data)
         if (data?.token_qr) {
           setTokenQr(data.token_qr)
           setSegundosRestantes(ROTACION_INTERVALO)

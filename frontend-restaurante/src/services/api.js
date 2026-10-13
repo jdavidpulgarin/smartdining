@@ -5,13 +5,23 @@
 
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
 export const EVENT_UNAUTHORIZED = 'smartdining:auth:unauthorized'
+export const EVENT_RATE_LIMITED = 'smartdining:auth:rate-limited'
+
+export const AUTH_MESSAGE_KEY = 'smartdining_auth_message'
+export const RATE_LIMIT_KEY = 'smartdining_rate_limit'
+
+export const MENSAJE_SESION_INVALIDA = 'Tu sesión no es válida o tu cuenta fue desactivada'
+export const MENSAJE_DEMASIADOS_INTENTOS = 'Demasiados intentos. Espera un minuto e inténtalo de nuevo'
 
 /**
- * Obtiene el token JWT del usuario de staff desde localStorage
+ * Obtiene el token JWT del usuario de staff desde sessionStorage
  */
 export function getAuthToken() {
   try {
-    const stored = localStorage.getItem('smartdining_staff_user')
+    const directToken = sessionStorage.getItem('smartdining_token')
+    if (directToken) return directToken
+
+    const stored = sessionStorage.getItem('smartdining_staff_user')
     if (stored) {
       const parsed = JSON.parse(stored)
       return parsed?.token || null
@@ -23,16 +33,125 @@ export function getAuthToken() {
 }
 
 /**
- * Dispara el evento global para cerrar sesión cuando el servidor responde 401
+ * Limpia las credenciales del usuario en sessionStorage
  */
-export function triggerUnauthorized() {
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent(EVENT_UNAUTHORIZED))
+export function clearAuthStorage() {
+  try {
+    sessionStorage.removeItem('smartdining_token')
+    sessionStorage.removeItem('smartdining_staff_user')
+  } catch {
+    // ignorar
   }
 }
 
 /**
- * Función fetch base configurada con JSON, Authorization y manejo de 401
+ * Guarda y recupera mensaje flash de autenticación para la pantalla de login
+ */
+export function setStoredAuthMessage(message) {
+  try {
+    sessionStorage.setItem(AUTH_MESSAGE_KEY, message)
+  } catch {
+    // ignorar
+  }
+}
+
+export function getStoredAuthMessage() {
+  try {
+    const msg = sessionStorage.getItem(AUTH_MESSAGE_KEY)
+    if (msg) {
+      sessionStorage.removeItem(AUTH_MESSAGE_KEY)
+      return msg
+    }
+  } catch {
+    // ignorar
+  }
+  return null
+}
+
+/**
+ * Gestión de bloqueo por tasa de peticiones (429 rate limit)
+ */
+export function setStoredRateLimit(seconds, message) {
+  try {
+    const s = Number.isFinite(seconds) && seconds > 0 ? seconds : 60
+    const resetAt = Date.now() + s * 1000
+    const payload = {
+      resetAt,
+      message: message || MENSAJE_DEMASIADOS_INTENTOS,
+    }
+    sessionStorage.setItem(RATE_LIMIT_KEY, JSON.stringify(payload))
+    return { remainingSeconds: s, resetAt }
+  } catch {
+    return { remainingSeconds: seconds || 60, resetAt: Date.now() + 60000 }
+  }
+}
+
+export function getStoredRateLimit() {
+  try {
+    const raw = sessionStorage.getItem(RATE_LIMIT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    const now = Date.now()
+    if (parsed && parsed.resetAt && parsed.resetAt > now) {
+      const remainingSeconds = Math.max(1, Math.ceil((parsed.resetAt - now) / 1000))
+      return {
+        remainingSeconds,
+        resetAt: parsed.resetAt,
+        message: parsed.message || MENSAJE_DEMASIADOS_INTENTOS,
+      }
+    }
+    sessionStorage.removeItem(RATE_LIMIT_KEY)
+  } catch {
+    // ignorar
+  }
+  return null
+}
+
+export function clearStoredRateLimit() {
+  try {
+    sessionStorage.removeItem(RATE_LIMIT_KEY)
+  } catch {
+    // ignorar
+  }
+}
+
+/**
+ * Redirige al login de forma segura evitando bucles de redirección si ya se está en /login
+ */
+export function navegarALogin() {
+  if (typeof window !== 'undefined' && window.location) {
+    const pathname = window.location.pathname || ''
+    const yaEnLogin = pathname === '/login' || pathname.endsWith('/login')
+    if (!yaEnLogin) {
+      if (typeof window.location.assign === 'function') {
+        window.location.assign('/login')
+      } else {
+        window.location.href = '/login'
+      }
+    }
+  }
+}
+
+/**
+ * Dispara el evento global para cerrar sesión cuando el servidor responde 401
+ */
+export function triggerUnauthorized(detail = {}) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(EVENT_UNAUTHORIZED, { detail }))
+  }
+}
+
+/**
+ * Dispara el evento global de límite excedido cuando el servidor responde 429
+ */
+export function triggerRateLimited(detail = {}) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(EVENT_RATE_LIMITED, { detail }))
+  }
+}
+
+/**
+ * Función fetch base configurada con JSON, Authorization y manejo centralizado de 401 y 429
  */
 export async function apiFetch(endpoint, options = {}) {
   const url = endpoint.startsWith('http')
@@ -58,13 +177,46 @@ export async function apiFetch(endpoint, options = {}) {
 
   const response = await fetch(url, config)
 
-  if (response.status === 401) {
-    triggerUnauthorized()
-  }
+  // Extraer cabecera Retry-After (en segundos según draft-7 de RFC)
+  const retryHeader = response.headers?.get
+    ? (response.headers.get('retry-after') || response.headers.get('Retry-After'))
+    : null
+  const retryParsed = retryHeader ? parseInt(retryHeader, 10) : null
+  const segundosEspera = Number.isFinite(retryParsed) && retryParsed > 0 ? retryParsed : 60
 
-  const contentType = response.headers.get('content-type') || ''
+  const contentType = response.headers?.get ? (response.headers.get('content-type') || '') : 'application/json'
   const isJson = contentType.includes('application/json')
   const data = isJson ? await response.json() : await response.text()
+
+  // Manejo de 401: Sesión no válida o usuario desactivado (H-09)
+  if (response.status === 401) {
+    const isLoginEndpoint = String(endpoint).includes('/auth/login')
+    // Si es /auth/login con skipAuth, es error de credenciales: no se borra ni redirige
+    if (!options.skipAuth && !isLoginEndpoint) {
+      clearAuthStorage()
+      const mensaje =
+        typeof data === 'object' && data?.error && data.error.toLowerCase().includes('desactivad')
+          ? data.error
+          : MENSAJE_SESION_INVALIDA
+      setStoredAuthMessage(mensaje)
+      triggerUnauthorized({ mensaje, error: data?.error })
+      navegarALogin()
+    }
+  }
+
+  // Manejo de 429: Rate limit excedido (H-04, H-27)
+  if (response.status === 429) {
+    const mensaje429 =
+      typeof data === 'object' && data?.error
+        ? data.error
+        : MENSAJE_DEMASIADOS_INTENTOS
+    setStoredRateLimit(segundosEspera, mensaje429)
+    triggerRateLimited({
+      segundos: segundosEspera,
+      mensaje: mensaje429,
+    })
+    navegarALogin()
+  }
 
   if (!response.ok) {
     const errorMsg =
@@ -74,6 +226,9 @@ export async function apiFetch(endpoint, options = {}) {
     const error = new Error(errorMsg)
     error.status = response.status
     error.data = data
+    if (response.status === 429) {
+      error.retryAfter = segundosEspera
+    }
     throw error
   }
 
@@ -151,15 +306,6 @@ export const mesasApi = {
   },
 
   /**
-   * Rota el QR de una mesa en curso: POST /api/mesas/:id/rotar-qr
-   */
-  async rotarQr(id) {
-    return apiFetch(`/mesas/${id}/rotar-qr`, {
-      method: 'POST',
-    })
-  },
-
-  /**
    * Obtiene la cuenta detallada y saldo de una mesa: GET /api/mesas/:id/cuenta
    */
   async obtenerCuenta(id) {
@@ -211,9 +357,14 @@ export const transaccionesApi = {
    * @param {{ id_pedido: number, monto: number, metodo_pago: string, referencia_externa?: string, comensal?: string|null }} datos
    */
   async registrarPago(datos) {
+    // H-07: El estado de la transacción lo fija el servidor. Solo se acepta omitirlo o 'completada'.
+    const payload = { ...datos }
+    if (payload.estado_transaccion && payload.estado_transaccion !== 'completada') {
+      delete payload.estado_transaccion
+    }
     return apiFetch('/transacciones', {
       method: 'POST',
-      body: JSON.stringify(datos),
+      body: JSON.stringify(payload),
     })
   },
 
@@ -224,4 +375,80 @@ export const transaccionesApi = {
     return apiFetch(`/transacciones/pedido/${idPedido}`)
   },
 }
+
+// Submódulo de Menú y Catálogo
+export const menuApi = {
+  /**
+   * Obtiene la carta completa del restaurante con categorías y platos: GET /api/menu
+   */
+  async obtenerMenu() {
+    return apiFetch('/menu', { skipAuth: true })
+  },
+}
+
+// Submódulo de Categorías
+export const categoriasApi = {
+  async listar() {
+    return apiFetch('/categorias', { skipAuth: true })
+  },
+}
+
+// Submódulo de Platos
+export const platosApi = {
+  async listar() {
+    return apiFetch('/platos', { skipAuth: true })
+  },
+}
+
+/**
+ * CONTRATOS PENDIENTES PARA DANIEL (Rutas que no existen aún en backend):
+ * 
+ * 1. RF-21 (Reportes):
+ *    GET /api/reportes?rango=hoy|semana|mes
+ *    Rol requerido: admin
+ *    Respuesta esperada: { totalVentas, totalPedidos, tiempoCocinaPromedio, ocupacionMesas, ticketPromedio, topPlatos, metodosPago }
+ */
+export const reportesApi = {
+  async obtenerReporte(rango = 'hoy') {
+    return apiFetch(`/reportes?rango=${encodeURIComponent(rango)}`)
+  },
+}
+
+/**
+ * 2. RF-20 (Constructor de Platos):
+ *    POST /api/platos/constructor
+ *    Rol requerido: admin
+ *    Body esperado: { id_categoria, nombre, precio, tiempo_estimado, pasos: [...] }
+ */
+export const constructorApi = {
+  async guardarPlato(datos) {
+    return apiFetch('/platos/constructor', {
+      method: 'POST',
+      body: JSON.stringify(datos),
+    })
+  },
+}
+
+/**
+ * 3. RF-11 (Agotados / Disponibilidad):
+ *    PATCH /api/platos/:id/disponible
+ *    PATCH /api/ingredientes/:id/disponible
+ *    Rol requerido: admin | cocina
+ *    Body: { disponible: boolean }
+ */
+export const agotadosApi = {
+  async togglePlato(idPlato, disponible) {
+    return apiFetch(`/platos/${idPlato}/disponible`, {
+      method: 'PATCH',
+      body: JSON.stringify({ disponible }),
+    })
+  },
+  async toggleIngrediente(idIngrediente, disponible) {
+    return apiFetch(`/ingredientes/${idIngrediente}/disponible`, {
+      method: 'PATCH',
+      body: JSON.stringify({ disponible }),
+    })
+  },
+}
+
 

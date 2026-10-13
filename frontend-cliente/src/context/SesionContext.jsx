@@ -164,6 +164,9 @@ export function SesionProvider({ children }) {
   const despedir = useCallback(
     (motivo = null) => {
       cerrarSesion(motivo);
+      if (typeof window !== 'undefined' && window.location.pathname === '/despedida') {
+        return;
+      }
       navigate('/despedida', { replace: true, state: { motivo } });
     },
     [cerrarSesion, navigate]
@@ -251,8 +254,12 @@ export function SesionProvider({ children }) {
         const errorFormateado = {
           status: err?.status ?? 0,
           motivo: err?.motivo ?? null,
-          mensaje: err?.mensaje || 'Ocurrió un error, intenta de nuevo',
+          mensaje:
+            err?.status === 429
+              ? (err?.mensaje || 'Demasiados intentos. Espera un minuto e inténtalo de nuevo')
+              : (err?.mensaje || 'Ocurrió un error, intenta de nuevo'),
           campo: err?.campo ?? null,
+          retryAfter: err?.retryAfter ?? (err?.status === 429 ? 60 : null),
         };
 
         setState((prev) => ({

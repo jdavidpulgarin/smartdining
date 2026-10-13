@@ -61,10 +61,30 @@
 \echo '===> [17/18] Ejecutando 17_sesion_mesa_cuenta.sql...'
 \i 17_sesion_mesa_cuenta.sql
 
-\echo '===> [18/18] Ejecutando 18_kds_variacion_tiempo.sql...'
+\echo '===> [18/24] Ejecutando 18_kds_variacion_tiempo.sql...'
 \i 18_kds_variacion_tiempo.sql
+
+\echo '===> [19/24] Ejecutando 19_fix_h01_bloqueo_pedidos.sql...'
+\i 19_fix_h01_bloqueo_pedidos.sql
+
+\echo '===> [20/24] Ejecutando 20_fix_h02_sesion_mesa_cuenta.sql...'
+\i 20_fix_h02_sesion_mesa_cuenta.sql
+
+\echo '===> [21/24] Ejecutando 21_fix_h06_limites_pedido.sql...'
+\i 21_fix_h06_limites_pedido.sql
+
+\echo '===> [22/24] Ejecutando 22_fix_h03_estado_pago.sql...'
+\i 22_fix_h03_estado_pago.sql
+
+\echo '===> [23/24] Ejecutando 23_fix_h08_intentos_pago_fallidos.sql...'
+\i 23_fix_h08_intentos_pago_fallidos.sql
 
 \echo '===> Finalizando bootstrap...'
 \echo '====================================================='
 \echo '  SmartDining: bootstrap del esquema y scripts completado. '
+
+
+
+
+
 

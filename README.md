@@ -197,6 +197,21 @@ Invoke-RestMethod http://localhost:4000/api/health
 Invoke-RestMethod http://localhost:4001/health
 ```
 
+---
+
+## ⚙️ Variables de entorno (Seguridad y Producción)
+
+A raíz de la Fase 2 de la auditoría de seguridad (H-04, H-09, H-10, H-27), el backend y socket-server requieren las siguientes variables para operar con lista blanca de CORS y conteo correcto de límites de intentos (rate limit):
+
+| Variable | Descripción y Formato | Valor en Desarrollo | Valor en Producción (VPS) |
+| :--- | :--- | :--- | :--- |
+| `CORS_ORIGINS` | Lista de orígenes permitidos separados por comas, con protocolo (`http://` o `https://`) y **sin** barra final. **Obligatoria en producción** (si falta, el backend bloquea todas las peticiones cruzadas). | `http://localhost:5173,http://localhost:5174,http://localhost:5175` | `https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO}` |
+| `TRUST_PROXY` | Configuración de proxy de confianza para Express. Permite leer la IP real del cliente desde `X-Forwarded-For` para el rate limit (login y QR). Acepta `true`, número de saltos (`1`), o IP fija del proxy. | Vacío (apagado, para evitar falsificación de IP) | `172.31.250.10` (IP fija de Nginx en `docker-compose.prod.yml`) o `1` |
+
+> **Nota:** En producción con Docker Compose (`docker-compose.prod.yml`), estas variables ya se propagan automáticamente al backend y socket-server basándose en la variable `DOMINIO` y la IP fija de Nginx (`172.31.250.10`).
+
+---
+
 ## 🌐 Producción
 
 Un VPS con Docker Compose, HTTPS de Let's Encrypt y despliegue automático al fusionar en

@@ -67,7 +67,7 @@ export function AuthProvider({ children }) {
    * cada pantalla tenga que acordarse.
    */
   useEffect(() => {
-    const alCaducar = () => cerrarSesion(MENSAJE_SESION_CAIDA)
+    const alCaducar = (e) => cerrarSesion(e?.detail?.mensaje || MENSAJE_SESION_CAIDA)
     window.addEventListener(EVENTO_NO_AUTORIZADO, alCaducar)
     return () => window.removeEventListener(EVENTO_NO_AUTORIZADO, alCaducar)
   }, [cerrarSesion])

@@ -40,11 +40,11 @@ function generarCadenaAleatoria(longitud = 12) {
 }
 
 /**
- * Obtiene el token JWT del personal logueado desde localStorage
+ * Obtiene el token JWT del personal logueado desde sessionStorage
  */
 function getStaffToken() {
   try {
-    const stored = localStorage.getItem('smartdining_staff_user')
+    const stored = sessionStorage.getItem('smartdining_staff_user')
     if (stored) {
       const u = JSON.parse(stored)
       return u.token || ''
@@ -267,7 +267,7 @@ export async function solicitarTokenPantalla(idMesa) {
       if (res.ok) {
         const data = await res.json()
         try {
-          localStorage.setItem(storageKey, data.token)
+          sessionStorage.setItem(storageKey, data.token)
         } catch {
           // ignorar
         }
@@ -282,7 +282,7 @@ export async function solicitarTokenPantalla(idMesa) {
 
   // Respaldo: reutilizar un token de pantalla ya emitido para esta mesa
   try {
-    const cached = localStorage.getItem(storageKey)
+    const cached = sessionStorage.getItem(storageKey)
     if (cached) {
       return { token: cached, id_mesa: Number(idMesa), expira_en: 'cached' }
     }

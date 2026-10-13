@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import { tables as defaultTables } from '../constants/mockData'
 import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
@@ -42,12 +41,12 @@ function normalizarMesa(backendMesa, prev = {}) {
 export function TablesProvider({ children }) {
   const [tables, setTables] = useState(() => {
     try {
-      const stored = localStorage.getItem('smartdining_tables_state')
+      const stored = sessionStorage.getItem('smartdining_tables_state')
       if (stored) return JSON.parse(stored)
     } catch {
       // fallback
     }
-    return defaultTables
+    return []
   })
 
   const [pedidosActivos, setPedidosActivos] = useState([])
@@ -87,7 +86,7 @@ export function TablesProvider({ children }) {
   // Guardar estado persistente en el navegador
   useEffect(() => {
     try {
-      localStorage.setItem('smartdining_tables_state', JSON.stringify(tables))
+      sessionStorage.setItem('smartdining_tables_state', JSON.stringify(tables))
     } catch {
       // ignorar
     }
@@ -135,14 +134,42 @@ export function TablesProvider({ children }) {
     }
   }, [])
 
-  // Cargar mesas y pedidos al montar si hay token
+  // Cargar mesas y pedidos al montar de forma asíncrona si hay sesión activa
   useEffect(() => {
+    let isSubscribed = true
     const token = getAuthToken()
-    if (token) {
-      cargarMesas()
-      cargarPedidosActivos()
+    if (!token) return
+
+    const fetchInitialData = async () => {
+      try {
+        const [mesasRes, pedidosRes] = await Promise.allSettled([
+          mesasApi.listar(),
+          pedidosApi.listarActivos(),
+        ])
+        if (!isSubscribed) return
+
+        if (mesasRes.status === 'fulfilled' && mesasRes.value?.mesas) {
+          setTables((prevTables) => {
+            const prevMap = new Map(prevTables.map((t) => [t.id, t]))
+            return mesasRes.value.mesas.map((m) =>
+              normalizarMesa(m, prevMap.get(m.id_mesa) || prevMap.get(m.numero) || {})
+            )
+          })
+        }
+        if (pedidosRes.status === 'fulfilled' && pedidosRes.value?.pedidos) {
+          setPedidosActivos(pedidosRes.value.pedidos)
+        }
+      } catch {
+        // error manejado
+      }
     }
-  }, [cargarMesas, cargarPedidosActivos])
+
+    fetchInitialData()
+
+    return () => {
+      isSubscribed = false
+    }
+  }, [])
 
 
   // Escuchar cuando entra un pedido nuevo (order:created)

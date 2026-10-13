@@ -10,4 +10,9 @@ export default defineConfig({
     cors: true,
     allowedHosts: true,
   },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+  },
 })
