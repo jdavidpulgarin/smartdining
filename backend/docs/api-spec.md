@@ -1101,9 +1101,12 @@ Hace falta porque `tr_validar_transaccion_financiera` solo rechaza que se pague 
 dejaría el pedido como cobrado, liberaría la mesa, invalidaría el QR del grupo y el resto
 no se volvería a cobrar.
 
-Mientras quede saldo tampoco se avisa al socket-server (`order:status` y
-`mesa:liberada` salen solo cuando el pedido se liquida de verdad). Para ver cuánto falta:
-`GET /transacciones/pedido/:id_pedido`, o la cuenta de la mesa en el canal interno.
+Mientras quede saldo no se avisa el **cierre** al socket-server (`order:status` y
+`mesa:liberada` salen solo cuando el pedido se liquida de verdad), pero el **cobro sí se
+anuncia**: cada abono manda su `POST /internal/payment-confirmed` con el saldo que le
+queda a la mesa, para que las demás cajas y la propia mesa vean bajar la cuenta en vivo
+(ver *Tiempo real*). Para ver cuánto falta: `GET /transacciones/pedido/:id_pedido`, o la
+cuenta de la mesa en el canal interno.
 
 409 también si el monto excede el saldo del pedido (`tr_validar_transaccion_financiera`,
 que además deja constancia en `intentos_pago_fallidos`).
@@ -1127,7 +1130,70 @@ Contrato completo en [socket-server/EVENTS.md](../../socket-server/EVENTS.md).
 | Se crea un pedido | `POST /internal/order-created` con el pedido y sus ítems |
 | Cambia el estado (pedidos y KDS) | `POST /internal/order-status` con `estado_anterior` |
 | Se abre una mesa con un token **nuevo** | `POST /internal/qr-rotado` → `qr:actualizado` a la tablet |
-| Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada` |
+| **La caja cobra** (efectivo, datáfono o abono parcial) | `POST /internal/payment-confirmed` → `payment:confirmed` |
+| Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada`, con `motivo` si la cerró un pago |
+
+### Cobros de caja: `payment:confirmed` (EVENTS.md §8.6)
+
+Un cobro en caja no pasa por la pasarela, así que nadie más se enteraría de él hasta
+recargar la cuenta. Después del COMMIT, `POST /api/transacciones` avisa a
+`/internal/payment-confirmed` y el socket-server lo reemite como `payment:confirmed`, el
+**mismo evento y el mismo payload** que un pago de Wompi.
+
+| Campo | Qué lleva |
+|---|---|
+| `eventId` | UUID v4, **uno por cobro** (primera guardia de idempotencia) |
+| `id_mesa` | Mesa del pedido cobrado |
+| `monto_centavos` | `Math.round(monto * 100)`, entero ≥ 1 |
+| `saldo_restante_centavos` | Saldo de **la mesa** (no el del pedido) después de este cobro |
+| `comensal` | Alias de quien pagó, o `null` en un cobro de la mesa completa |
+| `referencia_externa` | Voucher del datáfono, o `null` |
+| `id_transaccion` | Fila de `transacciones` (segunda guardia de idempotencia) |
+
+Todo va en **centavos enteros**: sumar abonos en coma flotante desajustaría el saldo, y
+el contrato rechaza un monto con decimales con 400. El saldo de la mesa se calcula
+**dentro** de la transacción del cobro, con la fila de la mesa bloqueada, para que sea
+exactamente el de después de ese pago y no el de un cobro ajeno que entró en medio.
+
+**Orden cuando el cobro liquida la cuenta.** Los tres avisos salen encadenados, en este
+orden y no en otro:
+
+```
+POST /internal/payment-confirmed   → payment:confirmed
+POST /internal/order-status        → order:status (pagado)
+POST /internal/mesa-liberada       → mesa:liberada (motivo "pagada")
+```
+
+`mesa-liberada` **desconecta a los comensales**: si saliera antes, la mesa nunca llegaría
+a ver el pago que la cerró. La cadena es secuencial pero el handler **no la espera**: el
+201 sale en cuanto está el COMMIT.
+
+**Dónde NO se avisa**, y por qué:
+
+- **Pago en línea** (`POST /api/transacciones/internal`): el socket-server ya emite
+  `payment:confirmed` desde su propio webhook. Avisar también desde aquí anunciaría el
+  mismo pago dos veces.
+- **Cierre al entregar** (`PATCH /api/pedidos/:id/estado` → `entregado` de un pedido ya
+  pagado) y **cierre a mano** a `pagado`: salen `order:status` y `mesa:liberada`, pero no
+  `payment:confirmed`. No entra dinero nuevo; anunciarlo sería un pago fantasma.
+- **Cancelar un pedido** o **liberar la mesa a mano**: no hay cobro.
+- Un estado de transacción que no sea `completada`: ese dinero no entró.
+
+### Motivo de `mesa:liberada` (H-22)
+
+El motivo sale del **estado final del pedido**, no de la ruta por la que se llegó:
+
+| Causa | `motivo` |
+|---|---|
+| Cobro en caja que liquida la cuenta | `pagada` |
+| Pago en línea (Wompi) | `pagada` |
+| Entrega que cierra un pedido ya pagado | `pagada` |
+| Pedido cancelado | `liberada` |
+| `POST /api/mesas/:id/liberar` (manual) | *(no se manda: `liberada` es el valor por omisión del socket-server)* |
+
+Antes el cobro en caja no mandaba `motivo`, así que el socket-server anunciaba la mesa
+como `liberada` —"el mesero cerró la mesa"— cuando en realidad el grupo había pagado. Las
+pantallas distinguen las dos cosas, de ahí la corrección.
 
 **Aislamiento:** salvo en `/qr/generar` y `/qr/validar` (donde sin respuesta no se puede
 abrir mesa ni sesión, y por eso se responde 503), el tiempo real es un extra. El cliente
