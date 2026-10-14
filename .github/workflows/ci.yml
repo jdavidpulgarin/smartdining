@@ -87,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [frontend-cliente, frontend-restaurante]
+        app: [frontend-cliente, frontend-restaurante, frontend-kds]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
