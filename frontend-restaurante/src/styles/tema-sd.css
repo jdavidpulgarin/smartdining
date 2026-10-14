@@ -2635,3 +2635,201 @@ a {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==============================================================================
+   MODAL QR DINÁMICO DE MESA (SD THEME)
+   ============================================================================== */
+.modal-backdrop.sd-modal-backdrop,
+.modal-backdrop:has(.qr-modal) {
+  background: rgba(0, 0, 0, 0.7) !important;
+  backdrop-filter: blur(4px);
+}
+
+.modal-card.qr-modal {
+  background: var(--sd-surface) !important;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85) !important;
+  color: var(--sd-text) !important;
+}
+
+.modal-card.qr-modal .modal-header {
+  border-bottom: 1px solid var(--sd-border) !important;
+  padding: 18px 24px !important;
+}
+
+.modal-card.qr-modal .modal-header h3 {
+  font-family: var(--sd-font-heading) !important;
+  font-weight: 800 !important;
+  font-size: 28px !important;
+  color: var(--sd-red) !important;
+  letter-spacing: 0.02em !important;
+  text-transform: uppercase !important;
+  margin: 0 !important;
+}
+
+.modal-card.qr-modal .modal-subtitle {
+  color: var(--sd-text-muted) !important;
+  font-family: var(--sd-font-body) !important;
+  font-size: 14px !important;
+  margin-top: 2px !important;
+}
+
+.modal-card.qr-modal .modal-icon-badge {
+  background: rgba(238, 28, 37, 0.15) !important;
+  color: var(--sd-red) !important;
+  border: 1px solid rgba(238, 28, 37, 0.3) !important;
+  border-radius: 8px !important;
+}
+
+.modal-card.qr-modal .modal-close-btn {
+  background: transparent !important;
+  border: 1px solid var(--sd-border-strong) !important;
+  color: var(--sd-text) !important;
+  border-radius: 6px !important;
+}
+
+.modal-card.qr-modal .modal-close-btn:hover {
+  background: rgba(238, 28, 37, 0.2) !important;
+  color: var(--sd-red-text) !important;
+  border-color: var(--sd-red) !important;
+}
+
+.modal-card.qr-modal .printable-qr-card {
+  background: #ffffff !important;
+  color: #120E0D !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35) !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+.modal-card.qr-modal .printable-brand {
+  border-bottom: 2px solid #f1f5f9 !important;
+}
+
+.modal-card.qr-modal .printable-mesa {
+  font-family: var(--sd-font-heading) !important;
+  font-weight: 800 !important;
+  font-size: 24px !important;
+  color: var(--sd-red) !important;
+}
+
+.modal-card.qr-modal .qr-rotacion-card {
+  background: var(--sd-bg) !important;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 10px !important;
+}
+
+.modal-card.qr-modal .qr-tablet-mode-banner {
+  background: var(--sd-bg) !important;
+  border: 1px solid var(--sd-border) !important;
+  border-radius: 10px !important;
+}
+
+.modal-card.qr-modal .tablet-mode-badge-icon {
+  background: rgba(238, 28, 37, 0.15) !important;
+  color: var(--sd-red) !important;
+  border-radius: 8px !important;
+}
+
+.modal-card.qr-modal .sd-qr-btn,
+.modal-card.qr-modal .qr-actions-grid button,
+.modal-card.qr-modal .qr-actions-grid a,
+.modal-card.qr-modal .tablet-mode-buttons button,
+.modal-card.qr-modal .tablet-mode-buttons a,
+.modal-card.qr-modal .qr-open-btn {
+  min-height: 44px !important;
+  font-family: var(--sd-font-heading) !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+  font-size: 14px !important;
+  border-radius: 6px !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+}
+
+.modal-card.qr-modal .sd-qr-btn-primary,
+.modal-card.qr-modal .tablet-launch-btn {
+  background: var(--sd-red) !important;
+  color: var(--sd-white) !important;
+  border: none !important;
+  text-decoration: none !important;
+}
+
+.modal-card.qr-modal .sd-qr-btn-primary:hover,
+.modal-card.qr-modal .tablet-launch-btn:hover {
+  background: #d4141d !important;
+}
+
+.modal-card.qr-modal .sd-qr-btn-secondary,
+.modal-card.qr-modal .tablet-copy-btn,
+.modal-card.qr-modal .qr-actions-grid button:not(.danger-hover),
+.modal-card.qr-modal .qr-actions-grid a {
+  background: transparent !important;
+  border: 1px solid var(--sd-text) !important;
+  color: var(--sd-text) !important;
+  text-decoration: none !important;
+}
+
+.modal-card.qr-modal .sd-qr-btn-secondary:hover,
+.modal-card.qr-modal .tablet-copy-btn:hover,
+.modal-card.qr-modal .qr-actions-grid button:not(.danger-hover):hover,
+.modal-card.qr-modal .qr-actions-grid a:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.modal-card.qr-modal .sd-qr-btn-danger,
+.modal-card.qr-modal .qr-action-btn.danger-hover {
+  background: transparent !important;
+  border: 1px solid var(--sd-red) !important;
+  color: var(--sd-red-text) !important;
+}
+
+.modal-card.qr-modal .sd-qr-btn-danger:hover,
+.modal-card.qr-modal .qr-action-btn.danger-hover:hover {
+  background: rgba(238, 28, 37, 0.15) !important;
+  color: var(--sd-white) !important;
+}
+
+.modal-card.qr-modal .sd-qr-btn-gold,
+.modal-card.qr-modal .qr-open-btn {
+  background: var(--sd-gold) !important;
+  color: var(--sd-gold-text) !important;
+  border: none !important;
+}
+
+.modal-card.qr-modal .sd-qr-btn-gold:hover,
+.modal-card.qr-modal .qr-open-btn:hover {
+  background: #c9931f !important;
+}
+
+.sd-qr-status-chip {
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-family: var(--sd-font-heading);
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sd-qr-status-chip.ocupada {
+  background: var(--sd-red) !important;
+  color: var(--sd-white) !important;
+}
+
+.sd-qr-status-chip.disponible {
+  background: var(--sd-white) !important;
+  color: #120E0D !important;
+}
+
+.sd-qr-status-chip.cuenta_pedida {
+  background: var(--sd-gold) !important;
+  color: var(--sd-gold-text) !important;
+}
