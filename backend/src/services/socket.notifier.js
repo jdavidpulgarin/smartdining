@@ -130,6 +130,17 @@ function esperarAvisos() {
  * el precio_aplicado que congeló la base, que es lo que el KDS necesita para
  * preparar un plato armado y la tablet para mostrar la cuenta por persona.
  * `notas_especiales` es solo la nota del ítem: el alias ya no va dentro.
+ *
+ * Cada ingrediente lleva además `paso`, el nombre del paso del constructor al
+ * que pertenece ("Elige tu Base", "Añade Toppings"). El KDS agrupa por él para
+ * leer el plato en el orden en que se arma, y sin ese campo una comanda que
+ * entra EN VIVO se veía plana —"Ingredientes: a · b · c"— mientras que la misma
+ * comanda, tras recargar, salía agrupada: los mismos datos se veían de dos
+ * formas distintas según por dónde hubieran llegado.
+ *
+ * Los ingredientes mantienen el orden que trae la consulta (pasos_constructor
+ * .orden), así que agrupar por `paso` respeta el orden del constructor sin que
+ * el receptor tenga que ordenar nada.
  */
 function armarPedido(pedido, detalles = []) {
   return {
@@ -145,13 +156,17 @@ function armarPedido(pedido, detalles = []) {
       cantidad: d.cantidad,
       comensal: d.comensal ?? null,
       notas_especiales: d.notas_especiales ?? null,
-      // Solo los campos del contrato: id_paso y paso se quedan en la API REST,
-      // el socket no los pide.
+      // `id_paso` se queda en la API REST: es una clave interna y quien recibe
+      // el evento agrupa por el nombre, no por el id.
       ingredientes: (d.ingredientes || []).map((i) => ({
         id_ingrediente: i.id_ingrediente,
         nombre: i.nombre,
         porcion: i.porcion,
         precio_aplicado: i.precio_aplicado,
+        // null cuando el ingrediente no viene de un paso del constructor; el
+        // campo va igual, para que el receptor no tenga que distinguir entre
+        // "sin paso" y "este evento no trae el dato".
+        paso: i.paso ?? null,
       })),
     })),
   };
