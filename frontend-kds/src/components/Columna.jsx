@@ -25,11 +25,12 @@ export default function Columna({ estado, titulo, comandas, ahora, vacio, conect
         className="flex items-center justify-between gap-2 rounded-xl border-t-4 bg-[color:var(--color-panel)] px-4 py-3"
         style={{ borderColor: color }}
       >
-        <h2 className="display text-3xl font-bold" style={{ color }}>
-          {titulo}
-        </h2>
+        {/* El titulo va en blanco y no en el color de la columna: tres titulos
+            de colores distintos compiten entre si, y el color ya lo lleva la
+            regla de arriba, que es donde se distingue sin leer. */}
+        <h2 className="display text-3xl font-bold">{titulo}</h2>
         <span
-          className="display min-w-11 rounded-lg bg-[color:var(--color-fondo)] px-3 py-1 text-center text-2xl font-bold tabular-nums"
+          className="display min-w-11 rounded-lg bg-[color:var(--color-contador)] px-3 py-1 text-center text-2xl font-bold tabular-nums text-[color:var(--color-contador-texto)]"
           aria-label={`${comandas.length} comandas`}
         >
           {comandas.length}

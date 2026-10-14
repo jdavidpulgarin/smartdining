@@ -29,6 +29,15 @@
   --color-alerta: #e01f2d;
 
   /*
+   * El contador de cada columna: cuadro claro con la cifra oscura. Es el unico
+   * sitio donde se invierte el contraste a proposito — asi la cifra se separa
+   * del titulo sin usar el color de la columna, que ya esta en la regla de
+   * arriba y no debe repetirse en tres sitios.
+   */
+  --color-contador: #f6f6f7;
+  --color-contador-texto: #141417;
+
+  /*
    * Barlow Condensed para lo que se lee de lejos (títulos, cifras, botones) y
    * Barlow para el detalle. La condensada permite "EN PREPARACIÓN" o "MARCAR
    * LISTO" en grande sin partir la línea en una columna estrecha.
@@ -54,6 +63,10 @@
   --color-preparacion: #8a6100;
   --color-listas: #3a3a44;
   --color-alerta: #b4141f;
+  /* Aqui se invierte al reves: sobre un panel blanco, un cuadro claro no se
+     veria, asi que el cuadro va oscuro y la cifra en blanco. */
+  --color-contador: #121216;
+  --color-contador-texto: #ffffff;
 }
 
 html,
