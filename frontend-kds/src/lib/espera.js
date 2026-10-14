@@ -60,7 +60,7 @@ export function textoDeEspera(minutos) {
 const SENALES = {
   normal: { signo: '•', etiqueta: 'En tiempo' },
   ambar: { signo: '!', etiqueta: 'Apurar' },
-  rojo: { signo: '!!', etiqueta: 'Retrasada' },
+  rojo: { signo: '!!', etiqueta: 'Atrasada' },
   // Sin semáforo: ni color ni etiqueta, solo el tiempo.
   neutro: { signo: '', etiqueta: '' },
 }
@@ -71,11 +71,23 @@ export function senalDeEspera(minutos) {
 }
 
 /**
+ * El nombre de un nivel, sin pasar por unos minutos concretos.
+ *
+ * Existe para la leyenda de la barra de resumen, que nombra los tres niveles a
+ * la vez y no tiene ninguna comanda delante. Antes los escribía a mano y por
+ * eso la tarjeta pudo decir "Retrasada" mientras la leyenda decía "ATRASADA":
+ * dos nombres para una sola cosa, en la misma pantalla.
+ */
+export function etiquetaDeNivel(nivel) {
+  return SENALES[nivel]?.etiqueta ?? ''
+}
+
+/**
  * Estados en los que el semáforo dice algo útil.
  *
  * Solo mientras la comanda depende de la cocina. Una comanda 'listo' ya está
  * hecha: el reloj sigue corriendo porque está esperando al mesero, pero pintarla
- * de rojo y llamarla "Retrasada" culparía a la cocina de una demora que no es
+ * de rojo y llamarla "Atrasada" culparía a la cocina de una demora que no es
  * suya, y además llenaría la columna de alarmas que nadie puede atender desde
  * ahí. En Listas se muestra el tiempo y nada más.
  */

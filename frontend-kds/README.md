@@ -112,7 +112,7 @@ hace semanas (19.000 min) y un número de cinco dígitos no informa de nada.
 
 El tiempo va en un **chip** que se pinta con el nivel, y el rojo además levanta un aviso
 de ancho completo **"ATRASADA · PRIORIDAD"** bajo la cabecera de la tarjeta. El nivel **no
-se señala solo con color**: el texto ("En tiempo", "Apurar", "Retrasada") sigue en el
+se señala solo con color**: el texto ("En tiempo", "Apurar", "Atrasada") sigue en el
 `title` del chip y en un `sr-only`, por si el monitor está mal calibrado, quien mira no
 distingue rojo de ámbar o se usa un lector de pantalla.
 
@@ -144,7 +144,7 @@ cambia nada: ahí el reloj es el total, que es lo que mide la espera del comensa
   verlo dos veces en la misma tarjeta hace dudar de si son cosas distintas. Atenuada,
   **no escondida**: una comanda
   olvidada tiene que seguir viéndose, solo deja de competir por la atención con las
-  recién salidas. Sin rojo y sin "RETRASADA": la cocina ya hizo su parte.
+  recién salidas. Sin rojo y sin "ATRASADA": la cocina ya hizo su parte.
 
 En esa columna el reloj dice **"N min en pase"**, no "N min" a secas: la cifra es otra que
 la de las demás columnas y conviene que se note.

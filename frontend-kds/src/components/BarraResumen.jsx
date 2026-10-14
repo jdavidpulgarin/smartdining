@@ -1,4 +1,4 @@
-import { UMBRAL_AMBAR, UMBRAL_ROJO } from '../lib/espera'
+import { UMBRAL_AMBAR, UMBRAL_ROJO, etiquetaDeNivel } from '../lib/espera'
 
 /**
  * La franja bajo la cabecera: cuanto trabajo hay encima y que significan los
@@ -8,15 +8,25 @@ import { UMBRAL_AMBAR, UMBRAL_ROJO } from '../lib/espera'
  * sin esto nadie sabe a partir de que minuto; con ella, un cocinero nuevo
  * entiende la pantalla sin que se lo expliquen.
  *
- * Las cifras salen de los umbrales de lib/espera, no escritas a mano: si algun
- * dia la cocina decide que son 8 y 12, la leyenda cambia sola en vez de quedar
- * mintiendo.
+ * Ni las cifras ni los nombres se escriben aqui: salen de lib/espera, que es
+ * quien decide los umbrales y como se llama cada nivel. Con los nombres a mano
+ * ya paso una vez que la tarjeta dijera "Retrasada" y la leyenda "Atrasada",
+ * dos nombres para una sola cosa en la misma pantalla.
  */
 
 const NIVELES = [
-  { color: 'var(--color-texto)', texto: `En tiempo · menos de ${UMBRAL_AMBAR} min` },
-  { color: 'var(--color-preparacion)', texto: `Apurar · ${UMBRAL_AMBAR} a ${UMBRAL_ROJO} min` },
-  { color: 'var(--color-alerta)', texto: `Atrasada · más de ${UMBRAL_ROJO} min` },
+  {
+    color: 'var(--color-texto)',
+    texto: `${etiquetaDeNivel('normal')} · menos de ${UMBRAL_AMBAR} min`,
+  },
+  {
+    color: 'var(--color-preparacion)',
+    texto: `${etiquetaDeNivel('ambar')} · ${UMBRAL_AMBAR} a ${UMBRAL_ROJO} min`,
+  },
+  {
+    color: 'var(--color-alerta)',
+    texto: `${etiquetaDeNivel('rojo')} · más de ${UMBRAL_ROJO} min`,
+  },
 ]
 
 export default function BarraResumen({ activas }) {
