@@ -1,0 +1,292 @@
+[
+  {
+    "id_categoria": 100,
+    "categoria": "Arma tu plato",
+    "descripcion": "Crea tu propia combinación eligiendo tus ingredientes favoritos",
+    "orden": 0,
+    "platos": [
+      {
+        "id_plato": 1001,
+        "nombre": "Bowl Personalizado",
+        "descripcion": "Arma tu bowl con base, proteína, vegetales y salsa a tu gusto.",
+        "precio": 20000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&q=80&auto=format",
+        "tiempo_estimado": 10,
+        "personalizable": true,
+        "calorias": 450,
+        "pasos": [
+          {
+            "id_paso": 101,
+            "nombre": "Elige tu Base",
+            "orden": 1,
+            "min_sel": 1,
+            "max_sel": 1,
+            "obligatorio": true,
+            "ingredientes": [
+              {
+                "id_ingrediente": 1011,
+                "nombre": "Arroz Integral",
+                "precio_extra": 0.00,
+                "calorias": 180,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1536304993881-ff6e9eefa2a6?w=600&q=80&auto=format",
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 1012,
+                "nombre": "Quinoa",
+                "precio_extra": 2000.00,
+                "calorias": 160,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1586201375761-83865001e31c?w=600&q=80&auto=format",
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 1013,
+                "nombre": "Lechuga Fresca",
+                "precio_extra": 0.00,
+                "calorias": 15,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1556801712-76c8eb07bbc9?w=600&q=80&auto=format",
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 102,
+            "nombre": "Elige tu Proteína",
+            "orden": 2,
+            "min_sel": 1,
+            "max_sel": 1,
+            "obligatorio": true,
+            "ingredientes": [
+              {
+                "id_ingrediente": 1021,
+                "nombre": "Pollo a la Plancha",
+                "precio_extra": 0.00,
+                "calorias": 220,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=600&q=80&auto=format",
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 1022,
+                "nombre": "Carne Desmechada",
+                "precio_extra": 2500.00,
+                "calorias": 260,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&q=80&auto=format",
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 1023,
+                "nombre": "Falafel (Vegano)",
+                "precio_extra": 0.00,
+                "calorias": 190,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1593560708920-61dd98c46a4e?w=600&q=80&auto=format",
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 103,
+            "nombre": "Añade Toppings",
+            "orden": 3,
+            "min_sel": 0,
+            "max_sel": 3,
+            "obligatorio": false,
+            "ingredientes": [
+              {
+                "id_ingrediente": 1031,
+                "nombre": "Maíz Tierno",
+                "precio_extra": 0.00,
+                "calorias": 70,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1551754655-cd27e38d2076?w=600&q=80&auto=format",
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 1032,
+                "nombre": "Tomate Picado",
+                "precio_extra": 0.00,
+                "calorias": 25,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=600&q=80&auto=format",
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 1033,
+                "nombre": "Aguacate",
+                "precio_extra": 1500.00,
+                "calorias": 120,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=600&q=80&auto=format",
+                "disponible": true
+              }
+            ]
+          },
+          {
+            "id_paso": 104,
+            "nombre": "Elige tu Salsa",
+            "orden": 4,
+            "min_sel": 0,
+            "max_sel": 1,
+            "obligatorio": false,
+            "ingredientes": [
+              {
+                "id_ingrediente": 1041,
+                "nombre": "Salsa de Ajo",
+                "precio_extra": 0.00,
+                "calorias": 90,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1472476443507-c7a5948772fc?w=600&q=80&auto=format",
+                "disponible": true
+              },
+              {
+                "id_ingrediente": 1042,
+                "nombre": "Salsa Picante",
+                "precio_extra": 0.00,
+                "calorias": 15,
+                "alergenos": [],
+                "url_imagen": "https://images.unsplash.com/photo-1563865436874-9aef32095fad?w=600&q=80&auto=format",
+                "disponible": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id_plato": 1002,
+        "nombre": "Wrap Personalizado",
+        "descripcion": "Tu combinación favorita envuelta en tortilla de harina fresca.",
+        "precio": 18000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1626700051175-6818013e1d4f?w=600&q=80&auto=format",
+        "tiempo_estimado": 8,
+        "personalizable": true,
+        "calorias": 520,
+        "pasos": []
+      },
+      {
+        "id_plato": 1003,
+        "nombre": "Arepa Rellena",
+        "descripcion": "Auténtica arepa de maíz con los rellenos que elijas.",
+        "precio": 15000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=600&q=80&auto=format",
+        "tiempo_estimado": 12,
+        "personalizable": true,
+        "calorias": 380,
+        "pasos": []
+      }
+    ]
+  },
+  {
+    "id_categoria": 1,
+    "categoria": "Entradas",
+    "descripcion": "Para comenzar y compartir al centro de mesa",
+    "orden": 1,
+    "platos": [
+      {
+        "id_plato": 1,
+        "nombre": "Nachos Supremos",
+        "descripcion": "Totopos crujientes con guacamole, queso cheddar fundido, pico de gallo y frijol refrito.",
+        "precio": 24000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1513456852971-30c0b8199d4d?w=600&q=80&auto=format",
+        "tiempo_estimado": 10,
+        "personalizable": false,
+        "calorias": null,
+        "pasos": []
+      },
+      {
+        "id_plato": 2,
+        "nombre": "Alitas BBQ x8",
+        "descripcion": "Alitas de pollo crujientes bañadas en salsa BBQ artesanal con bastones de apio.",
+        "precio": 28000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1567620832903-9fc6debc209f?w=600&q=80&auto=format",
+        "tiempo_estimado": 12,
+        "personalizable": false,
+        "calorias": null,
+        "pasos": []
+      }
+    ]
+  },
+  {
+    "id_categoria": 2,
+    "categoria": "Hamburguesas & Fuertes",
+    "descripcion": "Nuestras especialidades artesanales a la parrilla",
+    "orden": 2,
+    "platos": [
+      {
+        "id_plato": 3,
+        "nombre": "Hamburguesa Smart Angus",
+        "descripcion": "200g de carne Angus, queso cheddar madurado, tocineta ahumada, cebolla caramelizada y pan brioche.",
+        "precio": 34000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80&auto=format",
+        "tiempo_estimado": 15,
+        "personalizable": false,
+        "calorias": null,
+        "pasos": []
+      },
+      {
+        "id_plato": 4,
+        "nombre": "Costillas BBQ St. Louis",
+        "descripcion": "Costillar de cerdo glaseado a fuego lento acompañado de papas rústicas y ensalada coleslaw.",
+        "precio": 42000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&q=80&auto=format",
+        "tiempo_estimado": 20,
+        "personalizable": false,
+        "calorias": null,
+        "pasos": []
+      }
+    ]
+  },
+  {
+    "id_categoria": 3,
+    "categoria": "Bebidas & Cocteles",
+    "descripcion": "Refrescos naturales, cervezas y coctelería de autor",
+    "orden": 3,
+    "platos": [
+      {
+        "id_plato": 5,
+        "nombre": "Limonada de Coco",
+        "descripcion": "Limonada cremosa granizada preparada con leche de coco natural.",
+        "precio": 12000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=600&q=80&auto=format",
+        "tiempo_estimado": 5,
+        "personalizable": false,
+        "calorias": null,
+        "pasos": []
+      },
+      {
+        "id_plato": 6,
+        "nombre": "Cerveza Artesanal IPA",
+        "descripcion": "Botella 330ml de cerveza rubia lupulada de la casa.",
+        "precio": 14000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1608270586620-248524c67de9?w=600&q=80&auto=format",
+        "tiempo_estimado": 3,
+        "personalizable": false,
+        "calorias": null,
+        "pasos": []
+      }
+    ]
+  },
+  {
+    "id_categoria": 4,
+    "categoria": "Postres",
+    "descripcion": "El toque dulce perfecto para finalizar",
+    "orden": 4,
+    "platos": [
+      {
+        "id_plato": 7,
+        "nombre": "Volcán de Chocolate",
+        "descripcion": "Bizcocho tibio de chocolate relleno de fudge fluido con helado de vainilla.",
+        "precio": 18000.00,
+        "url_imagen": "https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=600&q=80&auto=format",
+        "tiempo_estimado": 10,
+        "personalizable": false,
+        "calorias": null,
+        "pasos": []
+      }
+    ]
+  }
+]
