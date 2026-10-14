@@ -496,8 +496,11 @@ export const constructorApi = {
     }
     try {
       return await apiFetch(`/platos/${idPlato}/pasos`)
-    } catch {
-      // Fallback a almacenamiento local mientras Daniel integra D-04
+    } catch (err) {
+      if (err?.status) {
+        throw err
+      }
+      // Fallback a almacenamiento local solo ante fallo de red (sin respuesta de servidor)
       const storage = getMockPasosStorage()
       return storage[idPlato] || []
     }
@@ -535,7 +538,10 @@ export const constructorApi = {
         method: 'POST',
         body: JSON.stringify(pasoPayload),
       })
-    } catch {
+    } catch (err) {
+      if (err?.status) {
+        throw err
+      }
       const storage = getMockPasosStorage()
       const pasosPlato = storage[idPlato] || []
       const nuevoPaso = {
@@ -570,7 +576,10 @@ export const constructorApi = {
         method: 'PUT',
         body: JSON.stringify(datos),
       })
-    } catch {
+    } catch (err) {
+      if (err?.status) {
+        throw err
+      }
       const storage = getMockPasosStorage()
       for (const pId of Object.keys(storage)) {
         storage[pId] = storage[pId].map((p) =>
@@ -598,7 +607,10 @@ export const constructorApi = {
 
     try {
       return await apiFetch(`/pasos/${idPaso}`, { method: 'DELETE' })
-    } catch {
+    } catch (err) {
+      if (err?.status) {
+        throw err
+      }
       const storage = getMockPasosStorage()
       for (const pId of Object.keys(storage)) {
         storage[pId] = storage[pId].filter((p) => p.id_paso !== idPaso)
@@ -643,7 +655,10 @@ export const constructorApi = {
         method: 'POST',
         body: JSON.stringify(ingPayload),
       })
-    } catch {
+    } catch (err) {
+      if (err?.status) {
+        throw err
+      }
       const storage = getMockPasosStorage()
       const nuevoIng = { id_ingrediente: Date.now(), ...ingPayload }
       for (const pId of Object.keys(storage)) {
@@ -683,7 +698,10 @@ export const constructorApi = {
         method: 'PUT',
         body: JSON.stringify(datos),
       })
-    } catch {
+    } catch (err) {
+      if (err?.status) {
+        throw err
+      }
       const storage = getMockPasosStorage()
       for (const pId of Object.keys(storage)) {
         storage[pId] = storage[pId].map((p) => ({
@@ -717,7 +735,10 @@ export const constructorApi = {
 
     try {
       return await apiFetch(`/ingredientes/${idIngrediente}`, { method: 'DELETE' })
-    } catch {
+    } catch (err) {
+      if (err?.status) {
+        throw err
+      }
       const storage = getMockPasosStorage()
       for (const pId of Object.keys(storage)) {
         storage[pId] = storage[pId].map((p) => ({
