@@ -210,10 +210,30 @@ Tipografía **Barlow Condensed** (títulos, cifras, botones) y **Barlow** (texto
 autoalojadas con `@fontsource`: una cocina puede quedarse sin internet y la pantalla tiene
 que arrancar igual, así que no se piden a ningún CDN.
 
-El fondo del login y del tablero es `public/fondo-cocina.jpg` con una capa oscura encima,
-y un degradado debajo que se ve mientras la imagen carga o si no llega a cargar. En tema
-claro no se usa la foto: la capa que la hace legible es oscura, y aclararla deja la imagen
-en un gris sucio.
+El fondo del login y del tablero es `public/fondo-cocina.jpg`, con un degradado debajo que
+se ve mientras la imagen carga o si no llega a cargar. La foto se usa en los **dos temas**;
+lo que cambia es el color del velo: oscuro en el tema oscuro, blanco en el claro — nunca al
+revés, porque una capa oscura sobre el tema claro ensucia la imagen y deja el texto oscuro
+flotando sobre un gris indeciso.
+
+La intensidad se toca en un solo sitio, en [`src/index.css`](src/index.css): son el
+porcentaje de velo que se mezcla sobre la foto (`0%` = foto intacta, `100%` = foto tapada).
+
+| Variable | Oscuro | Claro | Dónde |
+|---|---|---|---|
+| `--capa-fondo-tablero` | `55%` | `62%` | Toda la pantalla del tablero |
+| `--capa-fondo-login` | `82%` | `86%` | Solo detrás del texto del login, no en toda la foto |
+
+En el login la foto se ve casi limpia: el velo va pegado al titular y a la barra de arriba
+(`.velo-texto` y `.velo-barra`), que es lo único que hay que poder leer encima de la imagen.
+Las tarjetas, los encabezados de columna y la tarjeta de entrada llevan su fondo sólido y no
+dependen del velo.
+
+Los valores no son estéticos sino el mínimo que sostiene el contraste: medidos contra el
+píxel más claro de la foto (luminancia 250) en oscuro y el más oscuro en claro, todo el texto
+queda por encima de 4,5:1 (3:1 el texto grande). Por eso el titular del login usa
+`--color-marca-sobre-foto`, un rojo un punto más luminoso: el de marca se queda en 2,5:1 sobre
+el velo oscuro. Si subes el brillo de la foto bajando estos porcentajes, vuelve a comprobarlo.
 
 > ⚠️ **Licencia de la imagen.** `public/fondo-cocina.jpg` es una foto de banco **con marca
 > de agua**, usada aquí solo con fines académicos. Hay que reemplazarla por una imagen con

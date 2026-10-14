@@ -41,7 +41,11 @@ export default function Columna({ estado, titulo, comandas, ahora, vacio, conect
         {comandas.length === 0 ? (
           // Caja punteada, no un parrafo suelto: deja claro que el hueco es el
           // sitio donde van a aparecer las comandas, y no un fallo de carga.
-          <div className="rounded-xl border-2 border-dashed border-[color:var(--color-borde)] px-5 py-10 text-center">
+          //
+          // Lleva fondo solido porque es el unico texto del tablero que caeria
+          // sobre la foto: ahi el texto suave se queda en 1,6:1 (oscuro) y
+          // 2,5:1 (claro); sobre el panel sube a 6,6:1.
+          <div className="rounded-xl border-2 border-dashed border-[color:var(--color-borde)] bg-[color:var(--color-panel)] px-5 py-10 text-center">
             <ChefHat
               size={34}
               className="mx-auto mb-3 text-[color:var(--color-texto-suave)]"

@@ -47,9 +47,11 @@ export default function Login() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
+      {/* Sobre la foto limpia el texto suave se queda en 2,6:1, así que aquí va
+          el texto principal y la barra lleva su propio velo corto. */}
+      <header className="velo-barra flex flex-wrap items-center justify-between gap-3 px-6 pb-8 pt-4">
         <Logo texto="SmartDining" />
-        <p className="display text-base font-semibold text-[color:var(--color-texto-suave)]">
+        <p className="display text-base font-semibold text-[color:var(--color-texto)]">
           Pantalla de cocina
         </p>
       </header>
@@ -62,13 +64,17 @@ export default function Login() {
         {/* El reclamo de la izquierda no es relleno: esta pantalla se deja
             abierta en un monitor del pase, y asi se sabe de un vistazo cual de
             las tres aplicaciones de SmartDining es sin acercarse a leer. */}
-        <div className="max-w-lg">
+        {/* El velo va pegado a este bloque y no a la pantalla: es lo único que
+            hay que leer sobre la foto, así el resto de la imagen se ve limpia.
+            La bajada usa el texto principal y no el suave — sobre una foto, un
+            gris medio deja de leerse por mucho velo que se le ponga. */}
+        <div className="velo-texto max-w-lg rounded-3xl px-8 py-10">
           <h1 className="display text-7xl font-bold leading-[0.9] text-[color:var(--color-marca)] lg:text-8xl">
             A la
             <br />
             cocina
           </h1>
-          <p className="mt-5 text-lg text-[color:var(--color-texto-suave)]">
+          <p className="mt-5 text-lg font-semibold text-[color:var(--color-texto)]">
             Comandas en tres columnas, con el tiempo de cada una a la vista y aviso sonoro cuando
             entra una nueva.
           </p>

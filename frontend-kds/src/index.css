@@ -85,26 +85,20 @@ body {
 }
 
 /*
- * Fondo del login y del tablero.
+ * Fondo del login y del tablero: la foto, sin nada encima.
  *
- * El degradado NO es decorativo ni un resto: es el respaldo. Va en
- * `background-color` y en las capas de abajo, así que mientras la foto carga
+ * El degradado de debajo NO es decorativo ni un resto: es el respaldo. Va en
+ * `background-color` y en las capas inferiores, así que mientras la foto carga
  * —o si no carga nunca, que en una cocina sin red es el caso probable— la
  * pantalla ya se ve terminada en vez de blanca.
  *
- * Sobre la foto va una capa oscura casi opaca. No es un efecto: las comandas se
- * leen a varios metros y una foto a contraste pleno detrás se come los bordes
- * de las tarjetas y el texto suave. La capa deja la textura y devuelve el
- * contraste.
+ * Aquí no se oscurece nada. Cada pantalla pone su propia capa, porque no
+ * necesitan la misma: el login enseña la foto entera y el tablero tiene que
+ * dejar leer comandas por encima.
  */
 body {
   background-color: var(--color-fondo);
   background-image:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--color-fondo) 88%, transparent),
-      color-mix(in srgb, var(--color-fondo) 94%, transparent)
-    ),
     radial-gradient(90rem 55rem at 15% -15%, color-mix(in srgb, var(--color-marca) 16%, transparent), transparent 60%),
     radial-gradient(70rem 50rem at 110% 110%, color-mix(in srgb, var(--color-marca) 9%, transparent), transparent 62%),
     url('/fondo-cocina.jpg');
@@ -115,15 +109,101 @@ body {
 }
 
 /*
- * Tema claro: sin foto. La capa que hace legible la foto es oscura, y aclararla
- * lo bastante para un fondo claro deja la imagen en un gris sucio que no aporta
- * nada. El claro se queda con el degradado sobrio, que es para lo que existe:
- * una cocina muy iluminada donde el oscuro se ve lavado.
+ * ---------------------------------------------------------------------------
+ * Intensidad de las capas sobre la foto. Para subirlas o bajarlas a ojo, se
+ * toca SOLO el porcentaje: es cuánto color de capa se mezcla encima de la foto.
+ *
+ *   0%   = foto intacta
+ *   100% = foto tapada del todo
+ *
+ * El color de la capa cambia con el tema y nunca al revés: en oscuro se oscurece
+ * y en claro se aclara. Una capa oscura sobre el tema claro ensucia la foto y
+ * deja el texto oscuro flotando sobre un gris indeciso.
+ * ---------------------------------------------------------------------------
  */
-:root[data-tema='claro'] body {
-  background-image:
-    radial-gradient(90rem 55rem at 15% -15%, color-mix(in srgb, var(--color-marca) 10%, transparent), transparent 60%),
-    linear-gradient(180deg, color-mix(in srgb, var(--color-texto) 4%, transparent), transparent 40%);
+:root {
+  /* El color con el que se vela la foto. */
+  --capa-fondo-color: var(--color-fondo);
+  /*
+   * El rojo de marca, un punto más luminoso, SOLO para texto que cae sobre la
+   * foto velada. El de marca se queda en 2,5:1 contra ese fondo y el mínimo
+   * para texto grande es 3:1; este da 3,2:1 sin dejar de ser el mismo rojo.
+   */
+  --color-marca-sobre-foto: #f2404c;
+  /* Tablero: lo justo para que los huecos entre columnas no distraigan. */
+  --capa-fondo-tablero: 55%;
+  /* Login: solo detrás del texto de la izquierda, el resto de la foto limpio. */
+  --capa-fondo-login: 82%;
+}
+
+:root[data-tema='claro'] {
+  /* Blanco, nunca oscuro: aquí el texto que hay que salvar es el oscuro. */
+  --capa-fondo-color: #ffffff;
+  /* Sobre velo claro el rojo de marca ya da 5:1; no hace falta aclararlo. */
+  --color-marca-sobre-foto: var(--color-marca);
+  --capa-fondo-tablero: 62%;
+  --capa-fondo-login: 86%;
+}
+
+/*
+ * La capa del tablero. Fija y detrás de todo el contenido (z-index -1), así que
+ * no hay que envolver la pantalla en otro div ni tocar el apilado de las
+ * tarjetas, que llevan su propio fondo sólido y no dependen de esto.
+ */
+.fondo-tablero {
+  position: relative;
+}
+
+.fondo-tablero::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: color-mix(
+    in srgb,
+    var(--capa-fondo-color) var(--capa-fondo-tablero),
+    transparent
+  );
+  pointer-events: none;
+}
+
+/*
+ * El velo del login: un óvalo difuminado detrás del titular y su bajada.
+ *
+ * Va pegado al texto y no a la pantalla entera a propósito — es lo único que
+ * hay que poder leer sobre la foto, y así el resto de la imagen se ve tal cual.
+ * Se desvanece antes del borde del bloque, de modo que no se le ve el canto.
+ */
+.velo-texto {
+  background-image: radial-gradient(
+    115% 125% at 35% 50%,
+    color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 0%,
+    color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 42%,
+    transparent 78%
+  );
+}
+
+/*
+ * El mismo velo para la barra de arriba del login, en vertical y corto.
+ *
+ * Hace falta: el logo y "Pantalla de cocina" caen sobre la foto limpia, y ahí
+ * la imagen tiene zonas casi blancas (los platos) donde ese texto se queda en
+ * 2,6:1. Se desvanece a nada antes de llegar al titular, así que la foto sigue
+ * entera por debajo.
+ */
+.velo-barra {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 0%,
+    color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 55%,
+    transparent 100%
+  );
+}
+
+/* Dentro de un velo, el rojo de marca pasa al tono que sí contrasta ahí. */
+.velo-texto,
+.velo-barra {
+  --color-marca: var(--color-marca-sobre-foto);
 }
 
 /* En una pantalla tactil de cocina, seleccionar texto por accidente estorba. */

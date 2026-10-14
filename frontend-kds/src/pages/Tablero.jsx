@@ -139,7 +139,7 @@ export default function Tablero() {
   const aviso = avisoDelTablero({ conectado, error: estado.error })
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="fondo-tablero flex h-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--color-borde)] bg-[color:var(--color-panel)] px-5 py-3">
         <div className="flex flex-wrap items-center gap-4">
           <Logo
