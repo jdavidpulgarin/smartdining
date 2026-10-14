@@ -214,6 +214,10 @@ export function Caja() {
     cargarCuentas()
     if (data?.id_mesa) cargarMesas()
   })
+  useSocketListener('mesa:liberada', () => {
+    cargarCuentas()
+    cargarMesas()
+  })
   useSocketListener('mesa-liberada', () => {
     cargarCuentas()
     cargarMesas()
