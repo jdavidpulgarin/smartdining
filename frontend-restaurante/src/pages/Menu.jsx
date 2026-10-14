@@ -42,20 +42,21 @@ export function Menu() {
     const cats = data?.categorias || []
     const categoriasParsed = cats.map((c) => ({
       id: c.id_categoria,
-      name: c.nombre,
+      name: c.nombre || c.categoria || '',
       description: c.descripcion || '',
     }))
 
-    const platosParsed = cats.flatMap((c) =>
-      (c.platos || []).map((p) => ({
+    const platosParsed = cats.flatMap((c) => {
+      const catNombre = c.nombre || c.categoria || 'General'
+      return (c.platos || []).map((p) => ({
         id: p.id_plato,
         name: p.nombre,
-        categoryName: c.nombre,
+        categoryName: catNombre,
         categoryId: c.id_categoria,
         price: Number(p.precio || 0),
         priceFormatted: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
         prepTime: p.tiempo_preparacion_estimado || 15,
-        tag: c.nombre,
+        tag: catNombre,
         description: p.descripcion || '',
         imageUrl:
           p.url_imagen ||
@@ -64,7 +65,7 @@ export function Menu() {
         personalizable: Boolean(p.personalizable),
         calorias: p.calorias || null,
       }))
-    )
+    })
 
     setCategoriesList(categoriasParsed)
     setDishesList(platosParsed)
@@ -385,15 +386,16 @@ export function Menu() {
               <span className="sd-pill-count">{dishesList.length}</span>
             </button>
             {categoriesList.map((cat) => {
-              const count = dishesList.filter((d) => d.categoryName === cat.name).length
+              const catName = cat.name || ''
+              const count = dishesList.filter((d) => d.categoryName === catName).length
               return (
                 <button
                   key={cat.id}
                   type="button"
-                  className={`sd-band-pill ${activeCategory === cat.name ? 'active' : ''}`}
-                  onClick={() => setActiveCategory(cat.name)}
+                  className={`sd-band-pill ${activeCategory === catName ? 'active' : ''}`}
+                  onClick={() => setActiveCategory(catName)}
                 >
-                  <span>{cat.name.toUpperCase()}</span>
+                  <span>{catName.toUpperCase()}</span>
                   <span className="sd-pill-count">{count}</span>
                 </button>
               )
