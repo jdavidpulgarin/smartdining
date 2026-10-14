@@ -12,11 +12,38 @@
 
 import { ordenarPase } from './pase.js'
 
-/** Columnas del tablero, en el orden en que se muestran. */
+/**
+ * Columnas del tablero, en el orden en que se muestran.
+ *
+ * Cada una trae ademas el texto de su estado vacio, que no es decorativo: una
+ * columna vacia es el caso mas frecuente de esta pantalla, y es justo donde hay
+ * que explicar que se espera que aparezca ahi y de donde viene.
+ */
 export const COLUMNAS = [
-  { estado: 'recibido', titulo: 'Nuevas' },
-  { estado: 'en_preparacion', titulo: 'En preparación' },
-  { estado: 'listo', titulo: 'Listas' },
+  {
+    estado: 'recibido',
+    titulo: 'Nuevas',
+    vacio: {
+      titulo: 'Sin comandas nuevas',
+      nota: 'Sonará un aviso cuando llegue una.',
+    },
+  },
+  {
+    estado: 'en_preparacion',
+    titulo: 'En preparación',
+    vacio: {
+      titulo: 'Nada en preparación',
+      nota: 'Lo que empieces aparece aquí hasta que lo marques listo.',
+    },
+  },
+  {
+    estado: 'listo',
+    titulo: 'Listas en el pase',
+    vacio: {
+      titulo: 'El pase está vacío',
+      nota: 'Lo que marques como listo aparece aquí hasta que el mesero lo recoja.',
+    },
+  },
 ]
 
 const ESTADOS_EN_TABLERO = COLUMNAS.map((c) => c.estado)

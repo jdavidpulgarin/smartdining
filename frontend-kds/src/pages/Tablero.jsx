@@ -242,11 +242,7 @@ export default function Tablero() {
             comandas={comandasDeColumna(estado, columna.estado)}
             ahora={ahora}
             onAvanzar={avanzar}
-            nota={
-              columna.estado === 'listo'
-                ? 'Esperando que el mesero las recoja'
-                : null
-            }
+            vacio={columna.vacio}
           />
         ))}
       </main>
