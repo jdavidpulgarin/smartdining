@@ -133,12 +133,25 @@ a {
 
 /* Layout Base y Shell */
 .app-shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
   background-color: var(--sd-bg);
   color: var(--sd-text);
   font-family: var(--sd-font-body);
+  width: 100%;
+}
+
+.topbar,
+.sd-topbar,
+.sd-page-wrapper,
+main {
+  grid-column: 1 / -1;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .sd-bg-photo {
@@ -167,6 +180,7 @@ a {
 /* ==============================================================================
    TOPBAR — MENÚ SUPERIOR EDITORIAL
    ============================================================================== */
+.topbar,
 .sd-topbar {
   background-color: var(--sd-bg);
   border-bottom: 1px solid var(--sd-border);
@@ -175,10 +189,12 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 32px;
-  min-height: 76px;
-  gap: 20px;
   flex-wrap: wrap;
+  padding: 18px 32px;
+  min-height: 76px;
+  gap: 16px 40px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .sd-topbar-brand {
@@ -187,6 +203,7 @@ a {
   gap: 14px;
   text-decoration: none;
   color: var(--sd-text);
+  flex-shrink: 0;
 }
 
 .sd-brand-badge {
@@ -220,9 +237,11 @@ a {
 
 .sd-topbar-nav {
   display: flex;
+  flex-direction: row;
   align-items: center;
+  justify-content: center;
   gap: 28px;
-  flex-wrap: wrap;
+  flex: 1;
 }
 
 .sd-nav-link {
@@ -252,6 +271,7 @@ a {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-shrink: 0;
 }
 
 .sd-topbar-bell-btn {
@@ -268,6 +288,7 @@ a {
   cursor: pointer;
   transition: all 0.15s ease;
   text-decoration: none;
+  flex-shrink: 0;
 }
 
 .sd-topbar-bell-btn:hover {
@@ -301,6 +322,8 @@ a {
   background-color: var(--sd-surface);
   border: 1px solid var(--sd-border);
   border-radius: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .sd-user-name {
@@ -309,6 +332,7 @@ a {
   font-size: 16px;
   color: var(--sd-text);
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .sd-user-role {

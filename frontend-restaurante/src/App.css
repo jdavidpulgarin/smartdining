@@ -25,7 +25,7 @@
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 1fr;
   grid-template-rows: auto 1fr;
   min-height: 100vh;
   background: radial-gradient(circle at 10% 15%, rgba(16, 185, 129, 0.05) 0%, transparent 35%),
@@ -5354,3 +5354,50 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ==============================================================================
+   OVERRIDE: Menú superior a todo el ancho sin sidebar
+   ============================================================================== */
+.app-shell {
+  grid-template-columns: 1fr !important;
+}
+
+.topbar,
+.sd-topbar,
+.sd-page-wrapper,
+.main-content,
+main {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.topbar,
+.sd-topbar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: wrap !important;
+  padding: 18px 32px !important;
+  gap: 16px 40px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.sd-topbar-nav,
+.topbar-nav {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 28px !important;
+  flex: 1 !important;
+}
+
+.sd-user-name,
+.user-name,
+.sd-user-info-pill,
+.user-profile-widget {
+  white-space: nowrap !important;
+}
+
