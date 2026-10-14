@@ -22,7 +22,6 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
   const manejarCambio = (grupoId, ids) =>
     setSelecciones((prev) => ({ ...prev, [grupoId]: ids }));
 
-  // Los hooks deben ir ANTES de este return (reglas de hooks de React)
   if (!plato) {
     return null;
   }
@@ -57,12 +56,12 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
     !agotado && gruposFaltantes.length === 0 && !notasDemasiadoLargas;
 
   const textoBoton = agotado
-    ? 'No disponible'
+    ? 'NO DISPONIBLE'
     : gruposFaltantes.length > 0
-      ? `Elige: ${gruposFaltantes[0].nombre}`
+      ? `ELIGE: ${gruposFaltantes[0].nombre.toUpperCase()}`
       : notasDemasiadoLargas
-        ? 'Notas demasiado largas'
-        : `Añadir ${cantidad} · ${formatearPrecio(subtotal)}`;
+        ? 'NOTAS DEMASIADO LARGAS'
+        : `AÑADIR ${cantidad} · ${formatearPrecio(subtotal)}`;
 
   const manejarAgregar = () => {
     if (!puedeAgregar) return;
@@ -92,7 +91,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
       <div>
         {/* 1. Imagen grande: ancho completo, proporción 4:3, object-cover */}
         {plato.imagen && (
-          <div className="relative w-full aspect-[4/3] bg-gray-100 overflow-hidden">
+          <div className="relative w-full aspect-[4/3] bg-superficie-2 overflow-hidden border-b border-borde">
             <img
               src={plato.imagen}
               alt={plato.nombre}
@@ -101,18 +100,18 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
           </div>
         )}
 
-        <div className="p-4 space-y-4">
+        <div className="p-4 space-y-4 text-texto">
           {/* 2. Aviso de agotado si disponible === false */}
           {plato.disponible === false && (
-            <div className="bg-primary/10 text-primary border border-primary/30 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+            <div className="bg-primario/15 text-primario-texto border border-primario/30 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-primario shrink-0" />
               <span>Agotado: este plato no está disponible por ahora</span>
             </div>
           )}
 
           {/* 3. Precio formateado */}
           <div>
-            <span className="font-extrabold text-primary text-xl">
+            <span className="font-etiqueta font-bold text-texto text-2xl tracking-wide">
               {formatearPrecio(plato.precio)}
             </span>
           </div>
@@ -123,12 +122,12 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
               {plato.etiquetas.map((tag) => {
                 const conf = ETIQUETAS_MAP[tag] || {
                   label: tag.replace('_', ' '),
-                  style: 'bg-gray-50 text-gray-600 border-gray-200',
+                  style: 'bg-superficie-2 text-texto-suave border border-borde font-etiqueta text-[10px] uppercase font-semibold',
                 };
                 return (
                   <span
                     key={tag}
-                    className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border capitalize ${conf.style}`}
+                    className={`px-1.5 py-0.5 rounded ${conf.style}`}
                   >
                     {conf.label}
                   </span>
@@ -139,14 +138,14 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
 
           {/* 5. Descripción completa */}
           {plato.descripcion && (
-            <p className="text-sm text-cafe leading-relaxed">
+            <p className="text-sm text-texto-suave leading-relaxed font-cuerpo">
               {plato.descripcion}
             </p>
           )}
 
           {/* 6. Sección de Alérgenos */}
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">
+            <h3 className="text-xs font-etiqueta uppercase tracking-wider text-texto-suave mb-2 font-bold">
               Alérgenos
             </h3>
             {plato.alergenos && plato.alergenos.length > 0 ? (
@@ -154,14 +153,14 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
                 {plato.alergenos.map((alergeno) => (
                   <span
                     key={alergeno}
-                    className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-md bg-gray-100 text-cafe border border-gray-200"
+                    className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-md bg-superficie-2 text-texto-suave border border-borde font-cuerpo"
                   >
                     {ALERGENOS_MAP[alergeno] ?? alergeno}
                   </span>
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-gray-600 italic">
+              <p className="text-xs text-texto-tenue italic font-cuerpo">
                 Sin alérgenos declarados
               </p>
             )}
@@ -169,8 +168,8 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
 
           {/* 7. Sección Personaliza tu plato */}
           {plato.personalizaciones && plato.personalizaciones.length > 0 && (
-            <div className="border-t border-gray-100 pt-4 space-y-4">
-              <h3 className="text-sm font-bold text-cafe">
+            <div className="border-t border-borde pt-4 space-y-4">
+              <h3 className="text-sm font-etiqueta uppercase tracking-wider font-bold text-texto">
                 Personaliza tu plato
               </h3>
               <div className="space-y-4">
@@ -188,10 +187,10 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
           )}
 
           {/* 8. Sección Notas para la cocina */}
-          <div className="border-t border-gray-100 pt-4 space-y-2">
+          <div className="border-t border-borde pt-4 space-y-2">
             <label
               htmlFor={notasId}
-              className="block text-sm font-bold text-cafe"
+              className="block text-xs font-etiqueta uppercase tracking-wider font-bold text-texto"
             >
               Notas para la cocina
             </label>
@@ -203,29 +202,29 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
               rows={3}
               placeholder="Ej: sin cebolla"
               disabled={plato.disponible === false}
-              className="w-full text-base text-cafe placeholder:text-gray-600 border border-gray-200 rounded-lg p-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+              className="w-full text-base text-texto placeholder:text-texto-tenue bg-superficie-2 border border-borde rounded-xl p-2.5 resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto disabled:opacity-40 disabled:cursor-not-allowed"
             />
-            <div className="text-right text-xs text-gray-600">
+            <div className="text-right text-xs text-texto-tenue font-cuerpo">
               {notas.length}/{NOTAS_MAX}
             </div>
           </div>
         </div>
 
         {/* Barra inferior fija con selector de cantidad y botón añadir */}
-        <div className="sticky bottom-0 bg-white border-t border-gray-100 px-4 py-3 flex items-center justify-between gap-3">
+        <div className="sticky bottom-0 bg-superficie border-t border-borde px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setCantidad((c) => Math.max(CANTIDAD_MIN, c - 1))}
               disabled={plato.disponible === false || cantidad === CANTIDAD_MIN}
               aria-label="Disminuir cantidad"
-              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-lg border border-gray-200 text-cafe text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-xl border border-borde bg-superficie-2 text-texto text-lg font-bold hover:bg-superficie active:bg-superficie-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               −
             </button>
             <span
               aria-live="polite"
-              className="min-w-8 text-center font-bold text-cafe text-base"
+              className="min-w-8 text-center font-etiqueta font-bold text-texto text-xl"
             >
               {cantidad}
             </span>
@@ -234,7 +233,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
               onClick={() => setCantidad((c) => Math.min(CANTIDAD_MAX, c + 1))}
               disabled={plato.disponible === false || cantidad === CANTIDAD_MAX}
               aria-label="Aumentar cantidad"
-              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-lg border border-gray-200 text-cafe text-lg font-bold hover:bg-gray-50 active:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-xl border border-borde bg-superficie-2 text-texto text-lg font-bold hover:bg-superficie active:bg-superficie-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               +
             </button>
@@ -245,7 +244,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
             variante="primario"
             onClick={manejarAgregar}
             disabled={!puedeAgregar}
-            className="flex-1 md:text-base"
+            className="flex-1"
           >
             {textoBoton}
           </Button>
