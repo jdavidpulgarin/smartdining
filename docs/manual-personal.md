@@ -87,7 +87,7 @@ Si los comensales solicitan pagar por separado:
 2. Ingrese el monto específico que abonará el comensal actual.
 3. Confirme el pago; el estado de pago del pedido cambiará a `parcial`.
 4. El saldo restante quedará pendiente hasta que se cubra el 100% de la comanda.
-5. Una vez liquidado el saldo total a $0.00, el sistema transiciona a `pagado` y habilita la liberación inmediata de la mesa física.
+5. **Regla de liberación de mesa (H-03):** La mesa física se libera automáticamente cuando se cumplen simultáneamente ambas condiciones: el saldo total de la comanda queda cubierto a $0.00 (`pagado`) **Y** todos los platillos han sido servidos físicamente en la mesa (`entregado`). Si los comensales pagan por adelantado en caja mientras la cocina aún prepara sus pedidos, la mesa permanece `ocupada` y el código QR continúa activo para no interrumpir la sesión ni invalidar el seguimiento de quienes aún esperan su comida.
 
 ### 3.4 Emisión de Comprobantes
 - Al confirmarse cada pago, se genera automáticamente el ticket digital de recibo.
