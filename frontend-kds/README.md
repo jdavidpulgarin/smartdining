@@ -221,19 +221,24 @@ porcentaje de velo que se mezcla sobre la foto (`0%` = foto intacta, `100%` = fo
 
 | Variable | Oscuro | Claro | Dónde |
 |---|---|---|---|
-| `--capa-fondo-tablero` | `55%` | `62%` | Toda la pantalla del tablero |
-| `--capa-fondo-login` | `82%` | `86%` | Solo detrás del texto del login, no en toda la foto |
+| `--capa-fondo-tablero` | `55%` | `0%` | Toda la pantalla del tablero |
+| `--capa-fondo-login` | `82%` | `0%` | Solo detrás del texto del login, no en toda la foto |
+| `--fondo-texto-login` | `transparent` | `rgb(255 255 255 / .85)` | Fondo propio del bloque de texto del login |
 
-En el login la foto se ve casi limpia: el velo va pegado al titular y a la barra de arriba
-(`.velo-texto` y `.velo-barra`), que es lo único que hay que poder leer encima de la imagen.
-Las tarjetas, los encabezados de columna y la tarjeta de entrada llevan su fondo sólido y no
-dependen del velo.
+**En el tema claro la foto va sin velo**: se ve tal cual. Puede hacerse porque en el tablero
+no hay un solo texto encima de la imagen — cabecera, encabezados de columna, tarjetas y la
+caja del vacío llevan todos fondo sólido. Para volver a velarla basta subir esos `0%`.
 
-Los valores no son estéticos sino el mínimo que sostiene el contraste: medidos contra el
-píxel más claro de la foto (luminancia 250) en oscuro y el más oscuro en claro, todo el texto
-queda por encima de 4,5:1 (3:1 el texto grande). Por eso el titular del login usa
-`--color-marca-sobre-foto`, un rojo un punto más luminoso: el de marca se queda en 2,5:1 sobre
-el velo oscuro. Si subes el brillo de la foto bajando estos porcentajes, vuelve a comprobarlo.
+En el login la foto se ve casi limpia en los dos temas: lo único que se lee encima de ella es
+el titular y la barra de arriba (`.velo-texto` y `.velo-barra`). En oscuro les basta el velo
+degradado; en claro, sin velo, el texto oscuro caería sobre las zonas oscuras de la foto a
+1,1:1, así que ese bloque —y solo él— se trae su propio fondo con `--fondo-texto-login`.
+
+Los valores no son estéticos sino el mínimo que sostiene el contraste: medidos contra las
+zonas más clara (luminancia 250) y más oscura (5) de la foto, todo el texto queda por encima
+de 4,5:1, y 3:1 el texto grande. Por eso el titular del login usa `--color-marca-sobre-foto`,
+un rojo un punto más luminoso: el de marca se queda en 2,5:1 sobre el velo oscuro. Si cambias
+cualquiera de estos valores, vuelve a comprobarlo.
 
 > ⚠️ **Licencia de la imagen.** `public/fondo-cocina.jpg` es una foto de banco **con marca
 > de agua**, usada aquí solo con fines académicos. Hay que reemplazarla por una imagen con

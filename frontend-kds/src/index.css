@@ -134,15 +134,36 @@ body {
   --capa-fondo-tablero: 55%;
   /* Login: solo detrás del texto de la izquierda, el resto de la foto limpio. */
   --capa-fondo-login: 82%;
+  /*
+   * Fondo propio del bloque de texto del login, independiente de la capa de la
+   * foto. En oscuro no hace falta: el velo de arriba ya deja ese texto en
+   * 11:1, así que va transparente y el degradado se ve difuminado, sin cantos.
+   */
+  --fondo-texto-login: transparent;
 }
 
 :root[data-tema='claro'] {
   /* Blanco, nunca oscuro: aquí el texto que hay que salvar es el oscuro. */
   --capa-fondo-color: #ffffff;
-  /* Sobre velo claro el rojo de marca ya da 5:1; no hace falta aclararlo. */
+  /* Sobre la foto limpia el rojo de marca da 6,6:1 en las zonas claras y 3:1
+     en las oscuras; el bloque del login lleva su propio fondo, así que cae
+     siempre sobre blanco. No hace falta aclararlo. */
   --color-marca-sobre-foto: var(--color-marca);
-  --capa-fondo-tablero: 62%;
-  --capa-fondo-login: 86%;
+  /*
+   * Sin capa: en el tema claro la foto se ve tal cual. La capa blanca la dejaba
+   * apagada y no hacía falta — el único texto del tablero que cae sobre la
+   * imagen es el del vacío de columna, y ese ya lleva fondo sólido.
+   *
+   * Siguen siendo el mismo mando de antes: subirlas vuelve a velar la foto.
+   */
+  --capa-fondo-tablero: 0%;
+  --capa-fondo-login: 0%;
+  /*
+   * Sin capa, el texto oscuro del login caería sobre la foto a pelo: en sus
+   * zonas oscuras se queda en 1,1:1, que no se lee en absoluto. Así que el
+   * bloque se trae su propio fondo —solo él, no la pantalla— y sube a 13:1.
+   */
+  --fondo-texto-login: rgb(255 255 255 / 0.85);
 }
 
 /*
@@ -175,6 +196,7 @@ body {
  * Se desvanece antes del borde del bloque, de modo que no se le ve el canto.
  */
 .velo-texto {
+  background-color: var(--fondo-texto-login);
   background-image: radial-gradient(
     115% 125% at 35% 50%,
     color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 0%,
@@ -192,6 +214,7 @@ body {
  * entera por debajo.
  */
 .velo-barra {
+  background-color: var(--fondo-texto-login);
   background-image: linear-gradient(
     180deg,
     color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 0%,
