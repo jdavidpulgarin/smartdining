@@ -12,7 +12,7 @@ export function MenuItem({ name, tag, price }) {
           {tag && <span className="menu-item-tag">{tag}</span>}
         </div>
       </div>
-      <b className="menu-item-price font-mono">{price}</b>
+      <b className="menu-item-price">{price}</b>
     </div>
   )
 }

@@ -471,8 +471,9 @@
   gap: 0.2rem;
   font-size: 0.72rem;
   font-weight: 700;
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.12);
+  color: #B8ADA6;
+  background: #120E0D;
+  border: 1px solid #2E2724;
   padding: 0.15rem 0.45rem;
   border-radius: 6px;
 }
@@ -483,13 +484,17 @@
   gap: 4px;
   height: 20px;
   margin-top: 0.2rem;
-  opacity: 0.55;
+  opacity: 0.8;
 }
 
 .sparkline-bar {
   flex: 1;
-  background: linear-gradient(180deg, #10b981, rgba(16, 185, 129, 0.15));
+  background: #4A413D;
   border-radius: 2px;
+}
+
+.sparkline-bar:last-child {
+  background: #EE1C25;
 }
 
 /* ==============================================================================
@@ -934,15 +939,17 @@
 }
 
 .status.disponible {
-  background: rgba(16, 185, 129, 0.15);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: #FFFFFF;
+  color: #120E0D;
+  border: 1px solid #FFFFFF;
+  font-weight: 800;
 }
 
 .status.ocupada {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: #EE1C25;
+  color: #FFFFFF;
+  border: 1px solid #EE1C25;
+  font-weight: 800;
 }
 
 .status.reservada {
@@ -1582,9 +1589,9 @@
   font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #FF4A55;
+  background: rgba(238, 28, 37, 0.15);
+  border: 1px solid rgba(238, 28, 37, 0.3);
   padding: 0.15rem 0.45rem;
   border-radius: 999px;
   letter-spacing: 0.04em;
@@ -1703,9 +1710,9 @@
 }
 
 .item-qty-tag {
-  background: rgba(16, 185, 129, 0.15);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: rgba(238, 28, 37, 0.15);
+  color: #FF4A55;
+  border: 1px solid rgba(238, 28, 37, 0.3);
   font-size: 0.7rem;
   font-weight: 800;
   padding: 0.15rem 0.4rem;
@@ -1737,8 +1744,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(6, 182, 212, 0.05));
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: rgba(30, 26, 25, 0.85);
+  border: 1px solid var(--sd-border-strong, #2E2724);
   border-radius: 12px;
   padding: 0.85rem 1rem;
   margin-top: 0.25rem;
@@ -1753,11 +1760,11 @@
 }
 
 .total-value-glow {
-  font-family: 'Outfit', sans-serif;
-  font-size: 1.4rem;
+  font-family: var(--sd-font-heading, 'Barlow Condensed', sans-serif);
+  font-size: 1.6rem;
   font-weight: 800;
-  color: #34d399;
-  text-shadow: 0 0 16px rgba(52, 211, 153, 0.4);
+  color: #FFFFFF;
+  text-shadow: none;
 }
 
 .tax-hint {
@@ -1832,7 +1839,7 @@
 
 .menu-highlight-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(16, 185, 129, 0.35);
+  border-color: rgba(238, 28, 37, 0.4);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
@@ -1840,11 +1847,17 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: rgba(16, 185, 129, 0.12);
-  color: #34d399;
+  background-color: #120E0D;
+  color: #EE1C25;
+  border: 1px solid #2E2724;
   display: grid;
   place-items: center;
   flex-shrink: 0;
+}
+
+.menu-item-icon-wrap svg {
+  color: #EE1C25;
+  stroke: #EE1C25;
 }
 
 .menu-item-info {
@@ -1869,19 +1882,24 @@
 }
 
 .menu-item-tag {
-  font-size: 0.62rem;
-  font-weight: 700;
-  background: rgba(245, 158, 11, 0.12);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.25);
-  padding: 0.1rem 0.4rem;
-  border-radius: 6px;
+  background-color: #E0A526;
+  color: #1A1208;
+  border: none;
+  font-family: var(--sd-font-heading, 'Barlow Condensed', sans-serif);
+  font-weight: 800;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
 }
 
 .menu-item-price {
-  font-size: 0.92rem;
+  font-family: var(--sd-font-heading, 'Barlow Condensed', sans-serif);
+  font-size: 1.25rem;
   font-weight: 800;
-  color: #34d399;
+  color: #F5F1EC;
+  letter-spacing: 0.02em;
   flex-shrink: 0;
 }
 
@@ -5400,4 +5418,250 @@ main {
 .user-profile-widget {
   white-space: nowrap !important;
 }
+
+/* ==============================================================================
+   REDISEÑO: VISTA DE SALA / MESAS / ESTADÍSTICAS / DESTACADOS SIN VERDE
+   ============================================================================== */
+
+/* 1. Tarjetas de Estadísticas (StatsSection & StatCard) */
+.stat-icon-wrap {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 9px !important;
+  display: grid !important;
+  place-items: center !important;
+  background-color: #EE1C25 !important;
+  background: #EE1C25 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 12px rgba(238, 28, 37, 0.35) !important;
+}
+
+.stat-icon-wrap .stat-icon,
+.stat-icon-wrap svg {
+  color: #FFFFFF !important;
+  stroke: #FFFFFF !important;
+}
+
+.stat-trend-tag {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.2rem !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+  background: #120E0D !important;
+  border: 1px solid #2E2724 !important;
+  color: #B8ADA6 !important;
+  padding: 0.15rem 0.45rem !important;
+  border-radius: 6px !important;
+}
+
+.stat-trend-tag svg {
+  color: #B8ADA6 !important;
+  stroke: #B8ADA6 !important;
+}
+
+.stat-card-sparkline {
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 4px !important;
+  height: 20px !important;
+  margin-top: 0.2rem !important;
+  opacity: 0.8 !important;
+}
+
+.stat-card-sparkline .sparkline-bar {
+  flex: 1 !important;
+  background: #4A413D !important;
+  border-radius: 2px !important;
+}
+
+.stat-card-sparkline .sparkline-bar:last-child,
+.stat-card-sparkline .sparkline-bar.b7 {
+  background: #EE1C25 !important;
+}
+
+/* 2. Botón "Ver Mapa de Mesas" y Comanda Activa (OrderPanel) */
+.btn-mapa-mesas,
+.btn-ver-mapa,
+.order-empty-prompt .primary-button {
+  background-color: #EE1C25 !important;
+  color: #FFFFFF !important;
+  border: 1px solid #EE1C25 !important;
+  font-weight: 700 !important;
+  text-decoration: none !important;
+  transition: all 0.15s ease !important;
+}
+
+.btn-mapa-mesas:hover,
+.btn-ver-mapa:hover,
+.order-empty-prompt .primary-button:hover {
+  background-color: #d6141c !important;
+  color: #FFFFFF !important;
+  border-color: #d6141c !important;
+}
+
+.btn-entregar-order {
+  background-color: #EE1C25 !important;
+  color: #FFFFFF !important;
+  border: 1px solid #EE1C25 !important;
+}
+
+.order-panel .live-pulse-badge {
+  color: #FF4A55 !important;
+  background: rgba(238, 28, 37, 0.15) !important;
+  border: 1px solid rgba(238, 28, 37, 0.35) !important;
+}
+
+.item-qty-tag {
+  background: rgba(238, 28, 37, 0.15) !important;
+  color: #FF4A55 !important;
+  border: 1px solid rgba(238, 28, 37, 0.35) !important;
+}
+
+.total-box {
+  background: rgba(30, 26, 25, 0.85) !important;
+  border: 1px solid var(--sd-border-strong, #2E2724) !important;
+}
+
+.total-value-glow {
+  color: #FFFFFF !important;
+  text-shadow: none !important;
+  font-family: var(--sd-font-heading, 'Barlow Condensed', sans-serif) !important;
+  font-size: 1.6rem !important;
+  font-weight: 800 !important;
+}
+
+/* 3. Destacados del Menú de Hoy (MenuSection & MenuItem) */
+.bottom-panel h2,
+.menu-section-title {
+  font-family: var(--sd-font-heading, 'Barlow Condensed', sans-serif) !important;
+  font-weight: 800 !important;
+  font-size: 1.5rem !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: #FFFFFF !important;
+}
+
+.carta-activa-badge,
+.bottom-panel .live-pulse-badge {
+  border: 1px solid #FFFFFF !important;
+  color: #FFFFFF !important;
+  background: transparent !important;
+  font-family: var(--sd-font-heading, 'Barlow Condensed', sans-serif) !important;
+  font-weight: 700 !important;
+  font-size: 0.7rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  padding: 0.2rem 0.55rem !important;
+  border-radius: 999px !important;
+}
+
+.menu-catalog-link,
+.bottom-panel .link-button {
+  color: #FF4A55 !important;
+  font-weight: 700 !important;
+  text-decoration: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.35rem !important;
+  transition: color 0.15s ease !important;
+}
+
+.menu-catalog-link:hover,
+.bottom-panel .link-button:hover {
+  color: #EE1C25 !important;
+}
+
+.menu-item-price {
+  color: #F5F1EC !important;
+  font-family: var(--sd-font-heading, 'Barlow Condensed', sans-serif) !important;
+  font-weight: 800 !important;
+  font-size: 1.25rem !important;
+  letter-spacing: 0.02em !important;
+  flex-shrink: 0 !important;
+}
+
+.menu-header-icon {
+  color: #EE1C25 !important;
+  stroke: #EE1C25 !important;
+}
+
+.menu-item-icon-wrap {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 10px !important;
+  background-color: #120E0D !important;
+  color: #EE1C25 !important;
+  border: 1px solid #2E2724 !important;
+  display: grid !important;
+  place-items: center !important;
+  flex-shrink: 0 !important;
+}
+
+.menu-item-icon-wrap svg {
+  color: #EE1C25 !important;
+  stroke: #EE1C25 !important;
+}
+
+.menu-item-tag {
+  background-color: #E0A526 !important;
+  color: #1A1208 !important;
+  border: none !important;
+  font-family: var(--sd-font-heading, 'Barlow Condensed', sans-serif) !important;
+  font-weight: 800 !important;
+  font-size: 0.7rem !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  padding: 0.15rem 0.5rem !important;
+  border-radius: 4px !important;
+}
+
+.menu-highlight-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(238, 28, 37, 0.4) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* 4. Tarjetas de Mesa: Ocupada (Rojo) y Disponible (Blanco) */
+.status.ocupada,
+.sd-table-card .status.ocupada,
+.status.ocupado,
+.sd-table-card .status.ocupado {
+  background-color: #EE1C25 !important;
+  color: #FFFFFF !important;
+  border: 1px solid #EE1C25 !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.04em !important;
+}
+
+.status.disponible,
+.sd-table-card .status.disponible,
+.status.libre,
+.sd-table-card .status.libre {
+  background-color: #FFFFFF !important;
+  color: #120E0D !important;
+  border: 1px solid #FFFFFF !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.04em !important;
+}
+
+/* 5. Limpieza de verdes en clases de la vista principal */
+.bottom-panel .text-emerald,
+.order-panel .text-emerald,
+.main-panel .text-emerald {
+  color: #EE1C25 !important;
+  stroke: #EE1C25 !important;
+}
+
+.table-toast-banner.success {
+  background: rgba(224, 165, 38, 0.15) !important;
+  border: 1px solid rgba(224, 165, 38, 0.35) !important;
+  color: #E0A526 !important;
+}
+
+.table-toast-banner.success .text-emerald {
+  color: #E0A526 !important;
+  stroke: #E0A526 !important;
+}
+
 

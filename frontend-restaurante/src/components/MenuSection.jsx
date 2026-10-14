@@ -7,11 +7,11 @@ export function MenuSection({ menu = [] }) {
     <section className="panel bottom-panel">
       <div className="panel-header">
         <div className="panel-title-with-badge">
-          <UtensilsCrossed size={18} className="text-emerald" />
-          <h2>Destacados del Menú de Hoy</h2>
-          <span className="live-pulse-badge">Carta Activa</span>
+          <UtensilsCrossed size={18} className="menu-header-icon" />
+          <h2 className="menu-section-title">Destacados del Menú de Hoy</h2>
+          <span className="carta-activa-badge">Carta Activa</span>
         </div>
-        <Link to="/menu" className="link-button inline-flex-center">
+        <Link to="/menu" className="link-button inline-flex-center menu-catalog-link">
           <span>Gestionar Catálogo</span>
           <ArrowRight size={14} />
         </Link>
