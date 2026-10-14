@@ -298,8 +298,8 @@ export function TablesProvider({ children }) {
 
 
 
-  // Escuchar si el backend o socket-server avisa de una mesa liberada
-  useSocketListener('table:released', (data) => {
+  // Escuchar si el backend o socket-server avisa de una mesa liberada (evento canónico mesa:liberada)
+  const onMesaLiberada = (data) => {
     if (data?.id_mesa) {
       const numId = Number(data.id_mesa)
       setTables((prev) =>
@@ -320,7 +320,10 @@ export function TablesProvider({ children }) {
       )
       showNotification(`Mesa ${numId} liberada por el sistema`, 'info')
     }
-  })
+  }
+
+  useSocketListener('mesa:liberada', onMesaLiberada)
+  useSocketListener('table:released', onMesaLiberada)
 
   // Escuchar cuando el backend o trigger rota el token QR (evento de Roberto 'qr:actualizado')
   useSocketListener('qr:actualizado', (data) => {
