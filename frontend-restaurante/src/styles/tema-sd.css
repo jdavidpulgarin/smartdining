@@ -932,6 +932,114 @@ a {
   border-top-color: rgba(26, 18, 8, 0.2);
 }
 
+/* Badges */
+.sd-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--sd-font-heading);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.sd-badge-white {
+  background: var(--sd-white);
+  color: #120E0D;
+}
+.sd-badge-dark {
+  background: #120E0D;
+  color: var(--sd-white);
+}
+.sd-badge-gold {
+  background: var(--sd-gold);
+  color: var(--sd-gold-text);
+}
+.sd-badge-red {
+  background: var(--sd-red);
+  color: var(--sd-white);
+}
+.sd-badge-light {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--sd-text);
+}
+
+/* Acciones en la tarjeta de mesa */
+.sd-table-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.sd-table-ocupada .sd-table-card-actions,
+.sd-table-listo .sd-table-card-actions {
+  border-top-color: rgba(18, 14, 13, 0.15);
+}
+.sd-table-cuenta .sd-table-card-actions {
+  border-top-color: rgba(26, 18, 8, 0.2);
+}
+.sd-table-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-family: var(--sd-font-heading);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-height: 32px;
+}
+.sd-table-btn-open {
+  background: transparent;
+  color: var(--sd-white);
+  border: 1px solid var(--sd-border-strong);
+}
+.sd-table-btn-open:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--sd-white);
+}
+.sd-table-btn-qr {
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  border: 1px solid currentColor;
+}
+.sd-table-btn-qr:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.sd-table-btn-free {
+  background: transparent;
+  color: var(--sd-red-text);
+  border: 1px solid var(--sd-red);
+}
+.sd-table-ocupada .sd-table-btn-free {
+  color: #C8102E;
+  border-color: #C8102E;
+}
+.sd-table-btn-free:hover {
+  background: rgba(238, 28, 37, 0.15);
+}
+.sd-table-card-sid {
+  font-size: 11px;
+  opacity: 0.75;
+  letter-spacing: 0.05em;
+}
+.sd-table-card-detail {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
+
 /* ==============================================================================
    BANDEJA DE ALERTAS COMO TARJETA "ALERTAS"
    ============================================================================== */

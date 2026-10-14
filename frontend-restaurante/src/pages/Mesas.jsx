@@ -5,9 +5,9 @@ export function Mesas() {
   const { tables } = useTables()
 
   return (
-    <main className="main-panel">
+    <div className="sd-page-wrapper">
       <TablesPanel tables={tables} />
-    </main>
+    </div>
   )
 }
 
