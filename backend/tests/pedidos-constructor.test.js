@@ -511,10 +511,12 @@ test('el payload de order:created lleva comensal e ingredientes', async () => {
     const item = socket.buscar('/internal/order-created').cuerpo.pedido.items[0];
     assert.strictEqual(item.comensal, 'Ana');
     assert.strictEqual(item.notas_especiales, 'sin cebolla', 'la nota va sola, sin el alias');
+    // Cada ingrediente lleva ademas el nombre de su paso: el KDS agrupa por el
+    // para leer el plato en el orden en que se arma.
     assert.deepStrictEqual(item.ingredientes, [
-      { id_ingrediente: 1, nombre: 'Arroz Integral', porcion: 'normal', precio_aplicado: '0.00' },
-      { id_ingrediente: 4, nombre: 'Pollo a la Plancha', porcion: 'normal', precio_aplicado: '0.00' },
-      { id_ingrediente: 10, nombre: 'Aguacate', porcion: 'extra', precio_aplicado: '1500.00' },
+      { id_ingrediente: 1, nombre: 'Arroz Integral', porcion: 'normal', precio_aplicado: '0.00', paso: 'Elige tu Base' },
+      { id_ingrediente: 4, nombre: 'Pollo a la Plancha', porcion: 'normal', precio_aplicado: '0.00', paso: 'Elige tu Proteina' },
+      { id_ingrediente: 10, nombre: 'Aguacate', porcion: 'extra', precio_aplicado: '1500.00', paso: 'Anade Toppings' },
     ]);
   } finally {
     socket.restaurar();
