@@ -226,5 +226,17 @@ describe('menuService', () => {
       expect(platos).toHaveLength(2);
       expect(spyPedirJson).toHaveBeenCalledTimes(2);
     });
+
+    it('en modo simulado carga menu-simulado.json sin llamar a pedirJson', async () => {
+      vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+      const spyPedirJson = vi.spyOn(apiModule, 'pedirJson');
+
+      const categorias = await obtenerCategorias();
+      const platos = await obtenerPlatos();
+
+      expect(spyPedirJson).not.toHaveBeenCalled();
+      expect(categorias.length).toBeGreaterThan(0);
+      expect(platos.length).toBeGreaterThan(0);
+    });
   });
 });

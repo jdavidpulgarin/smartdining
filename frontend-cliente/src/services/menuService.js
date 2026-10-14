@@ -8,7 +8,7 @@ export function recargarMenu() {
 
 async function fetchMenuRaw() {
   if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
-    const modulo = await import('../mocks/ejemplo-menu.json');
+    const modulo = await import('../mocks/menu-simulado.json');
     return modulo.default || modulo;
   }
   return pedirJson('/menu');
