@@ -161,7 +161,35 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 
 200: `{ "usuario": { "id_usuario": 1, "nombre": "...", "email": "...", "rol": "mesero" }, "token": "..." }`
 
-401: `{ "error": "Credenciales inválidas" }` · 403: `{ "error": "Usuario inactivo" }`
+| Código | Cuerpo | Cuándo |
+|---|---|---|
+| 200 | `{ usuario, token }` | Credenciales correctas y cuenta activa |
+| 400 | `{ "error": "..." }` | El body no cumple el esquema (email inválido, contraseña de menos de 6) |
+| **401** | `{ "error": "Credenciales inválidas" }` | **El email no existe, la contraseña es incorrecta o la cuenta está inactiva: los tres responden lo mismo** |
+| 429 | `{ "error": "Demasiados intentos..." }` | Límite de intentos (H-04): 5 fallos por minuto y por IP+email |
+
+#### Un solo código y un solo mensaje (H-12)
+
+Antes este endpoint distinguía los tres casos, y eso permitía **enumerar usuarios**:
+
+- un email inexistente respondía en **~3 ms** y uno existente en **~70 ms**, porque solo el
+  segundo llegaba a bcrypt;
+- una cuenta desactivada respondía **403 `Usuario inactivo`**, confirmando que el email
+  existe, y además **antes** de validar la contraseña.
+
+Con eso se podía recorrer una lista de correos y quedarse con los que sí tienen cuenta sin
+acertar una sola contraseña. Ahora:
+
+- el login **siempre** pasa por `bcrypt.compare`, exista el usuario o no. Si no existe (o
+  no tiene hash) se compara contra un **hash ficticio** generado al arrancar a partir de
+  una cadena aleatoria y con el **mismo costo** que los hashes reales (`$2b$10$`, el de
+  `register` y el del seed), así que los tres casos tardan lo mismo;
+- la decisión **no depende** de esa comparación: sin usuario, o con la cuenta inactiva, se
+  rechaza siempre;
+- un **único** 401 con un **único** mensaje para los tres casos.
+
+> La cuenta desactivada sí se explica, pero en el **middleware** (H-09, más abajo): allí ya
+> hay un JWT válido, así que no queda nada que enumerar.
 
 ---
 
@@ -375,11 +403,143 @@ expire).
 - El caché es un extra, no parte del contrato: si Redis está caído, falla o no hay
   `REDIS_URL`, el endpoint responde igual leyendo de la base. **Nunca da 500 por culpa del
   caché.**
-- Toda mutación de la carta (`POST`/`PUT`/`DELETE` de `/platos` y `/categorias`) borra
-  `cache:menu` con `invalidarMenu()`, así que un cambio del admin se ve de inmediato sin
-  esperar el TTL. Con Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la
-  mutación sigue su curso.
+- Toda mutación de la carta (`POST`/`PUT`/`DELETE` de `/platos` y `/categorias`, y las 6
+  escrituras del constructor: pasos e ingredientes) borra `cache:menu` con
+  `invalidarMenu()`, así que un cambio del admin se ve de inmediato sin esperar el TTL. Con
+  Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la mutación sigue su
+  curso.
 - Un error de la base **no** se cachea.
+
+---
+
+## Constructor: pasos e ingredientes (D-04)
+
+Administración de los pasos de un plato personalizable y de las opciones de cada paso.
+Tablas en `database/scripts/13_constructor.sql`. Lo consume el panel del restaurante
+(`constructorApi`).
+
+| Método | Ruta | Roles | Respuesta | Errores |
+|---|---|---|---|---|
+| GET | `/platos/:id/pasos` | admin, cajero, mesero | 200, **array** de pasos con `ingredientes` anidados | 400 id inválido · 404 plato |
+| POST | `/platos/:id/pasos` | **admin** | 201, el paso creado con `ingredientes: []` | 400 · 404 plato · 409 |
+| PUT | `/pasos/:id` | **admin** | 200, el paso actualizado | 400 · 404 · 409 |
+| DELETE | `/pasos/:id` | **admin** | 204 sin cuerpo | 400 · 404 · 409 |
+| POST | `/pasos/:id/ingredientes` | **admin** | 201, el ingrediente creado | 400 · 404 paso · 409 |
+| PUT | `/ingredientes/:id` | **admin** | 200, el ingrediente actualizado | 400 · 404 · 409 |
+| DELETE | `/ingredientes/:id` | **admin** | 204 sin cuerpo | 400 · 404 · 409 |
+
+Escribir el constructor es **solo de admin**. Leerlo lo necesita todo el personal de sala,
+así que el `GET` lo abren también `cajero` y `mesero`; `cocina` y el comensal reciben 403
+(la cocina trabaja con `GET /kds/comandas`, y el comensal ve el constructor dentro de
+`GET /menu`).
+
+> `PATCH /ingredientes/:id/disponible` (agotar o reponer una opción en vivo, con el aviso
+> `ingrediente:disponibilidad` al socket-server) es **D-05** y todavía no existe.
+
+### `id_plato` e `id_paso` salen de la URL
+
+El panel los manda **también en el cuerpo**. Se **ignoran**: el que vale es siempre el de
+la URL. No se responde 400 por mandarlos, porque toda llamada del panel los incluye hoy.
+Mover un paso de plato o un ingrediente de paso no es parte de este contrato.
+
+### Los PUT son parciales
+
+Se manda solo lo que cambia; el resto se conserva. La fila se lee con
+`SELECT … FOR UPDATE` y se escribe **dentro de la misma transacción**, así que las reglas
+cruzadas se validan contra la fila ya mezclada y dos ediciones simultáneas no se pisan.
+
+### GET /platos/:id/pasos
+
+Devuelve el **array pelado**, no `{ pasos }`. Mismo orden y misma forma que
+`obtener_menu_completo`: pasos por `orden`, ingredientes por `id_ingrediente`. Los
+ingredientes agotados **sí** se devuelven (con `disponible: false`), para poder reactivarlos.
+
+```json
+[
+  {
+    "id_paso": 31,
+    "id_plato": 7,
+    "nombre": "Elige tu Base",
+    "orden": 1,
+    "min_sel": 1,
+    "max_sel": 1,
+    "obligatorio": true,
+    "ingredientes": [
+      {
+        "id_ingrediente": 10,
+        "id_paso": 31,
+        "nombre": "Arroz",
+        "precio_extra": "0.00",
+        "calorias": 150,
+        "alergenos": [],
+        "url_imagen": null,
+        "disponible": true
+      }
+    ]
+  }
+]
+```
+
+### Validación (400)
+
+Replica los CHECK de la base para dar un mensaje que se entienda, en vez del 500 genérico
+en el que el manejador central convierte un `23514`:
+
+| Campo | Regla |
+|---|---|
+| `nombre` (paso) | 1 a 60 caracteres |
+| `nombre` (ingrediente) | 1 a 80 caracteres |
+| `orden` | entero ≥ 1 |
+| `min_sel` | entero ≥ 0 |
+| `max_sel` | entero ≥ 1 |
+| `min_sel` / `max_sel` | `min_sel <= max_sel` |
+| `obligatorio` | si es `true`, `min_sel >= 1` |
+| `precio_extra` | número ≥ 0 |
+| `calorias` | entero ≥ 0 |
+| `alergenos` | arreglo de texto |
+| `url_imagen` | hasta 255 caracteres |
+
+**Normalización de lo que manda el panel:**
+
+- `calorias: null` → en el **POST** se omite la columna y actúa el `DEFAULT 0`; en el
+  **PUT** se guarda `0` (la columna es `NOT NULL` y ya tiene valor, no hay default que
+  invocar).
+- `url_imagen: ""` (o solo espacios) → `null` en los dos. Guardar una cadena vacía sería
+  basura que el constructor intentaría cargar como imagen.
+
+### Códigos 409
+
+| Situación | Mensaje |
+|---|---|
+| Otro paso del plato ya ocupa ese `orden` (`uq_pasos_plato_orden`) | `Ya hay otro paso de este plato en esa posición` |
+| Otro paso del plato ya tiene ese nombre (`uq_pasos_plato_nombre`) | `Ya hay otro paso de este plato con ese nombre` |
+| Otro ingrediente del paso ya tiene ese nombre (`uq_ingredientes_paso_nombre`) | `Ya hay otro ingrediente de este paso con ese nombre` |
+| Crear un paso en un plato no personalizable | `Ese plato no es personalizable: actívalo antes de agregarle pasos` |
+| Borrar un paso con ingredientes ya vendidos | `Ese paso tiene ingredientes que ya se usaron en pedidos: no se puede borrar, marca sus ingredientes como no disponibles` |
+| Borrar un ingrediente ya vendido | `Ese ingrediente ya se usó en pedidos: no se puede borrar, márcalo como no disponible` |
+
+`uq_pasos_plato_orden` es `DEFERRABLE INITIALLY DEFERRED`, así que su violación llega en el
+**COMMIT**, no en el `UPDATE`. El servicio lo captura igual y responde 409.
+
+### Regla de borrado: lo vendido no se borra
+
+`detalles_ingredientes.id_ingrediente` es `ON DELETE RESTRICT` a propósito, para que los
+pedidos históricos conserven su composición. Por eso:
+
+- Un ingrediente que ya se usó en algún pedido **no se borra**: responde **409**. Para
+  sacarlo de la carta hay que marcarlo como no disponible (`PATCH …/disponible`, D-05).
+- **Un paso también queda protegido**, de rebote: `ingredientes.id_paso` es
+  `ON DELETE CASCADE`, pero la cascada se topa con ese `RESTRICT` y PostgreSQL aborta todo.
+
+Se eligió responder 409 y no desactivar en silencio: un `DELETE` que en realidad apaga algo
+sería una sorpresa, y el interruptor correcto es el de D-05.
+
+### Caché
+
+Las 6 escrituras invalidan `cache:menu` (los pasos e ingredientes viajan dentro de
+`obtener_menu_completo`). Con Redis caído la escritura sigue su curso: `invalidarMenu()`
+devuelve `false` y no lanza. **No se avisa al socket-server:** no existe un evento de
+"cambió el menú" en `EVENTS.md`, y `/platos` tampoco avisa.
 
 ---
 
@@ -682,10 +842,10 @@ Notas de lo que quedó demostrado al escribirlas:
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | POST | /pedidos | **comensal, mesero, admin** | Crea un pedido con sus ítems |
-| GET | /pedidos/activos | admin, cajero, mesero | Pedidos en `recibido`/`en_preparacion` |
+| GET | /pedidos/activos | admin, cajero, mesero | Pedidos **activos** (`recibido`, `en_preparacion`, `listo`, `entregado`) con sus ítems y `mesa_numero` |
 | **GET** | **/pedidos/mesa** | **comensal** | **Pedidos de la mesa de la sesión** *(reemplaza a `/pedidos/historial`)* |
 | **GET** | **/pedidos/mesa/cuenta** | **comensal** | **Cuenta de SU mesa por comensal; la mesa sale del JWT** |
-| GET | /pedidos/:id | autenticado | Detalle con sus ítems; un comensal solo ve los de su mesa (403 si no) |
+| GET | /pedidos/:id | **admin, cajero, mesero, comensal** | Detalle con sus ítems; un comensal solo ve los de su mesa y de su visita (403 si no). **`cocina` no entra (S-26)** |
 | PATCH | /pedidos/:id/estado | admin, cajero, mesero | Cambia el estado (cualquiera de los 6 válidos) |
 | POST | /pedidos/:id/cancelar | admin, cajero, mesero | Atajo que fija `estado = cancelado`. **Solo desde `recibido` o `en_preparacion`**; desde `listo`/`entregado` responde 409 |
 
@@ -783,7 +943,85 @@ Body:
 
 400: plato inexistente o no disponible, `id_mesa` faltante para staff · 403: rol no permitido
 
+### GET /pedidos/activos — admin, cajero, mesero
+
+Lista para el **panel del restaurante**. Devuelve `{ pedidos }` con cada pedido en el
+**mismo formato** que `GET /pedidos/:id`: sus `detalles`, cada uno con el nombre del plato
+y los ingredientes elegidos. Añade `mesa_numero`.
+
+**Estados que cuentan como activos:** `recibido`, `en_preparacion`, `listo` y `entregado`.
+Quedan fuera `pagado` (ya se cobró y la mesa se liberó) y `cancelado`. El orden sigue
+siendo `creado_en ASC`: los más antiguos primero, que es el orden de atención.
+
+> `listo` y `entregado` **antes no entraban**. Un pedido `listo` es justo el que el mesero
+> tiene que llevar y uno `entregado` el que hay que cobrar: sin ellos el panel perdía de
+> vista los pedidos en el tramo donde más falta hace verlos.
+
+Campos nuevos respecto a lo que devolvía antes:
+
+| Campo | Tipo | Qué es |
+|---|---|---|
+| `mesa_numero` | número | Número de la mesa en el salón (`mesas.numero`), no el `id_mesa` interno |
+| `detalles` | array | Los ítems del pedido, igual que en `GET /pedidos/:id` (antes no venían) |
+
+Todo lo que ya devolvía (`id_pedido`, `id_mesa`, `codigo_pedido`, `estado`, `estado_pago`,
+`total`, `notas_generales`, `creado_en`, `actualizado_en`) **sigue igual**: la consulta usa
+`p.*`, así que solo se agrega.
+
+200:
+
+```json
+{
+  "pedidos": [
+    {
+      "id_pedido": 87,
+      "codigo_pedido": "PED-261013-A1B2C",
+      "id_mesa": 5,
+      "mesa_numero": 12,
+      "estado": "listo",
+      "estado_pago": "pendiente",
+      "total": "43000.00",
+      "notas_generales": null,
+      "creado_en": "2026-10-13T19:40:00.000Z",
+      "detalles": [
+        {
+          "id_detalle": 700,
+          "id_plato": 1001,
+          "plato_nombre": "Bowl Personalizado",
+          "cantidad": 2,
+          "precio_unitario": "20000.00",
+          "precio_extras": "1500.00",
+          "subtotal": "43000.00",
+          "comensal": "Ana",
+          "notas_especiales": "sin cebolla",
+          "ingredientes": [
+            { "id_ingrediente": 1, "nombre": "Arroz", "porcion": "normal", "precio_aplicado": "0.00", "paso": "Elige tu Base" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Son **dos consultas fijas** (los pedidos y los detalles de todos ellos de golpe), no una
+por pedido. Si no hay pedidos activos responde `{ "pedidos": [] }` sin consultar detalles.
+
+403: rol no permitido (`cocina` usa `GET /kds/comandas`; el comensal, `GET /pedidos/mesa`).
+
+> **Sobre el nombre del mesero:** se pidió como opcional, vía
+> `LEFT JOIN usuarios ON usuarios.id_usuario = pedidos.id_usuario`. **No se puede hacer
+> hoy: la tabla `pedidos` no tiene columna `id_usuario`** (ver `database/schema.sql`, tabla
+> 6). Quién interviene en un pedido se guarda en `historial_estados.id_usuario`, no en el
+> pedido. Sacar de ahí "el mesero" obliga a decidir qué fila representa al responsable
+> (¿quién lo creó? ¿quién lo entregó?), así que queda pendiente de acordar y no se inventó.
+
 ### GET /pedidos/:id
+
+Roles: **admin, cajero, mesero y comensal**. `cocina` responde **403** (S-26): esta ruta
+devuelve el pedido completo —el total y, por cada ítem, el alias de quién lo pidió— y la
+cocina no necesita nada de eso. Trabaja con `GET /kds/comandas` y
+`PATCH /kds/comandas/:id/estado`, que no pasan por aquí; ningún frontend del KDS la usa.
 
 200: el pedido con `detalles`. Cada detalle trae `comensal` (quién pidió el ítem),
 `notas_especiales` (solo la nota), `precio_extras` y sus `ingredientes`:
@@ -1101,9 +1339,12 @@ Hace falta porque `tr_validar_transaccion_financiera` solo rechaza que se pague 
 dejaría el pedido como cobrado, liberaría la mesa, invalidaría el QR del grupo y el resto
 no se volvería a cobrar.
 
-Mientras quede saldo tampoco se avisa al socket-server (`order:status` y
-`mesa:liberada` salen solo cuando el pedido se liquida de verdad). Para ver cuánto falta:
-`GET /transacciones/pedido/:id_pedido`, o la cuenta de la mesa en el canal interno.
+Mientras quede saldo no se avisa el **cierre** al socket-server (`order:status` y
+`mesa:liberada` salen solo cuando el pedido se liquida de verdad), pero el **cobro sí se
+anuncia**: cada abono manda su `POST /internal/payment-confirmed` con el saldo que le
+queda a la mesa, para que las demás cajas y la propia mesa vean bajar la cuenta en vivo
+(ver *Tiempo real*). Para ver cuánto falta: `GET /transacciones/pedido/:id_pedido`, o la
+cuenta de la mesa en el canal interno.
 
 409 también si el monto excede el saldo del pedido (`tr_validar_transaccion_financiera`,
 que además deja constancia en `intentos_pago_fallidos`).
@@ -1127,7 +1368,70 @@ Contrato completo en [socket-server/EVENTS.md](../../socket-server/EVENTS.md).
 | Se crea un pedido | `POST /internal/order-created` con el pedido y sus ítems |
 | Cambia el estado (pedidos y KDS) | `POST /internal/order-status` con `estado_anterior` |
 | Se abre una mesa con un token **nuevo** | `POST /internal/qr-rotado` → `qr:actualizado` a la tablet |
-| Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada` |
+| **La caja cobra** (efectivo, datáfono o abono parcial) | `POST /internal/payment-confirmed` → `payment:confirmed` |
+| Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada`, con `motivo` si la cerró un pago |
+
+### Cobros de caja: `payment:confirmed` (EVENTS.md §8.6)
+
+Un cobro en caja no pasa por la pasarela, así que nadie más se enteraría de él hasta
+recargar la cuenta. Después del COMMIT, `POST /api/transacciones` avisa a
+`/internal/payment-confirmed` y el socket-server lo reemite como `payment:confirmed`, el
+**mismo evento y el mismo payload** que un pago de Wompi.
+
+| Campo | Qué lleva |
+|---|---|
+| `eventId` | UUID v4, **uno por cobro** (primera guardia de idempotencia) |
+| `id_mesa` | Mesa del pedido cobrado |
+| `monto_centavos` | `Math.round(monto * 100)`, entero ≥ 1 |
+| `saldo_restante_centavos` | Saldo de **la mesa** (no el del pedido) después de este cobro |
+| `comensal` | Alias de quien pagó, o `null` en un cobro de la mesa completa |
+| `referencia_externa` | Voucher del datáfono, o `null` |
+| `id_transaccion` | Fila de `transacciones` (segunda guardia de idempotencia) |
+
+Todo va en **centavos enteros**: sumar abonos en coma flotante desajustaría el saldo, y
+el contrato rechaza un monto con decimales con 400. El saldo de la mesa se calcula
+**dentro** de la transacción del cobro, con la fila de la mesa bloqueada, para que sea
+exactamente el de después de ese pago y no el de un cobro ajeno que entró en medio.
+
+**Orden cuando el cobro liquida la cuenta.** Los tres avisos salen encadenados, en este
+orden y no en otro:
+
+```
+POST /internal/payment-confirmed   → payment:confirmed
+POST /internal/order-status        → order:status (pagado)
+POST /internal/mesa-liberada       → mesa:liberada (motivo "pagada")
+```
+
+`mesa-liberada` **desconecta a los comensales**: si saliera antes, la mesa nunca llegaría
+a ver el pago que la cerró. La cadena es secuencial pero el handler **no la espera**: el
+201 sale en cuanto está el COMMIT.
+
+**Dónde NO se avisa**, y por qué:
+
+- **Pago en línea** (`POST /api/transacciones/internal`): el socket-server ya emite
+  `payment:confirmed` desde su propio webhook. Avisar también desde aquí anunciaría el
+  mismo pago dos veces.
+- **Cierre al entregar** (`PATCH /api/pedidos/:id/estado` → `entregado` de un pedido ya
+  pagado) y **cierre a mano** a `pagado`: salen `order:status` y `mesa:liberada`, pero no
+  `payment:confirmed`. No entra dinero nuevo; anunciarlo sería un pago fantasma.
+- **Cancelar un pedido** o **liberar la mesa a mano**: no hay cobro.
+- Un estado de transacción que no sea `completada`: ese dinero no entró.
+
+### Motivo de `mesa:liberada` (H-22)
+
+El motivo sale del **estado final del pedido**, no de la ruta por la que se llegó:
+
+| Causa | `motivo` |
+|---|---|
+| Cobro en caja que liquida la cuenta | `pagada` |
+| Pago en línea (Wompi) | `pagada` |
+| Entrega que cierra un pedido ya pagado | `pagada` |
+| Pedido cancelado | `liberada` |
+| `POST /api/mesas/:id/liberar` (manual) | *(no se manda: `liberada` es el valor por omisión del socket-server)* |
+
+Antes el cobro en caja no mandaba `motivo`, así que el socket-server anunciaba la mesa
+como `liberada` —"el mesero cerró la mesa"— cuando en realidad el grupo había pagado. Las
+pantallas distinguen las dos cosas, de ahí la corrección.
 
 **Aislamiento:** salvo en `/qr/generar` y `/qr/validar` (donde sin respuesta no se puede
 abrir mesa ni sesión, y por eso se responde 503), el tiempo real es un extra. El cliente

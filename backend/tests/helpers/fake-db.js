@@ -31,7 +31,8 @@ function construirTokenQr(id_mesa, sid = crypto.randomBytes(12).toString('base64
  *        devuelve las filas de cada query; si devuelve undefined, { rows: [] }.
  * @param {{sesionCerrada?: boolean, tokenQrDeMesa?: string,
  *           pedidosAbiertos?: number, mesaYaLiberada?: boolean,
- *           saldoTrasPago?: number, usuarioInactivo?: boolean,
+ *           saldoTrasPago?: number, saldoMesaTrasPago?: number,
+ *           usuarioInactivo?: boolean,
  *           usuarioSinRegistro?: boolean, usuarioConsultaFalla?: boolean}} opciones
  *        Por omisión la sesión de mesa del comensal está vigente. Con
  *        sesionCerrada la columna token_qr responde NULL (mesa liberada), y con
@@ -71,6 +72,17 @@ function instalarFakeDb(responder, opciones = {}) {
     // las opciones para simular "queda otro pedido" o "ya estaba liberada".
     if (sql.includes('count(*)::int AS n FROM pedidos')) {
       return { rows: [{ n: opciones.pedidosAbiertos ?? 0 }] };
+    }
+    // Saldo de LA MESA en centavos (el que viaja en payment:confirmed). Va
+    // ANTES de la rama del saldo del pedido porque esta consulta también
+    // menciona obtener_saldo_pendiente, y la otra rama devuelve otras columnas.
+    // Por omisión coincide con el saldo del pedido: lo normal en las pruebas es
+    // una mesa con un solo pedido. saldoMesaTrasPago lo separa cuando hace falta.
+    if (sql.includes('AS saldo_centavos')) {
+      const propio = responder(sql, params);
+      if (propio && propio.rows && propio.rows.length > 0) return propio;
+      const pesos = opciones.saldoMesaTrasPago ?? opciones.saldoTrasPago ?? 0;
+      return { rows: [{ saldo_centavos: String(Math.round(pesos * 100)) }] };
     }
     // Saldo del pedido tras registrar el pago: con 0 (el valor por omisión) el
     // cobro liquida el pedido, que es el caso corriente. Una prueba de abono

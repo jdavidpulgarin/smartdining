@@ -4,6 +4,8 @@ const authRoutes = require('./auth.routes');
 const categoriasRoutes = require('./categorias.routes');
 const platosRoutes = require('./platos.routes');
 const menuRoutes = require('./menu.routes');
+const pasosRoutes = require('./pasos.routes');
+const ingredientesRoutes = require('./ingredientes.routes');
 const mesasRoutes = require('./mesas.routes');
 const pedidosRoutes = require('./pedidos.routes');
 const kdsRoutes = require('./kds.routes');
@@ -18,6 +20,10 @@ router.use('/auth', authRoutes);
 router.use('/categorias', categoriasRoutes);
 router.use('/platos', platosRoutes);
 router.use('/menu', menuRoutes);
+// D-04: pasos e ingredientes del constructor. Crear y listar los pasos de un
+// plato vive en /api/platos/:id/pasos; estos son los recursos ya sueltos.
+router.use('/pasos', pasosRoutes);
+router.use('/ingredientes', ingredientesRoutes);
 router.use('/mesas', mesasRoutes);
 router.use('/pedidos', pedidosRoutes);
 router.use('/kds', kdsRoutes);
