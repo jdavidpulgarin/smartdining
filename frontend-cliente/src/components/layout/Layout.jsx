@@ -16,13 +16,13 @@ function Layout({ children }) {
   }
 
   return (
-    <div className="min-h-screen bg-crema text-cafe flex flex-col">
+    <div className="min-h-screen bg-fondo text-texto flex flex-col">
       <Header
         numeroMesa={mesa}
         comensal={comensal}
         cantidadCarrito={totalUnidades}
       />
-      <main className="flex-1 w-full max-w-md mx-auto p-4">{children}</main>
+      <main className="flex-1 w-full max-w-md mx-auto px-4 pb-8">{children}</main>
     </div>
   );
 }
