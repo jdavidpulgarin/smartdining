@@ -266,6 +266,26 @@ export function QRModal({
                   fgColor="#0f172a"
                   bgColor="#ffffff"
                 />
+              ) : isOcupada ? (
+                <div className="qr-placeholder-box" style={{ padding: '20px 12px', textAlign: 'center' }}>
+                  <QrCode size={48} className="text-muted" style={{ margin: '0 auto 12px auto' }} />
+                  <p style={{ margin: '0 0 12px 0', fontSize: '0.9rem', lineHeight: 1.4, color: '#334155' }}>
+                    Esta mesa tiene una sesión abierta, pero su QR no está en este dispositivo.
+                  </p>
+                  <button
+                    type="button"
+                    className="primary-button qr-open-btn"
+                    onClick={() => ejecutarRotacion(false)}
+                    disabled={loadingAction}
+                    style={{ margin: '0 auto' }}
+                  >
+                    <RefreshCw size={14} className={loadingAction ? 'spin' : ''} />
+                    <span>{loadingAction ? 'Generando...' : 'Generar nuevo QR'}</span>
+                  </button>
+                  <p style={{ margin: '10px 0 0 0', fontSize: '0.75rem', color: '#64748b' }}>
+                    El QR anterior dejará de funcionar.
+                  </p>
+                </div>
               ) : (
                 <div className="qr-placeholder-box">
                   <QrCode size={56} className="text-muted" />
