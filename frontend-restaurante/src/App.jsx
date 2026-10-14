@@ -1,6 +1,6 @@
 import './App.css'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
-import { Topbar, Sidebar } from './components'
+import { Topbar } from './components'
 import {
   Home,
   Mesas,
@@ -41,19 +41,20 @@ function AppContent() {
   return (
     <div className="app-shell">
       <Topbar />
-      <Sidebar />
 
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/mesas" element={<Mesas />} />
-        <Route path="/pedidos" element={<Pedidos />} />
-        <Route path="/menu" element={<Menu />} />
-        <Route path="/caja" element={<Caja />} />
-        <Route path="/reportes" element={<Reportes />} />
-        <Route path="/pantalla/mesa/:id" element={<PantallaMesa />} />
-        <Route path="/pantalla/:id" element={<PantallaMesa />} />
-        <Route path="/login" element={<Login />} />
-      </Routes>
+      <main className="sd-page-wrapper">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/mesas" element={<Mesas />} />
+          <Route path="/pedidos" element={<Pedidos />} />
+          <Route path="/menu" element={<Menu />} />
+          <Route path="/caja" element={<Caja />} />
+          <Route path="/reportes" element={<Reportes />} />
+          <Route path="/pantalla/mesa/:id" element={<PantallaMesa />} />
+          <Route path="/pantalla/:id" element={<PantallaMesa />} />
+          <Route path="/login" element={<Login />} />
+        </Routes>
+      </main>
     </div>
   )
 }
