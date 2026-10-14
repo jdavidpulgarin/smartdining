@@ -306,7 +306,7 @@ export function QRModal({
                     <RefreshCw size={14} className={loadingAction ? 'spin' : ''} />
                     <span>{loadingAction ? 'Generando...' : 'Generar nuevo QR'}</span>
                   </button>
-                  <p style={{ margin: '10px 0 0 0', fontSize: '0.75rem', color: '#64748b' }}>
+                  <p style={{ margin: '10px 0 0 0', fontSize: '0.75rem', color: '#8E827B' }}>
                     El QR anterior dejará de funcionar.
                   </p>
                 </div>
@@ -404,7 +404,7 @@ export function QRModal({
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: autoRotacionHabilitada ? '#34d399' : '#64748b',
+                      color: autoRotacionHabilitada ? 'var(--sd-text)' : '#8E827B',
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',

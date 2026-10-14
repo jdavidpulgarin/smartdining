@@ -111,7 +111,7 @@ export function TableDetailModal({
                 <MapPin size={12} className="inline-icon" /> Zona {table?.location || table?.ubicacion || 'Principal'} ·{' '}
                 <Users size={12} className="inline-icon" /> Capacidad {table?.seats || table?.capacidad || 4} comensales
                 {sid && (
-                  <span style={{ marginLeft: '8px', color: 'var(--emerald-400, #34d399)' }}>
+                  <span style={{ marginLeft: '8px', color: 'var(--sd-text-muted)' }}>
                     · sid: {sid}
                   </span>
                 )}
@@ -138,52 +138,52 @@ export function TableDetailModal({
           margin: '16px 0',
         }}>
           <div className="metric-glass-card" style={{
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'var(--sd-bg)',
+            border: '1px solid var(--sd-border)',
             borderRadius: '12px',
             padding: '12px 14px',
           }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>
+            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--sd-text-muted)', display: 'block' }}>
               Consumo Mesa
             </span>
-            <strong style={{ fontSize: '1.25rem', color: '#f8fafc', display: 'block', marginTop: '4px' }}>
+            <strong style={{ fontSize: '1.25rem', color: 'var(--sd-text)', display: 'block', marginTop: '4px' }}>
               {formatearDinero(resumenFinanciero.totalConsumido)}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--emerald-400, #34d399)' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--sd-text-muted)' }}>
               {resumenFinanciero.totalItems} ítems ordenados
             </span>
           </div>
 
           <div className="metric-glass-card" style={{
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'var(--sd-bg)',
+            border: '1px solid var(--sd-border)',
             borderRadius: '12px',
             padding: '12px 14px',
           }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>
+            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--sd-text-muted)', display: 'block' }}>
               Comensales
             </span>
-            <strong style={{ fontSize: '1.25rem', color: '#f8fafc', display: 'block', marginTop: '4px' }}>
+            <strong style={{ fontSize: '1.25rem', color: 'var(--sd-text)', display: 'block', marginTop: '4px' }}>
               {resumenFinanciero.comensales.length > 0 ? resumenFinanciero.comensales.length : (isOcupada ? '1+' : '0')}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--sd-text-muted)' }}>
               {isOcupada ? 'Grupo activo' : 'Mesa libre'}
             </span>
           </div>
 
           <div className="metric-glass-card" style={{
-            background: 'rgba(16, 185, 129, 0.08)',
-            border: '1px solid rgba(16, 185, 129, 0.25)',
+            background: 'var(--sd-bg)',
+            border: '1px solid var(--sd-red)',
             borderRadius: '12px',
             padding: '12px 14px',
           }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--emerald-400, #34d399)', display: 'block' }}>
+            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--sd-red-text)', display: 'block' }}>
               Saldo Pendiente
             </span>
-            <strong style={{ fontSize: '1.25rem', color: 'var(--emerald-300, #6ee7b7)', display: 'block', marginTop: '4px' }}>
+            <strong style={{ fontSize: '1.25rem', color: 'var(--sd-text)', display: 'block', marginTop: '4px' }}>
               {formatearDinero(resumenFinanciero.saldo)}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--sd-text-muted)' }}>
               Por liquidar en caja
             </span>
           </div>
@@ -193,7 +193,7 @@ export function TableDetailModal({
         {resumenFinanciero.comensales.length > 0 && (
           <div className="detail-section-block" style={{ marginBottom: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <UserCheck size={16} className="text-emerald" />
+              <UserCheck size={16} style={{ color: 'var(--sd-red)' }} />
               <h3 style={{ fontSize: '0.9rem', color: '#f1f5f9', margin: 0 }}>
                 Cuenta Dividida por Comensal
               </h3>
@@ -220,11 +220,11 @@ export function TableDetailModal({
                 >
                   <div>
                     <strong style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>{c.nombre}</strong>
-                    <span style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.75rem', marginLeft: '8px' }}>
+                    <span style={{ color: 'var(--sd-text-muted)', fontSize: '0.75rem', marginLeft: '8px' }}>
                       ({c.itemsCount} {c.itemsCount === 1 ? 'ítem' : 'ítems'})
                     </span>
                   </div>
-                  <strong style={{ color: 'var(--emerald-400, #34d399)', fontSize: '0.9rem' }}>
+                  <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
                     {formatearDinero(c.subtotal)}
                   </strong>
                 </div>
@@ -237,7 +237,7 @@ export function TableDetailModal({
         <div className="detail-section-block" style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Utensils size={16} className="text-emerald" />
+              <Utensils size={16} style={{ color: 'var(--sd-red)' }} />
               <h3 style={{ fontSize: '0.9rem', color: '#f1f5f9', margin: 0 }}>
                 Comandas en Curso ({pedidosMesa.length})
               </h3>
@@ -262,7 +262,7 @@ export function TableDetailModal({
                       borderRadius: '10px',
                       background: 'rgba(255, 255, 255, 0.03)',
                       border: isListo
-                        ? '1px solid rgba(16, 185, 129, 0.5)'
+                        ? '1px solid var(--sd-gold)'
                         : '1px solid rgba(255, 255, 255, 0.08)',
                       display: 'flex',
                       flexDirection: 'column',
@@ -276,13 +276,13 @@ export function TableDetailModal({
                         </strong>
                         <StateBadge state={ped.estado} />
                       </div>
-                      <strong style={{ color: 'var(--emerald-400, #34d399)', fontSize: '0.9rem' }}>
+                      <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
                         {formatearDinero(ped.total)}
                       </strong>
                     </div>
 
                     {/* Platos del pedido */}
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)' }}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--sd-text-muted)' }}>
                       {(ped.detalles || ped.items || []).map((it, idx) => (
                         <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
                           <span>
@@ -302,7 +302,7 @@ export function TableDetailModal({
                           className="primary-button small"
                           onClick={() => onDeliverOrder(ped.id_pedido)}
                           style={{
-                            background: 'var(--emerald-600, #059669)',
+                            background: 'var(--sd-red)',
                             padding: '6px 12px',
                             fontSize: '0.75rem',
                           }}
@@ -321,8 +321,8 @@ export function TableDetailModal({
               textAlign: 'center',
               padding: '18px',
               borderRadius: '8px',
-              background: 'rgba(255, 255, 255, 0.02)',
-              color: 'var(--text-muted, #94a3b8)',
+              background: 'var(--sd-bg)',
+              color: 'var(--sd-text-muted)',
               fontSize: '0.85rem',
             }}>
               {isOcupada
