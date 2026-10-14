@@ -171,7 +171,14 @@ export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
         // 401 ya cerro la sesion en el servicio. Para el resto, el tablero se
         // vuelve a leer porque puede estar desincronizado.
         if (error.status !== 401) recargar()
-        return { ok: false, mensaje: error.message || 'No se pudo cambiar el estado' }
+        // Sin status no hubo respuesta: el fetch ni siquiera llego (red caida,
+        // backend apagado). Es distinto de un 409 del trigger, y la tarjeta
+        // decide cosas distintas con cada uno.
+        return {
+          ok: false,
+          mensaje: error.message || 'No se pudo cambiar el estado',
+          sinRespuesta: !error.status,
+        }
       }
     },
     [token, recargar]

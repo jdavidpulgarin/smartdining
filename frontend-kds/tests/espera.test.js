@@ -162,12 +162,12 @@ test('una comanda lista se muestra neutra, aunque lleve horas', () => {
   }
 })
 
-test('en Listas no hay etiqueta ni signo: nada de "Retrasada"', () => {
+test('en Listas no hay etiqueta ni signo: nada de "Atrasada"', () => {
   const senal = espera.senalDeEsperaDeComanda('listo', 300)
 
   assert.strictEqual(senal.etiqueta, '', 'sin texto de nivel')
   assert.strictEqual(senal.signo, '', 'sin signo')
-  assert.notStrictEqual(senal.etiqueta, 'Retrasada')
+  assert.notStrictEqual(senal.etiqueta, 'Atrasada')
 })
 
 test('el tiempo si se muestra en Listas, con el tope +99', () => {
@@ -188,7 +188,7 @@ test('senalDeEspera (sin estado) conserva su comportamiento de siempre', () => {
   // La version por minutos se sigue usando y no cambia: solo se agrego la
   // variante que mira el estado.
   assert.strictEqual(espera.senalDeEspera(30).nivel, 'rojo')
-  assert.strictEqual(espera.senalDeEspera(30).etiqueta, 'Retrasada')
+  assert.strictEqual(espera.senalDeEspera(30).etiqueta, 'Atrasada')
 })
 
 test('la lista de estados con semaforo son las dos columnas de cocina', () => {

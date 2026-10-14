@@ -10,34 +10,63 @@
  * prefers-color-scheme solo decide la primera vez, si nadie eligió todavía.
  */
 @theme {
-  --color-fondo: #0b0f14;
-  --color-panel: #151b23;
-  --color-panel-alto: #1e2732;
-  --color-borde: #2c3845;
-  --color-texto: #f5f7fa;
-  --color-texto-suave: #9aa8b8;
-  --color-nuevas: #38bdf8;
-  --color-preparacion: #fbbf24;
-  --color-listas: #4ade80;
-  --color-alerta: #f87171;
+  --color-fondo: #0b0b0d;
+  --color-panel: #141417;
+  --color-panel-alto: #1c1c20;
+  --color-borde: #2e2e34;
+  --color-texto: #f6f6f7;
+  --color-texto-suave: #9b9ba3;
+  /*
+   * El acento de la marca es el rojo, y es también el color de "Nuevas": lo que
+   * acaba de entrar es lo que tiene que saltar a la vista desde el otro lado de
+   * la cocina. Listas va en blanco a propósito: ya no es trabajo pendiente, así
+   * que no compite con las otras dos columnas por el color.
+   */
+  --color-marca: #e01f2d;
+  --color-nuevas: #e01f2d;
+  --color-preparacion: #f0b429;
+  --color-listas: #f6f6f7;
+  --color-alerta: #e01f2d;
+
+  /*
+   * El contador de cada columna: cuadro claro con la cifra oscura. Es el unico
+   * sitio donde se invierte el contraste a proposito — asi la cifra se separa
+   * del titulo sin usar el color de la columna, que ya esta en la regla de
+   * arriba y no debe repetirse en tres sitios.
+   */
+  --color-contador: #f6f6f7;
+  --color-contador-texto: #141417;
+
+  /*
+   * Barlow Condensed para lo que se lee de lejos (títulos, cifras, botones) y
+   * Barlow para el detalle. La condensada permite "EN PREPARACIÓN" o "MARCAR
+   * LISTO" en grande sin partir la línea en una columna estrecha.
+   */
+  --font-display: 'Barlow Condensed', 'Barlow', system-ui, sans-serif;
+  --font-sans: 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
 /*
  * Tema claro. Los colores de estado se oscurecen respecto al oscuro para que
- * mantengan contraste contra un fondo blanco: el ámbar y el verde claros sobre
+ * mantengan contraste contra un fondo blanco: el ámbar y el gris claros sobre
  * blanco son ilegibles, y aquí se leen cifras y botones.
  */
 :root[data-tema='claro'] {
-  --color-fondo: #f4f6f9;
+  --color-fondo: #f4f4f6;
   --color-panel: #ffffff;
   --color-panel-alto: #ffffff;
-  --color-borde: #c9d2dd;
-  --color-texto: #10161d;
-  --color-texto-suave: #55657a;
-  --color-nuevas: #0369a1;
-  --color-preparacion: #a16207;
-  --color-listas: #15803d;
-  --color-alerta: #b91c1c;
+  --color-borde: #cfcfd6;
+  --color-texto: #121216;
+  --color-texto-suave: #5c5c66;
+  --color-marca: #b4141f;
+  --color-nuevas: #b4141f;
+  --color-preparacion: #8a6100;
+  --color-listas: #3a3a44;
+  --color-alerta: #b4141f;
+  /* Aqui se invierte al reves: sobre un panel blanco, un cuadro claro no se
+     veria, asi que el cuadro va oscuro y la cifra en blanco. */
+  --color-contador: #121216;
+  --color-contador-texto: #ffffff;
 }
 
 html,
@@ -48,12 +77,156 @@ body,
 
 body {
   margin: 0;
-  background-color: var(--color-fondo);
   color: var(--color-texto);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   /* Tipografia base mas grande que la de una web normal: se lee a distancia. */
   font-size: 18px;
   -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Fondo del login y del tablero: la foto, sin nada encima.
+ *
+ * El degradado de debajo NO es decorativo ni un resto: es el respaldo. Va en
+ * `background-color` y en las capas inferiores, así que mientras la foto carga
+ * —o si no carga nunca, que en una cocina sin red es el caso probable— la
+ * pantalla ya se ve terminada en vez de blanca.
+ *
+ * Aquí no se oscurece nada. Cada pantalla pone su propia capa, porque no
+ * necesitan la misma: el login enseña la foto entera y el tablero tiene que
+ * dejar leer comandas por encima.
+ */
+body {
+  background-color: var(--color-fondo);
+  background-image:
+    radial-gradient(90rem 55rem at 15% -15%, color-mix(in srgb, var(--color-marca) 16%, transparent), transparent 60%),
+    radial-gradient(70rem 50rem at 110% 110%, color-mix(in srgb, var(--color-marca) 9%, transparent), transparent 62%),
+    url('/fondo-cocina.jpg');
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Intensidad de las capas sobre la foto. Para subirlas o bajarlas a ojo, se
+ * toca SOLO el porcentaje: es cuánto color de capa se mezcla encima de la foto.
+ *
+ *   0%   = foto intacta
+ *   100% = foto tapada del todo
+ *
+ * El color de la capa cambia con el tema y nunca al revés: en oscuro se oscurece
+ * y en claro se aclara. Una capa oscura sobre el tema claro ensucia la foto y
+ * deja el texto oscuro flotando sobre un gris indeciso.
+ * ---------------------------------------------------------------------------
+ */
+:root {
+  /* El color con el que se vela la foto. */
+  --capa-fondo-color: var(--color-fondo);
+  /*
+   * El rojo de marca, un punto más luminoso, SOLO para texto que cae sobre la
+   * foto velada. El de marca se queda en 2,5:1 contra ese fondo y el mínimo
+   * para texto grande es 3:1; este da 3,2:1 sin dejar de ser el mismo rojo.
+   */
+  --color-marca-sobre-foto: #f2404c;
+  /* Tablero: lo justo para que los huecos entre columnas no distraigan. */
+  --capa-fondo-tablero: 55%;
+  /* Login: solo detrás del texto de la izquierda, el resto de la foto limpio. */
+  --capa-fondo-login: 82%;
+  /*
+   * Fondo propio del bloque de texto del login, independiente de la capa de la
+   * foto. En oscuro no hace falta: el velo de arriba ya deja ese texto en
+   * 11:1, así que va transparente y el degradado se ve difuminado, sin cantos.
+   */
+  --fondo-texto-login: transparent;
+}
+
+:root[data-tema='claro'] {
+  /* Blanco, nunca oscuro: aquí el texto que hay que salvar es el oscuro. */
+  --capa-fondo-color: #ffffff;
+  /* Sobre la foto limpia el rojo de marca da 6,6:1 en las zonas claras y 3:1
+     en las oscuras; el bloque del login lleva su propio fondo, así que cae
+     siempre sobre blanco. No hace falta aclararlo. */
+  --color-marca-sobre-foto: var(--color-marca);
+  /*
+   * Sin capa: en el tema claro la foto se ve tal cual. La capa blanca la dejaba
+   * apagada y no hacía falta — el único texto del tablero que cae sobre la
+   * imagen es el del vacío de columna, y ese ya lleva fondo sólido.
+   *
+   * Siguen siendo el mismo mando de antes: subirlas vuelve a velar la foto.
+   */
+  --capa-fondo-tablero: 0%;
+  --capa-fondo-login: 0%;
+  /*
+   * Sin capa, el texto oscuro del login caería sobre la foto a pelo: en sus
+   * zonas oscuras se queda en 1,1:1, que no se lee en absoluto. Así que el
+   * bloque se trae su propio fondo —solo él, no la pantalla— y sube a 13:1.
+   */
+  --fondo-texto-login: rgb(255 255 255 / 0.85);
+}
+
+/*
+ * La capa del tablero. Fija y detrás de todo el contenido (z-index -1), así que
+ * no hay que envolver la pantalla en otro div ni tocar el apilado de las
+ * tarjetas, que llevan su propio fondo sólido y no dependen de esto.
+ */
+.fondo-tablero {
+  position: relative;
+}
+
+.fondo-tablero::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: color-mix(
+    in srgb,
+    var(--capa-fondo-color) var(--capa-fondo-tablero),
+    transparent
+  );
+  pointer-events: none;
+}
+
+/*
+ * El velo del login: un óvalo difuminado detrás del titular y su bajada.
+ *
+ * Va pegado al texto y no a la pantalla entera a propósito — es lo único que
+ * hay que poder leer sobre la foto, y así el resto de la imagen se ve tal cual.
+ * Se desvanece antes del borde del bloque, de modo que no se le ve el canto.
+ */
+.velo-texto {
+  background-color: var(--fondo-texto-login);
+  background-image: radial-gradient(
+    115% 125% at 35% 50%,
+    color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 0%,
+    color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 42%,
+    transparent 78%
+  );
+}
+
+/*
+ * El mismo velo para la barra de arriba del login, en vertical y corto.
+ *
+ * Hace falta: el logo y "Pantalla de cocina" caen sobre la foto limpia, y ahí
+ * la imagen tiene zonas casi blancas (los platos) donde ese texto se queda en
+ * 2,6:1. Se desvanece a nada antes de llegar al titular, así que la foto sigue
+ * entera por debajo.
+ */
+.velo-barra {
+  background-color: var(--fondo-texto-login);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 0%,
+    color-mix(in srgb, var(--capa-fondo-color) var(--capa-fondo-login), transparent) 55%,
+    transparent 100%
+  );
+}
+
+/* Dentro de un velo, el rojo de marca pasa al tono que sí contrasta ahí. */
+.velo-texto,
+.velo-barra {
+  --color-marca: var(--color-marca-sobre-foto);
 }
 
 /* En una pantalla tactil de cocina, seleccionar texto por accidente estorba. */
@@ -61,4 +234,30 @@ button {
   user-select: none;
   /* Sin retardo de 300 ms al tocar: en cocina se toca con prisa. */
   touch-action: manipulation;
+}
+
+/*
+ * Titulos, cifras y botones: condensada, en mayusculas y con la letra algo
+ * separada, que es como se leen de lejos sin volverse un bloque gris.
+ */
+.display {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+/*
+ * Para lo que el diseño muestra solo con color: el texto sigue ahí para los
+ * lectores de pantalla (y para el title del elemento).
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
