@@ -101,4 +101,62 @@ describe('Flujo de Menú en frontend-restaurante', () => {
     expect(screen.getByText('Costillas BBQ')).toBeInTheDocument()
     expect(screen.queryByText('Burger Clásica')).not.toBeInTheDocument()
   })
+
+  it('debe mostrar badge de Arma tu plato cuando el plato es personalizable y permitir abrir el EditorPasos', async () => {
+    const mockMenu = {
+      categorias: [
+        {
+          id_categoria: 100,
+          nombre: 'Arma tu plato',
+          platos: [
+            {
+              id_plato: 1001,
+              nombre: 'Bowl Personalizado',
+              precio: 20000,
+              disponible: true,
+              personalizable: true,
+              calorias: 450,
+            },
+          ],
+        },
+      ],
+    }
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      if (url.includes('/pasos')) {
+        return {
+          ok: true,
+          json: async () => [
+            { id_paso: 1, nombre: 'Elige tu Base', orden: 1, min_sel: 1, max_sel: 1, obligatorio: true, ingredientes: [] },
+          ],
+        }
+      }
+      return {
+        ok: true,
+        json: async () => mockMenu,
+      }
+    })
+
+    render(
+      <MemoryRouter>
+        <Menu />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Bowl Personalizado')).toBeInTheDocument()
+    })
+
+    expect(screen.getAllByText(/Arma tu plato/i).length).toBeGreaterThanOrEqual(1)
+
+    // Abrir EditorPasos con el botón de constructor
+    const btnConstructor = screen.getByTitle('Configurar Pasos e Ingredientes del Constructor')
+    fireEvent.click(btnConstructor)
+
+    await waitFor(() => {
+      expect(screen.getByText('Constructor de Plato')).toBeInTheDocument()
+      expect(screen.getByText(/Configuración de pasos, selecciones e ingredientes/i)).toBeInTheDocument()
+    })
+  })
 })
+
