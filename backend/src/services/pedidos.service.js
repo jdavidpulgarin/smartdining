@@ -175,11 +175,50 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
   }
 }
 
+/**
+ * Estados que el panel de sala considera "activo": el pedido sigue vivo para
+ * alguien. Se queda fuera 'pagado' (ya se cobró y la mesa se liberó) y
+ * 'cancelado' (se anuló).
+ *
+ * 'listo' y 'entregado' SÍ entran, y antes no: un pedido listo es justo el que
+ * el mesero tiene que llevar, y uno entregado es el que hay que cobrar. Sin
+ * ellos el panel perdía de vista los pedidos en el tramo donde más falta hace
+ * verlos.
+ */
+const ESTADOS_ACTIVOS = ['recibido', 'en_preparacion', 'listo', 'entregado'];
+
+/**
+ * Pedidos activos para el panel del restaurante.
+ *
+ * `p.*` y no una lista de columnas: así todo lo que ya devolvía sigue estando
+ * (compatible hacia atrás) y lo nuevo se agrega al lado.
+ *
+ * Se une con mesas para dar `mesa_numero`, que es lo que el panel muestra: el
+ * número que el personal ve en el salón, no el id interno. Es un JOIN y no un
+ * LEFT JOIN porque pedidos.id_mesa es NOT NULL con FK a mesas: todo pedido
+ * tiene su mesa. Mismo alias y mismo nombre de campo que kds.service, para que
+ * el panel y el KDS hablen igual.
+ */
+const SQL_PEDIDOS_ACTIVOS = `
+  SELECT p.*, m.numero AS mesa_numero
+  FROM pedidos p
+  JOIN mesas m ON m.id_mesa = p.id_mesa
+  WHERE p.estado = ANY($1::text[])
+  ORDER BY p.creado_en ASC`;
+
+/**
+ * Lista los pedidos activos con sus ítems, en el MISMO formato que
+ * GET /pedidos/:id y listarPorMesa: dos consultas fijas (pedidos + detalles de
+ * todos ellos), no una por pedido, y el reparto lo hace agruparDetalles.
+ */
 async function listarActivos() {
-  const result = await pool.query(
-    `SELECT * FROM pedidos WHERE estado IN ('recibido', 'en_preparacion') ORDER BY creado_en ASC`
-  );
-  return result.rows;
+  const result = await pool.query(SQL_PEDIDOS_ACTIVOS, [ESTADOS_ACTIVOS]);
+
+  // Sin pedidos no hay nada que buscar: detallesDePedidos con lista vacía sería
+  // una consulta de más (y un `= ANY('{}')` que nunca devuelve nada).
+  if (result.rows.length === 0) return [];
+
+  return agruparDetalles(result.rows, await detallesDePedidos(result.rows.map((p) => p.id_pedido)));
 }
 
 async function obtenerConDetalles(id) {
@@ -370,6 +409,7 @@ function agruparDetalles(pedidos, detalles) {
 
 module.exports = {
   ESTADOS_VALIDOS,
+  ESTADOS_ACTIVOS,
   generarCodigoPedido,
   detallesDePedidos,
   agruparDetalles,

@@ -206,6 +206,14 @@ async function crear(req, res, next) {
   }
 }
 
+/**
+ * GET /api/pedidos/activos — panel del restaurante (admin, cajero, mesero).
+ *
+ * Devuelve `{ pedidos }` con cada pedido en el mismo formato que
+ * GET /pedidos/:id: sus `detalles`, cada uno con el nombre del plato y los
+ * ingredientes elegidos, más `mesa_numero`. El servicio decide qué estados
+ * cuentan como activos y agrupa los detalles.
+ */
 async function listarActivos(req, res, next) {
   try {
     const pedidos = await pedidosService.listarActivos();
