@@ -161,7 +161,35 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 
 200: `{ "usuario": { "id_usuario": 1, "nombre": "...", "email": "...", "rol": "mesero" }, "token": "..." }`
 
-401: `{ "error": "Credenciales inválidas" }` · 403: `{ "error": "Usuario inactivo" }`
+| Código | Cuerpo | Cuándo |
+|---|---|---|
+| 200 | `{ usuario, token }` | Credenciales correctas y cuenta activa |
+| 400 | `{ "error": "..." }` | El body no cumple el esquema (email inválido, contraseña de menos de 6) |
+| **401** | `{ "error": "Credenciales inválidas" }` | **El email no existe, la contraseña es incorrecta o la cuenta está inactiva: los tres responden lo mismo** |
+| 429 | `{ "error": "Demasiados intentos..." }` | Límite de intentos (H-04): 5 fallos por minuto y por IP+email |
+
+#### Un solo código y un solo mensaje (H-12)
+
+Antes este endpoint distinguía los tres casos, y eso permitía **enumerar usuarios**:
+
+- un email inexistente respondía en **~3 ms** y uno existente en **~70 ms**, porque solo el
+  segundo llegaba a bcrypt;
+- una cuenta desactivada respondía **403 `Usuario inactivo`**, confirmando que el email
+  existe, y además **antes** de validar la contraseña.
+
+Con eso se podía recorrer una lista de correos y quedarse con los que sí tienen cuenta sin
+acertar una sola contraseña. Ahora:
+
+- el login **siempre** pasa por `bcrypt.compare`, exista el usuario o no. Si no existe (o
+  no tiene hash) se compara contra un **hash ficticio** generado al arrancar a partir de
+  una cadena aleatoria y con el **mismo costo** que los hashes reales (`$2b$10$`, el de
+  `register` y el del seed), así que los tres casos tardan lo mismo;
+- la decisión **no depende** de esa comparación: sin usuario, o con la cuenta inactiva, se
+  rechaza siempre;
+- un **único** 401 con un **único** mensaje para los tres casos.
+
+> La cuenta desactivada sí se explica, pero en el **middleware** (H-09, más abajo): allí ya
+> hay un JWT válido, así que no queda nada que enumerar.
 
 ---
 
@@ -685,7 +713,7 @@ Notas de lo que quedó demostrado al escribirlas:
 | GET | /pedidos/activos | admin, cajero, mesero | Pedidos en `recibido`/`en_preparacion` |
 | **GET** | **/pedidos/mesa** | **comensal** | **Pedidos de la mesa de la sesión** *(reemplaza a `/pedidos/historial`)* |
 | **GET** | **/pedidos/mesa/cuenta** | **comensal** | **Cuenta de SU mesa por comensal; la mesa sale del JWT** |
-| GET | /pedidos/:id | autenticado | Detalle con sus ítems; un comensal solo ve los de su mesa (403 si no) |
+| GET | /pedidos/:id | **admin, cajero, mesero, comensal** | Detalle con sus ítems; un comensal solo ve los de su mesa y de su visita (403 si no). **`cocina` no entra (S-26)** |
 | PATCH | /pedidos/:id/estado | admin, cajero, mesero | Cambia el estado (cualquiera de los 6 válidos) |
 | POST | /pedidos/:id/cancelar | admin, cajero, mesero | Atajo que fija `estado = cancelado`. **Solo desde `recibido` o `en_preparacion`**; desde `listo`/`entregado` responde 409 |
 
@@ -784,6 +812,11 @@ Body:
 400: plato inexistente o no disponible, `id_mesa` faltante para staff · 403: rol no permitido
 
 ### GET /pedidos/:id
+
+Roles: **admin, cajero, mesero y comensal**. `cocina` responde **403** (S-26): esta ruta
+devuelve el pedido completo —el total y, por cada ítem, el alias de quién lo pidió— y la
+cocina no necesita nada de eso. Trabaja con `GET /kds/comandas` y
+`PATCH /kds/comandas/:id/estado`, que no pasan por aquí; ningún frontend del KDS la usa.
 
 200: el pedido con `detalles`. Cada detalle trae `comensal` (quién pidió el ítem),
 `notas_especiales` (solo la nota), `precio_extras` y sus `ingredientes`:
