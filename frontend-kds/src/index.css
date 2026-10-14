@@ -85,18 +85,45 @@ body {
 }
 
 /*
- * Fondo con degradado en vez de una foto: el mockup lleva una imagen de banco
- * que no se puede usar, y una pantalla de cocina tampoco gana nada con una foto
- * detrás de las comandas. El degradado da la misma profundidad sin restar
- * contraste a las tarjetas.
+ * Fondo del login y del tablero.
+ *
+ * El degradado NO es decorativo ni un resto: es el respaldo. Va en
+ * `background-color` y en las capas de abajo, así que mientras la foto carga
+ * —o si no carga nunca, que en una cocina sin red es el caso probable— la
+ * pantalla ya se ve terminada en vez de blanca.
+ *
+ * Sobre la foto va una capa oscura casi opaca. No es un efecto: las comandas se
+ * leen a varios metros y una foto a contraste pleno detrás se come los bordes
+ * de las tarjetas y el texto suave. La capa deja la textura y devuelve el
+ * contraste.
  */
 body {
   background-color: var(--color-fondo);
   background-image:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-fondo) 88%, transparent),
+      color-mix(in srgb, var(--color-fondo) 94%, transparent)
+    ),
     radial-gradient(90rem 55rem at 15% -15%, color-mix(in srgb, var(--color-marca) 16%, transparent), transparent 60%),
     radial-gradient(70rem 50rem at 110% 110%, color-mix(in srgb, var(--color-marca) 9%, transparent), transparent 62%),
-    linear-gradient(180deg, color-mix(in srgb, var(--color-texto) 4%, transparent), transparent 40%);
+    url('/fondo-cocina.jpg');
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
   background-attachment: fixed;
+}
+
+/*
+ * Tema claro: sin foto. La capa que hace legible la foto es oscura, y aclararla
+ * lo bastante para un fondo claro deja la imagen en un gris sucio que no aporta
+ * nada. El claro se queda con el degradado sobrio, que es para lo que existe:
+ * una cocina muy iluminada donde el oscuro se ve lavado.
+ */
+:root[data-tema='claro'] body {
+  background-image:
+    radial-gradient(90rem 55rem at 15% -15%, color-mix(in srgb, var(--color-marca) 10%, transparent), transparent 60%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-texto) 4%, transparent), transparent 40%);
 }
 
 /* En una pantalla tactil de cocina, seleccionar texto por accidente estorba. */

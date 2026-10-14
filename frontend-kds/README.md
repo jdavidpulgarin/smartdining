@@ -208,5 +208,13 @@ React 19 · Vite 8 · react-router-dom 7 · socket.io-client 4.8 · Tailwind CSS
 
 Tipografía **Barlow Condensed** (títulos, cifras, botones) y **Barlow** (texto),
 autoalojadas con `@fontsource`: una cocina puede quedarse sin internet y la pantalla tiene
-que arrancar igual, así que no se piden a ningún CDN. El fondo es un degradado y no una
-foto: detrás de las comandas, una imagen solo les quita contraste.
+que arrancar igual, así que no se piden a ningún CDN.
+
+El fondo del login y del tablero es `public/fondo-cocina.jpg` con una capa oscura encima,
+y un degradado debajo que se ve mientras la imagen carga o si no llega a cargar. En tema
+claro no se usa la foto: la capa que la hace legible es oscura, y aclararla deja la imagen
+en un gris sucio.
+
+> ⚠️ **Licencia de la imagen.** `public/fondo-cocina.jpg` es una foto de banco **con marca
+> de agua**, usada aquí solo con fines académicos. Hay que reemplazarla por una imagen con
+> licencia (o propia) antes de cualquier publicación real del proyecto.
