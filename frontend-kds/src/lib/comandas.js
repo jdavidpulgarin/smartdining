@@ -235,7 +235,8 @@ function cambioDeEstado(evento) {
 /**
  * Siguiente estado al que puede avanzar una comanda desde el tablero.
  *
- * Es el boton de la tarjeta: "Empezar" en Nuevas y "Listo" en En preparacion.
+ * Es el boton de la tarjeta: "Empezar" en Nuevas y "Marcar listo" en En
+ * preparacion.
  * Una comanda ya lista no tiene boton — sacarla del tablero es del mesero, que
  * la marca 'entregado' desde su panel, y el KDS lo recibe por order:status.
  *
@@ -246,7 +247,7 @@ function cambioDeEstado(evento) {
  */
 export function siguientePaso(estadoActual) {
   if (estadoActual === 'recibido') return { estado: 'en_preparacion', etiqueta: 'Empezar' }
-  if (estadoActual === 'en_preparacion') return { estado: 'listo', etiqueta: 'Listo' }
+  if (estadoActual === 'en_preparacion') return { estado: 'listo', etiqueta: 'Marcar listo' }
   return null
 }
 
@@ -289,6 +290,32 @@ export function marcarEstadoLocal(estado, idPedido, nuevoEstado) {
 export function comandasDeColumna(estado, estadoColumna) {
   const deLaColumna = estado.comandas.filter((c) => c.estado === estadoColumna)
   return estadoColumna === 'listo' ? ordenarPase(deLaColumna) : deLaColumna
+}
+
+/**
+ * Los comensales de una comanda, sin repetir y en el orden en que aparecen.
+ *
+ * Va en la cabecera de la tarjeta, junto al numero de pedido: dice de un
+ * vistazo para cuanta gente es la mesa y con que nombres va a cantar el pase,
+ * sin tener que leer item por item.
+ *
+ * Sin repetir, porque una persona que pidio tres cosas es una persona; y en
+ * orden de aparicion, no alfabetico, para que coincida con el orden en que se
+ * leen los platos justo debajo.
+ *
+ * Los items sin comensal no aportan nada aqui: el socket no siempre lo manda, y
+ * un hueco o un "—" en la cabecera solo haria dudar de si falta alguien.
+ */
+export function comensalesDeComanda(comanda) {
+  const items = comanda?.items
+  if (!Array.isArray(items)) return []
+
+  const vistos = []
+  for (const item of items) {
+    const nombre = typeof item?.comensal === 'string' ? item.comensal.trim() : ''
+    if (nombre && !vistos.includes(nombre)) vistos.push(nombre)
+  }
+  return vistos
 }
 
 /**
