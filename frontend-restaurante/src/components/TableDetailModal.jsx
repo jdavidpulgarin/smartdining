@@ -1,13 +1,11 @@
 import { useMemo } from 'react'
 import {
   X,
-  Users,
   CheckCircle2,
   Receipt,
   Utensils,
   QrCode,
   LogOut,
-  MapPin,
   ArrowRight,
   UserCheck,
 } from 'lucide-react'
@@ -99,91 +97,63 @@ export function TableDetailModal({
         style={{ maxWidth: '680px', width: '92%' }}
       >
         {/* Encabezado */}
-        <div className="qr-modal-header">
-          <div className="table-modal-title-row">
-            <div className="table-badge-large">#{idMesa}</div>
-            <div>
-              <div className="modal-title-with-pill">
-                <h2 className="qr-modal-title">{tableName}</h2>
-                <StatusBadge status={table?.status || table?.estado} />
-              </div>
-              <span className="qr-modal-subtitle">
-                <MapPin size={12} className="inline-icon" /> Zona {table?.location || table?.ubicacion || 'Principal'} ·{' '}
-                <Users size={12} className="inline-icon" /> Capacidad {table?.seats || table?.capacidad || 4} comensales
-                {sid && (
-                  <span style={{ marginLeft: '8px', color: 'var(--sd-text-muted)' }}>
-                    · sid: {sid}
-                  </span>
-                )}
+        <div className="table-detail-header">
+          <div className="table-detail-header-left">
+            <div className="table-detail-title-row">
+              <div className="table-badge-large">#{idMesa}</div>
+              <h2 className="table-detail-title">{tableName}</h2>
+            </div>
+            <div className="table-detail-subtitle-row">
+              <StatusBadge status={table?.status || table?.estado || 'Disponible'} />
+              <span className="table-detail-meta">
+                Zona {table?.location || table?.ubicacion || 'Principal'} · Capacidad {table?.seats || table?.capacidad || 4}
               </span>
-
+              {sid && (
+                <span className="table-detail-sid">
+                  · sid: {sid}
+                </span>
+              )}
             </div>
           </div>
 
           <button
             type="button"
-            className="qr-modal-close-btn"
+            className="table-detail-close-btn"
             onClick={onClose}
             aria-label="Cerrar modal"
           >
-            <X size={18} />
+            <X size={20} />
           </button>
         </div>
 
         {/* Tarjetas de Métricas de Mesa */}
-        <div className="table-detail-metrics-grid" style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '12px',
-          margin: '16px 0',
-        }}>
-          <div className="metric-glass-card" style={{
-            background: 'var(--sd-bg)',
-            border: '1px solid var(--sd-border)',
-            borderRadius: '12px',
-            padding: '12px 14px',
-          }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--sd-text-muted)', display: 'block' }}>
-              Consumo Mesa
-            </span>
-            <strong style={{ fontSize: '1.25rem', color: 'var(--sd-text)', display: 'block', marginTop: '4px' }}>
+        <div className="table-detail-metrics-grid">
+          <div className="table-metric-card">
+            <span className="table-metric-caption">Consumo Mesa</span>
+            <strong className="table-metric-value">
               {formatearDinero(resumenFinanciero.totalConsumido)}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--sd-text-muted)' }}>
+            <span className="table-metric-subtext">
               {resumenFinanciero.totalItems} ítems ordenados
             </span>
           </div>
 
-          <div className="metric-glass-card" style={{
-            background: 'var(--sd-bg)',
-            border: '1px solid var(--sd-border)',
-            borderRadius: '12px',
-            padding: '12px 14px',
-          }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--sd-text-muted)', display: 'block' }}>
-              Comensales
-            </span>
-            <strong style={{ fontSize: '1.25rem', color: 'var(--sd-text)', display: 'block', marginTop: '4px' }}>
+          <div className="table-metric-card">
+            <span className="table-metric-caption">Comensales</span>
+            <strong className="table-metric-value">
               {resumenFinanciero.comensales.length > 0 ? resumenFinanciero.comensales.length : (isOcupada ? '1+' : '0')}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--sd-text-muted)' }}>
+            <span className="table-metric-subtext">
               {isOcupada ? 'Grupo activo' : 'Mesa libre'}
             </span>
           </div>
 
-          <div className="metric-glass-card" style={{
-            background: 'var(--sd-bg)',
-            border: '1px solid var(--sd-red)',
-            borderRadius: '12px',
-            padding: '12px 14px',
-          }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--sd-red-text)', display: 'block' }}>
-              Saldo Pendiente
-            </span>
-            <strong style={{ fontSize: '1.25rem', color: 'var(--sd-text)', display: 'block', marginTop: '4px' }}>
+          <div className="table-metric-card table-metric-card-saldo">
+            <span className="table-metric-caption-saldo">Saldo Pendiente</span>
+            <strong className="table-metric-value">
               {formatearDinero(resumenFinanciero.saldo)}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--sd-text-muted)' }}>
+            <span className="table-metric-subtext">
               Por liquidar en caja
             </span>
           </div>
@@ -317,14 +287,7 @@ export function TableDetailModal({
               })}
             </div>
           ) : (
-            <div style={{
-              textAlign: 'center',
-              padding: '18px',
-              borderRadius: '8px',
-              background: 'var(--sd-bg)',
-              color: 'var(--sd-text-muted)',
-              fontSize: '0.85rem',
-            }}>
+            <div className="table-detail-empty-box">
               {isOcupada
                 ? 'Sesión abierta esperando comandas de los comensales.'
                 : 'Mesa libre. No hay pedidos registrados.'}
@@ -333,22 +296,17 @@ export function TableDetailModal({
         </div>
 
         {/* Barra de Acciones de Mesa */}
-        <div className="table-detail-modal-footer" style={{
-          display: 'flex',
-          gap: '10px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          paddingTop: '16px',
-        }}>
+        <div className="table-detail-modal-footer">
           {onOpenQR && (
             <button
               type="button"
-              className="ghost-button small flex-1"
+              className="table-btn-secondary"
               onClick={() => {
                 onClose()
                 onOpenQR(table)
               }}
             >
-              <QrCode size={15} />
+              <QrCode size={18} />
               <span>{isOcupada ? 'Ver / Rotar QR' : 'Abrir Mesa'}</span>
             </button>
           )}
@@ -356,23 +314,22 @@ export function TableDetailModal({
           {isOcupada && (
             <button
               type="button"
-              className="primary-button small flex-1"
+              className="table-btn-primary"
               onClick={() => {
                 onClose()
                 navigate(`/caja?mesa=${idMesa}`)
               }}
             >
-              <Receipt size={15} />
+              <Receipt size={18} />
               <span>Cobrar en Caja</span>
-              <ArrowRight size={13} />
+              <ArrowRight size={16} />
             </button>
           )}
 
           {isOcupada && onFreeTable && (
             <button
               type="button"
-              className="ghost-button small"
-              style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+              className="table-btn-danger"
               onClick={() => {
                 if (window.confirm(`¿Liberar ${tableName}? Se revocará el QR de la sesión.`)) {
                   onFreeTable(idMesa)
@@ -380,7 +337,7 @@ export function TableDetailModal({
                 }
               }}
             >
-              <LogOut size={14} />
+              <LogOut size={16} />
               <span>Liberar</span>
             </button>
           )}

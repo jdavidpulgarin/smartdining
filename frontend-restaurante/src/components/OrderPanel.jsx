@@ -13,9 +13,9 @@ export function OrderPanel({ order, onDeliver }) {
           <Utensils size={42} className="text-muted" />
           <h3>Sin comanda seleccionada</h3>
           <p>Selecciona una mesa ocupada en el plano para monitorear sus platos en cocina o gestionar su consumo.</p>
-          <Link to="/mesas" className="primary-button small inline-flex-center btn-mapa-mesas">
+          <Link to="/mesas" className="btn-mapa-mesas">
             <span>Ver Mapa de Mesas</span>
-            <ArrowRight size={14} />
+            <ArrowRight size={16} />
           </Link>
         </div>
       </div>
