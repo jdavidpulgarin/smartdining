@@ -293,6 +293,26 @@ export function comandasDeColumna(estado, estadoColumna) {
 }
 
 /**
+ * Que aviso toca mostrar sobre el tablero, si es que toca alguno.
+ *
+ * Son dos fallos distintos y el de conexion manda. Un socket caido NO deja
+ * ningun error de API detras —la ultima carga pudo ir bien— y sin embargo es
+ * el peor de los dos: la pantalla se queda congelada, las comandas nuevas no
+ * entran y nada mas lo delata. Por eso no se puede colgar el aviso de
+ * estado.error, que es como estaba.
+ *
+ * Con el socket vivo, un error de la API si trae un mensaje del servidor que
+ * vale la pena leer tal cual, asi que ese es el que se enseña.
+ *
+ * @returns {'desconexion'|'error'|null}
+ */
+export function avisoDelTablero({ conectado, error }) {
+  if (!conectado) return 'desconexion'
+  if (error) return 'error'
+  return null
+}
+
+/**
  * Tras un PATCH fallido: ¿el boton se queda esperando a que vuelva la conexion?
  *
  * El avance va por HTTP y el tiempo real por el socket, que son dos canales

@@ -16,7 +16,12 @@ import IndicadorConexion from '../components/IndicadorConexion'
 import Logo from '../components/Logo'
 import { MENSAJE_SESION_CAIDA, useAuth } from '../context/AuthContext'
 import { cerrarSonido, prepararSonido, sonarAvisoDeComanda } from '../lib/aviso-sonoro'
-import { COLUMNAS, comandasDeColumna, contarComandasActivas } from '../lib/comandas'
+import {
+  COLUMNAS,
+  avisoDelTablero,
+  comandasDeColumna,
+  contarComandasActivas,
+} from '../lib/comandas'
 import {
   CLAVE_SONIDO,
   CLAVE_TEMA,
@@ -131,6 +136,7 @@ export default function Tablero() {
   })
 
   const activas = contarComandasActivas(estado)
+  const aviso = avisoDelTablero({ conectado, error: estado.error })
 
   return (
     <div className="flex h-full flex-col">
@@ -229,7 +235,7 @@ export default function Tablero() {
           saberlo. Por eso el aviso ocupa el ancho entero y dice que hacer, y
           por eso no depende de estado.error — un socket caido no deja ningun
           error de API detras. */}
-      {!conectado && (
+      {aviso === 'desconexion' && (
         <div className="flex flex-wrap items-center justify-between gap-4 bg-[color:var(--color-alerta)] px-5 py-3 text-white">
           <p className="flex items-start gap-3">
             <AlertCircle size={28} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -255,7 +261,7 @@ export default function Tablero() {
 
       {/* Un fallo de la API con el socket vivo es otra cosa: ahi si hay un
           mensaje del servidor que vale la pena leer tal cual. */}
-      {conectado && estado.error && (
+      {aviso === 'error' && (
         <div className="flex flex-wrap items-center justify-between gap-3 bg-[color:var(--color-alerta)]/15 px-5 py-3">
           <p className="flex items-center gap-2 text-lg text-[color:var(--color-alerta)]">
             <AlertCircle size={20} aria-hidden="true" />
