@@ -363,7 +363,9 @@ test("un cobro 'completada' avisa mesa-liberada y el cambio a pagado", async () 
 
     const liberada = socket.buscar('/internal/mesa-liberada');
     assert.ok(liberada, 'debe cerrarse la sesión de mesa');
-    assert.deepStrictEqual(liberada.cuerpo, { id_mesa: 5 });
+    // H-22: el cobro en caja libera la mesa POR UN PAGO, así que el motivo
+    // viaja explícito y no se queda en el 'liberada' por omisión.
+    assert.deepStrictEqual(liberada.cuerpo, { id_mesa: 5, motivo: 'pagada' });
 
     const estado = socket.buscar('/internal/order-status');
     assert.ok(estado);

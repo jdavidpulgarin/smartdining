@@ -2,6 +2,7 @@ const { z } = require('zod');
 const transaccionesService = require('../services/transacciones.service');
 const { ESTADO_COBRADO } = transaccionesService;
 const socketNotifier = require('../services/socket.notifier');
+const { MOTIVO_PAGADA } = socketNotifier;
 const { esComensal } = require('../middleware/auth.middleware');
 const aliasComensal = require('../services/alias-comensal');
 
@@ -91,8 +92,11 @@ async function crear(req, res, next) {
     // La mesa se liberó en la transacción del cobro solo si no le quedaban
     // pedidos abiertos. Se avisa para que el socket-server cierre esa sesión:
     // aislado, porque la liberación ya está hecha y no se revierte.
+    // H-22: el motivo es 'pagada', no el 'liberada' por omisión. La mesa se
+    // liberó porque el grupo pagó en caja, igual que si hubiera pagado en
+    // línea; las pantallas distinguen las dos cosas.
     if (mesaLiberada) {
-      socketNotifier.notificarMesaLiberada(id_mesa);
+      socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA);
       aliasComensal.olvidarMesa(id_mesa);
     }
 
@@ -105,9 +109,6 @@ async function crear(req, res, next) {
 // Moneda del contrato con Wompi: cualquier otra se rechaza antes de tocar la
 // base, porque mezclarlas haria que los centavos no signifiquen lo mismo.
 const MONEDA = 'COP';
-
-// Motivo con el que se avisa la liberacion por pago en linea (EVENTS.md §8.3).
-const MOTIVO_PAGADA = 'pagada';
 
 /**
  * Cuerpo que manda el socket-server tras verificar el pago con Wompi
@@ -214,5 +215,4 @@ module.exports = {
   METODOS_PAGO,
   ESTADOS_TRANSACCION,
   MONEDA,
-  MOTIVO_PAGADA,
 };

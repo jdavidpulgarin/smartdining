@@ -325,6 +325,20 @@ async function notificarQrRotado(id_mesa, token_qr) {
 const MOTIVO_PAGADA = 'pagada';
 const MOTIVO_LIBERADA = 'liberada';
 
+/**
+ * Motivo con el que se anuncia una mesa que se liberó al cerrarse un pedido.
+ *
+ * Sale del estado FINAL del pedido, que es la causa real de la liberación: un
+ * pedido que acabó en 'pagado' dejó la mesa libre porque se pagó; uno que acabó
+ * 'cancelado' la dejó libre porque se anuló. Derivarlo así evita que cada
+ * controller se invente el motivo por su cuenta, que es como apareció H-22.
+ *
+ * @param {string} estadoFinal Estado en el que quedó el pedido.
+ */
+function motivoPorEstadoFinal(estadoFinal) {
+  return estadoFinal === 'pagado' ? MOTIVO_PAGADA : MOTIVO_LIBERADA;
+}
+
 /** Tope de referencia_externa que acepta el socket-server (EVENTS.md §8.6). */
 const MAX_REFERENCIA_PAGO = 255;
 
@@ -427,6 +441,7 @@ module.exports = {
   notificarCambioEstado,
   notificarPagoConfirmado,
   notificarMesaLiberada,
+  motivoPorEstadoFinal,
   MOTIVO_PAGADA,
   MOTIVO_LIBERADA,
   MAX_REFERENCIA_PAGO,
