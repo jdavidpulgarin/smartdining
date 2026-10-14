@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCarrito } from '../context/CarritoContext';
 import { formatearPrecio } from '../utils/formato';
+import { obtenerApodo } from '../utils/apodo';
 import LineaCarrito from '../components/carrito/LineaCarrito';
 import Button from '../components/ui/Button';
 import { crearPedido } from '../services/pedidoService';
@@ -24,6 +25,8 @@ function Carrito() {
   const [enviando, setEnviando] = useState(false);
   const [errorPedido, setErrorPedido] = useState(null);
   const [bloqueoSegundos, setBloqueoSegundos] = useState(0);
+
+  const miNombre = obtenerApodo();
 
   useEffect(() => {
     if (bloqueoSegundos <= 0) return;
@@ -75,20 +78,20 @@ function Carrito() {
       <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
         <div
           aria-hidden="true"
-          className="w-20 h-20 rounded-full bg-primary/10 text-primary flex items-center justify-center text-3xl mb-4 shadow-inner"
+          className="w-20 h-20 rounded-full bg-superficie border border-borde text-texto-suave flex items-center justify-center text-3xl mb-4 shadow-inner"
         >
           🛒
         </div>
-        <h2 className="text-xl font-bold text-cafe mb-2">
+        <h2 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
           Tu carrito está vacío
         </h2>
-        <p className="text-sm text-gray-600 max-w-xs mb-6">
+        <p className="text-sm text-texto-suave max-w-xs mb-6">
           Aún no has agregado ningún plato a tu pedido. Revisa nuestro menú para
           elegir tus favoritos.
         </p>
         <Link
           to="/menu"
-          className="min-h-12 inline-flex items-center justify-center px-6 py-3 bg-primary hover:bg-primary-hover active:bg-primary-hover text-white font-bold text-sm rounded-xl transition-colors shadow-sm"
+          className="min-h-12 inline-flex items-center justify-center px-6 py-3 bg-primario hover:bg-primario-hover text-white font-etiqueta uppercase tracking-wider font-bold text-sm rounded-xl transition-colors shadow-sm"
         >
           Explorar menú
         </Link>
@@ -98,14 +101,30 @@ function Carrito() {
 
   return (
     <div className="space-y-4 pb-8">
-      {/* Título de la página y botón vaciar */}
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-extrabold text-cafe">Tu Carrito</h1>
-          <p className="text-xs text-gray-600">
-            {totalUnidades} {totalUnidades === 1 ? 'producto' : 'productos'}
+      {/* Portada Hero Carrito */}
+      <div className="-mx-4 -mt-4 mb-2 relative h-40 sm:h-48 overflow-hidden rounded-b-3xl bg-superficie">
+        <img
+          src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1200&q=80&auto=format"
+          alt="Comida fresca"
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />
+        <div className="absolute bottom-0 inset-x-0 p-4">
+          <h1 className="font-titulo text-4xl sm:text-5xl text-primario tracking-wider leading-none uppercase">
+            CARRITO DE LA MESA
+          </h1>
+          <p className="text-xs text-texto-suave flex items-center gap-1.5 mt-1">
+            <span className="w-2 h-2 rounded-full bg-exito inline-block" />
+            Se actualiza en vivo con lo que piden todos
           </p>
         </div>
+      </div>
+
+      {/* Barra de conteo y botón vaciar */}
+      <div className="flex items-center justify-between gap-2 px-1">
+        <span className="text-xs text-texto-suave font-medium">
+          {totalUnidades} {totalUnidades === 1 ? 'producto' : 'productos'}
+        </span>
 
         {confirmandoVaciar ? (
           <div className="flex items-center gap-2">
@@ -115,14 +134,14 @@ function Carrito() {
                 vaciarCarrito();
                 setConfirmandoVaciar(false);
               }}
-              className="min-h-12 text-xs font-bold text-primary hover:text-primary-hover bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+              className="text-xs font-bold text-primario-texto hover:underline px-2 py-1 rounded transition-colors cursor-pointer"
             >
               Sí, vaciar
             </button>
             <button
               type="button"
               onClick={() => setConfirmandoVaciar(false)}
-              className="min-h-12 text-xs font-semibold text-cafe hover:text-cafe bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+              className="text-xs font-semibold text-texto-suave hover:text-texto px-2 py-1 rounded transition-colors cursor-pointer"
             >
               Cancelar
             </button>
@@ -131,30 +150,41 @@ function Carrito() {
           <button
             type="button"
             onClick={() => setConfirmandoVaciar(true)}
-            className="min-h-12 text-xs font-medium text-gray-600 hover:text-primary py-1.5 px-3 rounded-lg hover:bg-primary/10 transition-colors cursor-pointer"
+            className="text-xs font-medium text-texto-suave hover:text-primario-texto py-1 px-2 rounded transition-colors cursor-pointer"
           >
             Vaciar carrito
           </button>
         )}
       </div>
 
-      {/* Lista de líneas */}
-      <div className="space-y-3">
-        {lineas.map((linea) => (
-          <LineaCarrito
-            key={linea.id_linea}
-            linea={linea}
-            onActualizarCantidad={actualizarCantidad}
-            onEliminar={eliminarLinea}
-          />
-        ))}
-      </div>
+      {/* Sección LO TUYO con borde rojo */}
+      <section className="bg-superficie rounded-2xl border-2 border-primario p-3.5 sm:p-4 space-y-3">
+        <div className="flex items-center justify-between pb-2 border-b border-borde">
+          <h2 className="font-etiqueta font-bold text-base uppercase tracking-wider text-white">
+            LO TUYO{miNombre ? ` · ${miNombre.toUpperCase()}` : ''}
+          </h2>
+          <span className="font-etiqueta font-bold text-base text-white">
+            {formatearPrecio(total)}
+          </span>
+        </div>
+
+        <div className="space-y-3">
+          {lineas.map((linea) => (
+            <LineaCarrito
+              key={linea.id_linea}
+              linea={linea}
+              onActualizarCantidad={actualizarCantidad}
+              onEliminar={eliminarLinea}
+            />
+          ))}
+        </div>
+      </section>
 
       {/* Notas generales para la cocina */}
-      <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm space-y-2">
+      <div className="bg-superficie rounded-2xl p-4 border border-borde space-y-2">
         <label
           htmlFor="notas-generales-pedido"
-          className="block text-xs font-bold text-cafe"
+          className="block text-xs font-etiqueta uppercase tracking-wider font-bold text-texto"
         >
           Notas para la cocina (opcional)
         </label>
@@ -165,24 +195,26 @@ function Carrito() {
           value={notasGenerales}
           onChange={(e) => setNotasGenerales(e.target.value)}
           placeholder="Ej. Traer todo al mismo tiempo, sin cubiertos plásticos..."
-          className="w-full text-sm p-2.5 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none bg-gray-50/50 text-cafe"
+          className="w-full text-sm p-3 rounded-xl border border-borde bg-superficie-2 text-texto placeholder:text-texto-tenue focus:outline-none focus-visible:ring-2 focus-visible:ring-primario resize-none"
         />
       </div>
 
-      {/* Resumen del pedido y botón confirmar */}
-      <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm space-y-3">
-        <div className="flex justify-between items-center text-sm text-gray-600">
+      {/* Resumen del pedido */}
+      <div className="bg-superficie rounded-2xl p-4 border border-borde space-y-3">
+        <div className="flex justify-between items-center text-sm text-texto-suave">
           <span>
             Subtotal ({totalUnidades}{' '}
             {totalUnidades === 1 ? 'producto' : 'productos'})
           </span>
-          <span className="font-semibold text-cafe">
+          <span className="font-etiqueta font-bold text-texto text-base">
             {formatearPrecio(total)}
           </span>
         </div>
-        <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
-          <span className="font-bold text-cafe text-base">Total estimado</span>
-          <span className="font-black text-xl text-primary">
+        <div className="border-t border-borde pt-3 flex justify-between items-center">
+          <span className="font-etiqueta uppercase font-bold text-texto text-lg tracking-wide">
+            Total estimado
+          </span>
+          <span className="font-etiqueta font-black text-2xl text-white">
             {formatearPrecio(total)}
           </span>
         </div>
@@ -192,11 +224,11 @@ function Carrito() {
       {errorPedido && (
         <div
           role="alert"
-          className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm space-y-1 animate-fadeIn"
+          className="p-4 bg-superficie rounded-2xl border border-primario text-primario-texto text-sm space-y-1 animate-fadeIn"
         >
           <p className="font-semibold">{errorPedido.mensaje}</p>
           {errorPedido.ayuda && (
-            <p className="text-xs text-red-600 font-medium">
+            <p className="text-xs text-texto-suave font-medium">
               {errorPedido.ayuda}
             </p>
           )}
@@ -204,7 +236,7 @@ function Carrito() {
             <button
               type="button"
               onClick={manejarConfirmarPedido}
-              className="text-xs font-bold text-red-800 underline hover:no-underline pt-1 block cursor-pointer"
+              className="text-xs font-bold text-primario hover:underline pt-1 block cursor-pointer"
             >
               Reintentar ahora
             </button>
@@ -216,9 +248,10 @@ function Carrito() {
       <div className="space-y-2 pt-2">
         <Button
           type="button"
+          variante="primario"
           onClick={manejarConfirmarPedido}
           disabled={enviando || bloqueoSegundos > 0}
-          className="w-full min-h-12 py-3 px-4 font-bold text-base rounded-xl flex items-center justify-center gap-2"
+          className="w-full min-h-12 py-3 px-4 font-bold font-etiqueta uppercase text-base rounded-xl flex items-center justify-center gap-2"
         >
           {enviando ? (
             <>
@@ -231,13 +264,16 @@ function Carrito() {
           ) : bloqueoSegundos > 0 ? (
             <span>Espera {bloqueoSegundos}s...</span>
           ) : (
-            <span>Confirmar pedido</span>
+            <span>Enviar pedido a cocina</span>
           )}
         </Button>
+        <p className="text-xs text-texto-suave text-center">
+          Se envía todo lo tuyo a la cocina. Cada quien paga lo suyo al final.
+        </p>
 
         <Link
           to="/menu"
-          className="min-h-12 inline-flex items-center justify-center w-full text-center py-2.5 text-sm font-semibold text-primary hover:text-primary-hover active:text-primary-hover transition-colors"
+          className="min-h-11 inline-flex items-center justify-center w-full text-center py-2 text-sm font-semibold text-primario-texto hover:underline transition-colors"
         >
           ← Seguir pidiendo
         </Link>
