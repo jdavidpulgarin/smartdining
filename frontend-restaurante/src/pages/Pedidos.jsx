@@ -51,11 +51,19 @@ function normalizarPedido(p) {
     ? Math.max(0, Math.floor((Date.now() - new Date(p.creado_en).getTime()) / 60000))
     : 0
 
+  const items = p.items || p.detalles || []
+  const comensalName =
+    p.comensal ||
+    p.detalles?.[0]?.comensal ||
+    p.items?.[0]?.comensal ||
+    items.find((i) => i.comensal)?.comensal ||
+    'Comensal General'
+
   return {
     id: p.codigo_pedido || `#${p.id_pedido}`,
     rawId: p.id_pedido,
     table: p.mesa_numero ? `Mesa ${p.mesa_numero}` : p.id_mesa ? `Mesa ${p.id_mesa}` : 'Barra',
-    client: p.detalles?.[0]?.comensal || 'Comensal General',
+    client: comensalName,
     waiter: p.mesero || 'Mesero Asignado',
     state: backendEstadoAUI(p.estado),
     rawEstado: p.estado,
@@ -64,10 +72,11 @@ function normalizarPedido(p) {
       : 'En vivo',
     elapsedMin: minElapsed,
     total: `$${Number(p.total || 0).toLocaleString('es-CO')}`,
-    items: (p.detalles || []).map((d) => ({
+    items: items.map((d) => ({
       name: d.nombre || d.plato_nombre || 'Plato',
       qty: d.cantidad || 1,
       notes: d.notas_especiales || d.notas || null,
+      comensal: d.comensal || null,
     })),
   }
 }
@@ -87,13 +96,30 @@ export function Pedidos() {
     setTimeout(() => setToastMsg(null), 3500)
   }
 
+  const enriquecerPedidos = async (rawList) => {
+    return Promise.all(
+      rawList.map(async (p) => {
+        if (!p.detalles && !p.items) {
+          try {
+            const full = await pedidosApi.obtener(p.id_pedido)
+            return full || p
+          } catch {
+            return p
+          }
+        }
+        return p
+      })
+    )
+  }
+
   const recargarPedidos = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const data = await pedidosApi.listarActivos()
       const raw = data?.pedidos || []
-      setOrdersList(raw.map(normalizarPedido))
+      const enriquecidos = await enriquecerPedidos(raw)
+      setOrdersList(enriquecidos.map(normalizarPedido))
     } catch (err) {
       setError(err.message || 'No se pudieron cargar los pedidos activos')
     } finally {
@@ -105,10 +131,11 @@ export function Pedidos() {
     let isMounted = true
     pedidosApi
       .listarActivos()
-      .then((data) => {
+      .then(async (data) => {
         if (!isMounted) return
         const raw = data?.pedidos || []
-        setOrdersList(raw.map(normalizarPedido))
+        const enriquecidos = await enriquecerPedidos(raw)
+        if (isMounted) setOrdersList(enriquecidos.map(normalizarPedido))
       })
       .catch((err) => {
         if (!isMounted) return
@@ -137,10 +164,30 @@ export function Pedidos() {
     }
   })
 
-  useSocketListener('order:new', (newOrder) => {
-    if (newOrder) {
-      const normalizado = normalizarPedido(newOrder)
-      setOrdersList((prev) => [normalizado, ...prev])
+  useSocketListener('order:created', (data) => {
+    const rawOrder = data?.pedido || data
+    if (rawOrder && (rawOrder.id_pedido || rawOrder.codigo_pedido)) {
+      const normalizado = normalizarPedido(rawOrder)
+      setOrdersList((prev) => {
+        if (prev.some((o) => o.rawId === normalizado.rawId || o.id === normalizado.id)) {
+          return prev.map((o) => (o.rawId === normalizado.rawId ? normalizado : o))
+        }
+        return [normalizado, ...prev]
+      })
+      showToast(`¡Nuevo pedido comensal en ${normalizado.table}!`)
+    }
+  })
+
+  useSocketListener('order:new', (data) => {
+    const rawOrder = data?.pedido || data
+    if (rawOrder && (rawOrder.id_pedido || rawOrder.codigo_pedido)) {
+      const normalizado = normalizarPedido(rawOrder)
+      setOrdersList((prev) => {
+        if (prev.some((o) => o.rawId === normalizado.rawId || o.id === normalizado.id)) {
+          return prev.map((o) => (o.rawId === normalizado.rawId ? normalizado : o))
+        }
+        return [normalizado, ...prev]
+      })
       showToast(`¡Nuevo pedido comensal en ${normalizado.table}!`)
     }
   })

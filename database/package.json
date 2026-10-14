@@ -1,0 +1,17 @@
+{
+  "name": "smartdining-database-tests",
+  "version": "1.0.0",
+  "description": "Suites de pruebas reales para base de datos PostgreSQL, integración y tiempo real",
+  "scripts": {
+    "test:db": "node --test tests/db.test.js",
+    "test:integracion": "node --test tests/integracion/api.test.js",
+    "test:tiempo-real": "node --test tests/tiempo-real/socket.test.js",
+    "test:real": "node --test tests/db.test.js tests/integracion/api.test.js tests/tiempo-real/socket.test.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "pg": "^8.12.0",
+    "socket.io-client": "^4.8.4",
+    "supertest": "^7.0.0"
+  }
+}
