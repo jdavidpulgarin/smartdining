@@ -40,6 +40,7 @@ function AppContent() {
 
   return (
     <div className="app-shell">
+      <img src="/img/fondo.jpg" alt="" className="sd-bg-photo" />
       <Topbar />
 
       <main className="sd-page-wrapper">

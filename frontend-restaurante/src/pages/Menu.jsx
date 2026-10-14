@@ -48,23 +48,27 @@ export function Menu() {
 
     const platosParsed = cats.flatMap((c) => {
       const catNombre = c.nombre || c.categoria || 'General'
-      return (c.platos || []).map((p) => ({
-        id: p.id_plato,
-        name: p.nombre,
-        categoryName: catNombre,
-        categoryId: c.id_categoria,
-        price: Number(p.precio || 0),
-        priceFormatted: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
-        prepTime: p.tiempo_preparacion_estimado || 15,
-        tag: catNombre,
-        description: p.descripcion || '',
-        imageUrl:
-          p.url_imagen ||
-          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
-        available: p.disponible !== false,
-        personalizable: Boolean(p.personalizable),
-        calorias: p.calorias || null,
-      }))
+      return (c.platos || []).map((p) => {
+        const isArepa = p.nombre?.toLowerCase().includes('arepa rellena')
+        return {
+          id: p.id_plato,
+          name: p.nombre,
+          categoryName: catNombre,
+          categoryId: c.id_categoria,
+          price: Number(p.precio || 0),
+          priceFormatted: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
+          prepTime: p.tiempo_preparacion_estimado || 15,
+          tag: catNombre,
+          description: p.descripcion || '',
+          imageUrl:
+            (isArepa ? '/img/arepa-rellena.png' : null) ||
+            p.url_imagen ||
+            'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+          available: p.disponible !== false,
+          personalizable: Boolean(p.personalizable),
+          calorias: p.calorias || null,
+        }
+      })
     })
 
     setCategoriesList(categoriasParsed)
@@ -491,8 +495,12 @@ export function Menu() {
                     alt={dish.name}
                     loading="lazy"
                     onError={(e) => {
-                      e.target.src =
-                        'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
+                      if (dish.name?.toLowerCase().includes('arepa rellena')) {
+                        e.target.src = '/img/arepa-rellena.png'
+                      } else {
+                        e.target.src =
+                          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
+                      }
                     }}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />

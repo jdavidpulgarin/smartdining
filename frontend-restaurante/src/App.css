@@ -5664,4 +5664,13 @@ main {
   stroke: #E0A526 !important;
 }
 
+.menu-item-icon-img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 9px !important;
+  display: block !important;
+}
+
+
 

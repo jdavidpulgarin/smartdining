@@ -24,6 +24,7 @@ export function MenuSection({ menu = [] }) {
             name={item.name}
             tag={item.tag}
             price={item.price}
+            imageUrl={item.imageUrl}
           />
         ))}
       </div>

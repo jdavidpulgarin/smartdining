@@ -1,10 +1,21 @@
 import { Utensils } from 'lucide-react'
 
-export function MenuItem({ name, tag, price }) {
+export function MenuItem({ name, tag, price, imageUrl }) {
+  const isArepa = name?.toLowerCase().includes('arepa rellena')
+  const imgSource = imageUrl || (isArepa ? '/img/arepa-rellena.png' : null)
+
   return (
     <div className="menu-highlight-card">
       <div className="menu-item-icon-wrap">
-        <Utensils size={16} />
+        {imgSource ? (
+          <img
+            src={imgSource}
+            alt={name}
+            className="menu-item-icon-img"
+          />
+        ) : (
+          <Utensils size={16} />
+        )}
       </div>
       <div className="menu-item-info">
         <div className="menu-item-header">
