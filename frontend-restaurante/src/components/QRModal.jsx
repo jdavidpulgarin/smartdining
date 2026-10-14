@@ -21,7 +21,6 @@ import {
   Pause,
   RotateCw,
 } from 'lucide-react'
-import { StatusBadge } from './ui/Badge'
 import { decodificarTokenQr } from '../services/qrService'
 import { useSocketListener, useTables } from '../hooks'
 
@@ -223,17 +222,17 @@ export function QRModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card qr-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop sd-modal-backdrop" onClick={onClose}>
+      <div className="modal-card qr-modal sd-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title-group">
             <div className="modal-icon-badge">
               <QrCode size={20} />
             </div>
             <div>
-              <h3>QR Dinámico por Sesión — {table.name}</h3>
+              <h3>QR · MESA {table.number || table.id}</h3>
               <p className="modal-subtitle">
-                {table.location || 'Salón'} · Capacidad: {table.seats} personas
+                {table.location || 'Salón'} · Capacidad: {table.seats || table.capacidad || 4} personas
               </p>
             </div>
           </div>
@@ -246,8 +245,33 @@ export function QRModal({
           {/* Tarjeta del Código QR en Pantalla para el Comensal */}
           <div className="printable-qr-card" ref={qrRef}>
             <div className="printable-brand">
-              <span className="printable-logo">🍽️ SmartDining</span>
-              <span className="printable-mesa">{table.name}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    background: 'var(--sd-red)',
+                    color: '#ffffff',
+                    fontFamily: 'var(--sd-font-heading)',
+                    fontWeight: 800,
+                    fontSize: 13,
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                  }}
+                >
+                  SD
+                </span>
+                <span
+                  style={{
+                    fontFamily: 'var(--sd-font-heading)',
+                    fontWeight: 800,
+                    fontSize: 17,
+                    letterSpacing: '0.04em',
+                    color: '#120E0D',
+                  }}
+                >
+                  SMARTDINING
+                </span>
+              </div>
+              <span className="printable-mesa">MESA {table.number || table.id}</span>
             </div>
 
             <div
@@ -263,9 +287,29 @@ export function QRModal({
                   size={210}
                   level="H"
                   includeMargin={true}
-                  fgColor="#0f172a"
+                  fgColor="#120E0D"
                   bgColor="#ffffff"
                 />
+              ) : isOcupada ? (
+                <div className="qr-placeholder-box" style={{ padding: '20px 12px', textAlign: 'center' }}>
+                  <QrCode size={48} className="text-muted" style={{ margin: '0 auto 12px auto' }} />
+                  <p style={{ margin: '0 0 12px 0', fontSize: '0.9rem', lineHeight: 1.4, color: '#334155' }}>
+                    Esta mesa tiene una sesión abierta, pero su QR no está en este dispositivo.
+                  </p>
+                  <button
+                    type="button"
+                    className="sd-qr-btn sd-qr-btn-gold"
+                    onClick={() => ejecutarRotacion(false)}
+                    disabled={loadingAction}
+                    style={{ margin: '0 auto' }}
+                  >
+                    <RefreshCw size={14} className={loadingAction ? 'spin' : ''} />
+                    <span>{loadingAction ? 'Generando...' : 'Generar nuevo QR'}</span>
+                  </button>
+                  <p style={{ margin: '10px 0 0 0', fontSize: '0.75rem', color: '#8E827B' }}>
+                    El QR anterior dejará de funcionar.
+                  </p>
+                </div>
               ) : (
                 <div className="qr-placeholder-box">
                   <QrCode size={56} className="text-muted" />
@@ -278,13 +322,13 @@ export function QRModal({
                   style={{
                     position: 'absolute',
                     inset: 0,
-                    background: 'rgba(16, 185, 129, 0.15)',
+                    background: 'rgba(238, 28, 37, 0.15)',
                     borderRadius: '12px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontWeight: 700,
-                    color: '#059669',
+                    color: 'var(--sd-red)',
                     fontSize: '0.85rem',
                     pointerEvents: 'none',
                   }}
@@ -317,7 +361,9 @@ export function QRModal({
             {/* Estado actual de la mesa */}
             <div className="qr-status-row">
               <span className="qr-label">Estado de la mesa:</span>
-              <StatusBadge status={table.status} />
+              <span className={`sd-qr-status-chip ${isOcupada ? 'ocupada' : isDisponible ? 'disponible' : 'cuenta_pedida'}`}>
+                {isOcupada ? 'OCUPADA' : isDisponible ? 'DISPONIBLE' : (table.status || 'ESTADO').toUpperCase()}
+              </span>
             </div>
 
             {/* SECCIÓN P-07: Rotación y Temporizador de 3 Minutos */}
@@ -325,8 +371,8 @@ export function QRModal({
               <div
                 className="qr-rotacion-card"
                 style={{
-                  background: 'rgba(15, 23, 42, 0.6)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: 'var(--sd-bg)',
+                  border: '1px solid var(--sd-border)',
                   borderRadius: '12px',
                   padding: '12px 14px',
                   display: 'flex',
@@ -344,9 +390,9 @@ export function QRModal({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Clock
                       size={16}
-                      className={segundosRestantes <= 30 && !tieneComensalesOpedidos ? 'text-amber animate-pulse' : 'text-emerald'}
+                      style={{ color: 'var(--sd-gold)' }}
                     />
-                    <strong style={{ fontSize: '0.85rem', color: '#f8fafc' }}>
+                    <strong style={{ fontSize: '0.85rem', color: 'var(--sd-text)', fontFamily: 'var(--sd-font-heading)', textTransform: 'uppercase' }}>
                       Rotación Automática (3 min)
                     </strong>
                   </div>
@@ -358,12 +404,15 @@ export function QRModal({
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: autoRotacionHabilitada ? '#34d399' : '#64748b',
+                      color: autoRotacionHabilitada ? 'var(--sd-text)' : '#8E827B',
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '4px',
                       fontSize: '0.75rem',
+                      fontFamily: 'var(--sd-font-heading)',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
                     }}
                   >
                     {autoRotacionHabilitada ? <Pause size={14} /> : <Play size={14} />}
@@ -386,10 +435,10 @@ export function QRModal({
                       height: '100%',
                       width: tieneComensalesOpedidos ? '100%' : `${porcentajeTiempo}%`,
                       background: tieneComensalesOpedidos
-                        ? 'linear-gradient(90deg, #3b82f6, #6366f1)'
+                        ? 'rgba(255, 255, 255, 0.2)'
                         : segundosRestantes <= 30
-                          ? 'linear-gradient(90deg, #f59e0b, #ef4444)'
-                          : 'linear-gradient(90deg, #10b981, #06b6d4)',
+                          ? 'var(--sd-red)'
+                          : 'linear-gradient(90deg, var(--sd-gold), var(--sd-red))',
                       transition: 'width 1s linear',
                       borderRadius: '999px',
                     }}
@@ -404,9 +453,9 @@ export function QRModal({
                     justifyContent: 'space-between',
                   }}
                 >
-                  <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--sd-text-muted)' }}>
                     {tieneComensalesOpedidos ? (
-                      <span style={{ color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ color: 'var(--sd-text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <span>⏸️ En pausa:</span>
                         <strong>comensales en mesa</strong>
                       </span>
@@ -415,7 +464,7 @@ export function QRModal({
                         Próxima renovación en:{' '}
                         <strong
                           style={{
-                            color: segundosRestantes <= 30 ? '#f59e0b' : '#34d399',
+                            color: 'var(--sd-gold)',
                             fontFamily: 'monospace',
                             fontSize: '0.9rem',
                           }}
@@ -424,7 +473,7 @@ export function QRModal({
                         </strong>
                       </span>
                     ) : (
-                      <span style={{ color: '#94a3b8' }}>Auto-rotación pausada manualmente</span>
+                      <span style={{ color: 'var(--sd-text-muted)' }}>Auto-rotación pausada manualmente</span>
                     )}
                   </div>
 
@@ -433,14 +482,11 @@ export function QRModal({
                     type="button"
                     onClick={() => ejecutarRotacion(false)}
                     disabled={loadingAction}
-                    className="primary-button small"
+                    className="sd-qr-btn sd-qr-btn-secondary"
                     title="Rotar inmediatamente el QR de la mesa (POST /api/mesas/:id/rotar-qr)"
                     style={{
-                      padding: '4px 10px',
-                      fontSize: '0.78rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
+                      padding: '4px 12px',
+                      fontSize: '0.8rem',
                     }}
                   >
                     <RefreshCw size={13} className={loadingAction ? 'spin' : ''} />
@@ -451,7 +497,7 @@ export function QRModal({
                 <div
                   style={{
                     fontSize: '0.7rem',
-                    color: '#64748b',
+                    color: 'var(--sd-text-muted)',
                     lineHeight: '1.3',
                   }}
                 >
@@ -484,14 +530,15 @@ export function QRModal({
             {/* Acción de Apertura si la mesa está libre */}
             {isDisponible && (
               <div className="qr-open-table-banner">
-                <p>
+                <p style={{ color: 'var(--sd-text-muted)', fontSize: 13, margin: '0 0 10px 0' }}>
                   Genera un QR nuevo e inicia la sesión para el grupo que va a ocupar esta mesa.
                 </p>
                 <button
                   type="button"
-                  className="primary-button qr-open-btn"
+                  className="sd-qr-btn sd-qr-btn-gold qr-open-btn"
                   onClick={handleAbrirMesa}
                   disabled={loadingAction}
+                  style={{ width: '100%' }}
                 >
                   <Sparkles size={16} />
                   <span>{loadingAction ? 'Generando QR...' : 'Abrir Mesa y Generar QR'}</span>
@@ -517,7 +564,7 @@ export function QRModal({
                   href={tabletUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="primary-button small tablet-launch-btn"
+                  className="sd-qr-btn sd-qr-btn-primary tablet-launch-btn"
                   title="Abrir la interfaz dedicada para la tablet física de la mesa"
                 >
                   <Monitor size={14} />
@@ -525,7 +572,7 @@ export function QRModal({
                 </a>
                 <button
                   type="button"
-                  className={`ghost-button small tablet-copy-btn ${copiedTablet ? 'copied' : ''}`}
+                  className={`sd-qr-btn sd-qr-btn-secondary tablet-copy-btn ${copiedTablet ? 'copied' : ''}`}
                   onClick={() => {
                     navigator.clipboard.writeText(tabletUrl)
                     setCopiedTablet(true)
@@ -544,7 +591,7 @@ export function QRModal({
               <div className="qr-network-selector-box">
                 <div className="network-toggle-header">
                   <span className="qr-label">
-                    <Wifi size={14} className="inline-icon text-teal" /> Destino del Escaneo:
+                    <Wifi size={14} className="inline-icon" style={{ color: 'var(--sd-red)' }} /> Destino del Escaneo:
                   </span>
                   <div className="network-pills">
                     <button
@@ -573,6 +620,7 @@ export function QRModal({
                       value={hostIp}
                       onChange={(e) => setHostIp(e.target.value.trim())}
                       placeholder="192.168.1.X"
+                      className="sd-input"
                     />
                     <small className="ip-hint">
                       💡 Los comensales deben estar conectados al mismo Wi-Fi del restaurante.
@@ -585,14 +633,17 @@ export function QRModal({
             {/* Enlace directo codificado en el QR */}
             {token && (
               <div className="qr-url-box">
-                <label>Enlace codificado en el QR:</label>
-                <div className="qr-url-input-group">
-                  <input type="text" readOnly value={diningUrl} />
+                <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--sd-text-muted)', textTransform: 'uppercase', fontFamily: 'var(--sd-font-heading)' }}>
+                  Enlace codificado en el QR:
+                </label>
+                <div className="qr-url-input-group" style={{ display: 'flex', marginTop: 4 }}>
+                  <input type="text" readOnly value={diningUrl} className="sd-input" style={{ borderRadius: '6px 0 0 6px' }} />
                   <button
                     type="button"
-                    className={`qr-btn-icon ${copied ? 'copied' : ''}`}
+                    className={`sd-qr-btn sd-qr-btn-secondary qr-btn-icon ${copied ? 'copied' : ''}`}
                     onClick={handleCopy}
                     title="Copiar enlace"
+                    style={{ borderRadius: '0 6px 6px 0', borderLeft: 'none', minWidth: 90 }}
                   >
                     {copied ? <Check size={16} /> : <Copy size={16} />}
                     <span>{copied ? 'Copiado' : 'Copiar'}</span>
@@ -606,7 +657,7 @@ export function QRModal({
               {isOcupada && onFreeTable && (
                 <button
                   type="button"
-                  className="ghost-button small qr-action-btn danger-hover"
+                  className="sd-qr-btn sd-qr-btn-danger qr-action-btn danger-hover"
                   onClick={handleLiberarMesa}
                   disabled={loadingAction}
                   title="Libera la mesa manualmente e invalida el QR actual"
@@ -619,7 +670,7 @@ export function QRModal({
               {token && (
                 <button
                   type="button"
-                  className="ghost-button small qr-action-btn"
+                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn"
                   onClick={() => ejecutarRotacion(false)}
                   disabled={loadingAction}
                   title="Roto el QR con POST /api/mesas/:id/rotar-qr"
@@ -632,7 +683,7 @@ export function QRModal({
               {token && (
                 <button
                   type="button"
-                  className="ghost-button small qr-action-btn"
+                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn"
                   onClick={handleDownload}
                 >
                   <Download size={16} />
@@ -643,7 +694,7 @@ export function QRModal({
               {token && (
                 <button
                   type="button"
-                  className="ghost-button small qr-action-btn"
+                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn"
                   onClick={handlePrint}
                 >
                   <Printer size={16} />
@@ -656,7 +707,7 @@ export function QRModal({
                   href={tabletUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="link-button small qr-action-btn tablet-link-btn"
+                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn tablet-link-btn"
                   title="Abrir vista de tablet para esta mesa"
                 >
                   <Tablet size={16} />
@@ -669,7 +720,7 @@ export function QRModal({
                   href={diningUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="link-button small qr-action-btn test-link"
+                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn test-link"
                 >
                   <ExternalLink size={16} />
                   <span>Probar comensal</span>

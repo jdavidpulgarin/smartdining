@@ -13,10 +13,11 @@ export function TableCard({
   onFreeTable,
   onClick,
 }) {
-  const tableName = table?.name || name
-  const tableStatus = (table?.status || status || 'Disponible').toLowerCase()
-  const tableSeats = table?.seats || seats
-  const tableLocation = table?.location || 'Principal'
+  const tableId = Number(table?.number || table?.id || 1)
+  const tableName = table?.name || name || `Mesa ${tableId}`
+  const tableStatus = (table?.status || table?.estado || status || 'Disponible').toLowerCase()
+  const tableSeats = table?.seats || table?.capacidad || seats || 4
+  const tableLocation = table?.location || table?.ubicacion || 'Principal'
   const tableDetail = table?.detail || detail
   const isActive = table?.active ?? active
 
@@ -24,63 +25,75 @@ export function TableCard({
   const sesionInfo = table?.token_qr ? decodificarTokenQr(table.token_qr) : null
   const sid = sesionInfo?.sid && sesionInfo.sid !== 'N/A' ? sesionInfo.sid.slice(0, 8) : null
 
-  const isDisponible = tableStatus === 'disponible'
+  const isDisponible = tableStatus === 'disponible' || tableStatus === 'libre'
   const isOcupada = tableStatus === 'ocupada'
-  const isReservada = tableStatus === 'reservada'
+  const isCuenta = tableStatus === 'cuenta' || tableStatus === 'cuenta_pedida'
+  const isListo = tableStatus === 'listo' || tableStatus === 'pedido_listo'
+  const isLlamado = tableStatus === 'llamado' || table?.alerta?.tipo === 'llamado'
+
+  let estadoVisual = 'disponible'
+  let estadoLabel = 'DISPONIBLE'
+
+  if (isLlamado) {
+    estadoVisual = 'llamado'
+    estadoLabel = 'LLAMA AL MESERO'
+  } else if (isCuenta) {
+    estadoVisual = 'cuenta'
+    estadoLabel = 'PIDE LA CUENTA'
+  } else if (isListo) {
+    estadoVisual = 'listo'
+    estadoLabel = 'PEDIDO LISTO'
+  } else if (isOcupada || isActive) {
+    estadoVisual = 'ocupada'
+    estadoLabel = 'OCUPADA'
+  }
 
   return (
     <div
-      className={`table-card ${isActive ? 'active' : ''} card-status-${tableStatus}`}
+      role="button"
+      tabIndex={0}
+      className={`sd-table-card sd-table-${estadoVisual} ${isActive ? 'active' : ''}`}
       onClick={onClick}
-      style={{ cursor: onClick ? 'pointer' : 'default' }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick?.()
+        }
+      }}
+      aria-label={`Mesa ${tableId}, estado ${estadoLabel}`}
     >
       {/* Cabecera de la mesa */}
-      <div className="table-top">
-        <div className="table-title-group">
-          <span className="table-number-mark">#{table?.number || table?.id || '1'}</span>
-          <div>
-            <strong className="table-heading">{tableName}</strong>
-            <span className="table-zone-pill">
-              <MapPin size={10} />
-              {tableLocation}
-            </span>
-          </div>
-        </div>
-
-        <div className="table-top-actions">
-          <StatusBadge status={table?.status || status} />
-        </div>
+      <div className="sd-table-card-top">
+        <span className="sd-table-card-number">#{tableId}</span>
+        <StatusBadge status={table?.status || status || estadoLabel} />
       </div>
 
       {/* Indicador de capacidad y sesión */}
-      <div className="table-meta-row">
-        <span className="table-capacity-chip">
-          <Users size={12} />
-          {tableSeats} pers.
+      <div className="sd-table-card-meta">
+        <span className="sd-table-card-time">
+          <MapPin size={12} aria-hidden="true" /> {tableLocation}
         </span>
-
-        {isOcupada && (
-          <div className="session-active-pill" title="Sesión activa en tiempo real">
-            <span className="pulsing-live-dot"></span>
-            <span>{sid ? `sid: ${sid}` : 'Sesión activa'}</span>
-          </div>
-        )}
-
-        {isReservada && (
-          <span className="reservation-time-pill">
-            Reserva 13:30
+        <span className="sd-table-card-seats">
+          <Users size={12} aria-hidden="true" /> {tableSeats} pers.
+        </span>
+        {sid && (
+          <span className="sd-table-card-sid">
+            SESIÓN: {sid}
           </span>
         )}
       </div>
 
-      <p className="table-detail-text">{tableDetail}</p>
+      <div className="sd-table-card-bottom">
+        <div className="sd-table-card-title">{tableName}</div>
+        {tableDetail && <div className="sd-table-card-detail">{tableDetail}</div>}
+      </div>
 
       {/* Barra de Acciones de Mesa para el Mesero */}
-      <div className="table-card-actions">
+      <div className="sd-table-card-actions">
         {onOpenQR && (
           <button
             type="button"
-            className={`table-action-btn ${isDisponible ? 'btn-open-session' : 'btn-view-qr'}`}
+            className={`sd-table-btn ${isDisponible ? 'sd-table-btn-open' : 'sd-table-btn-qr'}`}
             onClick={(e) => {
               e.stopPropagation()
               onOpenQR(table || { name, status, seats, detail, active })
@@ -95,7 +108,7 @@ export function TableCard({
         {isOcupada && onFreeTable && (
           <button
             type="button"
-            className="table-action-btn btn-free-table"
+            className="sd-table-btn sd-table-btn-free"
             onClick={(e) => {
               e.stopPropagation()
               if (

@@ -106,49 +106,102 @@ export function Login() {
   }
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        {/* Header */}
-        <div className="login-header">
-          <div className="brand-mark large">S</div>
-          <div>
-            <h2>SmartDining POS</h2>
-            <p>Portal de Acceso para Personal de Sala y Gerencia</p>
-          </div>
+    <div className="sd-login-page">
+      {/* Fondo fotográfico con opacidad y capa oscura */}
+      <img
+        src="/img/fondo.jpg"
+        alt=""
+        aria-hidden="true"
+        className="sd-bg-photo sd-bg-photo-login"
+        onError={(e) => {
+          e.currentTarget.style.display = 'none'
+        }}
+      />
+
+      {/* Encabezado sin Topbar con branding oficial SD */}
+      <header className="sd-login-topbar">
+        <div className="sd-brand-badge" aria-hidden="true">
+          <span>SD</span>
+        </div>
+        <div className="sd-login-brand-meta">
+          <span className="sd-brand-text">SMARTDINING</span>
+          <span className="sd-login-badge-sub">PANEL DEL RESTAURANTE</span>
+          <span
+            style={{
+              fontFamily: 'var(--sd-font-heading)',
+              fontWeight: 700,
+              fontSize: 14,
+              color: 'var(--sd-red-text)',
+              letterSpacing: '0.08em',
+              padding: '2px 8px',
+              borderRadius: 4,
+              background: 'rgba(238,28,37,0.15)',
+            }}
+          >
+            SmartDining POS
+          </span>
+        </div>
+      </header>
+
+      {/* Franja roja exclusiva de personal */}
+      <div className="sd-red-band sd-login-strip">
+        <span>SOLO PARA EL PERSONAL · MESEROS, CAJA Y ADMINISTRACIÓN</span>
+      </div>
+
+      <main className="sd-login-container">
+        {/* Columna Izquierda: Título editorial */}
+        <div className="sd-login-hero">
+          <h1 className="sd-page-title sd-login-title">
+            EMPIEZA<br />
+            TU<br />
+            TURNO
+          </h1>
+          <p className="sd-login-desc">
+            Mesas, pedidos y pagos de todo el salón en una sola pantalla, actualizados en tiempo real.
+          </p>
         </div>
 
-        {/* Mensaje de sesión inválida / cuenta desactivada (401) */}
-        {authNotice && (
-          <div className="login-warning-banner" role="alert">
-            <ShieldAlert size={16} />
-            <span>{authNotice}</span>
-          </div>
-        )}
+        {/* Columna Derecha: Tarjeta de Login */}
+        <div className="sd-card sd-login-card">
+          <h2 className="sd-card-title">INICIAR SESIÓN</h2>
+          <p style={{ color: 'var(--sd-text-muted)', fontSize: 14, marginTop: -8, marginBottom: 20 }}>
+            Portal de Acceso para Personal de Sala y Gerencia
+          </p>
 
-        {/* Mensaje de rate limit con cuenta regresiva (429) */}
-        {countdown > 0 && (
-          <div className="login-rate-limit-banner" role="alert">
-            <Clock size={16} />
-            <span>
-              {rateLimitMessage || MENSAJE_DEMASIADOS_INTENTOS} ({countdown}s)
-            </span>
-          </div>
-        )}
+          {/* Mensaje de sesión inválida / cuenta desactivada (401) */}
+          {authNotice && (
+            <div className="sd-login-banner sd-banner-warning" role="alert">
+              <ShieldAlert size={16} />
+              <span>{authNotice}</span>
+            </div>
+          )}
 
-        {/* Error regular de validación o credenciales */}
-        {error && countdown === 0 && (
-          <div className="login-error-banner" role="alert">
-            {error}
-          </div>
-        )}
+          {/* Mensaje de rate limit con cuenta regresiva (429) */}
+          {countdown > 0 && (
+            <div className="sd-login-banner sd-banner-warning" role="alert">
+              <Clock size={16} />
+              <span>
+                {rateLimitMessage || MENSAJE_DEMASIADOS_INTENTOS} ({countdown}s)
+              </span>
+            </div>
+          )}
 
-        {/* Formulario */}
-        <form onSubmit={handleSubmit} className="login-form">
-          <div className="form-group">
-            <label>Correo Electrónico:</label>
-            <div className="input-with-icon">
-              <Mail size={16} />
+          {/* Error regular de validación o credenciales */}
+          {error && countdown === 0 && (
+            <div className="sd-login-banner sd-banner-error" role="alert">
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* Formulario */}
+          <form onSubmit={handleSubmit} className="sd-login-form">
+            <div className="sd-input-group">
+              <label htmlFor="login-email" className="sd-input-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Mail size={14} style={{ color: 'var(--sd-red-text)' }} />
+                <span>CORREO ELECTRÓNICO</span>
+              </label>
               <input
+                id="login-email"
                 type="email"
                 placeholder="admin@smartdining.com"
                 value={email}
@@ -158,51 +211,69 @@ export function Login() {
                 }}
                 disabled={loading || countdown > 0}
                 required
+                className={`sd-input ${error ? 'error' : ''}`}
               />
             </div>
-          </div>
 
-          <div className="form-group">
-            <label>Contraseña:</label>
-            <div className="input-with-icon">
-              <Lock size={16} />
+            <div className="sd-input-group">
+              <label htmlFor="login-password" className="sd-input-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Lock size={14} style={{ color: 'var(--sd-red-text)' }} />
+                <span>CONTRASEÑA</span>
+              </label>
               <input
+                id="login-password"
                 type="password"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading || countdown > 0}
                 required
+                className={`sd-input ${error ? 'error' : ''}`}
               />
             </div>
-          </div>
 
-          <button
-            type="submit"
-            className="primary-button login-submit-btn"
-            disabled={loading || countdown > 0}
+            <button
+              type="submit"
+              className="sd-btn sd-btn-primary sd-btn-block"
+              disabled={loading || countdown > 0}
+              aria-label="Ingresar al Sistema"
+              style={{ width: '100%', justifyContent: 'center', padding: '14px 20px', marginTop: 8 }}
+            >
+              {loading ? (
+                <span>VERIFICANDO CREDENCIALES...</span>
+              ) : countdown > 0 ? (
+                <>
+                  <Clock size={18} />
+                  <span>Espera {countdown}s para reintentar</span>
+                </>
+              ) : (
+                <>
+                  <LogIn size={18} />
+                  <span>INGRESAR AL SISTEMA</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              marginTop: 24,
+              paddingTop: 16,
+              borderTop: '1px solid var(--sd-border)',
+              color: 'var(--sd-text-muted)',
+              fontSize: 13,
+              fontFamily: 'var(--sd-font-body)',
+            }}
           >
-            {loading ? (
-              <span>Verificando credenciales...</span>
-            ) : countdown > 0 ? (
-              <>
-                <Clock size={18} />
-                <span>Espera {countdown}s para reintentar</span>
-              </>
-            ) : (
-              <>
-                <LogIn size={18} />
-                <span>Ingresar al Sistema</span>
-              </>
-            )}
-          </button>
-        </form>
-
-        <div className="login-footer">
-          <ShieldCheck size={14} />
-          <span>Acceso autenticado con PostgreSQL y JWT</span>
+            <ShieldCheck size={14} style={{ color: 'var(--sd-white)' }} />
+            <span>Acceso autenticado con PostgreSQL y JWT</span>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

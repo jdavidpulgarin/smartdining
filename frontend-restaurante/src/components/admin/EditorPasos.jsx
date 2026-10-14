@@ -276,94 +276,106 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
   }
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal-content large" style={{ maxWidth: '850px', maxHeight: '90vh', overflowY: 'auto' }}>
+    <div className="sd-modal-backdrop" onClick={onClose}>
+      <div
+        className="sd-card sd-table-detail-modal"
+        style={{ maxWidth: 880, maxHeight: '90vh', overflowY: 'auto' }}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
         {/* Cabecera del Modal */}
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div className="sd-modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div
               style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(235, 94, 40, 0.15)',
+                width: 40,
+                height: 40,
+                borderRadius: 8,
+                backgroundColor: 'rgba(238, 28, 37, 0.15)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#eb5e28',
+                color: 'var(--sd-red)',
               }}
             >
-              <Layers size={20} />
+              <Layers size={22} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.25rem' }}>Constructor de Plato</h3>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: '#8d99ae' }}>
+              <h3 className="sd-card-title" style={{ margin: 0, fontSize: 24 }}>
+                Constructor de Plato
+              </h3>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--sd-text-muted)' }}>
                 {dish?.name} &bull; Configuración de pasos, selecciones e ingredientes
               </p>
             </div>
           </div>
-          <button type="button" className="icon-button" onClick={onClose}>
+          <button
+            type="button"
+            className="sd-topbar-icon-btn"
+            onClick={onClose}
+            aria-label="Cerrar modal"
+          >
             <X size={20} />
           </button>
         </div>
 
         {/* Notificaciones */}
         {notice && (
-          <div className="table-toast-banner info" style={{ margin: '1rem 1.5rem 0' }}>
+          <div className="table-toast-banner info" style={{ margin: '1rem 0 0 0' }}>
             <CheckCircle2 size={16} />
             <span>{notice}</span>
           </div>
         )}
         {error && (
-          <div className="table-toast-banner alert" style={{ margin: '1rem 1.5rem 0' }}>
+          <div className="table-toast-banner alert" style={{ margin: '1rem 0 0 0' }}>
             <AlertCircle size={16} />
             <span>{error}</span>
           </div>
         )}
 
         {/* Configuración Base del Plato */}
-        <div style={{ padding: '1.5rem 1.5rem 0' }}>
+        <div style={{ marginTop: 20 }}>
           <form
             onSubmit={handleSaveBaseConfig}
             style={{
-              padding: '1.25rem',
-              borderRadius: '10px',
-              backgroundColor: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: 18,
+              borderRadius: 8,
+              backgroundColor: 'rgba(0, 0, 0, 0.3)',
+              border: '1px solid var(--sd-border)',
               display: 'flex',
               flexWrap: 'wrap',
-              gap: '1rem',
+              gap: 16,
               alignItems: 'flex-end',
             }}
           >
-            <div style={{ flex: '1 1 200px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontWeight: 600 }}>
+            <div style={{ flex: '1 1 220px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 700, fontFamily: 'var(--sd-font-heading)' }}>
                 <input
                   type="checkbox"
                   checked={personalizable}
                   onChange={(e) => setPersonalizable(e.target.checked)}
-                  style={{ width: '18px', height: '18px', accentColor: '#eb5e28' }}
+                  style={{ width: 18, height: 18, accentColor: 'var(--sd-gold)' }}
                 />
                 <span>Habilitar como Personalizable ("Arma tu plato")</span>
               </label>
-              <p style={{ margin: '0.35rem 0 0 1.6rem', fontSize: '0.8rem', color: '#8d99ae' }}>
+              <p style={{ margin: '4px 0 0 26px', fontSize: 12, color: 'var(--sd-text-muted)' }}>
                 Permite al comensal armar el plato seleccionando sus ingredientes por pasos.
               </p>
             </div>
 
             <div style={{ flex: '0 1 180px' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem', color: '#ced4da' }}>
-                Calorías Base (kcal):
-              </label>
+              <label className="sd-input-label">CALORÍAS BASE (KCAL):</label>
               <div style={{ position: 'relative' }}>
-                <Flame size={16} style={{ position: 'absolute', left: '10px', top: '10px', color: '#eb5e28' }} />
+                <Flame size={16} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--sd-gold)' }} />
                 <input
                   type="number"
                   min="0"
                   value={caloriasBase}
                   onChange={(e) => setCaloriasBase(e.target.value)}
                   placeholder="Ej: 450"
-                  style={{ width: '100%', paddingLeft: '32px', height: '36px' }}
+                  className="sd-input"
+                  style={{ paddingLeft: 32, height: 38 }}
                 />
               </div>
             </div>
@@ -371,58 +383,60 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
             <button
               type="submit"
               disabled={savingBaseConfig}
-              className="primary-button small"
-              style={{ height: '36px' }}
+              className="sd-btn sd-btn-primary"
+              style={{ height: 38, fontSize: 13 }}
             >
               <Save size={16} />
-              <span>{savingBaseConfig ? 'Guardando...' : 'Guardar Estado'}</span>
+              <span>{savingBaseConfig ? 'GUARDANDO...' : 'GUARDAR ESTADO'}</span>
             </button>
           </form>
         </div>
 
         {/* Sección de Pasos del Constructor */}
-        <div style={{ padding: '1.5rem' }}>
+        <div style={{ marginTop: 24 }}>
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              marginBottom: '1rem',
+              marginBottom: 16,
+              flexWrap: 'wrap',
+              gap: 12,
             }}
           >
             <div>
-              <h4 style={{ margin: 0, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span>Pasos del Constructor</span>
+              <h4 style={{ margin: 0, fontFamily: 'var(--sd-font-heading)', fontSize: 20, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>PASOS DEL CONSTRUCTOR</span>
                 <span
                   style={{
-                    fontSize: '0.75rem',
-                    backgroundColor: 'rgba(235, 94, 40, 0.2)',
-                    color: '#eb5e28',
+                    fontSize: 12,
+                    backgroundColor: 'rgba(238, 28, 37, 0.2)',
+                    color: 'var(--sd-red-text)',
                     padding: '2px 8px',
-                    borderRadius: '12px',
+                    borderRadius: 12,
                   }}
                 >
                   {pasos.length} pasos
                 </span>
               </h4>
-              <p style={{ margin: 0, fontSize: '0.8rem', color: '#8d99ae' }}>
+              <p style={{ margin: '2px 0 0 0', fontSize: 13, color: 'var(--sd-text-muted)' }}>
                 Secuencia de elección del cliente (ej: Base &rarr; Proteína &rarr; Toppings &rarr; Salsas)
               </p>
             </div>
 
             <button
               type="button"
-              className="ghost-button small"
+              className="sd-btn sd-btn-primary"
               onClick={() => handleOpenPasoModal()}
-              style={{ borderColor: '#eb5e28', color: '#eb5e28' }}
+              style={{ fontSize: 13, padding: '8px 14px' }}
             >
               <Plus size={16} />
-              <span>Nuevo Paso</span>
+              <span>NUEVO PASO</span>
             </button>
           </div>
 
           {loading ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#8d99ae' }}>
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--sd-text-muted)' }}>
               Cargando estructura del constructor...
             </div>
           ) : pasos.length === 0 ? (
@@ -430,58 +444,61 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
               style={{
                 padding: '2.5rem',
                 textAlign: 'center',
-                backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                borderRadius: '8px',
-                border: '1px dashed rgba(255, 255, 255, 0.1)',
+                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                borderRadius: 8,
+                border: '1px dashed var(--sd-border)',
               }}
             >
-              <Layers size={36} style={{ color: '#8d99ae', margin: '0 auto 0.75rem', opacity: 0.5 }} />
-              <p style={{ margin: 0, fontWeight: 500 }}>Este plato aún no tiene pasos configurados</p>
-              <p style={{ margin: '0.25rem 0 1rem', fontSize: '0.85rem', color: '#8d99ae' }}>
+              <Layers size={36} style={{ color: 'var(--sd-text-muted)', margin: '0 auto 0.75rem', opacity: 0.5 }} />
+              <p style={{ margin: 0, fontWeight: 700, fontFamily: 'var(--sd-font-heading)', fontSize: 16 }}>
+                Este plato aún no tiene pasos configurados
+              </p>
+              <p style={{ margin: '4px 0 1rem', fontSize: 13, color: 'var(--sd-text-muted)' }}>
                 Crea el primer paso para habilitar la personalización por ingredientes.
               </p>
               <button
                 type="button"
-                className="primary-button small"
+                className="sd-btn sd-btn-primary"
                 onClick={() => handleOpenPasoModal()}
               >
                 <Plus size={16} />
-                <span>Agregar Primer Paso</span>
+                <span>AGREGAR PRIMER PASO</span>
               </button>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {pasos.map((paso) => (
                 <div
                   key={paso.id_paso}
                   style={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                    borderRadius: '10px',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    backgroundColor: 'var(--sd-surface)',
+                    borderRadius: 8,
+                    border: '1px solid var(--sd-border)',
                     overflow: 'hidden',
                   }}
                 >
                   {/* Encabezado del Paso */}
                   <div
                     style={{
-                      padding: '0.85rem 1rem',
-                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                      padding: '12px 16px',
+                      backgroundColor: 'rgba(0, 0, 0, 0.25)',
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
-                      borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                      borderBottom: '1px solid var(--sd-border)',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <span
                         style={{
-                          width: '24px',
-                          height: '24px',
+                          width: 26,
+                          height: 26,
                           borderRadius: '50%',
-                          backgroundColor: '#eb5e28',
+                          backgroundColor: 'var(--sd-red)',
                           color: '#fff',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
+                          fontSize: 13,
+                          fontWeight: 800,
+                          fontFamily: 'var(--sd-font-heading)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -490,31 +507,33 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                         {paso.orden}
                       </span>
                       <div>
-                        <strong style={{ fontSize: '0.95rem' }}>{paso.nombre}</strong>
-                        <div style={{ fontSize: '0.75rem', color: '#8d99ae', display: 'flex', gap: '0.75rem', marginTop: '2px' }}>
+                        <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 17, color: 'var(--sd-text)' }}>
+                          {paso.nombre}
+                        </strong>
+                        <div style={{ fontSize: 12, color: 'var(--sd-text-muted)', display: 'flex', gap: 12, marginTop: 2 }}>
                           <span>Mín: {paso.min_sel}</span>
                           <span>Máx: {paso.max_sel}</span>
-                          <span style={{ color: paso.obligatorio ? '#eb5e28' : '#8d99ae' }}>
-                            {paso.obligatorio ? 'Obligatorio' : 'Opcional'}
+                          <span style={{ color: paso.obligatorio ? 'var(--sd-red-text)' : 'var(--sd-text-muted)', fontWeight: 700 }}>
+                            {paso.obligatorio ? 'OBLIGATORIO' : 'OPCIONAL'}
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <button
                         type="button"
-                        className="ghost-button small"
-                        style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                        className="sd-btn sd-btn-secondary"
+                        style={{ padding: '6px 12px', fontSize: 12 }}
                         onClick={() => handleOpenIngModal(paso.id_paso)}
                       >
                         <Plus size={14} />
-                        <span>Ingrediente</span>
+                        <span>INGREDIENTE</span>
                       </button>
                       <button
                         type="button"
-                        className="icon-button"
-                        style={{ padding: '6px' }}
+                        className="sd-topbar-icon-btn"
+                        style={{ width: 32, height: 32 }}
                         onClick={() => handleOpenPasoModal(paso)}
                         title="Editar paso"
                       >
@@ -522,8 +541,8 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                       </button>
                       <button
                         type="button"
-                        className="icon-button"
-                        style={{ padding: '6px', color: '#e63946' }}
+                        className="sd-topbar-icon-btn"
+                        style={{ width: 32, height: 32, color: 'var(--sd-red-text)' }}
                         onClick={() => handleDeletePaso(paso.id_paso)}
                         title="Eliminar paso"
                       >
@@ -533,34 +552,36 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                   </div>
 
                   {/* Lista de Ingredientes dentro del Paso */}
-                  <div style={{ padding: '0.75rem 1rem' }}>
+                  <div style={{ padding: 14 }}>
                     {(!paso.ingredientes || paso.ingredientes.length === 0) ? (
-                      <p style={{ margin: 0, fontSize: '0.8rem', color: '#8d99ae', fontStyle: 'italic' }}>
+                      <p style={{ margin: 0, fontSize: 13, color: 'var(--sd-text-muted)', fontStyle: 'italic' }}>
                         Sin ingredientes en este paso. Haz clic en "+ Ingrediente" para añadir opciones.
                       </p>
                     ) : (
                       <div
                         style={{
                           display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                          gap: '0.75rem',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+                          gap: 12,
                         }}
                       >
                         {paso.ingredientes.map((ing) => (
                           <div
                             key={ing.id_ingrediente}
                             style={{
-                              padding: '0.65rem 0.75rem',
-                              borderRadius: '6px',
-                              backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                              border: '1px solid rgba(255, 255, 255, 0.05)',
+                              padding: 12,
+                              borderRadius: 6,
+                              backgroundColor: 'rgba(0, 0, 0, 0.25)',
+                              border: '1px solid var(--sd-border)',
                               display: 'flex',
                               flexDirection: 'column',
-                              gap: '0.35rem',
+                              gap: 6,
                             }}
                           >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <strong style={{ fontSize: '0.85rem' }}>{ing.nombre}</strong>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                              <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 15, color: 'var(--sd-text)' }}>
+                                {ing.nombre}
+                              </strong>
                               <button
                                 type="button"
                                 onClick={() => handleToggleIngDisponibilidad(ing)}
@@ -569,15 +590,15 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                                   border: 'none',
                                   cursor: 'pointer',
                                   padding: 0,
-                                  color: ing.disponible ? '#2a9d8f' : '#e63946',
+                                  color: ing.disponible ? 'var(--sd-white)' : 'var(--sd-red)',
                                 }}
                                 title={ing.disponible ? 'Disponible (clic para agotar)' : 'Agotado (clic para activar)'}
                               >
-                                {ing.disponible ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
+                                {ing.disponible ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
                               </button>
                             </div>
 
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#8d99ae' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--sd-text-muted)' }}>
                               <span>
                                 {Number(ing.precio_extra) > 0
                                   ? `+$${Number(ing.precio_extra).toLocaleString('es-CO')}`
@@ -587,16 +608,16 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                             </div>
 
                             {ing.alergenos && ing.alergenos.length > 0 && (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '2px' }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
                                 {(Array.isArray(ing.alergenos) ? ing.alergenos : [ing.alergenos]).map((al, idx) => (
                                   <span
                                     key={idx}
                                     style={{
-                                      fontSize: '0.65rem',
+                                      fontSize: 11,
                                       backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                                      padding: '1px 5px',
-                                      borderRadius: '4px',
-                                      color: '#ced4da',
+                                      padding: '1px 6px',
+                                      borderRadius: 4,
+                                      color: 'var(--sd-text-muted)',
                                     }}
                                   >
                                     {al}
@@ -609,16 +630,16 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                               style={{
                                 display: 'flex',
                                 justifyContent: 'flex-end',
-                                gap: '0.35rem',
-                                marginTop: '4px',
-                                paddingTop: '4px',
-                                borderTop: '1px solid rgba(255, 255, 255, 0.04)',
+                                gap: 6,
+                                marginTop: 4,
+                                paddingTop: 6,
+                                borderTop: '1px solid var(--sd-border)',
                               }}
                             >
                               <button
                                 type="button"
-                                className="icon-button"
-                                style={{ padding: '3px', color: '#8d99ae' }}
+                                className="sd-topbar-icon-btn"
+                                style={{ width: 28, height: 28, color: 'var(--sd-text-muted)' }}
                                 onClick={() => handleOpenIngModal(paso.id_paso, ing)}
                                 title="Editar ingrediente"
                               >
@@ -626,8 +647,8 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                               </button>
                               <button
                                 type="button"
-                                className="icon-button"
-                                style={{ padding: '3px', color: '#e63946' }}
+                                className="sd-topbar-icon-btn"
+                                style={{ width: 28, height: 28, color: 'var(--sd-red-text)' }}
                                 onClick={() => handleDeleteIng(ing.id_ingrediente)}
                                 title="Eliminar ingrediente"
                               >
@@ -647,84 +668,94 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
 
         {/* Modal de Paso (Crear / Editar) */}
         {isPasoModalOpen && (
-          <div className="modal-backdrop" style={{ backgroundColor: 'rgba(0, 0, 0, 0.75)' }}>
-            <div className="modal-content" style={{ maxWidth: '450px' }}>
-              <div className="modal-header">
-                <h3>{editingPaso ? 'Editar Paso' : 'Nuevo Paso del Constructor'}</h3>
-                <button type="button" className="icon-button" onClick={() => setIsPasoModalOpen(false)}>
+          <div className="sd-modal-backdrop" onClick={() => setIsPasoModalOpen(false)}>
+            <div
+              className="sd-card sd-table-detail-modal"
+              style={{ maxWidth: 460 }}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="sd-modal-header">
+                <h3 className="sd-card-title" style={{ margin: 0, fontSize: 22 }}>
+                  {editingPaso ? 'Editar Paso' : 'Nuevo Paso del Constructor'}
+                </h3>
+                <button
+                  type="button"
+                  className="sd-topbar-icon-btn"
+                  onClick={() => setIsPasoModalOpen(false)}
+                >
                   <X size={18} />
                 </button>
               </div>
 
-              <form onSubmit={handleSavePaso} style={{ padding: '1.25rem' }}>
-                <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-                    Nombre del Paso:
-                  </label>
+              <form onSubmit={handleSavePaso} style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
+                <div>
+                  <label className="sd-input-label">NOMBRE DEL PASO:</label>
                   <input
                     type="text"
                     required
                     value={pasoForm.nombre}
                     onChange={(e) => setPasoForm({ ...pasoForm, nombre: e.target.value })}
                     placeholder="Ej: Elige tu Base, Elige tu Proteína"
-                    style={{ width: '100%' }}
+                    className="sd-input"
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.35rem' }}>Orden:</label>
+                    <label className="sd-input-label">ORDEN:</label>
                     <input
                       type="number"
                       min="1"
                       required
                       value={pasoForm.orden}
                       onChange={(e) => setPasoForm({ ...pasoForm, orden: parseInt(e.target.value, 10) || 1 })}
-                      style={{ width: '100%' }}
+                      className="sd-input"
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.35rem' }}>Mínimo:</label>
+                    <label className="sd-input-label">MÍNIMO:</label>
                     <input
                       type="number"
                       min="0"
                       required
                       value={pasoForm.min_sel}
                       onChange={(e) => setPasoForm({ ...pasoForm, min_sel: parseInt(e.target.value, 10) || 0 })}
-                      style={{ width: '100%' }}
+                      className="sd-input"
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.35rem' }}>Máximo:</label>
+                    <label className="sd-input-label">MÁXIMO:</label>
                     <input
                       type="number"
                       min="1"
                       required
                       value={pasoForm.max_sel}
                       onChange={(e) => setPasoForm({ ...pasoForm, max_sel: parseInt(e.target.value, 10) || 1 })}
-                      style={{ width: '100%' }}
+                      className="sd-input"
                     />
                   </div>
                 </div>
 
-                <div style={{ marginBottom: '1.25rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontFamily: 'var(--sd-font-heading)', fontWeight: 700 }}>
                     <input
                       type="checkbox"
                       checked={pasoForm.obligatorio}
                       onChange={(e) => setPasoForm({ ...pasoForm, obligatorio: e.target.checked })}
-                      style={{ width: '16px', height: '16px', accentColor: '#eb5e28' }}
+                      style={{ width: 16, height: 16, accentColor: 'var(--sd-red)' }}
                     />
-                    <span>¿Paso obligatorio para el cliente?</span>
+                    <span>¿PASO OBLIGATORIO PARA EL CLIENTE?</span>
                   </label>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                  <button type="button" className="ghost-button small" onClick={() => setIsPasoModalOpen(false)}>
-                    Cancelar
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--sd-border)', paddingTop: 14 }}>
+                  <button type="button" className="sd-btn sd-btn-secondary" onClick={() => setIsPasoModalOpen(false)}>
+                    CANCELAR
                   </button>
-                  <button type="submit" className="primary-button small">
-                    {editingPaso ? 'Actualizar Paso' : 'Crear Paso'}
+                  <button type="submit" className="sd-btn sd-btn-primary">
+                    {editingPaso ? 'ACTUALIZAR PASO' : 'CREAR PASO'}
                   </button>
                 </div>
               </form>
@@ -734,35 +765,43 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
 
         {/* Modal de Ingrediente (Crear / Editar) */}
         {isIngModalOpen && (
-          <div className="modal-backdrop" style={{ backgroundColor: 'rgba(0, 0, 0, 0.75)' }}>
-            <div className="modal-content" style={{ maxWidth: '480px' }}>
-              <div className="modal-header">
-                <h3>{editingIng ? 'Editar Ingrediente' : 'Nuevo Ingrediente'}</h3>
-                <button type="button" className="icon-button" onClick={() => setIsIngModalOpen(false)}>
+          <div className="sd-modal-backdrop" onClick={() => setIsIngModalOpen(false)}>
+            <div
+              className="sd-card sd-table-detail-modal"
+              style={{ maxWidth: 500 }}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="sd-modal-header">
+                <h3 className="sd-card-title" style={{ margin: 0, fontSize: 22 }}>
+                  {editingIng ? 'Editar Ingrediente' : 'Nuevo Ingrediente'}
+                </h3>
+                <button
+                  type="button"
+                  className="sd-topbar-icon-btn"
+                  onClick={() => setIsIngModalOpen(false)}
+                >
                   <X size={18} />
                 </button>
               </div>
 
-              <form onSubmit={handleSaveIng} style={{ padding: '1.25rem' }}>
-                <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-                    Nombre del Ingrediente:
-                  </label>
+              <form onSubmit={handleSaveIng} style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
+                <div>
+                  <label className="sd-input-label">NOMBRE DEL INGREDIENTE:</label>
                   <input
                     type="text"
                     required
                     value={ingForm.nombre}
                     onChange={(e) => setIngForm({ ...ingForm, nombre: e.target.value })}
                     placeholder="Ej: Aguacate Hass, Pollo a la plancha"
-                    style={{ width: '100%' }}
+                    className="sd-input"
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.35rem' }}>
-                      Precio Extra (COP):
-                    </label>
+                    <label className="sd-input-label">PRECIO EXTRA (COP):</label>
                     <input
                       type="number"
                       min="0"
@@ -770,68 +809,62 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                       value={ingForm.precio_extra}
                       onChange={(e) => setIngForm({ ...ingForm, precio_extra: e.target.value })}
                       placeholder="0 si no tiene recargo"
-                      style={{ width: '100%' }}
+                      className="sd-input"
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.35rem' }}>
-                      Calorías (kcal):
-                    </label>
+                    <label className="sd-input-label">CALORÍAS (KCAL):</label>
                     <input
                       type="number"
                       min="0"
                       value={ingForm.calorias}
                       onChange={(e) => setIngForm({ ...ingForm, calorias: e.target.value })}
                       placeholder="Ej: 120"
-                      style={{ width: '100%' }}
+                      className="sd-input"
                     />
                   </div>
                 </div>
 
-                <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-                    Alérgenos (separados por coma):
-                  </label>
+                <div>
+                  <label className="sd-input-label">ALÉRGENOS (SEPARADOS POR COMA):</label>
                   <input
                     type="text"
                     value={ingForm.alergenos}
                     onChange={(e) => setIngForm({ ...ingForm, alergenos: e.target.value })}
                     placeholder="Ej: Gluten, Lácteos, Maní"
-                    style={{ width: '100%' }}
+                    className="sd-input"
                   />
                 </div>
 
-                <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-                    URL Imagen (Unsplash / Pexels):
-                  </label>
+                <div>
+                  <label className="sd-input-label">URL IMAGEN (UNSPLASH / PEXELS):</label>
                   <input
                     type="url"
                     value={ingForm.url_imagen}
                     onChange={(e) => setIngForm({ ...ingForm, url_imagen: e.target.value })}
                     placeholder="https://images.unsplash.com/..."
-                    style={{ width: '100%' }}
+                    className="sd-input"
                   />
                 </div>
 
-                <div style={{ marginBottom: '1.25rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontFamily: 'var(--sd-font-heading)', fontWeight: 700 }}>
                     <input
                       type="checkbox"
                       checked={ingForm.disponible}
                       onChange={(e) => setIngForm({ ...ingForm, disponible: e.target.checked })}
-                      style={{ width: '16px', height: '16px', accentColor: '#eb5e28' }}
+                      style={{ width: 16, height: 16, accentColor: 'var(--sd-white)' }}
                     />
-                    <span>Disponible en carta (no agotado)</span>
+                    <span>DISPONIBLE EN CARTA (NO AGOTADO)</span>
                   </label>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                  <button type="button" className="ghost-button small" onClick={() => setIsIngModalOpen(false)}>
-                    Cancelar
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--sd-border)', paddingTop: 14 }}>
+                  <button type="button" className="sd-btn sd-btn-secondary" onClick={() => setIsIngModalOpen(false)}>
+                    CANCELAR
                   </button>
-                  <button type="submit" className="primary-button small">
-                    {editingIng ? 'Actualizar Ingrediente' : 'Guardar Ingrediente'}
+                  <button type="submit" className="sd-btn sd-btn-primary">
+                    {editingIng ? 'ACTUALIZAR INGREDIENTE' : 'GUARDAR INGREDIENTE'}
                   </button>
                 </div>
               </form>

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import {
   Bell,
   BellRing,
@@ -7,7 +7,6 @@ import {
   Trash2,
   Volume2,
   VolumeX,
-  Clock,
   Utensils,
   Receipt,
   UserCheck,
@@ -18,11 +17,16 @@ export function BandejaAlertas({
   alertas = [],
   onAtender,
   onLimpiarTodas,
+  compact = false,
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [sonidoHabilitado, setSonidoHabilitado] = useState(true)
+  const [filtroTipo, setFiltroTipo] = useState('todos')
 
-  const pendientes = alertas.filter((a) => !a.atendida)
+  const pendientes = useMemo(() => {
+    return (alertas || []).filter((a) => !a.atendida)
+  }, [alertas])
+
   const countPendientes = pendientes.length
 
   const handleAtender = useCallback(
@@ -35,302 +39,284 @@ export function BandejaAlertas({
   const getAlertaIcon = (tipo) => {
     switch (tipo) {
       case 'llamado':
-        return <UserCheck size={16} className="text-amber" />
+        return <UserCheck size={16} />
       case 'cuenta':
-        return <Receipt size={16} className="text-emerald" />
+        return <Receipt size={16} />
       case 'pedido_listo':
-        return <Utensils size={16} className="text-emerald" />
+        return <Utensils size={16} />
       case 'pago':
-        return <CreditCard size={16} className="text-emerald" />
+        return <CreditCard size={16} />
       default:
-        return <BellRing size={16} className="text-amber" />
+        return <BellRing size={16} />
     }
   }
 
-  return (
-    <div className="bandeja-alertas-wrapper" style={{ position: 'relative' }}>
-      {/* Botón Disparador de Alertas */}
-      <button
-        type="button"
-        className={`alertas-trigger-btn ${countPendientes > 0 ? 'has-alerts' : ''}`}
-        onClick={() => setIsOpen((prev) => !prev)}
-        title="Bandeja de llamadas de mesas y avisos de cocina"
-        style={{
-          position: 'relative',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '38px',
-          height: '38px',
-          borderRadius: '10px',
-          background: countPendientes > 0 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-          border: countPendientes > 0 ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
-          color: countPendientes > 0 ? '#fbbf24' : '#cbd5e1',
-          cursor: 'pointer',
-          transition: 'all 0.2s ease',
-        }}
-      >
-        {countPendientes > 0 ? (
-          <BellRing size={18} className="bell-shake" />
-        ) : (
-          <Bell size={18} />
-        )}
+  const getDotClass = (tipo) => {
+    switch (tipo) {
+      case 'llamado':
+        return 'sd-dot-red'
+      case 'cuenta':
+        return 'sd-dot-gold'
+      case 'pedido_listo':
+      case 'pago':
+      default:
+        return 'sd-dot-white'
+    }
+  }
 
-        {countPendientes > 0 && (
-          <span
-            className="alertas-badge-counter"
-            style={{
-              position: 'absolute',
-              top: '-4px',
-              right: '-4px',
-              background: '#ef4444',
-              color: '#ffffff',
-              fontSize: '0.68rem',
-              fontWeight: 700,
-              minWidth: '18px',
-              height: '18px',
-              padding: '0 4px',
-              borderRadius: '999px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 0 8px rgba(239, 68, 68, 0.6)',
-            }}
-          >
-            {countPendientes}
-          </span>
-        )}
-      </button>
+  const getActionLabel = (tipo) => {
+    if (tipo === 'pedido_listo') return 'MARCAR ENTREGADO'
+    if (tipo === 'cuenta') return 'COBRAR / ATENDIDA'
+    return 'ATENDIDA'
+  }
 
-      {/* Menú Desplegable Flotante */}
-      {isOpen && (
-        <>
-          {/* Backdrop para cerrar al hacer clic afuera */}
-          <div
-            className="alertas-dropdown-backdrop"
-            onClick={() => setIsOpen(false)}
-            style={{ position: 'fixed', inset: 0, zIndex: 90 }}
-          />
+  const alertasFiltradas = useMemo(() => {
+    if (filtroTipo === 'llamados') return pendientes.filter((a) => a.tipo === 'llamado')
+    if (filtroTipo === 'cuentas') return pendientes.filter((a) => a.tipo === 'cuenta')
+    if (filtroTipo === 'pedidos') return pendientes.filter((a) => a.tipo === 'pedido_listo')
+    return pendientes
+  }, [pendientes, filtroTipo])
 
-          <div
-            className="alertas-dropdown-panel"
-            style={{
-              position: 'absolute',
-              top: '46px',
-              right: 0,
-              width: '360px',
-              maxWidth: '90vw',
-              background: 'rgba(15, 23, 42, 0.96)',
-              backdropFilter: 'blur(16px)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              borderRadius: '14px',
-              boxShadow: '0 20px 40px -8px rgba(0, 0, 0, 0.7)',
-              zIndex: 100,
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            {/* Cabecera del Panel */}
+  // Modo Desplegable Flotante (para Topbar o barra superior)
+  if (compact) {
+    return (
+      <div className="bandeja-alertas-wrapper" style={{ position: 'relative' }}>
+        <button
+          type="button"
+          className="sd-topbar-bell-btn"
+          onClick={() => setIsOpen((prev) => !prev)}
+          title="Bandeja de llamadas de mesas y avisos de cocina"
+          aria-label="Abrir bandeja de alertas"
+        >
+          {countPendientes > 0 ? (
+            <BellRing size={20} className="bell-shake" style={{ color: 'var(--sd-red-text)' }} />
+          ) : (
+            <Bell size={20} />
+          )}
+
+          {countPendientes > 0 && (
+            <span className="sd-topbar-bell-badge">
+              {countPendientes}
+            </span>
+          )}
+        </button>
+
+        {isOpen && (
+          <>
             <div
+              className="alertas-dropdown-backdrop"
+              onClick={() => setIsOpen(false)}
+              style={{ position: 'fixed', inset: 0, zIndex: 90 }}
+            />
+
+            <div
+              className="sd-card sd-alertas-panel"
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '12px 16px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-                background: 'rgba(255, 255, 255, 0.02)',
+                position: 'absolute',
+                top: '56px',
+                right: 0,
+                width: '380px',
+                maxWidth: '90vw',
+                zIndex: 100,
+                boxShadow: '0 24px 48px rgba(0, 0, 0, 0.8)',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Bell size={16} className="text-emerald" />
-                <strong style={{ fontSize: '0.9rem', color: '#f8fafc' }}>
-                  Alertas de Sala
-                </strong>
-                {countPendientes > 0 && (
-                  <span
-                    style={{
-                      background: 'rgba(245, 158, 11, 0.2)',
-                      color: '#fbbf24',
-                      fontSize: '0.7rem',
-                      padding: '2px 6px',
-                      borderRadius: '6px',
-                    }}
-                  >
-                    {countPendientes} activas
-                  </span>
-                )}
-              </div>
+              <div className="sd-alertas-header">
+                <div className="sd-alertas-title-group">
+                  <h3 className="sd-card-title" style={{ margin: 0, fontSize: 22 }}>ALERTAS</h3>
+                  {countPendientes > 0 && (
+                    <span className="sd-alertas-count">{countPendientes}</span>
+                  )}
+                </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button
-                  type="button"
-                  onClick={() => setSonidoHabilitado((prev) => !prev)}
-                  title={sonidoHabilitado ? 'Silenciar alertas' : 'Activar sonido'}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: sonidoHabilitado ? 'var(--emerald-400, #34d399)' : '#64748b',
-                    cursor: 'pointer',
-                    padding: '4px',
-                  }}
-                >
-                  {sonidoHabilitado ? <Volume2 size={16} /> : <VolumeX size={16} />}
-                </button>
-
-                {alertas.length > 0 && onLimpiarTodas && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button
                     type="button"
-                    onClick={onLimpiarTodas}
-                    title="Limpiar todas las alertas"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#94a3b8',
-                      cursor: 'pointer',
-                      padding: '4px',
-                    }}
+                    className="sd-sound-toggle-btn"
+                    onClick={() => setSonidoHabilitado((prev) => !prev)}
+                    title={sonidoHabilitado ? 'Silenciar sonido' : 'Activar sonido'}
                   >
-                    <Trash2 size={15} />
+                    {sonidoHabilitado ? <Volume2 size={16} /> : <VolumeX size={16} />}
                   </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setIsOpen(false)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    padding: '4px',
-                  }}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            </div>
-
-            {/* Lista de Alertas */}
-            <div
-              style={{
-                maxHeight: '340px',
-                overflowY: 'auto',
-                padding: '8px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-              }}
-            >
-              {pendientes.length > 0 ? (
-                pendientes.map((alerta) => (
-                  <div
-                    key={alerta.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '10px',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      background:
-                        alerta.tipo === 'llamado'
-                          ? 'rgba(245, 158, 11, 0.08)'
-                          : alerta.tipo === 'cuenta'
-                          ? 'rgba(59, 130, 246, 0.08)'
-                          : 'rgba(16, 185, 129, 0.08)',
-                      border:
-                        alerta.tipo === 'llamado'
-                          ? '1px solid rgba(245, 158, 11, 0.25)'
-                          : alerta.tipo === 'cuenta'
-                          ? '1px solid rgba(59, 130, 246, 0.25)'
-                          : '1px solid rgba(16, 185, 129, 0.25)',
-                    }}
+                  <button
+                    type="button"
+                    className="sd-sound-toggle-btn"
+                    onClick={() => setIsOpen(false)}
+                    title="Cerrar bandeja"
                   >
-                    <div style={{ marginTop: '2px' }}>{getAlertaIcon(alerta.tipo)}</div>
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
 
-                    <div style={{ flex: 1 }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          marginBottom: '2px',
-                        }}
-                      >
-                        <strong style={{ fontSize: '0.82rem', color: '#f1f5f9' }}>
-                          Mesa {alerta.idMesa || alerta.mesa}
+              <div className="sd-alertas-list" style={{ maxHeight: 380 }}>
+                {pendientes.length > 0 ? (
+                  pendientes.map((alerta) => (
+                    <div key={alerta.id} className="sd-alerta-item">
+                      <div className="sd-alerta-top">
+                        <span className={`sd-alerta-dot ${getDotClass(alerta.tipo)}`} />
+                        <strong className="sd-alerta-item-title">
+                          MESA {alerta.idMesa || alerta.mesa} · {alerta.hora || 'Ahora'}
                         </strong>
-                        <span
-                          style={{
-                            fontSize: '0.68rem',
-                            color: 'var(--text-muted, #94a3b8)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                          }}
-                        >
-                          <Clock size={10} />
-                          {alerta.hora || 'Ahora'}
-                        </span>
                       </div>
-
-                      <p
-                        style={{
-                          fontSize: '0.78rem',
-                          color: '#cbd5e1',
-                          margin: '2px 0 6px 0',
-                          lineHeight: '1.25',
-                        }}
-                      >
-                        {alerta.mensaje}
-                      </p>
-
-                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <p className="sd-alerta-detail">{alerta.mensaje}</p>
+                      <div className="sd-alerta-action">
                         <button
                           type="button"
+                          className="sd-btn sd-btn-secondary"
+                          style={{ minHeight: 30, fontSize: 12, padding: '3px 10px' }}
                           onClick={() => handleAtender(alerta.id)}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            background: 'rgba(16, 185, 129, 0.2)',
-                            color: 'var(--emerald-300, #6ee7b7)',
-                            border: '1px solid rgba(16, 185, 129, 0.3)',
-                            borderRadius: '6px',
-                            padding: '3px 8px',
-                            fontSize: '0.72rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                          }}
                         >
-                          <CheckCircle2 size={12} />
-                          <span>Atendida</span>
+                          {getActionLabel(alerta.tipo)}
                         </button>
                       </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="sd-alertas-empty">
+                    <CheckCircle2 size={32} />
+                    <p>SIN ALERTAS ACTIVAS</p>
                   </div>
-                ))
-              ) : (
-                <div
-                  style={{
-                    textAlign: 'center',
-                    padding: '24px 16px',
-                    color: 'var(--text-muted, #94a3b8)',
-                    fontSize: '0.82rem',
-                  }}
-                >
-                  <CheckCircle2
-                    size={28}
-                    className="text-emerald"
-                    style={{ margin: '0 auto 8px auto', display: 'block', opacity: 0.6 }}
-                  />
-                  <span>Sin llamados ni alertas pendientes en sala</span>
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        </>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  // Modo Tarjeta Lateral Fija (Diseño Oficial de Mesas)
+  return (
+    <aside className="sd-card sd-alertas-panel" aria-label="Bandeja de alertas activas">
+      {/* Cabecera de Alertas */}
+      <div className="sd-alertas-header">
+        <div className="sd-alertas-title-group">
+          <h2 className="sd-card-title" style={{ margin: 0 }}>ALERTAS</h2>
+          {countPendientes > 0 && (
+            <span className="sd-alertas-count">{countPendientes}</span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {countPendientes > 0 && onLimpiarTodas && (
+            <button
+              type="button"
+              className="sd-sound-toggle-btn"
+              onClick={onLimpiarTodas}
+              title="Limpiar todas las alertas atendidas"
+              aria-label="Limpiar todas las alertas"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="sd-sound-toggle-btn"
+            onClick={() => setSonidoHabilitado((prev) => !prev)}
+            title={sonidoHabilitado ? 'Silenciar alertas audibles' : 'Activar sonido de alertas'}
+            aria-label={sonidoHabilitado ? 'Silenciar sonido' : 'Activar sonido'}
+          >
+            {sonidoHabilitado ? <Volume2 size={18} /> : <VolumeX size={18} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Mini filtros rápidos si hay varias alertas */}
+      {countPendientes > 2 && (
+        <div
+          style={{
+            display: 'flex',
+            gap: 6,
+            paddingBottom: 8,
+            borderBottom: '1px solid var(--sd-border)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <button
+            type="button"
+            className={`sd-btn ${filtroTipo === 'todos' ? 'sd-btn-primary' : 'sd-btn-secondary'}`}
+            style={{ minHeight: 28, fontSize: 11, padding: '2px 8px' }}
+            onClick={() => setFiltroTipo('todos')}
+          >
+            TODAS ({countPendientes})
+          </button>
+          <button
+            type="button"
+            className={`sd-btn ${filtroTipo === 'llamados' ? 'sd-btn-primary' : 'sd-btn-secondary'}`}
+            style={{ minHeight: 28, fontSize: 11, padding: '2px 8px' }}
+            onClick={() => setFiltroTipo('llamados')}
+          >
+            LLAMADOS
+          </button>
+          <button
+            type="button"
+            className={`sd-btn ${filtroTipo === 'cuentas' ? 'sd-btn-primary' : 'sd-btn-secondary'}`}
+            style={{ minHeight: 28, fontSize: 11, padding: '2px 8px' }}
+            onClick={() => setFiltroTipo('cuentas')}
+          >
+            CUENTAS
+          </button>
+        </div>
       )}
-    </div>
+
+      {/* Lista de Alertas en Sala */}
+      <div className="sd-alertas-list">
+        {alertasFiltradas.length > 0 ? (
+          alertasFiltradas.map((alerta) => {
+            const dotClass = getDotClass(alerta.tipo)
+            const idMesa = alerta.idMesa || alerta.mesa || '?'
+            const hora = alerta.hora || 'Ahora'
+            const defaultMsg =
+              alerta.tipo === 'llamado'
+                ? 'Llamó al mesero a la mesa'
+                : alerta.tipo === 'cuenta'
+                ? 'Solicitó la cuenta'
+                : 'Pedido listo para entregar'
+
+            return (
+              <div key={alerta.id} className="sd-alerta-item">
+                <div className="sd-alerta-top">
+                  <span className={`sd-alerta-dot ${dotClass}`} aria-hidden="true" />
+                  <strong className="sd-alerta-item-title">
+                    MESA {idMesa} · {hora}
+                  </strong>
+                  <span style={{ marginLeft: 'auto', opacity: 0.6 }}>
+                    {getAlertaIcon(alerta.tipo)}
+                  </span>
+                </div>
+
+                <p className="sd-alerta-detail">
+                  {alerta.mensaje || defaultMsg}
+                </p>
+
+                <div className="sd-alerta-action">
+                  <button
+                    type="button"
+                    onClick={() => handleAtender(alerta.id)}
+                    className="sd-btn sd-btn-secondary"
+                    style={{ minHeight: 32, padding: '4px 14px', fontSize: 13 }}
+                    aria-label={`Atender alerta de mesa ${idMesa}`}
+                  >
+                    <CheckCircle2 size={13} style={{ marginRight: 6 }} />
+                    <span>{getActionLabel(alerta.tipo)}</span>
+                  </button>
+                </div>
+              </div>
+            )
+          })
+        ) : (
+          <div className="sd-alertas-empty">
+            <CheckCircle2 size={36} aria-hidden="true" style={{ color: 'var(--sd-text-muted)', opacity: 0.8 }} />
+            <p>SIN ALERTAS ACTIVAS</p>
+            <small style={{ color: 'var(--sd-text-muted)' }}>
+              El salón opera con normalidad sin avisos pendientes
+            </small>
+          </div>
+        )}
+      </div>
+    </aside>
   )
 }
+

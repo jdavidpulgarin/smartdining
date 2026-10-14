@@ -1,31 +1,33 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { LogOut, UserCheck, Plus, Radio, Clock } from 'lucide-react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Bell, LogOut } from 'lucide-react'
 import { useAuth, useTables } from '../hooks'
-import { BandejaAlertas } from './BandejaAlertas'
+
+const navLinks = [
+  { label: 'MESAS', path: '/mesas' },
+  { label: 'PEDIDOS', path: '/pedidos' },
+  { label: 'CAJA', path: '/caja' },
+  { label: 'MENÚ', path: '/menu' },
+  { label: 'REPORTES', path: '/reportes' },
+]
 
 export function Topbar() {
   const { user, logout } = useAuth()
   const { alertas, atenderAlerta, limpiarAlertas } = useTables()
+  void atenderAlerta
+  void limpiarAlertas
+  const location = useLocation()
   const navigate = useNavigate()
-  const [currentTime, setCurrentTime] = useState('')
-  const [currentDate, setCurrentDate] = useState('')
+  const [_currentTime, setCurrentTime] = useState('')
 
   useEffect(() => {
-    const updateTime = () => {
-      const now = new Date()
-      setCurrentTime(
-        now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      )
-      setCurrentDate(
-        now.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
-      )
-    }
-
-    updateTime()
-    const timer = setInterval(updateTime, 1000)
+    const timer = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+    }, 1000)
     return () => clearInterval(timer)
   }, [])
+
+  const pendientesCount = (alertas || []).filter((a) => !a.atendida).length
 
   const handleLogout = () => {
     logout()
@@ -33,81 +35,63 @@ export function Topbar() {
   }
 
   return (
-    <header className="topbar">
-      <div className="brand-block">
-        <div className="brand-mark-glow">
-          <span className="brand-icon">🍽️</span>
+    <header className="sd-topbar">
+      {/* 1. Logo y Marca a la izquierda */}
+      <Link to="/mesas" className="sd-topbar-brand" aria-label="Ir a Mesas SmartDining">
+        <div className="sd-brand-badge" aria-hidden="true">
+          <span>SD</span>
         </div>
-        <div>
-          <div className="brand-title-wrap">
-            <h1 className="brand-name">SmartDining</h1>
-            <span className="brand-badge-pro">PRO SALA</span>
-          </div>
-          <span className="brand-sub">Control de Sala & Terminal POS</span>
-        </div>
-      </div>
+        <span className="sd-brand-text">SMARTDINING</span>
+      </Link>
 
-      <div className="topbar-center-info">
-        <div className="live-clock-widget">
-          <Clock size={14} className="text-emerald clock-pulse" />
-          <span className="live-time">{currentTime || '12:00:00'}</span>
-          <span className="live-date">{currentDate}</span>
-        </div>
+      {/* 2. Menú de navegación principal en el centro */}
+      <nav className="sd-topbar-nav" aria-label="Navegación principal del restaurante">
+        {navLinks.map((item) => {
+          const isActive =
+            location.pathname === item.path ||
+            (item.path === '/mesas' && location.pathname === '/')
 
-        <div className="socket-status-pill" title="Conectado al servidor en tiempo real (puerto 4001)">
-          <Radio size={12} className="socket-beacon" />
-          <span>Socket en vivo</span>
-        </div>
-      </div>
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`sd-nav-link ${isActive ? 'active' : ''}`}
+              aria-current={isActive ? 'page' : undefined}
+            >
+              {item.label}
+            </Link>
+          )
+        })}
+      </nav>
 
-      <div className="topbar-actions">
-        {/* Bandeja de Alertas y Llamados en Vivo */}
-        <BandejaAlertas
-          alertas={alertas}
-          onAtender={atenderAlerta}
-          onLimpiarTodas={limpiarAlertas}
-        />
-
-        <button
-          type="button"
-          className="topbar-btn-primary"
-          onClick={() => navigate('/pedidos')}
-          title="Tomar nueva orden en mesa"
+      {/* 3. Campana de alertas y datos de usuario autenticado a la derecha */}
+      <div className="sd-topbar-actions">
+        <Link
+          to="/mesas"
+          className="sd-topbar-bell-btn"
+          aria-label={pendientesCount > 0 ? `${pendientesCount} alertas activas` : 'Sin alertas activas'}
+          title="Ver alertas en mesas"
         >
-          <Plus size={16} />
-          <span>Nuevo Pedido</span>
-        </button>
+          <Bell size={20} />
+          {pendientesCount > 0 && (
+            <span className="sd-topbar-bell-badge">{pendientesCount}</span>
+          )}
+        </Link>
 
-
-        {user ? (
-          <div className="user-profile-widget">
-            <div className={`avatar role-avatar-${user.role}`} title={user.name}>
-              {user.avatar || 'U'}
-            </div>
-            <div className="user-meta-info">
-              <strong className="user-name">{user.name}</strong>
-              <span className={`user-role-badge role-${user.role}`}>
-                {user.roleLabel || user.role}
-              </span>
-            </div>
+        {user && (
+          <div className="sd-user-info-pill">
+            <span className="sd-user-name">{user.name}</span>
+            <span className="sd-user-role">{user.roleLabel || user.role}</span>
             <button
               type="button"
-              className="topbar-logout-btn"
+              className="sd-topbar-icon-btn"
               onClick={handleLogout}
-              title="Cerrar sesión / Cambiar de rol"
+              aria-label="Cerrar sesión"
+              title="Cerrar sesión"
             >
-              <LogOut size={16} />
+              <LogOut size={18} />
             </button>
           </div>
-        ) : (
-          <button
-            type="button"
-            className="topbar-btn-login"
-            onClick={() => navigate('/login')}
-          >
-            <UserCheck size={16} />
-            <span>Ingresar Staff</span>
-          </button>
         )}
       </div>
     </header>

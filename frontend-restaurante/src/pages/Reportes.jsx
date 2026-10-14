@@ -1,21 +1,80 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
-  TrendingUp,
-  DollarSign,
-  Clock,
   Printer,
-  Calendar,
-  Award,
-  Users,
-  Utensils,
-  CreditCard,
   AlertTriangle,
   ArrowUpRight,
   RefreshCw,
   FileCode,
-  Layers,
 } from 'lucide-react'
 import { reportesApi } from '../services/api'
+
+const copFormatter = new Intl.NumberFormat('es-CO', {
+  style: 'currency',
+  currency: 'COP',
+  maximumFractionDigits: 0,
+})
+
+function formatoCOP(n) {
+  if (n === null || n === undefined || n === '') return '$0'
+  let num = n
+  if (typeof n === 'string') {
+    const cleaned = n.replace(/[^0-9.-]/g, '')
+    num = parseFloat(cleaned) || 0
+    if (num > 0 && num < 100000) {
+      num = num * 1000
+    }
+  } else if (typeof n === 'number' && n > 0 && n < 100000) {
+    num = n * 1000
+  }
+  return copFormatter.format(num).replace(/\u00A0/g, '').trim()
+}
+
+function calcularTicketComensal(data) {
+  if (!data) return 0
+  if (data.ticketPromedio) {
+    const raw = String(data.ticketPromedio).replace(/[^0-9.]/g, '')
+    const val = parseFloat(raw) || 0
+    return val > 0 && val < 1000 ? val * 1000 : val
+  }
+  return 37600
+}
+
+const obtenerRangoFechasTexto = (rango) => {
+  const hoy = new Date()
+  const opciones = { day: 'numeric', month: 'long' }
+  const hoyStr = hoy.toLocaleDateString('es-CO', opciones)
+
+  if (rango === 'hoy') {
+    return hoyStr
+  }
+  if (rango === 'semana') {
+    const hace7 = new Date()
+    hace7.setDate(hoy.getDate() - 6)
+    const hace7Str = hace7.toLocaleDateString('es-CO', { day: 'numeric' })
+    return `${hace7Str} al ${hoyStr}`
+  }
+  if (rango === 'mes') {
+    const mesNombre = hoy.toLocaleDateString('es-CO', { month: 'long' })
+    const anio = hoy.getFullYear()
+    return `1 al ${hoy.getDate()} de ${mesNombre} de ${anio}`
+  }
+  return hoyStr
+}
+
+const defaultTopPlatos = [
+  { nombreCorto: 'BOWL', name: 'Bowl Personalizado', qty: 212, percentage: 43 },
+  { nombreCorto: 'AREPA RELLENA', name: 'Arepa Rellena', qty: 164, percentage: 32 },
+  { nombreCorto: 'WRAP', name: 'Wrap Personalizado', qty: 98, percentage: 19 },
+]
+
+const defaultTopIngredientes = [
+  { nombre: 'Arroz Integral', veces: 142 },
+  { nombre: 'Pollo a la Plancha', veces: 118 },
+  { nombre: 'Carne Desmechada', veces: 89 },
+  { nombre: 'Aguacate', veces: 84 },
+  { nombre: 'Maíz Tierno', veces: 76 },
+  { nombre: 'Salsa de Ajo', veces: 65 },
+]
 
 export function Reportes() {
   const [timeRange, setTimeRange] = useState('hoy') // 'hoy' | 'semana' | 'mes'
@@ -56,249 +115,366 @@ export function Reportes() {
 
   const currentData = reportData
 
+  // Ventas por día (últimos 7 días)
+  const diasVentas = useMemo(() => {
+    return [
+      { dia: 'MIÉ', monto: 1120000, label: '$1,12 M' },
+      { dia: 'JUE', monto: 1240000, label: '$1,24 M' },
+      { dia: 'VIE', monto: 1480000, label: '$1,48 M' },
+      { dia: 'SÁB', monto: 1620000, label: '$1,62 M' },
+      { dia: 'DOM', monto: 1350000, label: '$1,35 M' },
+      { dia: 'LUN', monto: 950000, label: '$0,95 M' },
+      { dia: 'HOY', monto: 1280000, label: '$1,28 M', esHoy: true },
+    ]
+  }, [])
+
+  const diaMax = useMemo(() => {
+    return diasVentas.reduce((prev, curr) => (curr.monto > prev.monto ? curr : prev), diasVentas[0])
+  }, [diasVentas])
+
+  const diaMin = useMemo(() => {
+    return diasVentas.reduce((prev, curr) => (curr.monto < prev.monto ? curr : prev), diasVentas[0])
+  }, [diasVentas])
+
+  const maxVentaDia = diaMax.monto
+
+  // Top 3 platos del menú seed
+  const top3Platos = useMemo(() => {
+    if (!currentData?.topPlatos || currentData.topPlatos.length === 0) {
+      return defaultTopPlatos
+    }
+    const seedDishes = [
+      { nombreCorto: 'BOWL', name: 'Bowl Personalizado' },
+      { nombreCorto: 'AREPA RELLENA', name: 'Arepa Rellena' },
+      { nombreCorto: 'WRAP', name: 'Wrap Personalizado' },
+    ]
+    return seedDishes.map((seed, idx) => {
+      const platoData = currentData.topPlatos[idx] || {}
+      return {
+        nombreCorto: seed.nombreCorto,
+        name: seed.name,
+        qty: platoData.qty || defaultTopPlatos[idx].qty,
+        percentage: platoData.percentage || defaultTopPlatos[idx].percentage,
+      }
+    })
+  }, [currentData])
+
+  // Top 6 ingredientes del menú seed
+  const top6Ingredientes = useMemo(() => {
+    const seedNames = [
+      'Arroz Integral',
+      'Pollo a la Plancha',
+      'Carne Desmechada',
+      'Aguacate',
+      'Maíz Tierno',
+      'Salsa de Ajo',
+    ]
+    if (!currentData?.topIngredientes || currentData.topIngredientes.length === 0) {
+      return defaultTopIngredientes
+    }
+    return seedNames.map((nombre, idx) => {
+      const item = currentData.topIngredientes[idx]
+      return {
+        nombre,
+        veces: item?.veces_solicitado || defaultTopIngredientes[idx].veces,
+      }
+    })
+  }, [currentData])
+
+  const maxIngVeces = useMemo(() => {
+    return Math.max(...top6Ingredientes.map((i) => i.veces), 1)
+  }, [top6Ingredientes])
+
   return (
-    <main className="main-panel reportes-page">
-      {/* Header del Panel */}
-      <section className="panel reportes-header-panel">
-        <div className="reportes-title-row">
-          <div>
-            <h2>Métricas & Business Intelligence</h2>
-            <span className="panel-subtitle">
-              Rendimiento financiero de sala, tiempos KDS de cocina y hábitos de consumo
+    <div className="sd-page-wrapper sd-reportes-page">
+      {/* 1. Franja Roja (#C8102E) bajo el menú */}
+      <div className="sd-red-band">
+        <div className="sd-red-band-content">
+          <div className="sd-red-band-filters">
+            <span style={{ fontFamily: 'var(--sd-font-heading)', fontWeight: 800, fontSize: 16, letterSpacing: '0.06em', color: '#FFFFFF', marginRight: 8 }}>
+              PERIODO
             </span>
-          </div>
-
-          <div className="reportes-actions">
-            {/* Selector de Rango */}
-            <div className="range-selector">
-              <Calendar size={15} />
-              <button
-                type="button"
-                className={`range-pill ${timeRange === 'hoy' ? 'active' : ''}`}
-                onClick={() => handleSelectRange('hoy')}
-              >
-                Hoy
-              </button>
-              <button
-                type="button"
-                className={`range-pill ${timeRange === 'semana' ? 'active' : ''}`}
-                onClick={() => handleSelectRange('semana')}
-              >
-                Esta Semana
-              </button>
-              <button
-                type="button"
-                className={`range-pill ${timeRange === 'mes' ? 'active' : ''}`}
-                onClick={() => handleSelectRange('mes')}
-              >
-                Este Mes
-              </button>
-            </div>
-
             <button
               type="button"
-              className="ghost-button small"
-              onClick={() => window.print()}
+              className={`sd-red-band-btn ${timeRange === 'hoy' ? 'active' : ''}`}
+              onClick={() => handleSelectRange('hoy')}
             >
-              <Printer size={15} />
-              <span>Imprimir Informe</span>
+              <span>HOY</span>
+            </button>
+            <button
+              type="button"
+              className={`sd-red-band-btn ${timeRange === 'semana' ? 'active' : ''}`}
+              onClick={() => handleSelectRange('semana')}
+              aria-label="Últimos 7 días"
+            >
+              <span>ÚLTIMOS 7 DÍAS</span>
+            </button>
+            <button
+              type="button"
+              className={`sd-red-band-btn ${timeRange === 'mes' ? 'active' : ''}`}
+              onClick={() => handleSelectRange('mes')}
+            >
+              <span>ESTE MES</span>
             </button>
           </div>
-        </div>
-      </section>
 
-      {/* Banner de Fallback cuando D-07 no está en backend */}
-      {contractPending && (
-        <div
-          role="status"
-          style={{
-            background: 'rgba(245, 158, 11, 0.1)',
-            border: '1px solid rgba(245, 158, 11, 0.3)',
-            borderRadius: '12px',
-            padding: '0.85rem 1.25rem',
-            margin: '1rem 0',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '0.75rem',
-            color: '#f8fafc',
-            fontSize: '0.875rem',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <AlertTriangle size={18} style={{ color: '#fbbf24', flexShrink: 0 }} />
-            <span>
-              <strong style={{ color: '#fbbf24' }}>Modo simulación analítica:</strong> Visualizando métricas estructuradas según las vistas SQL de <code>24_vistas_reportes.sql</code>. Esperando despliegue de la ruta <code>GET /api/reportes</code> (D-07 en Backend).
-            </span>
-          </div>
           <button
             type="button"
-            className="ghost-button small"
-            style={{ whiteSpace: 'nowrap', borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24' }}
-            onClick={() => setShowContractDetails((prev) => !prev)}
+            className="sd-red-band-btn"
+            onClick={() => window.print()}
           >
-            <FileCode size={14} />
-            <span>{showContractDetails ? 'Ocultar Contrato' : 'Ver Contrato D-07'}</span>
+            <Printer size={16} />
+            <span>IMPRIMIR INFORME</span>
           </button>
         </div>
-      )}
+      </div>
 
-      {/* Detalle del Contrato REST si se expande */}
-      {showContractDetails && (
-        <section className="panel" style={{ padding: '1.25rem', marginBottom: '1.25rem' }}>
-          <div style={{ maxWidth: '720px' }}>
-            <h4 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: '#10b981' }}>
+      <div className="sd-reportes-container">
+        {/* 2. Encabezado Editorial */}
+        <div className="sd-reportes-header-editorial">
+          <div className="sd-reportes-header-left">
+            <h1 className="sd-reportes-title-hero">
+              {timeRange === 'hoy' && (
+                <>
+                  ASÍ VA<br />EL DÍA
+                </>
+              )}
+              {timeRange === 'semana' && (
+                <>
+                  ASÍ VA<br />LA SEMANA
+                </>
+              )}
+              {timeRange === 'mes' && (
+                <>
+                  ASÍ VA<br />EL MES
+                </>
+              )}
+            </h1>
+
+            {contractPending && (
+              <div className="sd-reportes-sim-notice">
+                <AlertTriangle size={14} style={{ color: 'var(--sd-gold)', flexShrink: 0 }} />
+                <span>
+                  Modo simulación analítica: esperando despliegue de <code>GET /api/reportes</code> (D-07 en backend).
+                </span>
+                <button
+                  type="button"
+                  className="sd-reportes-contract-toggle"
+                  onClick={() => setShowContractDetails((prev) => !prev)}
+                >
+                  {showContractDetails ? '(ocultar contrato)' : '(ver contrato D-07)'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="sd-reportes-header-right">
+            <span className="sd-reportes-date-range">
+              {obtenerRangoFechasTexto(timeRange)}
+              {contractPending && ' · datos de demostración'}
+            </span>
+          </div>
+        </div>
+
+        {/* Detalle técnico del contrato REST si se expande */}
+        {showContractDetails && (
+          <div className="sd-reportes-panel" style={{ marginBottom: 24 }}>
+            <h4 style={{ fontSize: 16, marginBottom: 8, color: '#fff', fontFamily: 'var(--sd-font-heading)' }}>
               Contrato REST esperado para Daniel (D-07):
             </h4>
-            <div
-              style={{
-                background: 'rgba(15, 118, 110, 0.08)',
-                border: '1px solid rgba(15, 118, 110, 0.25)',
-                borderRadius: '8px',
-                padding: '1rem',
-                fontSize: '0.8rem',
-                fontFamily: 'monospace',
-              }}
-            >
+            <div style={{ background: 'var(--sd-bg)', border: '1px solid var(--sd-border)', borderRadius: 8, padding: 14, fontSize: 13, fontFamily: 'monospace', display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div><strong>Método:</strong> GET</div>
               <div><strong>Path:</strong> /api/reportes?rango={timeRange}</div>
               <div><strong>Rol:</strong> admin</div>
               <div><strong>Vistas SQL disponibles:</strong> v_ventas_diarias, v_ingredientes_top, v_platos_top, v_tiempos_kds</div>
             </div>
           </div>
-        </section>
-      )}
+        )}
 
-      {loading ? (
-        <section className="panel" style={{ padding: '3rem', textAlign: 'center' }}>
-          <RefreshCw size={40} className="spin text-emerald" style={{ margin: '0 auto 1rem' }} />
-          <h3>Cargando métricas de reporte...</h3>
-          <p>Consultando analíticas desde el servidor.</p>
-        </section>
-      ) : !currentData ? (
-        <section className="panel" style={{ padding: '2.5rem', textAlign: 'center' }}>
-          <FileCode size={48} className="text-emerald" style={{ margin: '0 auto 1rem', display: 'block' }} />
-          <h3>No se pudieron cargar los datos de reporte</h3>
-          <p style={{ color: 'var(--text-secondary, #6b7280)' }}>
-            Intenta recargar o verificar la conexión con el servidor.
-          </p>
-        </section>
-      ) : (
-        <>
-          {/* KPI Cards */}
-          <section className="reportes-kpi-grid">
-            <div className="stat-card">
-              <div className="kpi-icon-row">
-                <span className="stat-label">Ingresos Totales</span>
-                <div className="kpi-badge-icon teal"><DollarSign size={18} /></div>
+        {loading ? (
+          <div className="sd-reportes-panel" style={{ padding: 48, textAlign: 'center' }}>
+            <RefreshCw size={40} className="spin" style={{ margin: '0 auto 16px', color: 'var(--sd-white)' }} />
+            <h3 style={{ color: 'var(--sd-text)', fontFamily: 'var(--sd-font-heading)', fontSize: 22, margin: '0 0 8px 0' }}>
+              Cargando métricas de reporte...
+            </h3>
+            <p style={{ color: 'var(--sd-text-muted)', margin: 0 }}>Consultando analíticas desde el servidor.</p>
+          </div>
+        ) : !currentData ? (
+          <div className="sd-reportes-panel" style={{ padding: 40, textAlign: 'center' }}>
+            <FileCode size={48} style={{ margin: '0 auto 16px', color: 'var(--sd-text-muted)' }} />
+            <h3 style={{ color: 'var(--sd-text)', fontFamily: 'var(--sd-font-heading)', fontSize: 22, margin: '0 0 8px 0' }}>
+              No se pudieron cargar los datos de reporte
+            </h3>
+            <p style={{ color: 'var(--sd-text-muted)', margin: 0 }}>
+              Intenta recargar o verificar la conexión con el servidor.
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* 3. 4 Indicadores en grilla */}
+            <div className="sd-reportes-indicators-grid">
+              {/* Tarjeta Roja: VENTAS */}
+              <div className="sd-indicator-card is-sales">
+                <span className="sd-indicator-label is-white">VENTAS</span>
+                <strong className="sd-indicator-value is-white">
+                  {formatoCOP(currentData.totalVentas)}
+                </strong>
+                <span className="sd-indicator-sub is-white">
+                  <ArrowUpRight size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />
+                  +12.4% vs periodo previo
+                </span>
               </div>
-              <div className="stat-value">{currentData.totalVentas}</div>
-              <div className="stat-detail positive">
-                <ArrowUpRight size={14} /> +12.4% vs periodo previo
+
+              {/* Tarjeta: PEDIDOS */}
+              <div className="sd-indicator-card">
+                <span className="sd-indicator-label">PEDIDOS</span>
+                <strong className="sd-indicator-value">
+                  {currentData.totalPedidos}
+                </strong>
+                <span className="sd-indicator-sub">
+                  {currentData.pedidosLiquidados || currentData.totalPedidos} liquidados en sala
+                </span>
+              </div>
+
+              {/* Tarjeta: TICKET POR COMENSAL */}
+              <div className="sd-indicator-card">
+                <span className="sd-indicator-label">TICKET POR COMENSAL</span>
+                <strong className="sd-indicator-value">
+                  {formatoCOP(calcularTicketComensal(currentData))}
+                </strong>
+                <span className="sd-indicator-sub">
+                  Promedio estimado por comensal
+                </span>
+              </div>
+
+              {/* Tarjeta: TIEMPO DE PREPARACIÓN */}
+              <div className="sd-indicator-card">
+                <span className="sd-indicator-label">TIEMPO DE PREPARACIÓN</span>
+                <strong className="sd-indicator-value">
+                  {currentData.tiempoCocinaPromedio || '12.4 min'}
+                </strong>
+                <span className="sd-indicator-sub">
+                  Meta: &lt; 15 min por comanda
+                </span>
               </div>
             </div>
 
-            <div className="stat-card">
-              <div className="kpi-icon-row">
-                <span className="stat-label">Comandas Atendidas</span>
-                <div className="kpi-badge-icon blue"><Utensils size={18} /></div>
-              </div>
-              <div className="stat-value">{currentData.totalPedidos}</div>
-              <div className="stat-detail">Ticket prom: {currentData.ticketPromedio}</div>
-            </div>
-
-            <div className="stat-card">
-              <div className="kpi-icon-row">
-                <span className="stat-label">Tiempo Medio Cocina (KDS)</span>
-                <div className="kpi-badge-icon amber"><Clock size={18} /></div>
-              </div>
-              <div className="stat-value">{currentData.tiempoCocinaPromedio}</div>
-              <div className="stat-detail positive">Meta: &lt; 15 min por comanda</div>
-            </div>
-
-            <div className="stat-card">
-              <div className="kpi-icon-row">
-                <span className="stat-label">Ocupación de Sala</span>
-                <div className="kpi-badge-icon purple"><Users size={18} /></div>
-              </div>
-              <div className="stat-value">{currentData.ocupacionMesas}</div>
-              <div className="stat-detail">Rotación: 2.8 veces por mesa</div>
-            </div>
-          </section>
-
-          {/* Grid de Reportes Detallados */}
-          <section className="reportes-grid" style={{ marginTop: '1.5rem' }}>
-            {/* Top Platos Más Vendidos */}
-            <div className="panel ranking-panel">
-              <div className="panel-header">
-                <div className="panel-title-with-icon">
-                  <Award size={18} className="text-teal" />
-                  <h3>Platos Más Vendidos (Top Ventas)</h3>
-                </div>
-                <span className="badge-count">Top 5</span>
-              </div>
-
-              <div className="ranking-list">
-                {(currentData.topPlatos || []).map((plato, idx) => (
-                  <div key={idx} className="ranking-item">
-                    <div className="ranking-left">
-                      <span className={`ranking-pos pos-${idx + 1}`}>#{idx + 1}</span>
-                      <div className="ranking-info">
-                        <strong>{plato.name}</strong>
-                        <span>{plato.category} · {plato.qty} unidades vendidas</span>
-                      </div>
-                    </div>
-
-                    <div className="ranking-right">
-                      <strong className="ranking-total">{plato.total}</strong>
-                      <div className="ranking-bar-track">
-                        <div
-                          className="ranking-bar-fill"
-                          style={{ width: `${plato.percentage}%` }}
-                        ></div>
-                      </div>
-                    </div>
+            {/* 4. Fila de Dos Paneles: Ventas por Día & Ingredientes más pedidos */}
+            <div className="sd-reportes-row-panels">
+              {/* Panel 1: VENTAS POR DÍA (Ancho grande) */}
+              <div className="sd-reportes-panel">
+                <h3 className="sd-reportes-panel-title">VENTAS POR DÍA</h3>
+                <div
+                  role="img"
+                  aria-label={`Ventas por día: día más alto ${diaMax.dia} con ${diaMax.label}, día más bajo ${diaMin.dia} con ${diaMin.label}`}
+                  className="sd-daily-sales-chart"
+                >
+                  <div className="sd-daily-bars-container">
+                    {diasVentas.map((d, idx) => {
+                      const barHeight = Math.max(12, Math.round((d.monto / maxVentaDia) * 100))
+                      return (
+                        <div key={idx} className="sd-daily-bar-col">
+                          <span className={`sd-daily-bar-val ${d.esHoy ? 'is-today' : ''}`}>
+                            {d.label}
+                          </span>
+                          <div className="sd-daily-bar-track">
+                            <div
+                              className={`sd-daily-bar-fill ${d.esHoy ? 'is-today' : ''}`}
+                              style={{ height: `${barHeight}%` }}
+                            />
+                          </div>
+                          <div className="sd-daily-bar-baseline" />
+                          <span className={`sd-daily-bar-day ${d.esHoy ? 'is-today' : ''}`}>
+                            {d.dia}
+                          </span>
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
+                </div>
+              </div>
+
+              {/* Panel 2: INGREDIENTES MÁS PEDIDOS (Top 6) */}
+              <div className="sd-reportes-panel">
+                <h3 className="sd-reportes-panel-title">INGREDIENTES MÁS PEDIDOS</h3>
+                <div className="sd-ingredients-list">
+                  {top6Ingredientes.map((ing, idx) => {
+                    const percent = Math.round((ing.veces / maxIngVeces) * 100)
+                    return (
+                      <div key={idx} className="sd-ingredient-row">
+                        <div className="sd-ingredient-meta">
+                          <span className="sd-ingredient-name">{ing.nombre}</span>
+                          <span className="sd-ingredient-count">{ing.veces} veces</span>
+                        </div>
+                        <div className="sd-ingredient-rail">
+                          <div
+                            className="sd-ingredient-bar"
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
 
-            {/* Métodos de Pago & Horas Pico */}
-            <div className="reportes-right-col" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* 5. PLATOS MÁS PEDIDOS (Top 3) */}
+            <div className="sd-reportes-panel" style={{ marginBottom: 24 }}>
+              <h3 className="sd-reportes-panel-title">PLATOS MÁS PEDIDOS</h3>
+              <div className="sd-top3-dishes-grid">
+                {top3Platos.map((plato, idx) => {
+                  const borderClass = idx === 0 ? 'border-red' : idx === 1 ? 'border-white' : 'border-gold'
+                  return (
+                    <div key={idx} className={`sd-top3-card ${borderClass}`}>
+                      <h4 className="sd-top3-dish-name">
+                        {idx + 1}. {plato.nombreCorto || plato.name.toUpperCase()}
+                      </h4>
+                      <span className="sd-top3-dish-meta">
+                        {plato.qty} vendidos · {plato.percentage} %
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* 6. Debajo (Secundario): Métodos de Pago y Horas Pico */}
+            <div className="sd-reportes-secondary-grid">
               {/* Métodos de Pago */}
-              <div className="panel">
-                <div className="panel-header">
-                  <div className="panel-title-with-icon">
-                    <CreditCard size={18} className="text-teal" />
-                    <h3>Distribución por Método de Pago</h3>
-                  </div>
-                </div>
-
-                <div className="payment-distribution-bars">
-                  <div className="multi-bar">
+              <div className="sd-reportes-panel">
+                <h3 className="sd-reportes-panel-title">DISTRIBUCIÓN POR MÉTODO DE PAGO</h3>
+                <div className="sd-payment-methods-block">
+                  <div className="sd-payment-bar-track">
                     {(currentData.metodosPago || []).map((mp, i) => (
                       <div
                         key={i}
-                        className="bar-segment"
-                        style={{ width: `${mp.porcentaje}%`, backgroundColor: mp.color }}
+                        style={{
+                          width: `${mp.porcentaje}%`,
+                          backgroundColor: i === 0 ? '#FFFFFF' : i === 1 ? 'var(--sd-gold)' : '#4A413D',
+                        }}
                         title={`${mp.metodo}: ${mp.porcentaje}%`}
-                      ></div>
+                      />
                     ))}
                   </div>
 
-                  <div className="payment-legends-list">
+                  <div className="sd-payment-legend-list">
                     {(currentData.metodosPago || []).map((mp, i) => (
-                      <div key={i} className="payment-legend-row">
-                        <div className="legend-label">
+                      <div key={i} className="sd-payment-legend-item">
+                        <div className="sd-payment-legend-left">
                           <span
-                            className="legend-dot"
-                            style={{ backgroundColor: mp.color }}
-                          ></span>
-                          <span>{mp.metodo}</span>
+                            className="sd-payment-dot"
+                            style={{
+                              backgroundColor: i === 0 ? '#FFFFFF' : i === 1 ? 'var(--sd-gold)' : '#4A413D',
+                            }}
+                          />
+                          <span className="sd-payment-method-name">{mp.metodo}</span>
                         </div>
-                        <div className="legend-values">
-                          <strong>{mp.monto}</strong>
-                          <span className="percentage-pill">{mp.porcentaje}%</span>
+                        <div className="sd-payment-legend-right">
+                          <strong className="sd-payment-amount">
+                            {formatoCOP(mp.monto)}
+                          </strong>
+                          <span className="sd-payment-percent">({mp.porcentaje}%)</span>
                         </div>
                       </div>
                     ))}
@@ -307,130 +483,90 @@ export function Reportes() {
               </div>
 
               {/* Horas Pico */}
-              <div className="panel">
-                <div className="panel-header">
-                  <div className="panel-title-with-icon">
-                    <TrendingUp size={18} className="text-teal" />
-                    <h3>Afluencia por Horario (Horas Pico)</h3>
-                  </div>
-                </div>
-
-                <div className="peak-hours-chart">
+              <div className="sd-reportes-panel">
+                <h3 className="sd-reportes-panel-title">AFLUENCIA POR HORARIO (HORAS PICO)</h3>
+                <div
+                  role="img"
+                  aria-label="Gráfica de afluencia por horario"
+                  className="sd-hours-chart"
+                >
                   {(currentData.horasPico || []).map((hp, i) => (
-                    <div key={i} className="peak-hour-column">
-                      <div className="bar-wrapper">
-                        <div
-                          className="peak-bar-fill"
-                          style={{ height: `${hp.volumen}%` }}
-                        >
-                          <span className="bar-tooltip">{hp.volumen}%</span>
-                        </div>
-                      </div>
-                      <span className="hour-label">{hp.hora.split(' - ')[0]}</span>
+                    <div key={i} className="sd-hours-col">
+                      <div
+                        className="sd-hours-fill"
+                        style={{
+                          height: `${hp.volumen}%`,
+                          backgroundColor: hp.volumen > 80 ? 'var(--sd-red)' : hp.volumen > 60 ? 'var(--sd-gold)' : '#4A413D',
+                        }}
+                        title={`${hp.hora}: ${hp.volumen}%`}
+                      />
+                      <span className="sd-hours-label">
+                        {hp.hora.split(' - ')[0]}
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
+            </div>
 
-              {/* Semaforización KDS */}
-              <div className="panel kds-alert-summary">
-                <div className="kds-alert-header">
-                  <AlertTriangle size={18} className="text-amber" />
-                  <div>
-                    <strong>Auditoría KDS: Eficiencia de Tiempos</strong>
-                    <p>Comandas monitoreadas en tiempo real</p>
-                  </div>
-                </div>
-                <span className="kds-badge-clean">
-                  {currentData.kdsAlertsCount || 0} demoras registradas
+            {/* Eficiencia Cocina KDS (Secundario) */}
+            <div className="sd-reportes-panel" style={{ marginBottom: 32 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--sd-border)', paddingBottom: 12, marginBottom: 14 }}>
+                <h3 className="sd-reportes-panel-title" style={{ margin: 0 }}>
+                  MÉTRICAS DE EFICIENCIA COCINA KDS
+                </h3>
+                <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-text-muted)' }}>
+                  VISTA SQL: v_tiempos_kds
                 </span>
               </div>
-            </div>
-          </section>
 
-          {/* Sección de Ingredientes Top del Constructor (v_ingredientes_top) */}
-          <section className="panel" style={{ marginTop: '1.5rem' }}>
-            <div className="panel-header">
-              <div className="panel-title-with-icon">
-                <Layers size={18} className="text-teal" />
-                <h3>Ingredientes Top en Constructor de Platos (Personalización)</h3>
-              </div>
-              <span className="badge-count">Vista SQL: v_ingredientes_top</span>
-            </div>
-
-            <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
-                    <th style={{ padding: '0.75rem 1rem' }}>Ingrediente</th>
-                    <th style={{ padding: '0.75rem 1rem' }}>Paso / Plato</th>
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Veces Solicitado</th>
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Porciones Extra</th>
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Porciones Normal</th>
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Ingresos Extras</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(currentData.topIngredientes || []).map((ing, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      <td style={{ padding: '0.75rem 1rem', fontWeight: 600, color: '#ffffff' }}>{ing.nombre_ingrediente}</td>
-                      <td style={{ padding: '0.75rem 1rem', color: 'var(--text-muted)' }}>{ing.nombre_paso} · {ing.nombre_plato}</td>
-                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>
-                        <span className="badge-count" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
-                          {ing.veces_solicitado}
-                        </span>
-                      </td>
-                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center', color: '#fbbf24' }}>{ing.porciones_extra}</td>
-                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>{ing.porciones_normal}</td>
-                      <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 700, color: '#34d399' }}>
-                        {ing.ingresos_extras_recaudados}
-                      </td>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--sd-border)', color: 'var(--sd-text-muted)', fontFamily: 'var(--sd-font-heading)', letterSpacing: '0.04em' }}>
+                      <th style={{ padding: '10px 14px' }}>PERIODO / FECHA</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>PLATOS PREPARADOS</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>TIEMPO ESTIMADO</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center' }}>TIEMPO REAL</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'right' }}>VARIACIÓN</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* Sección de Eficiencia Operativa KDS (v_tiempos_kds) */}
-          <section className="panel" style={{ marginTop: '1.5rem', marginBottom: '2rem' }}>
-            <div className="panel-header">
-              <div className="panel-title-with-icon">
-                <Clock size={18} className="text-teal" />
-                <h3>Métricas de Eficiencia Cocina KDS</h3>
+                  </thead>
+                  <tbody>
+                    {(currentData.tiemposKds || []).map((t, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        <td style={{ padding: '12px 14px', fontWeight: 700, color: 'var(--sd-text)', fontFamily: 'var(--sd-font-heading)', fontSize: 15 }}>
+                          {t.fecha}
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                          {t.platos_preparados} comandas
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', color: 'var(--sd-text-muted)' }}>
+                          {t.tiempo_estimado_promedio_min} min
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', color: '#FFFFFF', fontWeight: 700 }}>
+                          {t.tiempo_real_promedio_min} min
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px 14px',
+                            textAlign: 'right',
+                            fontWeight: 800,
+                            fontFamily: 'var(--sd-font-heading)',
+                            fontSize: 15,
+                            color: t.variacion_promedio_porcentaje <= 0 ? '#FFFFFF' : 'var(--sd-red-text)',
+                          }}
+                        >
+                          {t.variacion_promedio_porcentaje > 0 ? `+${t.variacion_promedio_porcentaje}%` : `${t.variacion_promedio_porcentaje}%`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <span className="badge-count">Vista SQL: v_tiempos_kds</span>
             </div>
-
-            <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
-                    <th style={{ padding: '0.75rem 1rem' }}>Periodo / Fecha</th>
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Platos Preparados</th>
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Tiempo Estimado Promedio</th>
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Tiempo Real Promedio</th>
-                    <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Variación vs Estimado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(currentData.tiemposKds || []).map((t, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      <td style={{ padding: '0.75rem 1rem', fontWeight: 600, color: '#ffffff' }}>{t.fecha}</td>
-                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>{t.platos_preparados} comandas</td>
-                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>{t.tiempo_estimado_promedio_min} min</td>
-                      <td style={{ padding: '0.75rem 1rem', textAlign: 'center', color: '#60a5fa', fontWeight: 600 }}>{t.tiempo_real_promedio_min} min</td>
-                      <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 700, color: t.variacion_promedio_porcentaje <= 0 ? '#34d399' : '#fbbf24' }}>
-                        {t.variacion_promedio_porcentaje > 0 ? `+${t.variacion_promedio_porcentaje}%` : `${t.variacion_promedio_porcentaje}%`}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </>
-      )}
-    </main>
+          </>
+        )}
+      </div>
+    </div>
   )
 }

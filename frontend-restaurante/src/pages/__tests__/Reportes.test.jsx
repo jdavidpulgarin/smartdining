@@ -24,14 +24,14 @@ describe('Flujo de Reportes & BI en frontend-restaurante', () => {
 
     // Debe mostrar indicador de carga o pasar a los KPIs
     await waitFor(() => {
-      expect(screen.getByText(/Métricas & Business Intelligence/i)).toBeInTheDocument()
+      expect(screen.getByText(/ASÍ VA/i)).toBeInTheDocument()
       expect(screen.getByText(/Modo simulación analítica/i)).toBeInTheDocument()
-      expect(screen.getByText('$1,280.00')).toBeInTheDocument()
+      expect(screen.getByText(/\$1\.280\.000/)).toBeInTheDocument()
     })
 
-    // Debe mostrar los platos top y tablas analíticas
-    expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument()
-    expect(screen.getByText(/Ingredientes Top en Constructor de Platos/i)).toBeInTheDocument()
+    // Debe mostrar los platos top y paneles analíticos
+    expect(screen.getByText(/Bowl Personalizado|1\. BOWL/i)).toBeInTheDocument()
+    expect(screen.getByText(/Ingredientes Más Pedidos/i)).toBeInTheDocument()
     expect(screen.getByText(/Métricas de Eficiencia Cocina KDS/i)).toBeInTheDocument()
   })
 
@@ -49,14 +49,14 @@ describe('Flujo de Reportes & BI en frontend-restaurante', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('$1,280.00')).toBeInTheDocument()
+      expect(screen.getByText(/\$1\.280\.000/)).toBeInTheDocument()
     })
 
-    const semanaBtn = screen.getByRole('button', { name: /esta semana/i })
+    const semanaBtn = screen.getByRole('button', { name: /últimos 7 días|esta semana/i })
     fireEvent.click(semanaBtn)
 
     await waitFor(() => {
-      expect(screen.getByText('$8,940.00')).toBeInTheDocument()
+      expect(screen.getByText(/\$8\.940\.000/)).toBeInTheDocument()
     })
   })
 })
