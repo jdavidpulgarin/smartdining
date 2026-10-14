@@ -161,56 +161,56 @@ export default function Tablero() {
               salir. Menos cosas que tocar mientras nada responde. */}
           {conectado && (
             <>
-          <button
-            type="button"
-            onClick={alternarSonido}
-            className={botonBarra}
-            aria-pressed={sonido}
-            aria-label={sonido ? 'Silenciar el aviso de comanda nueva' : 'Activar el aviso sonoro'}
-            title={sonido ? 'Silenciar el aviso de comanda nueva' : 'Activar el aviso sonoro'}
-          >
-            {sonido ? <Volume2 size={22} aria-hidden="true" /> : <VolumeX size={22} aria-hidden="true" />}
-          </button>
-
-          <button
-            type="button"
-            onClick={recargar}
-            className={botonBarra}
-            aria-label="Actualizar las comandas"
-            title="Actualizar las comandas"
-          >
-            <RefreshCw
-              size={22}
-              className={estado.cargando ? 'animate-spin' : undefined}
-              aria-hidden="true"
-            />
-          </button>
-
-          <button
-            type="button"
-            onClick={alternarPantallaCompleta}
-            className={botonBarra}
-            aria-label={pantallaCompleta ? 'Salir de pantalla completa' : 'Pantalla completa'}
-            title={pantallaCompleta ? 'Salir de pantalla completa' : 'Pantalla completa'}
-          >
-            {pantallaCompleta ? (
-              <Minimize size={22} aria-hidden="true" />
-            ) : (
-              <Maximize size={22} aria-hidden="true" />
-            )}
-          </button>
-
-          {/* El mockup es solo oscuro, pero el tema claro existe y sin boton
-              quedaria inalcanzable: se queda, con la misma forma que los demas. */}
-          <button
-            type="button"
-            onClick={alternarTema}
-            className={botonBarra}
-            aria-label="Cambiar entre claro y oscuro"
-            title="Cambiar entre claro y oscuro"
-          >
-            {tema === 'oscuro' ? <Sun size={22} aria-hidden="true" /> : <Moon size={22} aria-hidden="true" />}
-          </button>
+              <button
+                type="button"
+                onClick={alternarSonido}
+                className={botonBarra}
+                aria-pressed={sonido}
+                aria-label={sonido ? 'Silenciar el aviso de comanda nueva' : 'Activar el aviso sonoro'}
+                title={sonido ? 'Silenciar el aviso de comanda nueva' : 'Activar el aviso sonoro'}
+              >
+                {sonido ? <Volume2 size={22} aria-hidden="true" /> : <VolumeX size={22} aria-hidden="true" />}
+              </button>
+    
+              <button
+                type="button"
+                onClick={recargar}
+                className={botonBarra}
+                aria-label="Actualizar las comandas"
+                title="Actualizar las comandas"
+              >
+                <RefreshCw
+                  size={22}
+                  className={estado.cargando ? 'animate-spin' : undefined}
+                  aria-hidden="true"
+                />
+              </button>
+    
+              <button
+                type="button"
+                onClick={alternarPantallaCompleta}
+                className={botonBarra}
+                aria-label={pantallaCompleta ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                title={pantallaCompleta ? 'Salir de pantalla completa' : 'Pantalla completa'}
+              >
+                {pantallaCompleta ? (
+                  <Minimize size={22} aria-hidden="true" />
+                ) : (
+                  <Maximize size={22} aria-hidden="true" />
+                )}
+              </button>
+    
+              {/* El mockup es solo oscuro, pero el tema claro existe y sin boton
+                  quedaria inalcanzable: se queda, con la misma forma que los demas. */}
+              <button
+                type="button"
+                onClick={alternarTema}
+                className={botonBarra}
+                aria-label="Cambiar entre claro y oscuro"
+                title="Cambiar entre claro y oscuro"
+              >
+                {tema === 'oscuro' ? <Sun size={22} aria-hidden="true" /> : <Moon size={22} aria-hidden="true" />}
+              </button>
             </>
           )}
 
