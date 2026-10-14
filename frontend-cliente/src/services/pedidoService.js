@@ -1,6 +1,10 @@
 import { pedirJson } from './api';
 import { obtenerSesion } from '../utils/sesion';
 
+export const NOTAS_MAX_SERVIDOR = 200;
+export const NOTAS_GENERALES_MAX_SERVIDOR = 500;
+export const MAX_INGREDIENTES_POR_ITEM = 20;
+
 /**
  * Servicio de creación y gestión de pedidos para el comensal.
  *
@@ -11,9 +15,6 @@ import { obtenerSesion } from '../utils/sesion';
  * H-06: Límites de pedidos: máximo 50 ítems en total y entre 1 y 20 por ítem.
  */
 export async function crearPedido({ lineas = [], notasGenerales = '' } = {}) {
-  const sesion = obtenerSesion();
-  const token = sesion?.token;
-
   if (!lineas || lineas.length === 0) {
     throw new Error('No hay ítems para crear el pedido');
   }
@@ -22,7 +23,15 @@ export async function crearPedido({ lineas = [], notasGenerales = '' } = {}) {
     throw new Error('Un pedido no puede contener más de 50 ítems');
   }
 
-  // Mapear líneas omitiendo 'comensal' / 'apodo' (H-05) y ajustando topes (H-06)
+  if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+    const { crearPedidoSimulado } = await import('./pedidoSimulado');
+    return crearPedidoSimulado({ lineas, notasGenerales });
+  }
+
+  const sesion = obtenerSesion();
+  const token = sesion?.token;
+
+  // Mapear líneas omitiendo 'comensal', 'apodo', 'precio' y ajustando topes
   const items = lineas.map((linea) => {
     const item = {
       id_plato: Number(linea.id_plato || linea.idPlato),
@@ -31,29 +40,56 @@ export async function crearPedido({ lineas = [], notasGenerales = '' } = {}) {
 
     const nota = linea.notas || linea.notasCocina || linea.notasCliente;
     if (typeof nota === 'string' && nota.trim()) {
-      item.notas = nota.trim();
+      item.notas = nota.trim().slice(0, NOTAS_MAX_SERVIDOR);
     }
 
-    if (Array.isArray(linea.selecciones) && linea.selecciones.length > 0) {
-      item.ingredientes = linea.selecciones.map((sel) => ({
-        id_ingrediente: Number(sel.id_ingrediente || sel.idIngrediente),
-        porcion: sel.porcion || 'normal',
-      }));
+    let ingredientesRaw = null;
+    if (Array.isArray(linea.ingredientes) && linea.ingredientes.length > 0) {
+      ingredientesRaw = linea.ingredientes;
+    } else if (Array.isArray(linea.selecciones) && linea.selecciones.length > 0) {
+      ingredientesRaw = linea.selecciones;
+    }
+
+    if (ingredientesRaw && ingredientesRaw.length > 0) {
+      if (ingredientesRaw.length > MAX_INGREDIENTES_POR_ITEM) {
+        throw new Error(`Un plato no puede superar ${MAX_INGREDIENTES_POR_ITEM} ingredientes`);
+      }
+
+      const idsVistos = new Set();
+      const ingredientes = ingredientesRaw.map((ing) => {
+        const id_ingrediente = Number(ing.id_ingrediente ?? ing.idIngrediente);
+        if (idsVistos.has(id_ingrediente)) {
+          throw new Error('No se pueden repetir ingredientes en el mismo ítem');
+        }
+        idsVistos.add(id_ingrediente);
+
+        return {
+          id_ingrediente,
+          porcion: ing.porcion || 'normal',
+        };
+      });
+
+      item.ingredientes = ingredientes;
     }
 
     return item;
   });
 
+  const body = { items };
+  if (typeof notasGenerales === 'string' && notasGenerales.trim()) {
+    body.notas_generales = notasGenerales.trim().slice(0, NOTAS_GENERALES_MAX_SERVIDOR);
+  }
+
   return pedirJson('/pedidos', {
     method: 'POST',
-    body: {
-      items,
-      ...(notasGenerales?.trim() ? { notas_generales: notasGenerales.trim() } : {}),
-    },
+    body,
     token,
   });
 }
 
 export default {
+  NOTAS_MAX_SERVIDOR,
+  NOTAS_GENERALES_MAX_SERVIDOR,
+  MAX_INGREDIENTES_POR_ITEM,
   crearPedido,
 };

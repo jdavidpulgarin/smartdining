@@ -6,7 +6,7 @@ export const FACTORES_PORCION = {
   extra: 1.5,
 };
 
-const MAX_INGREDIENTES_LINEA = 30;
+const MAX_INGREDIENTES_LINEA = 20;
 
 export function validarPaso(paso, seleccionesDelPaso = {}) {
   if (!paso) {
