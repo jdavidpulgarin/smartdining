@@ -76,6 +76,52 @@ async function enviar(ruta, cuerpo) {
 }
 
 /**
+ * Última cadena de avisos lanzada. Solo existe para que las pruebas puedan
+ * esperarla: en producción nadie la mira.
+ */
+let ultimaCadena = Promise.resolve();
+
+/**
+ * Lanza varios avisos EN ORDEN y sin que el handler espere el resultado.
+ *
+ * Hay avisos cuyo orden importa y no se puede dejar al azar de la red: al
+ * liquidar una cuenta, `payment-confirmed` tiene que salir ANTES que
+ * `mesa-liberada`, porque mesa-liberada desconecta a los comensales y, si
+ * llegara primero, la mesa nunca vería el pago que acaba de hacer (EVENTS.md
+ * §8.6). Lanzarlos a la vez con tres llamadas sueltas no garantiza ese orden.
+ *
+ * Por eso se encadenan con await entre uno y otro, pero la cadena NO se espera
+ * en el controller: la respuesta HTTP sale de inmediato, porque el cobro ya
+ * está guardado y el tiempo real es un extra. El catch es defensivo: las
+ * funciones de este módulo ya no lanzan, así que si algo llega aquí es un error
+ * de programación y se registra en vez de volverse un rechazo sin dueño que
+ * tumbe el proceso.
+ *
+ * @param {Array<() => Promise<any>>} pasos Avisos a enviar, en orden.
+ * @returns {Promise<void>} La misma cadena, para quien quiera esperarla.
+ */
+function encadenarAvisos(pasos) {
+  const cadena = pasos
+    .reduce((previo, paso) => previo.then(() => paso()), Promise.resolve())
+    .then(() => undefined)
+    .catch((err) => {
+      console.error('[socket] la cadena de avisos fallo inesperadamente:', err && err.message);
+    });
+
+  ultimaCadena = cadena;
+  return cadena;
+}
+
+/**
+ * Espera a que terminen los avisos en vuelo. Es para las PRUEBAS: así pueden
+ * comprobar qué se envió y en qué orden sin recurrir a temporizadores, que
+ * harían la suite lenta y frágil.
+ */
+function esperarAvisos() {
+  return ultimaCadena;
+}
+
+/**
  * Da forma al pedido tal como lo documenta EVENTS.md, no como lo devuelve la
  * base: los ítems usan `nombre` (no `plato_nombre`) porque ese es el nombre de
  * campo del contrato de Roberto, que es lo que leen los frontends.
@@ -271,13 +317,97 @@ async function notificarQrRotado(id_mesa, token_qr) {
 }
 
 /**
+ * Motivos de /internal/mesa-liberada (EVENTS.md §5.1). El socket-server pone
+ * 'liberada' por defecto si no se manda, así que lo que importa es mandar
+ * 'pagada' cuando la causa fue un pago: las pantallas distinguen "se fueron
+ * pagando" de "el mesero cerró la mesa" (H-22).
+ */
+const MOTIVO_PAGADA = 'pagada';
+const MOTIVO_LIBERADA = 'liberada';
+
+/** Tope de referencia_externa que acepta el socket-server (EVENTS.md §8.6). */
+const MAX_REFERENCIA_PAGO = 255;
+
+/**
+ * POST /internal/payment-confirmed — un cobro de CAJA (efectivo, datáfono o
+ * abono parcial) ya guardado en la base, para que todas las cajas y la mesa
+ * vean el saldo nuevo al instante (EVENTS.md §8.6).
+ *
+ * El socket-server lo reemite como `payment:confirmed`, el MISMO evento y el
+ * mismo payload que un pago de Wompi, y convierte a pesos él solo. Por eso aquí
+ * todo va en centavos enteros: el dinero en float pierde precisión al sumar
+ * abonos.
+ *
+ * NO se llama para los pagos en línea: en esos el socket-server ya emite
+ * `payment:confirmed` desde su propio webhook, y como lo hace sin pasar por su
+ * registro de idempotencia, avisar también desde aquí anunciaría el pago dos
+ * veces.
+ *
+ * Aislado como el resto: se llama DESPUÉS del COMMIT y si falla, el pago ya
+ * está guardado y no se revierte; solo se pierde el aviso en vivo y las
+ * pantallas lo verán al recargar la cuenta.
+ *
+ * @param {{id_mesa: number, monto_centavos: number,
+ *          saldo_restante_centavos: number, comensal?: string|null,
+ *          referencia_externa?: string|null, id_transaccion?: number|null}} pago
+ */
+async function notificarPagoConfirmado({
+  id_mesa,
+  monto_centavos,
+  saldo_restante_centavos,
+  comensal = null,
+  referencia_externa = null,
+  id_transaccion = null,
+}) {
+  // El socket-server exige monto_centavos >= 1 y responde 400 si no. Un cobro
+  // de cero o negativo no existe en caja, así que en vez de gastar una petición
+  // que se va a rechazar se deja constancia y no se llama.
+  if (!Number.isSafeInteger(monto_centavos) || monto_centavos < 1) {
+    console.error(
+      `[socket] /internal/payment-confirmed no se envia: monto_centavos invalido (${monto_centavos}) en la mesa ${id_mesa}`
+    );
+    return { ok: false, motivo: 'MONTO_INVALIDO' };
+  }
+
+  // Una referencia más larga que el tope haría que el socket-server rechazara
+  // el aviso entero con 400. Vale más perder el dato del voucher que el aviso:
+  // el número completo queda en transacciones.referencia_externa.
+  let referencia = referencia_externa ?? null;
+  if (typeof referencia === 'string' && referencia.length > MAX_REFERENCIA_PAGO) {
+    console.warn(
+      `[socket] /internal/payment-confirmed: referencia_externa de ${referencia.length} caracteres `
+        + `(tope ${MAX_REFERENCIA_PAGO}) en la mesa ${id_mesa}; se envia null para no perder el aviso`
+    );
+    referencia = null;
+  }
+
+  return enviar('/internal/payment-confirmed', {
+    // Un eventId por cobro: es la primera guardia de idempotencia del
+    // socket-server. La segunda es id_transaccion, que evita que un reintento
+    // con un eventId nuevo anuncie el mismo cobro dos veces.
+    eventId: nuevoEventId(),
+    id_mesa,
+    comensal: comensal ?? null,
+    monto_centavos,
+    saldo_restante_centavos,
+    referencia_externa: referencia,
+    id_transaccion: id_transaccion ?? null,
+  });
+}
+
+/**
  * POST /internal/mesa-liberada — invalida los QR emitidos de esa mesa y borra
  * su carrito y sus suscripciones push, para que el grupo siguiente empiece
  * limpio. Se llama tras un pago efectivo (estado_transaccion 'completada').
  *
- * `motivo` es opcional y solo viaja si se pasa: un pago en línea manda
- * 'pagada' (EVENTS.md §8.3), mientras que liberar a mano o cobrar en caja no
- * manda nada, para no cambiar el cuerpo que ya recibe el socket-server.
+ * `motivo` es opcional y solo viaja si se pasa. Lo manda quien liberó la mesa
+ * por un PAGO —el cobro en caja y el pago en línea (EVENTS.md §8.3)— con
+ * MOTIVO_PAGADA, que es lo que corrige H-22: antes el cobro de caja no mandaba
+ * nada y el socket-server lo anunciaba con su valor por omisión, 'liberada', o
+ * sea "el mesero cerró la mesa", cuando en realidad el grupo pagó.
+ *
+ * Liberar a mano no lo manda: 'liberada' es justo el valor por omisión del
+ * socket-server, así que el cuerpo se queda como estaba.
  */
 async function notificarMesaLiberada(id_mesa, motivo) {
   const cuerpo = { id_mesa };
@@ -288,11 +418,17 @@ async function notificarMesaLiberada(id_mesa, motivo) {
 module.exports = {
   nuevoEventId,
   armarPedido,
+  encadenarAvisos,
+  esperarAvisos,
   generarTokenQr,
   validarTokenQr,
   notificarQrRotado,
   notificarPedidoCreado,
   notificarCambioEstado,
+  notificarPagoConfirmado,
   notificarMesaLiberada,
+  MOTIVO_PAGADA,
+  MOTIVO_LIBERADA,
+  MAX_REFERENCIA_PAGO,
   TIMEOUT_POR_DEFECTO_MS,
 };
