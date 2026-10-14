@@ -1316,6 +1316,7 @@ es el único sitio donde se decide el status. Traduce lo que lanza PostgreSQL as
 | Error de negocio del backend (`{ status, message }`) | ese status | su mensaje |
 | `RAISE EXCEPTION` de un trigger (**P0001**) | **409** | el mensaje del trigger, tal cual — está escrito para leerse ("Transición de estado no autorizada: de \"listo\" hacia \"en_preparacion\"") |
 | Error de **datos** de PostgreSQL (**clase 22**: 22003 desbordamiento numérico, 22001 texto largo, 22012 división por cero, 22P02 sintaxis…) | **422** | `No se pudo registrar esta operación: un dato está fuera del rango permitido. Avisa al equipo.` |
+| **Choque de concurrencia**: **40P01** (deadlock) y **40001** (fallo de serialización) | **409** | `La operación chocó con otra en curso, vuelve a intentarlo` |
 | Cualquier otro error de PostgreSQL (CHECK 23514, FK 23503, unique 23505…) o inesperado | **500** | `Error interno del servidor` |
 
 **Por qué 422 y no 500 en la clase 22.** Un dato que no cabe no es una caída del
@@ -1334,6 +1335,46 @@ servidor junto al método y la ruta.
 > minutos la desborda. Se cruza cuando el tiempo real supera ~101× el estimado (unas 8 h
 > para un plato de 5 min). El arreglo de fondo es ampliar esa precisión en `database/`;
 > hasta entonces, el KDS al menos muestra un mensaje que se entiende.
+
+### El 409 de concurrencia: el único que se puede reintentar
+
+`La operación chocó con otra en curso, vuelve a intentarlo`
+
+Significa que PostgreSQL abortó la transacción porque chocó con otra que corría a la vez,
+no que la petición estuviera mal:
+
+- **40P01** `deadlock_detected`: dos transacciones se esperaban en círculo y el servidor
+  mató a una de las dos.
+- **40001** `serialization_failure`: la transacción no se pudo serializar con otra
+  concurrente.
+
+**El cliente puede reintentar la misma petición una vez**, y es el único 4xx del que eso
+se puede decir: un 409 de trigger (P0001), un 422 o un 400 van a fallar igual por mucho
+que se insista. Una vez, no en bucle: si el segundo intento también choca, hay algo que
+mirar en el servidor y conviene mostrarlo al usuario en vez de seguir golpeando. En un
+cobro, reintentar es seguro porque la transacción abortada **no dejó nada escrito** (el
+`ROLLBACK` es completo); un pago en línea además lleva su `referencia_externa` con índice
+único, así que un reintento se detecta como duplicado.
+
+Antes estos dos códigos caían en el 500 genérico, que empuja justo a lo contrario:
+parecía una caída del servidor y no una colisión pasajera.
+
+Son **solo esos dos**, no la clase 40 entera: `40002` (violación de integridad diferida)
+y `40003` (resultado de la transacción desconocido) siguen dando 500, porque reintentar a
+ciegas con un resultado desconocido es lo que cobra dos veces.
+
+El mensaje es siempre el mismo y no dice qué filas ni qué transacción: el texto real de
+PostgreSQL nombra procesos, relaciones y modos de bloqueo (`el proceso 12345 espera
+ShareLock en la transacción 678; bloqueado por el proceso 12346`), que es un mapa del
+esquema y de la carga del servidor. El detalle completo —código, `detail` y `where`— se
+registra en el log del servidor junto al método y la ruta, igual que en el 422.
+
+> Esto es una red de seguridad, no el arreglo: el camino normal es que no haya deadlocks.
+> El backend toma los bloqueos **siempre en el mismo orden** (la mesa antes del pedido,
+> los pedidos por `id_pedido`) en los dos endpoints de pago y en los cambios de estado que
+> cierran un pedido, y está medido con `npm run test:integracion`: **0 deadlocks de 20
+> intentos**. El 409 cubre lo que se escape por ahí — un `INSERT` directo a la base, una
+> ruta nueva que se despiste, o un bloqueo que tome un trigger de `database/`.
 
 ---
 
