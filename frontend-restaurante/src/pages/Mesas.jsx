@@ -1,13 +1,6 @@
-import { TablesPanel } from '../components'
-import { useTables } from '../hooks'
+import { Home } from './Home'
 
 export function Mesas() {
-  const { tables } = useTables()
-
-  return (
-    <div className="sd-page-wrapper">
-      <TablesPanel tables={tables} />
-    </div>
-  )
+  return <Home />
 }
 
