@@ -1441,6 +1441,28 @@ registra el motivo y sigue. Un socket-server caído no hace fallar un pedido ni 
 En `order:created` los ítems se envían con `nombre` (no `plato_nombre`), que es el nombre
 de campo del contrato de Roberto.
 
+Cada ingrediente de un ítem va con `id_ingrediente`, `nombre`, `porcion`, `precio_aplicado`
+y **`paso`**, el nombre del paso del constructor al que pertenece:
+
+```json
+"ingredientes": [
+  { "id_ingrediente": 2, "nombre": "Quinoa", "porcion": "normal", "precio_aplicado": 0, "paso": "Elige tu Base" },
+  { "id_ingrediente": 4, "nombre": "Pollo a la Plancha", "porcion": "extra", "precio_aplicado": 3000, "paso": "Elige tu Proteína" }
+]
+```
+
+`paso` va porque el KDS agrupa los ingredientes por él para leer el plato en el orden en
+que se arma. Sin ese campo, una comanda que entraba **en vivo** se veía plana
+(*"Ingredientes: a · b · c"*) mientras que la misma comanda, tras recargar y venir de
+`GET /api/kds/comandas`, salía agrupada: los mismos datos de dos formas distintas según por
+dónde hubieran llegado.
+
+Los ingredientes mantienen el orden de la consulta (`pasos_constructor.orden`), así que
+agrupar por `paso` respeta el orden del constructor sin ordenar nada en el receptor. Cuando
+el ingrediente no viene de un paso, `paso` es `null` —el campo va igual, para no tener que
+distinguir *"sin paso"* de *"este evento no trae el dato"*—. `id_paso` **no** se envía: es
+clave interna y quien recibe agrupa por el nombre; sigue estando en la API REST.
+
 Los importes (`total`, `precio`, `subtotal`, `monto`) salen como **número**, no como string:
 se registra un parser por OID 1700 en `src/config/db.js`.
 
