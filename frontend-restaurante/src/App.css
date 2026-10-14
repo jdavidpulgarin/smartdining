@@ -4,20 +4,34 @@
    ============================================================================== */
 
 :root {
-  --bg-base: #090d16;
-  --bg-surface: rgba(15, 23, 42, 0.75);
-  --bg-card: rgba(22, 30, 49, 0.65);
-  --bg-card-hover: rgba(30, 41, 59, 0.85);
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-hover: rgba(255, 255, 255, 0.16);
-  --emerald-neon: #10b981;
-  --emerald-glow: rgba(16, 185, 129, 0.35);
-  --amber-neon: #f59e0b;
-  --crimson-neon: #ef4444;
-  --indigo-neon: #6366f1;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --text-dim: #64748b;
+  --sd-bg: #120E0D;
+  --sd-surface: #1E1A19;
+  --sd-surface-2: #2A2422;
+  --sd-border: #2E2724;
+  --sd-border-strong: #4A413D;
+  --sd-text: #F5F1EC;
+  --sd-text-muted: #B8ADA6;
+  --sd-red: #EE1C25;
+  --sd-red-band: #C8102E;
+  --sd-red-text: #FF4A55;
+  --sd-gold: #E0A526;
+  --sd-gold-text: #1A1208;
+  --sd-white: #FFFFFF;
+
+  --bg-base: var(--sd-bg);
+  --bg-surface: var(--sd-surface);
+  --bg-card: var(--sd-surface);
+  --bg-card-hover: var(--sd-surface-2);
+  --border-subtle: var(--sd-border);
+  --border-hover: var(--sd-border-strong);
+  --emerald-neon: var(--sd-red);
+  --emerald-glow: rgba(238, 28, 37, 0.30);
+  --amber-neon: var(--sd-gold);
+  --crimson-neon: var(--sd-red);
+  --indigo-neon: var(--sd-red);
+  --text-main: var(--sd-text);
+  --text-muted: var(--sd-text-muted);
+  --text-dim: #8E827B;
   --shadow-lg: 0 14px 35px rgba(0, 0, 0, 0.35);
   --radius-panel: 22px;
   --radius-card: 16px;
@@ -28,9 +42,7 @@
   grid-template-columns: 1fr;
   grid-template-rows: auto 1fr;
   min-height: 100vh;
-  background: radial-gradient(circle at 10% 15%, rgba(16, 185, 129, 0.05) 0%, transparent 35%),
-              radial-gradient(circle at 90% 85%, rgba(99, 102, 241, 0.05) 0%, transparent 40%),
-              var(--bg-base);
+  background: var(--sd-bg);
   color: var(--text-main);
 }
 

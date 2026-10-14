@@ -5,6 +5,7 @@
 :root {
   --sd-bg: #120E0D;
   --sd-surface: #1E1A19;
+  --sd-surface-2: #2A2422;
   --sd-border: #2E2724;
   --sd-border-strong: #4A413D;
   --sd-text: #F5F1EC;
@@ -17,6 +18,22 @@
   --sd-white: #FFFFFF;
   --sd-font-body: 'Barlow', sans-serif;
   --sd-font-heading: 'Barlow Condensed', sans-serif;
+
+  /* Mapeo de variables heredadas hacia la paleta oficial SmartDining */
+  --bg-base: var(--sd-bg);
+  --bg-surface: var(--sd-surface);
+  --bg-card: var(--sd-surface);
+  --bg-card-hover: var(--sd-surface-2);
+  --border-subtle: var(--sd-border);
+  --border-hover: var(--sd-border-strong);
+  --emerald-neon: var(--sd-red);
+  --emerald-glow: rgba(238, 28, 37, 0.30);
+  --amber-neon: var(--sd-gold);
+  --crimson-neon: var(--sd-red);
+  --indigo-neon: var(--sd-red);
+  --text-main: var(--sd-text);
+  --text-muted: var(--sd-text-muted);
+  --text-dim: #8E827B;
 }
 
 body {
@@ -139,7 +156,7 @@ a {
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
-  background-color: var(--sd-bg);
+  background: var(--sd-bg) !important;
   color: var(--sd-text);
   font-family: var(--sd-font-body);
   width: 100%;
