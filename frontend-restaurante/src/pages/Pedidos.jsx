@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  UtensilsCrossed,
-  Clock,
   Flame,
   BellRing,
   CheckCircle2,
@@ -14,6 +12,7 @@ import {
   AlertCircle,
   RefreshCw,
 } from 'lucide-react'
+import { StatusBadge } from '../components/ui/Badge'
 import { pedidosApi } from '../services/api'
 import { useSocketListener, useSocketEmit } from '../hooks'
 
@@ -55,6 +54,7 @@ function normalizarPedido(p) {
     id: p.codigo_pedido || `#${p.id_pedido}`,
     rawId: p.id_pedido,
     table: p.mesa_numero ? `Mesa ${p.mesa_numero}` : p.id_mesa ? `Mesa ${p.id_mesa}` : 'Barra',
+    numeroMesa: p.mesa_numero || p.id_mesa || '?',
     client: p.detalles?.[0]?.comensal || 'Comensal General',
     waiter: p.mesero || 'Mesero Asignado',
     state: backendEstadoAUI(p.estado),
@@ -68,6 +68,8 @@ function normalizarPedido(p) {
       name: d.nombre || d.plato_nombre || 'Plato',
       qty: d.cantidad || 1,
       notes: d.notas_especiales || d.notas || null,
+      subtotal: d.subtotal ? `$${Number(d.subtotal).toLocaleString('es-CO')}` : '',
+      comensal: d.comensal || 'General',
     })),
   }
 }
@@ -201,327 +203,310 @@ export function Pedidos() {
   }
 
   return (
-    <main className="main-panel pedidos-page">
+    <div className="sd-pedidos-page-wrap">
       {/* Toast Alert */}
       {toastMsg && (
-        <div className="table-toast-banner info">
+        <div className="table-toast-banner info" style={{ position: 'fixed', top: 90, right: 24, zIndex: 100 }}>
           <BellRing size={16} />
           <span>{toastMsg}</span>
         </div>
       )}
 
-      {/* Banner de KPIs en Vivo */}
-      <section className="pedidos-kpi-strip">
-        <div className="pedidos-kpi-card">
-          <div className="kpi-icon-badge blue">
-            <UtensilsCrossed size={18} />
-          </div>
-          <div>
-            <span className="kpi-label">Comandas Activas</span>
-            <strong className="kpi-number">{totalActivas}</strong>
-          </div>
-        </div>
-
-        <div className="pedidos-kpi-card">
-          <div className="kpi-icon-badge amber">
-            <Clock size={18} />
-          </div>
-          <div>
-            <span className="kpi-label">Pendientes de Cocina</span>
-            <strong className="kpi-number text-amber">{pendientesCount}</strong>
-          </div>
-        </div>
-
-        <div className="pedidos-kpi-card">
-          <div className="kpi-icon-badge flame-color">
-            <Flame size={18} />
-          </div>
-          <div>
-            <span className="kpi-label">En Preparación (KDS)</span>
-            <strong className="kpi-number text-orange">{enCocinaCount}</strong>
-          </div>
-        </div>
-
-        <div className="pedidos-kpi-card">
-          <div className="kpi-icon-badge green">
-            <BellRing size={18} />
-          </div>
-          <div>
-            <span className="kpi-label">Listas para Servir</span>
-            <strong className="kpi-number text-emerald">{porServirCount}</strong>
-          </div>
-        </div>
-      </section>
-
-      {/* Barra de Filtros y Búsqueda */}
-      <section className="panel pedidos-filter-panel">
-        <div className="pedidos-filter-row">
-          <div className="status-tabs-strip">
+      {/* Franja roja con filtros */}
+      <div className="sd-red-band">
+        <div className="sd-red-band-content">
+          <div className="sd-red-band-filters">
             <button
               type="button"
-              className={`status-tab-btn ${selectedStatus === 'Todos' ? 'active' : ''}`}
+              className={`sd-red-band-btn ${selectedStatus === 'Todos' ? 'active' : ''}`}
               onClick={() => setSelectedStatus('Todos')}
             >
-              <span>Todas</span>
-              <span className="tab-pill-count">{ordersList.length}</span>
+              TODAS <span>{ordersList.length}</span>
             </button>
             <button
               type="button"
-              className={`status-tab-btn ${selectedStatus === 'Pendiente' ? 'active' : ''}`}
+              className={`sd-red-band-btn ${selectedStatus === 'Pendiente' ? 'active' : ''}`}
               onClick={() => setSelectedStatus('Pendiente')}
             >
-              <Clock size={14} />
-              <span>Pendientes</span>
-              <span className="tab-pill-count">{pendientesCount}</span>
+              PENDIENTES <span>{pendientesCount}</span>
             </button>
             <button
               type="button"
-              className={`status-tab-btn ${selectedStatus === 'En cocina' ? 'active' : ''}`}
+              className={`sd-red-band-btn ${selectedStatus === 'En cocina' ? 'active' : ''}`}
               onClick={() => setSelectedStatus('En cocina')}
             >
-              <Flame size={14} />
-              <span>En Cocina</span>
-              <span className="tab-pill-count">{enCocinaCount}</span>
+              EN COCINA <span>{enCocinaCount}</span>
             </button>
             <button
               type="button"
-              className={`status-tab-btn ${selectedStatus === 'Por servir' ? 'active' : ''}`}
+              className={`sd-red-band-btn ${selectedStatus === 'Por servir' ? 'active' : ''}`}
               onClick={() => setSelectedStatus('Por servir')}
             >
-              <BellRing size={14} />
-              <span>Por Servir</span>
-              <span className="tab-pill-count">{porServirCount}</span>
+              POR SERVIR <span>{porServirCount}</span>
             </button>
             <button
               type="button"
-              className={`status-tab-btn ${selectedStatus === 'Entregado' ? 'active' : ''}`}
+              className={`sd-red-band-btn ${selectedStatus === 'Entregado' ? 'active' : ''}`}
               onClick={() => setSelectedStatus('Entregado')}
             >
-              <CheckCircle2 size={14} />
-              <span>Entregadas</span>
+              ENTREGADAS
             </button>
           </div>
 
-          <div className="pedidos-search-wrap">
-            <Search size={15} />
+          <div className="sd-band-search-box">
+            <Search size={14} aria-hidden="true" />
             <input
               type="text"
               placeholder="Buscar comanda por mesa, cliente o ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              className="sd-band-search-input"
             />
             {searchQuery && (
               <button
                 type="button"
                 className="clear-search-btn"
                 onClick={() => setSearchQuery('')}
+                style={{ background: 'transparent', border: 'none', color: 'var(--sd-white)', cursor: 'pointer' }}
               >
                 <X size={14} />
               </button>
             )}
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* Grid de Comandas KDS */}
-      <section className="pedidos-grid-layout">
-        {loading ? (
-          <div className="panel empty-kds-panel">
-            <RefreshCw size={40} className="spin text-emerald" />
-            <h3>Cargando comandas en vivo...</h3>
-            <p>Sincronizando pedidos activos desde el backend.</p>
+      <div className="sd-page-container sd-pedidos-container">
+        {/* Encabezado con título editorial y contadores */}
+        <header className="sd-pedidos-header" style={{ marginBottom: 28 }}>
+          <h1 className="sd-page-title">
+            PEDIDOS<br />
+            EN VIVO
+          </h1>
+          <div className="sd-tables-counters">
+            <span>{totalActivas} ACTIVAS</span>
+            <span className="sd-counter-sep">·</span>
+            <span>{pendientesCount} PENDIENTES</span>
+            <span className="sd-counter-sep">·</span>
+            <span>{enCocinaCount} EN COCINA</span>
+            <span className="sd-counter-sep">·</span>
+            <span className="sd-counter-alert">{porServirCount} POR SERVIR</span>
           </div>
-        ) : error ? (
-          <div className="panel empty-kds-panel">
-            <AlertCircle size={40} className="text-amber" />
-            <h3>Error al conectar con comandas</h3>
-            <p>{error}</p>
-            <button type="button" className="primary-button inline-flex-center" onClick={recargarPedidos} style={{ marginTop: '0.75rem' }}>
-              <RefreshCw size={14} />
-              <span>Reintentar</span>
-            </button>
-          </div>
-        ) : filteredOrders.length === 0 ? (
-          <div className="panel empty-kds-panel">
-            <ChefHat size={46} className="text-muted" />
-            <h3>No hay comandas que coincidan</h3>
-            <p>No se encontraron comandas con el filtro "{selectedStatus}".</p>
-          </div>
-        ) : (
-          <div className="kds-cards-grid">
-            {filteredOrders.map((order) => {
-              const urgency = getUrgencyClass(order.elapsedMin)
-              const isDelivered = order.state.toLowerCase() === 'entregado'
+        </header>
 
-              return (
-                <div
-                  key={order.id}
-                  className={`kds-order-card state-${order.state.toLowerCase().replace(' ', '-')}`}
-                  onClick={() => setSelectedOrder(order)}
-                >
-                  {/* Header de la Tarjeta */}
-                  <div className="kds-card-top">
-                    <div className="table-badge-group">
-                      <span className="kds-table-badge">{order.table}</span>
-                      <span className="kds-order-id font-mono">{order.id}</span>
-                    </div>
+        {/* Grid de Comandas KDS */}
+        <section className="pedidos-grid-layout">
+          {loading ? (
+            <div className="sd-card sd-empty-box">
+              <RefreshCw size={40} className="spin" style={{ color: 'var(--sd-red)' }} />
+              <p>CARGANDO COMANDAS EN VIVO...</p>
+              <small>Sincronizando pedidos activos desde el backend.</small>
+            </div>
+          ) : error ? (
+            <div className="sd-card sd-empty-box">
+              <AlertCircle size={40} style={{ color: 'var(--sd-gold)' }} />
+              <p>ERROR AL CONECTAR CON COMANDAS</p>
+              <small>{error}</small>
+              <button
+                type="button"
+                className="sd-btn sd-btn-primary"
+                onClick={recargarPedidos}
+                style={{ marginTop: '1rem', minHeight: 38, fontSize: 14 }}
+              >
+                <RefreshCw size={14} />
+                <span>REINTENTAR</span>
+              </button>
+            </div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="sd-card sd-empty-box">
+              <ChefHat size={46} style={{ color: 'var(--sd-text-muted)', opacity: 0.7 }} />
+              <p>NO HAY COMANDAS QUE COINCIDAN</p>
+              <small>No se encontraron comandas con el filtro "{selectedStatus}".</small>
+            </div>
+          ) : (
+            <div className="sd-pedidos-cards-grid">
+              {filteredOrders.map((order) => {
+                const urgency = getUrgencyClass(order.elapsedMin)
+                const isDelivered = order.state.toLowerCase() === 'entregado'
 
-                    <div className={`elapsed-timer-chip ${urgency}`}>
-                      <Timer size={13} />
-                      <span>{order.elapsedMin ? `${order.elapsedMin}m` : 'Nuevo'}</span>
-                    </div>
-                  </div>
+                return (
+                  <div
+                    key={order.id}
+                    className="sd-card sd-pedidos-kds-card"
+                    onClick={() => setSelectedOrder(order)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {/* Header de la Tarjeta */}
+                    <div className="sd-pedidos-card-top">
+                      <div>
+                        <strong className="sd-pedidos-mesa-title">{order.table}</strong>
+                        <span className="sd-pedidos-code-time">
+                          {order.id} · {order.time}
+                        </span>
+                      </div>
 
-                  {/* Comensal & Mesero */}
-                  <div className="kds-meta-strip">
-                    <span>
-                      <User size={12} /> {order.client}
-                    </span>
-                    {order.waiter && (
-                      <span className="waiter-name">Atiende: {order.waiter}</span>
-                    )}
-                  </div>
-
-                  {/* Lista de Ítems */}
-                  <div className="kds-items-container">
-                    {order.items.map((item, idx) => (
-                      <div key={idx} className="kds-item-line">
-                        <div className="item-qty-name">
-                          <span className="kds-qty-badge">x{item.qty}</span>
-                          <span className="kds-item-name">{item.name}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div className={`elapsed-timer-chip ${urgency}`} style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Timer size={13} />
+                          <span>{order.elapsedMin ? `${order.elapsedMin}m` : 'Nuevo'}</span>
                         </div>
-                        {item.notes && (
-                          <span className="kds-item-notes">
-                            <AlertCircle size={11} /> {item.notes}
+                        <StatusBadge status={order.state} />
+                      </div>
+                    </div>
+
+                    {/* Comensal & Mesero */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, color: 'var(--sd-text-muted)' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <User size={12} /> {order.client}
+                      </span>
+                      {order.waiter && (
+                        <span>Atiende: {order.waiter}</span>
+                      )}
+                    </div>
+
+                    {/* Lista de Ítems */}
+                    <div className="sd-pedidos-items-list">
+                      {order.items.map((item, idx) => (
+                        <div key={idx} className="sd-pedidos-item-row">
+                          <div className="sd-pedidos-item-meta">
+                            <span className="sd-pedidos-item-name">
+                              x{item.qty} {item.name}
+                            </span>
+                            {item.notes && (
+                              <small style={{ color: 'var(--sd-gold)', display: 'block', fontSize: 12 }}>
+                                Nota: {item.notes}
+                              </small>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Footer & Acciones KDS */}
+                    <div className="sd-pedidos-card-footer">
+                      <strong className="sd-pedidos-total">{order.total}</strong>
+
+                      <div className="kds-action-btn-wrap">
+                        {!isDelivered ? (
+                          <button
+                            type="button"
+                            className="sd-btn sd-btn-primary"
+                            style={{ minHeight: 36, fontSize: 13, padding: '4px 14px' }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleAdvanceStatus(order.id, order.state)
+                            }}
+                          >
+                            {order.state === 'Pendiente' && (
+                              <>
+                                <Flame size={14} />
+                                <span>A Cocina</span>
+                              </>
+                            )}
+                            {order.state === 'En cocina' && (
+                              <>
+                                <BellRing size={14} />
+                                <span>Marcar Listo</span>
+                              </>
+                            )}
+                            {order.state === 'Por servir' && (
+                              <>
+                                <CheckCircle2 size={14} />
+                                <span>Entregar</span>
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--sd-white)', fontSize: 13, fontWeight: 700 }}>
+                            <CheckCircle2 size={14} /> Servido
                           </span>
                         )}
                       </div>
-                    ))}
-                  </div>
-
-                  {/* Footer & Acciones KDS */}
-                  <div className="kds-card-footer">
-                    <div className="kds-total-box">
-                      <span className="total-label">Total</span>
-                      <strong className="total-val">{order.total}</strong>
-                    </div>
-
-                    <div className="kds-action-btn-wrap">
-                      {!isDelivered ? (
-                        <button
-                          type="button"
-                          className="kds-advance-btn"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleAdvanceStatus(order.id, order.state)
-                          }}
-                        >
-                          {order.state === 'Pendiente' && (
-                            <>
-                              <Flame size={14} />
-                              <span>A Cocina</span>
-                            </>
-                          )}
-                          {order.state === 'En cocina' && (
-                            <>
-                              <BellRing size={14} />
-                              <span>Marcar Listo</span>
-                            </>
-                          )}
-                          {order.state === 'Por servir' && (
-                            <>
-                              <CheckCircle2 size={14} />
-                              <span>Entregar</span>
-                            </>
-                          )}
-                        </button>
-                      ) : (
-                        <span className="kds-delivered-tag">
-                          <CheckCircle2 size={13} /> Servido
-                        </span>
-                      )}
                     </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      </div>
 
       {/* Modal de Detalle de Comanda */}
       {selectedOrder && (
-        <div className="modal-backdrop" onClick={() => setSelectedOrder(null)}>
-          <div className="modal-card kds-detail-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-title-group">
-                <div className="modal-icon-badge">
-                  <FileText size={20} />
-                </div>
+        <div className="sd-modal-backdrop" onClick={() => setSelectedOrder(null)}>
+          <div className="sd-card sd-table-detail-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+            <div className="sd-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <FileText size={24} style={{ color: 'var(--sd-red)' }} />
                 <div>
-                  <h3>Detalle de Comanda {selectedOrder.id}</h3>
-                  <p className="modal-subtitle">
-                    {selectedOrder.table} · {selectedOrder.client} · Registrado a las {selectedOrder.time}
+                  <h3 className="sd-card-title" style={{ margin: 0, fontSize: 24 }}>
+                    Comanda {selectedOrder.id}
+                  </h3>
+                  <p style={{ margin: 0, fontSize: 14, color: 'var(--sd-text-muted)' }}>
+                    {selectedOrder.table} · {selectedOrder.client} · {selectedOrder.time}
                   </p>
                 </div>
               </div>
               <button
-                className="modal-close-btn"
+                type="button"
+                className="sd-topbar-icon-btn"
                 onClick={() => setSelectedOrder(null)}
                 aria-label="Cerrar"
               >
-                <X size={18} />
+                <X size={20} />
               </button>
             </div>
 
-            <div className="modal-body">
-              <div className="kds-modal-items">
-                <h4>Ítems solicitados por la mesa:</h4>
-                <div className="modal-items-list">
-                  {selectedOrder.items.map((it, i) => (
-                    <div key={i} className="modal-item-row">
-                      <div className="modal-item-info">
-                        <strong>{it.qty}x {it.name}</strong>
-                        {it.notes && (
-                          <span className="item-note-tag">Nota: {it.notes}</span>
-                        )}
-                      </div>
-                      <span className="item-sub-amount">{it.subtotal}</span>
+            <div style={{ margin: '20px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <h4 style={{ fontFamily: 'var(--sd-font-heading)', margin: 0, fontSize: 18, color: 'var(--sd-text)' }}>
+                ÍTEMS SOLICITADOS:
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+                {selectedOrder.items.map((it, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', borderRadius: 6 }}>
+                    <div>
+                      <strong style={{ color: 'var(--sd-text)' }}>{it.qty}x {it.name}</strong>
+                      {it.notes && (
+                        <div style={{ fontSize: 12, color: 'var(--sd-gold)' }}>Nota: {it.notes}</div>
+                      )}
                     </div>
-                  ))}
-                </div>
-
-                <div className="modal-total-summary">
-                  <span>Importe Comanda:</span>
-                  <strong>{selectedOrder.total}</strong>
-                </div>
+                    {it.subtotal && <span style={{ color: 'var(--sd-text-muted)' }}>{it.subtotal}</span>}
+                  </div>
+                ))}
               </div>
 
-              <div className="modal-actions-footer">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTop: '1px solid var(--sd-border)' }}>
+                <span style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 18, color: 'var(--sd-text-muted)' }}>IMPORTE COMANDA:</span>
+                <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 24, color: 'var(--sd-text)' }}>{selectedOrder.total}</strong>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, paddingTop: 12, borderTop: '1px solid var(--sd-border)' }}>
+              <button
+                type="button"
+                className="sd-btn sd-btn-secondary"
+                style={{ minHeight: 40, fontSize: 14 }}
+                onClick={() => window.print()}
+              >
+                Imprimir Comanda
+              </button>
+              {selectedOrder.state !== 'Entregado' && (
                 <button
                   type="button"
-                  className="ghost-button small"
-                  onClick={() => window.print()}
+                  className="sd-btn sd-btn-primary"
+                  style={{ minHeight: 40, fontSize: 14 }}
+                  onClick={() => {
+                    handleAdvanceStatus(selectedOrder.id, selectedOrder.state)
+                    setSelectedOrder(null)
+                  }}
                 >
-                  Imprimir Comanda Cocina
+                  Avanzar Estado ({selectedOrder.state})
                 </button>
-                {selectedOrder.state !== 'Entregado' && (
-                  <button
-                    type="button"
-                    className="primary-button small"
-                    onClick={() => {
-                      handleAdvanceStatus(selectedOrder.id, selectedOrder.state)
-                      setSelectedOrder(null)
-                    }}
-                  >
-                    Avanzar Estado ({selectedOrder.state})
-                  </button>
-                )}
-              </div>
+              )}
             </div>
           </div>
         </div>
       )}
-    </main>
+    </div>
   )
 }
