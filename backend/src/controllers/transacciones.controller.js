@@ -69,14 +69,17 @@ async function crear(req, res, next) {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
 
   try {
-    const { transaccion, pedidoLiquidado, mesaLiberada, id_mesa } =
+    const { transaccion, pedidoCerrado, mesaLiberada, id_mesa } =
       await transaccionesService.registrarPago({
         ...parsed.data,
         comensal: aliasDelComensal(req, parsed.data),
         id_usuario: req.user.id_usuario,
       });
 
-    if (pedidoLiquidado) {
+    // Solo si el pedido pasó a 'pagado'. Con la cuenta cubierta pero la comida
+    // sin entregar el pedido sigue en cocina: el cambio se anunciará cuando el
+    // mesero lo marque entregado.
+    if (pedidoCerrado) {
       socketNotifier.notificarCambioEstado({
         id_pedido: transaccion.id_pedido,
         id_mesa,
