@@ -403,11 +403,143 @@ expire).
 - El caché es un extra, no parte del contrato: si Redis está caído, falla o no hay
   `REDIS_URL`, el endpoint responde igual leyendo de la base. **Nunca da 500 por culpa del
   caché.**
-- Toda mutación de la carta (`POST`/`PUT`/`DELETE` de `/platos` y `/categorias`) borra
-  `cache:menu` con `invalidarMenu()`, así que un cambio del admin se ve de inmediato sin
-  esperar el TTL. Con Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la
-  mutación sigue su curso.
+- Toda mutación de la carta (`POST`/`PUT`/`DELETE` de `/platos` y `/categorias`, y las 6
+  escrituras del constructor: pasos e ingredientes) borra `cache:menu` con
+  `invalidarMenu()`, así que un cambio del admin se ve de inmediato sin esperar el TTL. Con
+  Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la mutación sigue su
+  curso.
 - Un error de la base **no** se cachea.
+
+---
+
+## Constructor: pasos e ingredientes (D-04)
+
+Administración de los pasos de un plato personalizable y de las opciones de cada paso.
+Tablas en `database/scripts/13_constructor.sql`. Lo consume el panel del restaurante
+(`constructorApi`).
+
+| Método | Ruta | Roles | Respuesta | Errores |
+|---|---|---|---|---|
+| GET | `/platos/:id/pasos` | admin, cajero, mesero | 200, **array** de pasos con `ingredientes` anidados | 400 id inválido · 404 plato |
+| POST | `/platos/:id/pasos` | **admin** | 201, el paso creado con `ingredientes: []` | 400 · 404 plato · 409 |
+| PUT | `/pasos/:id` | **admin** | 200, el paso actualizado | 400 · 404 · 409 |
+| DELETE | `/pasos/:id` | **admin** | 204 sin cuerpo | 400 · 404 · 409 |
+| POST | `/pasos/:id/ingredientes` | **admin** | 201, el ingrediente creado | 400 · 404 paso · 409 |
+| PUT | `/ingredientes/:id` | **admin** | 200, el ingrediente actualizado | 400 · 404 · 409 |
+| DELETE | `/ingredientes/:id` | **admin** | 204 sin cuerpo | 400 · 404 · 409 |
+
+Escribir el constructor es **solo de admin**. Leerlo lo necesita todo el personal de sala,
+así que el `GET` lo abren también `cajero` y `mesero`; `cocina` y el comensal reciben 403
+(la cocina trabaja con `GET /kds/comandas`, y el comensal ve el constructor dentro de
+`GET /menu`).
+
+> `PATCH /ingredientes/:id/disponible` (agotar o reponer una opción en vivo, con el aviso
+> `ingrediente:disponibilidad` al socket-server) es **D-05** y todavía no existe.
+
+### `id_plato` e `id_paso` salen de la URL
+
+El panel los manda **también en el cuerpo**. Se **ignoran**: el que vale es siempre el de
+la URL. No se responde 400 por mandarlos, porque toda llamada del panel los incluye hoy.
+Mover un paso de plato o un ingrediente de paso no es parte de este contrato.
+
+### Los PUT son parciales
+
+Se manda solo lo que cambia; el resto se conserva. La fila se lee con
+`SELECT … FOR UPDATE` y se escribe **dentro de la misma transacción**, así que las reglas
+cruzadas se validan contra la fila ya mezclada y dos ediciones simultáneas no se pisan.
+
+### GET /platos/:id/pasos
+
+Devuelve el **array pelado**, no `{ pasos }`. Mismo orden y misma forma que
+`obtener_menu_completo`: pasos por `orden`, ingredientes por `id_ingrediente`. Los
+ingredientes agotados **sí** se devuelven (con `disponible: false`), para poder reactivarlos.
+
+```json
+[
+  {
+    "id_paso": 31,
+    "id_plato": 7,
+    "nombre": "Elige tu Base",
+    "orden": 1,
+    "min_sel": 1,
+    "max_sel": 1,
+    "obligatorio": true,
+    "ingredientes": [
+      {
+        "id_ingrediente": 10,
+        "id_paso": 31,
+        "nombre": "Arroz",
+        "precio_extra": "0.00",
+        "calorias": 150,
+        "alergenos": [],
+        "url_imagen": null,
+        "disponible": true
+      }
+    ]
+  }
+]
+```
+
+### Validación (400)
+
+Replica los CHECK de la base para dar un mensaje que se entienda, en vez del 500 genérico
+en el que el manejador central convierte un `23514`:
+
+| Campo | Regla |
+|---|---|
+| `nombre` (paso) | 1 a 60 caracteres |
+| `nombre` (ingrediente) | 1 a 80 caracteres |
+| `orden` | entero ≥ 1 |
+| `min_sel` | entero ≥ 0 |
+| `max_sel` | entero ≥ 1 |
+| `min_sel` / `max_sel` | `min_sel <= max_sel` |
+| `obligatorio` | si es `true`, `min_sel >= 1` |
+| `precio_extra` | número ≥ 0 |
+| `calorias` | entero ≥ 0 |
+| `alergenos` | arreglo de texto |
+| `url_imagen` | hasta 255 caracteres |
+
+**Normalización de lo que manda el panel:**
+
+- `calorias: null` → en el **POST** se omite la columna y actúa el `DEFAULT 0`; en el
+  **PUT** se guarda `0` (la columna es `NOT NULL` y ya tiene valor, no hay default que
+  invocar).
+- `url_imagen: ""` (o solo espacios) → `null` en los dos. Guardar una cadena vacía sería
+  basura que el constructor intentaría cargar como imagen.
+
+### Códigos 409
+
+| Situación | Mensaje |
+|---|---|
+| Otro paso del plato ya ocupa ese `orden` (`uq_pasos_plato_orden`) | `Ya hay otro paso de este plato en esa posición` |
+| Otro paso del plato ya tiene ese nombre (`uq_pasos_plato_nombre`) | `Ya hay otro paso de este plato con ese nombre` |
+| Otro ingrediente del paso ya tiene ese nombre (`uq_ingredientes_paso_nombre`) | `Ya hay otro ingrediente de este paso con ese nombre` |
+| Crear un paso en un plato no personalizable | `Ese plato no es personalizable: actívalo antes de agregarle pasos` |
+| Borrar un paso con ingredientes ya vendidos | `Ese paso tiene ingredientes que ya se usaron en pedidos: no se puede borrar, marca sus ingredientes como no disponibles` |
+| Borrar un ingrediente ya vendido | `Ese ingrediente ya se usó en pedidos: no se puede borrar, márcalo como no disponible` |
+
+`uq_pasos_plato_orden` es `DEFERRABLE INITIALLY DEFERRED`, así que su violación llega en el
+**COMMIT**, no en el `UPDATE`. El servicio lo captura igual y responde 409.
+
+### Regla de borrado: lo vendido no se borra
+
+`detalles_ingredientes.id_ingrediente` es `ON DELETE RESTRICT` a propósito, para que los
+pedidos históricos conserven su composición. Por eso:
+
+- Un ingrediente que ya se usó en algún pedido **no se borra**: responde **409**. Para
+  sacarlo de la carta hay que marcarlo como no disponible (`PATCH …/disponible`, D-05).
+- **Un paso también queda protegido**, de rebote: `ingredientes.id_paso` es
+  `ON DELETE CASCADE`, pero la cascada se topa con ese `RESTRICT` y PostgreSQL aborta todo.
+
+Se eligió responder 409 y no desactivar en silencio: un `DELETE` que en realidad apaga algo
+sería una sorpresa, y el interruptor correcto es el de D-05.
+
+### Caché
+
+Las 6 escrituras invalidan `cache:menu` (los pasos e ingredientes viajan dentro de
+`obtener_menu_completo`). Con Redis caído la escritura sigue su curso: `invalidarMenu()`
+devuelve `false` y no lanza. **No se avisa al socket-server:** no existe un evento de
+"cambió el menú" en `EVENTS.md`, y `/platos` tampoco avisa.
 
 ---
 
