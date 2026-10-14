@@ -10,34 +10,50 @@
  * prefers-color-scheme solo decide la primera vez, si nadie eligió todavía.
  */
 @theme {
-  --color-fondo: #0b0f14;
-  --color-panel: #151b23;
-  --color-panel-alto: #1e2732;
-  --color-borde: #2c3845;
-  --color-texto: #f5f7fa;
-  --color-texto-suave: #9aa8b8;
-  --color-nuevas: #38bdf8;
-  --color-preparacion: #fbbf24;
-  --color-listas: #4ade80;
-  --color-alerta: #f87171;
+  --color-fondo: #0b0b0d;
+  --color-panel: #141417;
+  --color-panel-alto: #1c1c20;
+  --color-borde: #2e2e34;
+  --color-texto: #f6f6f7;
+  --color-texto-suave: #9b9ba3;
+  /*
+   * El acento de la marca es el rojo, y es también el color de "Nuevas": lo que
+   * acaba de entrar es lo que tiene que saltar a la vista desde el otro lado de
+   * la cocina. Listas va en blanco a propósito: ya no es trabajo pendiente, así
+   * que no compite con las otras dos columnas por el color.
+   */
+  --color-marca: #e01f2d;
+  --color-nuevas: #e01f2d;
+  --color-preparacion: #f0b429;
+  --color-listas: #f6f6f7;
+  --color-alerta: #e01f2d;
+
+  /*
+   * Barlow Condensed para lo que se lee de lejos (títulos, cifras, botones) y
+   * Barlow para el detalle. La condensada permite "EN PREPARACIÓN" o "MARCAR
+   * LISTO" en grande sin partir la línea en una columna estrecha.
+   */
+  --font-display: 'Barlow Condensed', 'Barlow', system-ui, sans-serif;
+  --font-sans: 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
 /*
  * Tema claro. Los colores de estado se oscurecen respecto al oscuro para que
- * mantengan contraste contra un fondo blanco: el ámbar y el verde claros sobre
+ * mantengan contraste contra un fondo blanco: el ámbar y el gris claros sobre
  * blanco son ilegibles, y aquí se leen cifras y botones.
  */
 :root[data-tema='claro'] {
-  --color-fondo: #f4f6f9;
+  --color-fondo: #f4f4f6;
   --color-panel: #ffffff;
   --color-panel-alto: #ffffff;
-  --color-borde: #c9d2dd;
-  --color-texto: #10161d;
-  --color-texto-suave: #55657a;
-  --color-nuevas: #0369a1;
-  --color-preparacion: #a16207;
-  --color-listas: #15803d;
-  --color-alerta: #b91c1c;
+  --color-borde: #cfcfd6;
+  --color-texto: #121216;
+  --color-texto-suave: #5c5c66;
+  --color-marca: #b4141f;
+  --color-nuevas: #b4141f;
+  --color-preparacion: #8a6100;
+  --color-listas: #3a3a44;
+  --color-alerta: #b4141f;
 }
 
 html,
@@ -48,12 +64,26 @@ body,
 
 body {
   margin: 0;
-  background-color: var(--color-fondo);
   color: var(--color-texto);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   /* Tipografia base mas grande que la de una web normal: se lee a distancia. */
   font-size: 18px;
   -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Fondo con degradado en vez de una foto: el mockup lleva una imagen de banco
+ * que no se puede usar, y una pantalla de cocina tampoco gana nada con una foto
+ * detrás de las comandas. El degradado da la misma profundidad sin restar
+ * contraste a las tarjetas.
+ */
+body {
+  background-color: var(--color-fondo);
+  background-image:
+    radial-gradient(90rem 55rem at 15% -15%, color-mix(in srgb, var(--color-marca) 16%, transparent), transparent 60%),
+    radial-gradient(70rem 50rem at 110% 110%, color-mix(in srgb, var(--color-marca) 9%, transparent), transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-texto) 4%, transparent), transparent 40%);
+  background-attachment: fixed;
 }
 
 /* En una pantalla tactil de cocina, seleccionar texto por accidente estorba. */
@@ -61,4 +91,30 @@ button {
   user-select: none;
   /* Sin retardo de 300 ms al tocar: en cocina se toca con prisa. */
   touch-action: manipulation;
+}
+
+/*
+ * Titulos, cifras y botones: condensada, en mayusculas y con la letra algo
+ * separada, que es como se leen de lejos sin volverse un bloque gris.
+ */
+.display {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+/*
+ * Para lo que el diseño muestra solo con color: el texto sigue ahí para los
+ * lectores de pantalla (y para el title del elemento).
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
