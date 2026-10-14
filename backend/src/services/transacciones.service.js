@@ -147,10 +147,21 @@ async function registrarPago({
       mesaLiberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, pedido.id_mesa);
     }
 
+    // Saldo de LA MESA después de este cobro, para el aviso de
+    // payment:confirmed (EVENTS.md §8.6: el campo es el de la mesa, no el del
+    // pedido, igual que en el payload de Wompi).
+    //
+    // Se calcula DENTRO de la transacción, con la fila de la mesa todavía
+    // bloqueada: así el número es exactamente el de después de este pago. Leerlo
+    // tras el COMMIT con el pool podría ver el efecto de un cobro ajeno y
+    // anunciar un saldo que no corresponde a este aviso. Es una lectura, no
+    // toma bloqueos nuevos ni alarga los que ya hay.
+    const saldoMesaCentavos = await saldoDeLaMesaEnCentavos(client, pedido.id_mesa);
+
     await client.query('COMMIT');
     // Se devuelve qué pasó, para que el controller avise al socket-server
     // después del commit sin volver a consultar. Un abono parcial no cambió
-    // nada que el tiempo real deba anunciar.
+    // el estado de nada, pero sí el saldo: eso también se anuncia.
     return {
       transaccion: transaccionResult.rows[0],
       // Saldo en cero: la cuenta está cubierta. No implica que el pedido haya
@@ -162,6 +173,7 @@ async function registrarPago({
       pedidoCerrado,
       mesaLiberada,
       id_mesa: pedido.id_mesa,
+      saldoMesaCentavos,
     };
   } catch (err) {
     await client.query('ROLLBACK');
