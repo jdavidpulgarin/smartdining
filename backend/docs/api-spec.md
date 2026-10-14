@@ -682,7 +682,7 @@ Notas de lo que quedó demostrado al escribirlas:
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | POST | /pedidos | **comensal, mesero, admin** | Crea un pedido con sus ítems |
-| GET | /pedidos/activos | admin, cajero, mesero | Pedidos en `recibido`/`en_preparacion` |
+| GET | /pedidos/activos | admin, cajero, mesero | Pedidos **activos** (`recibido`, `en_preparacion`, `listo`, `entregado`) con sus ítems y `mesa_numero` |
 | **GET** | **/pedidos/mesa** | **comensal** | **Pedidos de la mesa de la sesión** *(reemplaza a `/pedidos/historial`)* |
 | **GET** | **/pedidos/mesa/cuenta** | **comensal** | **Cuenta de SU mesa por comensal; la mesa sale del JWT** |
 | GET | /pedidos/:id | autenticado | Detalle con sus ítems; un comensal solo ve los de su mesa (403 si no) |
@@ -782,6 +782,79 @@ Body:
 ```
 
 400: plato inexistente o no disponible, `id_mesa` faltante para staff · 403: rol no permitido
+
+### GET /pedidos/activos — admin, cajero, mesero
+
+Lista para el **panel del restaurante**. Devuelve `{ pedidos }` con cada pedido en el
+**mismo formato** que `GET /pedidos/:id`: sus `detalles`, cada uno con el nombre del plato
+y los ingredientes elegidos. Añade `mesa_numero`.
+
+**Estados que cuentan como activos:** `recibido`, `en_preparacion`, `listo` y `entregado`.
+Quedan fuera `pagado` (ya se cobró y la mesa se liberó) y `cancelado`. El orden sigue
+siendo `creado_en ASC`: los más antiguos primero, que es el orden de atención.
+
+> `listo` y `entregado` **antes no entraban**. Un pedido `listo` es justo el que el mesero
+> tiene que llevar y uno `entregado` el que hay que cobrar: sin ellos el panel perdía de
+> vista los pedidos en el tramo donde más falta hace verlos.
+
+Campos nuevos respecto a lo que devolvía antes:
+
+| Campo | Tipo | Qué es |
+|---|---|---|
+| `mesa_numero` | número | Número de la mesa en el salón (`mesas.numero`), no el `id_mesa` interno |
+| `detalles` | array | Los ítems del pedido, igual que en `GET /pedidos/:id` (antes no venían) |
+
+Todo lo que ya devolvía (`id_pedido`, `id_mesa`, `codigo_pedido`, `estado`, `estado_pago`,
+`total`, `notas_generales`, `creado_en`, `actualizado_en`) **sigue igual**: la consulta usa
+`p.*`, así que solo se agrega.
+
+200:
+
+```json
+{
+  "pedidos": [
+    {
+      "id_pedido": 87,
+      "codigo_pedido": "PED-261013-A1B2C",
+      "id_mesa": 5,
+      "mesa_numero": 12,
+      "estado": "listo",
+      "estado_pago": "pendiente",
+      "total": "43000.00",
+      "notas_generales": null,
+      "creado_en": "2026-10-13T19:40:00.000Z",
+      "detalles": [
+        {
+          "id_detalle": 700,
+          "id_plato": 1001,
+          "plato_nombre": "Bowl Personalizado",
+          "cantidad": 2,
+          "precio_unitario": "20000.00",
+          "precio_extras": "1500.00",
+          "subtotal": "43000.00",
+          "comensal": "Ana",
+          "notas_especiales": "sin cebolla",
+          "ingredientes": [
+            { "id_ingrediente": 1, "nombre": "Arroz", "porcion": "normal", "precio_aplicado": "0.00", "paso": "Elige tu Base" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Son **dos consultas fijas** (los pedidos y los detalles de todos ellos de golpe), no una
+por pedido. Si no hay pedidos activos responde `{ "pedidos": [] }` sin consultar detalles.
+
+403: rol no permitido (`cocina` usa `GET /kds/comandas`; el comensal, `GET /pedidos/mesa`).
+
+> **Sobre el nombre del mesero:** se pidió como opcional, vía
+> `LEFT JOIN usuarios ON usuarios.id_usuario = pedidos.id_usuario`. **No se puede hacer
+> hoy: la tabla `pedidos` no tiene columna `id_usuario`** (ver `database/schema.sql`, tabla
+> 6). Quién interviene en un pedido se guarda en `historial_estados.id_usuario`, no en el
+> pedido. Sacar de ahí "el mesero" obliga a decidir qué fila representa al responsable
+> (¿quién lo creó? ¿quién lo entregó?), así que queda pendiente de acordar y no se inventó.
 
 ### GET /pedidos/:id
 
