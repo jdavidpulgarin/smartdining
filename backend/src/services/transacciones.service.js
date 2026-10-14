@@ -21,7 +21,9 @@ const ESTADO_COBRADO = 'completada';
  *   tr_validar_transaccion_financiera (409 con su mensaje). Ojo: ese trigger
  *   solo rechaza el exceso, no el pago de menos.
  * - Que el pedido pueda pasar a 'pagado' lo valida tr_validar_transicion_estado
- *   contra transiciones_validas (solo es legal desde 'entregado').
+ *   contra transiciones_validas (solo es legal desde 'entregado'); por eso aquí
+ *   solo se intenta cuando el pedido ya está entregado, para que cobrar antes
+ *   no haga ROLLBACK del pago.
  * - Liberar la mesa y rotar su token_qr lo hace el trigger tr_regenerar_token_qr
  *   al ver el pedido en 'pagado': por eso aquí ya NO se toca la tabla mesas.
  *
@@ -109,10 +111,22 @@ async function registrarPago({
       pedidoLiquidado = saldo.rows[0].liquidado === true;
     }
 
-    if (pedidoLiquidado) {
-      // Que el pedido pueda pasar a 'pagado' lo decide el trigger
-      // tr_validar_transicion_estado: solo es legal desde 'entregado'. Cobrar
-      // desde otro estado sigue respondiendo 409 con su mensaje.
+    // REGLA DE CIERRE: un pedido pasa a 'pagado' cuando está entregado Y
+    // totalmente pagado, en cualquiera de los dos órdenes.
+    //
+    // Aquí se resuelve el orden "primero se paga": si la comida todavía no
+    // salió, la transacción queda registrada y el estado NO se toca. Antes se
+    // intentaba el UPDATE a 'pagado' igualmente y el trigger
+    // tr_validar_transicion_estado abortaba con su 409, lo que hacía ROLLBACK de
+    // toda la transacción y **se perdía el pago entero** (medido: pedido en
+    // 'listo' cobrado completo → 409 y cero filas en transacciones). El otro
+    // orden lo cierra pedidosService.actualizarEstado al marcar 'entregado'.
+    //
+    // Es el mismo criterio que ya aplicaba registrarPagoInterno para el pago en
+    // línea; lo que faltaba era que la caja hiciera lo mismo.
+    const pedidoCerrado = pedidoLiquidado && pedido.estado === ESTADO_ENTREGADO;
+
+    if (pedidoCerrado) {
       await client.query(`UPDATE pedidos SET estado = 'pagado' WHERE id_pedido = $1`, [id_pedido]);
       await client.query(
         `INSERT INTO historial_estados
@@ -124,9 +138,12 @@ async function registrarPago({
 
     // El pedido quedó cerrado: si la mesa no tiene otros pedidos abiertos, se
     // libera en esta misma transacción (estado 'disponible' y token_qr en NULL).
-    // Con saldo pendiente la mesa sigue ocupada: el grupo no ha terminado.
+    // Con saldo pendiente la mesa sigue ocupada: el grupo no ha terminado. Y si
+    // se pagó pero la comida no ha salido, tampoco: la mesa se libera al
+    // entregar, nunca solo por haber pagado, para no invalidar el QR de alguien
+    // que sigue esperando su plato.
     let mesaLiberada = false;
-    if (pedidoLiquidado) {
+    if (pedidoCerrado) {
       mesaLiberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, pedido.id_mesa);
     }
 
@@ -136,7 +153,13 @@ async function registrarPago({
     // nada que el tiempo real deba anunciar.
     return {
       transaccion: transaccionResult.rows[0],
+      // Saldo en cero: la cuenta está cubierta. No implica que el pedido haya
+      // cambiado de estado.
       pedidoLiquidado,
+      // El pedido quedó en 'pagado' ahora mismo. Es lo que mira el controller
+      // para anunciar el cambio de estado: anunciar 'pagado' de un pedido que
+      // sigue en cocina le diría al comensal y al KDS algo que no pasó.
+      pedidoCerrado,
       mesaLiberada,
       id_mesa: pedido.id_mesa,
     };

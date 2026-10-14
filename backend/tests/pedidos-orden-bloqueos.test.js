@@ -98,7 +98,30 @@ test('cancelar tambien bloquea la mesa primero', async () => {
   }
 });
 
-for (const estado of ['en_preparacion', 'listo', 'entregado']) {
+test('marcar entregado tambien bloquea la mesa primero', async () => {
+  // Cambio de expectativa: antes 'entregado' no tocaba la mesa. Desde la regla
+  // de cierre puede cerrar el pedido en 'pagado' y liberarla, asi que tiene que
+  // tomar el mismo orden que los pagos (mesa -> pedido) o se reintroduce el
+  // interbloqueo. El bloqueo se toma SIEMPRE, no solo cuando el pedido esta
+  // pagado: se sabe si lo esta despues del UPDATE, y para entonces ya seria
+  // tarde para ordenar los bloqueos.
+  const socket = instalarFakeSocket();
+  const { db, peticion } = patch('entregado', 'listo');
+  try {
+    const res = await peticion;
+    assert.strictEqual(res.status, 200);
+    assert.ok(indiceDe(db, SQL_BLOQUEO_MESA) >= 0, 'se bloquea la mesa');
+    assert.ok(
+      indiceDe(db, SQL_BLOQUEO_MESA) < indiceDe(db, SQL_UPDATE_PEDIDO),
+      'mesa primero, igual que registrarPago y registrarPagoInterno'
+    );
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+for (const estado of ['en_preparacion', 'listo']) {
   test(`una transicion a '${estado}' NO bloquea la mesa`, async () => {
     const socket = instalarFakeSocket();
     const { db, peticion } = patch(estado, 'recibido');

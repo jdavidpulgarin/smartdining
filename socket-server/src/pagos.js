@@ -1,10 +1,13 @@
 const crypto = require('crypto');
-const { salaMesa, SALA_ADMIN } = require('./salas');
+const { salaMesa, SALA_ADMIN, esIdValido } = require('./salas');
 const { log } = require('./log');
+const { exito, fallo } = require('./ack');
 const {
-  ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson,
+  ErrorHttp, enviarJson, enviarAck, leerCuerpoCrudo, parsearJson, exigirClaveInterna,
 } = require('./http');
-const { verificarJwt, esComensalSinAlias, ROL_COMENSAL } = require('./auth');
+const {
+  verificarJwt, esComensalSinAlias, ROL_COMENSAL, MAX_ALIAS,
+} = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
 const { calcularMonto, validarCuenta, MODOS } = require('./cuenta');
 
@@ -161,6 +164,26 @@ function compararTransaccion({ evento, tx, intencion }) {
 const aPesos = (centavos) => centavos / 100;
 
 /**
+ * ÚNICO lugar que arma y emite payment:confirmed (Wompi y cobros de caja).
+ * Así el panel y la mesa reciben siempre el mismo payload, venga de donde venga.
+ */
+function emitirPagoConfirmado(io, {
+  eventId, idMesa, comensal, montoCentavos, saldoCentavos, referencia,
+}) {
+  io.to(SALA_ADMIN).to(salaMesa(idMesa)).emit('payment:confirmed', {
+    eventId,
+    id_mesa: idMesa,
+    comensal: comensal ?? null,
+    monto: aPesos(montoCentavos),
+    saldo_restante: aPesos(saldoCentavos),
+    monto_centavos: montoCentavos,
+    saldo_restante_centavos: saldoCentavos,
+    referencia_externa: referencia ?? null,
+    emitidoEn: new Date().toISOString(),
+  });
+}
+
+/**
  * Capa 6: el pago se registra en el backend (la base es la fuente de verdad)
  * ANTES de anunciarlo. Contrato (pendiente: Daniel):
  *   POST /api/transacciones/internal  (x-internal-key)
@@ -296,16 +319,13 @@ async function recibirEventoPasarela(req, res, ctx) {
 
     // Recién ahora, con el pago guardado en la base, se anuncia. Si el saldo
     // llegó a 0, el backend libera la mesa y avisa por /internal/mesa-liberada.
-    ctx.io.to(SALA_ADMIN).to(salaMesa(intencion.id_mesa)).emit('payment:confirmed', {
+    emitirPagoConfirmado(ctx.io, {
       eventId: tx.id,
-      id_mesa: intencion.id_mesa,
+      idMesa: intencion.id_mesa,
       comensal: intencion.comensal,
-      monto: aPesos(tx.monto_centavos),
-      saldo_restante: aPesos(registro.saldo),
-      monto_centavos: tx.monto_centavos,
-      saldo_restante_centavos: registro.saldo,
-      referencia_externa: evento.referencia,
-      emitidoEn: new Date().toISOString(),
+      montoCentavos: tx.monto_centavos,
+      saldoCentavos: registro.saldo,
+      referencia: evento.referencia,
     });
     return enviarJson(res, 200, { ok: true, duplicado: false, registrado: true });
   } catch (err) {
@@ -317,12 +337,74 @@ async function recibirEventoPasarela(req, res, ctx) {
   }
 }
 
+// Tope de 100 millones de pesos (en centavos): ninguna cuenta real lo alcanza
+// y corta montos absurdos antes de que lleguen a las pantallas.
+const MAX_CENTAVOS = 10_000_000_000;
+const MAX_REFERENCIA = 255;
+
+const esCentavos = (v, minimo) => Number.isSafeInteger(v) && v >= minimo && v <= MAX_CENTAVOS;
+
+/** Valida el payload de un cobro de caja. Devuelve mensaje de error o null. */
+function validarPagoCaja(p) {
+  if (!esIdValido(p.id_mesa)) return 'id_mesa debe ser un entero positivo';
+  if (!esCentavos(p.monto_centavos, 1)) return `monto_centavos debe ser un entero entre 1 y ${MAX_CENTAVOS}`;
+  if (!esCentavos(p.saldo_restante_centavos, 0)) return `saldo_restante_centavos debe ser un entero entre 0 y ${MAX_CENTAVOS}`;
+  if (p.comensal !== undefined && p.comensal !== null
+    && (typeof p.comensal !== 'string' || !p.comensal.trim() || p.comensal.length > MAX_ALIAS)) {
+    return `comensal debe ser un texto de 1 a ${MAX_ALIAS} caracteres o null`;
+  }
+  if (p.referencia_externa !== undefined && p.referencia_externa !== null
+    && (typeof p.referencia_externa !== 'string' || !p.referencia_externa.length || p.referencia_externa.length > MAX_REFERENCIA)) {
+    return `referencia_externa debe ser un texto de 1 a ${MAX_REFERENCIA} caracteres o null`;
+  }
+  if (p.id_transaccion !== undefined && p.id_transaccion !== null && !esIdValido(p.id_transaccion)) {
+    return 'id_transaccion debe ser un entero positivo';
+  }
+  return null;
+}
+
+/**
+ * Cobro de caja (efectivo, datáfono o abono parcial) ya guardado por el
+ * backend: se anuncia con el mismo payment:confirmed que un pago de Wompi.
+ * Solo se reenvían los campos conocidos; el resto del cuerpo se descarta.
+ */
+async function difundirPagoConfirmado(ctx, p) {
+  if (!esEventIdValido(p.eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
+  const errorPayload = validarPagoCaja(p);
+  if (errorPayload) return fallo('PAYLOAD_INVALIDO', errorPayload, { eventId: p.eventId });
+
+  // Doble guardia, como order:created: por eventId (reintento exacto) y por
+  // id_transaccion (el backend reintenta el mismo cobro con otro eventId).
+  // Se reservan ambas claves; si cualquiera ya existía, es un duplicado.
+  const nuevoEvento = await ctx.registro.reservar(`payment:confirmed:${p.eventId}`);
+  const tieneTx = p.id_transaccion !== undefined && p.id_transaccion !== null;
+  const nuevaTx = tieneTx ? await ctx.registro.reservar(`payment:confirmed:tx:${p.id_transaccion}`) : true;
+  if (!nuevoEvento || !nuevaTx) return exito({ eventId: p.eventId, duplicado: true });
+
+  emitirPagoConfirmado(ctx.io, {
+    eventId: p.eventId,
+    idMesa: p.id_mesa,
+    comensal: p.comensal,
+    montoCentavos: p.monto_centavos,
+    saldoCentavos: p.saldo_restante_centavos,
+    referencia: p.referencia_externa,
+  });
+  return exito({ eventId: p.eventId, duplicado: false });
+}
+
 const rutasPagos = {
   'POST /pagos/intencion': crearIntencionPago,
 
   'POST /pagos/webhook': recibirEventoPasarela,
+
+  // No depende de la pasarela: la caja cobra aunque Wompi no esté configurado.
+  'POST /internal/payment-confirmed': async (req, res, ctx) => {
+    exigirClaveInterna(req, ctx.config);
+    const cuerpo = parsearJson(await leerCuerpoCrudo(req));
+    enviarAck(res, await difundirPagoConfirmado(ctx, cuerpo));
+  },
 };
 
 module.exports = {
-  rutasPagos, generarReferencia, compararTransaccion, LIMITE_INTENCIONES,
+  rutasPagos, generarReferencia, compararTransaccion, emitirPagoConfirmado, difundirPagoConfirmado, LIMITE_INTENCIONES,
 };

@@ -55,17 +55,56 @@ terminal. Verificado contra la base real de Jarrison, estado por estado:
 | `listo` | 409 | 409 |
 | `entregado` | **permitido** | 409 |
 
-### Regla de cobro: solo desde `entregado`
+### Regla de cierre: `entregado` **y** pagado, en cualquier orden
 
-`entregado → pagado` es la única transición que llega a `pagado`, así que
-`POST /transacciones` exige que el pedido esté en `entregado`. Cobrar un pedido en
-`recibido`, `en_preparacion` o `listo` responde 409 con el mensaje del trigger. En sala,
-el mesero tiene que marcar `entregado` **antes** de que caja cobre.
+> Un pedido pasa a `estado = 'pagado'` en el momento en que está **entregado** y
+> **totalmente pagado**. Da igual cuál de las dos cosas pase primero.
 
-Además, solo un `estado_transaccion = 'completada'` liquida el pedido: una transacción
-`pendiente`, `fallida` o `reembolsada` se guarda en `transacciones` pero deja el pedido
-en `entregado` (si liquidara, un pago rechazado liberaría la mesa y la cuenta quedaría
-como cobrada).
+`entregado → pagado` sigue siendo la única transición que llega a `pagado` (la valida
+`tr_validar_transicion_estado`), pero **pagar y entregar son dos ejes distintos** desde
+el script 22 de Jarrison (H-03), que separó el estado financiero en la columna
+`pedidos.estado_pago` (`pendiente` | `parcial` | `pagado`). Esa columna la mantiene el
+trigger `tr_sincronizar_estado_pago_pedido` sobre `transacciones`; el backend solo la
+lee, nunca la escribe.
+
+Los dos órdenes existen de verdad y cada uno lo cierra un endpoint distinto:
+
+| Orden | Quién cobra | Quién cierra el pedido |
+|---|---|---|
+| Se entrega y después se cobra | `POST /transacciones` (caja) | el propio cobro, al dejar el saldo en 0 |
+| Se paga y después sale la comida | `POST /transacciones/internal` (pago en línea) o la caja cobrando por adelantado | `PATCH /pedidos/:id/estado` con `entregado` |
+
+- **Cobrar un pedido que aún no se entregó ya no falla.** La transacción se registra
+  (201), `estado_pago` queda en `pagado` y el `estado` de cocina **no se toca**: el
+  pedido sigue su curso. Antes se intentaba el `UPDATE` a `pagado` igualmente, el trigger
+  lo abortaba con 409 y el `ROLLBACK` **se llevaba el pago entero** (medido: pedido en
+  `listo` cobrado completo → 409 y cero filas en `transacciones`).
+- **Marcar `entregado` un pedido con la cuenta ya cubierta lo cierra en `pagado`** en la
+  misma transacción, y libera la mesa si no le quedan otros pedidos abiertos. Sin esto un
+  pago en línea dejaba la mesa `ocupada` con su QR vivo **para siempre**: el pedido nunca
+  volvía a `pagado`, así que seguía contando como abierto y ni el mesero ni la caja
+  podían cerrar la mesa.
+- El cierre pide que **las dos fuentes digan lo mismo**: `estado_pago = 'pagado'` y
+  `obtener_saldo_pendiente(:id) <= 0`. `estado_pago` se recalcula al tocar
+  `transacciones`, así que es esa columna la que podría quedarse atrás respecto del
+  total; con una sola fuente se podría cerrar un pedido con saldo vivo.
+- **La mesa se libera al entregar y pagar, nunca solo al pagar.** Pagar antes de recibir
+  la comida no suelta la mesa ni invalida el QR: el comensal sigue sentado y su sesión
+  tiene que seguir en pie.
+- `historial_estados` guarda **los dos saltos**, no solo el último: `listo → entregado`
+  con las observaciones de quien entregó, y `entregado → pagado` con
+  `'Cuenta ya cubierta al entregar'`.
+- Solo un `estado_transaccion = 'completada'` cuenta para la cuenta: una transacción
+  `pendiente`, `fallida` o `reembolsada` se guarda en `transacciones` pero no mueve
+  `estado_pago` ni cierra nada (si liquidara, un pago rechazado liberaría la mesa y la
+  cuenta quedaría como cobrada).
+
+**Orden de bloqueos.** Como marcar `entregado` puede ahora cerrar el pedido y tocar la
+tabla `mesas`, ese camino bloquea **la mesa antes del pedido**, igual que los dos
+endpoints de pago. Un camino que fuera pedido → mesa se interbloquearía con ellos
+(SQLSTATE `40P01`, medido en 19 de 20 intentos en su momento). Las transiciones del KDS
+(`en_preparacion`, `listo`) no tocan la mesa y por eso no la bloquean: hacerlo
+serializaría sin motivo las comandas de una misma mesa.
 
 ### Regla de cancelación: solo desde `recibido` o `en_preparacion`
 
@@ -536,8 +575,9 @@ Reglas del aviso:
 
 ### Liberación automática
 
-Cuando un pedido queda **`pagado`** (cobro `completada`) o **`cancelado`**, en la misma
-transacción se bloquea la mesa y se cuentan sus pedidos abiertos; si no queda ninguno, se
+Cuando un pedido queda **`pagado`** —por un cobro que lo liquida estando entregado, o
+por entregarlo cuando ya estaba pagado (ver *Regla de cierre*)— o **`cancelado`**, en la
+misma transacción se bloquea la mesa y se cuentan sus pedidos abiertos; si no queda ninguno, se
 libera igual que arriba. El `SELECT … FOR UPDATE` serializa los cierres simultáneos, así
 que **dos pedidos de la misma mesa cerrándose a la vez la liberan una sola vez**. Si no se
 puede leer el conteo, la mesa se queda ocupada (es más seguro que soltarla con pedidos
@@ -796,6 +836,16 @@ Cada cambio queda en `historial_estados` con `estado_anterior`, `estado_nuevo`,
 400 si el estado no existe; **409 si la transición no está en `transiciones_validas`**,
 con el mensaje del trigger.
 
+**`entregado` puede cerrar el pedido.** Si al entregarlo la cuenta ya está cubierta
+(`estado_pago = 'pagado'` y saldo 0, el caso del pago en línea), el pedido pasa a
+`pagado` en la misma transacción y la mesa se libera si no le quedan otros pedidos
+abiertos. La respuesta lo dice: `estado` llega como `"pagado"` —no como el `"entregado"`
+que se pidió—, `estado_anterior` es el estado del que se venía de verdad, y aparecen
+`cerradoPorPago: true` y `mesaLiberada: true`. El `order:status` que sale hacia el
+socket-server anuncia `pagado`, así que el KDS saca la comanda del tablero y el comensal
+ve su pedido cerrado. Con cuenta pendiente o abono parcial, el pedido se queda en
+`entregado` y la mesa sigue `ocupada`. Ver *Regla de cierre*.
+
 > Punto de integración con Roberto: en el código (marcado con un comentario `NOTA`)
 > es donde se debe emitir `order:created` / `order:status` hacia el socket-server.
 
@@ -1014,12 +1064,15 @@ Body:
 
 201: fila insertada en `transacciones`.
 
-**El pedido debe estar en `entregado`**: es la única transición que lleva a `pagado`.
-Cobrar desde otro estado responde 409 con el mensaje del trigger (ver *Regla de cobro*).
+**Se puede cobrar en cualquier estado menos `cancelado`.** El pedido pasa a `pagado`
+solo si ya estaba en `entregado`; si todavía está en cocina, el pago queda registrado
+(201), `estado_pago` pasa a `pagado` y el `estado` no se toca: lo cerrará el `PATCH` a
+`entregado` (ver *Regla de cierre*). Esta ruta ya **no** responde 409 por cobrar antes
+de entregar — antes lo hacía y el pago se perdía con el `ROLLBACK`.
 
 **Solo `estado_transaccion = 'completada'` liquida el pedido.** Con `pendiente`,
-`fallida` o `reembolsada` la transacción se registra igual (201) pero el pedido se queda
-en `entregado` y la mesa no se libera, así que se puede reintentar el cobro.
+`fallida` o `reembolsada` la transacción se registra igual (201) pero el saldo no baja,
+el pedido no se cierra y la mesa no se libera, así que se puede reintentar el cobro.
 
 **Los pagos de un mismo pedido se serializan (H-01).** Al abrir la transacción se bloquea
 la fila de la mesa y después la del pedido (`SELECT … FOR UPDATE`), antes de calcular el
@@ -1038,8 +1091,8 @@ esperando la mesa mientras la pasarela tiene la mesa esperando el pedido.
 > Jarrison (`database/`) y cerraría el hueco también para un INSERT directo a la base.
 
 **Se admiten abonos parciales.** Un cobro `completada` por menos del saldo se registra
-(201) y **no** cambia el pedido ni la mesa: el pedido pasa a `pagado` únicamente cuando
-el saldo llega a **0** y está en `entregado`. Tras insertar la transacción, el backend
+(201) y **no** cambia el estado del pedido ni el de la mesa: el pedido pasa a `pagado`
+únicamente cuando el saldo llega a **0** y está en `entregado`. Tras insertar la transacción, el backend
 le pregunta el saldo a la base (`obtener_saldo_pendiente`) dentro de la misma
 transacción SQL, así que la cuenta la cierra la base y no una suma en JavaScript.
 
@@ -1179,8 +1232,9 @@ Body:
 - Un pedido pasa a `pagado` **solo si se cumplen las dos cosas**: su saldo llegó a **0**
   **y** ya estaba en **`entregado`** (es la única transición que acepta
   `tr_validar_transicion_estado`). Si todavía está en cocina, el pago queda registrado y
-  el pedido sigue su curso; cuando llegue a `entregado` su saldo ya será 0 y la caja no
-  volverá a cobrarlo. El cambio se registra en `historial_estados` con `id_usuario`
+  el pedido sigue su curso; **al marcarlo `entregado` se cierra en `pagado` y la mesa se
+  libera** (ver *Regla de cierre*), y la caja no vuelve a cobrarlo porque su saldo ya es
+  0. El cambio se registra en `historial_estados` con `id_usuario`
   **NULL** y `observaciones` `"Pago en linea"`: no lo cobró una persona.
 - **La mesa se libera solo si algún pedido llegó a `pagado` por este pago y a la mesa no
   le queda ningún otro pedido abierto**, todo en la misma transacción. Dos consecuencias
@@ -1262,6 +1316,7 @@ es el único sitio donde se decide el status. Traduce lo que lanza PostgreSQL as
 | Error de negocio del backend (`{ status, message }`) | ese status | su mensaje |
 | `RAISE EXCEPTION` de un trigger (**P0001**) | **409** | el mensaje del trigger, tal cual — está escrito para leerse ("Transición de estado no autorizada: de \"listo\" hacia \"en_preparacion\"") |
 | Error de **datos** de PostgreSQL (**clase 22**: 22003 desbordamiento numérico, 22001 texto largo, 22012 división por cero, 22P02 sintaxis…) | **422** | `No se pudo registrar esta operación: un dato está fuera del rango permitido. Avisa al equipo.` |
+| **Choque de concurrencia**: **40P01** (deadlock) y **40001** (fallo de serialización) | **409** | `La operación chocó con otra en curso, vuelve a intentarlo` |
 | Cualquier otro error de PostgreSQL (CHECK 23514, FK 23503, unique 23505…) o inesperado | **500** | `Error interno del servidor` |
 
 **Por qué 422 y no 500 en la clase 22.** Un dato que no cabe no es una caída del
@@ -1280,6 +1335,46 @@ servidor junto al método y la ruta.
 > minutos la desborda. Se cruza cuando el tiempo real supera ~101× el estimado (unas 8 h
 > para un plato de 5 min). El arreglo de fondo es ampliar esa precisión en `database/`;
 > hasta entonces, el KDS al menos muestra un mensaje que se entiende.
+
+### El 409 de concurrencia: el único que se puede reintentar
+
+`La operación chocó con otra en curso, vuelve a intentarlo`
+
+Significa que PostgreSQL abortó la transacción porque chocó con otra que corría a la vez,
+no que la petición estuviera mal:
+
+- **40P01** `deadlock_detected`: dos transacciones se esperaban en círculo y el servidor
+  mató a una de las dos.
+- **40001** `serialization_failure`: la transacción no se pudo serializar con otra
+  concurrente.
+
+**El cliente puede reintentar la misma petición una vez**, y es el único 4xx del que eso
+se puede decir: un 409 de trigger (P0001), un 422 o un 400 van a fallar igual por mucho
+que se insista. Una vez, no en bucle: si el segundo intento también choca, hay algo que
+mirar en el servidor y conviene mostrarlo al usuario en vez de seguir golpeando. En un
+cobro, reintentar es seguro porque la transacción abortada **no dejó nada escrito** (el
+`ROLLBACK` es completo); un pago en línea además lleva su `referencia_externa` con índice
+único, así que un reintento se detecta como duplicado.
+
+Antes estos dos códigos caían en el 500 genérico, que empuja justo a lo contrario:
+parecía una caída del servidor y no una colisión pasajera.
+
+Son **solo esos dos**, no la clase 40 entera: `40002` (violación de integridad diferida)
+y `40003` (resultado de la transacción desconocido) siguen dando 500, porque reintentar a
+ciegas con un resultado desconocido es lo que cobra dos veces.
+
+El mensaje es siempre el mismo y no dice qué filas ni qué transacción: el texto real de
+PostgreSQL nombra procesos, relaciones y modos de bloqueo (`el proceso 12345 espera
+ShareLock en la transacción 678; bloqueado por el proceso 12346`), que es un mapa del
+esquema y de la carga del servidor. El detalle completo —código, `detail` y `where`— se
+registra en el log del servidor junto al método y la ruta, igual que en el 422.
+
+> Esto es una red de seguridad, no el arreglo: el camino normal es que no haya deadlocks.
+> El backend toma los bloqueos **siempre en el mismo orden** (la mesa antes del pedido,
+> los pedidos por `id_pedido`) en los dos endpoints de pago y en los cambios de estado que
+> cierran un pedido, y está medido con `npm run test:integracion`: **0 deadlocks de 20
+> intentos**. El 409 cubre lo que se escape por ahí — un `INSERT` directo a la base, una
+> ruta nueva que se despiste, o un bloqueo que tome un trigger de `database/`.
 
 ---
 
