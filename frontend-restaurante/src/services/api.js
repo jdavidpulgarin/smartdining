@@ -732,12 +732,169 @@ export const constructorApi = {
 }
 
 /**
- * RF-21 (Reportes):
- * GET /api/reportes?rango=hoy|semana|mes
+ * CONTRATOS PENDIENTES PARA DANIEL (Rutas que no existen aún en backend):
+ * 
+ * 1. RF-21 (Reportes):
+ *    GET /api/reportes?rango=hoy|semana|mes
+ *    Rol requerido: admin
+ *    Respuesta esperada: { totalVentas, totalPedidos, tiempoCocinaPromedio, ocupacionMesas, ticketPromedio, topPlatos, metodosPago }
+ *    Vistas SQL implementadas en database/scripts/24_vistas_reportes.sql:
+ *    - v_ventas_diarias, v_ingredientes_top, v_platos_top, v_tiempos_kds
  */
+function generarReporteFallback(rango = 'hoy') {
+  if (rango === 'semana') {
+    return {
+      isFallback: true,
+      rango: 'semana',
+      totalVentas: '$8,940.00',
+      totalPedidos: 242,
+      pedidosLiquidados: 236,
+      tiempoCocinaPromedio: '13.1 min',
+      ocupacionMesas: '76%',
+      ticketPromedio: '$36.94',
+      kdsAlertsCount: 8,
+      topPlatos: [
+        { name: 'Hamburguesa Smart Angus', category: 'Hamburguesas', qty: 114, total: '$2,622.00', percentage: 95 },
+        { name: 'Bowl Personalizado', category: 'Arma tu plato', qty: 86, total: '$1,806.00', percentage: 75 },
+        { name: 'Pizza Margherita Smart', category: 'Pizzas', qty: 72, total: '$1,296.00', percentage: 60 },
+        { name: 'Papas Rústicas Trufadas', category: 'Acompañamientos', qty: 65, total: '$552.50', percentage: 52 },
+        { name: 'Limonada de Coco', category: 'Bebidas', qty: 58, total: '$406.00', percentage: 46 },
+      ],
+      metodosPago: [
+        { metodo: 'Tarjeta', porcentaje: 54, monto: '$4,827.60', color: '#10b981' },
+        { metodo: 'Efectivo', porcentaje: 28, monto: '$2,503.20', color: '#3b82f6' },
+        { metodo: 'Transferencia', porcentaje: 18, monto: '$1,609.20', color: '#a855f7' },
+      ],
+      horasPico: [
+        { hora: '12:00 - 13:00', volumen: 70 },
+        { hora: '13:00 - 14:00', volumen: 95 },
+        { hora: '14:00 - 15:00', volumen: 55 },
+        { hora: '19:00 - 20:00', volumen: 82 },
+        { hora: '20:00 - 21:00', volumen: 90 },
+      ],
+      topIngredientes: [
+        { id_ingrediente: 1, nombre_ingrediente: 'Carne Angus 150g', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 142, porciones_extra: 34, porciones_normal: 108, ingresos_extras_recaudados: '$102.00' },
+        { id_ingrediente: 4, nombre_ingrediente: 'Queso Cheddar Fundido', nombre_paso: 'Queso y Salsas', nombre_plato: 'Bowl Personalizado', veces_solicitado: 118, porciones_extra: 28, porciones_normal: 90, ingresos_extras_recaudados: '$56.00' },
+        { id_ingrediente: 2, nombre_ingrediente: 'Pollo Crispy Apanado', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 89, porciones_extra: 12, porciones_normal: 77, ingresos_extras_recaudados: '$30.00' },
+        { id_ingrediente: 7, nombre_ingrediente: 'Tocineta Ahumada Crispy', nombre_paso: 'Toppings & Crunch', nombre_plato: 'Bowl Personalizado', veces_solicitado: 84, porciones_extra: 42, porciones_normal: 42, ingresos_extras_recaudados: '$84.00' },
+        { id_ingrediente: 9, nombre_ingrediente: 'Aguacate Hass Laminado', nombre_paso: 'Vegetales & Frescura', nombre_plato: 'Bowl Personalizado', veces_solicitado: 76, porciones_extra: 22, porciones_normal: 54, ingresos_extras_recaudados: '$44.00' },
+      ],
+      tiemposKds: [
+        { fecha: 'Últimos 7 días', platos_preparados: 256, tiempo_estimado_promedio_min: 15.0, tiempo_real_promedio_min: 13.1, variacion_promedio_porcentaje: -12.7 },
+        { fecha: 'Día Pico (Sábado)', platos_preparados: 68, tiempo_estimado_promedio_min: 15.0, tiempo_real_promedio_min: 14.2, variacion_promedio_porcentaje: -5.3 },
+      ],
+    }
+  }
+
+  if (rango === 'mes') {
+    return {
+      isFallback: true,
+      rango: 'mes',
+      totalVentas: '$38,420.00',
+      totalPedidos: 1045,
+      pedidosLiquidados: 1022,
+      tiempoCocinaPromedio: '13.5 min',
+      ocupacionMesas: '81%',
+      ticketPromedio: '$36.76',
+      kdsAlertsCount: 26,
+      topPlatos: [
+        { name: 'Hamburguesa Smart Angus', category: 'Hamburguesas', qty: 480, total: '$11,040.00', percentage: 98 },
+        { name: 'Bowl Personalizado', category: 'Arma tu plato', qty: 375, total: '$7,875.00', percentage: 80 },
+        { name: 'Pizza Margherita Smart', category: 'Pizzas', qty: 310, total: '$5,580.00', percentage: 65 },
+        { name: 'Papas Rústicas Trufadas', category: 'Acompañamientos', qty: 280, total: '$2,380.00', percentage: 55 },
+        { name: 'Limonada de Coco', category: 'Bebidas', qty: 250, total: '$1,750.00', percentage: 48 },
+      ],
+      metodosPago: [
+        { metodo: 'Tarjeta', porcentaje: 56, monto: '$21,515.20', color: '#10b981' },
+        { metodo: 'Efectivo', porcentaje: 26, monto: '$9,989.20', color: '#3b82f6' },
+        { metodo: 'Transferencia', porcentaje: 18, monto: '$6,915.60', color: '#a855f7' },
+      ],
+      horasPico: [
+        { hora: '12:00 - 13:00', volumen: 75 },
+        { hora: '13:00 - 14:00', volumen: 96 },
+        { hora: '14:00 - 15:00', volumen: 58 },
+        { hora: '19:00 - 20:00', volumen: 85 },
+        { hora: '20:00 - 21:00', volumen: 92 },
+      ],
+      topIngredientes: [
+        { id_ingrediente: 1, nombre_ingrediente: 'Carne Angus 150g', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 590, porciones_extra: 140, porciones_normal: 450, ingresos_extras_recaudados: '$420.00' },
+        { id_ingrediente: 4, nombre_ingrediente: 'Queso Cheddar Fundido', nombre_paso: 'Queso y Salsas', nombre_plato: 'Bowl Personalizado', veces_solicitado: 480, porciones_extra: 110, porciones_normal: 370, ingresos_extras_recaudados: '$220.00' },
+        { id_ingrediente: 2, nombre_ingrediente: 'Pollo Crispy Apanado', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 380, porciones_extra: 50, porciones_normal: 330, ingresos_extras_recaudados: '$125.00' },
+        { id_ingrediente: 7, nombre_ingrediente: 'Tocineta Ahumada Crispy', nombre_paso: 'Toppings & Crunch', nombre_plato: 'Bowl Personalizado', veces_solicitado: 360, porciones_extra: 180, porciones_normal: 180, ingresos_extras_recaudados: '$360.00' },
+        { id_ingrediente: 9, nombre_ingrediente: 'Aguacate Hass Laminado', nombre_paso: 'Vegetales & Frescura', nombre_plato: 'Bowl Personalizado', veces_solicitado: 320, porciones_extra: 95, porciones_normal: 225, ingresos_extras_recaudados: '$190.00' },
+      ],
+      tiemposKds: [
+        { fecha: 'Mes Corriente', platos_preparados: 1120, tiempo_estimado_promedio_min: 15.0, tiempo_real_promedio_min: 13.5, variacion_promedio_porcentaje: -10.0 },
+        { fecha: 'Mes Anterior', platos_preparados: 980, tiempo_estimado_promedio_min: 15.0, tiempo_real_promedio_min: 14.1, variacion_promedio_porcentaje: -6.0 },
+      ],
+    }
+  }
+
+  // Por defecto 'hoy'
+  return {
+    isFallback: true,
+    rango: 'hoy',
+    totalVentas: '$1,280.00',
+    totalPedidos: 34,
+    pedidosLiquidados: 32,
+    tiempoCocinaPromedio: '12.4 min',
+    ocupacionMesas: '72%',
+    ticketPromedio: '$37.64',
+    kdsAlertsCount: 2,
+    topPlatos: [
+      { name: 'Hamburguesa Smart Angus', category: 'Hamburguesas', qty: 18, total: '$414.00', percentage: 90 },
+      { name: 'Bowl Personalizado', category: 'Arma tu plato', qty: 14, total: '$294.00', percentage: 70 },
+      { name: 'Pizza Margherita Smart', category: 'Pizzas', qty: 11, total: '$198.00', percentage: 55 },
+      { name: 'Papas Rústicas Trufadas', category: 'Acompañamientos', qty: 10, total: '$85.00', percentage: 50 },
+      { name: 'Limonada de Coco', category: 'Bebidas', qty: 9, total: '$63.00', percentage: 45 },
+    ],
+    metodosPago: [
+      { metodo: 'Tarjeta', porcentaje: 52, monto: '$665.60', color: '#10b981' },
+      { metodo: 'Efectivo', porcentaje: 30, monto: '$384.00', color: '#3b82f6' },
+      { metodo: 'Transferencia', porcentaje: 18, monto: '$230.40', color: '#a855f7' },
+    ],
+    horasPico: [
+      { hora: '12:00 - 13:00', volumen: 65 },
+      { hora: '13:00 - 14:00', volumen: 92 },
+      { hora: '14:00 - 15:00', volumen: 48 },
+      { hora: '19:00 - 20:00', volumen: 78 },
+      { hora: '20:00 - 21:00', volumen: 85 },
+    ],
+    topIngredientes: [
+      { id_ingrediente: 1, nombre_ingrediente: 'Carne Angus 150g', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 28, porciones_extra: 6, porciones_normal: 22, ingresos_extras_recaudados: '$18.00' },
+      { id_ingrediente: 4, nombre_ingrediente: 'Queso Cheddar Fundido', nombre_paso: 'Queso y Salsas', nombre_plato: 'Bowl Personalizado', veces_solicitado: 24, porciones_extra: 5, porciones_normal: 19, ingresos_extras_recaudados: '$10.00' },
+      { id_ingrediente: 2, nombre_ingrediente: 'Pollo Crispy Apanado', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 19, porciones_extra: 3, porciones_normal: 16, ingresos_extras_recaudados: '$7.50' },
+      { id_ingrediente: 7, nombre_ingrediente: 'Tocineta Ahumada Crispy', nombre_paso: 'Toppings & Crunch', nombre_plato: 'Bowl Personalizado', veces_solicitado: 16, porciones_extra: 8, porciones_normal: 8, ingresos_extras_recaudados: '$16.00' },
+      { id_ingrediente: 9, nombre_ingrediente: 'Aguacate Hass Laminado', nombre_paso: 'Vegetales & Frescura', nombre_plato: 'Bowl Personalizado', veces_solicitado: 15, porciones_extra: 4, porciones_normal: 11, ingresos_extras_recaudados: '$8.00' },
+    ],
+    tiemposKds: [
+      { fecha: 'Hoy (Servicio Activo)', platos_preparados: 38, tiempo_estimado_promedio_min: 15.0, tiempo_real_promedio_min: 12.4, variacion_promedio_porcentaje: -17.3 },
+      { fecha: 'Ayer', platos_preparados: 42, tiempo_estimado_promedio_min: 15.0, tiempo_real_promedio_min: 13.0, variacion_promedio_porcentaje: -13.3 },
+    ],
+  }
+}
+
 export const reportesApi = {
+  /**
+   * Obtiene métricas y analíticas del restaurante: GET /api/reportes?rango=hoy|semana|mes
+   * D-07: Si el backend aún no expone la ruta (404/red) o VITE_USE_MOCKS es true,
+   * se retorna fallback estructurado basado en las vistas SQL de 24_vistas_reportes.sql
+   */
   async obtenerReporte(rango = 'hoy') {
-    return apiFetch(`/reportes?rango=${encodeURIComponent(rango)}`)
+    const useMocks = import.meta.env?.VITE_USE_MOCKS === 'true'
+    if (!useMocks) {
+      try {
+        const data = await apiFetch(`/reportes?rango=${encodeURIComponent(rango)}`)
+        return { ...data, isFallback: false }
+      } catch (err) {
+        // Si es 401 o 429, dejamos que apiFetch gestione la sesión/rate limit
+        if (err.status === 401 || err.status === 429) {
+          throw err
+        }
+        // En caso de 404 (endpoint aún no desplegado en backend) o error de conexión, usamos fallback controlado
+      }
+    }
+    return generarReporteFallback(rango)
   },
 }
 
