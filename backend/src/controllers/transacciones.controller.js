@@ -70,35 +70,75 @@ async function crear(req, res, next) {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
 
   try {
-    const { transaccion, pedidoCerrado, mesaLiberada, id_mesa } =
-      await transaccionesService.registrarPago({
-        ...parsed.data,
-        comensal: aliasDelComensal(req, parsed.data),
-        id_usuario: req.user.id_usuario,
-      });
+    const {
+      transaccion, pedidoCerrado, mesaLiberada, id_mesa, saldoMesaCentavos, estadoTransaccion,
+    } = await transaccionesService.registrarPago({
+      ...parsed.data,
+      comensal: aliasDelComensal(req, parsed.data),
+      id_usuario: req.user.id_usuario,
+    });
 
-    // Solo si el pedido pasó a 'pagado'. Con la cuenta cubierta pero la comida
-    // sin entregar el pedido sigue en cocina: el cambio se anunciará cuando el
-    // mesero lo marque entregado.
-    if (pedidoCerrado) {
-      socketNotifier.notificarCambioEstado({
-        id_pedido: transaccion.id_pedido,
-        id_mesa,
-        estado_anterior: 'entregado',
-        estado: 'pagado',
-      });
+    // AVISOS AL TIEMPO REAL. Todos van DESPUÉS del COMMIT y en una cadena
+    // secuencial que esta respuesta NO espera: el 201 sale de inmediato porque
+    // el cobro ya está guardado y el tiempo real es un extra. Se encadenan en
+    // vez de lanzarse sueltos porque su ORDEN importa (ver el aviso 1).
+    const avisos = [];
+
+    // (1) El cobro en sí. Va PRIMERO, antes de mesa-liberada: mesa-liberada
+    // desconecta a los comensales de la mesa y, si saliera antes, la mesa
+    // nunca llegaría a ver el pago que acaba de hacer (EVENTS.md §8.6).
+    //
+    // Solo si el dinero entró de verdad: un pago 'pendiente', 'fallido' o
+    // 'reembolsado' no es un cobro y no se anuncia como tal. El pago EN LÍNEA
+    // tampoco pasa por aquí —va por crearInterno— y allí el aviso lo emite el
+    // propio socket-server desde su webhook: avisar también desde el backend
+    // anunciaría el mismo pago dos veces.
+    if (estadoTransaccion === ESTADO_COBRADO) {
+      avisos.push(() =>
+        socketNotifier.notificarPagoConfirmado({
+          id_mesa,
+          // Centavos enteros: el contrato no acepta decimales y sumar abonos
+          // en coma flotante desajustaría el saldo.
+          monto_centavos: Math.round(Number(transaccion.monto) * 100),
+          // Saldo de la MESA (no el del pedido), calculado dentro de la
+          // transacción con la fila de la mesa todavía bloqueada.
+          saldo_restante_centavos: saldoMesaCentavos,
+          comensal: transaccion.comensal ?? null,
+          referencia_externa: transaccion.referencia_externa ?? null,
+          id_transaccion: transaccion.id_transaccion ?? null,
+        })
+      );
     }
 
-    // La mesa se liberó en la transacción del cobro solo si no le quedaban
+    // (2) Solo si el pedido pasó a 'pagado'. Con la cuenta cubierta pero la
+    // comida sin entregar el pedido sigue en cocina: el cambio se anunciará
+    // cuando el mesero lo marque entregado.
+    if (pedidoCerrado) {
+      avisos.push(() =>
+        socketNotifier.notificarCambioEstado({
+          id_pedido: transaccion.id_pedido,
+          id_mesa,
+          estado_anterior: 'entregado',
+          estado: 'pagado',
+        })
+      );
+    }
+
+    // (3) La mesa se liberó en la transacción del cobro solo si no le quedaban
     // pedidos abiertos. Se avisa para que el socket-server cierre esa sesión:
     // aislado, porque la liberación ya está hecha y no se revierte.
     // H-22: el motivo es 'pagada', no el 'liberada' por omisión. La mesa se
     // liberó porque el grupo pagó en caja, igual que si hubiera pagado en
     // línea; las pantallas distinguen las dos cosas.
     if (mesaLiberada) {
-      socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA);
-      aliasComensal.olvidarMesa(id_mesa);
+      avisos.push(() => socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA));
     }
+
+    socketNotifier.encadenarAvisos(avisos);
+
+    // Esto no es un aviso al socket-server sino estado en memoria de este
+    // proceso, así que no entra en la cadena: se olvida ya mismo.
+    if (mesaLiberada) aliasComensal.olvidarMesa(id_mesa);
 
     return res.status(201).json(transaccion);
   } catch (err) {

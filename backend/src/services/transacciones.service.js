@@ -174,6 +174,10 @@ async function registrarPago({
       mesaLiberada,
       id_mesa: pedido.id_mesa,
       saldoMesaCentavos,
+      // El estado con el que QUEDÓ la transacción, ya con el valor por omisión
+      // aplicado. Lo mira el controller para no anunciar como cobro un pago
+      // 'pendiente', 'fallido' o 'reembolsado': ese dinero no entró.
+      estadoTransaccion: estado,
     };
   } catch (err) {
     await client.query('ROLLBACK');
