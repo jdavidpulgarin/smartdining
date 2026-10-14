@@ -265,6 +265,23 @@ export function comandasDeColumna(estado, estadoColumna) {
 }
 
 /**
+ * Cuantas comandas tiene la cocina encima ahora mismo.
+ *
+ * Es la cifra de la barra de resumen. Cuenta solo lo que esta en el tablero
+ * (las tres columnas) y no lo que ya salio, aunque siga en memoria: el numero
+ * tiene que coincidir con la suma de los tres contadores que el cocinero ve
+ * justo debajo, o deja de significar nada.
+ *
+ * Incluye el pase a proposito: una comanda lista pero sin recoger sigue
+ * ocupando sitio y sigue siendo una mesa esperando.
+ */
+export function contarComandasActivas(estado) {
+  const comandas = estado?.comandas
+  if (!Array.isArray(comandas)) return 0
+  return comandas.filter((c) => ESTADOS_EN_TABLERO.includes(c?.estado)).length
+}
+
+/**
  * Minutos que lleva la comanda.
  *
  * Parte de `minutos_transcurridos`, que calcula la base al cargar, y le suma lo

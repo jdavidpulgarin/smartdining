@@ -1,6 +1,5 @@
 import {
   AlertCircle,
-  ChefHat,
   LogOut,
   Maximize,
   Minimize,
@@ -11,11 +10,13 @@ import {
   VolumeX,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import BarraResumen from '../components/BarraResumen'
 import Columna from '../components/Columna'
 import IndicadorConexion from '../components/IndicadorConexion'
+import Logo from '../components/Logo'
 import { MENSAJE_SESION_CAIDA, useAuth } from '../context/AuthContext'
 import { cerrarSonido, prepararSonido, sonarAvisoDeComanda } from '../lib/aviso-sonoro'
-import { COLUMNAS, comandasDeColumna } from '../lib/comandas'
+import { COLUMNAS, comandasDeColumna, contarComandasActivas } from '../lib/comandas'
 import {
   CLAVE_SONIDO,
   CLAVE_TEMA,
@@ -115,67 +116,89 @@ export default function Tablero() {
     }
   }
 
+  // Solo-icono: en la cabecera del mockup lo unico que lleva texto es SALIR,
+  // que es el boton del que mas conviene no dudar. El resto se explica con el
+  // title y con aria-label, que ademas es lo que lee un lector de pantalla.
   const botonBarra =
-    'flex h-12 items-center gap-2 rounded-lg border border-[color:var(--color-borde)] px-3 text-base font-semibold'
+    'grid h-12 w-12 place-items-center rounded-xl border border-[color:var(--color-borde)] text-[color:var(--color-texto)]'
+
+  // El reloj de pared se cuelga del mismo latido de un segundo que los
+  // cronometros de las tarjetas: ni un timer mas.
+  const horaDePared = new Date(ahora).toLocaleTimeString('es-CO', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+
+  const activas = contarComandasActivas(estado)
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--color-borde)] bg-[color:var(--color-panel)] px-5 py-3">
-        <div className="flex items-center gap-3">
-          <ChefHat size={30} className="text-[color:var(--color-listas)]" aria-hidden="true" />
-          <div>
-            <h1 className="text-2xl font-bold leading-none">Cocina</h1>
-            <p className="text-sm text-[color:var(--color-texto-suave)]">
-              {usuario?.nombre || usuario?.email} · {usuario?.rol}
-            </p>
-          </div>
+        <div className="flex flex-wrap items-center gap-4">
+          <Logo
+            texto="Cocina"
+            titulo={
+              usuario ? `${usuario.nombre || usuario.email} · ${usuario.rol}` : undefined
+            }
+          />
+          <IndicadorConexion conectado={conectado} />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <IndicadorConexion conectado={conectado} />
+          <p className="display mr-2 text-3xl font-bold tabular-nums" aria-label="Hora">
+            {horaDePared}
+          </p>
 
           <button
             type="button"
             onClick={alternarSonido}
             className={botonBarra}
             aria-pressed={sonido}
+            aria-label={sonido ? 'Silenciar el aviso de comanda nueva' : 'Activar el aviso sonoro'}
             title={sonido ? 'Silenciar el aviso de comanda nueva' : 'Activar el aviso sonoro'}
           >
-            {sonido ? <Volume2 size={18} aria-hidden="true" /> : <VolumeX size={18} aria-hidden="true" />}
-            {sonido ? 'Sonido' : 'Activar sonido'}
+            {sonido ? <Volume2 size={22} aria-hidden="true" /> : <VolumeX size={22} aria-hidden="true" />}
           </button>
 
           <button
             type="button"
-            onClick={alternarTema}
+            onClick={recargar}
             className={botonBarra}
-            title="Cambiar entre claro y oscuro"
+            aria-label="Actualizar las comandas"
+            title="Actualizar las comandas"
           >
-            {tema === 'oscuro' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
-            {tema === 'oscuro' ? 'Claro' : 'Oscuro'}
+            <RefreshCw
+              size={22}
+              className={estado.cargando ? 'animate-spin' : undefined}
+              aria-hidden="true"
+            />
           </button>
 
           <button
             type="button"
             onClick={alternarPantallaCompleta}
             className={botonBarra}
-            title="Pantalla completa"
+            aria-label={pantallaCompleta ? 'Salir de pantalla completa' : 'Pantalla completa'}
+            title={pantallaCompleta ? 'Salir de pantalla completa' : 'Pantalla completa'}
           >
             {pantallaCompleta ? (
-              <Minimize size={18} aria-hidden="true" />
+              <Minimize size={22} aria-hidden="true" />
             ) : (
-              <Maximize size={18} aria-hidden="true" />
+              <Maximize size={22} aria-hidden="true" />
             )}
-            {pantallaCompleta ? 'Salir' : 'Pantalla'}
           </button>
 
-          <button type="button" onClick={recargar} className={botonBarra}>
-            <RefreshCw
-              size={18}
-              className={estado.cargando ? 'animate-spin' : undefined}
-              aria-hidden="true"
-            />
-            Actualizar
+          {/* El mockup es solo oscuro, pero el tema claro existe y sin boton
+              quedaria inalcanzable: se queda, con la misma forma que los demas. */}
+          <button
+            type="button"
+            onClick={alternarTema}
+            className={botonBarra}
+            aria-label="Cambiar entre claro y oscuro"
+            title="Cambiar entre claro y oscuro"
+          >
+            {tema === 'oscuro' ? <Sun size={22} aria-hidden="true" /> : <Moon size={22} aria-hidden="true" />}
           </button>
 
           <button
@@ -184,13 +207,15 @@ export default function Tablero() {
               cerrarSonido()
               cerrarSesion()
             }}
-            className={`${botonBarra} border-[color:var(--color-alerta)] text-[color:var(--color-alerta)]`}
+            className="display flex h-12 items-center gap-2 rounded-xl border border-[color:var(--color-borde)] px-4 text-xl font-semibold"
           >
-            <LogOut size={18} aria-hidden="true" />
+            <LogOut size={22} aria-hidden="true" />
             Salir
           </button>
         </div>
       </header>
+
+      <BarraResumen activas={activas} />
 
       {estado.error && (
         <div className="flex flex-wrap items-center justify-between gap-3 bg-[color:var(--color-alerta)]/15 px-5 py-3">

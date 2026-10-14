@@ -59,7 +59,7 @@ export function textoDeEspera(minutos) {
  */
 const SENALES = {
   normal: { signo: '•', etiqueta: 'En tiempo' },
-  ambar: { signo: '!', etiqueta: 'Va lenta' },
+  ambar: { signo: '!', etiqueta: 'Apurar' },
   rojo: { signo: '!!', etiqueta: 'Retrasada' },
   // Sin semáforo: ni color ni etiqueta, solo el tiempo.
   neutro: { signo: '', etiqueta: '' },
