@@ -69,7 +69,7 @@ Los scripts SQL están versionados secuencialmente en `database/scripts/`:
 
 ```
 database/scripts/
-├── 00_ejecutar_todo.sql                # Orquestador maestro (ejecuta del 01 al 24 en orden)
+├── 00_ejecutar_todo.sql                # Orquestador maestro (schema.sql, scripts 01 a 24 y seed.sql)
 ├── 01_tablas_complementarias.sql       # Tablas de soporte, kds y auditoria
 ├── 02_funciones_pagos.sql              # Logica transaccional de cobros y validaciones
 ├── 03_funciones_pedidos.sql            # Creacion y actualizacion de pedidos
@@ -97,21 +97,15 @@ database/scripts/
 ```
 
 ### Ejecución en PostgreSQL Local / Docker
-Para crear la base de datos completa y ejecutar todas las migraciones:
+Para crear la base de datos completa con todas las migraciones y datos iniciales (usuarios, mesas y platos):
 
 ```bash
 # 1. Crear base de datos
 psql -U postgres -c "CREATE DATABASE smartdining;"
 
-# 2. Ejecutar esquema base
-psql -U postgres -d smartdining -f database/schema.sql
-
-# 3. Ejecutar scripts modulares en secuencia
+# 2. Ejecutar bootstrap completo (esquema, scripts y datos semilla)
 cd database/scripts
 psql -U postgres -d smartdining -f 00_ejecutar_todo.sql
-
-# 4. (Opcional) Cargar datos de prueba completos
-psql -U postgres -d smartdining -f ../seed.sql
 ```
 
 ### Ejecución con Docker Compose
