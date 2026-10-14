@@ -1,6 +1,11 @@
 import { Clock, FileText, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
-import { comensalesDeComanda, ingredientesPorPaso, siguientePaso } from '../lib/comandas'
+import {
+  comensalesDeComanda,
+  debeEsperarConexion,
+  ingredientesPorPaso,
+  siguientePaso,
+} from '../lib/comandas'
 import { minutosDesdeCreacion, senalDeEsperaDeComanda, textoDeEspera } from '../lib/espera'
 import {
   avisoSinRecoger,
@@ -81,9 +86,15 @@ function Ingredientes({ item }) {
   )
 }
 
-export default function ComandaCard({ comanda, ahora, onAvanzar }) {
+export default function ComandaCard({ comanda, ahora, conectado = true, onAvanzar }) {
   const [enVuelo, setEnVuelo] = useState(false)
   const [error, setError] = useState(null)
+  const [ultimoFallo, setUltimoFallo] = useState(null)
+
+  // Derivado, no guardado: en cuanto vuelve el tiempo real el boton vuelve
+  // solo, sin un efecto que lo "despierte". La reconexion es la señal de que
+  // la red esta otra vez, y nadie deberia tener que recargar para poder tocar.
+  const esperandoConexion = debeEsperarConexion(ultimoFallo, conectado)
 
   const minutos = minutosDesdeCreacion(comanda, ahora)
   // En Listas la señal es neutra: la comanda ya salió de la cocina.
@@ -110,11 +121,13 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
     if (enVuelo || !paso) return
     setEnVuelo(true)
     setError(null)
+    setUltimoFallo(null)
     const resultado = await onAvanzar?.(comanda.id_pedido, paso.estado)
     // Si salió bien, la tarjeta se mueve de columna y este componente se
     // desmonta; dejar enVuelo en true evita un parpadeo del botón justo antes.
     if (!resultado?.ok) {
       setError(resultado?.mensaje || 'No se pudo cambiar el estado')
+      setUltimoFallo(resultado)
       setEnVuelo(false)
     }
   }
@@ -230,7 +243,17 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
         </p>
       )}
 
-      {paso && (
+      {paso && esperandoConexion && (
+        // El PATCH no llego al servidor y el tiempo real tampoco esta: tocar
+        // otra vez solo repetiria el mismo fallo. En cuanto vuelva la conexion
+        // este bloque se va solo y el boton vuelve.
+        <p className="display mt-4 flex h-16 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[color:var(--color-borde)] text-xl font-bold text-[color:var(--color-texto-suave)]">
+          <LoaderCircle size={22} className="animate-spin" aria-hidden="true" />
+          Esperando conexión…
+        </p>
+      )}
+
+      {paso && !esperandoConexion && (
         <button
           type="button"
           onClick={alTocar}

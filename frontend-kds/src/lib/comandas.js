@@ -293,6 +293,25 @@ export function comandasDeColumna(estado, estadoColumna) {
 }
 
 /**
+ * Tras un PATCH fallido: ¿el boton se queda esperando a que vuelva la conexion?
+ *
+ * El avance va por HTTP y el tiempo real por el socket, que son dos canales
+ * distintos: que el socket este caido NO impide cambiar el estado, asi que el
+ * boton no se bloquea por eso. Se bloquea cuando el PATCH fallo de verdad **y**
+ * sin respuesta del servidor (un fallo de red, sin status), que es cuando
+ * volver a tocar solo repetiria el mismo error.
+ *
+ * Y solo si ademas el socket esta caido, para que haya quien lo desbloquee: la
+ * reconexion. Si el socket esta vivo y aun asi el PATCH no llego, el boton
+ * sigue activo con su mensaje de error, porque reintentar es lo unico sensato
+ * que puede hacer el cocinero.
+ */
+export function debeEsperarConexion(resultado, conectado) {
+  if (!resultado || resultado.ok) return false
+  return Boolean(resultado.sinRespuesta) && !conectado
+}
+
+/**
  * Los comensales de una comanda, sin repetir y en el orden en que aparecen.
  *
  * Va en la cabecera de la tarjeta, junto al numero de pedido: dice de un

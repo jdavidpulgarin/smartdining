@@ -150,6 +150,11 @@ export default function Tablero() {
             {horaDePared}
           </p>
 
+          {/* Sin conexion, los botones de pantalla sobran: lo unico que se
+              puede hacer es recargar (que esta en el aviso rojo, en grande) o
+              salir. Menos cosas que tocar mientras nada responde. */}
+          {conectado && (
+            <>
           <button
             type="button"
             onClick={alternarSonido}
@@ -200,6 +205,8 @@ export default function Tablero() {
           >
             {tema === 'oscuro' ? <Sun size={22} aria-hidden="true" /> : <Moon size={22} aria-hidden="true" />}
           </button>
+            </>
+          )}
 
           <button
             type="button"
@@ -215,9 +222,40 @@ export default function Tablero() {
         </div>
       </header>
 
-      <BarraResumen activas={activas} />
+      {conectado && <BarraResumen activas={activas} />}
 
-      {estado.error && (
+      {/* Sin tiempo real, la pantalla se queda congelada sin que nada mas lo
+          delate: las comandas nuevas no entran y el cocinero no tiene como
+          saberlo. Por eso el aviso ocupa el ancho entero y dice que hacer, y
+          por eso no depende de estado.error — un socket caido no deja ningun
+          error de API detras. */}
+      {!conectado && (
+        <div className="flex flex-wrap items-center justify-between gap-4 bg-[color:var(--color-alerta)] px-5 py-3 text-white">
+          <p className="flex items-start gap-3">
+            <AlertCircle size={28} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>
+              <span className="display block text-2xl font-bold leading-none">
+                Sin conexión con el servidor
+              </span>
+              <span className="mt-1 block text-base">
+                Reintentando solo… Las comandas nuevas no están llegando: avisa al mesero o al
+                administrador.
+              </span>
+            </span>
+          </p>
+          <button
+            type="button"
+            onClick={recargar}
+            className="display h-12 rounded-lg bg-white px-5 text-xl font-bold text-[color:var(--color-alerta)]"
+          >
+            Recargar ahora
+          </button>
+        </div>
+      )}
+
+      {/* Un fallo de la API con el socket vivo es otra cosa: ahi si hay un
+          mensaje del servidor que vale la pena leer tal cual. */}
+      {conectado && estado.error && (
         <div className="flex flex-wrap items-center justify-between gap-3 bg-[color:var(--color-alerta)]/15 px-5 py-3">
           <p className="flex items-center gap-2 text-lg text-[color:var(--color-alerta)]">
             <AlertCircle size={20} aria-hidden="true" />
@@ -226,7 +264,7 @@ export default function Tablero() {
           <button
             type="button"
             onClick={recargar}
-            className="h-12 rounded-lg bg-[color:var(--color-alerta)] px-4 text-base font-bold text-[color:var(--color-fondo)]"
+            className="display h-12 rounded-lg bg-[color:var(--color-alerta)] px-4 text-lg font-bold text-white"
           >
             Reintentar
           </button>
@@ -243,6 +281,7 @@ export default function Tablero() {
             ahora={ahora}
             onAvanzar={avanzar}
             vacio={columna.vacio}
+            conectado={conectado}
           />
         ))}
       </main>

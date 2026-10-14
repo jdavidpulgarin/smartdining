@@ -16,7 +16,7 @@ const COLOR = {
   listo: 'var(--color-listas)',
 }
 
-export default function Columna({ estado, titulo, comandas, ahora, vacio, onAvanzar }) {
+export default function Columna({ estado, titulo, comandas, ahora, vacio, conectado, onAvanzar }) {
   const color = COLOR[estado] || 'var(--color-texto-suave)'
 
   return (
@@ -57,6 +57,7 @@ export default function Columna({ estado, titulo, comandas, ahora, vacio, onAvan
               key={comanda.id_pedido}
               comanda={comanda}
               ahora={ahora}
+              conectado={conectado}
               onAvanzar={onAvanzar}
             />
           ))
