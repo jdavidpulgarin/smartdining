@@ -8,6 +8,7 @@ import {
   useRef,
 } from 'react';
 import { useMesaSession } from '../hooks/useMesaSession';
+import { CLAVE_SESION } from '../utils/sesion';
 
 const CarritoContext = createContext(null);
 
@@ -18,21 +19,16 @@ const ESTADO_INICIAL = {
 function obtenerMesaInicial() {
   try {
     if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const mesaParam = params.get('mesa');
-      if (mesaParam && !isNaN(Number(mesaParam))) {
-        return Number(mesaParam);
-      }
-      const sesionGuardada = localStorage.getItem('smartdining_mesa_session');
+      const sesionGuardada = sessionStorage.getItem(CLAVE_SESION);
       if (sesionGuardada) {
         const parsed = JSON.parse(sesionGuardada);
-        if (parsed?.mesa && !isNaN(Number(parsed.mesa))) {
-          return Number(parsed.mesa);
+        if (parsed?.idMesa && !isNaN(Number(parsed.idMesa))) {
+          return Number(parsed.idMesa);
         }
       }
     }
   } catch {
-    // Si ocurre un error al acceder a localStorage o parsear, continuar con null
+    // Si ocurre un error al acceder a sessionStorage o parsear, continuar con null
   }
   return null;
 }
@@ -128,7 +124,7 @@ function inicializarEstado() {
 }
 
 export function CarritoProvider({ children }) {
-  const { mesa } = useMesaSession();
+  const { idMesa: mesa } = useMesaSession();
   const [state, dispatch] = useReducer(carritoReducer, ESTADO_INICIAL, inicializarEstado);
   const mesaInicial = useMemo(() => obtenerMesaInicial(), []);
   const mesaAnteriorRef = useRef(mesaInicial);

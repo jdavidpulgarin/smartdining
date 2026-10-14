@@ -1,0 +1,103 @@
+name: CI
+
+# Pruebas, lint y build en cada PR y en cada push a develop y main.
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+# Mínimo privilegio: el workflow solo lee el código. No publica, no comenta,
+# no escribe en el repositorio (un PR de un fork no puede usarlo para nada más).
+permissions:
+  contents: read
+
+# Un push nuevo al mismo PR cancela la corrida anterior.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend · pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: npm test (falla si hay pruebas canceladas)
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/npm-test-sin-canceladas.sh"
+
+  socket-server:
+    name: socket-server · pruebas (con Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: socket-server
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      # Activa las pruebas contra Redis real (se omiten en local sin esta variable).
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: socket-server/package-lock.json
+      - run: npm ci
+      - name: npm test (falla si hay pruebas canceladas)
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/npm-test-sin-canceladas.sh"
+
+  infra:
+    name: infra · scripts de despliegue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sintaxis de los scripts de shell
+        run: for f in infra/scripts/*.sh; do sh -n "$f"; done
+      - name: Pruebas (contraseñas del personal)
+        run: node --test "infra/scripts/*.test.cjs"
+
+  frontends:
+    name: ${{ matrix.app }} · lint y build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [frontend-cliente, frontend-restaurante]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build

@@ -1,15 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { randomUUID } = require('node:crypto');
-const { levantar, emitir, esperar, tokenComensal, tokenPersonal } = require('./helpers');
+const { levantar, emitir, esperar, tokenComensal, tokenPersonal, CLAVE_INTERNA } = require('./helpers');
 
-const CLAVE = 'clave-interna-de-pruebas';
+const CLAVE = CLAVE_INTERNA;
 const cambio = (extra = {}) => ({
   eventId: randomUUID(), id_pedido: 87, id_mesa: 5, codigo_pedido: 'PED-87', estado_anterior: 'recibido', estado: 'en_preparacion', ...extra,
 });
 
 async function escenario() {
-  const s = await levantar({ INTERNAL_API_KEY: CLAVE });
+  const s = await levantar({});
   const cocina = await s.conectar(tokenPersonal('cocina'));
   const admin = await s.conectar(tokenPersonal('admin'));
   const mesero = await s.conectar(tokenPersonal('mesero'));

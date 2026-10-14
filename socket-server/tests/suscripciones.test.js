@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { randomUUID } = require('node:crypto');
-const { levantar, emitir, tokenComensal, tokenPersonal } = require('./helpers');
+const { levantar, emitir, tokenComensal, tokenPersonal, CLAVE_INTERNA } = require('./helpers');
 const { validarSuscripcion } = require('../src/suscripciones');
 
 const sub = (n = 1) => ({
@@ -21,7 +21,9 @@ function pushFalso() {
 const post = (s, metodo, cuerpo, token) => fetch(`${s.url}/push/suscripcion`, {
   method: metodo, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(cuerpo),
 });
-const cambio = (extra) => ({ eventId: randomUUID(), id_pedido: 1, id_mesa: 5, codigo_pedido: 'PED-1', estado: 'listo', ...extra });
+// Por defecto "en_preparacion" (se avisa a toda la mesa); "listo" va solo a
+// los dueños del pedido y se prueba en push-duenos.test.js.
+const cambio = (extra) => ({ eventId: randomUUID(), id_pedido: 1, id_mesa: 5, codigo_pedido: 'PED-1', estado: 'en_preparacion', ...extra });
 const pausa = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
 test('validarSuscripcion rechaza endpoints peligrosos (SSRF) y llaves malformadas', () => {
@@ -35,28 +37,33 @@ test('validarSuscripcion rechaza endpoints peligrosos (SSRF) y llaves malformada
   assert.ok(validarSuscripcion(null).error);
 });
 
-test('HTTP: el comensal se suscribe y se desuscribe; solo el comensal', async () => {
+test('HTTP: el comensal se suscribe con el alias de su JWT y se desuscribe; solo el comensal', async () => {
   const push = pushFalso();
   const s = await levantar({}, { push });
-  assert.strictEqual((await post(s, 'POST', { subscription: sub() })).status, 401);
-  assert.strictEqual((await post(s, 'POST', { subscription: sub() }, tokenPersonal('mesero'))).status, 403);
-  assert.strictEqual((await post(s, 'POST', { subscription: { endpoint: 'x' } }, tokenComensal(5))).status, 400);
-  assert.strictEqual((await post(s, 'POST', { subscription: sub() }, tokenComensal(5))).status, 201);
-  assert.strictEqual((await post(s, 'POST', { subscription: sub() }, tokenComensal(5))).status, 201); // idempotente
-  assert.strictEqual(s.suscripciones.listar(5).length, 1);
+  const alta = (extra = {}) => ({ subscription: sub(), comensal: 'Ana', ...extra });
+  assert.strictEqual((await post(s, 'POST', alta())).status, 401);
+  assert.strictEqual((await post(s, 'POST', alta(), tokenPersonal('mesero'))).status, 403);
+  assert.strictEqual((await post(s, 'POST', alta({ subscription: { endpoint: 'x' } }), tokenComensal(5))).status, 400);
+  assert.strictEqual((await post(s, 'POST', alta({ comensal: 'Zoe' }), tokenComensal(5))).status, 403, 'otro alias que el del JWT');
+  assert.strictEqual((await post(s, 'POST', alta({ comensal: undefined }), tokenComensal(5))).status, 201, 'sin comensal: el del JWT');
+  assert.strictEqual((await post(s, 'POST', alta(), tokenComensal(5))).status, 201);
+  assert.strictEqual((await post(s, 'POST', alta(), tokenComensal(5))).status, 201); // idempotente
+  assert.deepStrictEqual(s.suscripciones.listar(5).map((x) => x.comensal), ['Ana']);
   assert.strictEqual((await post(s, 'DELETE', { endpoint: sub().endpoint }, tokenComensal(5))).status, 200);
   assert.strictEqual(s.suscripciones.listar(5).length, 0);
   await s.cerrar();
 });
 
-test('por socket: push:subscribe es idempotente y push:unsubscribe la quita', async () => {
+test('por socket: exige sala; el alias es el del JWT; es idempotente y push:unsubscribe la quita', async () => {
   const s = await levantar({}, { push: pushFalso() });
   const ana = await s.conectar(tokenComensal(5));
+  assert.strictEqual((await emitir(ana, 'push:subscribe', { eventId: randomUUID(), subscription: sub() })).codigo, 'SIN_SALA');
+  await emitir(ana, 'join:table', {});
   const eventId = randomUUID();
   assert.strictEqual((await emitir(ana, 'push:subscribe', { eventId, subscription: sub() })).duplicado, false);
   assert.strictEqual((await emitir(ana, 'push:subscribe', { eventId, subscription: sub() })).duplicado, true);
   assert.strictEqual((await emitir(ana, 'push:subscribe', { eventId: randomUUID(), subscription: { endpoint: 'x' } })).codigo, 'PAYLOAD_INVALIDO');
-  assert.strictEqual(s.suscripciones.listar(5).length, 1);
+  assert.deepStrictEqual(s.suscripciones.listar(5).map((x) => x.comensal), ['Ana'], 'el alias lo pone el servidor');
   assert.strictEqual((await emitir(ana, 'push:unsubscribe', { endpoint: sub().endpoint })).ok, true);
   assert.strictEqual(s.suscripciones.listar(5).length, 0);
   const mesero = await s.conectar(tokenPersonal('mesero'));
@@ -73,10 +80,9 @@ test('un cambio de estado envía push solo a las suscripciones de ESA mesa', asy
   await emitir(cocina, 'order:status', cambio());
   await pausa();
   assert.deepStrictEqual(push.enviados.map((e) => e.endpoint), [sub(1).endpoint]);
-  assert.strictEqual(push.enviados[0].payload.titulo, 'Tu pedido está listo');
-  assert.strictEqual(push.enviados[0].payload.id_mesa, 5);
+  assert.strictEqual(push.enviados[0].payload.titulo, 'Tu pedido está en preparación');
   // Estados que no ameritan interrumpir al comensal no generan push.
-  await emitir(cocina, 'order:status', cambio({ estado: 'listo' }));
+  await emitir(cocina, 'order:status', cambio({ estado: 'en_preparacion' }));
   const mesero = await s.conectar(tokenPersonal('mesero'));
   await emitir(mesero, 'order:status', cambio({ estado: 'entregado' }));
   await pausa();
@@ -102,12 +108,12 @@ test('un evento duplicado no reenvía push y las suscripciones caducadas se elim
 });
 
 test('al liberar la mesa se borran suscripciones y carrito de esa mesa (no de otras)', async () => {
-  const s = await levantar({ INTERNAL_API_KEY: 'k' }, { push: pushFalso() });
+  const s = await levantar({}, { push: pushFalso() });
   s.suscripciones.agregar(5, sub(1));
   s.suscripciones.agregar(6, sub(2));
   s.carritos.aplicar(5, { accion: 'set', comensal: 'Ana', id_plato: 1, cantidad: 1 });
   const r = await fetch(`${s.url}/internal/mesa-liberada`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-internal-key': 'k' }, body: JSON.stringify({ id_mesa: 5 }),
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-internal-key': CLAVE_INTERNA }, body: JSON.stringify({ id_mesa: 5 }),
   });
   assert.strictEqual(r.status, 200);
   assert.strictEqual(s.suscripciones.listar(5).length, 0);

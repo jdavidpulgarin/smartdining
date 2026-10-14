@@ -59,6 +59,7 @@ CREATE TABLE mesas (
     estado VARCHAR(20) NOT NULL DEFAULT 'disponible'
         CHECK (estado IN ('disponible', 'ocupada', 'reservada', 'mantenimiento')),
     token_qr VARCHAR(255) UNIQUE,
+    sesion_iniciada_en TIMESTAMPTZ,
     version_control INTEGER NOT NULL DEFAULT 1,
     actualizado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -120,6 +121,8 @@ CREATE TABLE pedidos (
     codigo_pedido VARCHAR(16) NOT NULL UNIQUE,
     estado VARCHAR(20) NOT NULL DEFAULT 'recibido'
         CHECK (estado IN ('recibido', 'en_preparacion', 'listo', 'entregado', 'pagado', 'cancelado')),
+    estado_pago VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+        CHECK (estado_pago IN ('pendiente', 'parcial', 'pagado')),
     total DECIMAL(10,2) NOT NULL DEFAULT 0.00 CHECK (total >= 0),
     notas_generales TEXT,
     creado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -139,7 +142,7 @@ CREATE TABLE detalles_pedido (
     id_detalle SERIAL PRIMARY KEY,
     id_pedido INTEGER NOT NULL,
     id_plato INTEGER NOT NULL,
-    cantidad INTEGER NOT NULL CHECK (cantidad > 0),
+    cantidad INTEGER NOT NULL CHECK (cantidad BETWEEN 1 AND 20),
     precio_unitario DECIMAL(10,2) NOT NULL CHECK (precio_unitario >= 0),
     subtotal DECIMAL(10,2) NOT NULL CHECK (subtotal >= 0),
     notas_especiales TEXT,
@@ -171,6 +174,8 @@ CREATE TABLE transacciones (
     estado_transaccion VARCHAR(20) NOT NULL DEFAULT 'completada'
         CHECK (estado_transaccion IN ('pendiente', 'completada', 'fallida', 'reembolsada')),
     referencia_externa VARCHAR(100),
+    comensal VARCHAR(40)
+        CHECK (comensal IS NULL OR length(btrim(comensal)) > 0),
     creado_en TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_transacciones_pedido
@@ -253,7 +258,7 @@ CREATE TABLE kds_metricas (
     id_plato INTEGER,
     tiempo_preparacion_real NUMERIC(8,2) NOT NULL CHECK (tiempo_preparacion_real >= 0),
     tiempo_preparacion_estimado INTEGER NOT NULL CHECK (tiempo_preparacion_estimado > 0),
-    variacion_porcentaje NUMERIC(6,2) NOT NULL,
+    variacion_porcentaje NUMERIC(10,2) NOT NULL,
     fecha_metrica TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_kds_pedido
         FOREIGN KEY (id_pedido)
@@ -267,11 +272,16 @@ CREATE TABLE kds_metricas (
 
 CREATE TABLE intentos_pago_fallidos (
     id_intento SERIAL PRIMARY KEY,
-    id_pedido INTEGER NOT NULL,
+    id_pedido INTEGER,
     id_usuario INTEGER,
+    id_mesa INTEGER,
     metodo_pago VARCHAR(20),
     monto DECIMAL(10,2) CHECK (monto > 0),
     razon_rechazo TEXT NOT NULL,
+    referencia_externa VARCHAR(100),
+    id_transaccion_pasarela VARCHAR(100),
+    pasarela VARCHAR(20),
+    moneda VARCHAR(3),
     ip_origen VARCHAR(45) DEFAULT '127.0.0.1',
     fecha_intento TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_intento_pedido
@@ -281,6 +291,10 @@ CREATE TABLE intentos_pago_fallidos (
     CONSTRAINT fk_intento_usuario
         FOREIGN KEY (id_usuario)
         REFERENCES usuarios(id_usuario)
+        ON DELETE SET NULL,
+    CONSTRAINT fk_intento_mesa
+        FOREIGN KEY (id_mesa)
+        REFERENCES mesas(id_mesa)
         ON DELETE SET NULL
 );
 
@@ -299,7 +313,7 @@ CREATE TABLE kds_alertas (
     id_alerta SERIAL PRIMARY KEY,
     id_pedido INTEGER NOT NULL,
     mensaje TEXT NOT NULL,
-    variacion_porcentaje NUMERIC(6,2),
+    variacion_porcentaje NUMERIC(10,2),
     fecha_alerta TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_kds_alertas_pedido
         FOREIGN KEY (id_pedido)
@@ -322,7 +336,9 @@ CREATE INDEX idx_detalles_pedido_plato ON detalles_pedido(id_plato);
 CREATE INDEX idx_detalles_pedido_estado ON detalles_pedido(estado_item);
 CREATE INDEX idx_detalles_estado_pedido_prioritario ON detalles_pedido(estado_item, id_pedido, id_plato) WHERE estado_item IN ('pendiente', 'cocinando');
 CREATE INDEX idx_transacciones_pedido ON transacciones(id_pedido);
+CREATE INDEX idx_transacciones_comensal ON transacciones(comensal);
 CREATE INDEX idx_transacciones_estado_fecha ON transacciones(estado_transaccion, creado_en DESC, monto);
+CREATE UNIQUE INDEX idx_transacciones_referencia_externa ON transacciones(referencia_externa) WHERE referencia_externa IS NOT NULL;
 CREATE INDEX idx_historial_pedido ON historial_estados(id_pedido);
 CREATE INDEX idx_historial_fecha_usuario ON historial_estados(fecha_cambio DESC, id_usuario);
 CREATE INDEX idx_push_pedido ON suscripciones_push(id_pedido);
@@ -334,6 +350,8 @@ CREATE INDEX idx_kds_metricas_pedido ON kds_metricas(id_pedido);
 CREATE INDEX idx_kds_metricas_fecha ON kds_metricas(fecha_metrica DESC);
 CREATE INDEX idx_intentos_pago_pedido ON intentos_pago_fallidos(id_pedido);
 CREATE INDEX idx_intentos_pago_fecha ON intentos_pago_fallidos(fecha_intento DESC);
+CREATE INDEX idx_intentos_pago_referencia ON intentos_pago_fallidos(referencia_externa) WHERE referencia_externa IS NOT NULL;
+CREATE INDEX idx_intentos_pago_mesa ON intentos_pago_fallidos(id_mesa) WHERE id_mesa IS NOT NULL;
 CREATE INDEX idx_token_hist_mesa ON token_qr_historico(id_mesa);
 CREATE INDEX idx_token_hist_antiguo ON token_qr_historico(token_antiguo);
 CREATE INDEX idx_kds_alertas_pedido ON kds_alertas(id_pedido);

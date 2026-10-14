@@ -13,10 +13,10 @@ function CategoriaFiltro({
         <button
           type="button"
           onClick={() => onSeleccionar && onSeleccionar(null)}
-          className={`px-4 py-2 rounded-full text-sm transition-all cursor-pointer select-none shrink-0 ${
+          className={`min-h-12 px-4 py-2 rounded-full text-sm inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
             esTodasSeleccionada
-              ? 'bg-blue-600 text-white font-semibold shadow-sm'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium'
+              ? 'bg-primary text-white font-semibold shadow-sm'
+              : 'bg-white text-cafe border border-gray-200 hover:bg-primary/10 font-medium'
           }`}
         >
           Todas
@@ -30,10 +30,10 @@ function CategoriaFiltro({
               key={cat.id}
               type="button"
               onClick={() => onSeleccionar && onSeleccionar(cat.id)}
-              className={`px-4 py-2 rounded-full text-sm transition-all cursor-pointer select-none shrink-0 ${
+              className={`min-h-12 px-4 py-2 rounded-full text-sm inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
                 esActiva
-                  ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium'
+                  ? 'bg-primary text-white font-semibold shadow-sm'
+                  : 'bg-white text-cafe border border-gray-200 hover:bg-primary/10 font-medium'
               }`}
             >
               {cat.nombre}

@@ -39,7 +39,9 @@ function resolverMesa(identidad, idPayload) {
  * `obtenerSnapshot(idMesa)` permite que el ack de join:table incluya el
  * carrito actual; se inyecta para no acoplar este módulo al del carrito.
  */
-function registrarSalas(socket, { obtenerSnapshot } = {}) {
+function registrarSalas(socket, {
+  obtenerSnapshot, sesionVigente = () => true, alCambiarSala = () => {}, alEntrarComensal = () => {},
+} = {}) {
   const identidad = socket.data.identidad;
 
   // Las pantallas de personal escuchan sus salas desde que conectan: no
@@ -50,16 +52,33 @@ function registrarSalas(socket, { obtenerSnapshot } = {}) {
   // sola a esa sala, sin depender de que emita join:table.
   if (identidad.rol === ROL_PANTALLA) socket.join(salaMesa(identidad.id_mesa));
 
-  socket.on('join:table', manejar('join:table', (payload) => {
+  socket.on('join:table', manejar('join:table', async (payload) => {
     if (identidad.rol === 'cocina') {
       return fallo('NO_AUTORIZADO', 'La cocina no se une a salas de mesa');
     }
     const { idMesa, error } = resolverMesa(identidad, payload.id_mesa);
     if (error) return error;
+    // Un comensal conectado antes de liberar la mesa pero que no estaba en la
+    // sala (por eso no lo desconectamos) tampoco puede entrar después.
+    if (!(await sesionVigente(identidad))) return fallo('NO_AUTORIZADO', 'La sesión de esta mesa ya se cerró');
+
+    // El alias del comensal ("Ana") sale SOLO de su JWT, que el backend firmó
+    // al abrir la sesión (único en la mesa). Si el cliente manda otro, intenta
+    // presentarse como otra persona: se rechaza.
+    if (identidad.rol === ROL_COMENSAL) {
+      if (payload.comensal !== undefined && payload.comensal !== identidad.comensal) {
+        return fallo('NO_AUTORIZADO', 'El comensal es el de tu sesión; no se puede cambiar');
+      }
+      socket.data.alias = identidad.comensal;
+    }
 
     socket.join(salaMesa(idMesa));
+    if (identidad.rol === ROL_COMENSAL) {
+      alEntrarComensal(idMesa);
+      alCambiarSala(idMesa);
+    }
     const respuesta = { id_mesa: idMesa, sala: salaMesa(idMesa) };
-    if (obtenerSnapshot) respuesta.carrito = obtenerSnapshot(idMesa);
+    if (obtenerSnapshot) respuesta.carrito = await obtenerSnapshot(idMesa);
     return exito(respuesta);
   }));
 
@@ -67,6 +86,7 @@ function registrarSalas(socket, { obtenerSnapshot } = {}) {
     const { idMesa, error } = resolverMesa(identidad, payload.id_mesa);
     if (error) return error;
     socket.leave(salaMesa(idMesa));
+    if (identidad.rol === ROL_COMENSAL) alCambiarSala(idMesa);
     return exito();
   }));
 }

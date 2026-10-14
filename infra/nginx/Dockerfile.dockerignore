@@ -1,0 +1,11 @@
+# Contexto: la raíz del repo. Solo entran los frontends y la config de nginx.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+.git
+backend
+database
+socket-server
+docs
+*.docx

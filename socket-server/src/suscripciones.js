@@ -4,7 +4,8 @@ const { esEventIdValido } = require('./idempotencia');
 const {
   ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson,
 } = require('./http');
-const { verificarJwt, ROL_COMENSAL } = require('./auth');
+const { verificarJwt, esComensalSinAlias, ROL_COMENSAL } = require('./auth');
+const { estaEnMesa } = require('./salas');
 
 const MAX_SUSCRIPCIONES_POR_MESA = 20; // una mesa tiene pocos comensales; evita llenar memoria
 const MAX_ENDPOINT = 2048;
@@ -74,10 +75,16 @@ function crearAlmacenSuscripciones() {
   };
 }
 
-function suscribir(ctx, idMesa, suscripcionCruda) {
+/**
+ * Guarda la suscripción ligada al COMENSAL (alias), no solo a la mesa: así
+ * "¡Tu plato está listo!" le llega a quien pidió ese plato y no a toda la
+ * mesa. El alias lo pone el servidor (el del join:table de ese socket o uno
+ * validado contra la presencia), nunca se acepta uno cualquiera.
+ */
+async function suscribir(ctx, idMesa, suscripcionCruda, comensal) {
   const { suscripcion, error } = validarSuscripcion(suscripcionCruda);
   if (error) return fallo('PAYLOAD_INVALIDO', error);
-  if (!ctx.suscripciones.agregar(idMesa, suscripcion)) {
+  if (!(await ctx.suscripciones.agregar(idMesa, { ...suscripcion, comensal }))) {
     return fallo('PAYLOAD_INVALIDO', `La mesa alcanzó el máximo de ${MAX_SUSCRIPCIONES_POR_MESA} suscripciones`);
   }
   return exito();
@@ -86,24 +93,30 @@ function suscribir(ctx, idMesa, suscripcionCruda) {
 function registrarSuscripcionesSocket(socket, ctx) {
   const identidad = socket.data.identidad;
 
-  socket.on('push:subscribe', manejar('push:subscribe', (p) => {
+  socket.on('push:subscribe', manejar('push:subscribe', async (p) => {
     if (!esEventIdValido(p.eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
     if (identidad.rol !== ROL_COMENSAL) {
       return fallo('NO_AUTORIZADO', 'Solo el comensal se suscribe a push', { eventId: p.eventId });
     }
+    // El alias es el del JWT (join:table lo copia en socket.data.alias).
+    if (!estaEnMesa(socket, identidad.id_mesa)) {
+      return fallo('SIN_SALA', 'Haz join:table antes de suscribirte', { eventId: p.eventId });
+    }
     const clave = `push:${identidad.id_mesa}:${p.eventId}`;
-    if (ctx.registro.obtener(clave)) return exito({ eventId: p.eventId, duplicado: true });
+    if (await ctx.registro.obtener(clave)) return exito({ eventId: p.eventId, duplicado: true });
 
-    const r = suscribir(ctx, identidad.id_mesa, p.subscription);
+    // Dar de alta el mismo endpoint dos veces ya es idempotente (se indexa por
+    // endpoint), así que aquí basta con marcar el eventId después del alta.
+    const r = await suscribir(ctx, identidad.id_mesa, p.subscription, socket.data.alias);
     if (!r.ok) return { ...r, eventId: p.eventId };
-    ctx.registro.guardar(clave, true);
+    await ctx.registro.guardar(clave, true);
     return exito({ eventId: p.eventId, duplicado: false });
   }));
 
-  socket.on('push:unsubscribe', manejar('push:unsubscribe', (p) => {
+  socket.on('push:unsubscribe', manejar('push:unsubscribe', async (p) => {
     if (identidad.rol !== ROL_COMENSAL) return fallo('NO_AUTORIZADO', 'Solo el comensal gestiona sus suscripciones');
     if (typeof p.endpoint !== 'string') return fallo('PAYLOAD_INVALIDO', 'endpoint es obligatorio');
-    ctx.suscripciones.quitar(identidad.id_mesa, p.endpoint);
+    await ctx.suscripciones.quitar(identidad.id_mesa, p.endpoint);
     return exito();
   }));
 }
@@ -111,17 +124,28 @@ function registrarSuscripcionesSocket(socket, ctx) {
 /** Identifica al comensal desde el Bearer; la mesa sale del JWT, nunca del cuerpo. */
 function comensalDeRequest(req, ctx) {
   const auth = req.headers.authorization || '';
-  const identidad = auth.startsWith('Bearer ') ? verificarJwt(auth.slice(7), ctx.config.jwtSecret) : null;
-  if (!identidad) throw new ErrorHttp(401, 'NO_AUTORIZADO', 'Se requiere un JWT válido');
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const identidad = token ? verificarJwt(token, ctx.config.jwtSecret) : null;
+  if (!identidad) {
+    if (token && esComensalSinAlias(token, ctx.config.jwtSecret)) {
+      throw new ErrorHttp(401, 'TOKEN_INVALIDO', 'Sesión antigua sin nombre: escanea el QR de nuevo');
+    }
+    throw new ErrorHttp(401, 'NO_AUTORIZADO', 'Se requiere un JWT válido');
+  }
   if (identidad.rol !== ROL_COMENSAL) throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Solo el comensal puede suscribirse');
   return identidad;
 }
 
 const rutasSuscripciones = {
   'POST /push/suscripcion': async (req, res, ctx) => {
-    const { id_mesa: idMesa } = comensalDeRequest(req, ctx);
+    const { id_mesa: idMesa, comensal } = comensalDeRequest(req, ctx);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    const r = suscribir(ctx, idMesa, cuerpo.subscription);
+    // El alias es el del JWT. `comensal` en el cuerpo es opcional; si viene
+    // distinto, alguien intenta recibir los avisos de otro.
+    if (cuerpo.comensal !== undefined && cuerpo.comensal !== comensal) {
+      throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Solo puedes suscribirte con tu propio nombre');
+    }
+    const r = await suscribir(ctx, idMesa, cuerpo.subscription, comensal);
     if (!r.ok) throw new ErrorHttp(400, r.codigo, r.mensaje);
     enviarJson(res, 201, { ok: true });
   },
@@ -129,7 +153,7 @@ const rutasSuscripciones = {
     const { id_mesa: idMesa } = comensalDeRequest(req, ctx);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
     if (typeof cuerpo.endpoint !== 'string') throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'endpoint es obligatorio');
-    ctx.suscripciones.quitar(idMesa, cuerpo.endpoint);
+    await ctx.suscripciones.quitar(idMesa, cuerpo.endpoint);
     enviarJson(res, 200, { ok: true });
   },
 };
@@ -139,9 +163,11 @@ const rutasSuscripciones = {
 // interrumpirlo con una notificación.
 const MENSAJES_ESTADO = {
   en_preparacion: 'Tu pedido está en preparación',
-  listo: 'Tu pedido está listo',
+  listo: '¡Tu plato está listo!',
   cancelado: 'Tu pedido fue cancelado',
 };
+// Al tocar la notificación, la PWA abre el seguimiento del pedido.
+const URL_SEGUIMIENTO = '/seguimiento';
 
 /**
  * Envía la notificación push a las suscripciones de la mesa y elimina las
@@ -151,19 +177,28 @@ const MENSAJES_ESTADO = {
 async function notificarCambioEstado(ctx, cambio) {
   const titulo = MENSAJES_ESTADO[cambio.estado];
   if (!titulo || !ctx.push.habilitado) return;
+  // Payload mínimo: sin nombres, sin montos, sin mesa. El navegador lo
+  // muestra en la pantalla bloqueada del teléfono.
   const payload = {
     titulo,
     cuerpo: cambio.codigo_pedido || `Pedido #${cambio.id_pedido}`,
     id_pedido: cambio.id_pedido,
     estado: cambio.estado,
-    id_mesa: cambio.id_mesa,
+    url: URL_SEGUIMIENTO,
   };
-  await Promise.all(ctx.suscripciones.listar(cambio.id_mesa).map(async (s) => {
+  let destinatarios = await ctx.suscripciones.listar(cambio.id_mesa);
+  if (cambio.estado === 'listo') {
+    // "¡Tu plato está listo!" solo a quien lo pidió. Si no se sabe quién fue,
+    // no se avisa a nadie por push (la sala igual recibe order:status en vivo).
+    const duenos = ctx.duenosPedidos ? await ctx.duenosPedidos.obtener(cambio.id_pedido) : [];
+    destinatarios = destinatarios.filter((s) => s.comensal && duenos.includes(s.comensal));
+  }
+  await Promise.all(destinatarios.map(async (s) => {
     const r = await ctx.push.enviar(s, payload);
-    if (r.caducada) ctx.suscripciones.quitar(cambio.id_mesa, s.endpoint);
+    if (r.caducada) await ctx.suscripciones.quitar(cambio.id_mesa, s.endpoint);
   }));
 }
 
 module.exports = {
-  crearAlmacenSuscripciones, registrarSuscripcionesSocket, rutasSuscripciones, notificarCambioEstado, validarSuscripcion,
+  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, URL_SEGUIMIENTO, rutasSuscripciones, notificarCambioEstado, validarSuscripcion,
 };

@@ -21,7 +21,8 @@ BEGIN
     IF NEW.estado_transaccion = 'completada' THEN
         SELECT total INTO v_total_pedido 
         FROM pedidos 
-        WHERE id_pedido = NEW.id_pedido;
+        WHERE id_pedido = NEW.id_pedido
+        FOR UPDATE;
 
         SELECT COALESCE(SUM(monto), 0.00) INTO v_total_pagado
         FROM transacciones
@@ -297,9 +298,9 @@ CREATE OR REPLACE FUNCTION fn_tr_calcular_tiempo_preparacion()
 RETURNS TRIGGER AS $$
 DECLARE
     v_fecha_inicio TIMESTAMPTZ;
-    v_tiempo_real NUMERIC(8,2);
+    v_tiempo_real NUMERIC(10,2);
     v_tiempo_estimado INTEGER;
-    v_variacion NUMERIC(6,2);
+    v_variacion NUMERIC(10,2);
     v_cursor_platos CURSOR FOR
         SELECT dp.id_plato, pl.tiempo_preparacion_estimado
         FROM detalles_pedido dp
@@ -321,7 +322,20 @@ BEGIN
             -- Analizar métrica para cada plato en la comanda
             FOR r IN v_cursor_platos LOOP
                 v_tiempo_estimado := r.tiempo_preparacion_estimado;
-                v_variacion := ROUND(((v_tiempo_real - v_tiempo_estimado) / v_tiempo_estimado::numeric) * 100.0, 2);
+
+                IF v_tiempo_estimado IS NOT NULL AND v_tiempo_estimado > 0 THEN
+                    -- Calcular variación porcentual y acotarla al rango de NUMERIC(10,2) para evitar desbordamientos
+                    v_variacion := LEAST(
+                        GREATEST(
+                            ROUND(((v_tiempo_real - v_tiempo_estimado) / v_tiempo_estimado::numeric) * 100.0, 2),
+                            -99999999.99
+                        ),
+                        99999999.99
+                    );
+                ELSE
+                    v_variacion := 0.00;
+                    v_tiempo_estimado := 1;
+                END IF;
 
                 INSERT INTO kds_metricas (
                     id_pedido,

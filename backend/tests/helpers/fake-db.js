@@ -30,7 +30,9 @@ function construirTokenQr(id_mesa, sid = crypto.randomBytes(12).toString('base64
  * @param {(sql: string, params: any[]) => {rows: any[]}|undefined} responder
  *        devuelve las filas de cada query; si devuelve undefined, { rows: [] }.
  * @param {{sesionCerrada?: boolean, tokenQrDeMesa?: string,
- *           pedidosAbiertos?: number, mesaYaLiberada?: boolean}} opciones
+ *           pedidosAbiertos?: number, mesaYaLiberada?: boolean,
+ *           saldoTrasPago?: number, usuarioInactivo?: boolean,
+ *           usuarioSinRegistro?: boolean, usuarioConsultaFalla?: boolean}} opciones
  *        Por omisión la sesión de mesa del comensal está vigente. Con
  *        sesionCerrada la columna token_qr responde NULL (mesa liberada), y con
  *        tokenQrDeMesa se fija otro token (para simular un QR distinto).
@@ -39,9 +41,21 @@ function instalarFakeDb(responder, opciones = {}) {
   const queryOriginal = pool.query;
   const connectOriginal = pool.connect;
   const ejecutadas = [];
+  let siguienteIdDetalle = opciones.primerIdDetalle ?? 500;
 
   const ejecutar = async (sql, params = []) => {
     ejecutadas.push({ sql, params });
+
+    // H-09: el middleware comprueba en cada petición del personal que la cuenta
+    // siga activa. Se contesta aquí para que ninguna prueba tenga que saber que
+    // existe; con usuarioInactivo se simula una cuenta desactivada.
+    if (sql.includes('FROM usuarios WHERE id_usuario')) {
+      if (opciones.usuarioConsultaFalla) throw new Error('la base no responde');
+      if (opciones.usuarioSinRegistro) return { rows: [] };
+      return {
+        rows: [{ id_usuario: params[0], rol: 'admin', activo: !opciones.usuarioInactivo }],
+      };
+    }
 
     // La consulta del middleware se contesta aquí para que cada prueba no tenga
     // que saber que existe; se puede forzar con las opciones.
@@ -58,12 +72,37 @@ function instalarFakeDb(responder, opciones = {}) {
     if (sql.includes('count(*)::int AS n FROM pedidos')) {
       return { rows: [{ n: opciones.pedidosAbiertos ?? 0 }] };
     }
+    // Saldo del pedido tras registrar el pago: con 0 (el valor por omisión) el
+    // cobro liquida el pedido, que es el caso corriente. Una prueba de abono
+    // parcial pasa el saldo que queda pendiente.
+    if (sql.includes('obtener_saldo_pendiente')) {
+      // Si la prueba contesta ella misma (por ejemplo para encadenar dos
+      // abonos), manda su respuesta.
+      const propio = responder(sql, params);
+      if (propio && propio.rows && propio.rows.length > 0) return propio;
+      const saldo = opciones.saldoTrasPago ?? 0;
+      return { rows: [{ liquidado: saldo <= 0, saldo_pendiente: saldo.toFixed(2) }] };
+    }
+
     if (sql.includes('UPDATE mesas SET estado = $1, token_qr = NULL')) {
       // Se devuelve la fila como la daría RETURNING *, para que sirva tanto a la
       // liberación automática (que solo mira si afectó filas) como a
       // liberarSesion (que responde con el estado de la mesa).
       if (opciones.mesaYaLiberada) return { rows: [] };
       return { rows: [{ id_mesa: params[1], numero: params[1], estado: params[0], token_qr: null }] };
+    }
+
+    // El INSERT del detalle lleva RETURNING id_detalle porque con ese id se
+    // insertan los ingredientes y se llama validar_selecciones_detalle. Se
+    // contesta aquí, como el resto del andamiaje, porque los responder de las
+    // pruebas devuelven { rows: [] } para lo que no conocen y eso dejaría el
+    // id_detalle vacío. Una prueba que necesite ids concretos usa
+    // opciones.primerIdDetalle, y una que quiera simular el fallo del trigger
+    // responde ella misma lanzando desde su responder.
+    if (sql.includes('INSERT INTO detalles_pedido')) {
+      const propio = responder(sql, params);
+      if (propio && propio.rows && propio.rows.length > 0) return propio;
+      return { rows: [{ id_detalle: siguienteIdDetalle++ }] };
     }
 
     return responder(sql, params) || { rows: [] };

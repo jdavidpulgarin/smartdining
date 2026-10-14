@@ -113,7 +113,7 @@ test('POST /api/mesas/qr/:token/sesion no devuelve el token_qr de la mesa', asyn
     { tokenQrDeMesa: token }
   );
   try {
-    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`);
+    const res = await request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`).send({ comensal: 'Sin Token' });
 
     assert.strictEqual(res.status, 201);
     assert.ok(!('token_qr' in res.body.mesa), 'la mesa de la respuesta no lleva token_qr');

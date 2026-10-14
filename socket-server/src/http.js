@@ -1,3 +1,5 @@
+const { log } = require('./log');
+const { enCurso } = require('./cierre');
 const crypto = require('crypto');
 
 const LIMITE_CUERPO = 100 * 1024; // 100 KB: de sobra para un pedido, corta abusos
@@ -89,14 +91,20 @@ function crearRouter(rutas, ctx) {
     const ruta = req.url.split('?')[0];
     const handler = rutas[`${req.method} ${ruta}`];
     if (!handler) return enviarJson(res, 404, { error: 'Ruta no encontrada' });
+    // Cerrando: lo nuevo se rechaza con 503 (Wompi y el backend reintentan) y
+    // lo que ya estaba en curso termina.
+    if (ctx.cerrando) return enviarJson(res, 503, { ok: false, codigo: 'ERROR_INTERNO', mensaje: 'Servidor reiniciándose; reintenta' });
+    enCurso.iniciar();
     try {
       await handler(req, res, ctx);
     } catch (err) {
       if (err instanceof ErrorHttp) {
         return enviarJson(res, err.status, { ok: false, codigo: err.codigo, mensaje: err.message });
       }
-      console.error('[http] error inesperado:', err);
+      log.error('error inesperado en HTTP', { ruta, metodo: req.method, error: err });
       enviarJson(res, 500, { ok: false, codigo: 'ERROR_INTERNO', mensaje: 'Error inesperado del servidor' });
+    } finally {
+      enCurso.terminar();
     }
   };
 }
@@ -104,7 +112,8 @@ function crearRouter(rutas, ctx) {
 /** Convierte un ack ({ok:false,...}) en la respuesta HTTP equivalente. */
 function enviarAck(res, ack) {
   if (ack.ok) return enviarJson(res, 200, ack);
-  const status = ack.codigo === 'PAYLOAD_INVALIDO' ? 400 : ack.codigo === 'NO_AUTORIZADO' ? 403 : 500;
+  const STATUS = { PAYLOAD_INVALIDO: 400, NO_AUTORIZADO: 403, RATE_LIMIT: 429 };
+  const status = STATUS[ack.codigo] || 500;
   return enviarJson(res, status, ack);
 }
 

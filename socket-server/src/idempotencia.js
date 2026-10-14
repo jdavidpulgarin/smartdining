@@ -44,6 +44,14 @@ function crearRegistroIdempotencia({ ttlMs = 10 * 60 * 1000, maxEntradas = 50000
       entradas.set(clave, { respuesta, expira: ahora() + ttlMs });
       podar();
     },
+    /** true si esta llamada reservó la clave; false si ya estaba (duplicado). */
+    reservar(clave, respuesta = true) {
+      if (this.obtener(clave) !== undefined) return false;
+      this.guardar(clave, respuesta);
+      return true;
+    },
+    /** Quita una reserva: el evento se podrá procesar de nuevo (reintento tras un fallo). */
+    liberar(clave) { entradas.delete(clave); },
     get tamano() { return entradas.size; },
   };
 }

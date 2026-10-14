@@ -1,8 +1,10 @@
 const { enviarJson, ErrorHttp } = require('./http');
+const { log } = require('./log');
 
 // Códigos con los que el servicio push (FCM, Mozilla...) indica que la
 // suscripción ya no existe: el usuario revocó el permiso o desinstaló la PWA.
 const CODIGOS_SUSCRIPCION_CADUCADA = [404, 410];
+const TTL_PUSH_SEG = 30 * 60;
 
 /**
  * Servicio de Web Push. Se inyecta `webpush` para poder probarlo sin salir a
@@ -21,7 +23,7 @@ function crearServicioPush(config, { webpush = require('web-push') } = {}) {
     // si son incorrectos: preferimos fallar al arrancar que al primer envío.
     webpush.setVapidDetails(vapidSubject, vapidPublica, vapidPrivada);
   } else {
-    console.warn('[push] VAPID no configurado: Web Push deshabilitado (usa "npm run vapid")');
+    log.warn('push: VAPID no configurado, Web Push deshabilitado (usa "npm run vapid")');
   }
 
   /**
@@ -33,13 +35,14 @@ function crearServicioPush(config, { webpush = require('web-push') } = {}) {
   async function enviar(suscripcion, payload) {
     if (!habilitado) return { ok: false, caducada: false, motivo: 'deshabilitado' };
     try {
-      // TTL: si el dispositivo está apagado, el aviso "tu pedido está listo"
-      // pierde sentido pasada una hora, así que no se encola más tiempo.
-      await webpush.sendNotification(suscripcion, JSON.stringify(payload), { TTL: 3600, urgency: 'high' });
+      // TTL 30 min: si el dispositivo está apagado más tiempo, "tu plato está
+      // listo" ya no sirve (o ya lo recogieron). urgency high: que no lo
+      // retrase el ahorro de batería.
+      await webpush.sendNotification(suscripcion, JSON.stringify(payload), { TTL: TTL_PUSH_SEG, urgency: 'high' });
       return { ok: true };
     } catch (err) {
       const caducada = CODIGOS_SUSCRIPCION_CADUCADA.includes(err.statusCode);
-      if (!caducada) console.error('[push] error al enviar:', err.statusCode || err.message);
+      if (!caducada) log.error('push: error al enviar', { status: err.statusCode, codigo: err.code });
       return { ok: false, caducada, motivo: err.statusCode || 'error' };
     }
   }
@@ -56,4 +59,6 @@ const rutasPush = {
   },
 };
 
-module.exports = { crearServicioPush, rutasPush, CODIGOS_SUSCRIPCION_CADUCADA };
+module.exports = {
+  crearServicioPush, rutasPush, CODIGOS_SUSCRIPCION_CADUCADA, TTL_PUSH_SEG,
+};

@@ -25,6 +25,11 @@ const ID_MESA = 5;
  * Levanta el escenario: una mesa, un socket-server que firma y revoca tokens, y
  * el registro de lo que fue pasando. Devuelve helpers para actuar como cada rol.
  */
+// Total con el que responde el doble al releer el pedido. Se usa tambien para
+// calcular el saldo pendiente, de modo que un cobro por este monto liquide la
+// cuenta y uno menor no.
+const TOTAL_DEL_PEDIDO = 34000;
+
 function instalarEscenario() {
   const queryOriginal = pool.query;
   const connectOriginal = pool.connect;
@@ -45,6 +50,8 @@ function instalarEscenario() {
     },
     pedidos: [],
     siguienteIdPedido: 1,
+    siguienteIdDetalle: 1,
+    pagos: [],
     // Tokens que el socket-server emitió (los da por bien firmados) y los que
     // revocó al recibir /internal/mesa-liberada.
     emitidos: new Set(),
@@ -75,6 +82,12 @@ function instalarEscenario() {
       return yaLiberada ? { rows: [] } : { rows: [{ ...estado.mesa }] };
     }
 
+    // H-09: el middleware pregunta en cada peticion del personal si la cuenta
+    // sigue activa. Aqui todos los usuarios del escenario estan activos.
+    if (sql.includes('FROM usuarios WHERE id_usuario')) {
+      return { rows: [{ id_usuario: params[0], rol: 'admin', activo: true }] };
+    }
+
     if (sql.includes('count(*)::int AS n FROM pedidos')) {
       const abiertos = estado.pedidos.filter((p) => !['pagado', 'cancelado'].includes(p.estado));
       return { rows: [{ n: abiertos.length }] };
@@ -93,7 +106,7 @@ function instalarEscenario() {
     }
     if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) {
       const p = estado.pedidos.find((x) => x.id_pedido === Number(params[0]));
-      return { rows: p ? [{ ...p, total: 34000 }] : [] };
+      return { rows: p ? [{ ...p, total: TOTAL_DEL_PEDIDO }] : [] };
     }
     if (sql.includes('SELECT estado FROM pedidos WHERE id_pedido')) {
       const p = estado.pedidos.find((x) => x.id_pedido === Number(params[0]));
@@ -114,18 +127,44 @@ function instalarEscenario() {
       return { rows: estado.pedidos.filter((p) => p.id_mesa === Number(params[0])).map((p) => ({ ...p })) };
     }
     if (sql.includes('INSERT INTO transacciones')) {
-      return {
-        rows: [{
-          id_transaccion: 1,
-          id_pedido: params[0],
-          metodo_pago: params[1],
-          monto: params[2],
-          estado_transaccion: params[3],
-        }],
+      const pago = {
+        id_transaccion: estado.pagos.length + 1,
+        id_pedido: Number(params[0]),
+        metodo_pago: params[1],
+        monto: Number(params[2]),
+        estado_transaccion: params[3],
       };
+      estado.pagos.push(pago);
+      return { rows: [{ ...pago }] };
+    }
+    // Saldo del pedido: total menos lo ya cobrado. Asi el doble distingue un
+    // abono parcial de un pago que liquida la cuenta, como hace la base.
+    if (sql.includes('obtener_saldo_pendiente')) {
+      const idPedido = Number(params[0]);
+      const cobrado = estado.pagos
+        .filter((x) => x.id_pedido === idPedido && x.estado_transaccion === 'completada')
+        .reduce((suma, x) => suma + x.monto, 0);
+      const saldo = TOTAL_DEL_PEDIDO - cobrado;
+      return { rows: [{ liquidado: saldo <= 0, saldo_pendiente: saldo.toFixed(2) }] };
+    }
+    // El detalle devuelve su id_detalle: con él se insertan los ingredientes del
+    // ítem y se llama validar_selecciones_detalle en la misma transacción.
+    if (sql.includes('INSERT INTO detalles_pedido')) {
+      return { rows: [{ id_detalle: estado.siguienteIdDetalle++ }] };
     }
     if (sql.includes('FROM detalles_pedido dp')) {
-      return { rows: [{ id_detalle: 1, id_plato: 3, cantidad: 1, notas_especiales: 'Ana', plato_nombre: 'Hamburguesa Smart Angus' }] };
+      return {
+        rows: [{
+          id_detalle: 1,
+          id_pedido: Number(Array.isArray(params[0]) ? params[0][0] : params[0]),
+          id_plato: 3,
+          cantidad: 1,
+          comensal: 'Ana',
+          notas_especiales: null,
+          plato_nombre: 'Hamburguesa Smart Angus',
+          ingredientes: [],
+        }],
+      };
     }
     return { rows: [] };
   };
@@ -186,7 +225,9 @@ function instalarEscenario() {
     liberarMesa: () =>
       request(app).post(`/api/mesas/${ID_MESA}/liberar`).set('Authorization', `Bearer ${jwtStaff('mesero')}`),
 
-    abrirSesion: (token) => request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`),
+    // Alias único por llamada: dos comensales de la misma sesión no pueden repetirlo.
+    abrirSesion: (token, comensal = `Comensal ${(estado.alias = (estado.alias || 0) + 1)}`) =>
+      request(app).post(`/api/mesas/qr/${encodeURIComponent(token)}/sesion`).send({ comensal }),
 
     crearPedido: (jwtComensal, apodo = 'Ana') =>
       request(app)

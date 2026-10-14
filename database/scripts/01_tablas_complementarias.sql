@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS kds_metricas (
     id_plato INTEGER,
     tiempo_preparacion_real NUMERIC(8,2) NOT NULL CHECK (tiempo_preparacion_real >= 0),
     tiempo_preparacion_estimado INTEGER NOT NULL CHECK (tiempo_preparacion_estimado > 0),
-    variacion_porcentaje NUMERIC(6,2) NOT NULL,
+    variacion_porcentaje NUMERIC(10,2) NOT NULL,
     fecha_metrica TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_kds_pedido 
         FOREIGN KEY (id_pedido) 
@@ -83,11 +83,16 @@ CREATE INDEX IF NOT EXISTS idx_kds_metricas_fecha ON kds_metricas(fecha_metrica 
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS intentos_pago_fallidos (
     id_intento SERIAL PRIMARY KEY,
-    id_pedido INTEGER NOT NULL,
+    id_pedido INTEGER,
     id_usuario INTEGER,
+    id_mesa INTEGER,
     metodo_pago VARCHAR(20),
     monto DECIMAL(10,2) CHECK (monto > 0),
     razon_rechazo TEXT NOT NULL,
+    referencia_externa VARCHAR(100),
+    id_transaccion_pasarela VARCHAR(100),
+    pasarela VARCHAR(20),
+    moneda VARCHAR(3),
     ip_origen VARCHAR(45) DEFAULT '127.0.0.1',
     fecha_intento TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_intento_pedido 
@@ -97,11 +102,17 @@ CREATE TABLE IF NOT EXISTS intentos_pago_fallidos (
     CONSTRAINT fk_intento_usuario 
         FOREIGN KEY (id_usuario) 
         REFERENCES usuarios(id_usuario) 
+        ON DELETE SET NULL,
+    CONSTRAINT fk_intento_mesa
+        FOREIGN KEY (id_mesa)
+        REFERENCES mesas(id_mesa)
         ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_intentos_pago_pedido ON intentos_pago_fallidos(id_pedido);
 CREATE INDEX IF NOT EXISTS idx_intentos_pago_fecha ON intentos_pago_fallidos(fecha_intento DESC);
+CREATE INDEX IF NOT EXISTS idx_intentos_pago_referencia_externa ON intentos_pago_fallidos(referencia_externa) WHERE referencia_externa IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_intentos_pago_mesa ON intentos_pago_fallidos(id_mesa) WHERE id_mesa IS NOT NULL;
 
 -- ==============================================================================
 -- TABLA A.5: token_qr_historico
@@ -129,7 +140,7 @@ CREATE TABLE IF NOT EXISTS kds_alertas (
     id_alerta SERIAL PRIMARY KEY,
     id_pedido INTEGER NOT NULL,
     mensaje TEXT NOT NULL,
-    variacion_porcentaje NUMERIC(6,2),
+    variacion_porcentaje NUMERIC(10,2),
     fecha_alerta TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_kds_alertas_pedido 
         FOREIGN KEY (id_pedido) 

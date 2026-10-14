@@ -14,6 +14,10 @@ const ESTADOS_MESA = ['disponible', 'ocupada', 'reservada', 'mantenimiento'];
 const ESTADO_MESA_LIBRE = 'disponible';
 const ESTADO_MESA_OCUPADA = 'ocupada';
 
+// Unica moneda del proyecto. Va explicita en la cuenta interna porque el
+// contrato de Wompi la exige y el socket-server rechaza cualquier otra.
+const MONEDA = 'COP';
+
 async function listar() {
   const result = await pool.query('SELECT * FROM mesas ORDER BY numero ASC');
   return result.rows;
@@ -27,19 +31,50 @@ async function obtenerPorId(id) {
 async function crear({ numero, capacidad, ubicacion, estado, token_qr }) {
   // capacidad, ubicacion y actualizado_en tienen DEFAULT en el schema: si no
   // vienen, se deja que la base ponga el suyo.
+  //
+  // Una mesa que nace 'ocupada' (caso raro, al dar de alta el salón con gente
+  // sentada) ya está en una visita, así que arranca con su sesion_iniciada_en.
+  // Si nace libre queda NULL, y la primera apertura la fijará.
   const result = await pool.query(
-    `INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr)
-     VALUES ($1, COALESCE($2, 4), COALESCE($3, 'Principal'), $4, $5) RETURNING *`,
-    [numero, capacidad ?? null, ubicacion || null, estado || ESTADO_MESA_LIBRE, token_qr || null]
+    `INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr, sesion_iniciada_en)
+     VALUES ($1, COALESCE($2, 4), COALESCE($3, 'Principal'), $4, $5,
+             CASE WHEN $4 = $6 THEN NOW() ELSE NULL END) RETURNING *`,
+    [
+      numero,
+      capacidad ?? null,
+      ubicacion || null,
+      estado || ESTADO_MESA_LIBRE,
+      token_qr || null,
+      ESTADO_MESA_OCUPADA,
+    ]
   );
   return result.rows[0];
 }
 
+/**
+ * Cambia el estado de la mesa a mano (PATCH /api/mesas/:id/estado).
+ *
+ * Este camino también puede empezar una visita: un mesero que marca la mesa
+ * 'ocupada' desde el panel, sin pasar por "abrir" (y por tanto sin QR). Se
+ * aplica la misma regla que en abrirSesion, porque si no la cuenta de ese grupo
+ * arrastraría los pedidos del anterior.
+ *
+ * El CASE compara contra el estado VIEJO: en una misma sentencia SQL el lado
+ * derecho del SET ve los valores previos a la fila, así que esto distingue
+ * "pasa a ocupada" de "ya estaba ocupada" sin una lectura aparte ni una
+ * carrera entre el SELECT y el UPDATE.
+ *
+ * actualizado_en y version_control los maneja el trigger tr_control_concurrencia_mesa.
+ */
 async function actualizarEstado(id, estado) {
-  // actualizado_en y version_control los maneja el trigger tr_control_concurrencia_mesa.
   const result = await pool.query(
-    `UPDATE mesas SET estado = COALESCE($1, estado) WHERE id_mesa = $2 RETURNING *`,
-    [estado, id]
+    `UPDATE mesas SET estado = COALESCE($1, estado),
+            sesion_iniciada_en = CASE
+              WHEN $1 = $3 AND estado <> $3 THEN NOW()
+              ELSE sesion_iniciada_en
+            END
+      WHERE id_mesa = $2 RETURNING *`,
+    [estado, id, ESTADO_MESA_OCUPADA]
   );
   return result.rows[0] || null;
 }
@@ -100,13 +135,81 @@ async function abrirSesion(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
       return { rechazado: true, status: generado.status, mensaje: generado.mensaje };
     }
 
+    // sesion_iniciada_en marca el comienzo de la VISITA, no del QR: delimita qué
+    // pedidos entran en la cuenta (scripts 17, obtener_cuenta_mesa). Se pone
+    // solo si la mesa NO estaba ocupada, en la misma UPDATE y la misma
+    // transacción que el estado y el token.
+    //
+    // Si ya estaba ocupada no se toca, aunque aquí se esté generando un QR
+    // nuevo: eso pasa cuando el anterior caducó, y sigue siendo la misma visita.
+    // Pisarlo dejaría fuera de la cuenta todo lo que el grupo ya pidió.
+    const visitaNueva = mesa.estado !== ESTADO_MESA_OCUPADA;
     const actualizada = await client.query(
-      `UPDATE mesas SET token_qr = $1, estado = 'ocupada' WHERE id_mesa = $2 RETURNING *`,
-      [generado.token, idMesa]
+      `UPDATE mesas SET token_qr = $1, estado = 'ocupada',
+              sesion_iniciada_en = CASE WHEN $3 THEN NOW() ELSE sesion_iniciada_en END
+        WHERE id_mesa = $2 RETURNING *`,
+      [generado.token, idMesa, visitaNueva]
     );
 
     await client.query('COMMIT');
     return { mesa: actualizada.rows[0], token: generado.token, reutilizado: false };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Rota el QR de una mesa con sesión abierta: pide un token nuevo al
+ * socket-server y lo guarda como el vigente.
+ *
+ * Solo para mesas 'ocupada': rotar una mesa libre equivaldría a abrirla sin
+ * pasar por POST /abrir. La fila se bloquea (FOR UPDATE) igual que al abrir,
+ * para que dos rotaciones simultáneas no dejen guardado un token distinto del
+ * que se avisó a la tablet.
+ *
+ * Avisar a la tablet (/internal/qr-rotado) es del controller, DESPUÉS del
+ * commit: así nunca se anuncia un token que no quedó guardado.
+ *
+ * @returns { noExiste: true } | { noOcupada: true, estado }
+ *          | { socketCaido: true, motivo } | { rechazado: true, status, mensaje }
+ *          | { mesa, token, expira_en }
+ */
+async function rotarQr(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const bloqueada = await client.query('SELECT * FROM mesas WHERE id_mesa = $1 FOR UPDATE', [idMesa]);
+    if (bloqueada.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { noExiste: true };
+    }
+    const mesa = bloqueada.rows[0];
+    if (mesa.estado !== ESTADO_MESA_OCUPADA) {
+      await client.query('ROLLBACK');
+      return { noOcupada: true, estado: mesa.estado };
+    }
+
+    const generado = await socket.generarTokenQr(idMesa, jwtStaff);
+    if (!generado.alcanzado) {
+      await client.query('ROLLBACK');
+      return { socketCaido: true, motivo: generado.motivo };
+    }
+    if (!generado.token) {
+      await client.query('ROLLBACK');
+      return { rechazado: true, status: generado.status, mensaje: generado.mensaje };
+    }
+
+    const actualizada = await client.query(
+      'UPDATE mesas SET token_qr = $1 WHERE id_mesa = $2 RETURNING *',
+      [generado.token, idMesa]
+    );
+
+    await client.query('COMMIT');
+    return { mesa: actualizada.rows[0], token: generado.token, expira_en: generado.expira_en ?? null };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -143,8 +246,14 @@ async function liberarSesion(idMesa) {
     }
 
     const abiertos = await client.query(
-      `SELECT count(*)::int AS n FROM pedidos
-       WHERE id_mesa = $1 AND estado NOT IN ('pagado', 'cancelado')`,
+      // Solo los de la visita actual: un pedido abierto que quedó colgado de un
+      // grupo anterior no debe impedir cerrar la mesa de este (y, si no se
+      // filtrara, la mesa no se liberaría nunca más).
+      `SELECT count(*)::int AS n FROM pedidos p
+       JOIN mesas m ON m.id_mesa = p.id_mesa
+       WHERE p.id_mesa = $1
+         AND p.estado NOT IN ('pagado', 'cancelado')
+         AND (m.sesion_iniciada_en IS NULL OR p.creado_en >= m.sesion_iniciada_en)`,
       [idMesa]
     );
     const n = abiertos.rows[0] && abiertos.rows[0].n;
@@ -189,8 +298,12 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
   await client.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE', [idMesa]);
 
   const abiertos = await client.query(
-    `SELECT count(*)::int AS n FROM pedidos
-     WHERE id_mesa = $1 AND estado NOT IN ('pagado', 'cancelado')`,
+    // Mismo criterio de visita que liberarSesion.
+    `SELECT count(*)::int AS n FROM pedidos p
+     JOIN mesas m ON m.id_mesa = p.id_mesa
+     WHERE p.id_mesa = $1
+       AND p.estado NOT IN ('pagado', 'cancelado')
+       AND (m.sesion_iniciada_en IS NULL OR p.creado_en >= m.sesion_iniciada_en)`,
     [idMesa]
   );
   // Si por alguna razón no se puede leer el conteo, NO se libera: es más
@@ -205,6 +318,85 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
     [ESTADO_MESA_LIBRE, idMesa]
   );
   return liberada.rows.length > 0;
+}
+
+/**
+ * Cuenta de la mesa para el socket-server (EVENTS.md §8.2), en centavos.
+ *
+ * Los centavos se calculan EN SQL (`ROUND(x * 100)::bigint`) y no en
+ * JavaScript: `33333.33 * 100` en coma flotante da 3333332.9999999995, y un
+ * peso perdido al redondear en el lado equivocado deja una cuenta que nunca
+ * cuadra. La base ya guarda DECIMAL(10,2); multiplicar ahí mantiene el entero
+ * exacto.
+ *
+ * El desglose sale de obtener_cuenta_mesa_json() de Jarrison, que es la
+ * autoridad sobre quién consumió qué y cuánto se ha pagado. `por_comensal` solo
+ * lleva a quien todavía debe algo: a quien ya pagó no hay que volver a
+ * cobrarle, y el comensal lo usa para elegir "pago lo mío".
+ *
+ * @returns {Promise<null|{id_mesa, moneda, total_centavos, saldo_centavos, por_comensal}>}
+ *          null si la mesa no existe (el endpoint responde 404; la función SQL
+ *          lanzaría un RAISE, que el manejador central traduciría a 409).
+ */
+async function cuentaInterna(idMesa) {
+  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
+  if (existe.rows.length === 0) return null;
+
+  const result = await pool.query(
+    `WITH cuenta AS (SELECT obtener_cuenta_mesa_json($1) AS j)
+     SELECT
+       ROUND(COALESCE((j->>'total_mesa')::numeric, 0) * 100)::bigint AS total_centavos,
+       ROUND(COALESCE((j->>'saldo_mesa')::numeric, 0) * 100)::bigint AS saldo_centavos,
+       COALESCE((
+         SELECT json_agg(
+                  json_build_object(
+                    'comensal', e->>'comensal',
+                    'saldo_centavos', ROUND((e->>'saldo')::numeric * 100)::bigint
+                  ) ORDER BY e->>'comensal' ASC
+                )
+         FROM json_array_elements(j->'comensales') AS e
+         WHERE (e->>'saldo')::numeric > 0
+       ), '[]'::json) AS por_comensal
+     FROM cuenta`,
+    [idMesa]
+  );
+
+  const fila = result.rows[0];
+  return {
+    id_mesa: Number(idMesa),
+    moneda: MONEDA,
+    // pg devuelve bigint como string para no perder precisión; aquí los montos
+    // en centavos caben de sobra en un entero de JavaScript.
+    total_centavos: Number(fila.total_centavos),
+    saldo_centavos: Number(fila.saldo_centavos),
+    por_comensal: fila.por_comensal,
+  };
+}
+
+/**
+ * Cuenta de la mesa por comensal, tal como la devuelve
+ * obtener_cuenta_mesa_json() de Jarrison (scripts 15 y 16).
+ *
+ * Los montos van en PESOS con decimales, que es la unidad de la función y de la
+ * base: esta cuenta la leen personas (la lee el cajero en el panel y el
+ * comensal en su teléfono), no la pasarela. La versión en centavos enteros es
+ * cuentaInterna(), que es la que consume el socket-server; aquí no se convierte
+ * nada para no tener dos verdades sobre el mismo número.
+ *
+ * Se devuelve el JSON de la función sin recomponerlo: sus campos son el
+ * contrato (id_mesa, numero, estado_mesa, ubicacion, total_mesa, pagado_mesa,
+ * saldo_mesa, items_totales, pedidos[], comensales[]), y copiarlos a mano aquí
+ * solo añadiría un sitio más que actualizar cuando Jarrison los cambie.
+ *
+ * @returns {Promise<null|object>} null si la mesa no existe (404). La función
+ *          SQL lanzaría un RAISE, que el manejador central daría como 409.
+ */
+async function cuentaPorComensal(idMesa) {
+  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
+  if (existe.rows.length === 0) return null;
+
+  const result = await pool.query('SELECT obtener_cuenta_mesa_json($1) AS cuenta', [idMesa]);
+  return result.rows[0].cuenta;
 }
 
 /** token_qr vigente de la mesa, o null. Lo usa el middleware de sesión. */
@@ -226,9 +418,13 @@ module.exports = {
   ESTADO_MESA_LIBRE,
   ESTADO_MESA_OCUPADA,
   abrirSesion,
+  rotarQr,
   liberarSesion,
   liberarSiNoQuedanPedidosAbiertos,
+  cuentaInterna,
+  cuentaPorComensal,
   tokenQrDeMesa,
+  MONEDA,
   listar,
   obtenerPorId,
   crear,

@@ -1,4 +1,5 @@
 const { exito, fallo, manejar } = require('./ack');
+const { log } = require('./log');
 const { esEventIdValido } = require('./idempotencia');
 const { salaMesa, SALA_KDS, SALA_ADMIN, esIdValido } = require('./salas');
 const { notificarCambioEstado } = require('./suscripciones');
@@ -23,7 +24,7 @@ function validarPedidoCreado(p) {
  * Lógica única de order:created, compartida por el socket (personal) y por el
  * HTTP interno (backend). Así ambas vías validan, deduplican y difunden igual.
  */
-function difundirPedidoCreado(ctx, p) {
+async function difundirPedidoCreado(ctx, p) {
   const { io, carritos, registro } = ctx;
   if (!esEventIdValido(p.eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
   const errorPayload = validarPedidoCreado(p);
@@ -35,11 +36,14 @@ function difundirPedidoCreado(ctx, p) {
   // misma comanda dos veces.
   const claveEvento = `order:created:${p.eventId}`;
   const clavePedido = `order:created:pedido:${pedido.id_pedido}`;
-  if (registro.obtener(claveEvento) || registro.obtener(clavePedido)) {
+  // reservar es atómico (SET NX en Redis): dos envíos simultáneos del mismo
+  // pedido no pueden pasar ambos el chequeo. Se reservan las dos claves; si
+  // cualquiera ya existía, es un duplicado.
+  const nuevoEvento = await registro.reservar(claveEvento);
+  const nuevoPedido = await registro.reservar(clavePedido);
+  if (!nuevoEvento || !nuevoPedido) {
     return exito({ eventId: p.eventId, duplicado: true });
   }
-  registro.guardar(claveEvento, true);
-  registro.guardar(clavePedido, true);
 
   // Encadenar .to() envía UNA sola vez a un socket que esté en varias de estas
   // salas (p. ej. un admin, que está en KDS y en Admin).
@@ -49,13 +53,26 @@ function difundirPedidoCreado(ctx, p) {
     emitidoEn: new Date().toISOString(),
   });
 
+  // Dueños del pedido para el push "¡Tu plato está listo!": el comensal de
+  // cada ítem si el backend lo envía y, además, los de las líneas del carrito
+  // que se están convirtiendo en este pedido (el backend hoy guarda el apodo
+  // dentro de notas_especiales, no en un campo propio).
+  const carrito = await carritos.snapshot(pedido.id_mesa);
+  const duenos = new Set(carrito.items.map((i) => i.comensal).filter(Boolean));
+  for (const item of Array.isArray(pedido.items) ? pedido.items : []) {
+    if (item && typeof item.comensal === 'string' && item.comensal.trim() && item.comensal.length <= 40) {
+      duenos.add(item.comensal.trim());
+    }
+  }
+  if (duenos.size > 0 && ctx.duenosPedidos) await ctx.duenosPedidos.guardar(pedido.id_pedido, duenos);
+
   // Lo que estaba en el carrito acaba de convertirse en pedido: se vacía para
   // que la mesa no pueda volver a ordenar lo mismo por accidente.
-  if (carritos.snapshot(pedido.id_mesa).items.length > 0) {
+  if (carrito.items.length > 0) {
     io.to(salaMesa(pedido.id_mesa)).emit('cart:updated', {
       eventId: p.eventId,
       origen: 'sistema',
-      carrito: carritos.vaciar(pedido.id_mesa),
+      carrito: await carritos.vaciar(pedido.id_mesa),
     });
   }
   return exito({ eventId: p.eventId, duplicado: false });
@@ -87,7 +104,7 @@ function validarCambioEstado(p) {
  * campos conocidos, no el objeto entero: así un emisor no puede colar datos
  * arbitrarios hacia las pantallas de cocina y de los comensales.
  */
-function difundirCambioEstado(ctx, p) {
+async function difundirCambioEstado(ctx, p) {
   const { io, registro } = ctx;
   if (!esEventIdValido(p.eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
   const errorPayload = validarCambioEstado(p);
@@ -96,8 +113,7 @@ function difundirCambioEstado(ctx, p) {
   // Un mismo pedido pasa por varios estados, así que aquí la clave es SOLO el
   // eventId (no el id_pedido): cada cambio legítimo trae su propio eventId.
   const claveEvento = `order:status:${p.eventId}`;
-  if (registro.obtener(claveEvento)) return exito({ eventId: p.eventId, duplicado: true });
-  registro.guardar(claveEvento, true);
+  if (!(await registro.reservar(claveEvento))) return exito({ eventId: p.eventId, duplicado: true });
 
   const cambio = {
     eventId: p.eventId,
@@ -113,7 +129,7 @@ function difundirCambioEstado(ctx, p) {
   // Push para el comensal que ya cerró la PWA. Sin await a propósito: un
   // servicio push lento no debe retrasar el ack; y notificarCambioEstado
   // no lanza, pero el catch protege el proceso de un rechazo no capturado.
-  notificarCambioEstado(ctx, cambio).catch((err) => console.error('[push] fallo al notificar:', err));
+  notificarCambioEstado(ctx, cambio).catch((err) => log.error('push: fallo al notificar', { id_pedido: cambio.id_pedido, error: err }));
   return exito({ eventId: p.eventId, duplicado: false });
 }
 
@@ -145,12 +161,12 @@ const rutasPedidos = {
   'POST /internal/order-created': async (req, res, ctx) => {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    enviarAck(res, difundirPedidoCreado(ctx, cuerpo));
+    enviarAck(res, await difundirPedidoCreado(ctx, cuerpo));
   },
   'POST /internal/order-status': async (req, res, ctx) => {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    enviarAck(res, difundirCambioEstado(ctx, cuerpo));
+    enviarAck(res, await difundirCambioEstado(ctx, cuerpo));
   },
 };
 

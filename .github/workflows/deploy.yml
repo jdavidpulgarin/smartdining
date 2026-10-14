@@ -1,0 +1,90 @@
+name: Deploy
+
+# Despliega en el VPS cuando el CI pasa sobre main (es decir, al fusionar un PR
+# en main). También se puede lanzar a mano desde la pestaña Actions.
+# Guía y secretos necesarios: docs/despliegue.md
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Nunca dos despliegues a la vez, y uno en curso no se cancela a la mitad.
+concurrency:
+  group: deploy-produccion
+  cancel-in-progress: false
+
+jobs:
+  vps:
+    name: vps · docker compose up
+    # Solo si el CI terminó bien y fue un push (no un PR que apunta a main).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # El environment permite exigir aprobación y limita quién ve los secretos.
+    environment: produccion
+    env:
+      # El commit que pasó el CI, no lo último de main (pudo llegar otro push).
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Preparar llave SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Huella fija del servidor: sin ella cualquiera en el medio podría
+          # hacerse pasar por el VPS (nada de StrictHostKeyChecking=no).
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Desplegar ${{ env.SHA }}
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_RUTA: ${{ secrets.VPS_RUTA }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$VPS_USER@$VPS_HOST" sh -s -- "$VPS_RUTA" "$SHA" <<'REMOTO'
+          set -eu
+          cd "$1"
+          git fetch --quiet origin main
+          # Copia de despliegue: nadie edita aquí. infra/.env está ignorado y
+          # no se toca.
+          git reset --hard --quiet "$2"
+          dc() { docker compose -f docker-compose.prod.yml --env-file infra/.env "$@" < /dev/null; }
+          # El script llega por stdin: < /dev/null evita que un comando se
+          # coma el resto. --wait: falla si un servicio no llega a healthy.
+          # Primero lo interno; nginx (lo único público) solo si ninguna
+          # cuenta del personal tiene una contraseña conocida o publicada.
+          dc up -d --build --remove-orphans --wait --wait-timeout 180 postgres redis backend socket-server
+          if ! sh infra/scripts/passwords-demo.sh verificar < /dev/null; then
+            dc stop nginx
+            echo "::error::Hay cuentas con contraseña conocida (Admin123!). Sitio detenido: corre 'sh infra/scripts/passwords-demo.sh cambiar' en el VPS."
+            exit 1
+          fi
+          dc up -d --build --remove-orphans --wait --wait-timeout 180
+          docker image prune -f > /dev/null
+          echo "Desplegado $(git rev-parse --short HEAD)"
+          REMOTO
+
+      - name: Comprobar desde fuera
+        env:
+          DOMINIO: ${{ vars.DOMINIO }}
+        if: env.DOMINIO != ''
+        run: |
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "https://api.$DOMINIO/api/health"
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "https://rt.$DOMINIO/health"
+          curl -fsS -o /dev/null "https://app.$DOMINIO/"
+
+      - name: Borrar llave SSH
+        if: always()
+        run: rm -f ~/.ssh/id_deploy

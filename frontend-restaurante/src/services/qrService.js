@@ -40,11 +40,11 @@ function generarCadenaAleatoria(longitud = 12) {
 }
 
 /**
- * Obtiene el token JWT del personal logueado desde localStorage
+ * Obtiene el token JWT del personal logueado desde sessionStorage
  */
 function getStaffToken() {
   try {
-    const stored = localStorage.getItem('smartdining_staff_user')
+    const stored = sessionStorage.getItem('smartdining_staff_user')
     if (stored) {
       const u = JSON.parse(stored)
       return u.token || ''
@@ -159,6 +159,66 @@ export async function generarTokenQrMesa(idMesa, ttlMinutos = 240) {
 }
 
 /**
+ * Rota el token QR de una mesa en curso:
+ * Intenta POST /api/mesas/:id/rotar-qr en el backend oficial.
+ * Si el backend está desconectado o no implementa la ruta, genera un nuevo sid firmado
+ * y notifica /internal/qr-rotado al socket-server.
+ */
+export async function rotarTokenQrMesa(idMesa, ttlMinutos = 240) {
+  const numId = Number(idMesa)
+
+  // 1. Intento contra el Backend oficial (POST /api/mesas/:id/rotar-qr)
+  try {
+    const data = await mesasApi.rotarQr(numId)
+    if (data?.token) {
+      const decodificado = decodificarTokenQr(data.token)
+      return {
+        token: data.token,
+        url: data.url,
+        id_mesa: numId,
+        emitido_en: decodificado.emitido_en || Date.now(),
+        expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
+        sid: decodificado.sid,
+        servidor: 'backend-api',
+      }
+    }
+  } catch (err) {
+    console.warn('Aviso: endpoint rotarQr no disponible o falló:', err.message)
+    if (err.status && err.status === 409) {
+      throw err
+    }
+  }
+
+  // 2. Fallback sintético local: genera nuevo sid firmado y avisa al socket-server
+  const iat = Date.now()
+  const exp = iat + ttlMinutos * 60 * 1000
+  const sid = generarCadenaAleatoria(12)
+  const payload = {
+    m: numId,
+    iat,
+    exp,
+    sid,
+  }
+
+  const cuerpo = `v1.${toBase64Url(JSON.stringify(payload))}`
+  const firmaMock = toBase64Url(`sig_${sid}_${iat}`).slice(0, 43)
+  const nuevoToken = `${cuerpo}.${firmaMock}`
+
+  // Notificar al socket-server para que tablets físicas reciban 'qr:actualizado'
+  await notificarQrRotado(numId, nuevoToken)
+
+  return {
+    token: nuevoToken,
+    url: `http://localhost:5173/?token=${encodeURIComponent(nuevoToken)}&mesa=${numId}`,
+    id_mesa: numId,
+    emitido_en: iat,
+    expira_en: exp,
+    sid,
+    servidor: 'local-fallback-rotado',
+  }
+}
+
+/**
  * Libera una mesa a través del Backend oficial:
  * POST /api/mesas/:id/liberar
  *
@@ -179,37 +239,50 @@ export async function liberarMesaRemota(idMesa) {
 /**
  * Solicita el JWT de autenticación para la tablet física de la mesa (rol 'pantalla')
  * llamando a POST /qr/pantalla del socket-server (EVENTS.md §6).
+ *
+ * Si falla, se reutiliza solo un token de PANTALLA emitido antes para esta mesa.
+ * Nunca se usa el JWT del personal en su lugar: la tablet queda a la vista de
+ * los comensales y con ese token cualquiera podría actuar como mesero (abrir y
+ * liberar mesas, ver todas las salas). Sin credencial, se lanza un error para
+ * que la pantalla lo muestre.
+ *
+ * @throws Error si no hay token de pantalla emitido ni en caché
  */
 export async function solicitarTokenPantalla(idMesa) {
   const staffToken = getStaffToken()
   const storageKey = `smartdining_pantalla_token_${idMesa}`
+  let motivo = 'sin sesión de personal'
 
-  try {
-    const res = await fetch(`${SOCKET_URL}/qr/pantalla`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: staffToken ? `Bearer ${staffToken}` : '',
-      },
-      body: JSON.stringify({ id_mesa: Number(idMesa) }),
-    })
+  if (staffToken) {
+    try {
+      const res = await fetch(`${SOCKET_URL}/qr/pantalla`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${staffToken}`,
+        },
+        body: JSON.stringify({ id_mesa: Number(idMesa) }),
+      })
 
-    if (res.ok) {
-      const data = await res.json()
-      try {
-        localStorage.setItem(storageKey, data.token)
-      } catch {
-        // ignorar
+      if (res.ok) {
+        const data = await res.json()
+        try {
+          sessionStorage.setItem(storageKey, data.token)
+        } catch {
+          // ignorar
+        }
+        return data
       }
-      return data
+      motivo = `el servidor respondió ${res.status}`
+    } catch (err) {
+      motivo = 'el servidor de tiempo real no responde'
+      console.warn('Aviso: no se pudo obtener token de /qr/pantalla:', err.message)
     }
-  } catch (err) {
-    console.warn('Aviso: no se pudo obtener token de /qr/pantalla:', err.message)
   }
 
-  // Fallback: reutilizar token en localStorage si ya se había emitido
+  // Respaldo: reutilizar un token de pantalla ya emitido para esta mesa
   try {
-    const cached = localStorage.getItem(storageKey)
+    const cached = sessionStorage.getItem(storageKey)
     if (cached) {
       return { token: cached, id_mesa: Number(idMesa), expira_en: 'cached' }
     }
@@ -217,32 +290,29 @@ export async function solicitarTokenPantalla(idMesa) {
     // ignorar
   }
 
-  return {
-    token: staffToken || '',
-    id_mesa: Number(idMesa),
-    expira_en: 'fallback-staff',
-  }
+  throw new Error(`No se pudo obtener la credencial de la pantalla (${motivo}). Inicia sesión como personal y recarga.`)
 }
 
 /**
- * Notifica /internal/qr-rotado al socket-server (usado en rotaciones manuales)
+ * Rota el QR de una mesa abierta a través del backend:
+ * POST /api/mesas/:id/rotar-qr (Bearer del personal).
+ *
+ * El navegador NUNCA llama a /internal/* del socket-server: esa ruta exige la
+ * clave interna, y cualquier valor con prefijo VITE_ queda incrustado en el
+ * JavaScript público. El backend guarda el token nuevo y, tras el commit, es
+ * él quien avisa a la tablet (qr:actualizado).
+ *
+ * @returns {Promise<{ ok: true, token: string, url: string, expira_en: number|null }>}
+ * @throws Error con .status si el backend rechaza (401/403/409/503)
  */
-export async function notificarQrRotado(idMesa, tokenQr) {
+export async function notificarQrRotado(idMesa) {
+  const data = await mesasApi.rotarQr(Number(idMesa))
+  // El backend solo devuelve la url; el token se lee de ahí para redibujar.
+  let token = null
   try {
-    const res = await fetch(`${SOCKET_URL}/internal/qr-rotado`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-internal-key': import.meta.env.VITE_INTERNAL_API_KEY || 'dev-key',
-      },
-      body: JSON.stringify({
-        id_mesa: Number(idMesa),
-        token_qr: tokenQr,
-      }),
-    })
-    return res.ok
-  } catch (err) {
-    console.warn('Error al notificar /internal/qr-rotado:', err.message)
-    return false
+    token = new URL(data.url).searchParams.get('token')
+  } catch {
+    token = null
   }
+  return { ok: true, token, url: data.url, expira_en: data.expira_en ?? null }
 }

@@ -7,9 +7,32 @@ const app = require('../server');
 
 const PEDIDO = { id_pedido: 87, id_mesa: 5, codigo_pedido: 'PED-260927-A1B2C', estado: 'recibido' };
 
+// Como los devuelve la base desde D-03: el alias va en su columna comensal y
+// notas_especiales solo lleva la nota del item. Los ingredientes vienen del
+// json_agg de la consulta de detalles.
 const DETALLES = [
-  { id_detalle: 1, id_plato: 3, cantidad: 2, notas_especiales: 'Ana: sin cebolla', plato_nombre: 'Hamburguesa Smart Angus' },
-  { id_detalle: 2, id_plato: 5, cantidad: 1, notas_especiales: 'Pipe', plato_nombre: 'Limonada de Coco' },
+  {
+    id_detalle: 1,
+    id_pedido: 87,
+    id_plato: 3,
+    cantidad: 2,
+    comensal: 'Ana',
+    notas_especiales: 'sin cebolla',
+    plato_nombre: 'Hamburguesa Smart Angus',
+    ingredientes: [],
+  },
+  {
+    id_detalle: 2,
+    id_pedido: 87,
+    id_plato: 5,
+    cantidad: 1,
+    comensal: 'Pipe',
+    notas_especiales: null,
+    plato_nombre: 'Limonada de Coco',
+    ingredientes: [
+      { id_ingrediente: 10, nombre: 'Aguacate', porcion: 'extra', precio_aplicado: '1500.00', id_paso: 3, paso: 'Anade Toppings' },
+    ],
+  },
 ];
 
 function dbCreacionOk(sql) {
@@ -74,9 +97,17 @@ test('los items usan "nombre" (formato de Roberto), no "plato_nombre"', async ()
       id_plato: 3,
       nombre: 'Hamburguesa Smart Angus',
       cantidad: 2,
-      notas_especiales: 'Ana: sin cebolla',
+      comensal: 'Ana',
+      notas_especiales: 'sin cebolla',
+      ingredientes: [],
     });
     assert.ok(!('plato_nombre' in items[0]), 'no debe filtrarse el nombre de columna de la base');
+
+    // Los ingredientes salen con los cuatro campos del contrato: id_paso y paso
+    // se quedan en la API REST porque EVENTS.md no los pide.
+    assert.deepStrictEqual(items[1].ingredientes, [
+      { id_ingrediente: 10, nombre: 'Aguacate', porcion: 'extra', precio_aplicado: '1500.00' },
+    ]);
   } finally {
     socket.restaurar();
     db.restaurar();
@@ -344,8 +375,10 @@ test("un cobro 'completada' avisa mesa-liberada y el cambio a pagado", async () 
   }
 });
 
+// H-07: estos estados ya no se aceptan en el body (400), asi que no hay cobro
+// que pueda liberar la mesa ni aviso que mandar.
 for (const estado of ['fallida', 'pendiente', 'reembolsada']) {
-  test(`un cobro '${estado}' NO libera la mesa`, async () => {
+  test(`un cobro '${estado}' se rechaza y no avisa nada`, async () => {
     const db = instalarFakeDb(dbPago());
     const socket = instalarFakeSocket();
     try {
@@ -354,7 +387,7 @@ for (const estado of ['fallida', 'pendiente', 'reembolsada']) {
         .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
         .send({ id_pedido: 87, monto: 80000, metodo_pago: 'tarjeta_credito', estado_transaccion: estado });
 
-      assert.strictEqual(res.status, 201, 'la transacción se registra igual');
+      assert.strictEqual(res.status, 400);
       assert.strictEqual(socket.buscar('/internal/mesa-liberada'), undefined);
       assert.strictEqual(socket.buscar('/internal/order-status'), undefined);
     } finally {

@@ -32,6 +32,11 @@ async function cambiarEstado(req, res, next) {
     );
     if (!pedido) return res.status(404).json({ error: 'Comanda no encontrada' });
 
+    // La comanda ya estaba en ese estado: nada cambió, así que no hay nada que
+    // anunciar. Avisar igualmente haría que el comensal viera "pedido listo"
+    // dos veces y que el panel de sala parpadeara sin motivo.
+    if (pedido.sin_cambios) return res.json(pedido);
+
     // El comensal ve avanzar su pedido y el panel admin se entera en vivo.
     // (No existe un evento order:item_ready en socket-server/EVENTS.md: el
     // avance de la comanda se comunica con order:status.)

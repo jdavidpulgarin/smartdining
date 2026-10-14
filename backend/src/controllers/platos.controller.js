@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const platosService = require('../services/platos.service');
+const menuService = require('../services/menu.service');
 
 // Columnas segun docs/modelo-er.md: url_imagen (no "imagen_url"), id_categoria
 // y tiempo_preparacion_estimado. El modelo no tiene personalizaciones.
@@ -38,6 +39,7 @@ async function crear(req, res, next) {
 
   try {
     const plato = await platosService.crear(parsed.data);
+    await menuService.invalidarMenu();
     return res.status(201).json(plato);
   } catch (err) {
     return next(err);
@@ -53,6 +55,7 @@ async function actualizar(req, res, next) {
     if (!actual) return res.status(404).json({ error: 'Plato no encontrado' });
 
     const plato = await platosService.actualizar(req.params.id, { ...actual, ...parsed.data });
+    await menuService.invalidarMenu();
     return res.json(plato);
   } catch (err) {
     return next(err);
@@ -63,6 +66,7 @@ async function eliminar(req, res, next) {
   try {
     const eliminado = await platosService.eliminar(req.params.id);
     if (!eliminado) return res.status(404).json({ error: 'Plato no encontrado' });
+    await menuService.invalidarMenu();
     return res.status(204).send();
   } catch (err) {
     return next(err);

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { TableCard } from './TableCard'
 import { QRModal } from './QRModal'
+import { TableDetailModal } from './TableDetailModal'
 import { useTables } from '../hooks'
 import {
   CheckCircle2,
@@ -14,20 +15,23 @@ import {
 export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId }) {
   const tablesContext = useTables()
   const contextTables = tablesContext?.tables
+  const pedidosActivos = tablesContext?.pedidosActivos || []
+  const marcarEntregado = tablesContext?.marcarEntregado
   const abrirMesa = tablesContext?.abrirMesa
   const liberarMesa = tablesContext?.liberarMesa
   const regenerarQr = tablesContext?.regenerarQr
   const notification = tablesContext?.notification
 
   const [localTables, setLocalTables] = useState(propTables || [])
-  const tablesList = contextTables || propTables || localTables
+  const tablesList = (contextTables && contextTables.length > 0) ? contextTables : (propTables || localTables)
 
   const [statusFilter, setStatusFilter] = useState('Todas')
   const [zoneFilter, setZoneFilter] = useState('Todas')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTableIdForQR, setSelectedTableIdForQR] = useState(null)
+  const [selectedTableForDetail, setSelectedTableForDetail] = useState(null)
 
-  // Encontrar la mesa activa para el modal
+  // Encontrar la mesa activa para el modal QR
   const selectedTableForQR = selectedTableIdForQR
     ? tablesList.find(
         (t) => t.id === selectedTableIdForQR || t.number === selectedTableIdForQR
@@ -37,6 +41,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
   const handleOpenQRModal = (table) => {
     setSelectedTableIdForQR(table.id || table.number)
   }
+
 
   const handleOpenTableAction = async (idMesa) => {
     if (abrirMesa) {
@@ -238,7 +243,10 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
               key={table.id || table.number || table.name}
               table={table}
               active={selectedTableId ? selectedTableId === table.id : table.active}
-              onClick={onSelectTable ? () => onSelectTable(table) : undefined}
+              onClick={() => {
+                if (onSelectTable) onSelectTable(table)
+                setSelectedTableForDetail(table)
+              }}
               onOpenQR={handleOpenQRModal}
               onFreeTable={handleFreeTableAction}
             />
@@ -261,6 +269,19 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
         </div>
       )}
 
+      {/* Modal Detalle Completo de Mesa con Comensales y Saldo */}
+      {selectedTableForDetail && (
+        <TableDetailModal
+          key={`detail-${selectedTableForDetail.id || selectedTableForDetail.number}`}
+          table={selectedTableForDetail}
+          pedidos={pedidosActivos}
+          onClose={() => setSelectedTableForDetail(null)}
+          onOpenQR={handleOpenQRModal}
+          onFreeTable={handleFreeTableAction}
+          onDeliverOrder={marcarEntregado}
+        />
+      )}
+
       {/* Modal QR Dinámico */}
       {selectedTableForQR && (
         <QRModal
@@ -273,5 +294,6 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
         />
       )}
     </div>
+
   )
 }

@@ -1,0 +1,64 @@
+@import 'tailwindcss';
+
+/*
+ * Dos temas, con el oscuro por defecto: el KDS vive en un monitor de cocina que
+ * se mira de lejos y a veces con reflejos. El claro existe para cocinas muy
+ * iluminadas, donde el oscuro se ve lavado.
+ *
+ * El tema se elige con data-tema en <html> (lo pone el Tablero) y NO con la
+ * preferencia del sistema, porque aquí manda quién está delante de la pantalla;
+ * prefers-color-scheme solo decide la primera vez, si nadie eligió todavía.
+ */
+@theme {
+  --color-fondo: #0b0f14;
+  --color-panel: #151b23;
+  --color-panel-alto: #1e2732;
+  --color-borde: #2c3845;
+  --color-texto: #f5f7fa;
+  --color-texto-suave: #9aa8b8;
+  --color-nuevas: #38bdf8;
+  --color-preparacion: #fbbf24;
+  --color-listas: #4ade80;
+  --color-alerta: #f87171;
+}
+
+/*
+ * Tema claro. Los colores de estado se oscurecen respecto al oscuro para que
+ * mantengan contraste contra un fondo blanco: el ámbar y el verde claros sobre
+ * blanco son ilegibles, y aquí se leen cifras y botones.
+ */
+:root[data-tema='claro'] {
+  --color-fondo: #f4f6f9;
+  --color-panel: #ffffff;
+  --color-panel-alto: #ffffff;
+  --color-borde: #c9d2dd;
+  --color-texto: #10161d;
+  --color-texto-suave: #55657a;
+  --color-nuevas: #0369a1;
+  --color-preparacion: #a16207;
+  --color-listas: #15803d;
+  --color-alerta: #b91c1c;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-fondo);
+  color: var(--color-texto);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Tipografia base mas grande que la de una web normal: se lee a distancia. */
+  font-size: 18px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* En una pantalla tactil de cocina, seleccionar texto por accidente estorba. */
+button {
+  user-select: none;
+  /* Sin retardo de 300 ms al tocar: en cocina se toca con prisa. */
+  touch-action: manipulation;
+}

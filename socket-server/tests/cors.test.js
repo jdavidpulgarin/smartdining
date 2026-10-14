@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { levantar } = require('./helpers');
+const { levantar, ENV_BASE } = require('./helpers');
 const { cargarConfig } = require('../src/config');
 
 const PERMITIDO = 'http://localhost:5173';
@@ -25,6 +25,7 @@ test('/health responde y hay preflight CORS para POST con Authorization', async 
   const s = await levantar();
   const h = await (await fetch(`${s.url}/health`)).json();
   assert.strictEqual(h.estado, 'ok');
+  assert.strictEqual(h.redis, 'memoria');
   const pre = await fetch(`${s.url}/health`, {
     method: 'OPTIONS',
     headers: { Origin: PERMITIDO, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type' },

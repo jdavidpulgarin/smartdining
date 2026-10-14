@@ -10,7 +10,10 @@ const VERSION = 'v1';
 const TTL_MIN_MINUTOS = 1;
 const TTL_MAX_MINUTOS = 24 * 60; // un QR que vive días dejaría de ser "de la sesión de mesa"
 const ROLES_GENERAN_QR = ['admin', 'mesero', 'cajero'];
-const MAX_TOKEN_QR_MOSTRADO = 128; // margen generoso sobre el varchar(64) real de mesas.token_qr
+// 255: un token v1 firmado mide ~150 caracteres (payload + HMAC en base64url).
+// Con 128 se rechazaban los tokens reales y la tablet nunca refrescaba el QR.
+const MAX_TOKEN_QR_MOSTRADO = 255;
+const MOTIVOS_LIBERACION = ['pagada', 'liberada'];
 
 const b64 = (buf) => Buffer.from(buf).toString('base64url');
 
@@ -32,10 +35,25 @@ const b64 = (buf) => Buffer.from(buf).toString('base64url');
  * Es un token firmado (no cifrado): no lleva secretos, y la firma impide que
  * alguien fabrique uno para otra mesa o alargue su expiración.
  */
-function crearServicioQr({ secreto, ttlMinutosPorDefecto = 360, ahora = Date.now }) {
-  // Última liberación por mesa (ms). Un token emitido ANTES de ese instante
-  // ya no vale, aunque no haya expirado ni tenga la firma alterada.
-  const revocadoDesde = new Map();
+/**
+ * Revocaciones por mesa en memoria: { obtener(idMesa) -> ms|null, fijar(idMesa, ms) }.
+ * La versión Redis (almacen/revocaciones-redis.js) tiene la misma interfaz.
+ */
+function crearRevocacionesMemoria() {
+  const desde = new Map();
+  return {
+    obtener: (idMesa) => desde.get(idMesa) || null,
+    fijar: (idMesa, ms) => { desde.set(idMesa, ms); },
+  };
+}
+
+function crearServicioQr({
+  secreto, ttlMinutosPorDefecto = 360, ahora = Date.now, revocaciones = crearRevocacionesMemoria(),
+}) {
+  // Última liberación por mesa (ms), en `revocaciones`. Un token emitido ANTES
+  // de ese instante ya no vale, aunque no haya expirado ni tenga la firma
+  // alterada. Con Redis esto sobrevive a un reinicio: si viviera solo en
+  // memoria, reiniciar el servidor volvería a aceptar los QR de mesas pagadas.
 
   const firmar = (contenido) => crypto.createHmac('sha256', secreto).update(contenido).digest();
 
@@ -54,7 +72,7 @@ function crearServicioQr({ secreto, ttlMinutosPorDefecto = 360, ahora = Date.now
   }
 
   /** Valida en el servidor: formato, firma, expiración y revocación. */
-  function validar(token) {
+  async function validar(token) {
     if (typeof token !== 'string' || token.length > 512) return { valido: false, motivo: 'formato' };
     const partes = token.split('.');
     if (partes.length !== 3 || partes[0] !== VERSION) return { valido: false, motivo: 'formato' };
@@ -77,18 +95,30 @@ function crearServicioQr({ secreto, ttlMinutosPorDefecto = 360, ahora = Date.now
       return { valido: false, motivo: 'formato' };
     }
     if (ahora() >= p.exp) return { valido: false, motivo: 'expirado' };
-    if (p.iat < (revocadoDesde.get(p.m) || 0)) return { valido: false, motivo: 'revocado' };
+    if (p.iat < ((await revocaciones.obtener(p.m)) || 0)) return { valido: false, motivo: 'revocado' };
     return { valido: true, id_mesa: p.m, expira_en: p.exp };
   }
 
   /** La mesa se liberó: invalida todos los QR emitidos hasta este momento. */
-  function revocarMesa(idMesa) {
+  async function revocarMesa(idMesa) {
     // +1 ms para que también quede fuera un token emitido en este mismo
     // milisegundo; el QR nuevo de la mesa siguiente se genera después.
-    revocadoDesde.set(idMesa, ahora() + 1);
+    await revocaciones.fijar(idMesa, ahora() + 1);
   }
 
-  return { generar, validar, revocarMesa };
+  /**
+   * ¿Se liberó la mesa después de emitir una credencial en `emitidoSeg`
+   * (iat de un JWT, en segundos)? Se compara contra el final de ese segundo:
+   * ante la duda se acepta, porque el backend también comprueba el sid.
+   */
+  async function revocadaDespuesDe(idMesa, emitidoSeg) {
+    const desde = await revocaciones.obtener(idMesa);
+    if (!desde) return false;
+    if (!Number.isFinite(emitidoSeg)) return true; // sin iat no hay forma de saberlo
+    return (emitidoSeg + 1) * 1000 <= desde;
+  }
+
+  return { generar, validar, revocarMesa, revocadaDespuesDe };
 }
 
 /** Deriva una clave de firma propia si no se configuró QR_SECRET. */
@@ -127,6 +157,11 @@ const rutasQr = {
     try {
       const ttl = cuerpo.ttl_minutos === undefined ? undefined : Number(cuerpo.ttl_minutos);
       const qr = ctx.qr.generar(cuerpo.id_mesa, ttl);
+      // QR nuevo = sesión nueva: una liberación posterior vuelve a contar.
+      if (ctx.reabrirMesa) ctx.reabrirMesa(cuerpo.id_mesa);
+      // Y empieza (o reinicia) la cuenta de la rotación automática con este
+      // token como el vigente esperado en el backend.
+      if (ctx.rotador) ctx.rotador.abrir(cuerpo.id_mesa, qr.token);
       enviarJson(res, 201, qr);
     } catch (err) {
       if (err instanceof RangeError) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', err.message);
@@ -137,7 +172,7 @@ const rutasQr = {
   // Público a propósito: el comensal aún no tiene sesión cuando escanea.
   'POST /qr/validar': async (req, res, ctx) => {
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    const resultado = ctx.qr.validar(cuerpo.token);
+    const resultado = await ctx.qr.validar(cuerpo.token);
     enviarJson(res, resultado.valido ? 200 : 401, resultado);
   },
 
@@ -187,11 +222,16 @@ const rutasQr = {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
     if (!esIdValido(cuerpo.id_mesa)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'id_mesa debe ser un entero positivo');
-    ctx.liberarMesa(cuerpo.id_mesa);
-    enviarJson(res, 200, { ok: true });
+    // motivo es opcional para no romper al backend actual, que solo manda id_mesa.
+    const motivo = cuerpo.motivo === undefined ? 'liberada' : cuerpo.motivo;
+    if (!MOTIVOS_LIBERACION.includes(motivo)) {
+      throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', `motivo debe ser uno de: ${MOTIVOS_LIBERACION.join(', ')}`);
+    }
+    const r = await ctx.liberarMesa(cuerpo.id_mesa, motivo);
+    enviarJson(res, 200, { ok: true, duplicado: r.duplicado });
   },
 };
 
 module.exports = {
-  crearServicioQr, derivarSecretoQr, generarTokenPantalla, rutasQr, TTL_MAX_MINUTOS,
+  crearServicioQr, crearRevocacionesMemoria, derivarSecretoQr, generarTokenPantalla, rutasQr, TTL_MAX_MINUTOS,
 };

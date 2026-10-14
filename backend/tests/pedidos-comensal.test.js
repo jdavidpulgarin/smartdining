@@ -38,13 +38,15 @@ test('un comensal no puede crear un pedido para otra mesa: se usa el id_mesa del
   }
 });
 
-test('el apodo del comensal se guarda en detalles_pedido.notas_especiales', async () => {
+test('el alias va en detalles_pedido.comensal y la nota sola en notas_especiales', async () => {
   const db = instalarFakeDb(responderCreacionOk);
   try {
+    // Lo pide el mesero: desde H-05 el alias del body solo vale para el personal
+    // (un comensal lo toma de su JWT firmado y nunca del cuerpo).
     const res = await request(app)
       .post('/api/pedidos')
-      .set('Authorization', `Bearer ${tokenComensal(5)}`)
-      .send({ items: [{ id_plato: 12, cantidad: 2, apodo: 'Ana', notas: 'sin cebolla' }] });
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 2, comensal: 'Ana', notas: 'sin cebolla' }] });
 
     assert.strictEqual(res.status, 201);
     assert.ok(res.body.codigo_pedido, 'el pedido trae un codigo_pedido');
@@ -52,15 +54,45 @@ test('el apodo del comensal se guarda en detalles_pedido.notas_especiales', asyn
 
     const detalle = db.buscar('INSERT INTO detalles_pedido');
     assert.ok(detalle);
-    // (id_pedido, id_plato, cantidad, notas_especiales) — el backend ya no manda
-    // precio_unitario ni subtotal: el precio sale de una subconsulta a platos y
-    // el subtotal lo calcula el trigger tr_validar_detalle_pedido.
-    assert.deepStrictEqual(detalle.params, [87, 12, 2, 'Ana: sin cebolla']);
+    // (id_pedido, id_plato, cantidad, notas_especiales, comensal) — el backend
+    // sigue sin mandar precio_unitario ni subtotal: el precio sale de una
+    // subconsulta a platos y el subtotal lo calcula el trigger.
+    assert.deepStrictEqual(detalle.params, [87, 12, 2, 'sin cebolla', 'Ana']);
     assert.ok(
       detalle.sql.includes('(SELECT precio FROM platos WHERE id_plato = $2)'),
       'el precio lo congela la base en el propio INSERT'
     );
     assert.ok(!detalle.sql.includes('subtotal'), 'el backend no manda subtotal');
+    assert.ok(detalle.sql.includes('RETURNING id_detalle'), 'hace falta para los ingredientes');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('apodo sigue funcionando como alias de comensal (compatibilidad)', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1, apodo: 'Pipe' }] });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[4], 'Pipe');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('si llegan comensal y apodo, manda comensal', async () => {
+  const db = instalarFakeDb(responderCreacionOk);
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1, comensal: 'Ana', apodo: 'Pipe' }] });
+
+    assert.strictEqual(db.buscar('INSERT INTO detalles_pedido').params[4], 'Ana');
   } finally {
     db.restaurar();
   }
@@ -98,12 +130,21 @@ test('un mesero debe mandar el id_mesa en el body', async () => {
 });
 
 test('un cajero no puede crear pedidos', async () => {
-  const res = await request(app)
-    .post('/api/pedidos')
-    .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
-    .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1 }] });
+  // El doble de base es necesario desde H-09: el middleware comprueba en cada
+  // peticion del personal que la cuenta siga activa, antes de mirar el rol. Sin
+  // el, la consulta va a PostgreSQL de verdad y en un entorno sin base (el CI)
+  // la peticion falla con 500 en vez de llegar al control de roles.
+  const db = instalarFakeDb(() => ({ rows: [] }));
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
+      .send({ id_mesa: 5, items: [{ id_plato: 12, cantidad: 1 }] });
 
-  assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.status, 403);
+  } finally {
+    db.restaurar();
+  }
 });
 
 test('un comensal no puede consultar un pedido de otra mesa', async () => {

@@ -10,7 +10,7 @@
         "nombre": "Arepa Rellena",
         "descripcion": "Auténtica arepa de maíz con los rellenos que elijas.",
         "precio": 15000,
-        "url_imagen": null,
+        "url_imagen": "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=600&q=80&auto=format",
         "tiempo_estimado": 12,
         "personalizable": true,
         "calorias": 380,
@@ -29,7 +29,7 @@
                 "precio_extra": 0,
                 "calorias": 180,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1565299585323-38d6b0865b47?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -38,7 +38,7 @@
                 "precio_extra": 1500,
                 "calorias": 220,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -57,7 +57,7 @@
                 "precio_extra": 0,
                 "calorias": 220,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -66,7 +66,7 @@
                 "precio_extra": 2500,
                 "calorias": 260,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -75,7 +75,7 @@
                 "precio_extra": 3000,
                 "calorias": 340,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1528607929212-2636ec44253e?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -94,7 +94,7 @@
                 "precio_extra": 1500,
                 "calorias": 120,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -103,7 +103,7 @@
                 "precio_extra": 1000,
                 "calorias": 110,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1618160702438-9b02ab6515c9?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -112,7 +112,7 @@
                 "precio_extra": 0,
                 "calorias": 60,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1580201092675-a0a6a6cafbb1?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -131,7 +131,7 @@
                 "precio_extra": 0,
                 "calorias": 90,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1472476443507-c7a5948772fc?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -140,7 +140,7 @@
                 "precio_extra": 0,
                 "calorias": 15,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1563865436874-9aef32095fad?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -149,7 +149,7 @@
                 "precio_extra": 2000,
                 "calorias": 100,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1604467715878-83e57e8bc129?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -161,7 +161,7 @@
         "nombre": "Bowl Personalizado",
         "descripcion": "Arma tu bowl con base, proteína, vegetales y salsa a tu gusto.",
         "precio": 20000,
-        "url_imagen": null,
+        "url_imagen": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&q=80&auto=format",
         "tiempo_estimado": 10,
         "personalizable": true,
         "calorias": 450,
@@ -180,7 +180,7 @@
                 "precio_extra": 0,
                 "calorias": 180,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1536304993881-ff6e9eefa2a6?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -189,7 +189,7 @@
                 "precio_extra": 2000,
                 "calorias": 160,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1586201375761-83865001e31c?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -198,7 +198,7 @@
                 "precio_extra": 0,
                 "calorias": 15,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1556801712-76c8eb07bbc9?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -217,7 +217,7 @@
                 "precio_extra": 0,
                 "calorias": 220,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -226,7 +226,7 @@
                 "precio_extra": 2500,
                 "calorias": 260,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -235,7 +235,7 @@
                 "precio_extra": 0,
                 "calorias": 190,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1593560708920-61dd98c46a4e?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -244,7 +244,7 @@
                 "precio_extra": 3000,
                 "calorias": 340,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1528607929212-2636ec44253e?w=600&q=80&auto=format",
                 "disponible": false
               }
             ]
@@ -263,7 +263,7 @@
                 "precio_extra": 0,
                 "calorias": 70,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1551754655-cd27e38d2076?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -272,7 +272,7 @@
                 "precio_extra": 0,
                 "calorias": 25,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -281,7 +281,7 @@
                 "precio_extra": 1500,
                 "calorias": 120,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -290,7 +290,7 @@
                 "precio_extra": 1000,
                 "calorias": 110,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1618160702438-9b02ab6515c9?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -299,7 +299,7 @@
                 "precio_extra": 0,
                 "calorias": 60,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1580201092675-a0a6a6cafbb1?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -318,7 +318,7 @@
                 "precio_extra": 0,
                 "calorias": 90,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1472476443507-c7a5948772fc?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -327,7 +327,7 @@
                 "precio_extra": 0,
                 "calorias": 15,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1563865436874-9aef32095fad?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -336,7 +336,7 @@
                 "precio_extra": 0,
                 "calorias": 110,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1540420773420-3366772f4999?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -345,7 +345,7 @@
                 "precio_extra": 2000,
                 "calorias": 100,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1604467715878-83e57e8bc129?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -357,7 +357,7 @@
         "nombre": "Wrap Personalizado",
         "descripcion": "Tu combinación favorita envuelta en tortilla de harina fresca.",
         "precio": 18000,
-        "url_imagen": null,
+        "url_imagen": "https://images.unsplash.com/photo-1626700051175-6818013e1d4f?w=600&q=80&auto=format",
         "tiempo_estimado": 8,
         "personalizable": true,
         "calorias": 520,
@@ -376,7 +376,7 @@
                 "precio_extra": 0,
                 "calorias": 190,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1565299585323-38d6b0865b47?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -385,7 +385,7 @@
                 "precio_extra": 0,
                 "calorias": 170,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -404,7 +404,7 @@
                 "precio_extra": 0,
                 "calorias": 220,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -413,7 +413,7 @@
                 "precio_extra": 2500,
                 "calorias": 260,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -422,7 +422,7 @@
                 "precio_extra": 0,
                 "calorias": 190,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1593560708920-61dd98c46a4e?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -441,7 +441,7 @@
                 "precio_extra": 0,
                 "calorias": 70,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1551754655-cd27e38d2076?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -450,7 +450,7 @@
                 "precio_extra": 0,
                 "calorias": 25,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -459,7 +459,7 @@
                 "precio_extra": 1500,
                 "calorias": 120,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -468,7 +468,7 @@
                 "precio_extra": 1000,
                 "calorias": 110,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1618160702438-9b02ab6515c9?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]
@@ -487,7 +487,7 @@
                 "precio_extra": 0,
                 "calorias": 90,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1472476443507-c7a5948772fc?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -496,7 +496,7 @@
                 "precio_extra": 0,
                 "calorias": 15,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1563865436874-9aef32095fad?w=600&q=80&auto=format",
                 "disponible": true
               },
               {
@@ -505,7 +505,7 @@
                 "precio_extra": 0,
                 "calorias": 110,
                 "alergenos": [],
-                "url_imagen": null,
+                "url_imagen": "https://images.unsplash.com/photo-1540420773420-3366772f4999?w=600&q=80&auto=format",
                 "disponible": true
               }
             ]

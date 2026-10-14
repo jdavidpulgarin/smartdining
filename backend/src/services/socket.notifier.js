@@ -79,6 +79,11 @@ async function enviar(ruta, cuerpo) {
  * Da forma al pedido tal como lo documenta EVENTS.md, no como lo devuelve la
  * base: los ítems usan `nombre` (no `plato_nombre`) porque ese es el nombre de
  * campo del contrato de Roberto, que es lo que leen los frontends.
+ *
+ * Cada ítem lleva `comensal` (quién lo pidió) e `ingredientes` con su porción y
+ * el precio_aplicado que congeló la base, que es lo que el KDS necesita para
+ * preparar un plato armado y la tablet para mostrar la cuenta por persona.
+ * `notas_especiales` es solo la nota del ítem: el alias ya no va dentro.
  */
 function armarPedido(pedido, detalles = []) {
   return {
@@ -92,7 +97,16 @@ function armarPedido(pedido, detalles = []) {
       id_plato: d.id_plato,
       nombre: d.plato_nombre ?? null,
       cantidad: d.cantidad,
+      comensal: d.comensal ?? null,
       notas_especiales: d.notas_especiales ?? null,
+      // Solo los campos del contrato: id_paso y paso se quedan en la API REST,
+      // el socket no los pide.
+      ingredientes: (d.ingredientes || []).map((i) => ({
+        id_ingrediente: i.id_ingrediente,
+        nombre: i.nombre,
+        porcion: i.porcion,
+        precio_aplicado: i.precio_aplicado,
+      })),
     })),
   };
 }
@@ -260,9 +274,15 @@ async function notificarQrRotado(id_mesa, token_qr) {
  * POST /internal/mesa-liberada — invalida los QR emitidos de esa mesa y borra
  * su carrito y sus suscripciones push, para que el grupo siguiente empiece
  * limpio. Se llama tras un pago efectivo (estado_transaccion 'completada').
+ *
+ * `motivo` es opcional y solo viaja si se pasa: un pago en línea manda
+ * 'pagada' (EVENTS.md §8.3), mientras que liberar a mano o cobrar en caja no
+ * manda nada, para no cambiar el cuerpo que ya recibe el socket-server.
  */
-async function notificarMesaLiberada(id_mesa) {
-  return enviar('/internal/mesa-liberada', { id_mesa });
+async function notificarMesaLiberada(id_mesa, motivo) {
+  const cuerpo = { id_mesa };
+  if (motivo !== undefined && motivo !== null) cuerpo.motivo = motivo;
+  return enviar('/internal/mesa-liberada', cuerpo);
 }
 
 module.exports = {
