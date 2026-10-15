@@ -198,14 +198,19 @@ const SQL_METODOS_PAGO = `
   ${CTE_LIMITES}
   , cobros AS (
     SELECT ${ETIQUETA_METODO} AS metodo,
-           SUM(t.monto)::float8 AS monto
+           -- Se queda en NUMERIC a propósito: PostgreSQL solo tiene
+           -- round(numeric, int), no round(double precision, int), así que
+           -- castear a float8 aquí haría fallar el ROUND de abajo con un
+           -- 42883. El cast a float8 va en el SELECT final, ya redondeado.
+           SUM(t.monto) AS monto
     FROM transacciones t
     CROSS JOIN limites l
     WHERE t.estado_transaccion = 'completada'
       AND ${FECHA_LOCAL('t.creado_en')} BETWEEN l.desde AND l.hasta
     GROUP BY 1
   )
-  SELECT metodo, monto,
+  SELECT metodo,
+         monto::float8 AS monto,
          ROUND(100.0 * monto / SUM(monto) OVER (), 1)::float8 AS porcentaje
   FROM cobros
   ORDER BY monto DESC`;
