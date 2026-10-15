@@ -117,3 +117,30 @@ export function cambiarEstadoComanda(token, idPedido, estado) {
     body: JSON.stringify({ estado }),
   })
 }
+
+/**
+ * GET /api/menu — la carta completa, de donde salen los ingredientes del panel
+ * de agotados (D-10).
+ *
+ * SIN token: es publica (api-spec.md), porque el comensal carga la carta antes
+ * de tener sesion de mesa. Es tambien la UNICA fuente que el rol `cocina` puede
+ * leer: GET /platos/:id/pasos es de admin, cajero y mesero.
+ */
+export function obtenerMenu() {
+  return pedir('/menu')
+}
+
+/**
+ * PATCH /api/ingredientes/:id/disponible — agotar o reponer (D-05).
+ *
+ * Es la unica escritura del constructor que puede hacer `cocina`. Devuelve el
+ * ingrediente actualizado; el error llega tal cual lo manda el backend, que es
+ * texto escrito para leerse.
+ */
+export function cambiarDisponibilidadIngrediente(token, idIngrediente, disponible) {
+  return pedir(`/ingredientes/${idIngrediente}/disponible`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify({ disponible }),
+  })
+}
