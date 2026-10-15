@@ -100,14 +100,14 @@ function Constructor() {
     return (
       <div className="space-y-6 pb-24" aria-busy="true" aria-label="Cargando constructor">
         <div className="animate-pulse space-y-3">
-          <div className="h-6 w-48 bg-gray-200 rounded" />
-          <div className="h-4 w-64 bg-gray-200 rounded" />
-          <div className="h-2 w-full bg-gray-200 rounded-full" />
+          <div className="h-6 w-48 bg-superficie-2 rounded" />
+          <div className="h-4 w-64 bg-superficie-2 rounded" />
+          <div className="h-2 w-full bg-superficie-2 rounded-full" />
         </div>
         <div className="space-y-3">
-          <div className="h-28 bg-gray-200 rounded-2xl animate-pulse" />
-          <div className="h-28 bg-gray-200 rounded-2xl animate-pulse" />
-          <div className="h-28 bg-gray-200 rounded-2xl animate-pulse" />
+          <div className="h-28 bg-superficie-2 rounded-2xl animate-pulse" />
+          <div className="h-28 bg-superficie-2 rounded-2xl animate-pulse" />
+          <div className="h-28 bg-superficie-2 rounded-2xl animate-pulse" />
         </div>
       </div>
     );
@@ -116,7 +116,7 @@ function Constructor() {
   if (error) {
     return (
       <div className="text-center py-12 px-4 space-y-4">
-        <p className="text-red-600 font-medium">
+        <p className="text-primario-texto font-medium">
           {error.mensaje || error.message || 'No pudimos cargar el plato'}
         </p>
         <Button variante="secundario" onClick={manejarReintentar}>
@@ -129,7 +129,7 @@ function Constructor() {
   if (!plato) {
     return (
       <Card className="text-center space-y-4 py-8">
-        <p className="text-cafe font-semibold text-base">
+        <p className="text-texto font-semibold text-base">
           Este plato ya no está disponible
         </p>
         <Button variante="secundario" onClick={() => navigate('/menu')}>
@@ -188,14 +188,36 @@ function Constructor() {
 
   return (
     <div className="space-y-4 pb-32">
-      <header className="space-y-1">
-        <h1 className="font-titulo text-2xl font-bold text-cafe">
-          {plato.nombre}
-        </h1>
-        {plato.descripcion && (
-          <p className="text-sm text-gray-600">{plato.descripcion}</p>
+      {/* Portada / Hero del plato */}
+      <div className="-mx-4 -mt-4 mb-2 relative overflow-hidden rounded-b-3xl bg-superficie min-h-[160px]">
+        {plato.url_imagen && (
+          <div className="h-48 sm:h-56 w-full relative">
+            <img
+              src={plato.url_imagen}
+              alt={plato.nombre}
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />
+          </div>
         )}
-      </header>
+        <div className={plato.url_imagen ? 'absolute bottom-0 inset-x-0 p-4' : 'p-4'}>
+          <button
+            type="button"
+            onClick={() => navigate('/menu')}
+            className="text-xs font-semibold text-primario-texto hover:underline inline-flex items-center gap-1 mb-1.5 cursor-pointer"
+          >
+            ← Volver al menú
+          </button>
+          <h1 className="font-titulo text-4xl sm:text-5xl uppercase tracking-wider text-primario leading-none">
+            {plato.nombre}
+          </h1>
+          {plato.descripcion && (
+            <p className="text-xs sm:text-sm text-texto-suave mt-1 line-clamp-2">
+              {plato.descripcion}
+            </p>
+          )}
+        </div>
+      </div>
 
       <ProgressBar
         pasoActual={estado.enResumen ? totalPasos : estado.pasoActual + 1}
@@ -210,7 +232,7 @@ function Constructor() {
       {estado.enResumen ? (
         <Card className="space-y-4">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="font-titulo text-xl font-bold text-cafe">
+            <h2 className="font-titulo text-2xl tracking-wide uppercase text-texto">
               Tu plato
             </h2>
             <Button variante="secundario" onClick={manejarAnterior}>
@@ -218,18 +240,18 @@ function Constructor() {
             </Button>
           </div>
 
-          <div className="space-y-3 divide-y divide-gray-100">
+          <div className="space-y-3 divide-y divide-borde">
             {pasos.map((paso) => {
               const itemsPaso = calculo.detalle.filter(
                 (d) => d.paso === paso.nombre
               );
               return (
                 <div key={paso.id_paso} className="pt-2.5 first:pt-0">
-                  <h3 className="text-xs font-bold uppercase tracking-wide text-gray-600">
+                  <h3 className="text-xs font-etiqueta font-bold uppercase tracking-wider text-texto-suave">
                     {paso.nombre}
                   </h3>
                   {itemsPaso.length === 0 ? (
-                    <p className="text-sm text-gray-500 italic mt-0.5">
+                    <p className="text-sm text-texto-tenue italic mt-0.5">
                       Sin selección
                     </p>
                   ) : (
@@ -237,10 +259,10 @@ function Constructor() {
                       {itemsPaso.map((item, idx) => (
                         <li
                           key={`${paso.id_paso}-${idx}`}
-                          className="text-sm font-medium text-cafe"
+                          className="text-sm font-medium text-texto"
                         >
                           {item.nombre} ·{' '}
-                          <span className="font-semibold text-primary">
+                          <span className="font-bold font-etiqueta uppercase text-primario-texto">
                             {ETIQUETA_PORCION[item.porcion] || item.porcion}
                           </span>
                         </li>
@@ -252,12 +274,12 @@ function Constructor() {
             })}
           </div>
 
-          <div className="space-y-1.5 pt-2 border-t border-gray-100">
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-600">
+          <div className="space-y-1.5 pt-2 border-t border-borde">
+            <p className="text-xs font-etiqueta font-bold uppercase tracking-wider text-texto-suave">
               Alérgenos
             </p>
             {calculo.alergenos.length === 0 ? (
-              <p className="text-xs text-gray-600">Sin alérgenos declarados</p>
+              <p className="text-xs text-texto-suave">Sin alérgenos declarados</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {calculo.alergenos.map((alergeno) => (
@@ -269,15 +291,15 @@ function Constructor() {
             )}
           </div>
 
-          <div className="space-y-1.5 pt-2 border-t border-gray-100">
+          <div className="space-y-1.5 pt-2 border-t border-borde">
             <div className="flex items-center justify-between">
               <label
                 htmlFor={notasId}
-                className="text-sm font-semibold text-cafe"
+                className="text-sm font-semibold text-texto"
               >
                 Notas para cocina (opcional)
               </label>
-              <span className="text-xs text-gray-600">
+              <span className="text-xs text-texto-suave">
                 {estado.notas.length}/200
               </span>
             </div>
@@ -290,12 +312,12 @@ function Constructor() {
                 despachador({ type: 'CAMBIAR_NOTAS', notas: e.target.value })
               }
               placeholder="Ej: Salsa aparte, bien cocido..."
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-cafe focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="w-full rounded-xl border border-borde bg-superficie-2 px-3 py-2 text-sm text-texto placeholder:text-texto-tenue focus:outline-none focus-visible:ring-2 focus-visible:ring-primario"
             />
           </div>
 
           {pendientes.length > 0 && (
-            <p role="alert" className="text-xs font-semibold text-primary">
+            <p role="alert" className="text-xs font-semibold text-primario-texto">
               Falta completar: {pendientes.join(', ')}
             </p>
           )}
@@ -311,28 +333,25 @@ function Constructor() {
           {!cumpleMinimoPaso && (
             <p
               role="status"
-              className="text-xs font-semibold text-primary text-right"
+              className="text-xs font-semibold text-primario-texto text-right"
             >
               Elige al menos {minSelActual}
             </p>
           )}
-
-          <div className="flex items-center justify-between gap-3 pt-2">
-            <Button variante="secundario" onClick={manejarAnterior}>
-              Anterior
-            </Button>
-          </div>
         </>
       )}
 
       <BottomBar precioTotal={calculo.precio} calorias={calculo.calorias}>
+        <Button variante="secundario" onClick={manejarAnterior}>
+          Anterior
+        </Button>
         {estado.enResumen ? (
           <Button
             variante="primario"
             disabled={pendientes.length > 0}
             onClick={manejarAgregarAMesa}
           >
-            Agregar a la mesa
+            Añadir a la mesa
           </Button>
         ) : (
           <Button
