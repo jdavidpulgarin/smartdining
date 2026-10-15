@@ -287,6 +287,15 @@ async function crearIngrediente(idPaso, datos) {
  *
  * Aquí no hay constraint diferido, pero el catch rodea el COMMIT igual: cuesta
  * lo mismo y evita que el día que se agregue uno este camino se quede atrás.
+ *
+ * DEVUELVE `{ ingrediente, anterior }` y no solo la fila nueva, a diferencia de
+ * actualizarIngrediente/actualizarPaso del resto del módulo. El motivo es D-05:
+ * para avisar al socket-server SOLO cuando `disponible` cambió de verdad hace
+ * falta el valor previo, y el único sitio donde existe sin una segunda consulta
+ * —y sin carrera con otra edición— es dentro de esta transacción, que ya lee la
+ * fila con FOR UPDATE. `anterior` es la fila completa de antes del UPDATE.
+ *
+ * Sigue devolviendo `null` si el ingrediente no existe.
  */
 async function actualizarIngrediente(idIngrediente, cambios, validar) {
   const client = await pool.connect();
@@ -324,7 +333,7 @@ async function actualizarIngrediente(idIngrediente, cambios, validar) {
     );
 
     await client.query('COMMIT');
-    return r.rows[0];
+    return { ingrediente: r.rows[0], anterior: actual.rows[0] };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw traducirError(err);
