@@ -1,24 +1,50 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #8B1E1E;
-  --color-primary-hover: #6E1717;
-  --color-cafe: #3B2414;
-  --color-crema: #F7F1E8;
-  --color-verde: #2F6B3A;
-  --font-titulo: 'Oswald', sans-serif;
+  --color-fondo: #0B0B0B;
+  --color-superficie: #161616;
+  --color-superficie-2: #1F1F1F;
+  --color-borde: #2A2A2A;
+  --color-primario: #E3242B;
+  --color-primario-hover: #C81E24;
+  --color-primario-texto: #FF5A5F;
+  --color-texto: #FFFFFF;
+  --color-texto-suave: #A3A3A3;
+  --color-texto-tenue: #6B6B6B;
+  --color-acento: #F2B705;
+  --color-exito: #2FA35A;
+
+  /* Compatibilidad durante migración */
+  --color-primary: #E3242B;
+  --color-primary-hover: #C81E24;
+  --color-crema: #0B0B0B;
+  --color-cafe: #FFFFFF;
+  --color-verde: #2FA35A;
+
+  /* Tipografias */
+  --font-titulo: 'Bebas Neue', sans-serif;
+  --font-etiqueta: 'Barlow Condensed', sans-serif;
   --font-cuerpo: 'Inter', sans-serif;
 }
 
 @layer base {
   body {
-    @apply bg-crema text-cafe font-cuerpo;
+    background-color: #0B0B0B;
+    color: #FFFFFF;
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1,
   h2,
   h3 {
-    @apply font-titulo;
+    font-family: 'Bebas Neue', sans-serif;
+  }
+
+  :focus-visible {
+    outline: 2px solid #FF5A5F;
+    outline-offset: 2px;
   }
 }

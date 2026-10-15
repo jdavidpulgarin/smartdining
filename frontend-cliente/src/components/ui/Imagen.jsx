@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 const IMAGEN_RESPALDO =
-  "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'><rect width='400' height='300' fill='%23F7F1E8'/><g fill='none' stroke='%238B1E1E' stroke-width='8' stroke-linecap='round' stroke-linejoin='round' opacity='0.45'><circle cx='200' cy='150' r='55'/><path d='M120 110v80M105 110v30a15 15 0 0 0 30 0v-30M280 110v80M280 110c15 0 20 15 20 35h-20'/></g></svg>";
+  "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'><rect width='400' height='300' fill='%231F1F1F'/><g fill='none' stroke='%23E3242B' stroke-width='8' stroke-linecap='round' stroke-linejoin='round' opacity='0.45'><circle cx='200' cy='150' r='55'/><path d='M120 110v80M105 110v30a15 15 0 0 0 30 0v-30M280 110v80M280 110c15 0 20 15 20 35h-20'/></g></svg>";
 
 /**
  * Componente de imagen con proporción fija, carga diferida y respaldo ante error.
@@ -37,7 +37,7 @@ function Imagen({
   return (
     <div
       style={{ aspectRatio: aspecto }}
-      className={`relative overflow-hidden bg-crema ${className}`.trim()}
+      className={`relative overflow-hidden bg-superficie-2 ${className}`.trim()}
     >
       <img
         src={mostrarRespaldo ? srcRespaldo : src}

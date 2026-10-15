@@ -96,16 +96,19 @@ function Menu() {
   if (cargando) {
     return (
       <div className="space-y-4 pb-6 animate-pulse" aria-label="Cargando menú">
+        {/* Hero esqueleto */}
+        <div className="-mx-4 -mt-4 mb-4 h-56 bg-superficie-2 rounded-b-3xl" />
+
         {/* Arma tu plato esqueleto */}
         <div className="space-y-2.5">
-          <div className="h-6 bg-gray-200 rounded w-36" />
+          <div className="h-6 bg-superficie-2 rounded w-36" />
           <div className="flex gap-3 overflow-x-auto pb-2">
             {[1, 2, 3].map((item) => (
-              <Card key={item} className="w-64 shrink-0 space-y-3">
-                <div className="w-full aspect-4/3 rounded-xl bg-gray-200" />
-                <div className="h-4 bg-gray-200 rounded w-3/4" />
-                <div className="h-3 bg-gray-200 rounded w-full" />
-                <div className="h-10 bg-gray-200 rounded-xl w-full" />
+              <Card key={item} className="w-64 shrink-0 space-y-3 bg-superficie border border-borde">
+                <div className="w-full aspect-4/3 rounded-xl bg-superficie-2" />
+                <div className="h-4 bg-superficie-2 rounded w-3/4" />
+                <div className="h-3 bg-superficie-2 rounded w-full" />
+                <div className="h-10 bg-superficie-2 rounded-xl w-full" />
               </Card>
             ))}
           </div>
@@ -116,7 +119,7 @@ function Menu() {
           {[1, 2, 3, 4].map((item) => (
             <div
               key={item}
-              className="h-9 w-24 bg-gray-200 rounded-full shrink-0"
+              className="h-9 w-24 bg-superficie-2 rounded-full shrink-0"
             />
           ))}
         </div>
@@ -126,13 +129,13 @@ function Menu() {
           {[1, 2, 3, 4].map((item) => (
             <div
               key={item}
-              className="bg-white rounded-xl shadow-sm border border-gray-100 flex gap-3 p-3"
+              className="bg-superficie rounded-2xl border border-borde flex gap-3 p-3"
             >
-              <div className="w-24 h-24 shrink-0 rounded-lg bg-gray-200" />
+              <div className="w-24 h-24 shrink-0 rounded-xl bg-superficie-2" />
               <div className="flex flex-col justify-between flex-1 py-1 space-y-2">
-                <div className="h-4 bg-gray-200 rounded w-2/3" />
-                <div className="h-3 bg-gray-200 rounded w-full" />
-                <div className="h-4 bg-gray-200 rounded w-1/4" />
+                <div className="h-4 bg-superficie-2 rounded w-2/3" />
+                <div className="h-3 bg-superficie-2 rounded w-full" />
+                <div className="h-4 bg-superficie-2 rounded w-1/4" />
               </div>
             </div>
           ))}
@@ -143,15 +146,15 @@ function Menu() {
 
   if (errorMenu) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center shadow-sm space-y-4 my-8">
-        <div className="w-12 h-12 bg-primary/10 text-primary rounded-full flex items-center justify-center mx-auto text-xl font-bold">
+      <div className="bg-superficie rounded-2xl border border-borde p-8 text-center space-y-4 my-8">
+        <div className="w-12 h-12 bg-primario/15 text-primario rounded-full flex items-center justify-center mx-auto text-xl font-bold">
           !
         </div>
         <div>
-          <h2 className="font-titulo text-lg font-bold text-cafe">
+          <h2 className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto">
             No pudimos cargar el menú
           </h2>
-          <p className="text-sm text-gray-600 mt-1">{errorMenu}</p>
+          <p className="text-sm text-texto-suave mt-1">{errorMenu}</p>
         </div>
         <Button
           variante="primario"
@@ -167,25 +170,46 @@ function Menu() {
   }
 
   return (
-    <div className="space-y-4 pb-6">
+    <div className="space-y-5 pb-6">
+      {/* Portada Hero del Menú */}
+      <div className="-mx-4 -mt-4 mb-2 relative h-56 sm:h-64 overflow-hidden rounded-b-3xl bg-superficie">
+        <img
+          src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1200&q=80&auto=format"
+          alt="Comida fresca de SmartDining"
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />
+        <div className="absolute bottom-0 inset-x-0 p-4">
+          <p className="text-xs font-etiqueta font-semibold uppercase tracking-widest text-primario-texto mb-1">
+            Experiencia SmartDining
+          </p>
+          <h1 className="font-titulo text-5xl sm:text-6xl text-primario tracking-wider leading-none uppercase">
+            NUESTRO MENÚ
+          </h1>
+          <p className="text-xs sm:text-sm text-texto-suave mt-1">
+            Elige tus platos favoritos o ármalos a tu gusto.
+          </p>
+        </div>
+      </div>
+
       {/* Sección Arma tu plato */}
       {platosArmables.length > 0 && (
         <section aria-labelledby="titulo-arma-tu-plato" className="space-y-2.5">
           <div className="flex items-baseline justify-between gap-2">
             <h2
               id="titulo-arma-tu-plato"
-              className="font-titulo text-xl font-bold text-cafe tracking-tight"
+              className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto"
             >
               Arma tu plato
             </h2>
-            <span className="text-xs text-gray-600">Paso a paso a tu gusto</span>
+            <span className="text-xs text-texto-suave">Paso a paso a tu gusto</span>
           </div>
 
-          <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
+          <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none">
             {platosArmables.map((plato) => (
               <Card
                 key={plato.id_plato}
-                className="w-64 shrink-0 snap-start flex flex-col justify-between gap-3"
+                className="w-64 shrink-0 snap-start flex flex-col justify-between gap-3 bg-superficie border border-borde rounded-2xl p-3"
               >
                 <div className="space-y-2">
                   <Imagen
@@ -195,24 +219,24 @@ function Menu() {
                     className="w-full rounded-xl"
                   />
                   <div>
-                    <h3 className="font-titulo text-base font-bold text-cafe leading-snug">
+                    <h3 className="font-etiqueta text-base font-bold uppercase tracking-wide text-texto leading-snug">
                       {plato.nombre}
                     </h3>
                     {plato.descripcion && (
-                      <p className="text-xs text-gray-600 mt-1 line-clamp-2 leading-relaxed">
+                      <p className="text-xs text-texto-suave mt-1 line-clamp-2 leading-relaxed">
                         {plato.descripcion}
                       </p>
                     )}
                   </div>
                 </div>
 
-                <div className="space-y-2.5 pt-1 border-t border-gray-100">
+                <div className="space-y-2.5 pt-2 border-t border-borde">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-primary text-sm">
+                    <span className="font-bold font-etiqueta text-sm text-white">
                       Desde {formatearPrecio(plato.precio)}
                     </span>
                     {plato.calorias != null && (
-                      <span className="text-gray-600 font-medium">
+                      <span className="text-texto-suave font-medium">
                         ≈ {plato.calorias} kcal
                       </span>
                     )}
@@ -240,15 +264,15 @@ function Menu() {
 
       {/* Grid de platos o mensaje de estado vacío */}
       {platosFiltrados.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-100 p-8 text-center shadow-sm">
-          <div className="w-12 h-12 bg-gray-100 text-gray-600 rounded-full flex items-center justify-center mx-auto text-xl">
+        <div className="bg-superficie rounded-2xl border border-borde p-8 text-center space-y-2">
+          <div className="w-12 h-12 bg-superficie-2 text-texto-suave rounded-full flex items-center justify-center mx-auto text-xl">
             🍽️
           </div>
-          <p className="text-cafe font-medium text-sm">
+          <p className="text-texto font-etiqueta uppercase font-bold text-base">
             No hay platos en esta categoría
           </p>
-          <p className="text-gray-600 text-xs mt-1">
-            Prueba seleccionando otra categoría o la opción "Todas".
+          <p className="text-texto-suave text-xs mt-1">
+            Prueba seleccionando otra categoría o la opción &ldquo;Todas&rdquo;.
           </p>
         </div>
       ) : (
@@ -277,7 +301,7 @@ function Menu() {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-verde text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2 max-w-[90vw]"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-exito text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2 max-w-[90vw]"
         >
           <span className="text-white font-bold" aria-hidden="true">
             ✓
