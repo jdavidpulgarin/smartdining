@@ -91,6 +91,38 @@ npm run dev     # con nodemon, recarga automática
 npm start       # modo normal
 ```
 
+### Límites del pool y cierre ordenado (H-25)
+
+Cinco variables **opcionales**, todas en milisegundos salvo `PG_POOL_MAX`. Si falta, está
+vacía o trae algo que no es un entero positivo, se usa el valor por defecto y queda un
+aviso en el log: **una errata en el `.env` no impide arrancar**.
+
+| Variable | Defecto | Para qué |
+|---|---|---|
+| `PG_POOL_MAX` | `10` | Conexiones simultáneas máximas del pool |
+| `PG_IDLE_TIMEOUT_MS` | `10000` | Cuánto vive una conexión inactiva antes de devolverse |
+| `PG_CONNECTION_TIMEOUT_MS` | `5000` | Cuánto se espera una conexión libre antes de fallar |
+| `PG_STATEMENT_TIMEOUT_MS` | `10000` | Cuánto puede tardar una consulta antes de que PostgreSQL la aborte |
+| `APAGADO_TIMEOUT_MS` | `10000` | Margen para el cierre ordenado antes de forzar la salida |
+
+Por qué importan las dos del medio:
+
+- **`PG_CONNECTION_TIMEOUT_MS`** tapa el default de `pg`, que es `0`: esperar *para
+  siempre*. Con PostgreSQL caído la petición se cuelga y el cliente con ella, porque
+  Express no tiene timeout propio.
+- **`PG_STATEMENT_TIMEOUT_MS`** pone `statement_timeout` (no `query_timeout`, que corta
+  solo del lado del cliente y deja la consulta corriendo en el servidor). Sin él, una
+  query trabada retiene su conexión indefinidamente: con `max: 10`, diez de esas dejan el
+  backend muerto sin un solo error. Al vencer, PostgreSQL devuelve `57014` y la API
+  responde **503** (ver [`docs/api-spec.md`](docs/api-spec.md)).
+
+**Cierre ordenado.** Ante `SIGTERM` (lo que manda `docker stop`) o `SIGINT` (Ctrl+C), el
+backend cierra en este orden: servidor HTTP → Redis → pool de PostgreSQL. El HTTP primero
+para no cerrarle la base a una petición en vuelo, y el pool de último porque es el que
+puede tener transacciones a medias. Si algo no cierra en `APAGADO_TIMEOUT_MS`, se fuerza la
+salida: un apagado colgado es peor que uno brusco. `SIGUSR2` **no** se intercepta, porque
+es con la que nodemon reinicia en `npm run dev`.
+
 ```bash
 curl http://localhost:4000/api/health
 # { "status": "ok" }
