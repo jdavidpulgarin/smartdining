@@ -6,7 +6,10 @@ const router = express.Router();
 
 // D-04. Escribir el constructor es de admin; leerlo lo necesita todo el
 // personal de sala (el panel muestra los pasos al armar un pedido).
-// PATCH /:id/disponible es D-05 y aqui todavia no existe.
+//
+// Un paso NO se agota: pasos_constructor no tiene columna `disponible` y D-05
+// es solo de ingredientes (PATCH /ingredientes/:id/disponible). Lo que se apaga
+// son las opciones, no la pregunta.
 router.put('/:id', requireAuth, requireRole('admin'), ctrl.actualizarPaso);
 router.delete('/:id', requireAuth, requireRole('admin'), ctrl.eliminarPaso);
 

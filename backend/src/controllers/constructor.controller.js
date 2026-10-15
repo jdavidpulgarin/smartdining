@@ -2,6 +2,7 @@ const { z } = require('zod');
 const constructorService = require('../services/constructor.service');
 const platosService = require('../services/platos.service');
 const menuService = require('../services/menu.service');
+const socketNotifier = require('../services/socket.notifier');
 
 /**
  * CRUD de pasos e ingredientes del constructor de platos (D-04).
@@ -16,9 +17,15 @@ const menuService = require('../services/menu.service');
  * el comensal seguiría viendo el constructor viejo hasta que expire el TTL.
  * invalidarMenu nunca lanza (cache.borrar devuelve false si Redis está caído).
  *
- * No se avisa al socket-server: no existe un evento de "cambió el menú" en
- * EVENTS.md, y platos tampoco avisa. El único evento cercano,
- * ingrediente:disponibilidad (§5.3), es de D-05.
+ * Al socket-server solo se le avisa de la DISPONIBILIDAD (D-05): no existe un
+ * evento de "cambió el menú" en EVENTS.md, y platos tampoco avisa. Cambiar el
+ * nombre o el precio de un ingrediente no mueve el constructor de nadie en
+ * vivo; agotarlo, sí (ingrediente:disponibilidad, §5.3).
+ *
+ * Ese aviso sale por los DOS caminos que pueden cambiar `disponible`: el PATCH
+ * dedicado y el PUT del editor, que también puede tocarlo. En el PUT solo
+ * cuando el valor cambió de verdad; en el PATCH siempre. Y en los dos, después
+ * del COMMIT y después de invalidar la caché, nunca antes.
  */
 
 // Límites de las columnas en 13_constructor.sql.
@@ -85,6 +92,34 @@ const ingredienteCrearSchema = z.object({
 const ingredienteActualizarSchema = z
   .object({ ...ingredienteBase, calorias: ingredienteBase.calorias.nullable() })
   .partial();
+
+/**
+ * Cuerpo de PATCH /ingredientes/:id/disponible (D-05).
+ *
+ * `.strict()` aquí sí, al contrario que el resto del módulo: este cuerpo lo
+ * manda el panel de agotados y tiene UN solo campo, así que una clave de más es
+ * un error de quien llama y no la costumbre del editor de reenviar la fila
+ * entera. Y `z.boolean()` sin coerción: un "false" en texto o un 0 valen
+ * `true` si se los deja pasar, y eso aquí significaría reponer algo agotado.
+ */
+const disponibilidadSchema = z.object({ disponible: z.boolean() }).strict();
+
+/**
+ * Lanza el aviso de disponibilidad al socket-server sin esperarlo.
+ *
+ * No se hace `await`: el cambio ya está en la base y el tiempo real es un
+ * extra. notificarIngredienteDisponibilidad nunca lanza —registra y devuelve
+ * { ok: false }—, así que un socket-server caído no altera la respuesta. Se
+ * encadena para que las pruebas puedan esperarlo con esperarAvisos().
+ */
+function avisarDisponibilidad(ingrediente) {
+  socketNotifier.encadenarAvisos([
+    () => socketNotifier.notificarIngredienteDisponibilidad(
+      ingrediente.id_ingrediente,
+      ingrediente.disponible
+    ),
+  ]);
+}
 
 /** Primer mensaje de zod, igual que el resto de los controllers. */
 const error400 = (res, parsed) =>
@@ -246,11 +281,60 @@ async function actualizarIngrediente(req, res, next) {
   if (cambios.calorias === null) cambios.calorias = 0;
 
   try {
-    const ingrediente = await constructorService.actualizarIngrediente(idIngrediente, cambios);
-    if (!ingrediente) return res.status(404).json({ error: 'Ingrediente no encontrado' });
+    const resultado = await constructorService.actualizarIngrediente(idIngrediente, cambios);
+    if (!resultado) return res.status(404).json({ error: 'Ingrediente no encontrado' });
 
+    const { ingrediente, anterior } = resultado;
     await menuService.invalidarMenu();
+
+    // D-05: el editor del panel también puede agotar o reponer por aquí, y sin
+    // este aviso el cambio no llegaría en vivo a los celulares. Solo cuando
+    // `disponible` CAMBIÓ de valor: un PUT que toca el nombre o el precio no es
+    // una noticia de disponibilidad y no debe mover el constructor de nadie.
+    if (anterior.disponible !== ingrediente.disponible) {
+      avisarDisponibilidad(ingrediente);
+    }
+
     return res.json(ingrediente);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
+ * PATCH /ingredientes/:id/disponible — D-05.
+ *
+ * El interruptor de "se agotó" / "volvió". Es de `admin` y de `cocina`: es la
+ * única escritura del constructor que no es de admin, porque no es editar la
+ * carta sino reportar lo que pasa en la cocina (es lo que usa el panel de
+ * agotados del KDS, D-10).
+ *
+ * Idempotente: ponerlo al valor que ya tenía responde 200, no es un error.
+ */
+async function cambiarDisponibilidadIngrediente(req, res, next) {
+  const idIngrediente = idDeLaUrl(req.params.id);
+  if (!idIngrediente) return res.status(400).json({ error: 'id de ingrediente inválido' });
+
+  const parsed = disponibilidadSchema.safeParse(req.body);
+  if (!parsed.success) return error400(res, parsed);
+
+  try {
+    const resultado = await constructorService.actualizarIngrediente(idIngrediente, {
+      disponible: parsed.data.disponible,
+    });
+    if (!resultado) return res.status(404).json({ error: 'Ingrediente no encontrado' });
+
+    // El orden importa: primero la caché, después el aviso. Al revés, un
+    // cliente que reaccione al evento pidiendo GET /menu podría recibir la
+    // copia vieja (TTL 60 s) y seguir mostrando el ingrediente como disponible.
+    await menuService.invalidarMenu();
+
+    // Aquí se avisa SIEMPRE, incluso si el valor no cambió: si un cliente se
+    // perdió el aviso anterior, el reenvío lo recupera. No se espera el
+    // resultado: el cambio ya está guardado y el tiempo real es un extra.
+    avisarDisponibilidad(resultado.ingrediente);
+
+    return res.json(resultado.ingrediente);
   } catch (err) {
     return next(err);
   }
@@ -278,5 +362,6 @@ module.exports = {
   eliminarPaso,
   crearIngrediente,
   actualizarIngrediente,
+  cambiarDisponibilidadIngrediente,
   eliminarIngrediente,
 };

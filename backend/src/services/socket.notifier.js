@@ -444,6 +444,27 @@ async function notificarMesaLiberada(id_mesa, motivo) {
   return enviar('/internal/mesa-liberada', cuerpo);
 }
 
+/**
+ * POST /internal/ingrediente-disponibilidad (D-05) — un ingrediente se agotó
+ * (`false`) o volvió (`true`). El socket-server lo difunde a TODOS los sockets
+ * como `ingrediente:disponibilidad` (EVENTS.md §5.3): cada mesa deshabilita esa
+ * opción del constructor en vivo, y el KDS puede avisar.
+ *
+ * Solo viajan los dos campos y el eventId. `emitidoEn` NO se manda: lo pone él
+ * al emitir (sala.js), y mandarlo sería un campo que se ignora.
+ *
+ * Un eventId por llamada, incluso si el valor no cambió: así un reenvío lo
+ * recuperan los clientes que se perdieron el anterior, en vez de que Roberto lo
+ * deduplique y el aviso se pierda en silencio.
+ */
+async function notificarIngredienteDisponibilidad(id_ingrediente, disponible) {
+  return enviar('/internal/ingrediente-disponibilidad', {
+    id_ingrediente,
+    disponible,
+    eventId: nuevoEventId(),
+  });
+}
+
 module.exports = {
   nuevoEventId,
   armarPedido,
@@ -456,6 +477,7 @@ module.exports = {
   notificarCambioEstado,
   notificarPagoConfirmado,
   notificarMesaLiberada,
+  notificarIngredienteDisponibilidad,
   motivoPorEstadoFinal,
   MOTIVO_PAGADA,
   MOTIVO_LIBERADA,

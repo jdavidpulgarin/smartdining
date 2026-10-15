@@ -427,14 +427,76 @@ Tablas en `database/scripts/13_constructor.sql`. Lo consume el panel del restaur
 | POST | `/pasos/:id/ingredientes` | **admin** | 201, el ingrediente creado | 400 · 404 paso · 409 |
 | PUT | `/ingredientes/:id` | **admin** | 200, el ingrediente actualizado | 400 · 404 · 409 |
 | DELETE | `/ingredientes/:id` | **admin** | 204 sin cuerpo | 400 · 404 · 409 |
+| PATCH | `/ingredientes/:id/disponible` | **admin, cocina** | 200, el ingrediente actualizado | 400 · 403 · 404 |
 
-Escribir el constructor es **solo de admin**. Leerlo lo necesita todo el personal de sala,
-así que el `GET` lo abren también `cajero` y `mesero`; `cocina` y el comensal reciben 403
-(la cocina trabaja con `GET /kds/comandas`, y el comensal ve el constructor dentro de
+Escribir el constructor es **solo de admin**, con **una excepción**: el `PATCH` de
+disponibilidad, que se detalla abajo. Leerlo lo necesita todo el personal de sala, así que
+el `GET` lo abren también `cajero` y `mesero`; `cocina` y el comensal reciben 403 en el
+resto (la cocina trabaja con `GET /kds/comandas`, y el comensal ve el constructor dentro de
 `GET /menu`).
 
-> `PATCH /ingredientes/:id/disponible` (agotar o reponer una opción en vivo, con el aviso
-> `ingrediente:disponibilidad` al socket-server) es **D-05** y todavía no existe.
+**La excepción al "solo de admin" (D-05).** `PATCH /ingredientes/:id/disponible` es la única
+escritura del constructor que también puede hacer `cocina`, y es deliberado: **agotar un
+ingrediente no es editar la carta, es reportar lo que pasa en la cocina.** Quien ve que se
+acabó la panceta está frente al KDS, no en el panel de administración, y el panel de
+agotados que la llama (**D-10**) vive justamente ahí. `cajero`, `mesero` y el comensal
+siguen recibiendo 403.
+
+### PATCH /ingredientes/:id/disponible — agotar o reponer (D-05)
+
+El interruptor de "se acabó" / "volvió". Cuerpo con **un solo campo**:
+
+```json
+{ "disponible": false }
+```
+
+- `disponible` es **booleano estricto**: `"false"`, `0` o `null` responden **400**. Sin
+  coerción a propósito — un `"false"` en texto es `true` para JavaScript, y aquí eso
+  significaría reponer algo que está agotado.
+- Es el **único** cuerpo del constructor con `.strict()`: tiene un campo, así que una clave
+  de más es un error de quien llama y no la costumbre del editor de reenviar la fila entera
+  (ver §`id_plato` e `id_paso` salen de la URL).
+- **Idempotente**: ponerlo al valor que ya tenía responde **200**, no 409.
+- **200** devuelve la fila del ingrediente, con la misma forma que el `PUT`.
+
+**El orden es parte del contrato:**
+
+1. `UPDATE` dentro de la transacción que ya abre el servicio (`SELECT … FOR UPDATE`), y
+   **COMMIT**.
+2. **Invalidar `cache:menu`.**
+3. **Recién entonces** avisar al socket-server.
+
+El paso 2 va antes del 3 y no al revés: si se avisara primero, un cliente que reaccione al
+evento pidiendo `GET /menu` podría recibir la copia vieja de la caché (TTL 60 s) y seguir
+mostrando el ingrediente como disponible. Es una carrera real.
+
+**El aviso es un extra, no parte de la operación.** Se manda
+`POST /internal/ingrediente-disponibilidad` con `{ id_ingrediente, disponible, eventId }`, y
+el socket-server difunde `ingrediente:disponibilidad` a todos los sockets
+([EVENTS.md §5.3](../../socket-server/EVENTS.md)). `emitidoEn` **lo pone él** al emitir, no
+el backend. Si el socket-server está caído, lento o responde mal: **no se revierte nada**, se
+registra en el log del servidor y **la respuesta sigue siendo 200**, porque el cambio ya está
+guardado. Tampoco se espera el aviso para responder.
+
+**Un `eventId` nuevo por llamada, incluso si el valor no cambió.** Así un reenvío lo
+recuperan los clientes que se perdieron el anterior; con el mismo `eventId`, el
+socket-server lo deduplicaría (`duplicado: true`, sin emitir) y el aviso se perdería en
+silencio.
+
+**El `PUT /ingredientes/:id` también avisa**, porque también puede cambiar `disponible`:
+agotar algo desde el editor del panel llega en vivo igual que por el PATCH. Pero **solo
+cuando el valor cambió de verdad** — un `PUT` que toca el nombre o el precio no es una
+noticia de disponibilidad y no debe mover el constructor de nadie. La caché, en cambio, se
+invalida en los dos casos, porque el nombre y el precio viajan dentro del menú.
+
+**Un paso no se agota.** `pasos_constructor` no tiene columna `disponible`: lo que se apaga
+son las opciones, no la pregunta. D-05 es solo de ingredientes.
+
+**Un ingrediente agotado no se puede pedir.** No lo comprueba el backend: lo rechaza el
+trigger `tr_validar_detalle_ingrediente` con `El ingrediente "X" está agotado`, que sale
+como **409** con ese mensaje (§`Códigos de error de la base de datos`). La condición del
+trigger permite **conservarlo** en un `UPDATE` que no lo cambie, así que agotar algo no
+rompe los pedidos ya tomados.
 
 ### `id_plato` e `id_paso` salen de la URL
 
@@ -528,7 +590,8 @@ está en §[La frontera entre 400 y 422](#la-frontera-entre-400-y-422-h-11)):
 pedidos históricos conserven su composición. Por eso:
 
 - Un ingrediente que ya se usó en algún pedido **no se borra**: responde **409**. Para
-  sacarlo de la carta hay que marcarlo como no disponible (`PATCH …/disponible`, D-05).
+  sacarlo de la carta hay que marcarlo como no disponible con
+  `PATCH /ingredientes/:id/disponible` (D-05, ya disponible: ver arriba).
 - **Un paso también queda protegido**, de rebote: `ingredientes.id_paso` es
   `ON DELETE CASCADE`, pero la cascada se topa con ese `RESTRICT` y PostgreSQL aborta todo.
 
