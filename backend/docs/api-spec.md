@@ -482,8 +482,9 @@ ingredientes agotados **sí** se devuelven (con `disponible: false`), para poder
 
 ### Validación (400)
 
-Replica los CHECK de la base para dar un mensaje que se entienda, en vez del 500 genérico
-en el que el manejador central convierte un `23514`:
+Replica los CHECK de la base para dar un mensaje que se entienda, en vez del mensaje fijo
+y opaco del 422 al que el manejador central traduce un `23514` (la frontera entre los dos
+está en §[La frontera entre 400 y 422](#la-frontera-entre-400-y-422-h-11)):
 
 | Campo | Regla |
 |---|---|
@@ -1643,7 +1644,35 @@ es el único sitio donde se decide el status. Traduce lo que lanza PostgreSQL as
 | `RAISE EXCEPTION` de un trigger (**P0001**) | **409** | el mensaje del trigger, tal cual — está escrito para leerse ("Transición de estado no autorizada: de \"listo\" hacia \"en_preparacion\"") |
 | Error de **datos** de PostgreSQL (**clase 22**: 22003 desbordamiento numérico, 22001 texto largo, 22012 división por cero, 22P02 sintaxis…) | **422** | `No se pudo registrar esta operación: un dato está fuera del rango permitido. Avisa al equipo.` |
 | **Choque de concurrencia**: **40P01** (deadlock) y **40001** (fallo de serialización) | **409** | `La operación chocó con otra en curso, vuelve a intentarlo` |
-| Cualquier otro error de PostgreSQL (CHECK 23514, FK 23503, unique 23505…) o inesperado | **500** | `Error interno del servidor` |
+| **23505** `unique_violation` | **409** | `Ya existe un registro con esos datos` |
+| **23503** `foreign_key_violation` | **409** | `La operación choca con otro registro relacionado` |
+| **23514** `check_violation` | **422** | `No se pudo registrar esta operación: un dato está fuera del rango permitido. Avisa al equipo.` (el mismo de la clase 22) |
+| **57014** `query_canceled` — venció `statement_timeout` | **503** | `La operación tardó demasiado y se canceló, vuelve a intentarlo en un momento` |
+| Cualquier otro error de PostgreSQL (23502 NOT NULL, 23P01 exclusión…) o inesperado | **500** | `Error interno del servidor` |
+
+### La frontera entre 400 y 422 (H-11)
+
+Los dos significan "esto no se va a arreglar reintentando", pero **no son lo mismo** y el
+cliente puede y debe distinguirlos:
+
+| | **400** | **422** |
+|---|---|---|
+| Qué pasó | El cuerpo **no cumple el esquema**: falta un campo, sobra uno, el tipo o el rango no son los declarados | El cuerpo **está bien formado**, pero el valor **no cabe o no sirve** en la base |
+| Quién lo decide | El controller, con zod, **antes** de tocar la base | PostgreSQL, y lo traduce el manejador central |
+| Mensaje | **Dice qué campo falla** y por qué: `min_sel no puede ser mayor que max_sel` | **Fijo y opaco**, siempre el mismo: `No se pudo registrar esta operación: un dato está fuera del rango permitido. Avisa al equipo.` |
+| Qué hacer en el cliente | Resaltar el campo y dejar corregir | Mostrar el mensaje tal cual: no hay nada que el usuario pueda corregir |
+| Códigos | — | clase 22 (22003, 22001, 22012, 22P02…) y **23514** |
+
+Por eso el mensaje del 422 **no** se puede volver específico y el del 400 **sí**: el del
+400 lo redacta el backend sobre su propio esquema, mientras que el del 422 vendría del
+texto de PostgreSQL, que nombra funciones, columnas y precisiones internas (ver más
+abajo). Y por eso **la validación de zod sigue en 400**: moverla a 422 fusionaría las dos
+filas de esta tabla y le quitaría al cliente la única señal que le dice si resaltar un
+campo o decir "avisa al equipo".
+
+Un 400 también puede venir de una validación del backend que no es de esquema (un `id` de
+la URL que no es un entero positivo, un alias de comensal con formato inválido, un estado
+que el KDS no acepta). Mismo contrato: mensaje que explica qué está mal.
 
 **Por qué 422 y no 500 en la clase 22.** Un dato que no cabe no es una caída del
 servidor: reintentar nunca va a funcionar, y un 500 lo hace indistinguible de un fallo
@@ -1701,6 +1730,55 @@ registra en el log del servidor junto al método y la ruta, igual que en el 422.
 > cierran un pedido, y está medido con `npm run test:integracion`: **0 deadlocks de 20
 > intentos**. El 409 cubre lo que se escape por ahí — un `INSERT` directo a la base, una
 > ruta nueva que se despiste, o un bloqueo que tome un trigger de `database/`.
+
+### Integridad: 23505, 23503 y 23514 (H-11)
+
+Los tres **caían antes en el 500 genérico**, a propósito, para no filtrar el esquema. El
+problema es que un 500 los vuelve indistinguibles de una caída: el cliente no sabe si
+corregir algo, reintentar o avisar al equipo. Ahora se traducen, **manteniendo el mensaje
+genérico**:
+
+| Código | Status | Qué significa |
+|---|---|---|
+| **23505** `unique_violation` | **409** | Ya existe una fila con esos datos |
+| **23503** `foreign_key_violation` | **409** | Choca con otra fila relacionada |
+| **23514** `check_violation` | **422** | El valor no cumple una regla de la base |
+
+- **El 23503 no dice en qué sentido choca.** Una FK se viola de dos maneras —la fila
+  referenciada no existe, o sigue referenciada y por eso no se puede borrar— y
+  distinguirlas obligaría a mirar el nombre del constraint, que es justo lo que no debe
+  salir. Un 409 cubre ambas sin filtrar cuál.
+- **El 23514 va al 422 y no al 400** porque es exactamente el caso de la clase 22: el
+  cuerpo pasó el esquema y el valor no sirve. Reutiliza su mismo mensaje, así que sigue
+  habiendo **un solo 422 con un solo mensaje**.
+- **Es una lista explícita, no la clase 23 entera:** `23502` (NOT NULL) y `23P01`
+  (violación de exclusión) significan otra cosa —el backend dejó de mandar una columna
+  obligatoria, que sí es un fallo nuestro— y siguen dando 500.
+- **Nombres de constraint y `detail` nunca salen**, igual que en las clases 22 y 40: van
+  al log del servidor con el método y la ruta.
+
+**Lo que un service ya tradujo, manda.** La primera rama del manejador es la del error de
+negocio (`{ status, message }`), así que
+[`constructor.service.js`](../src/services/constructor.service.js) —que captura esos tres
+códigos por `constraint` y dice **qué** choca: `Ya hay otro paso de este plato en esa
+posición`— sale por ahí y nunca llega a la tabla genérica. Las rutas del constructor
+conservan sus mensajes de §`Códigos 409`; el resto de la API gana los genéricos.
+
+### 57014: la consulta tardó demasiado → 503
+
+`La operación tardó demasiado y se canceló, vuelve a intentarlo en un momento`
+
+PostgreSQL aborta una consulta cuando vence el `statement_timeout` del pool
+(`PG_STATEMENT_TIMEOUT_MS`, 10 s por defecto — ver [`README.md`](../README.md)) y devuelve
+**57014** `query_canceled`.
+
+Es **503 y no 500** porque no se escribió nada (la transacción se abortó completa) y el
+problema es de carga o de bloqueos, no de la petición: es momentáneo, y **reintentar más
+tarde sí sirve**. Un 500 sugiere un bug del servidor y no invita a nada.
+
+Es el segundo caso —con el 409 de concurrencia— en que reintentar tiene sentido, pero la
+espera no es la misma: ante un 409 de concurrencia el cliente puede reintentar **ya, una
+vez**; ante un 503 conviene dejar pasar unos segundos, porque lo que sobra es carga.
 
 ---
 

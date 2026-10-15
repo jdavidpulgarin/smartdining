@@ -66,6 +66,55 @@ function esErrorDeConcurrencia(codigo) {
 }
 
 /**
+ * SQLSTATE que hasta ahora caían en el 500 genérico aunque NO son fallos del
+ * servidor. Un 500 los vuelve indistinguibles de una caída: el cliente no sabe
+ * si corregir algo, reintentar o avisar al equipo.
+ *
+ * - 23505 unique_violation: ya existe una fila con esos datos -> 409.
+ * - 23503 foreign_key_violation: la operación choca con otra fila relacionada
+ *   -> 409. Cubre los dos sentidos de una FK (la fila referenciada no existe, o
+ *   sigue referenciada y por eso no se puede borrar) con un mensaje que no dice
+ *   cuál: distinguirlos obligaría a mirar el nombre del constraint, que es justo
+ *   lo que no debe salir. Donde importa de verdad —el constructor— ya se traduce
+ *   antes, con mensaje propio.
+ * - 23514 check_violation: el cuerpo pasó el esquema pero el valor no cumple una
+ *   regla de la base -> 422, el mismo caso que la clase 22 y con su mismo
+ *   mensaje. No se abre un segundo significado para el 422.
+ * - 57014 query_canceled: PostgreSQL abortó la consulta al vencer
+ *   statement_timeout (ver src/config/db.js) -> 503. No se escribió nada y el
+ *   problema es de carga, no de la petición: reintentar más tarde sirve.
+ *
+ * Es una lista explícita, NO la clase 23 completa: 23502 (NOT NULL) y 23P01
+ * (violación de exclusión) significan otra cosa y siguen dando 500.
+ */
+const MENSAJE_REGISTRO_DUPLICADO = 'Ya existe un registro con esos datos';
+const MENSAJE_REFERENCIA_RELACIONADA = 'La operación choca con otro registro relacionado';
+const MENSAJE_CONSULTA_CANCELADA =
+  'La operación tardó demasiado y se canceló, vuelve a intentarlo en un momento';
+
+/**
+ * Un Map y no un objeto literal: con un objeto, un `código` como
+ * 'constructor' o '__proto__' encontraría algo heredado del prototipo.
+ *
+ * `rotulo` es solo para el log del servidor; al cliente va `mensaje`.
+ */
+const TRADUCCION_POR_SQLSTATE = new Map([
+  ['23505', { status: 409, mensaje: MENSAJE_REGISTRO_DUPLICADO, rotulo: 'Violación de unicidad' }],
+  ['23503', { status: 409, mensaje: MENSAJE_REFERENCIA_RELACIONADA, rotulo: 'Violación de clave ajena' }],
+  ['23514', { status: 422, mensaje: MENSAJE_DATOS_FUERA_DE_RANGO, rotulo: 'Violación de CHECK' }],
+  ['57014', { status: 503, mensaje: MENSAJE_CONSULTA_CANCELADA, rotulo: 'Consulta cancelada por timeout' }],
+]);
+
+/**
+ * Devuelve la traducción de un SQLSTATE, o null si no está en la lista.
+ * Exportada para poder probar la tabla sin pasar por una ruta.
+ */
+function traduccionDeSqlstate(codigo) {
+  if (typeof codigo !== 'string') return null;
+  return TRADUCCION_POR_SQLSTATE.get(codigo) || null;
+}
+
+/**
  * Reglas:
  * - Error de negocio del backend ({ status, message }) -> ese status.
  * - RAISE EXCEPTION de un trigger (P0001) -> 409 con el mensaje del trigger,
@@ -76,9 +125,16 @@ function esErrorDeConcurrencia(codigo) {
  * - Choque de concurrencia (40P01 deadlock, 40001 fallo de serialización) ->
  *   409 con un mensaje genérico que invita a reintentar, que es el único caso
  *   en el que reintentar sirve de algo. El detalle va al log.
- * - Cualquier otro error, incluidos los demás de PostgreSQL (CHECK 23514,
- *   FK 23503, unique 23505, etc.) -> 500 genérico. El mensaje interno se
- *   registra en el servidor y nunca se expone al cliente.
+ * - Integridad y cancelación (23505, 23503 -> 409; 23514 -> 422; 57014 -> 503)
+ *   con mensajes genéricos. El detalle técnico va al log, no al cliente.
+ * - Cualquier otro error, incluidos los demás de PostgreSQL (23502 NOT NULL,
+ *   23P01 exclusión, etc.) -> 500 genérico. El mensaje interno se registra en
+ *   el servidor y nunca se expone al cliente.
+ *
+ * El orden importa: la primera rama es la del error de negocio ({ status,
+ * message }), así que lo que un service ya tradujo por su cuenta —p. ej.
+ * constructor.service.js, que convierte 23505/23503/23514 en 409 con un mensaje
+ * que nombra QUÉ choca— sale por ahí y nunca llega a la tabla genérica.
  */
 function manejadorErrores(err, req, res, next) {
   if (res.headersSent) return next(err);
@@ -116,6 +172,20 @@ function manejadorErrores(err, req, res, next) {
     return res.status(409).json({ error: MENSAJE_CONCURRENCIA });
   }
 
+  const traduccion = traduccionDeSqlstate(err && err.code);
+  if (traduccion) {
+    // Mismo criterio que las clases 22 y 40: el detalle completo al log del
+    // servidor (el nombre del constraint es lo que permite arreglar la causa) y
+    // al cliente solo el mensaje genérico.
+    console.error(
+      `${traduccion.rotulo} en PostgreSQL (${err.code}) en ${req.method} ${req.originalUrl}:`,
+      err.message,
+      err.detail || '',
+      err.where || ''
+    );
+    return res.status(traduccion.status).json({ error: traduccion.mensaje });
+  }
+
   console.error('Error no controlado:', err);
   return res.status(500).json({ error: 'Error interno del servidor' });
 }
@@ -129,4 +199,9 @@ module.exports = {
   CODIGOS_CONCURRENCIA_POSTGRES,
   MENSAJE_CONCURRENCIA,
   esErrorDeConcurrencia,
+  MENSAJE_REGISTRO_DUPLICADO,
+  MENSAJE_REFERENCIA_RELACIONADA,
+  MENSAJE_CONSULTA_CANCELADA,
+  TRADUCCION_POR_SQLSTATE,
+  traduccionDeSqlstate,
 };
