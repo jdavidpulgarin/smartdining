@@ -194,9 +194,56 @@ La decisión está en `avisoDelTablero()` y `debeEsperarConexion()`
 ([`src/lib/comandas.js`](src/lib/comandas.js)), fuera de los componentes y probadas en
 [`tests/conexion.test.js`](tests/conexion.test.js).
 
+## Panel de agotados (D-10)
+
+El botón con el icono de caja tachada, en la cabecera, abre un cajón lateral con **todos
+los ingredientes de la carta agrupados por plato y por paso**. Cada fila es un interruptor:
+un toque lo marca **Agotado**, otro lo **repone**.
+
+- **Insignia con el número de agotados** en el botón, para saber si hay algo apagado sin
+  abrir el panel. Si no hay ninguno, no se pinta nada.
+- **Sin confirmación**: la acción es reversible con el mismo toque, y un diálogo a mitad de
+  un servicio es justo lo que una cocina no puede permitirse.
+- **El interruptor se mueve antes de que el servidor responda** y **vuelve atrás** si el
+  `PATCH` falla, con el mensaje del backend debajo de **esa** fila.
+- **Buscador** (ignora acentos y mayúsculas: `jalapeno` encuentra `Jalapeño`) y filtro
+  **Solo agotados**, que es la vista para empezar el turno reponiendo.
+- **En vivo**: el evento `ingrediente:disponibilidad` ([EVENTS.md §5.3](../socket-server/EVENTS.md))
+  actualiza el panel abierto, así que dos pantallas de cocina no se contradicen. Llega por
+  el socket que **ya** tiene el tablero; no se abre una segunda conexión.
+- **Área táctil de 56 px** por fila, para usarlo con guantes. El estado nunca se dice solo
+  con color: va el texto (`Disponible` / `Agotado`) y un icono.
+- **Teclado**: `Enter`/`Espacio` en el interruptor, `Esc` cierra, el tabulador no se escapa
+  del cajón y al cerrar el foco **vuelve** al botón de la cabecera.
+- Respeta `prefers-reduced-motion`: sin él, el cajón entra deslizándose; con él, aparece.
+
+El botón **se ve siempre**, también sin socket: el `PATCH` va por HTTP y agotar algo
+funciona igual. Lo que se pierde sin tiempo real son los cambios de **otras** pantallas, y
+de eso avisa el propio panel. Al reconectar, el panel **vuelve a leer la carta**, porque
+los eventos que se perdieron mientras estuvo caído no se reenvían.
+
+Toda la decisión está en [`src/lib/agotados.js`](src/lib/agotados.js) y se prueba en
+[`tests/agotados.test.js`](tests/agotados.test.js); [`src/lib/useAgotados.js`](src/lib/useAgotados.js)
+solo se queda con los efectos.
+
+**Todo va por `id_ingrediente`, nunca por nombre.** En la carta hay nombres repetidos a
+propósito: la "Panceta Crujiente" del seed son **dos** ingredientes distintos, en dos pasos
+distintos, y agotar uno no agota el otro. Contar o agrupar por nombre los fusionaría y
+apagaría el equivocado, que en una cocina significa servir algo que no hay.
+
 ## Limitaciones
 
-- **El panel de agotados es D-10**, todavía no está.
+- **Un plato entero no disponible esconde sus ingredientes del panel.** `GET /menu` solo
+  devuelve platos con `disponible = true`, así que si un plato está apagado, sus
+  ingredientes no aparecen y no se pueden reponer desde aquí. Es la **única** fuente que el
+  rol `cocina` puede leer: `GET /platos/:id/pasos` es de `admin`, `cajero` y `mesero`, y a
+  `cocina` le responde 403. Mientras tanto, el interruptor del plato está en el panel de
+  administración. Si llega a estorbar, el arreglo es del backend (abrir esa ruta a `cocina`
+  o añadir un `GET /ingredientes`), no del KDS.
+- **El panel no agota platos ni pasos.** Los platos son de `admin`; y un paso no se agota
+  porque `pasos_constructor` no tiene columna `disponible`: lo que se apaga son las
+  opciones, no la pregunta.
+- **No hay historial** de quién agotó qué: no existe endpoint ni columna.
 - Un `order:status` de un pedido que no está en pantalla **no** crea una tarjeta: ese
   payload no trae los ítems, y una comanda sin ítems no le sirve a la cocina. La siguiente
   recarga lo pone en su sitio.
