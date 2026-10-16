@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
+import { pluralizar } from '../../utils/pluralizar';
 
 function Header({ numeroMesa, comensal, cantidadCarrito = 0 }) {
   const location = useLocation();
@@ -30,11 +31,7 @@ function Header({ numeroMesa, comensal, cantidadCarrito = 0 }) {
       <Link
         to="/carrito"
         className="relative min-w-10 min-h-10 px-3 py-1.5 rounded-full border border-borde bg-superficie-2 hover:bg-superficie text-texto transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
-        aria-label={
-          cantidadCarrito === 1
-            ? 'Carrito, 1 producto'
-            : `Carrito, ${cantidadCarrito} productos`
-        }
+        aria-label={`Carrito, ${cantidadCarrito} ${pluralizar(cantidadCarrito, 'producto', 'productos')}`}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"

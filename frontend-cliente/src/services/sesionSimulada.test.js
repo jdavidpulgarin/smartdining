@@ -74,5 +74,31 @@ describe('crearSesionSimulada', () => {
       globalThis.window = originalWindow;
     }
   });
+
+  it('extrae el alias firmado del jwt_dev ignorando el nombre escrito por el usuario', async () => {
+    const payload = Buffer.from(
+      JSON.stringify({ id_mesa: 5, rol: 'comensal', comensal: 'Ana' })
+    )
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    const jwtConAlias = `eyJhbGciOiJIUzI1NiJ9.${payload}.firma`;
+
+    const originalWindow = globalThis.window;
+    globalThis.window = {
+      location: {
+        search: `?jwt_dev=${jwtConAlias}`,
+      },
+    };
+
+    try {
+      const respuesta = await crearSesionSimulada('simulado', 'Juan');
+      expect(respuesta.token).toBe(jwtConAlias);
+      expect(respuesta.comensal).toBe('Ana');
+    } finally {
+      globalThis.window = originalWindow;
+    }
+  });
 });
 

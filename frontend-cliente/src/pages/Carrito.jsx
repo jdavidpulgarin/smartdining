@@ -4,6 +4,7 @@ import { useCarrito } from '../context/CarritoContext';
 import { useMesaSocketContext } from '../context/MesaSocketContext';
 import { formatearPrecio } from '../utils/formato';
 import { obtenerApodo } from '../utils/apodo';
+import { pluralizar } from '../utils/pluralizar';
 import { puedoEnviar } from '../utils/carritoCompartido';
 import LineaCarrito from '../components/carrito/LineaCarrito';
 import Button from '../components/ui/Button';
@@ -192,7 +193,7 @@ function Carrito() {
       {/* Barra de conteo y botón vaciar lo mío */}
       <div className="flex items-center justify-between gap-2 px-1">
         <span className="text-xs text-texto-suave font-medium">
-          {totalUnidades} {totalUnidades === 1 ? 'producto' : 'productos'} en tu
+          {totalUnidades} {pluralizar(totalUnidades, 'producto', 'productos')} en tu
           pedido
         </span>
 
@@ -272,7 +273,12 @@ function Carrito() {
             <span className="w-2 h-2 rounded-full bg-texto-suave" />
             <h2 className="font-etiqueta uppercase font-bold text-sm text-texto-suave tracking-wider">
               DE LA MESA ({otros.reduce((acc, g) => acc + g.lineas.length, 0)}{' '}
-              platos de otros comensales)
+              {pluralizar(
+                otros.reduce((acc, g) => acc + g.lineas.length, 0),
+                'plato',
+                'platos'
+              )}{' '}
+              de otros comensales)
             </h2>
           </div>
 
@@ -328,7 +334,7 @@ function Carrito() {
         <div className="flex justify-between items-center text-sm text-texto-suave">
           <span>
             Subtotal lo tuyo ({misLineas.length}{' '}
-            {misLineas.length === 1 ? 'producto' : 'productos'})
+            {pluralizar(misLineas.length, 'producto', 'productos')})
           </span>
           <span className="font-etiqueta font-bold text-texto text-base">
             {formatearPrecio(totalMio)}

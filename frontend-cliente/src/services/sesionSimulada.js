@@ -1,4 +1,5 @@
 import { ErrorApi } from './api';
+import { aliasDelToken } from './clienteMesa';
 
 function codificarBase64Url(objeto) {
   const json = JSON.stringify(objeto);
@@ -58,9 +59,11 @@ export async function crearSesionSimulada(tokenQr, comensal) {
       const params = new URLSearchParams(window.location.search);
       const jwtDev = params.get('jwt_dev');
       if (jwtDev && jwtDev.trim()) {
+        const tokenDev = jwtDev.trim();
+        const aliasJwt = aliasDelToken(tokenDev);
         return {
-          token: jwtDev.trim(),
-          comensal: comensalLimpio,
+          token: tokenDev,
+          comensal: aliasJwt || comensalLimpio,
           expira_en: '4h',
           qr_expira_en: '20m',
           mesa: {
