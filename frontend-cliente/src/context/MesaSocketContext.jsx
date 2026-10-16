@@ -17,7 +17,11 @@ const CARRITO_VACIO = { version: 0, items: [] };
 // oxlint-disable-next-line react/only-export-components
 export function esModoCompartido(token, socketUrl) {
   if (!token || !socketUrl) return false;
-  if (typeof token === 'string' && token.endsWith('.simulada')) {
+  if (
+    import.meta.env.DEV &&
+    typeof token === 'string' &&
+    token.endsWith('.simulada')
+  ) {
     return false;
   }
   return true;
