@@ -4,8 +4,10 @@ import { useCarrito } from '../context/CarritoContext';
 import { useMesaSocketContext } from '../context/MesaSocketContext';
 import { formatearPrecio } from '../utils/formato';
 import { obtenerApodo } from '../utils/apodo';
+import { puedoEnviar } from '../utils/carritoCompartido';
 import LineaCarrito from '../components/carrito/LineaCarrito';
 import Button from '../components/ui/Button';
+import Modal from '../components/ui/Modal';
 import { crearPedido } from '../services/pedidoService';
 import { recargarMenu } from '../services/menuService';
 import { traducirErrorPedido } from '../utils/erroresPedido';
@@ -28,6 +30,7 @@ function Carrito() {
   const { on: socketOn } = useMesaSocketContext();
 
   const [confirmandoVaciar, setConfirmandoVaciar] = useState(false);
+  const [modalConfirmarAbierto, setModalConfirmarAbierto] = useState(false);
   const [notasGenerales, setNotasGenerales] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [errorPedido, setErrorPedido] = useState(null);
@@ -35,6 +38,7 @@ function Carrito() {
   const [toastPedido, setToastPedido] = useState(null);
 
   const miNombre = obtenerApodo();
+  const validacionEnvio = puedoEnviar(misLineas);
 
   // Escuchar order:created en la mesa para notificar cuando otro comensal envía su pedido
   useEffect(() => {
@@ -69,7 +73,7 @@ function Carrito() {
   }, [bloqueoSegundos]);
 
   const manejarConfirmarPedido = async () => {
-    if (enviando || bloqueoSegundos > 0 || misLineas.length === 0) return;
+    if (enviando || bloqueoSegundos > 0 || !validacionEnvio.ok) return;
 
     setEnviando(true);
     setErrorPedido(null);
@@ -80,6 +84,7 @@ function Carrito() {
         notasGenerales,
       });
 
+      setModalConfirmarAbierto(false);
       await vaciarCarrito();
       navigate('/seguimiento', { state: { pedido: respuesta } });
     } catch (err) {
@@ -378,24 +383,28 @@ function Carrito() {
         <Button
           type="button"
           variante="primario"
-          onClick={manejarConfirmarPedido}
-          disabled={enviando || bloqueoSegundos > 0 || misLineas.length === 0}
+          onClick={() => setModalConfirmarAbierto(true)}
+          disabled={
+            enviando ||
+            bloqueoSegundos > 0 ||
+            misLineas.length === 0 ||
+            !validacionEnvio.ok
+          }
           className="w-full min-h-12 py-3 px-4 font-bold font-etiqueta uppercase text-base rounded-xl flex items-center justify-center gap-2"
         >
-          {enviando ? (
-            <>
-              <span
-                className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"
-                aria-hidden="true"
-              />
-              <span>Enviando a cocina…</span>
-            </>
-          ) : bloqueoSegundos > 0 ? (
+          {bloqueoSegundos > 0 ? (
             <span>Espera {bloqueoSegundos}s...</span>
           ) : (
-            <span>Enviar pedido a cocina</span>
+            <span>Enviar mi pedido a cocina</span>
           )}
         </Button>
+
+        {!validacionEnvio.ok && misLineas.length > 0 && (
+          <p className="text-xs text-primario-texto text-center font-medium">
+            {validacionEnvio.motivo}
+          </p>
+        )}
+
         <p className="text-xs text-texto-suave text-center">
           Se envía todo lo tuyo a la cocina. Cada quien paga lo suyo al final.
         </p>
@@ -407,6 +416,115 @@ function Carrito() {
           ← Seguir pidiendo
         </Link>
       </div>
+
+      {/* Modal de confirmación para enviar solo lo mío */}
+      <Modal
+        abierto={modalConfirmarAbierto}
+        onCerrar={() => !enviando && setModalConfirmarAbierto(false)}
+        titulo="Confirmar mi pedido"
+      >
+        <div className="p-4 space-y-4">
+          <p className="text-xs text-texto-suave">
+            Estás a punto de enviar tus platos a la cocina. Cada comensal de la
+            mesa envía y paga sus propios platos.
+          </p>
+
+          {/* Lista resumida de platos a enviar */}
+          <div className="bg-superficie-2 rounded-xl p-3 border border-borde space-y-2 max-h-48 overflow-y-auto">
+            {misLineas.map((linea) => (
+              <div
+                key={linea.id_linea}
+                className="flex items-center justify-between text-xs py-1 border-b border-borde/40 last:border-b-0"
+              >
+                <div className="flex-1 min-w-0 pr-2">
+                  <span className="font-semibold text-texto truncate block">
+                    {linea.nombre}
+                  </span>
+                  <span className="text-texto-tenue">
+                    Cantidad: {linea.cantidad}
+                  </span>
+                </div>
+                <span className="font-bold font-etiqueta text-sm text-white shrink-0">
+                  {formatearPrecio(
+                    linea.subtotal ??
+                      Number(linea.precioUnitario) * Number(linea.cantidad)
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {notasGenerales && (
+            <div className="text-xs bg-superficie-2 p-2.5 rounded-xl border border-borde text-texto-suave">
+              <span className="font-bold text-texto block mb-0.5">
+                Notas para la cocina:
+              </span>
+              <p className="italic">{notasGenerales}</p>
+            </div>
+          )}
+
+          <div className="flex justify-between items-center pt-2 border-t border-borde">
+            <span className="font-etiqueta uppercase font-bold text-base text-texto">
+              Total de tu pedido
+            </span>
+            <span className="font-etiqueta font-black text-2xl text-white">
+              {formatearPrecio(totalMio)}
+            </span>
+          </div>
+
+          {!validacionEnvio.ok && (
+            <div
+              role="alert"
+              className="p-3 bg-superficie rounded-xl border border-primario text-primario-texto text-xs"
+            >
+              {validacionEnvio.motivo}
+            </div>
+          )}
+
+          {errorPedido && (
+            <div
+              role="alert"
+              className="p-3 bg-superficie rounded-xl border border-primario text-primario-texto text-xs space-y-1"
+            >
+              <p className="font-semibold">{errorPedido.mensaje}</p>
+              {errorPedido.ayuda && (
+                <p className="text-texto-suave">{errorPedido.ayuda}</p>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2 pt-2">
+            <Button
+              type="button"
+              variante="primario"
+              onClick={manejarConfirmarPedido}
+              disabled={enviando || !validacionEnvio.ok}
+              className="w-full min-h-12 py-3 px-4 font-bold font-etiqueta uppercase text-base rounded-xl flex items-center justify-center gap-2"
+            >
+              {enviando ? (
+                <>
+                  <span
+                    className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"
+                    aria-hidden="true"
+                  />
+                  <span>Enviando a cocina…</span>
+                </>
+              ) : (
+                <span>Confirmar y enviar</span>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variante="secundario"
+              onClick={() => setModalConfirmarAbierto(false)}
+              disabled={enviando}
+              className="w-full min-h-11"
+            >
+              Revisar platos
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
