@@ -5,7 +5,9 @@ import {
   infoEstado,
   normalizarPedido,
   pedidoPrincipal,
+  registrarMiPedidoId,
   separarPedidos,
+  esPedidoMio,
 } from './seguimiento';
 
 describe('infoEstado', () => {
@@ -240,5 +242,27 @@ describe('haceCuanto', () => {
     expect(haceCuanto(ahora - 2 * 60 * 60 * 1000, ahora)).toBe('hace 2 h');
     expect(haceCuanto(ahora - 48 * 60 * 60 * 1000, ahora)).toBe('hace 2 d');
     expect(haceCuanto(null)).toBe('');
+  });
+});
+
+describe('registrarMiPedidoId y esPedidoMio', () => {
+  it('registra y reconoce un pedido como propio', () => {
+    let store = {};
+    const originalSessionStorage = globalThis.sessionStorage;
+    globalThis.sessionStorage = {
+      getItem: (key) => store[key] || null,
+      setItem: (key, val) => {
+        store[key] = String(val);
+      },
+    };
+
+    try {
+      expect(esPedidoMio(501)).toBe(false);
+      registrarMiPedidoId(501);
+      expect(esPedidoMio(501)).toBe(true);
+      expect(esPedidoMio(502)).toBe(false);
+    } finally {
+      globalThis.sessionStorage = originalSessionStorage;
+    }
   });
 });

@@ -195,8 +195,13 @@ export function normalizarPedido(pedido, miAlias = null) {
   const totalCalculado = detalles.reduce((acc, d) => acc + d.subtotal, 0);
   const total = Number(pedido.total ?? totalCalculado);
 
+  const id_pedido = pedido.id_pedido ?? pedido.id ?? null;
+  if (esMio && id_pedido != null) {
+    registrarMiPedidoId(id_pedido);
+  }
+
   return {
-    id_pedido: pedido.id_pedido ?? pedido.id ?? null,
+    id_pedido,
     codigo_pedido: pedido.codigo_pedido ?? pedido.codigo ?? '',
     id_mesa: pedido.id_mesa ?? null,
     estado: String(pedido.estado || 'recibido').toLowerCase(),
@@ -321,11 +326,87 @@ export function haceCuanto(fecha, ahora = Date.now()) {
   return `hace ${diffDias} d`;
 }
 
+export const CLAVE_MIS_PEDIDOS_IDS = 'smartdining_mis_pedidos_ids';
+export const CLAVE_ULTIMO_PEDIDO = 'smartdining_ultimo_pedido';
+
+/**
+ * Registra el ID de un pedido perteneciente al comensal actual en sessionStorage.
+ *
+ * @param {number|string|null} idPedido - ID del pedido a registrar
+ */
+export function registrarMiPedidoId(idPedido) {
+  if (idPedido == null) return;
+  try {
+    const raw = sessionStorage.getItem(CLAVE_MIS_PEDIDOS_IDS);
+    const lista = raw ? JSON.parse(raw) : [];
+    const set = new Set(Array.isArray(lista) ? lista.map(String) : []);
+    set.add(String(idPedido));
+    sessionStorage.setItem(CLAVE_MIS_PEDIDOS_IDS, JSON.stringify([...set]));
+  } catch {
+    // Ignorar errores de almacenamiento
+  }
+}
+
+/**
+ * Determina si un id_pedido corresponde a una orden del comensal actual.
+ * Revisa el registro de IDs, el último pedido y los pedidos simulados guardados.
+ *
+ * @param {number|string|null} idPedido - ID a verificar
+ * @param {string|null} [miAlias] - Alias del usuario actual
+ * @returns {boolean}
+ */
+export function esPedidoMio(idPedido, miAlias = null) {
+  if (idPedido == null) return false;
+  const idStr = String(idPedido);
+
+  try {
+    const rawIds = sessionStorage.getItem(CLAVE_MIS_PEDIDOS_IDS);
+    if (rawIds) {
+      const lista = JSON.parse(rawIds);
+      if (Array.isArray(lista) && lista.some((id) => String(id) === idStr)) {
+        return true;
+      }
+    }
+
+    const rawUltimo = sessionStorage.getItem(CLAVE_ULTIMO_PEDIDO);
+    if (rawUltimo) {
+      const ultimo = JSON.parse(rawUltimo);
+      if (String(ultimo?.id_pedido ?? ultimo?.id) === idStr) {
+        return true;
+      }
+    }
+
+    const rawSimulados = sessionStorage.getItem('smartdining_pedidos_simulados');
+    if (rawSimulados && miAlias) {
+      const aliasNorm = miAlias.toLowerCase();
+      const simulados = JSON.parse(rawSimulados);
+      if (Array.isArray(simulados)) {
+        const hallado = simulados.find((p) => String(p.id_pedido) === idStr);
+        if (
+          hallado?.detalles?.some(
+            (d) => d.comensal?.toLowerCase() === aliasNorm
+          )
+        ) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
 export default {
+  CLAVE_MIS_PEDIDOS_IDS,
+  CLAVE_ULTIMO_PEDIDO,
   infoEstado,
   normalizarPedido,
   aplicarCambioEstado,
   separarPedidos,
   pedidoPrincipal,
   haceCuanto,
+  registrarMiPedidoId,
+  esPedidoMio,
 };
