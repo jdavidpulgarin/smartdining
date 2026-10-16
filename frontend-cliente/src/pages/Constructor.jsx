@@ -1,6 +1,11 @@
 import { useEffect, useId, useMemo, useReducer, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { obtenerPlatoArmable, recargarMenu } from '../services/menuService';
+import {
+  actualizarDisponibilidadEnCache,
+  obtenerPlatoArmable,
+  recargarMenu,
+} from '../services/menuService';
+import { useMesaSocketContext } from '../context/MesaSocketContext';
 import {
   constructorReducer,
   estadoInicial,
@@ -32,6 +37,7 @@ function Constructor() {
   const navigate = useNavigate();
   const notasId = useId();
   const { agregarLinea } = useCarrito();
+  const { on: socketOn } = useMesaSocketContext();
 
   const [estadoCarga, setEstadoCarga] = useState({
     idCargado: null,
@@ -70,6 +76,38 @@ function Constructor() {
       activo = false;
     };
   }, [idPlato]);
+
+  useEffect(() => {
+    if (!socketOn) return undefined;
+    const baja = socketOn('ingrediente:disponibilidad', (data) => {
+      const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
+      const disponible = Boolean(data?.disponible);
+      if (!idIng) return;
+
+      actualizarDisponibilidadEnCache(idIng, disponible);
+
+      if (!disponible) {
+        despachador({ type: 'QUITAR_NO_DISPONIBLE', id_ingrediente: idIng });
+      }
+
+      setEstadoCarga((prev) => {
+        if (!prev.plato || !Array.isArray(prev.plato.pasos)) return prev;
+        const nuevosPasos = prev.plato.pasos.map((paso) => ({
+          ...paso,
+          ingredientes: (paso.ingredientes || []).map((ing) =>
+            Number(ing.id_ingrediente) === idIng
+              ? { ...ing, disponible }
+              : ing
+          ),
+        }));
+        return {
+          ...prev,
+          plato: { ...prev.plato, pasos: nuevosPasos },
+        };
+      });
+    });
+    return baja;
+  }, [socketOn]);
 
   const manejarReintentar = async () => {
     recargarMenu();

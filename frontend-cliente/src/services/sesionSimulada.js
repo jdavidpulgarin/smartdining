@@ -1,4 +1,5 @@
 import { ErrorApi } from './api';
+import { aliasDelToken } from './clienteMesa';
 
 function codificarBase64Url(objeto) {
   const json = JSON.stringify(objeto);
@@ -50,6 +51,33 @@ export async function crearSesionSimulada(tokenQr, comensal) {
       motivo: 'alias_en_uso',
       mensaje: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
     });
+  }
+
+  // Soporte para jwt_dev en DEV: si se pasa ?jwt_dev=... en la URL, se usa como token real
+  if (import.meta.env.DEV && typeof window !== 'undefined' && window.location) {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const jwtDev = params.get('jwt_dev');
+      if (jwtDev && jwtDev.trim()) {
+        const tokenDev = jwtDev.trim();
+        const aliasJwt = aliasDelToken(tokenDev);
+        return {
+          token: tokenDev,
+          comensal: aliasJwt || comensalLimpio,
+          expira_en: '4h',
+          qr_expira_en: '20m',
+          mesa: {
+            id_mesa: 5,
+            numero: 5,
+            capacidad: 4,
+            ubicacion: 'Terraza',
+            estado: 'ocupada',
+          },
+        };
+      }
+    } catch {
+      // Ignorar errores al acceder a window.location
+    }
   }
 
   if (tokenLimpio.startsWith('simulado')) {

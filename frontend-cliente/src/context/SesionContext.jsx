@@ -9,6 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { setManejadorSesionInvalida } from '../services/api';
 import { crearSesion } from '../services/sesionService';
+import { aliasDelToken } from '../services/clienteMesa';
 import { CLAVE_SESION, leerExpiracionJwt, validarNombre } from '../utils/sesion';
 
 const SesionContext = createContext(null);
@@ -35,9 +36,11 @@ function leerSesionAlmacenada() {
       return null;
     }
 
+    const aliasJwt = aliasDelToken(datos.token);
+
     return {
       token: datos.token,
-      comensal: datos.comensal || '',
+      comensal: aliasJwt || datos.comensal || '',
       idMesa: Number(datos.idMesa),
       numeroMesa: Number(datos.numeroMesa ?? datos.idMesa),
       expiraEn: datos.expiraEn || null,
@@ -225,9 +228,12 @@ export function SesionProvider({ children }) {
 
       try {
         const respuesta = await crearSesion(tokenQr, validacion.nombre);
+        const aliasJwt = aliasDelToken(respuesta.token);
+        const comensalFinal =
+          aliasJwt || respuesta.comensal || validacion.nombre;
         const nuevaSesion = {
           token: respuesta.token,
-          comensal: respuesta.comensal || validacion.nombre,
+          comensal: comensalFinal,
           idMesa: Number(respuesta.mesa?.id_mesa),
           numeroMesa: Number(respuesta.mesa?.numero ?? respuesta.mesa?.id_mesa),
           expiraEn: respuesta.expira_en || null,

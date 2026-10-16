@@ -5,6 +5,7 @@ import {
   adaptarPlatos,
   adaptarPlatosArmables,
   adaptarPlatoArmable,
+  aplicarDisponibilidad,
   normalizarCategorias,
   obtenerCategorias,
   obtenerPlatos,
@@ -237,6 +238,61 @@ describe('menuService', () => {
       expect(spyPedirJson).not.toHaveBeenCalled();
       expect(categorias.length).toBeGreaterThan(0);
       expect(platos.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('aplicarDisponibilidad', () => {
+    const menuConIngredientes = [
+      {
+        id_categoria: 10,
+        categoria: 'Arma tu plato',
+        platos: [
+          {
+            id_plato: 1001,
+            nombre: 'Bowl',
+            personalizable: true,
+            pasos: [
+              {
+                id_paso: 1,
+                nombre: 'Base',
+                ingredientes: [
+                  { id_ingrediente: 1, nombre: 'Arroz', disponible: true },
+                  { id_ingrediente: 2, nombre: 'Quinoa', disponible: true },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    it('actualiza inmutablemente la disponibilidad de un ingrediente en un array de categorias', () => {
+      const menuActualizado = aplicarDisponibilidad(menuConIngredientes, 1, false);
+
+      const ingOriginal = menuConIngredientes[0].platos[0].pasos[0].ingredientes[0];
+      const ingActualizado = menuActualizado[0].platos[0].pasos[0].ingredientes[0];
+
+      expect(ingOriginal.disponible).toBe(true);
+      expect(ingActualizado.disponible).toBe(false);
+      expect(menuActualizado).not.toBe(menuConIngredientes);
+    });
+
+    it('actualiza inmutablemente un objeto { categorias: [...] }', () => {
+      const objetoMenu = { categorias: menuConIngredientes };
+      const menuActualizado = aplicarDisponibilidad(objetoMenu, 1, false);
+      expect(menuActualizado.categorias).toBeDefined();
+      expect(
+        menuActualizado.categorias[0].platos[0].pasos[0].ingredientes[0].disponible
+      ).toBe(false);
+      expect(
+        menuConIngredientes[0].platos[0].pasos[0].ingredientes[0].disponible
+      ).toBe(true);
+    });
+
+    it('retorna el menu intacto si recibe null o ingrediente inexistente', () => {
+      expect(aplicarDisponibilidad(null, 1, false)).toBeNull();
+      const sinCambios = aplicarDisponibilidad(menuConIngredientes, 99999, false);
+      expect(sinCambios[0].platos[0].pasos[0].ingredientes[0].disponible).toBe(true);
     });
   });
 });

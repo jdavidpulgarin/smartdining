@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useSesion } from '../context/SesionContext';
 import { validarNombre } from '../utils/sesion';
 import { leerMesaDelQr } from '../utils/qr';
+import { aliasDelToken } from '../services/clienteMesa';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 
@@ -22,7 +23,14 @@ function Inicio() {
     unirse,
     limpiarError,
   } = useSesion();
-  const [nombre, setNombre] = useState('');
+
+  const jwtDevUrl =
+    import.meta.env.DEV && typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('jwt_dev')
+      : null;
+  const aliasDevUrl = jwtDevUrl ? aliasDelToken(jwtDevUrl) : null;
+
+  const [nombre, setNombre] = useState(() => aliasDevUrl || '');
   const [tocado, setTocado] = useState(false);
   const [cuentaRegresiva, setCuentaRegresiva] = useState(() =>
     error?.status === 429 ? error.retryAfter || 60 : 0
@@ -34,6 +42,12 @@ function Inicio() {
       ? new URLSearchParams(window.location.search).get('token')
       : null);
   const numeroMesaQr = leerMesaDelQr(tokenUrl);
+
+  useEffect(() => {
+    if (import.meta.env.DEV && aliasDevUrl && estado === 'pide_nombre' && !enviando) {
+      unirse(aliasDevUrl);
+    }
+  }, [aliasDevUrl, estado, enviando, unirse]);
 
   const validacion = validarNombre(nombre);
   const esErrorQr401 = error?.status === 401;
@@ -164,7 +178,7 @@ function Inicio() {
               <form onSubmit={manejarSubmit} className="space-y-4" noValidate>
                 <div className="space-y-1">
                   <h2 className="font-titulo text-3xl sm:text-4xl text-white tracking-wide uppercase leading-tight">
-                    ¡BIENVENIDO!
+                    {numeroMesaQr !== null ? '¡BIENVENIDO!' : 'ÚNETE A LA MESA'}
                   </h2>
                   <p className="text-xs sm:text-sm text-texto-suave font-cuerpo leading-relaxed">
                     Escribe tu nombre para que la cocina sepa de quién es cada plato.

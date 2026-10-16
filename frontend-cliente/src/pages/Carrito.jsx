@@ -3,8 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCarrito } from '../context/CarritoContext';
 import { formatearPrecio } from '../utils/formato';
 import { obtenerApodo } from '../utils/apodo';
+import { pluralizar } from '../utils/pluralizar';
+import { puedoEnviar } from '../utils/carritoCompartido';
 import LineaCarrito from '../components/carrito/LineaCarrito';
 import Button from '../components/ui/Button';
+import Modal from '../components/ui/Modal';
 import { crearPedido } from '../services/pedidoService';
 import { recargarMenu } from '../services/menuService';
 import { traducirErrorPedido } from '../utils/erroresPedido';
@@ -12,21 +15,27 @@ import { traducirErrorPedido } from '../utils/erroresPedido';
 function Carrito() {
   const navigate = useNavigate();
   const {
-    lineas,
+    modo,
+    estadoConexion,
+    misLineas,
+    otros,
+    totalMio,
+    totalMesa,
     totalUnidades,
-    total,
     actualizarCantidad,
     eliminarLinea,
     vaciarCarrito,
   } = useCarrito();
 
   const [confirmandoVaciar, setConfirmandoVaciar] = useState(false);
+  const [modalConfirmarAbierto, setModalConfirmarAbierto] = useState(false);
   const [notasGenerales, setNotasGenerales] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [errorPedido, setErrorPedido] = useState(null);
   const [bloqueoSegundos, setBloqueoSegundos] = useState(0);
 
   const miNombre = obtenerApodo();
+  const validacionEnvio = puedoEnviar(misLineas);
 
   useEffect(() => {
     if (bloqueoSegundos <= 0) return;
@@ -44,18 +53,19 @@ function Carrito() {
   }, [bloqueoSegundos]);
 
   const manejarConfirmarPedido = async () => {
-    if (enviando || bloqueoSegundos > 0) return;
+    if (enviando || bloqueoSegundos > 0 || !validacionEnvio.ok) return;
 
     setEnviando(true);
     setErrorPedido(null);
 
     try {
       const respuesta = await crearPedido({
-        lineas,
+        lineas: misLineas,
         notasGenerales,
       });
 
-      vaciarCarrito();
+      setModalConfirmarAbierto(false);
+      await vaciarCarrito();
       navigate('/seguimiento', { state: { pedido: respuesta } });
     } catch (err) {
       const infoError = traducirErrorPedido(err);
@@ -73,7 +83,9 @@ function Carrito() {
     }
   };
 
-  if (lineas.length === 0) {
+  const estaVacioTotal = misLineas.length === 0 && otros.length === 0;
+
+  if (estaVacioTotal) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
         <div
@@ -120,41 +132,69 @@ function Carrito() {
         </div>
       </div>
 
-      {/* Barra de conteo y botón vaciar */}
+      {/* Banner de estado de conexión compartida */}
+      {modo === 'compartido' && estadoConexion !== 'conectado' && (
+        <div
+          role="status"
+          className="bg-superficie rounded-2xl border border-borde p-3 flex items-center gap-3 text-xs text-texto-suave"
+        >
+          {estadoConexion === 'conectando' ||
+          estadoConexion === 'reconectando' ? (
+            <>
+              <span className="w-2.5 h-2.5 rounded-full bg-acento animate-pulse shrink-0" />
+              <span>
+                Conectando con la mesa… Se sincronizarán los cambios
+                automáticamente.
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="w-2.5 h-2.5 rounded-full bg-primario shrink-0" />
+              <span className="text-primario-texto">
+                Sin conexión con la mesa. Reintentando…
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Barra de conteo y botón vaciar lo mío */}
       <div className="flex items-center justify-between gap-2 px-1">
         <span className="text-xs text-texto-suave font-medium">
-          {totalUnidades} {totalUnidades === 1 ? 'producto' : 'productos'}
+          {totalUnidades} {pluralizar(totalUnidades, 'producto', 'productos')} en tu
+          pedido
         </span>
 
-        {confirmandoVaciar ? (
-          <div className="flex items-center gap-2">
+        {misLineas.length > 0 &&
+          (confirmandoVaciar ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  vaciarCarrito();
+                  setConfirmandoVaciar(false);
+                }}
+                className="text-xs font-bold text-primario-texto hover:underline px-2 py-1 rounded transition-colors cursor-pointer"
+              >
+                Sí, vaciar lo mío
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmandoVaciar(false)}
+                className="text-xs font-semibold text-texto-suave hover:text-texto px-2 py-1 rounded transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
             <button
               type="button"
-              onClick={() => {
-                vaciarCarrito();
-                setConfirmandoVaciar(false);
-              }}
-              className="text-xs font-bold text-primario-texto hover:underline px-2 py-1 rounded transition-colors cursor-pointer"
+              onClick={() => setConfirmandoVaciar(true)}
+              className="text-xs font-medium text-texto-suave hover:text-primario-texto py-1 px-2 rounded transition-colors cursor-pointer"
             >
-              Sí, vaciar
+              Vaciar lo mío
             </button>
-            <button
-              type="button"
-              onClick={() => setConfirmandoVaciar(false)}
-              className="text-xs font-semibold text-texto-suave hover:text-texto px-2 py-1 rounded transition-colors cursor-pointer"
-            >
-              Cancelar
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setConfirmandoVaciar(true)}
-            className="text-xs font-medium text-texto-suave hover:text-primario-texto py-1 px-2 rounded transition-colors cursor-pointer"
-          >
-            Vaciar carrito
-          </button>
-        )}
+          ))}
       </div>
 
       {/* Sección LO TUYO con borde rojo */}
@@ -164,21 +204,79 @@ function Carrito() {
             LO TUYO{miNombre ? ` · ${miNombre.toUpperCase()}` : ''}
           </h2>
           <span className="font-etiqueta font-bold text-base text-white">
-            {formatearPrecio(total)}
+            {formatearPrecio(totalMio)}
           </span>
         </div>
 
-        <div className="space-y-3">
-          {lineas.map((linea) => (
-            <LineaCarrito
-              key={linea.id_linea}
-              linea={linea}
-              onActualizarCantidad={actualizarCantidad}
-              onEliminar={eliminarLinea}
-            />
+        {misLineas.length === 0 ? (
+          <div className="py-6 text-center space-y-2">
+            <p className="text-xs text-texto-suave">
+              No tienes platos agregados a tu pedido personal.
+            </p>
+            <Link
+              to="/menu"
+              className="inline-block text-xs font-bold text-primario-texto hover:underline"
+            >
+              + Agregar platos desde el menú
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {misLineas.map((linea) => (
+              <LineaCarrito
+                key={linea.id_linea}
+                linea={linea}
+                onActualizarCantidad={actualizarCantidad}
+                onEliminar={eliminarLinea}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Sección DE LA MESA (otros comensales, solo lectura) */}
+      {modo === 'compartido' && otros.length > 0 && (
+        <div className="space-y-4 pt-2">
+          <div className="flex items-center gap-2 px-1">
+            <span className="w-2 h-2 rounded-full bg-texto-suave" />
+            <h2 className="font-etiqueta uppercase font-bold text-sm text-texto-suave tracking-wider">
+              DE LA MESA ({otros.reduce((acc, g) => acc + g.lineas.length, 0)}{' '}
+              {pluralizar(
+                otros.reduce((acc, g) => acc + g.lineas.length, 0),
+                'plato',
+                'platos'
+              )}{' '}
+              de otros comensales)
+            </h2>
+          </div>
+
+          {otros.map((grupo) => (
+            <section
+              key={grupo.comensal}
+              className="bg-superficie rounded-2xl border border-borde p-3.5 sm:p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-borde">
+                <span className="font-etiqueta font-bold text-sm uppercase tracking-wider text-texto-suave">
+                  De {grupo.comensal}
+                </span>
+                <span className="font-etiqueta font-bold text-sm text-texto-suave">
+                  {formatearPrecio(grupo.subtotal)}
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {grupo.lineas.map((linea) => (
+                  <LineaCarrito
+                    key={linea.id_linea}
+                    linea={linea}
+                    soloLectura={true}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
-      </section>
+      )}
 
       {/* Notas generales para la cocina */}
       <div className="bg-superficie rounded-2xl p-4 border border-borde space-y-2">
@@ -203,19 +301,29 @@ function Carrito() {
       <div className="bg-superficie rounded-2xl p-4 border border-borde space-y-3">
         <div className="flex justify-between items-center text-sm text-texto-suave">
           <span>
-            Subtotal ({totalUnidades}{' '}
-            {totalUnidades === 1 ? 'producto' : 'productos'})
+            Subtotal lo tuyo ({misLineas.length}{' '}
+            {pluralizar(misLineas.length, 'producto', 'productos')})
           </span>
           <span className="font-etiqueta font-bold text-texto text-base">
-            {formatearPrecio(total)}
+            {formatearPrecio(totalMio)}
           </span>
         </div>
+
+        {modo === 'compartido' && totalMesa > totalMio && (
+          <div className="flex justify-between items-center text-xs text-texto-tenue pt-1 border-t border-borde/50">
+            <span>Total acumulado en la mesa</span>
+            <span className="font-etiqueta font-semibold text-texto-suave text-sm">
+              {formatearPrecio(totalMesa)}
+            </span>
+          </div>
+        )}
+
         <div className="border-t border-borde pt-3 flex justify-between items-center">
           <span className="font-etiqueta uppercase font-bold text-texto text-lg tracking-wide">
-            Total estimado
+            Total a pagar por ti
           </span>
           <span className="font-etiqueta font-black text-2xl text-white">
-            {formatearPrecio(total)}
+            {formatearPrecio(totalMio)}
           </span>
         </div>
       </div>
@@ -249,24 +357,28 @@ function Carrito() {
         <Button
           type="button"
           variante="primario"
-          onClick={manejarConfirmarPedido}
-          disabled={enviando || bloqueoSegundos > 0}
+          onClick={() => setModalConfirmarAbierto(true)}
+          disabled={
+            enviando ||
+            bloqueoSegundos > 0 ||
+            misLineas.length === 0 ||
+            !validacionEnvio.ok
+          }
           className="w-full min-h-12 py-3 px-4 font-bold font-etiqueta uppercase text-base rounded-xl flex items-center justify-center gap-2"
         >
-          {enviando ? (
-            <>
-              <span
-                className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"
-                aria-hidden="true"
-              />
-              <span>Enviando a cocina…</span>
-            </>
-          ) : bloqueoSegundos > 0 ? (
+          {bloqueoSegundos > 0 ? (
             <span>Espera {bloqueoSegundos}s...</span>
           ) : (
-            <span>Enviar pedido a cocina</span>
+            <span>Enviar mi pedido a cocina</span>
           )}
         </Button>
+
+        {!validacionEnvio.ok && misLineas.length > 0 && (
+          <p className="text-xs text-primario-texto text-center font-medium">
+            {validacionEnvio.motivo}
+          </p>
+        )}
+
         <p className="text-xs text-texto-suave text-center">
           Se envía todo lo tuyo a la cocina. Cada quien paga lo suyo al final.
         </p>
@@ -278,6 +390,115 @@ function Carrito() {
           ← Seguir pidiendo
         </Link>
       </div>
+
+      {/* Modal de confirmación para enviar solo lo mío */}
+      <Modal
+        abierto={modalConfirmarAbierto}
+        onCerrar={() => !enviando && setModalConfirmarAbierto(false)}
+        titulo="Confirmar mi pedido"
+      >
+        <div className="p-4 space-y-4">
+          <p className="text-xs text-texto-suave">
+            Estás a punto de enviar tus platos a la cocina. Cada comensal de la
+            mesa envía y paga sus propios platos.
+          </p>
+
+          {/* Lista resumida de platos a enviar */}
+          <div className="bg-superficie-2 rounded-xl p-3 border border-borde space-y-2 max-h-48 overflow-y-auto">
+            {misLineas.map((linea) => (
+              <div
+                key={linea.id_linea}
+                className="flex items-center justify-between text-xs py-1 border-b border-borde/40 last:border-b-0"
+              >
+                <div className="flex-1 min-w-0 pr-2">
+                  <span className="font-semibold text-texto truncate block">
+                    {linea.nombre}
+                  </span>
+                  <span className="text-texto-tenue">
+                    Cantidad: {linea.cantidad}
+                  </span>
+                </div>
+                <span className="font-bold font-etiqueta text-sm text-white shrink-0">
+                  {formatearPrecio(
+                    linea.subtotal ??
+                      Number(linea.precioUnitario) * Number(linea.cantidad)
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {notasGenerales && (
+            <div className="text-xs bg-superficie-2 p-2.5 rounded-xl border border-borde text-texto-suave">
+              <span className="font-bold text-texto block mb-0.5">
+                Notas para la cocina:
+              </span>
+              <p className="italic">{notasGenerales}</p>
+            </div>
+          )}
+
+          <div className="flex justify-between items-center pt-2 border-t border-borde">
+            <span className="font-etiqueta uppercase font-bold text-base text-texto">
+              Total de tu pedido
+            </span>
+            <span className="font-etiqueta font-black text-2xl text-white">
+              {formatearPrecio(totalMio)}
+            </span>
+          </div>
+
+          {!validacionEnvio.ok && (
+            <div
+              role="alert"
+              className="p-3 bg-superficie rounded-xl border border-primario text-primario-texto text-xs"
+            >
+              {validacionEnvio.motivo}
+            </div>
+          )}
+
+          {errorPedido && (
+            <div
+              role="alert"
+              className="p-3 bg-superficie rounded-xl border border-primario text-primario-texto text-xs space-y-1"
+            >
+              <p className="font-semibold">{errorPedido.mensaje}</p>
+              {errorPedido.ayuda && (
+                <p className="text-texto-suave">{errorPedido.ayuda}</p>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2 pt-2">
+            <Button
+              type="button"
+              variante="primario"
+              onClick={manejarConfirmarPedido}
+              disabled={enviando || !validacionEnvio.ok}
+              className="w-full min-h-12 py-3 px-4 font-bold font-etiqueta uppercase text-base rounded-xl flex items-center justify-center gap-2"
+            >
+              {enviando ? (
+                <>
+                  <span
+                    className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"
+                    aria-hidden="true"
+                  />
+                  <span>Enviando a cocina…</span>
+                </>
+              ) : (
+                <span>Confirmar y enviar</span>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variante="secundario"
+              onClick={() => setModalConfirmarAbierto(false)}
+              disabled={enviando}
+              className="w-full min-h-11"
+            >
+              Revisar platos
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
