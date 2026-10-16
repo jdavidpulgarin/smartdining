@@ -198,6 +198,18 @@ describe('separarPedidos', () => {
     expect(misPedidos[0].id_pedido).toBe(1);
     expect(otrosPedidos[0].id_pedido).toBe(2);
   });
+
+  it('separa evaluando miAlias si los pedidos no estaban previamente marcados', () => {
+    const lista = [
+      { id_pedido: 1, comensal: 'Beto' },
+      { id_pedido: 2, comensal: 'Carlos' },
+      { id_pedido: 3, detalles: [{ comensal: 'Beto' }] },
+    ];
+    const { misPedidos, otrosPedidos } = separarPedidos(lista, 'Beto');
+    expect(misPedidos).toHaveLength(2);
+    expect(otrosPedidos).toHaveLength(1);
+    expect(otrosPedidos[0].id_pedido).toBe(2);
+  });
 });
 
 describe('pedidoPrincipal', () => {

@@ -3,7 +3,13 @@ import { useLocation, Link } from 'react-router-dom';
 import useMesaSession from '../hooks/useMesaSession';
 import TarjetaEstado from '../components/seguimiento/TarjetaEstado';
 import LineaTiempo from '../components/seguimiento/LineaTiempo';
-import { normalizarPedido } from '../utils/seguimiento';
+import OtrosPedidos from '../components/seguimiento/OtrosPedidos';
+import { listarPedidosMesa } from '../services/pedidoService';
+import {
+  normalizarPedido,
+  separarPedidos,
+  pedidoPrincipal,
+} from '../utils/seguimiento';
 import { formatearPrecio } from '../utils/formato';
 
 const CLAVE_ULTIMO_PEDIDO = 'smartdining_ultimo_pedido';
@@ -13,8 +19,22 @@ const CLAVE_ULTIMO_PEDIDO = 'smartdining_ultimo_pedido';
  */
 function Seguimiento() {
   const location = useLocation();
-  const { mesa, comensal } = useMesaSession();
+  const { mesa, idMesa, comensal } = useMesaSession();
   const [avisoMesero, setAvisoMesero] = useState(null);
+  const [pedidos, setPedidos] = useState(() => {
+    const raw =
+      location.state?.pedido ||
+      (() => {
+        try {
+          const guardado = sessionStorage.getItem(CLAVE_ULTIMO_PEDIDO);
+          return guardado ? JSON.parse(guardado) : null;
+        } catch {
+          return null;
+        }
+      })();
+    return raw ? [normalizarPedido(raw, comensal)] : [];
+  });
+  const [idSeleccionado] = useState(null);
 
   const pedidoState = location.state?.pedido;
 
@@ -31,18 +51,47 @@ function Seguimiento() {
     }
   }, [pedidoState]);
 
-  const rawPedido =
-    pedidoState ||
-    (() => {
+  useEffect(() => {
+    let montado = true;
+    async function cargar() {
       try {
-        const guardado = sessionStorage.getItem(CLAVE_ULTIMO_PEDIDO);
-        return guardado ? JSON.parse(guardado) : null;
-      } catch {
-        return null;
-      }
-    })();
+        const lista = await listarPedidosMesa(idMesa);
+        if (!montado) return;
+        const norm = (Array.isArray(lista) ? lista : [])
+          .map((p) => normalizarPedido(p, comensal))
+          .filter(Boolean);
 
-  const pedido = rawPedido ? normalizarPedido(rawPedido, comensal) : null;
+        setPedidos((prev) => {
+          // Mantener pedidos locales que aún no aparezcan en la API
+          const combinados = [...norm];
+          for (const p of prev) {
+            if (
+              p.id_pedido &&
+              !combinados.some(
+                (c) => String(c.id_pedido) === String(p.id_pedido)
+              )
+            ) {
+              combinados.unshift(p);
+            }
+          }
+          return combinados;
+        });
+      } catch {
+        // En caso de fallo de red, se mantiene el estado previo
+      }
+    }
+
+    cargar();
+    return () => {
+      montado = false;
+    };
+  }, [idMesa, comensal]);
+
+  const { misPedidos, otrosPedidos } = separarPedidos(pedidos, comensal);
+  const pedidoActivo =
+    misPedidos.length > 0
+      ? pedidoPrincipal(misPedidos, idSeleccionado)
+      : otrosPedidos[0] || null;
 
   const handleLlamarMesero = () => {
     setAvisoMesero('Ya avisamos al mesero. Pronto se acercará a la mesa.');
@@ -51,7 +100,7 @@ function Seguimiento() {
     }, 4000);
   };
 
-  if (!pedido) {
+  if (!pedidoActivo) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
         <div
@@ -93,7 +142,12 @@ function Seguimiento() {
     );
   }
 
-  const detalles = pedido.detalles || [];
+  // Filtrar otros pedidos para no repetir el que se esté mostrando como activo
+  const otrosAMostrar = otrosPedidos.filter(
+    (p) => String(p.id_pedido) !== String(pedidoActivo.id_pedido)
+  );
+
+  const detalles = pedidoActivo.detalles || [];
 
   return (
     <div className="flex flex-col gap-3.5 pb-8">
@@ -110,13 +164,13 @@ function Seguimiento() {
       )}
 
       {/* Tarjeta principal con halo y animación */}
-      <TarjetaEstado pedido={pedido} numeroMesa={mesa} />
+      <TarjetaEstado pedido={pedidoActivo} numeroMesa={mesa} />
 
       {/* Línea de tiempo de 4 pasos */}
-      <LineaTiempo estado={pedido.estado} />
+      <LineaTiempo estado={pedidoActivo.estado} />
 
-      {/* TU ORDEN */}
-      {detalles.length > 0 && (
+      {/* TU ORDEN (si el pedido activo es mío o tiene detalles) */}
+      {detalles.length > 0 && pedidoActivo.esMio && (
         <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-2.5">
           <h2 className="m-0 font-etiqueta font-bold text-[15px] tracking-wider text-texto-suave uppercase">
             TU ORDEN
@@ -141,11 +195,14 @@ function Seguimiento() {
           <div className="flex justify-between items-baseline">
             <span className="text-sm text-texto-suave">Total de tu orden</span>
             <span className="font-titulo text-[28px] tracking-wider text-white">
-              {formatearPrecio(pedido.total)}
+              {formatearPrecio(pedidoActivo.total)}
             </span>
           </div>
         </section>
       )}
+
+      {/* OTROS PEDIDOS DE LA MESA */}
+      <OtrosPedidos pedidos={otrosAMostrar} />
 
       {/* Botones de acción */}
       <div className="flex flex-col gap-2.5 pt-1">

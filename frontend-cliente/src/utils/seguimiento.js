@@ -239,19 +239,29 @@ export function aplicarCambioEstado(pedidos, evento) {
  * Separa una lista de pedidos normalizados en mis pedidos y pedidos de otros comensales.
  *
  * @param {Array<object>} pedidos - Lista de pedidos
+ * @param {string|null} [miAlias] - Alias opcional para evaluar pertenencia
  * @returns {{ misPedidos: Array<object>, otrosPedidos: Array<object> }}
  */
-export function separarPedidos(pedidos) {
+export function separarPedidos(pedidos, miAlias = null) {
   if (!Array.isArray(pedidos)) {
     return { misPedidos: [], otrosPedidos: [] };
   }
 
+  const aliasNorm = String(miAlias || '').trim().toLowerCase();
   const misPedidos = [];
   const otrosPedidos = [];
 
   for (const p of pedidos) {
-    if (p.esMio) {
-      misPedidos.push(p);
+    const esMio = aliasNorm
+      ? Boolean(
+          p.esMio ||
+          p.detalles?.some((d) => d.comensal?.toLowerCase() === aliasNorm) ||
+          p.comensal?.toLowerCase() === aliasNorm
+        )
+      : Boolean(p.esMio);
+
+    if (esMio) {
+      misPedidos.push({ ...p, esMio: true });
     } else {
       otrosPedidos.push(p);
     }
