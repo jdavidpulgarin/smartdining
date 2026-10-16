@@ -52,6 +52,31 @@ export async function crearSesionSimulada(tokenQr, comensal) {
     });
   }
 
+  // Soporte para jwt_dev en DEV: si se pasa ?jwt_dev=... en la URL, se usa como token real
+  if (import.meta.env.DEV && typeof window !== 'undefined' && window.location) {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const jwtDev = params.get('jwt_dev');
+      if (jwtDev && jwtDev.trim()) {
+        return {
+          token: jwtDev.trim(),
+          comensal: comensalLimpio,
+          expira_en: '4h',
+          qr_expira_en: '20m',
+          mesa: {
+            id_mesa: 5,
+            numero: 5,
+            capacidad: 4,
+            ubicacion: 'Terraza',
+            estado: 'ocupada',
+          },
+        };
+      }
+    } catch {
+      // Ignorar errores al acceder a window.location
+    }
+  }
+
   if (tokenLimpio.startsWith('simulado')) {
     const expSegundos = Math.floor(Date.now() / 1000) + 4 * 3600;
     const header = codificarBase64Url({ alg: 'HS256', typ: 'JWT' });

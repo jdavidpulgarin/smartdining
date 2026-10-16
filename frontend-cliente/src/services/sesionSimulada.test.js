@@ -55,4 +55,24 @@ describe('crearSesionSimulada', () => {
         'No se pudo validar el QR: el servicio de tiempo real no responde',
     });
   });
+
+  it('retorna el token real provisto en jwt_dev cuando está en la URL', async () => {
+    const originalWindow = globalThis.window;
+    globalThis.window = {
+      location: {
+        search: '?jwt_dev=eyJhbGciOiJIUzI1NiJ9.token_de_prueba.firma',
+      },
+    };
+
+    try {
+      const respuesta = await crearSesionSimulada('simulado', 'Carlos');
+      expect(respuesta.token).toBe(
+        'eyJhbGciOiJIUzI1NiJ9.token_de_prueba.firma'
+      );
+      expect(respuesta.comensal).toBe('Carlos');
+    } finally {
+      globalThis.window = originalWindow;
+    }
+  });
 });
+
