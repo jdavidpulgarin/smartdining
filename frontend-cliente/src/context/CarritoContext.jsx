@@ -19,7 +19,11 @@ import {
   totalesMesa,
   traducirErrorSocket,
 } from '../utils/carritoCompartido';
-import { obtenerMenuRaw } from '../services/menuService';
+import {
+  obtenerMenuRaw,
+  aplicarDisponibilidad,
+  actualizarDisponibilidadEnCache,
+} from '../services/menuService';
 
 const CarritoContext = createContext(null);
 
@@ -172,6 +176,23 @@ export function CarritoProvider({ children }) {
       activo = false;
     };
   }, []);
+
+  // Escuchar ingrediente:disponibilidad en tiempo real para actualizar el menú en memoria
+  useEffect(() => {
+    if (!mesaSocket?.on) return undefined;
+    const baja = mesaSocket.on('ingrediente:disponibilidad', (data) => {
+      const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
+      const disponible = Boolean(data?.disponible);
+      if (!idIng) return;
+
+      actualizarDisponibilidadEnCache(idIng, disponible);
+      setMenuRaw((prev) => {
+        if (!prev) return prev;
+        return aplicarDisponibilidad(prev, idIng, disponible);
+      });
+    });
+    return baja;
+  }, [mesaSocket]);
 
   // Sincronizar estado cuando la mesa cambia (modo local)
   useEffect(() => {

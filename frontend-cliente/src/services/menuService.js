@@ -24,6 +24,42 @@ export function obtenerMenuRaw() {
   return cacheMenuPromise;
 }
 
+export function aplicarDisponibilidad(menu, idIngrediente, disponible) {
+  if (!menu) return menu;
+  const idNum = Number(idIngrediente);
+  const esArray = Array.isArray(menu);
+  const categorias = esArray ? menu : menu.categorias;
+  if (!Array.isArray(categorias)) return menu;
+
+  const nuevasCategorias = categorias.map((cat) => {
+    if (!Array.isArray(cat.platos)) return cat;
+    const nuevosPlatos = cat.platos.map((plato) => {
+      if (!Array.isArray(plato.pasos)) return plato;
+      const nuevosPasos = plato.pasos.map((paso) => {
+        if (!Array.isArray(paso.ingredientes)) return paso;
+        const nuevosIngredientes = paso.ingredientes.map((ing) => {
+          if (Number(ing.id_ingrediente) === idNum) {
+            return { ...ing, disponible: Boolean(disponible) };
+          }
+          return ing;
+        });
+        return { ...paso, ingredientes: nuevosIngredientes };
+      });
+      return { ...plato, pasos: nuevosPasos };
+    });
+    return { ...cat, platos: nuevosPlatos };
+  });
+
+  return esArray ? nuevasCategorias : { ...menu, categorias: nuevasCategorias };
+}
+
+export function actualizarDisponibilidadEnCache(idIngrediente, disponible) {
+  if (!cacheMenuPromise) return;
+  cacheMenuPromise = cacheMenuPromise.then((raw) =>
+    aplicarDisponibilidad(raw, idIngrediente, disponible)
+  );
+}
+
 export function normalizarCategorias(rawMenu) {
   if (Array.isArray(rawMenu)) return rawMenu;
   if (Array.isArray(rawMenu?.categorias)) return rawMenu.categorias;
@@ -128,4 +164,6 @@ export default {
   adaptarPlatos,
   adaptarPlatosArmables,
   adaptarPlatoArmable,
+  aplicarDisponibilidad,
+  actualizarDisponibilidadEnCache,
 };
