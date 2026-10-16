@@ -199,7 +199,7 @@ export function useSeguimientoMesa(pedidoInicial = null) {
             ack.mensaje || 'Ya avisamos hace poco. El mesero ya viene en camino.'
           );
         } else {
-          setAvisoMesero('Ya avisamos al mesero.');
+          setAvisoMesero('No pudimos conectar con el mesero. Intenta en un momento.');
         }
       } else {
         setAvisoMesero('Ya avisamos al mesero. Pronto se acercará a la mesa.');
@@ -210,7 +210,7 @@ export function useSeguimientoMesa(pedidoInicial = null) {
           err.message || 'Ya avisamos hace poco. El mesero ya viene en camino.'
         );
       } else {
-        setAvisoMesero('Ya avisamos al mesero.');
+        setAvisoMesero('No pudimos conectar con el mesero. Intenta en un momento.');
       }
     }
     setTimeout(() => {
