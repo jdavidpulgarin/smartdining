@@ -98,6 +98,14 @@ function aplicarOperacion(actual, op) {
     items = items.filter((x) => x.id_linea !== op.id_linea);
   } else if (op.accion === 'clear') {
     items = [];
+  } else if (op.accion === 'remove_de') {
+    // INTERNA: la usa order:created para quitar las líneas de quienes acaban
+    // de pedir. validarOperacion no la admite, así que ningún cliente puede
+    // emitirla. Ir aquí la hace atómica igual que las demás (memoria y Redis).
+    const quitar = new Set(op.comensales);
+    items = items.filter((x) => !quitar.has(x.comensal));
+    // Sin nada que quitar no sube la versión ni hay que avisar a la mesa.
+    if (items.length === actual.items.length) return { carrito: actual, sinCambios: true };
   }
   return { carrito: { version: actual.version + 1, items } };
 }
@@ -118,24 +126,25 @@ function crearAlmacenCarritos({ registro } = {}) {
 
   const snapshot = (idMesa) => copiar(mesas.get(idMesa) || CARRITO_VACIO);
 
-  /** Devuelve { snapshot } o { error } si se excede el tope. */
+  /** Devuelve { snapshot, sinCambios? } o { error } si se excede el tope. */
   function aplicar(idMesa, op) {
     const r = aplicarOperacion(mesas.get(idMesa) || CARRITO_VACIO, op);
     if (r.error) return r;
+    if (r.sinCambios) return { snapshot: copiar(r.carrito), sinCambios: true };
     mesas.set(idMesa, r.carrito);
     return { snapshot: copiar(r.carrito) };
   }
 
   /**
    * Aplica la operación solo si `claveIdem` no se procesó antes.
-   * @returns {{ duplicado: boolean, snapshot } | { error: string }}
+   * @returns {{ duplicado: boolean, snapshot, sinCambios? } | { error: string }}
    */
   function aplicarUnaVez(idMesa, op, claveIdem) {
     if (claveIdem && registro && registro.obtener(claveIdem)) return { duplicado: true, snapshot: snapshot(idMesa) };
     const r = aplicar(idMesa, op);
     if (r.error) return r;
     if (claveIdem && registro) registro.guardar(claveIdem, true);
-    return { duplicado: false, snapshot: r.snapshot };
+    return { duplicado: false, ...r };
   }
 
   const vaciar = (idMesa) => aplicar(idMesa, { accion: 'clear' }).snapshot;

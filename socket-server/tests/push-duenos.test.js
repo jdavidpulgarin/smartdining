@@ -39,17 +39,20 @@ async function escenario(t) {
 }
 const linea = (comensal) => ({ eventId: randomUUID(), accion: 'set', id_linea: randomUUID(), comensal, id_plato: 3, cantidad: 1 });
 
-test('"¡Tu plato está listo!" llega solo a quien lo pidió (dueños tomados del carrito)', async (t) => {
-  const { s, push, ana } = await escenario(t);
+test('"¡Tu plato está listo!" llega solo a quien lo pidió, aunque otro tenga líneas en el carrito', async (t) => {
+  const { s, push, ana, beto } = await escenario(t);
   await emitir(ana, 'cart:update', linea('Ana'));
-  await interno(s, '/internal/order-created', { eventId: randomUUID(), pedido: { id_pedido: 87, id_mesa: 5, estado: 'recibido' } });
+  await emitir(beto, 'cart:update', linea('Beto'));
+  await interno(s, '/internal/order-created', {
+    eventId: randomUUID(), pedido: { id_pedido: 87, id_mesa: 5, estado: 'recibido', items: [{ id_plato: 3, comensal: 'Ana' }] },
+  });
   await interno(s, '/internal/order-status', listo());
   await pausa();
   assert.deepStrictEqual(push.enviados.map((e) => e.endpoint), [sub(1).endpoint]);
   assert.strictEqual(push.enviados[0].payload.titulo, '¡Tu plato está listo!');
 });
 
-test('también se toman los dueños de items[].comensal si el backend los envía', async (t) => {
+test('los dueños salen de items[].comensal; un alias de más de 40 caracteres se ignora', async (t) => {
   const { s, push } = await escenario(t);
   await interno(s, '/internal/order-created', {
     eventId: randomUUID(),
@@ -77,7 +80,9 @@ test('otros estados (en preparación) siguen avisando a toda la mesa', async (t)
 test('payload mínimo: sin nombres, montos ni mesa; abre /seguimiento', async (t) => {
   const { s, push, ana } = await escenario(t);
   await emitir(ana, 'cart:update', linea('Ana'));
-  await interno(s, '/internal/order-created', { eventId: randomUUID(), pedido: { id_pedido: 87, id_mesa: 5, estado: 'recibido', total: 56000 } });
+  await interno(s, '/internal/order-created', {
+    eventId: randomUUID(), pedido: { id_pedido: 87, id_mesa: 5, estado: 'recibido', total: 56000, items: [{ id_plato: 3, comensal: 'Ana' }] },
+  });
   await interno(s, '/internal/order-status', listo());
   await pausa();
   const { payload } = push.enviados[0];

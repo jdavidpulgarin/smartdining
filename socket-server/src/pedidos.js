@@ -53,29 +53,46 @@ async function difundirPedidoCreado(ctx, p) {
     emitidoEn: new Date().toISOString(),
   });
 
-  // Dueños del pedido para el push "¡Tu plato está listo!": el comensal de
-  // cada ítem si el backend lo envía y, además, los de las líneas del carrito
-  // que se están convirtiendo en este pedido (el backend hoy guarda el apodo
-  // dentro de notas_especiales, no en un campo propio).
-  const carrito = await carritos.snapshot(pedido.id_mesa);
-  const duenos = new Set(carrito.items.map((i) => i.comensal).filter(Boolean));
-  for (const item of Array.isArray(pedido.items) ? pedido.items : []) {
-    if (item && typeof item.comensal === 'string' && item.comensal.trim() && item.comensal.length <= 40) {
-      duenos.add(item.comensal.trim());
-    }
-  }
-  if (duenos.size > 0 && ctx.duenosPedidos) await ctx.duenosPedidos.guardar(pedido.id_pedido, duenos);
+  // Quiénes pidieron: el backend pone en cada ítem el alias del JWT de quien
+  // envió el pedido. Sin alias (pedido del personal) no se toca el carrito:
+  // no hay forma de saber qué líneas se convirtieron en este pedido.
+  const alias = aliasDelPedido(pedido);
+  if (alias.size === 0) return exito({ eventId: p.eventId, duplicado: false });
 
-  // Lo que estaba en el carrito acaba de convertirse en pedido: se vacía para
-  // que la mesa no pueda volver a ordenar lo mismo por accidente.
-  if (carrito.items.length > 0) {
+  // Dueños para el push "¡Tu plato está listo!": solo quienes pidieron, no
+  // todos los que tienen algo en el carrito de la mesa.
+  if (ctx.duenosPedidos) await ctx.duenosPedidos.guardar(pedido.id_pedido, alias);
+
+  // Cada comensal envía solo SUS platos: se quitan sus líneas y las de los
+  // demás siguen en el carrito. Es una sola operación atómica del almacén, así
+  // que un cart:update simultáneo no puede colarse ni perderse.
+  const r = await carritos.aplicarUnaVez(
+    pedido.id_mesa,
+    { accion: 'remove_de', comensales: [...alias] },
+    `sistema:cart:${pedido.id_mesa}:${p.eventId}`,
+  );
+  if (!r.error && !r.duplicado && !r.sinCambios) {
     io.to(salaMesa(pedido.id_mesa)).emit('cart:updated', {
       eventId: p.eventId,
       origen: 'sistema',
-      carrito: await carritos.vaciar(pedido.id_mesa),
+      carrito: r.snapshot,
     });
   }
   return exito({ eventId: p.eventId, duplicado: false });
+}
+
+const MAX_ALIAS = 40; // igual que MAX_APODO del carrito
+
+/** Alias únicos y no vacíos de pedido.items[].comensal. */
+function aliasDelPedido(pedido) {
+  const alias = new Set();
+  for (const item of Array.isArray(pedido.items) ? pedido.items : []) {
+    if (item && typeof item.comensal === 'string') {
+      const a = item.comensal.trim();
+      if (a && a.length <= MAX_ALIAS) alias.add(a);
+    }
+  }
+  return alias;
 }
 
 const ROLES_EMITEN_ESTADO = ['cocina', 'mesero', 'cajero', 'admin'];
