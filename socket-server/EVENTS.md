@@ -390,7 +390,20 @@ la fuente de verdad; un comensal **no** puede emitirlo.
 
 `id_pedido`, `id_mesa` y `estado` son obligatorios; el resto se reenvía tal cual.
 Cada ingrediente lleva `paso`: el nombre del paso del constructor al que pertenece, o `null` si no viene de un paso (el campo va siempre, nunca se omite). Los ingredientes llegan ordenados por `pasos_constructor.orden`, así que el KDS los agrupa por `paso` sin ordenar nada. El socket-server no valida ni filtra este campo: lo reenvía tal cual.
-Al crear la comanda el **carrito de la mesa se vacía** (ya pasó a ser pedido).
+Qué pasa con el carrito al crear la comanda (cada comensal envía **solo sus platos**):
+
+- **Con alias** (`items[].comensal`, que el backend toma del JWT de quien pidió): se quitan
+  del carrito **solo las líneas de esos alias**; las de los demás comensales se quedan. Se
+  emite `cart:updated` a `room:mesa-{ID}` con `origen: "sistema"` y el snapshot resultante
+  (la `version` sube en 1). Si esos alias no tenían líneas, no se emite nada.
+- **Sin alias** (pedido del personal sin `comensal` en los ítems): el carrito **no se toca**
+  y no se emite `cart:updated`.
+- Alias válido: texto no vacío de hasta 40 caracteres (tras quitar espacios); se usan los
+  valores únicos.
+- Quitar las líneas es **una sola operación atómica** (en memoria y en Redis): un
+  `cart:update` simultáneo de otro comensal no se pierde ni se borra. Un reintento del
+  mismo pedido (mismo `eventId` o mismo `id_pedido`) responde `duplicado: true` y no quita
+  nada otra vez, aunque el comensal ya haya agregado platos nuevos.
 
 ### `order:status`
 
@@ -465,7 +478,7 @@ hasta que se libere.
 
 | Evento | Destino | Payload |
 |---|---|---|
-| `cart:updated` | `room:mesa-{ID}` (todos **menos** quien emitió) | `{ eventId, origen, carrito: { version, items } }` |
+| `cart:updated` | `room:mesa-{ID}` (todos **menos** quien emitió; tras `order:created`, **todos**) | `{ eventId, origen, carrito: { version, items } }` (`origen`: alias de quien editó, o `"sistema"` tras `order:created`) |
 | `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, emitidoEn }` |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, emitidoEn }` (mismo payload para Wompi, §8.3, y caja, §8.6) |
@@ -484,6 +497,8 @@ Notas para el frontend:
 - `order:created` y `order:status` pueden llegar repetidos si el servidor reintenta;
   deduplica por `eventId`.
 - El sender de `cart:update` **no** recibe `cart:updated` (usa el snapshot de su ack).
+- `cart:updated` con `origen: "sistema"` llega a **toda** la mesa cuando un pedido quita las
+  líneas de quien lo envió (ver [`order:created`](#ordercreated)); el `eventId` es el del pedido.
 - `payment:confirmed` trae el **mismo payload** venga de Wompi (§8.3) o de la caja (§8.6):
   el panel y la mesa no necesitan distinguir el origen. Deduplica por `eventId`.
 - `mesa:liberada`: la sesión de mesa terminó (pago o liberación manual). Ver §5.1.
@@ -646,8 +661,8 @@ Qué se envía:
 | `listo` | **Solo a los dueños del pedido** | ¡Tu plato está listo! |
 | `cancelado` | Todas las suscripciones de la mesa | Tu pedido fue cancelado |
 
-Los dueños se anotan al crear el pedido: el `comensal` de cada ítem (si el backend lo envía en
-`order:created`) y los comensales de las líneas del carrito que se convirtieron en ese pedido.
+Los dueños se anotan al crear el pedido: **solo** los alias de `items[].comensal` de
+`order:created` (quienes lo enviaron), no todos los que tienen líneas en el carrito de la mesa.
 Si no se sabe de quién es, el push de `listo` no se envía (la sala igual recibe `order:status`).
 
 Payload **mínimo** (sin nombres, montos ni mesa). TTL de 30 min y `urgency: high`:
@@ -1017,3 +1032,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Arranque | Aceptaba secretos cortos o de ejemplo | No arranca sin secretos de 32+ caracteres, distintos y propios | Todo el equipo: regenerar `.env` |
 | Alias del comensal (R-18) | Lo mandaba el cliente en cada evento (`join:table`, `cart:update`, pago, push) | Sale **solo del JWT**; otro alias → `NO_AUTORIZADO`; JWT sin alias → `TOKEN_INVALIDO`; solo se tocan las líneas propias | PWA: enviar `{ comensal }` al abrir la sesión y dejar de mandarlo en los eventos. Backend: `feature/mesas-alias-en-jwt` |
 | `order:created` · `ingredientes[].paso` | Los ingredientes no traían su paso | Cada ingrediente lleva `paso` (nombre del paso o `null`) | Nadie: compatible hacia atrás. KDS: agrupar por `paso` |
+| `order:created` · carrito y dueños | Vaciaba el carrito de **toda** la mesa; dueños = todos los alias del carrito | Quita solo las líneas de `items[].comensal`; sin alias no toca el carrito; dueños = solo esos alias | PWA: nada (sigue reemplazando el carrito con `cart:updated`). Backend: mantener `comensal` en cada ítem |

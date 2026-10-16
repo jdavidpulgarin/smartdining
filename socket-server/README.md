@@ -140,7 +140,7 @@ sequenceDiagram
   A->>B: POST /api/pedidos (precios calculados en la base)
   B->>B: commit del pedido
   B->>S: POST /internal/order-created { eventId, pedido }
-  S->>R: anota los dueños de cada ítem · vacía el carrito
+  S->>R: anota los dueños (items[].comensal) · quita solo sus líneas del carrito
   S->>K: order:created (room:kds)
   S->>A: order:created (room:mesa-ID y room:admin)
   S->>Z: order:created
