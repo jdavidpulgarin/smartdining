@@ -1,104 +1,26 @@
-import { useEffect, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import useMesaSession from '../hooks/useMesaSession';
+import useSeguimientoMesa from '../hooks/useSeguimientoMesa';
 import TarjetaEstado from '../components/seguimiento/TarjetaEstado';
 import LineaTiempo from '../components/seguimiento/LineaTiempo';
 import OtrosPedidos from '../components/seguimiento/OtrosPedidos';
-import { listarPedidosMesa } from '../services/pedidoService';
-import {
-  normalizarPedido,
-  separarPedidos,
-  pedidoPrincipal,
-} from '../utils/seguimiento';
+import { infoEstado } from '../utils/seguimiento';
 import { formatearPrecio } from '../utils/formato';
-
-const CLAVE_ULTIMO_PEDIDO = 'smartdining_ultimo_pedido';
 
 /**
  * Pantalla principal de seguimiento de pedidos en mesa (J-07).
  */
 function Seguimiento() {
   const location = useLocation();
-  const { mesa, idMesa, comensal } = useMesaSession();
-  const [avisoMesero, setAvisoMesero] = useState(null);
-  const [pedidos, setPedidos] = useState(() => {
-    const raw =
-      location.state?.pedido ||
-      (() => {
-        try {
-          const guardado = sessionStorage.getItem(CLAVE_ULTIMO_PEDIDO);
-          return guardado ? JSON.parse(guardado) : null;
-        } catch {
-          return null;
-        }
-      })();
-    return raw ? [normalizarPedido(raw, comensal)] : [];
-  });
-  const [idSeleccionado] = useState(null);
-
-  const pedidoState = location.state?.pedido;
-
-  useEffect(() => {
-    if (pedidoState) {
-      try {
-        sessionStorage.setItem(
-          CLAVE_ULTIMO_PEDIDO,
-          JSON.stringify(pedidoState)
-        );
-      } catch {
-        // Ignorar errores de almacenamiento
-      }
-    }
-  }, [pedidoState]);
-
-  useEffect(() => {
-    let montado = true;
-    async function cargar() {
-      try {
-        const lista = await listarPedidosMesa(idMesa);
-        if (!montado) return;
-        const norm = (Array.isArray(lista) ? lista : [])
-          .map((p) => normalizarPedido(p, comensal))
-          .filter(Boolean);
-
-        setPedidos((prev) => {
-          // Mantener pedidos locales que aún no aparezcan en la API
-          const combinados = [...norm];
-          for (const p of prev) {
-            if (
-              p.id_pedido &&
-              !combinados.some(
-                (c) => String(c.id_pedido) === String(p.id_pedido)
-              )
-            ) {
-              combinados.unshift(p);
-            }
-          }
-          return combinados;
-        });
-      } catch {
-        // En caso de fallo de red, se mantiene el estado previo
-      }
-    }
-
-    cargar();
-    return () => {
-      montado = false;
-    };
-  }, [idMesa, comensal]);
-
-  const { misPedidos, otrosPedidos } = separarPedidos(pedidos, comensal);
-  const pedidoActivo =
-    misPedidos.length > 0
-      ? pedidoPrincipal(misPedidos, idSeleccionado)
-      : otrosPedidos[0] || null;
-
-  const handleLlamarMesero = () => {
-    setAvisoMesero('Ya avisamos al mesero. Pronto se acercará a la mesa.');
-    setTimeout(() => {
-      setAvisoMesero(null);
-    }, 4000);
-  };
+  const {
+    misPedidos,
+    otrosPedidos,
+    pedidoActivo,
+    setPedidoActivo,
+    avisoMesero,
+    cooldownMesero,
+    llamarMesero,
+    mesa,
+  } = useSeguimientoMesa(location.state?.pedido);
 
   if (!pedidoActivo) {
     return (
@@ -163,13 +85,57 @@ function Seguimiento() {
         </div>
       )}
 
+      {/* Tira horizontal de chips si el comensal tiene más de un pedido */}
+      {misPedidos.length > 1 && (
+        <div
+          role="tablist"
+          aria-label="Mis pedidos"
+          className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar"
+        >
+          {misPedidos.map((p) => {
+            const esActivo =
+              String(p.id_pedido) === String(pedidoActivo.id_pedido);
+            const info = infoEstado(p.estado);
+            const cod = p.codigo_pedido
+              ? p.codigo_pedido.startsWith('#')
+                ? p.codigo_pedido
+                : `#${p.codigo_pedido}`
+              : `#PED-${p.id_pedido}`;
+
+            return (
+              <button
+                key={p.id_pedido}
+                type="button"
+                role="tab"
+                aria-selected={esActivo}
+                onClick={() => setPedidoActivo(p.id_pedido)}
+                className={`min-h-[44px] px-3.5 py-1.5 rounded-xl border font-etiqueta font-bold text-xs tracking-wider uppercase whitespace-nowrap transition-all cursor-pointer flex items-center gap-2 ${
+                  esActivo
+                    ? 'bg-superficie-2 text-white shadow-sm'
+                    : 'bg-superficie text-texto-suave border-borde hover:text-white'
+                }`}
+                style={esActivo ? { borderColor: info.color } : {}}
+              >
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: info.color }}
+                />
+                <span>
+                  {cod} · {info.pill}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Tarjeta principal con halo y animación */}
       <TarjetaEstado pedido={pedidoActivo} numeroMesa={mesa} />
 
       {/* Línea de tiempo de 4 pasos */}
       <LineaTiempo estado={pedidoActivo.estado} />
 
-      {/* TU ORDEN (si el pedido activo es mío o tiene detalles) */}
+      {/* TU ORDEN (si el pedido activo es mío y tiene ítems) */}
       {detalles.length > 0 && pedidoActivo.esMio && (
         <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-2.5">
           <h2 className="m-0 font-etiqueta font-bold text-[15px] tracking-wider text-texto-suave uppercase">
@@ -215,8 +181,13 @@ function Seguimiento() {
         <div className="grid grid-cols-2 gap-2.5">
           <button
             type="button"
-            onClick={handleLlamarMesero}
-            className="min-h-[52px] rounded-xl border border-borde bg-superficie hover:bg-superficie-2 text-white font-etiqueta font-bold text-[15px] tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-colors"
+            onClick={llamarMesero}
+            disabled={cooldownMesero > 0}
+            className={`min-h-[52px] rounded-xl border border-borde bg-superficie hover:bg-superficie-2 text-white font-etiqueta font-bold text-[15px] tracking-wider flex items-center justify-center gap-2 transition-colors ${
+              cooldownMesero > 0
+                ? 'opacity-60 cursor-not-allowed'
+                : 'cursor-pointer'
+            }`}
           >
             <svg
               width="18"
@@ -232,7 +203,9 @@ function Seguimiento() {
               <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
               <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
             </svg>
-            LLAMAR AL MESERO
+            {cooldownMesero > 0
+              ? `LLAMAR AL MESERO (${cooldownMesero}s)`
+              : 'LLAMAR AL MESERO'}
           </button>
           <button
             type="button"
