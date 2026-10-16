@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCarrito } from '../context/CarritoContext';
-import { useMesaSocketContext } from '../context/MesaSocketContext';
 import { formatearPrecio } from '../utils/formato';
 import { obtenerApodo } from '../utils/apodo';
 import { pluralizar } from '../utils/pluralizar';
@@ -28,35 +27,15 @@ function Carrito() {
     vaciarCarrito,
   } = useCarrito();
 
-  const { on: socketOn } = useMesaSocketContext();
-
   const [confirmandoVaciar, setConfirmandoVaciar] = useState(false);
   const [modalConfirmarAbierto, setModalConfirmarAbierto] = useState(false);
   const [notasGenerales, setNotasGenerales] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [errorPedido, setErrorPedido] = useState(null);
   const [bloqueoSegundos, setBloqueoSegundos] = useState(0);
-  const [toastPedido, setToastPedido] = useState(null);
 
   const miNombre = obtenerApodo();
   const validacionEnvio = puedoEnviar(misLineas);
-
-  // Escuchar order:created en la mesa para notificar cuando otro comensal envía su pedido
-  useEffect(() => {
-    if (!socketOn) return undefined;
-    const baja = socketOn('order:created', (data) => {
-      const emisor =
-        data?.pedido?.comensal || data?.pedido?.usuario || data?.pedido?.alias;
-      const miAliasNorm = (miNombre || '').trim().toLowerCase();
-      if (emisor && emisor.trim().toLowerCase() !== miAliasNorm) {
-        setToastPedido(`${emisor} envió su pedido a cocina`);
-        const timer = setTimeout(() => setToastPedido(null), 4000);
-        return () => clearTimeout(timer);
-      }
-      return undefined;
-    });
-    return baja;
-  }, [socketOn, miNombre]);
 
   useEffect(() => {
     if (bloqueoSegundos <= 0) return;
@@ -176,17 +155,6 @@ function Carrito() {
               </span>
             </>
           )}
-        </div>
-      )}
-
-      {/* Toast temporal cuando otro comensal envía su pedido */}
-      {toastPedido && (
-        <div
-          role="status"
-          className="bg-superficie-2 border border-exito text-texto p-3.5 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg animate-fadeIn"
-        >
-          <span className="w-2 h-2 rounded-full bg-exito shrink-0" />
-          <span>{toastPedido}</span>
         </div>
       )}
 
