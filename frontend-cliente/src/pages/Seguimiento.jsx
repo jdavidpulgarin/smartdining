@@ -1,37 +1,21 @@
-import { useEffect } from 'react';
-import { useLocation, Link, useNavigate } from 'react-router-dom';
-import Card from '../components/ui/Card';
-import Button from '../components/ui/Button';
-import Badge from '../components/ui/Badge';
+import { useEffect, useState } from 'react';
+import { useLocation, Link } from 'react-router-dom';
+import useMesaSession from '../hooks/useMesaSession';
+import TarjetaEstado from '../components/seguimiento/TarjetaEstado';
+import LineaTiempo from '../components/seguimiento/LineaTiempo';
+import { normalizarPedido } from '../utils/seguimiento';
 import { formatearPrecio } from '../utils/formato';
 
 const CLAVE_ULTIMO_PEDIDO = 'smartdining_ultimo_pedido';
 
-const PASOS_TIMELINE = [
-  { clave: 'recibido', label: 'RECIBIDO' },
-  { clave: 'en_preparacion', label: 'EN PREPARACIÓN' },
-  { clave: 'listo', label: 'LISTO' },
-  { clave: 'entregado', label: 'EN TU MESA' },
-];
-
-function obtenerIndiceEstado(estado) {
-  switch (estado) {
-    case 'recibido':
-      return 0;
-    case 'en_preparacion':
-      return 1;
-    case 'listo':
-      return 2;
-    case 'entregado':
-      return 3;
-    default:
-      return 1;
-  }
-}
-
+/**
+ * Pantalla principal de seguimiento de pedidos en mesa (J-07).
+ */
 function Seguimiento() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const { mesa, comensal } = useMesaSession();
+  const [avisoMesero, setAvisoMesero] = useState(null);
+
   const pedidoState = location.state?.pedido;
 
   useEffect(() => {
@@ -47,7 +31,7 @@ function Seguimiento() {
     }
   }, [pedidoState]);
 
-  const pedido =
+  const rawPedido =
     pedidoState ||
     (() => {
       try {
@@ -58,14 +42,40 @@ function Seguimiento() {
       }
     })();
 
+  const pedido = rawPedido ? normalizarPedido(rawPedido, comensal) : null;
+
+  const handleLlamarMesero = () => {
+    setAvisoMesero('Ya avisamos al mesero. Pronto se acercará a la mesa.');
+    setTimeout(() => {
+      setAvisoMesero(null);
+    }, 4000);
+  };
+
   if (!pedido) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
         <div
           aria-hidden="true"
-          className="w-20 h-20 rounded-full bg-superficie border border-borde text-texto-suave flex items-center justify-center text-3xl mb-4"
+          className="w-20 h-20 rounded-full bg-superficie border border-borde text-texto-suave flex items-center justify-center mb-4"
         >
-          📋
+          <svg
+            width="36"
+            height="36"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="8" y="2" width="8" height="4" rx="1" />
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+            <path d="M12 11h4" />
+            <path d="M12 16h4" />
+            <path d="M8 11h.01" />
+            <path d="M8 16h.01" />
+          </svg>
         </div>
         <h2 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
           No tienes pedidos activos en esta mesa
@@ -83,170 +93,113 @@ function Seguimiento() {
     );
   }
 
-  const estadoActual = pedido.estado || 'en_preparacion';
-  const indiceActual = obtenerIndiceEstado(estadoActual);
-
-  const tituloPorEstado = {
-    recibido: 'PEDIDO RECIBIDO',
-    en_preparacion: 'ESTÁ EN LA COCINA',
-    listo: '¡LISTO!',
-    entregado: 'EN TU MESA',
-  };
-
-  const subtituloPorEstado = {
-    recibido: 'Tu orden fue recibida por la cocina.',
-    en_preparacion: 'Listo en unos 8 minutos.',
-    listo: 'Tu pedido está listo para servir.',
-    entregado: '¡Buen provecho!',
-  };
-
-  const tituloEstado = tituloPorEstado[estadoActual] || 'ESTÁ EN LA COCINA';
-  const subtituloEstado =
-    subtituloPorEstado[estadoActual] || 'Tu orden está siendo atendida en cocina.';
-  const codigoPedido = pedido.codigo_pedido || `PED-${pedido.id_pedido || '1061'}`;
-
-  const itemsPedido = Array.isArray(pedido.lineas)
-    ? pedido.lineas
-    : Array.isArray(pedido.items)
-      ? pedido.items
-      : [];
+  const detalles = pedido.detalles || [];
 
   return (
-    <div className="space-y-4 pb-12">
-      {/* Portada Hero Seguimiento */}
-      <div className="-mx-4 -mt-4 mb-2 relative h-48 sm:h-56 overflow-hidden rounded-b-3xl bg-superficie">
-        <img
-          src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1200&q=80&auto=format"
-          alt="Comida en preparación"
-          className="w-full h-full object-cover"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />
-        <div className="absolute bottom-0 inset-x-0 p-4">
-          <p className="font-etiqueta text-xs uppercase tracking-wider text-texto-suave mb-1 font-bold">
-            PEDIDO #{codigoPedido}
-          </p>
-          <h1 className="font-titulo text-4xl sm:text-5xl text-primario tracking-wider leading-none uppercase">
-            {tituloEstado}
-          </h1>
-          <p className="text-xs sm:text-sm text-texto-suave mt-1">
-            {subtituloEstado}
-          </p>
+    <div className="flex flex-col gap-3.5 pb-8">
+      {/* Aviso temporal de llamada al mesero */}
+      {avisoMesero && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="bg-superficie-2 border border-acento text-texto px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg"
+        >
+          <span className="w-2 h-2 rounded-full bg-acento shrink-0" />
+          <span>{avisoMesero}</span>
         </div>
-      </div>
+      )}
 
-      {/* Tarjeta de Línea de Tiempo de Estado */}
-      <Card className="p-5 space-y-5 bg-superficie border border-borde rounded-2xl">
-        <div className="space-y-4 pl-2">
-          {PASOS_TIMELINE.map((paso, idx) => {
-            const completado = idx < indiceActual;
-            const activo = idx === indiceActual;
+      {/* Tarjeta principal con halo y animación */}
+      <TarjetaEstado pedido={pedido} numeroMesa={mesa} />
 
-            return (
-              <div key={paso.clave} className="flex items-start gap-3.5 relative">
-                {/* Línea conectora */}
-                {idx < PASOS_TIMELINE.length - 1 && (
-                  <div
-                    className={`absolute left-3 top-6 bottom-0 w-0.5 -mb-4 ${
-                      idx < indiceActual ? 'bg-exito' : 'bg-borde'
-                    }`}
-                  />
-                )}
+      {/* Línea de tiempo de 4 pasos */}
+      <LineaTiempo estado={pedido.estado} />
 
-                {/* Círculo indicador */}
-                <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 z-10 text-xs font-bold ${
-                    completado
-                      ? 'bg-exito text-white shadow-sm'
-                      : activo
-                        ? 'bg-acento text-fondo shadow-md ring-4 ring-acento/20'
-                        : 'border-2 border-borde bg-superficie text-transparent'
-                  }`}
-                >
-                  {completado ? '✓' : activo ? '●' : ''}
-                </div>
-
-                {/* Texto del paso */}
-                <div className="min-w-0">
-                  <p
-                    className={`font-etiqueta uppercase text-sm tracking-wide font-bold ${
-                      activo
-                        ? 'text-acento'
-                        : completado
-                          ? 'text-texto'
-                          : 'text-texto-tenue'
-                    }`}
-                  >
-                    {paso.label}
-                  </p>
-                  {activo && (
-                    <p className="text-[11px] text-texto-suave font-medium">
-                      {subtituloEstado}
-                    </p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {pedido.total !== undefined && (
-          <div className="pt-3 border-t border-borde flex justify-between items-center text-sm">
-            <span className="text-texto-suave font-medium">Total de la orden</span>
-            <span className="font-bold font-etiqueta text-lg text-white">
-              {formatearPrecio(pedido.total)}
-            </span>
-          </div>
-        )}
-      </Card>
-
-      {/* Sección Lo que pidió la mesa (si hay líneas) */}
-      {itemsPedido.length > 0 && (
-        <section className="bg-superficie rounded-2xl p-4 border border-borde space-y-3">
-          <h2 className="font-etiqueta uppercase font-bold text-sm tracking-wider text-texto">
-            Lo que pidió la mesa
+      {/* TU ORDEN */}
+      {detalles.length > 0 && (
+        <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-2.5">
+          <h2 className="m-0 font-etiqueta font-bold text-[15px] tracking-wider text-texto-suave uppercase">
+            TU ORDEN
           </h2>
-          <div className="space-y-2 divide-y divide-borde">
-            {itemsPedido.map((item, idx) => (
+          <div className="flex flex-col gap-2">
+            {detalles.map((detalle, idx) => (
               <div
-                key={item.id_linea || idx}
-                className="pt-2 first:pt-0 flex items-center justify-between gap-2"
+                key={detalle.id_detalle ?? idx}
+                className="flex justify-between items-baseline text-[15px] gap-2"
               >
-                <div className="min-w-0">
-                  <p className="font-etiqueta uppercase text-sm font-bold text-texto truncate">
-                    {item.nombre} {item.comensal ? `· ${item.comensal}` : ''}
-                  </p>
-                  {item.cantidad > 1 && (
-                    <p className="text-xs text-texto-suave">{item.cantidad} unidades</p>
-                  )}
-                </div>
-                <Badge
-                  variante={
-                    estadoActual === 'listo' || estadoActual === 'entregado'
-                      ? 'exito'
-                      : 'alerta'
-                  }
-                >
-                  {estadoActual === 'listo'
-                    ? 'LISTO'
-                    : estadoActual === 'entregado'
-                      ? 'ENTREGADO'
-                      : 'PREPARANDO'}
-                </Badge>
+                <span className="text-white truncate">
+                  {detalle.cantidad} × {detalle.plato_nombre || detalle.nombre}
+                  {detalle.comensal ? ` · ${detalle.comensal}` : ''}
+                </span>
+                <span className="text-texto-suave shrink-0 font-medium">
+                  {formatearPrecio(detalle.subtotal)}
+                </span>
               </div>
             ))}
+          </div>
+          <div className="h-px bg-borde my-1" />
+          <div className="flex justify-between items-baseline">
+            <span className="text-sm text-texto-suave">Total de tu orden</span>
+            <span className="font-titulo text-[28px] tracking-wider text-white">
+              {formatearPrecio(pedido.total)}
+            </span>
           </div>
         </section>
       )}
 
-      {/* Botón Pedir más platos */}
-      <div className="pt-2">
-        <Button
-          variante="primario"
-          onClick={() => navigate('/menu')}
-          className="w-full min-h-12 py-3 px-4 font-bold font-etiqueta uppercase text-base rounded-xl"
+      {/* Botones de acción */}
+      <div className="flex flex-col gap-2.5 pt-1">
+        <Link
+          to="/menu"
+          className="flex items-center justify-center min-h-[56px] rounded-2xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-[19px] tracking-wider transition-colors no-underline"
         >
-          Pedir más platos
-        </Button>
+          PEDIR MÁS PLATOS
+        </Link>
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={handleLlamarMesero}
+            className="min-h-[52px] rounded-xl border border-borde bg-superficie hover:bg-superficie-2 text-white font-etiqueta font-bold text-[15px] tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-colors"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#F2B705"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+              <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
+            </svg>
+            LLAMAR AL MESERO
+          </button>
+          <button
+            type="button"
+            disabled
+            title="Próximamente"
+            className="min-h-[52px] rounded-xl border border-borde bg-[#111111] text-texto-tenue font-etiqueta font-bold text-[15px] tracking-wider flex items-center justify-center gap-2 cursor-not-allowed opacity-60"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#6B6B6B"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 2v20l3-2 3 2 3-2 3 2 3-2 1 1V2l-1 1-3-2-3 2-3-2-3 2-3-2Z" />
+              <path d="M8 8h8M8 12h8M8 16h5" />
+            </svg>
+            PEDIR LA CUENTA
+          </button>
+        </div>
       </div>
     </div>
   );
