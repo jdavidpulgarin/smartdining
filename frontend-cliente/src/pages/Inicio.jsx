@@ -164,7 +164,7 @@ function Inicio() {
               <form onSubmit={manejarSubmit} className="space-y-4" noValidate>
                 <div className="space-y-1">
                   <h2 className="font-titulo text-3xl sm:text-4xl text-white tracking-wide uppercase leading-tight">
-                    ¡BIENVENIDO!
+                    {numeroMesaQr !== null ? '¡BIENVENIDO!' : 'ÚNETE A LA MESA'}
                   </h2>
                   <p className="text-xs sm:text-sm text-texto-suave font-cuerpo leading-relaxed">
                     Escribe tu nombre para que la cocina sepa de quién es cada plato.
