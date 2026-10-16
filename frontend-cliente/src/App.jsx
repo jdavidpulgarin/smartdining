@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { SesionProvider } from './context/SesionContext'
+import { MesaSocketProvider } from './context/MesaSocketContext'
 import { CarritoProvider } from './context/CarritoContext'
 import Layout from './components/layout/Layout'
 import Inicio from './pages/Inicio'
@@ -15,7 +16,8 @@ function App() {
   return (
     <BrowserRouter>
       <SesionProvider>
-        <CarritoProvider>
+        <MesaSocketProvider>
+          <CarritoProvider>
           <Routes>
             <Route path="/" element={<Inicio />} />
             <Route
@@ -64,8 +66,9 @@ function App() {
             )}
           </Routes>
         </CarritoProvider>
-      </SesionProvider>
-    </BrowserRouter>
+      </MesaSocketProvider>
+    </SesionProvider>
+  </BrowserRouter>
   )
 }
 
