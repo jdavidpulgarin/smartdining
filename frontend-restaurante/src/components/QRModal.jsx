@@ -150,14 +150,19 @@ export function QRModal({
   const infoToken = decodificarTokenQr(token)
   const sid = infoToken.sid || (token ? token.slice(-8) : null)
 
-  const port = typeof window !== 'undefined' ? window.location.port || '5173' : '5173'
+  const defaultClientPort = (import.meta.env && import.meta.env.VITE_CLIENTE_PORT) || '5174'
   const activeDomain = useWifiIp ? hostIp : 'localhost'
 
-  const diningUrl = token
-    ? useWifiIp
-      ? `http://${activeDomain}:${port}/?token=${encodeURIComponent(token)}&mesa=${table.number || table.id}`
-      : table.qr_url || `http://localhost:${port}/?token=${encodeURIComponent(token)}&mesa=${table.number || table.id}`
-    : ''
+  // Priorizar table.qr_url enviada por el backend (apunta a frontend-cliente).
+  // Si se prueba con Wi-Fi en red local, se sustituye localhost por hostIp manteniendo el puerto del comensal.
+  let diningUrl = ''
+  if (table.qr_url) {
+    diningUrl = useWifiIp && hostIp !== 'localhost'
+      ? table.qr_url.replace(/localhost|127\.0\.0\.1/, hostIp)
+      : table.qr_url
+  } else if (token) {
+    diningUrl = `http://${activeDomain}:${defaultClientPort}/?token=${encodeURIComponent(token)}&mesa=${table.number || table.id}`
+  }
 
   const tabletUrl =
     typeof window !== 'undefined'
