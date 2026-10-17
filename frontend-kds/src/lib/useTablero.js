@@ -38,7 +38,12 @@ function reducer(estado, accion) {
 /** Cada cuanto se repinta el cronometro de las tarjetas, sin pedir nada. */
 const REFRESCO_RELOJ_MS = 30_000
 
-export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
+export function useTablero({
+  token,
+  alCaducarSesion,
+  alLlegarComandaNueva,
+  alCambiarDisponibilidad,
+}) {
   const [estado, despachar] = useReducer(reducer, undefined, estadoInicial)
   const [conectado, setConectado] = useState(false)
 
@@ -57,6 +62,16 @@ export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
   useEffect(() => {
     alLlegarRef.current = alLlegarComandaNueva
   }, [alLlegarComandaNueva])
+
+  // D-10: el panel de agotados necesita `ingrediente:disponibilidad`, y el
+  // socket del KDS ya esta abierto aqui. Se reenvia por callback (con ref, como
+  // los de arriba) en vez de abrir una segunda conexion para lo mismo: el rol
+  // `cocina` ya recibe el evento, porque el socket-server lo difunde a TODOS
+  // los sockets (EVENTS.md §5.3). Quien no pase el callback no nota nada.
+  const alCambiarDisponibilidadRef = useRef(alCambiarDisponibilidad)
+  useEffect(() => {
+    alCambiarDisponibilidadRef.current = alCambiarDisponibilidad
+  }, [alCambiarDisponibilidad])
 
   // El aviso sonoro solo debe sonar por una comanda que ENTRA por el socket, no
   // al recargar ni al reconectar. Para saber si el evento aporta algo nuevo hay
@@ -136,6 +151,10 @@ export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
 
     socket.on('order:status', (evento) => {
       if (vivo) despachar({ tipo: 'estado', datos: evento })
+    })
+
+    socket.on('ingrediente:disponibilidad', (evento) => {
+      if (vivo) alCambiarDisponibilidadRef.current?.(evento)
     })
 
     return () => {

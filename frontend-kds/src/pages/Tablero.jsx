@@ -4,16 +4,18 @@ import {
   Maximize,
   Minimize,
   Moon,
+  PackageX,
   RefreshCw,
   Sun,
   Volume2,
   VolumeX,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import BarraResumen from '../components/BarraResumen'
 import Columna from '../components/Columna'
 import IndicadorConexion from '../components/IndicadorConexion'
 import Logo from '../components/Logo'
+import PanelAgotados from '../components/PanelAgotados'
 import { MENSAJE_SESION_CAIDA, useAuth } from '../context/AuthContext'
 import { cerrarSonido, prepararSonido, sonarAvisoDeComanda } from '../lib/aviso-sonoro'
 import {
@@ -31,6 +33,7 @@ import {
   temaInicial,
 } from '../lib/preferencias'
 import { useCronometro } from '../hooks/useCronometro'
+import { useAgotados } from '../lib/useAgotados'
 import { useTablero } from '../lib/useTablero'
 
 /**
@@ -84,11 +87,35 @@ export default function Tablero() {
     if (sonido) sonarAvisoDeComanda()
   }, [sonido])
 
+  // D-10. El panel se monta siempre (aunque este cerrado) para que la insignia
+  // del header sea correcta sin tener que abrirlo.
+  const [panelAbierto, setPanelAbierto] = useState(false)
+  const botonAgotados = useRef(null)
+
+  const agotados = useAgotados({ token })
+
   const { estado, conectado, recargar, avanzar } = useTablero({
     token,
     alCaducarSesion,
     alLlegarComandaNueva,
+    alCambiarDisponibilidad: agotados.alLlegarEvento,
   })
+
+  // Al RECONECTAR se vuelve a leer la carta: mientras el socket estuvo caido,
+  // otras pantallas pudieron agotar cosas y esos eventos no se reenvian. Sin
+  // esto el panel mostraria un estado viejo con toda confianza.
+  const estabaConectado = useRef(conectado)
+  useEffect(() => {
+    if (conectado && !estabaConectado.current) agotados.recargar()
+    estabaConectado.current = conectado
+  }, [conectado, agotados])
+
+  // Al cerrar, el foco vuelve al boton que lo abrio: si no, quien navega con
+  // teclado acaba al principio de la pagina sin saber donde estaba.
+  const cerrarPanel = useCallback(() => {
+    setPanelAbierto(false)
+    botonAgotados.current?.focus()
+  }, [])
 
   // Un solo intervalo de 1 s para todas las tarjetas.
   const ahora = useCronometro()
@@ -155,6 +182,37 @@ export default function Tablero() {
           <p className="display mr-2 text-3xl font-bold tabular-nums" aria-label="Hora">
             {horaDePared}
           </p>
+
+          {/* D-10. Este SI se ve siempre, al contrario que los de abajo: el
+              PATCH va por HTTP y agotar algo funciona aunque el socket este
+              caido. Lo que se pierde sin socket son los cambios de OTRAS
+              pantallas, y de eso avisa el propio panel. */}
+          <button
+            ref={botonAgotados}
+            type="button"
+            onClick={() => setPanelAbierto(true)}
+            className={`relative ${botonBarra}`}
+            aria-label={
+              agotados.agotados > 0
+                ? `Ingredientes agotados: ${agotados.agotados}`
+                : 'Ingredientes agotados'
+            }
+            title="Ingredientes agotados"
+          >
+            <PackageX size={22} aria-hidden="true" />
+            {/* La insignia solo aparece si hay algo agotado: un cero permanente
+                seria ruido. Si GET /menu fallo, el contador es 0 y no se pinta
+                nada, que es justo lo que se quiere: el panel no estorba al
+                tablero por no haber podido leer la carta. */}
+            {agotados.agotados > 0 && (
+              <span
+                aria-hidden="true"
+                className="absolute -right-1 -top-1 grid h-6 min-w-6 place-items-center rounded-full bg-[color:var(--color-alerta)] px-1 text-xs font-bold text-white"
+              >
+                {agotados.agotados}
+              </span>
+            )}
+          </button>
 
           {/* Sin conexion, los botones de pantalla sobran: lo unico que se
               puede hacer es recargar (que esta en el aviso rojo, en grande) o
@@ -291,6 +349,16 @@ export default function Tablero() {
           />
         ))}
       </main>
+
+      <PanelAgotados
+        abierto={panelAbierto}
+        onCerrar={cerrarPanel}
+        estado={agotados.estado}
+        conectado={conectado}
+        onConmutar={agotados.conmutar}
+        onRecargar={agotados.recargar}
+        onDescartarError={agotados.descartarError}
+      />
     </div>
   )
 }

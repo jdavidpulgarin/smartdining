@@ -261,3 +261,19 @@ button {
   white-space: nowrap;
   border-width: 0;
 }
+
+/**
+ * D-10: el cajon de agotados entra deslizandose desde la derecha.
+ *
+ * Solo se aplica bajo motion-safe (ver PanelAgotados.jsx), asi que quien tenga
+ * prefers-reduced-motion activado lo ve aparecer sin movimiento. El cajon se
+ * abre a mitad de un servicio y un deslizamiento largo estorbaria: 180 ms.
+ */
+@keyframes entrar-cajon {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
