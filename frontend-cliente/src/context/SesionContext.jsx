@@ -147,6 +147,12 @@ export function SesionProvider({ children }) {
         // Ignorar errores de localStorage
       }
 
+      const motivosPrioritarios = ['pagada', 'liberada'];
+      const motivoFinal =
+        motivo === 'MESA_LIBERADA' && motivosPrioritarios.includes(prev.motivoCierre)
+          ? prev.motivoCierre
+          : motivo;
+
       return {
         sesion: null,
         tokenQrPendiente: null,
@@ -154,7 +160,7 @@ export function SesionProvider({ children }) {
         error: null,
         enviando: false,
         recienUnido: false,
-        motivoCierre: motivo,
+        motivoCierre: motivoFinal,
       };
     });
   }, []);
