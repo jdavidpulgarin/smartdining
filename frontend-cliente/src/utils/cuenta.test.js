@@ -132,6 +132,85 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(montos.total).toBe(60000);
     });
 
+    it('calcula total 62.000 entre 3 sin pagos → 20.667', () => {
+      const cuenta = {
+        total: 62000,
+        pagado: 0,
+        saldo: 62000,
+        mia: { saldo: 20000 },
+      };
+
+      const montos = montosPorModo(cuenta, 3);
+      expect(montos.igual).toBe(20667);
+      expect(montos.total).toBe(62000);
+    });
+
+    it('calcula total 62.000, ya pagaron 20.000, saldo 42.000 → 20.667 (no 42.000)', () => {
+      const cuenta = {
+        total: 62000,
+        pagado: 20000,
+        saldo: 42000,
+        mia: { saldo: 20000 },
+      };
+
+      const montos = montosPorModo(cuenta, 3);
+      expect(montos.igual).toBe(20667);
+      expect(montos.total).toBe(42000);
+    });
+
+    it('calcula total 62.000, saldo 20.666 → 20.666 (último paga el saldo)', () => {
+      const cuenta = {
+        total: 62000,
+        pagado: 41334,
+        saldo: 20666,
+        mia: { saldo: 20666 },
+      };
+
+      const montos = montosPorModo(cuenta, 3);
+      expect(montos.igual).toBe(20666);
+      expect(montos.total).toBe(20666);
+    });
+
+    it('calcula total 50.000 entre 2 sin pagos → 25.000', () => {
+      const cuenta = {
+        total: 50000,
+        pagado: 0,
+        saldo: 50000,
+        mia: { saldo: 25000 },
+      };
+
+      const montos = montosPorModo(cuenta, 2);
+      expect(montos.igual).toBe(25000);
+      expect(montos.total).toBe(50000);
+    });
+
+    it('calcula total 50.000 entre 2, un comensal ya pagó y solo queda uno (saldo 25.000) → 25.000', () => {
+      const cuenta = {
+        total: 50000,
+        pagado: 25000,
+        saldo: 25000,
+        mia: { saldo: 25000 },
+      };
+
+      const montos = montosPorModo(cuenta, 2);
+      expect(montos.igual).toBe(25000);
+      expect(montos.total).toBe(25000);
+    });
+
+    it('cubre el residuo de redondeo cuando el último comensal paga', () => {
+      const cuenta = {
+        total: 100,
+        pagado: 66,
+        saldo: 34,
+        mia: { saldo: 34 },
+      };
+
+      const montos = montosPorModo(cuenta, 3);
+      // parte = Math.round(100/3) = 33; residuo = 1; saldo 34 <= 33+1 -> 34
+      expect(montos.igual).toBe(34);
+      expect(montos.total).toBe(34);
+    });
+
     it('el modo igual nunca excede el saldo restante de la mesa', () => {
       const cuenta = {
         total: 90000,
@@ -142,7 +221,7 @@ describe('utils/cuenta.js (J-08)', () => {
       };
 
       const montos = montosPorModo(cuenta, 2);
-      expect(montos.igual).toBe(10000); // Math.min(saldo 10000, 90000/2=45000) = 10000
+      expect(montos.igual).toBe(10000);
       expect(montos.total).toBe(10000);
     });
 

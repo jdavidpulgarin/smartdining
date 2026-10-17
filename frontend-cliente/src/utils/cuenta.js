@@ -115,18 +115,27 @@ export function normalizarCuenta(api = {}, miAlias = '') {
 /**
  * Calcula los montos a pagar según el modo seleccionado:
  * - propio: mi saldo (nunca más que el saldo de la mesa)
- * - igual: total de la mesa dividido entre el número de personas, redondeado, nunca más que el saldo
+ * - igual: reparte el TOTAL de la mesa entre las personas presentes (n = personas),
+ *   redondeado a pesos. El residuo del redondeo lo cubre quien paga de último.
+ *   Fórmula idéntica a socket-server/src/cuenta.js (calcularMonto).
+ *   Nota: cantPersonas usa comensales individuales como estimación en el cliente;
+ *   el monto definitivo lo calcula el servidor en POST /pagos/intencion con presencia.total
+ *   (sockets en sala) y se muestra en CONFIRMANDO TU PAGO.
  * - total: todo lo que le falta a la mesa (saldo)
  *
- * @param {object} cuenta - Cuenta normalizada
- * @param {number} [personas] - Personas presentes en la mesa (mínimo 1)
+ * @param {object} cuenta - Cuenta normalizada (cuenta.saldo es el saldo de la mesa)
+ * @param {number} [personas] - Personas estimadas en la mesa (mínimo 1)
  * @returns {{ propio: number, igual: number, total: number }}
  */
 export function montosPorModo(cuenta, personas = 1) {
+  // Saldo restante de la MESA (saldo_mesa normalizado)
   const saldo = Math.max(0, Number(cuenta?.saldo ?? 0));
   const totalMesa = Math.max(0, Number(cuenta?.total ?? saldo));
 
-  // Número de personas: usa el argumento o la cantidad de comensales individuales (mínimo 1)
+  // Estimación de personas en el cliente: comensales individuales (mínimo 1).
+  // El cliente no recibe eventos de presencia de sockets (emitidos solo a SALA_ADMIN).
+  // El monto definitivo es el monto_centavos que devuelve POST /pagos/intencion,
+  // el cual ya se muestra en la pantalla CONFIRMANDO TU PAGO.
   const cantPersonas = Math.max(
     1,
     Number(personas) || (cuenta?.comensales ? cuenta.comensales.filter((c) => !c.esGeneral).length : 1) || 1
@@ -134,8 +143,18 @@ export function montosPorModo(cuenta, personas = 1) {
 
   const miSaldo = Math.max(0, Number(cuenta?.mia?.saldo ?? 0));
   const propio = Math.min(saldo, miSaldo);
-  const cuotaIgual = Math.round(totalMesa / cantPersonas);
-  const igual = Math.min(saldo, Math.max(0, cuotaIgual));
+
+  // Fórmula idéntica a socket-server/src/cuenta.js:
+  // Se reparte el TOTAL de la cuenta (no el saldo que va quedando).
+  // Cada parte se redondea a pesos. Quien paga de último cubre el residuo y el saldo restante.
+  const n = Math.max(1, cantPersonas);
+  const parte = Math.round(totalMesa / n);
+  const residuo = Math.max(0, totalMesa - parte * n);
+  const igual = saldo <= 0
+    ? 0
+    : (parte <= 0 || saldo <= parte + residuo)
+      ? saldo
+      : parte;
   const total = saldo;
 
   return {
