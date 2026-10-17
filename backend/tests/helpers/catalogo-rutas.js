@@ -278,7 +278,7 @@ const tokenDe = (rol) => (rol === 'comensal' ? tokenComensal(MESA) : tokenStaff(
  * dirección que la de la fila (los `:id` envenenados de la inyección) y con
  * `cuerpo` se manda otro cuerpo.
  */
-async function pedir(fila, { token, responder, url, cuerpo, cabeceras } = {}) {
+async function pedir(fila, { token, responder, url, cuerpo, cabeceras, espia } = {}) {
   const socket = instalarFakeSocket(() => ({ ok: true }));
   const db = instalarFakeDb(responder || (() => ({ rows: [] })));
   try {
@@ -289,7 +289,11 @@ async function pedir(fila, { token, responder, url, cuerpo, cabeceras } = {}) {
     }
     const aEnviar = cuerpo !== undefined ? cuerpo : fila.cuerpo;
     if (aEnviar) peticion = peticion.send(aEnviar);
-    return await peticion;
+    const res = await peticion;
+    // `espia` recibe el doble de base ANTES de restaurarlo: es lo que permite
+    // afirmar con qué SQL y con qué parámetros se llamó (pruebas de inyección).
+    if (espia) espia(db, res);
+    return res;
   } finally {
     db.restaurar();
     socket.restaurar();
