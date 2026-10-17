@@ -14,7 +14,7 @@ import { abrirCheckout } from '../services/wompiWidget';
  */
 function Pago() {
   const { cuenta, cargando, error, recargar, idMesa, comensal } = useCuentaMesa();
-  const { on: socketOn } = useMesaSocket();
+  const { on: socketOn, enviar } = useMesaSocket();
 
   const [pantalla, setPantalla] = useState(() => {
     if (typeof window !== 'undefined' && window.location.search) {
@@ -33,11 +33,11 @@ function Pago() {
   const [intencionActual, setIntencionActual] = useState(null);
   const [ultimoPago, setUltimoPago] = useState(0);
 
-  // Escuchar payment:confirmed para transicionar a pantalla ¡PAGO CONFIRMADO! si el pago fue mío
+  // Escuchar eventos de socket (payment:confirmed y cuenta:solicitada)
   useEffect(() => {
     if (!socketOn) return undefined;
 
-    const baja = socketOn('payment:confirmed', (evento) => {
+    const bajaPayment = socketOn('payment:confirmed', (evento) => {
       if (!evento) return;
       const comensalEvento = evento.comensal ? String(evento.comensal).trim().toLowerCase() : null;
       const aliasActual = (comensal || '').trim().toLowerCase();
@@ -52,8 +52,13 @@ function Pago() {
       }
     });
 
+    const bajaCuenta = socketOn('cuenta:solicitada', () => {
+      setCuentaPedida(true);
+    });
+
     return () => {
-      baja?.();
+      bajaPayment?.();
+      bajaCuenta?.();
     };
   }, [socketOn, comensal]);
 
@@ -124,10 +129,24 @@ function Pago() {
     total: 'Pagas todo lo que le falta a la mesa (invitas tú).',
   };
 
-  const handlePedirCuenta = () => {
+  const handlePedirCuenta = async () => {
     setCuentaPedida(true);
     setAvisoMesero('Le avisamos al mesero que quieres la cuenta');
     setTimeout(() => setAvisoMesero(null), 4000);
+
+    if (enviar) {
+      try {
+        const eventId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `cs-${Date.now()}`;
+        await enviar('cuenta:solicitada', { eventId });
+      } catch {
+        // Ignorar
+      }
+    }
+  };
+
+  const handlePagarCaja = () => {
+    handlePedirCuenta();
+    setPantalla('caja');
   };
 
   const handlePagarWompi = async () => {
@@ -375,7 +394,7 @@ function Pago() {
               {/* Botón Pagar en Caja */}
               <button
                 type="button"
-                onClick={() => setPantalla('caja')}
+                onClick={handlePagarCaja}
                 className="min-h-[52px] rounded-xl border border-borde bg-superficie-2 hover:bg-[#252525] text-white font-etiqueta font-bold text-base tracking-wider cursor-pointer flex items-center justify-center gap-2 transition-colors"
               >
                 <svg
@@ -587,6 +606,66 @@ function Pago() {
             className="w-full min-h-[52px] rounded-xl border border-borde bg-superficie-2 hover:bg-[#252525] text-white font-etiqueta font-bold text-base tracking-wider cursor-pointer transition-colors"
           >
             VER LA CUENTA
+          </button>
+        </section>
+      )}
+
+      {/* ──────────────── PANTALLA 4: PAGA EN LA CAJA ──────────────── */}
+      {pantalla === 'caja' && (
+        <section
+          className="entra bg-superficie border border-borde rounded-3xl p-6 flex flex-col items-center gap-3.5 text-center"
+          aria-live="polite"
+        >
+          {/* Ilustración de caja registradora con recibo animado */}
+          <svg className="ilu" width="200" height="170" viewBox="0 0 200 170" aria-hidden="true">
+            <rect x="40" y="70" width="120" height="70" rx="10" fill="#1F1F1F" stroke="#3A3A3A" strokeWidth="2" />
+            <rect x="54" y="82" width="56" height="22" rx="4" fill="#0B0B0B" />
+            <text x="82" y="98" textAnchor="middle" fontFamily="Bebas Neue, sans-serif" fontSize="16" fill="#2FA35A">
+              {formatoPesos(montoModo)}
+            </text>
+            <rect x="120" y="84" width="10" height="8" rx="2" fill="#3A3A3A" />
+            <rect x="134" y="84" width="10" height="8" rx="2" fill="#3A3A3A" />
+            <rect x="120" y="96" width="10" height="8" rx="2" fill="#3A3A3A" />
+            <rect x="134" y="96" width="10" height="8" rx="2" fill="#F2B705" />
+            <rect x="30" y="140" width="140" height="10" rx="4" fill="#2A2A2A" />
+            <g className="recibo">
+              <rect x="74" y="22" width="52" height="48" fill="#F4F1EA" />
+              <rect x="82" y="32" width="36" height="4" rx="2" fill="#BDBDBD" />
+              <rect x="82" y="42" width="28" height="4" rx="2" fill="#BDBDBD" />
+              <rect x="82" y="52" width="32" height="4" rx="2" fill="#E3242B" />
+            </g>
+          </svg>
+
+          <h1 className="m-0 font-titulo text-[48px] leading-[0.95] tracking-wider text-acento">
+            PAGA EN LA CAJA
+          </h1>
+
+          <p className="m-0 text-[15px] text-white">
+            Ya le avisamos al mesero. Puedes acercarte a la caja o esperarlo en la mesa.
+          </p>
+
+          <div className="w-full box-border bg-[#0B0B0B] border border-dashed border-acento rounded-2xl p-3.5 flex flex-col gap-1 text-center">
+            <span className="font-etiqueta font-bold text-xs tracking-widest text-texto-suave uppercase">
+              DILE AL CAJERO
+            </span>
+            <span className="font-titulo text-[34px] tracking-wider text-white">
+              MESA {mesaNumero} · {(comensal || 'MESA').toUpperCase()}
+            </span>
+            <span className="text-[15px] text-acento font-semibold">
+              {formatoPesos(montoModo)}
+            </span>
+          </div>
+
+          <p className="m-0 text-xs text-texto-tenue">
+            Cuando el cajero registre tu pago, esta pantalla se actualiza sola.
+          </p>
+
+          <button
+            type="button"
+            onClick={handleVolverCuenta}
+            className="min-h-[44px] border-none bg-transparent text-primario-texto hover:text-primario text-sm font-semibold cursor-pointer transition-colors"
+          >
+            Prefiero pagar con Wompi
           </button>
         </section>
       )}
