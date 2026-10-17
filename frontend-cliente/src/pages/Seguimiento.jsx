@@ -74,16 +74,33 @@ function Seguimiento() {
   return (
     <div className="flex flex-col gap-3.5 pb-8">
       {/* Aviso temporal de llamada al mesero */}
-      {avisoMesero && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="bg-superficie-2 border border-acento text-texto px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg"
-        >
-          <span className="w-2 h-2 rounded-full bg-acento shrink-0" />
-          <span>{avisoMesero}</span>
-        </div>
-      )}
+      {avisoMesero && (() => {
+        const mensaje =
+          typeof avisoMesero === 'string'
+            ? avisoMesero
+            : avisoMesero.mensaje;
+        const esLimite =
+          (typeof avisoMesero === 'object' && avisoMesero?.tipo === 'limite') ||
+          (typeof avisoMesero === 'string' &&
+            /ya llam[oó] al mesero|espera/i.test(avisoMesero));
+
+        return (
+          <div
+            role="status"
+            aria-live="polite"
+            className={`bg-superficie-2 px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg border ${
+              esLimite ? 'border-[#6B6B6B]' : 'border-acento'
+            } text-texto`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                esLimite ? 'bg-[#6B6B6B]' : 'bg-acento'
+              }`}
+            />
+            <span>{mensaje}</span>
+          </div>
+        );
+      })()}
 
       {/* Tira horizontal de chips si el comensal tiene más de un pedido */}
       {misPedidos.length > 1 && (
@@ -149,7 +166,6 @@ function Seguimiento() {
               >
                 <span className="text-white truncate">
                   {detalle.cantidad} × {detalle.plato_nombre || detalle.nombre}
-                  {detalle.comensal ? ` · ${detalle.comensal}` : ''}
                 </span>
                 <span className="text-texto-suave shrink-0 font-medium">
                   {formatearPrecio(detalle.subtotal)}

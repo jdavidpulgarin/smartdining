@@ -193,24 +193,40 @@ export function useSeguimientoMesa(pedidoInicial = null) {
       if (enviar) {
         const ack = await enviar('mesa:llamar_mesero', {});
         if (ack?.ok) {
-          setAvisoMesero('Ya avisamos al mesero. Pronto se acercará a la mesa.');
+          setAvisoMesero({
+            mensaje: 'Ya avisamos al mesero. Pronto se acercará a la mesa.',
+            tipo: 'exito',
+          });
         } else if (ack?.codigo === 'RATE_LIMIT') {
-          setAvisoMesero(
-            ack.mensaje || 'Ya avisamos hace poco. El mesero ya viene en camino.'
-          );
+          setAvisoMesero({
+            mensaje:
+              ack.mensaje || 'La mesa ya llamó al mesero; espera 60 s',
+            tipo: 'limite',
+          });
         } else {
-          setAvisoMesero('No pudimos conectar con el mesero. Intenta en un momento.');
+          setAvisoMesero({
+            mensaje: 'No pudimos conectar con el mesero. Intenta en un momento.',
+            tipo: 'error',
+          });
         }
       } else {
-        setAvisoMesero('Ya avisamos al mesero. Pronto se acercará a la mesa.');
+        setAvisoMesero({
+          mensaje: 'Ya avisamos al mesero. Pronto se acercará a la mesa.',
+          tipo: 'exito',
+        });
       }
     } catch (err) {
       if (err?.codigo === 'RATE_LIMIT') {
-        setAvisoMesero(
-          err.message || 'Ya avisamos hace poco. El mesero ya viene en camino.'
-        );
+        setAvisoMesero({
+          mensaje:
+            err.message || 'La mesa ya llamó al mesero; espera 60 s',
+          tipo: 'limite',
+        });
       } else {
-        setAvisoMesero('No pudimos conectar con el mesero. Intenta en un momento.');
+        setAvisoMesero({
+          mensaje: 'No pudimos conectar con el mesero. Intenta en un momento.',
+          tipo: 'error',
+        });
       }
     }
     setTimeout(() => {
