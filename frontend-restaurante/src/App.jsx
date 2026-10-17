@@ -1,5 +1,5 @@
 import './App.css'
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { Topbar } from './components'
 import {
   Home,
@@ -11,12 +11,13 @@ import {
   Login,
   PantallaMesa,
 } from './pages'
-import { useSocket } from './hooks'
+import { useSocket, useAuth } from './hooks'
 import { AuthProvider } from './context/AuthContext'
 import { TablesProvider } from './context/TablesContext'
 
 function AppContent() {
   useSocket()
+  const { user } = useAuth()
   const location = useLocation()
   const isLoginPage = location.pathname === '/login'
   const isPantallaPage = location.pathname.startsWith('/pantalla')
@@ -38,9 +39,12 @@ function AppContent() {
     )
   }
 
+  if (!user) {
+    return <Navigate to="/login" replace />
+  }
+
   return (
     <div className="app-shell">
-      <img src="/img/fondo.jpg" alt="" className="sd-bg-photo" />
       <Topbar />
 
       <main className="sd-page-wrapper">

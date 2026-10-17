@@ -349,11 +349,16 @@ SELECT 304, 'Guacamole', 2000.00, 100, 'https://images.unsplash.com/photo-160446
 WHERE NOT EXISTS (SELECT 1 FROM ingredientes WHERE id_paso = 304 AND nombre = 'Guacamole');
 
 -- 6. PEDIDO DEMO
-INSERT INTO pedidos (id_mesa, codigo_pedido, estado, total, notas_generales)
-SELECT m.id_mesa, 'ORD-001', 'en_preparacion', 70000.00, 'Mesa de cumpleaños'
+INSERT INTO pedidos (id_mesa, codigo_pedido, estado, total, notas_generales, creado_en)
+SELECT m.id_mesa, 'ORD-001', 'en_preparacion', 70000.00, 'Mesa de cumpleaños', CURRENT_TIMESTAMP - INTERVAL '10 minutes'
 FROM mesas m
 WHERE m.numero = 3
   AND NOT EXISTS (SELECT 1 FROM pedidos WHERE codigo_pedido = 'ORD-001');
+
+-- Si el pedido demo ya existia de una siembra previa, actualizar creado_en para mantener metricas KDS realistas
+UPDATE pedidos
+SET creado_en = CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+WHERE codigo_pedido = 'ORD-001' AND estado = 'en_preparacion';
 
 -- 7. DETALLES DEL PEDIDO DEMO
 INSERT INTO detalles_pedido (id_pedido, id_plato, cantidad, precio_unitario, subtotal, notas_especiales, estado_item)
