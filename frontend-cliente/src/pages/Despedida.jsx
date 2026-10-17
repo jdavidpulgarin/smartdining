@@ -5,13 +5,9 @@ import Card from '../components/ui/Card';
 function Despedida() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { motivoCierre, sesion } = useSesion();
+  const { motivoCierre, ultimaMesa } = useSesion();
   const motivo = location.state?.motivo ?? motivoCierre;
-  const numeroMesa =
-    location.state?.numeroMesa ??
-    sesion?.numeroMesa ??
-    sesion?.idMesa ??
-    null;
+  const numeroMesa = location.state?.numeroMesa ?? ultimaMesa ?? null;
 
   const textoMesa = numeroMesa
     ? `La cuenta de la mesa ${numeroMesa} quedó pagada.`
