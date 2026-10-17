@@ -203,3 +203,111 @@ test('el login real sigue respondiendo en las pruebas, sin 429', async () => {
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// D-11: la forma del 429
+//
+// El 429 es una respuesta que sale ANTES de cualquier comprobación de
+// credenciales, así que es un canal lateral barato: si dijera "te quedan 2
+// intentos para ana@x.com" o si solo apareciera para los correos que existen,
+// devolvería gratis lo que H-12 cerró en el login.
+// ---------------------------------------------------------------------------
+
+/**
+ * App de un endpoint que SIEMPRE falla con 401.
+ *
+ * El limitador del login lleva `skipSuccessfulRequests`, así que con un
+ * endpoint que responde 200 no se gasta cupo y el 429 no llega nunca. Para
+ * verlo hay que fallar, igual que falla un login de verdad.
+ */
+function appConLoginFallido(env) {
+  const app = express();
+  app.use(express.json());
+  app.post('/probar', crearLimitadorLogin(env), (req, res) => res.status(401).json({ error: 'no' }));
+  return app;
+}
+
+/** Agota el cupo del limitador y devuelve la primera respuesta con 429. */
+async function hasta429(app, cuerpo, tope = 12) {
+  for (let i = 0; i < tope; i += 1) {
+    const res = await request(app).post('/probar').send(cuerpo);
+    if (res.status === 429) return res;
+  }
+  throw new Error('el limitador no llegó a responder 429');
+}
+
+test('d-11: el 429 tiene la misma forma de JSON que el resto de errores', async () => {
+  const app = appConLoginFallido(envReal({ RATE_LIMIT_LOGIN_MAX: '2' }));
+
+  const res = await hasta429(app, { email: 'ana@mail.com', password: 'mala' });
+
+  assert.deepStrictEqual(Object.keys(res.body), ['error']);
+  assert.strictEqual(res.body.error, MENSAJE_LOGIN);
+});
+
+test('d-11: el 429 no dice cuántos intentos quedan ni para qué cuenta', async () => {
+  const app = appConLoginFallido(envReal({ RATE_LIMIT_LOGIN_MAX: '2' }));
+
+  const res = await hasta429(app, { email: 'ana@mail.com', password: 'mala' });
+  const cuerpo = JSON.stringify(res.body);
+
+  assert.ok(!cuerpo.includes('ana@mail.com'), 'el 429 repitió el correo');
+  assert.ok(!/\d/.test(cuerpo), `el 429 lleva un número: ${cuerpo}`);
+  // Y tampoco en una cabecera: draft-7 manda RateLimit, que dice el tope y lo
+  // que queda. Es información del límite, no de la cuenta, y eso es lo que se
+  // comprueba: que ningún encabezado nombre el correo.
+  for (const [nombre, valor] of Object.entries(res.headers)) {
+    assert.ok(!String(valor).includes('ana@mail.com'), `la cabecera ${nombre} lleva el correo`);
+  }
+});
+
+test('d-11: el 429 llega igual para un correo que existe y para uno que no', async () => {
+  // El contador es por IP+email, así que cada correo tiene su propio cupo. Lo
+  // que se afirma es que la RESPUESTA es indistinguible: mismo código, mismo
+  // cuerpo. Si no, bastaría con mirar quién se bloquea para enumerar cuentas.
+  const app = appConLoginFallido(envReal({ RATE_LIMIT_LOGIN_MAX: '2' }));
+
+  const existe = await hasta429(app, { email: 'admin@smartdining.com', password: 'mala' });
+  const noExiste = await hasta429(app, { email: 'nadie-de-nadie@mail.com', password: 'mala' });
+
+  assert.strictEqual(existe.status, noExiste.status);
+  assert.deepStrictEqual(existe.body, noExiste.body);
+});
+
+test('d-11: el 429 trae Retry-After para que el cliente sepa esperar', async () => {
+  const app = appConLoginFallido(envReal({ RATE_LIMIT_LOGIN_MAX: '2' }));
+
+  const res = await hasta429(app, { email: 'ana@mail.com', password: 'mala' });
+
+  const retry = res.headers['retry-after'];
+  assert.ok(retry !== undefined, 'sin Retry-After el cliente solo puede reintentar a ciegas');
+  assert.ok(Number(retry) > 0, `Retry-After no es un número de segundos: ${retry}`);
+});
+
+test('d-11: el 429 del QR tampoco cuenta nada de más', async () => {
+  const app = appConLimitador(crearLimitadorQr, envReal({ RATE_LIMIT_QR_MAX: '2' }));
+
+  const res = await hasta429(app, {});
+
+  assert.deepStrictEqual(Object.keys(res.body), ['error']);
+  assert.strictEqual(res.body.error, MENSAJE_QR);
+  assert.ok(!/\d/.test(JSON.stringify(res.body)));
+});
+
+test('d-11: el 429 no anuncia Express ni se salta helmet', async () => {
+  // El limitador responde con su propio handler, que es un camino distinto del
+  // normal: conviene comprobar que no se salta lo de H-10.
+  const app = express();
+  app.use(require('helmet')());
+  app.disable('x-powered-by');
+  app.use(express.json());
+  app.post('/probar', crearLimitadorLogin(envReal({ RATE_LIMIT_LOGIN_MAX: '1' })), (req, res) =>
+    res.status(401).json({ error: 'no' })
+  );
+
+  const res = await hasta429(app, { email: 'ana@mail.com', password: 'mala' });
+
+  assert.strictEqual(res.status, 429);
+  assert.strictEqual(res.headers['x-powered-by'], undefined);
+  assert.strictEqual(res.headers['x-content-type-options'], 'nosniff');
+});
