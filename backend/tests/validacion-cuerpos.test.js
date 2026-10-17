@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
-const { tokenStaff } = require('./helpers/fake-db');
+const { instalarFakeDb, tokenStaff } = require('./helpers/fake-db');
 const { pedir } = require('./helpers/catalogo-rutas');
 const app = require('../server');
 
@@ -347,14 +347,27 @@ test('d-11: ninguna clave del prototipo ensucia Object.prototype', async () => {
 test('d-11: una clave del prototipo no se convierte en permiso', async () => {
   // El riesgo concreto: que `{ "__proto__": { "rol": "admin" } }` hiciera que
   // un mesero pasara por admin en el siguiente `req.user.rol`.
-  const res = await request(app)
-    .post('/api/categorias')
-    .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
-    .set('Content-Type', 'application/json')
-    .send('{"nombre":"Postres","__proto__":{"rol":"admin"}}');
+  //
+  // Se manda como texto crudo, no con un objeto: en un literal de JavaScript
+  // la clave '__proto__' fija el prototipo en vez de crear una propiedad, así
+  // que el ataque solo se reproduce desde el JSON.
+  //
+  // Y con el doble de base puesto, porque `requireAuth` comprueba en cada
+  // petición del personal que la cuenta siga activa (H-09): sin él esa consulta
+  // sale a PostgreSQL y en un entorno sin base la respuesta sería 500.
+  const db = instalarFakeDb(responderGenerico);
+  try {
+    const res = await request(app)
+      .post('/api/categorias')
+      .set('Authorization', `Bearer ${tokenStaff(3, 'mesero')}`)
+      .set('Content-Type', 'application/json')
+      .send('{"nombre":"Postres","__proto__":{"rol":"admin"}}');
 
-  assert.strictEqual(res.status, 403);
-  assert.strictEqual({}.rol, undefined);
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual({}.rol, undefined);
+  } finally {
+    db.restaurar();
+  }
 });
 
 test('d-11: la tabla de traducción de errores no se confunde con __proto__', async () => {
