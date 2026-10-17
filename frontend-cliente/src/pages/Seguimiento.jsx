@@ -223,18 +223,16 @@ function Seguimiento() {
               ? `LLAMAR AL MESERO (${cooldownMesero}s)`
               : 'LLAMAR AL MESERO'}
           </button>
-          <button
-            type="button"
-            disabled
-            title="Próximamente"
-            className="min-h-[52px] rounded-xl border border-borde bg-[#111111] text-texto-tenue font-etiqueta font-bold text-[15px] tracking-wider flex items-center justify-center gap-2 cursor-not-allowed opacity-60"
+          <Link
+            to="/pago"
+            className="min-h-[52px] rounded-xl border border-borde bg-superficie hover:bg-superficie-2 text-white font-etiqueta font-bold text-[15px] tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer no-underline"
           >
             <svg
               width="18"
               height="18"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#6B6B6B"
+              stroke="#E3242B"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -244,7 +242,7 @@ function Seguimiento() {
               <path d="M8 8h8M8 12h8M8 16h5" />
             </svg>
             PEDIR LA CUENTA
-          </button>
+          </Link>
         </div>
       </div>
     </div>

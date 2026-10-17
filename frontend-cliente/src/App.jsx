@@ -12,6 +12,7 @@ import Pago from './pages/Pago'
 import Despedida from './pages/Despedida'
 import UiShowcase from './pages/dev/UiShowcase'
 import './styles/seguimiento.css'
+import './styles/cuenta.css'
 
 function App() {
   return (
