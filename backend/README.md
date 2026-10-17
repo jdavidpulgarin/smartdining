@@ -103,7 +103,7 @@ aviso en el log: **una errata en el `.env` no impide arrancar**.
 | `PG_IDLE_TIMEOUT_MS` | `10000` | Cuánto vive una conexión inactiva antes de devolverse |
 | `PG_CONNECTION_TIMEOUT_MS` | `5000` | Cuánto se espera una conexión libre antes de fallar |
 | `PG_STATEMENT_TIMEOUT_MS` | `10000` | Cuánto puede tardar una consulta antes de que PostgreSQL la aborte |
-| `APAGADO_TIMEOUT_MS` | `10000` | Margen para el cierre ordenado antes de forzar la salida |
+| `APAGADO_TIMEOUT_MS` | `10000` | Margen para el cierre ordenado antes de forzar la salida. En producción debe ser menor que `stop_grace_period` (ver abajo) |
 
 Por qué importan las dos del medio:
 
@@ -122,6 +122,11 @@ para no cerrarle la base a una petición en vuelo, y el pool de último porque e
 puede tener transacciones a medias. Si algo no cierra en `APAGADO_TIMEOUT_MS`, se fuerza la
 salida: un apagado colgado es peor que uno brusco. `SIGUSR2` **no** se intercepta, porque
 es con la que nodemon reinicia en `npm run dev`.
+
+En producción, `docker-compose.prod.yml` le da al backend `stop_grace_period: 15s`: es lo que
+Docker espera tras el `SIGTERM` antes de mandar `SIGKILL`. Ese margen debe ser **mayor** que
+`APAGADO_TIMEOUT_MS`; si subes la variable, sube también `stop_grace_period`, porque si no
+Docker corta el cierre antes de que termine y el pool puede quedar sin cerrar.
 
 ```bash
 curl http://localhost:4000/api/health
