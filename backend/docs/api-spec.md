@@ -1421,6 +1421,184 @@ antes fue retirado por Jarrison.
 
 ---
 
+## Reportes (D-07)
+
+| Método | Ruta | Roles | Respuesta | Errores |
+|---|---|---|---|---|
+| GET | `/reportes?rango=hoy\|semana\|mes` | **admin** | 200, el reporte del rango | 400 rango inválido · 401 · 403 |
+
+**Solo `admin`.** Son cifras de negocio —ventas, ticket promedio, reparto por método de
+pago— y ni la cocina ni la caja las necesitan para trabajar. `cajero`, `mesero`, `cocina` y
+el comensal reciben **403**, y la petición no llega a tocar la base.
+
+`rango` es **opcional** y por defecto vale `hoy`. Cualquier otro valor —`ayer`, `HOY`, `7`,
+vacío, repetido— responde **400** con `rango debe ser hoy, semana o mes`. El valor nunca
+entra en el SQL: se traduce a un número de días por un mapa del código.
+
+| `rango` | Cubre |
+|---|---|
+| `hoy` | el día de hoy |
+| `semana` | los **7** últimos días, hoy incluido |
+| `mes` | los **30** últimos días, hoy incluido |
+
+### Todo lo numérico sale como número
+
+El panel formatea; el backend no. `totalVentas` es `1250000`, no `'$1.250.000,00'`;
+`tiempoCocinaPromedio` es `13.1`, no `'13.1 min'`; `ocupacionMesas` es `60.0`, no `'60%'`.
+Las **etiquetas** sí son texto: `metodosPago[].metodo`, `horasPico[].hora`, los nombres de
+platos e ingredientes y `tiemposKds[].fecha`.
+
+Un backend que devuelve `'$8.940,00'` obliga al cliente a parsear su propio texto para
+cualquier cuenta, y el panel ya hace cuentas con estos valores: normaliza alturas de barra,
+busca máximos y compara periodos.
+
+```json
+{
+  "rango": "hoy",
+  "totalVentas": 1250000,
+  "totalPedidos": 42,
+  "pedidosLiquidados": 38,
+  "ticketPromedio": 32894.74,
+  "tiempoCocinaPromedio": 13.1,
+  "ocupacionMesas": 60.0,
+  "kdsAlertsCount": 3,
+  "topPlatos": [
+    { "id_plato": 1042, "nombre": "Hamburguesa Smart Angus", "categoria": "Hamburguesas & Fuertes",
+      "unidades": 20, "total": 680000, "porcentaje": 100 }
+  ],
+  "metodosPago": [
+    { "metodo": "Tarjeta", "monto": 700000, "porcentaje": 56.0 }
+  ],
+  "horasPico": [
+    { "hora": "12:00 - 13:00", "volumen": 100, "pedidos": 18 }
+  ],
+  "topIngredientes": [
+    { "id_ingrediente": 7, "nombre_ingrediente": "Panceta Crujiente",
+      "nombre_paso": "Elige tu Proteína", "nombre_plato": "Bowl Personalizado",
+      "veces_solicitado": 14, "porciones_extra": 4, "porciones_normal": 10,
+      "ingresos_extras": 12000 }
+  ],
+  "tiemposKds": [
+    { "fecha": "2026-10-14", "platos_preparados": 56, "tiempo_estimado_promedio_min": 15,
+      "tiempo_real_promedio_min": 13.1, "variacion_promedio_porcentaje": -12.7 }
+  ]
+}
+```
+
+### De dónde sale cada campo
+
+| Campo | Origen | Nota |
+|---|---|---|
+| `totalVentas` | `v_ventas_diarias.total_recaudado` | **transacciones `completada`**, no totales de pedido |
+| `totalPedidos` | `v_ventas_diarias.total_pedidos` | excluye cancelados |
+| `pedidosLiquidados` | `v_ventas_diarias.pedidos_liquidados` | `estado = 'pagado'` **o** `estado_pago = 'pagado'` |
+| `ticketPromedio` | derivado | `totalVentas / pedidosLiquidados`, **recalculado sobre el rango** |
+| `tiempoCocinaPromedio` | `v_tiempos_kds` | media **ponderada por comandas**. `null` si no hubo ninguna |
+| `ocupacionMesas` | `pedidos` + `mesas` | mesas distintas con pedido no cancelado / total de mesas × 100 |
+| `kdsAlertsCount` | `kds_alertas` | por `fecha_alerta` |
+| `topPlatos` | consulta propia | **no** usa `v_platos_top`: ver abajo. Máx. 5 |
+| `topIngredientes` | consulta propia | **no** usa `v_ingredientes_top`. Máx. 6, agrupado por `id_ingrediente` |
+| `metodosPago` | `transacciones` | ver la agrupación abajo |
+| `horasPico` | `pedidos` | ver `volumen` abajo. Máx. 24 |
+| `tiemposKds` | `v_tiempos_kds` | una fila por día. Máx. 30 |
+
+**Por qué `topPlatos` y `topIngredientes` no usan las vistas.** `v_platos_top` y
+`v_ingredientes_top` **no tienen columna de fecha**: agrupan todo el histórico. Con ellas,
+los tres rangos devolverían lo mismo y el selector del panel mentiría. El service hace su
+propia consulta con el `JOIN pedidos` y el filtro del rango.
+
+**`ticketPromedio` no se promedia desde la vista.** Promediar los `ticket_promedio` diarios
+sería un promedio de promedios: cada día pesaría igual, tenga 2 pedidos u 80.
+
+**`tiempoCocinaPromedio` va ponderado** por `platos_preparados`, por lo mismo.
+
+### Agrupación de `metodosPago`
+
+La base acepta **cinco** métodos (CHECK de `transacciones`) y el reporte devuelve **cuatro
+etiquetas**, en español:
+
+| `metodo_pago` en la base | Etiqueta |
+|---|---|
+| `tarjeta_debito` | **Tarjeta** |
+| `tarjeta_credito` | **Tarjeta** |
+| `efectivo` | Efectivo |
+| `transferencia` | Transferencia |
+| `online` | Online |
+
+Débito y crédito se **juntan**: lo que interesa es cuánto entró por datáfono, no de qué
+tipo era el plástico. `porcentaje` es sobre el **monto** total del rango, no sobre el número
+de transacciones.
+
+### `horasPico.volumen` está normalizado de 0 a 100
+
+El panel lo usa como **altura de barra** (`height: ${volumen}%`), así que no puede ser el
+conteo: una hora con 3 pedidos se pintaría como una barra del 3 %. `volumen` es
+`pedidos / pedidos_de_la_hora_pico × 100`, y el conteo real va aparte en **`pedidos`**.
+
+### Sin datos no es un error
+
+Una base recién sembrada responde **200** con `0` en los números, `null` en
+`tiempoCocinaPromedio` y **listas vacías**. Nunca 404: *"hoy no se ha vendido nada"* es un
+dato, no un fallo. `tiempoCocinaPromedio` es `null` y no `0` porque `0 min` diría que se
+cocina al instante.
+
+### Zona horaria
+
+Todos los filtros y agrupaciones usan **`AT TIME ZONE 'America/Bogota'` explícito**, no
+`CURRENT_DATE`. El servidor tiene esa zona por defecto, pero un contenedor que arranque con
+`TZ=UTC` correría "hoy" cinco horas y el corte de caja saldría mal sin que nadie lo notara.
+
+> **Límite conocido:** `v_ventas_diarias` y `v_tiempos_kds` agrupan internamente por
+> `DATE(columna)`, que usa la zona de la **sesión**. El backend filtra sus filas con fechas
+> ya calculadas en Bogotá, así que el rango es correcto; lo que no puede garantizar desde
+> aquí es el corte interno de la vista. Arreglarlo es de
+> [`database/scripts/24_vistas_reportes.sql`](../../database/scripts/24_vistas_reportes.sql).
+
+### Caché y rendimiento
+
+Caché de **60 s** en Redis, clave `cache:reportes:<rango>` (una por rango). Un reporte con
+un minuto de antigüedad sirve igual para decidir, y a cambio una pestaña que se deje
+recargando no castiga la base. **Nunca lanza**: con Redis caído se lee de la base y la
+respuesta sale igual (`services/cache.js`).
+
+Nueve consultas, lanzadas en paralelo, todas con `LIMIT` en las listas. `transacciones` y
+`kds_metricas` tienen índice por estado+fecha y por fecha. **`pedidos` no tiene un índice
+por `creado_en` solo** —los que hay son parciales por estado—, así que el filtro por rango
+hace *seq scan*; con el volumen actual es irrelevante, y el arreglo
+(`CREATE INDEX … ON pedidos (creado_en)`) sería de `database/`.
+
+### Seguridad
+
+- Solo `admin`; el resto 403 y sin consultar nada.
+- **Cero SQL concatenado**: todo por `$1`/`$2`.
+- **Sin datos de clientes**: no sale ningún `comensal`, alias, `referencia_externa` ni id de
+  transacción. Solo agregados.
+
+### Cambios que necesita el panel
+
+Para consumir números crudos, [`frontend-restaurante/src/pages/Reportes.jsx`](../../frontend-restaurante/src/pages/Reportes.jsx)
+necesita **tres** ajustes (son de Jarrison; aquí solo quedan anotados):
+
+1. **Quitar el `×1000` de `formatoCOP`** (líneas 17-30). Hoy multiplica por 1000 cualquier
+   número entre 0 y 100 000, porque los datos del fallback están en escala de dólares. Con
+   ventas reales en COP, un pedido de `70000` se pintaría como **$70.000.000**.
+2. **Quitar el `×1000` de `calcularTicketComensal`** (líneas 32-40), por lo mismo, con el
+   umbral en 1000.
+3. **Añadir `" min"` a `tiempoCocinaPromedio`** (línea 354): hoy se pinta crudo, así que un
+   número aparecería como `13.1` sin unidad. El resto de los tiempos (`tiemposKds`) ya
+   recibe números y el panel ya les añade la unidad.
+
+**No hace falta tocar nada más:** `totalVentas` y `metodosPago[].monto` ya pasan por
+`formatoCOP`; `tiemposKds`, `topPlatos[].porcentaje` y `topIngredientes[].veces_solicitado`
+ya se tratan como números. Y mientras no se cambie, su *fallback* sigue funcionando: solo se
+activa cuando la ruta da 404 o falla la red.
+
+> El panel hoy **no pinta** `ocupacionMesas` ni `kdsAlertsCount`, y de `topPlatos` solo usa
+> `unidades` y `porcentaje` (los nombres los tiene fijos). Se devuelven igual, porque el
+> contrato los pide y son datos legítimos del reporte.
+
+---
+
 ## Tiempo real (socket-server)
 
 El backend avisa al socket-server por HTTP interno, con la cabecera `x-internal-key` y un
