@@ -380,7 +380,10 @@ function Pago() {
                       type="button"
                       role="radio"
                       aria-checked={activo}
-                      onClick={() => setModo(k)}
+                      onClick={() => {
+                        setModo(k);
+                        setErrorPago(null);
+                      }}
                       className={`min-h-[48px] rounded-lg cursor-pointer flex flex-col items-center justify-center gap-0.5 transition-colors ${
                         activo
                           ? 'bg-primario text-white shadow-sm'
@@ -401,6 +404,17 @@ function Pago() {
               <p className="m-0 text-xs text-texto-suave">
                 {ayudas[modo]}
               </p>
+
+              {/* Aviso de error de pago junto al botón */}
+              {errorPago && (
+                <div
+                  role="alert"
+                  className="bg-superficie border border-primario text-white px-4 py-3 rounded-xl flex items-center gap-2.5 text-xs font-semibold shadow-md toast-entra"
+                >
+                  <span className="w-2 h-2 rounded-full bg-primario shrink-0" />
+                  <span>{errorPago}</span>
+                </div>
+              )}
 
               {/* Botón Pagar Wompi */}
               <button
