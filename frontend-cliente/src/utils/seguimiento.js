@@ -398,6 +398,36 @@ export function esPedidoMio(idPedido, miAlias = null) {
   return false;
 }
 
+/**
+ * Resume los pedidos activos y el estado prioritario de los pedidos propios del comensal.
+ *
+ * @param {Array<object>} mios - Lista de pedidos pertenecientes al comensal
+ * @returns {{ cantidad: number, estadoPrincipal: string|null, tienePedidos: boolean }}
+ */
+export function resumenPedidosActivos(mios) {
+  if (!Array.isArray(mios) || mios.length === 0) {
+    return {
+      cantidad: 0,
+      estadoPrincipal: null,
+      tienePedidos: false,
+    };
+  }
+
+  const activos = mios.filter((p) =>
+    ['recibido', 'en_preparacion', 'listo'].includes(
+      String(p.estado || '').toLowerCase()
+    )
+  );
+
+  const principal = pedidoPrincipal(mios);
+
+  return {
+    cantidad: activos.length,
+    estadoPrincipal: principal ? principal.estado : null,
+    tienePedidos: true,
+  };
+}
+
 export default {
   CLAVE_MIS_PEDIDOS_IDS,
   CLAVE_ULTIMO_PEDIDO,
@@ -409,4 +439,5 @@ export default {
   haceCuanto,
   registrarMiPedidoId,
   esPedidoMio,
+  resumenPedidosActivos,
 };

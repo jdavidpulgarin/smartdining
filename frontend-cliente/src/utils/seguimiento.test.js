@@ -8,6 +8,7 @@ import {
   registrarMiPedidoId,
   separarPedidos,
   esPedidoMio,
+  resumenPedidosActivos,
 } from './seguimiento';
 
 describe('infoEstado', () => {
@@ -264,5 +265,39 @@ describe('registrarMiPedidoId y esPedidoMio', () => {
     } finally {
       globalThis.sessionStorage = originalSessionStorage;
     }
+  });
+});
+
+describe('resumenPedidosActivos', () => {
+  it('retorna ceros si no hay pedidos', () => {
+    expect(resumenPedidosActivos([])).toEqual({
+      cantidad: 0,
+      estadoPrincipal: null,
+      tienePedidos: false,
+    });
+    expect(resumenPedidosActivos(null)).toEqual({
+      cantidad: 0,
+      estadoPrincipal: null,
+      tienePedidos: false,
+    });
+  });
+
+  it('cuenta correctamente pedidos activos e identifica el estado principal', () => {
+    const pedidos = [
+      { id_pedido: 1, estado: 'recibido' },
+      { id_pedido: 2, estado: 'en_preparacion' },
+    ];
+    const res = resumenPedidosActivos(pedidos);
+    expect(res.cantidad).toBe(2);
+    expect(res.estadoPrincipal).toBe('recibido');
+    expect(res.tienePedidos).toBe(true);
+  });
+
+  it('si solo hay pedidos entregados, cantidad es 0 pero tienePedidos es true', () => {
+    const pedidos = [{ id_pedido: 1, estado: 'entregado' }];
+    const res = resumenPedidosActivos(pedidos);
+    expect(res.cantidad).toBe(0);
+    expect(res.estadoPrincipal).toBe('entregado');
+    expect(res.tienePedidos).toBe(true);
   });
 });

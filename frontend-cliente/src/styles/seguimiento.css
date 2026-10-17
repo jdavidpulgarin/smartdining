@@ -207,10 +207,20 @@
   100% { transform: translateY(0); opacity: 1; }
 }
 
+.dot-latido {
+  animation: latido 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes latido {
+  0% { transform: scale(0.85); opacity: 0.6; }
+  100% { transform: scale(1.3); opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ilu *,
   .titulo-in,
-  .cancel-pop {
+  .cancel-pop,
+  .dot-latido {
     animation: none !important;
   }
 }
