@@ -1,5 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { crearPedido, NOTAS_MAX_SERVIDOR, NOTAS_GENERALES_MAX_SERVIDOR } from './pedidoService';
+import {
+  crearPedido,
+  listarPedidosMesa,
+  NOTAS_MAX_SERVIDOR,
+  NOTAS_GENERALES_MAX_SERVIDOR,
+} from './pedidoService';
 import * as apiModule from './api';
 import { CLAVE_SESION } from '../utils/sesion';
 
@@ -243,5 +248,41 @@ describe('pedidoService (H-05, H-06, J-05)', () => {
       status: 409,
       motivo: 'agotado',
     });
+  });
+
+  it('listarPedidosMesa: consulta GET /pedidos/mesa con el token de la sesión', async () => {
+    globalThis.sessionStorage.setItem(
+      CLAVE_SESION,
+      JSON.stringify({ token: 'jwt.comensal.beto', comensal: 'Beto' })
+    );
+
+    const mockPedidos = [{ id_pedido: 101, estado: 'recibido' }];
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({ id_mesa: 5, pedidos: mockPedidos });
+
+    const pedidos = await listarPedidosMesa();
+    expect(spyPedirJson).toHaveBeenCalledWith('/pedidos/mesa', {
+      method: 'GET',
+      token: 'jwt.comensal.beto',
+    });
+    expect(pedidos).toEqual(mockPedidos);
+  });
+
+  it('listarPedidosMesa: en modo simulado lee los pedidos de sessionStorage', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const { CLAVE_PEDIDOS_SIMULADOS } = await import('./pedidoSimulado');
+    const simulados = [
+      { id_pedido: 55, id_mesa: 5, estado: 'recibido' },
+      { id_pedido: 66, id_mesa: 9, estado: 'en_preparacion' },
+    ];
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify(simulados)
+    );
+
+    const pedidosMesa5 = await listarPedidosMesa(5);
+    expect(pedidosMesa5).toHaveLength(1);
+    expect(pedidosMesa5[0].id_pedido).toBe(55);
   });
 });

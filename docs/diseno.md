@@ -51,9 +51,42 @@ Las fuentes se importan vía Google Fonts antes de `@import "tailwindcss"` en `s
 2. **Menú:** Portada con foto de comida de ancho completo ("NUESTRO MENÚ"), carrusel horizontal "ARMA TU PLATO", chips de categorías y listado de platos.
 3. **Constructor:** Portada con foto del plato, enlace "← Volver al menú", selector paso a paso de ingredientes, control segmentado de porciones y barra inferior fija.
 4. **Carrito de la mesa:** Portada hero "CARRITO DE LA MESA", tarjeta destacada con borde rojo "LO TUYO · {NOMBRE}" y total individual, notas para cocina y botón "ENVIAR PEDIDO A COCINA".
-5. **Seguimiento:** Línea de tiempo vertical interactiva con estados (*Recibido*, *En preparación*, *Listo* y *En tu mesa*), código de orden y botón "PEDIR MÁS PLATOS".
+5. **Seguimiento:** Pantalla animada en tiempo real con halo dinámico, ilustraciones SVG interactivas en bucle por estado, línea de tiempo horizontal de 4 pasos, desglose de "TU ORDEN", lista compacta de "OTROS PEDIDOS DE LA MESA", selector multi-pedido y acción para llamar al mesero.
 6. **Cuenta y pago:** Marcador de estado estilizado bajo el tema oscuro.
 7. **Despedida:** Tarjeta de confirmación con mensaje de despedida y estilo visual coherente.
+
+## Seguimiento animado (J-07)
+
+El módulo de seguimiento (`/seguimiento`) ofrece una experiencia visual inmersiva y reactiva que mantiene al comensal informado sobre el ciclo de vida de sus pedidos y los de su mesa.
+
+### Estados e Ilustraciones Vectoriales Animadas
+
+Cada estado cuenta con su propia ilustración SVG inline, paleta cromática, halo radial suave y animación mediante `@keyframes` en CSS puro (definidos en `src/styles/seguimiento.css`):
+
+1. **`recibido` (Pill gris / fondo `#2A2A2A`, texto blanco, título "YA LO TENEMOS"):**
+   - Ilustración en bucle de 4 segundos: la comanda cae desde arriba al riel con rebote elástico (`drop`), se balancea suavemente (`sway`), imprime sus líneas una por una (`linea`) y recibe un sello de verificación verde (`sello`) antes de salir para reiniciar el ciclo.
+2. **`en_preparacion` (Pill amarillo `#F2B705`, texto `#0B0B0B`, título "ESTAMOS COCINANDO"):**
+   - Ilustración en bucle: sartén que se sacude (`sacude`), llamas dinámicas en la base (`llama`), ingredientes que saltan girando con trayectorias vectoriales independientes (`salta` con variable `--dx`) y columnas de vapor ascendente (`vapor`).
+3. **`listo` (Pill rojo `#E3242B`, texto blanco, título "¡SALE CALIENTE!"):**
+   - Ilustración en bucle: halo rojo pulsante difuminado (`brillo`), campana de servicio oscilando con ondas sonoras concéntricas (`campana`, `ondas`) y tapa de cloche metálica dando saltos (`tapa`).
+4. **`entregado` / `pagado` (Pill verde `#2FA35A`, texto `#0B0B0B`, título "¡BUEN PROVECHO!"):**
+   - Ilustración de celebración: plato servido que entra con un pop elástico de rebote (`plato-pop`), vapor sutil y cuatro chispas luminosas que titilan alrededor (`chispa`).
+5. **`cancelado` (Pill `#2A2A2A`, texto `#A3A3A3`, título "PEDIDO CANCELADO"):**
+   - Plato base con una insignia de cancelación roja (`#E3242B`) que entra con animación de pop una única vez (sin bucle continuo). Omite la línea de tiempo.
+
+### Accesibilidad (A11y) y Rendimiento
+
+- **Movimiento reducido (`prefers-reduced-motion: reduce`):** Regla global en CSS que desactiva todas las animaciones y transformaciones continuas (`animation: none !important`) para usuarios con sensibilidad al movimiento.
+- **Lectores de pantalla:** Todas las ilustraciones SVG y elementos puramente decorativos portan `aria-hidden="true"`. La tarjeta principal de estado utiliza `aria-live="polite"` para anunciar cambios de estado sin interrumpir al usuario.
+- **Dimensiones táctiles:** Todos los botones interactivos cumplen con el estándar mínimo de accesibilidad WCAG de 44 px de altura (botones de acción entre 52 px y 56 px).
+
+### Multi-Pedido y Sincronización en Tiempo Real
+
+- **Separación de pedidos de la mesa:** Divide automáticamente la lista proveniente de `GET /api/pedidos/mesa` en "TU ORDEN" (pedidos vinculados al alias del comensal en el JWT) y "OTROS PEDIDOS DE LA MESA" (filas compactas con el alias, resumen de ítems, código, tiempo transcurrido con `haceCuanto` y pill de estado).
+- **Tira de chips multi-pedido:** Si el comensal ha enviado más de un pedido propio en la visita, aparece una barra superior de pestañas accesibles (`role="tablist"`) para alternar fácilmente entre ellos.
+- **Eventos en vivo y reconexión:** Escucha los eventos `order:status` y `order:created` del `socket-server` mediante el hook `useSeguimientoMesa`. Implementa deduplicación estricta de eventos mediante un búfer circular de los últimos 200 `eventId`. Al reconectarse el socket, re-consulta la API completa para recuperar transiciones ocurridas durante la desconexión.
+- **Aviso global "Sale caliente":** Notificación flotante de 5 segundos que se dispara en cualquier pantalla de la app (`Layout.jsx`) cuando un pedido perteneciente al usuario transiciona a estado `listo`.
+- **Llamar al mesero:** Emisión de `mesa:llamar_mesero` con `eventId` único y cooldown de 60 segundos con cuenta regresiva en el botón y mensajes amigables ante `RATE_LIMIT` o problemas de red.
 
 ## Componentes
 
