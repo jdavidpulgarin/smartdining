@@ -70,26 +70,45 @@ export async function crearIntencion(modo = 'propio', eventIdReintento = null) {
         });
       }
 
-      // Simulado exitoso: calcular monto aproximado de la cuenta simulada
-      let montoCentavos = 2800000;
+      // Simulado exitoso: calcular monto de la cuenta simulada según el comensal y modo
+      let montoCentavos;
       try {
+        const sesion = obtenerSesion();
         const { obtenerCuentaSimulada } = await import('./cuentaSimulada');
-        const cuenta = obtenerCuentaSimulada();
-        if (cuenta) {
-          const { montosPorModo } = await import('../utils/cuenta');
-          const montos = montosPorModo(cuenta);
-          const estimado = montos[modo] || cuenta.saldo || 28000;
-          if (estimado <= 0) {
-            throw new ErrorApi({
-              status: 409,
-              codigo: 'SIN_SALDO',
-              mensaje: traducirErrorPago(409, 'SIN_SALDO'),
-            });
-          }
-          montoCentavos = estimado * 100;
+        const cuentaRaw = obtenerCuentaSimulada(sesion?.idMesa, sesion?.comensal);
+        if (!cuentaRaw) {
+          throw new ErrorApi({
+            status: 503,
+            codigo: 'ERROR_SIMULACION',
+            mensaje: 'Simulación: no hay cuenta para calcular el monto',
+          });
         }
+        const { normalizarCuenta, montosPorModo } = await import('../utils/cuenta');
+        const cuentaNorm = normalizarCuenta(cuentaRaw, sesion?.comensal);
+        const montos = montosPorModo(cuentaNorm);
+        const estimado = montos[modo];
+        if (typeof estimado !== 'number' || !Number.isFinite(estimado)) {
+          throw new ErrorApi({
+            status: 503,
+            codigo: 'ERROR_SIMULACION',
+            mensaje: 'Simulación: no hay cuenta para calcular el monto',
+          });
+        }
+        if (estimado <= 0) {
+          throw new ErrorApi({
+            status: 409,
+            codigo: 'SIN_SALDO',
+            mensaje: traducirErrorPago(409, 'SIN_SALDO'),
+          });
+        }
+        montoCentavos = Math.round(estimado * 100);
       } catch (err) {
         if (err instanceof ErrorApi) throw err;
+        throw new ErrorApi({
+          status: 503,
+          codigo: 'ERROR_SIMULACION',
+          mensaje: 'Simulación: no hay cuenta para calcular el monto',
+        });
       }
 
       const ahora = Date.now();
