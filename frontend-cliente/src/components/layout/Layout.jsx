@@ -6,6 +6,7 @@ import { useCarrito } from '../../context/CarritoContext';
 import { useMesaSocketContext } from '../../context/MesaSocketContext';
 import { formatearMensajePedidoCreado } from '../../utils/notificacionesMesa';
 import { esPedidoMio } from '../../utils/seguimiento';
+import { textoPagoConfirmado } from '../../utils/cuenta';
 
 function Layout({ children }) {
   const { mesa, comensal, valida, cargando } = useMesaSession();
@@ -57,9 +58,22 @@ function Layout({ children }) {
       }
     });
 
+    const bajaPayment = socketOn('payment:confirmed', (data) => {
+      if (!data) return;
+      const mensaje = textoPagoConfirmado(data, comensal);
+      if (mensaje) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        setToastPedido({ tipo: 'pago', mensaje });
+        timerRef.current = setTimeout(() => {
+          setToastPedido(null);
+        }, 5000);
+      }
+    });
+
     return () => {
       bajaCreated?.();
       bajaStatus?.();
+      bajaPayment?.();
     };
   }, [socketOn, comensal]);
 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useCuentaMesa } from '../hooks/useCuentaMesa';
+import { useMesaSocket } from '../context/MesaSocketContext';
 import { formatoPesos, montosPorModo, TITULOS_MODO } from '../utils/cuenta';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout } from '../services/wompiWidget';
@@ -12,7 +13,8 @@ import { abrirCheckout } from '../services/wompiWidget';
  * de confirmación y pago en caja.
  */
 function Pago() {
-  const { cuenta, cargando, error, recargar, idMesa } = useCuentaMesa();
+  const { cuenta, cargando, error, recargar, idMesa, comensal } = useCuentaMesa();
+  const { on: socketOn } = useMesaSocket();
 
   const [pantalla, setPantalla] = useState(() => {
     if (typeof window !== 'undefined' && window.location.search) {
@@ -29,6 +31,31 @@ function Pago() {
   const [iniciandoPago, setIniciandoPago] = useState(false);
   const [errorPago, setErrorPago] = useState(null);
   const [intencionActual, setIntencionActual] = useState(null);
+  const [ultimoPago, setUltimoPago] = useState(0);
+
+  // Escuchar payment:confirmed para transicionar a pantalla ¡PAGO CONFIRMADO! si el pago fue mío
+  useEffect(() => {
+    if (!socketOn) return undefined;
+
+    const baja = socketOn('payment:confirmed', (evento) => {
+      if (!evento) return;
+      const comensalEvento = evento.comensal ? String(evento.comensal).trim().toLowerCase() : null;
+      const aliasActual = (comensal || '').trim().toLowerCase();
+      const esMio = !comensalEvento || (aliasActual && comensalEvento === aliasActual);
+
+      if (esMio) {
+        const monto = evento.monto != null
+          ? Number(evento.monto)
+          : (evento.monto_centavos != null ? Number(evento.monto_centavos) / 100 : 0);
+        setUltimoPago(monto);
+        setPantalla('confirmado');
+      }
+    });
+
+    return () => {
+      baja?.();
+    };
+  }, [socketOn, comensal]);
 
   // Limpiar parámetros de retorno de Wompi de la URL sin recargar
   useEffect(() => {
@@ -513,6 +540,53 @@ function Pago() {
             className="min-h-[44px] border-none bg-transparent text-primario-texto hover:text-primario text-sm font-semibold cursor-pointer transition-colors"
           >
             Volver a la cuenta
+          </button>
+        </section>
+      )}
+
+      {/* ──────────────── PANTALLA 3: ¡PAGO CONFIRMADO! ──────────────── */}
+      {pantalla === 'confirmado' && (
+        <section
+          className="entra bg-superficie border border-borde rounded-3xl p-6 flex flex-col items-center gap-3.5 text-center"
+          aria-live="polite"
+        >
+          {/* Ilustración de check verde con rebote y chispitas */}
+          <svg className="ilu" width="220" height="170" viewBox="0 0 220 170" aria-hidden="true">
+            <circle className="circulo-ok" cx="110" cy="85" r="56" fill="#2FA35A" />
+            <path
+              className="check"
+              d="M84 86 l18 18 l36 -38"
+              fill="none"
+              stroke="#0B0B0B"
+              strokeWidth="10"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path className="chispa" d="M36 40 l4 10 l10 4 l-10 4 l-4 10 l-4 -10 l-10 -4 l10 -4 Z" fill="#F2B705" />
+            <path className="chispa c2" d="M184 34 l3 8 l8 3 l-8 3 l-3 8 l-3 -8 l-8 -3 l8 -3 Z" fill="#2FA35A" />
+            <path className="chispa c3" d="M180 120 l3 7 l7 3 l-7 3 l-3 7 l-3 -7 l-7 -3 l7 -3 Z" fill="#FF5A5F" />
+            <path className="chispa c4" d="M42 124 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 l6 -2 Z" fill="#F2B705" />
+          </svg>
+
+          <h1 className="m-0 font-titulo text-[50px] leading-[0.95] tracking-wider text-exito">
+            ¡PAGO CONFIRMADO!
+          </h1>
+
+          <p className="m-0 text-[15px] text-white">
+            Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
+          </p>
+
+          <div className="w-full box-border bg-superficie-2 border border-borde rounded-xl p-3 flex justify-between items-center text-sm">
+            <span className="text-texto-suave">Le falta a la mesa</span>
+            <span className="font-semibold text-white">{formatoPesos(saldo)}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleVolverCuenta}
+            className="w-full min-h-[52px] rounded-xl border border-borde bg-superficie-2 hover:bg-[#252525] text-white font-etiqueta font-bold text-base tracking-wider cursor-pointer transition-colors"
+          >
+            VER LA CUENTA
           </button>
         </section>
       )}
