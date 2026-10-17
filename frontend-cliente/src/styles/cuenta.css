@@ -230,3 +230,28 @@
     stroke-dashoffset: 0;
   }
 }
+
+.btn-despedida-inicio {
+  margin-top: 8px;
+  min-height: 44px;
+  padding: 10px 24px;
+  border-radius: 12px;
+  border: 1px solid #2A2A2A;
+  background: #1F1F1F;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.btn-despedida-inicio:hover {
+  background: #2A2A2A;
+  border-color: #3A3A3A;
+}
+

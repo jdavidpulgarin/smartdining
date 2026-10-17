@@ -9,7 +9,7 @@ import { esPedidoMio } from '../../utils/seguimiento';
 import { textoPagoConfirmado } from '../../utils/cuenta';
 
 function Layout({ children }) {
-  const { mesa, comensal, valida, cargando } = useMesaSession();
+  const { mesa, comensal, valida, cargando, motivoCierre } = useMesaSession();
   const { totalUnidades } = useCarrito();
   const { on: socketOn } = useMesaSocketContext();
 
@@ -82,6 +82,11 @@ function Layout({ children }) {
   }
 
   if (!valida) {
+    const motivosDespedida = ['pagada', 'liberada', 'MESA_LIBERADA'];
+    if (motivoCierre && motivosDespedida.includes(motivoCierre)) {
+      const motivoNorm = motivoCierre === 'MESA_LIBERADA' ? 'liberada' : motivoCierre;
+      return <Navigate to="/despedida" replace state={{ motivo: motivoNorm, numeroMesa: mesa }} />;
+    }
     return <Navigate to="/" replace />;
   }
 

@@ -1,16 +1,21 @@
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useSesion } from '../context/SesionContext';
 import Card from '../components/ui/Card';
 
 function Despedida() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { motivoCierre, sesion } = useSesion();
   const motivo = location.state?.motivo ?? motivoCierre;
   const numeroMesa =
     location.state?.numeroMesa ??
     sesion?.numeroMesa ??
     sesion?.idMesa ??
-    5;
+    null;
+
+  const textoMesa = numeroMesa
+    ? `La cuenta de la mesa ${numeroMesa} quedó pagada.`
+    : 'La cuenta de la mesa quedó pagada.';
 
   return (
     <div className="min-h-screen bg-fondo text-texto flex items-center justify-center p-4">
@@ -72,12 +77,17 @@ function Despedida() {
           >
             ¡GRACIAS POR VENIR!
           </h1>
-          <p style={{ margin: 0, fontSize: '15px' }}>
-            La cuenta de la mesa {numeroMesa} quedó pagada.
-          </p>
+          <p style={{ margin: 0, fontSize: '15px' }}>{textoMesa}</p>
           <p style={{ margin: 0, fontSize: '13px', color: '#A3A3A3' }}>
             Para volver a pedir, escanea el QR de la mesa otra vez.
           </p>
+          <button
+            type="button"
+            onClick={() => navigate('/', { replace: true })}
+            className="btn-despedida-inicio"
+          >
+            Volver al inicio
+          </button>
         </section>
       ) : (
         <Card className="max-w-md w-full p-8 text-center shadow-2xl space-y-6 bg-superficie border border-borde rounded-2xl">
@@ -100,6 +110,14 @@ function Despedida() {
               La mesa se cerró. Si quieres pedir de nuevo, escanea el QR de la mesa.
             </p>
           </div>
+
+          <button
+            type="button"
+            onClick={() => navigate('/', { replace: true })}
+            className="btn-despedida-inicio"
+          >
+            Volver al inicio
+          </button>
         </Card>
       )}
     </div>
