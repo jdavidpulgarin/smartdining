@@ -276,6 +276,100 @@ export function traducirErrorPago(status, codigo) {
   return 'No pudimos iniciar el pago, intenta de nuevo';
 }
 
+export const ESTADO_CUENTA_INICIAL = {
+  estado: 'inicial',
+  mensaje: 'Pedir la cuenta al mesero',
+  deshabilitado: false,
+  tipo: 'neutro',
+};
+
+export const ESTADO_CUENTA_ENVIANDO = {
+  estado: 'enviando',
+  mensaje: 'Avisando al mesero...',
+  deshabilitado: true,
+  tipo: 'info',
+};
+
+/**
+ * Traduce el resultado (o error) de emitir cuenta:solicitada a un estado normalizado.
+ *
+ * @param {object|Error|string} resultado - Ack exitoso, Error capturado o clave de estado
+ * @param {boolean} [esError=false] - Indica si resultado proviene de un catch
+ * @returns {{ estado: 'inicial'|'enviando'|'ok'|'rate_limit'|'error', mensaje: string, deshabilitado: boolean, tipo: 'neutro'|'info'|'exito'|'advertencia'|'error' }}
+ */
+export function estadoCuentaSolicitada(resultado, esError = false) {
+  if (resultado === 'enviando') {
+    return ESTADO_CUENTA_ENVIANDO;
+  }
+  if (!resultado && !esError) {
+    return ESTADO_CUENTA_INICIAL;
+  }
+
+  if (esError) {
+    const codigo = resultado?.codigo || resultado?.message || '';
+    if (codigo === 'RATE_LIMIT' || /RATE_LIMIT/i.test(codigo)) {
+      return {
+        estado: 'rate_limit',
+        mensaje: 'La mesa ya pidió la cuenta; espera un momento',
+        deshabilitado: true,
+        tipo: 'advertencia',
+      };
+    }
+    return {
+      estado: 'error',
+      mensaje: 'No pudimos avisar al mesero. Toca para reintentar.',
+      deshabilitado: false,
+      tipo: 'error',
+    };
+  }
+
+  if (resultado?.codigo === 'RATE_LIMIT' || resultado?.ack?.codigo === 'RATE_LIMIT') {
+    return {
+      estado: 'rate_limit',
+      mensaje: 'La mesa ya pidió la cuenta; espera un momento',
+      deshabilitado: true,
+      tipo: 'advertencia',
+    };
+  }
+
+  if (resultado?.ok === false) {
+    return {
+      estado: 'error',
+      mensaje: 'No pudimos avisar al mesero. Toca para reintentar.',
+      deshabilitado: false,
+      tipo: 'error',
+    };
+  }
+
+  return {
+    estado: 'ok',
+    mensaje: 'Ya le avisamos al mesero que quieres la cuenta',
+    deshabilitado: true,
+    tipo: 'exito',
+  };
+}
+
+/**
+ * Devuelve el mensaje explicativo para la pantalla PAGA EN LA CAJA según el estado del aviso al mesero.
+ *
+ * @param {{ estado: string }} avisoCuenta
+ * @returns {string}
+ */
+export function textoCajaSegunEstado(avisoCuenta) {
+  switch (avisoCuenta?.estado) {
+    case 'enviando':
+      return 'Avisando al mesero que pagarás en la caja...';
+    case 'ok':
+      return 'Ya le avisamos al mesero. Puedes acercarte a la caja o esperarlo en la mesa.';
+    case 'rate_limit':
+      return 'La mesa ya pidió la cuenta. Puedes acercarte a la caja o esperar al mesero.';
+    case 'error':
+      return 'No pudimos avisar al mesero. Puedes acercarte directamente a la caja a pagar.';
+    default:
+      return 'Puedes acercarte a la caja a pagar o esperar al mesero en la mesa.';
+  }
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -285,4 +379,8 @@ export default {
   aplicarPagoConfirmado,
   textoPagoConfirmado,
   traducirErrorPago,
+  ESTADO_CUENTA_INICIAL,
+  ESTADO_CUENTA_ENVIANDO,
+  estadoCuentaSolicitada,
+  textoCajaSegunEstado,
 };

@@ -6,6 +6,10 @@ import {
   aplicarPagoConfirmado,
   textoPagoConfirmado,
   traducirErrorPago,
+  ESTADO_CUENTA_INICIAL,
+  ESTADO_CUENTA_ENVIANDO,
+  estadoCuentaSolicitada,
+  textoCajaSegunEstado,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -276,6 +280,78 @@ describe('utils/cuenta.js (J-08)', () => {
 
     it('traduce errores desconocidos con mensaje genérico', () => {
       expect(traducirErrorPago(500)).toBe('No pudimos iniciar el pago, intenta de nuevo');
+    });
+  });
+
+  describe('estadoCuentaSolicitada', () => {
+    it('devuelve estado inicial cuando no hay resultado', () => {
+      expect(estadoCuentaSolicitada(null)).toEqual(ESTADO_CUENTA_INICIAL);
+      expect(estadoCuentaSolicitada(undefined)).toEqual(ESTADO_CUENTA_INICIAL);
+    });
+
+    it('devuelve estado enviando al pasar "enviando"', () => {
+      expect(estadoCuentaSolicitada('enviando')).toEqual(ESTADO_CUENTA_ENVIANDO);
+    });
+
+    it('devuelve estado ok al recibir ack { ok: true }', () => {
+      const res = estadoCuentaSolicitada({ ok: true });
+      expect(res.estado).toBe('ok');
+      expect(res.mensaje).toBe('Ya le avisamos al mesero que quieres la cuenta');
+      expect(res.deshabilitado).toBe(true);
+      expect(res.tipo).toBe('exito');
+    });
+
+    it('devuelve estado ok al recibir ack exitoso con eventId', () => {
+      const res = estadoCuentaSolicitada({ ok: true, eventId: '123' });
+      expect(res.estado).toBe('ok');
+    });
+
+    it('detecta RATE_LIMIT en el error o mensaje', () => {
+      const errObj = { codigo: 'RATE_LIMIT', message: 'RATE_LIMIT' };
+      const res = estadoCuentaSolicitada(errObj, true);
+      expect(res.estado).toBe('rate_limit');
+      expect(res.mensaje).toBe('La mesa ya pidió la cuenta; espera un momento');
+      expect(res.deshabilitado).toBe(true);
+      expect(res.tipo).toBe('advertencia');
+
+      const errConTexto = new Error('Hubo RATE_LIMIT en la sala');
+      expect(estadoCuentaSolicitada(errConTexto, true).estado).toBe('rate_limit');
+    });
+
+    it('devuelve estado error y habilita el botón ante fallos de conexión', () => {
+      const err = new Error('Timeout al esperar ack');
+      const res = estadoCuentaSolicitada(err, true);
+      expect(res.estado).toBe('error');
+      expect(res.mensaje).toBe('No pudimos avisar al mesero. Toca para reintentar.');
+      expect(res.deshabilitado).toBe(false);
+      expect(res.tipo).toBe('error');
+    });
+
+    it('devuelve estado error si el ack trae ok: false', () => {
+      const ackFallo = { ok: false, codigo: 'ERROR_INTERNO' };
+      const res = estadoCuentaSolicitada(ackFallo, false);
+      expect(res.estado).toBe('error');
+      expect(res.deshabilitado).toBe(false);
+    });
+  });
+
+  describe('textoCajaSegunEstado', () => {
+    it('devuelve el texto adecuado según el estado del aviso', () => {
+      expect(textoCajaSegunEstado({ estado: 'enviando' })).toBe(
+        'Avisando al mesero que pagarás en la caja...'
+      );
+      expect(textoCajaSegunEstado({ estado: 'ok' })).toBe(
+        'Ya le avisamos al mesero. Puedes acercarte a la caja o esperarlo en la mesa.'
+      );
+      expect(textoCajaSegunEstado({ estado: 'rate_limit' })).toBe(
+        'La mesa ya pidió la cuenta. Puedes acercarte a la caja o esperar al mesero.'
+      );
+      expect(textoCajaSegunEstado({ estado: 'error' })).toBe(
+        'No pudimos avisar al mesero. Puedes acercarte directamente a la caja a pagar.'
+      );
+      expect(textoCajaSegunEstado(null)).toBe(
+        'Puedes acercarte a la caja a pagar o esperar al mesero en la mesa.'
+      );
     });
   });
 });

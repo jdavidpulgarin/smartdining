@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useCuentaMesa } from '../hooks/useCuentaMesa';
 import { useMesaSocket } from '../context/MesaSocketContext';
-import { formatoPesos, montosPorModo, TITULOS_MODO } from '../utils/cuenta';
+import {
+  formatoPesos,
+  montosPorModo,
+  TITULOS_MODO,
+  ESTADO_CUENTA_INICIAL,
+  ESTADO_CUENTA_ENVIANDO,
+  estadoCuentaSolicitada,
+  textoCajaSegunEstado,
+} from '../utils/cuenta';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout } from '../services/wompiWidget';
 
@@ -26,7 +34,7 @@ function Pago() {
     return 'cuenta';
   });
   const [modo, setModo] = useState('propio');
-  const [cuentaPedida, setCuentaPedida] = useState(false);
+  const [avisoCuenta, setAvisoCuenta] = useState(ESTADO_CUENTA_INICIAL);
   const [avisoMesero, setAvisoMesero] = useState(null);
   const [iniciandoPago, setIniciandoPago] = useState(false);
   const [errorPago, setErrorPago] = useState(null);
@@ -53,7 +61,10 @@ function Pago() {
     });
 
     const bajaCuenta = socketOn('cuenta:solicitada', () => {
-      setCuentaPedida(true);
+      setAvisoCuenta((prev) => {
+        if (prev.estado === 'ok') return prev;
+        return estadoCuentaSolicitada({ ok: true });
+      });
     });
 
     return () => {
@@ -130,22 +141,39 @@ function Pago() {
   };
 
   const handlePedirCuenta = async () => {
-    setCuentaPedida(true);
-    setAvisoMesero('Le avisamos al mesero que quieres la cuenta');
-    setTimeout(() => setAvisoMesero(null), 4000);
+    if (avisoCuenta.deshabilitado && avisoCuenta.estado !== 'inicial') return;
+    setAvisoCuenta(ESTADO_CUENTA_ENVIANDO);
 
-    if (enviar) {
-      try {
-        const eventId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `cs-${Date.now()}`;
-        await enviar('cuenta:solicitada', { eventId });
-      } catch {
-        // Ignorar
+    if (!enviar) {
+      const res = estadoCuentaSolicitada(new Error('SIN_CONEXION'), true);
+      setAvisoCuenta(res);
+      return;
+    }
+
+    try {
+      const eventId =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `cs-${Date.now()}`;
+      const ack = await enviar('cuenta:solicitada', { eventId });
+      const res = estadoCuentaSolicitada(ack ?? { ok: true }, false);
+      setAvisoCuenta(res);
+      setAvisoMesero({ mensaje: res.mensaje, tipo: res.tipo });
+      setTimeout(() => setAvisoMesero(null), 4000);
+    } catch (err) {
+      const res = estadoCuentaSolicitada(err, true);
+      setAvisoCuenta(res);
+      if (res.estado === 'rate_limit') {
+        setAvisoMesero({ mensaje: res.mensaje, tipo: res.tipo });
+        setTimeout(() => setAvisoMesero(null), 4000);
       }
     }
   };
 
   const handlePagarCaja = () => {
-    handlePedirCuenta();
+    if (avisoCuenta.estado === 'inicial' || avisoCuenta.estado === 'error') {
+      handlePedirCuenta();
+    }
     setPantalla('caja');
   };
 
@@ -184,10 +212,24 @@ function Pago() {
         <div
           role="status"
           aria-live="polite"
-          className="bg-superficie border border-exito text-white px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg toast-entra"
+          className={`bg-superficie border ${
+            avisoMesero?.tipo === 'advertencia'
+              ? 'border-[#2A2A2A] text-[#6B6B6B]'
+              : avisoMesero?.tipo === 'error'
+              ? 'border-primario text-white'
+              : 'border-exito text-white'
+          } px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg toast-entra`}
         >
-          <span className="w-2 h-2 rounded-full bg-exito shrink-0" />
-          <span>{avisoMesero}</span>
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              avisoMesero?.tipo === 'advertencia'
+                ? 'bg-[#6B6B6B]'
+                : avisoMesero?.tipo === 'error'
+                ? 'bg-primario'
+                : 'bg-exito'
+            }`}
+          />
+          <span>{avisoMesero?.mensaje || avisoMesero}</span>
         </div>
       )}
 
@@ -454,9 +496,15 @@ function Pago() {
           <button
             type="button"
             onClick={handlePedirCuenta}
-            disabled={cuentaPedida}
-            className={`min-h-[48px] rounded-xl border border-dashed border-[#3A3A3A] bg-transparent text-texto-suave text-sm flex items-center justify-center gap-2 transition-colors ${
-              cuentaPedida ? 'opacity-70 cursor-not-allowed' : 'hover:border-texto-suave hover:text-white cursor-pointer'
+            disabled={avisoCuenta.deshabilitado}
+            className={`min-h-[48px] rounded-xl border border-dashed text-sm flex items-center justify-center gap-2 transition-colors ${
+              avisoCuenta.estado === 'error'
+                ? 'border-primario text-primario hover:bg-primario/10 cursor-pointer'
+                : avisoCuenta.estado === 'rate_limit'
+                ? 'border-[#2A2A2A] bg-[#1A1A1A] text-[#6B6B6B] cursor-not-allowed opacity-80'
+                : avisoCuenta.deshabilitado
+                ? 'border-[#3A3A3A] bg-transparent text-texto-suave opacity-70 cursor-not-allowed'
+                : 'border-[#3A3A3A] bg-transparent text-texto-suave hover:border-texto-suave hover:text-white cursor-pointer'
             }`}
           >
             <svg
@@ -464,7 +512,13 @@ function Pago() {
               height="16"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#A3A3A3"
+              stroke={
+                avisoCuenta.estado === 'error'
+                  ? '#E3242B'
+                  : avisoCuenta.estado === 'rate_limit'
+                  ? '#6B6B6B'
+                  : '#A3A3A3'
+              }
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -473,11 +527,7 @@ function Pago() {
               <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
               <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
             </svg>
-            <span>
-              {cuentaPedida
-                ? 'Ya le avisamos al mesero que quieres la cuenta'
-                : 'Pedir la cuenta al mesero'}
-            </span>
+            <span>{avisoCuenta.mensaje}</span>
           </button>
         </div>
       )}
@@ -640,9 +690,23 @@ function Pago() {
             PAGA EN LA CAJA
           </h1>
 
-          <p className="m-0 text-[15px] text-white">
-            Ya le avisamos al mesero. Puedes acercarte a la caja o esperarlo en la mesa.
+          <p
+            className={`m-0 text-[15px] ${
+              avisoCuenta.estado === 'error' ? 'text-primario font-semibold' : 'text-white'
+            }`}
+            role={avisoCuenta.estado === 'error' ? 'alert' : undefined}
+          >
+            {textoCajaSegunEstado(avisoCuenta)}
           </p>
+          {avisoCuenta.estado === 'error' && (
+            <button
+              type="button"
+              onClick={handlePedirCuenta}
+              className="min-h-[36px] px-3 rounded-lg border border-primario bg-transparent text-primario text-xs font-semibold hover:bg-primario/10 cursor-pointer transition-colors"
+            >
+              Reintentar aviso al mesero
+            </button>
+          )}
 
           <div className="w-full box-border bg-[#0B0B0B] border border-dashed border-acento rounded-2xl p-3.5 flex flex-col gap-1 text-center">
             <span className="font-etiqueta font-bold text-xs tracking-widest text-texto-suave uppercase">
