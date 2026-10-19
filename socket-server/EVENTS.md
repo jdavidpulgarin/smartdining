@@ -407,6 +407,50 @@ Qué pasa con el carrito al crear la comanda (cada comensal envía **solo sus pl
   mismo pedido (mismo `eventId` o mismo `id_pedido`) responde `duplicado: true` y no quita
   nada otra vez, aunque el comensal ya haya agregado platos nuevos.
 
+**Orden y reintentos ("primero confirmar, después avisar").** El servidor procesa así:
+
+1. Quita las líneas de los alias del pedido y, si cambió algo, emite `cart:updated`.
+2. Guarda los dueños del pedido (para el push de "¡Tu plato está listo!").
+3. Reserva el aviso del pedido (una sola operación atómica, `SET NX` en Redis) y emite
+   `order:created`.
+4. Marca el `eventId` para responder al instante a un reintento exacto.
+
+Consecuencias para quien emite y para quien escucha:
+
+- **En `room:mesa-{ID}`, `cart:updated` (`origen: "sistema"`) llega ANTES que
+  `order:created`.** No dependas del orden inverso.
+- **Reintento ante `5xx` (HTTP) o `ERROR_INTERNO` (socket):** reenvía el **mismo
+  `eventId`**. Si falló el paso 1, el 2 o el 3, todavía no se había reservado nada, así
+  que el reintento completa lo que faltó: las líneas se quitan una sola vez y
+  `order:created` sale una sola vez. Si el aviso ya había salido, el reintento responde
+  `duplicado: true`, no reemite y no toca el carrito.
+- Si falla solo la marca del paso 4, la respuesta igual es `ok: true` (el fallo se
+  registra en el log): la reserva por pedido ya protege el aviso, y el siguiente reintento
+  responde `duplicado: true`.
+
+Claves de idempotencia de este evento (en Redis llevan el prefijo `sd:idem:`):
+
+| Clave | Para qué | TTL |
+|---|---|---|
+| `sistema:cart:{id_mesa}:pedido:{id_pedido}` | Quitar las líneas una sola vez (va en la misma transacción que el carrito) | 10 min |
+| `order:created:pedido:{id_pedido}` | Emitir `order:created` una sola vez | 10 min |
+| `order:created:{eventId}` | Responder `duplicado` a un reintento exacto (secundaria) | 10 min |
+| `sd:pedido:{id_pedido}:duenos` (sin `idem:`) | Dueños del pedido para el push | 24 h |
+
+Pasados los 10 min, el mismo pedido se procesaría como nuevo.
+
+Límites conocidos:
+
+- **El proceso muere entre la reserva (paso 3) y la emisión.** Esa comanda no se anuncia
+  en vivo (se prefiere perder un aviso a mostrarlo dos veces). El pedido sí existe en la
+  base: el KDS y el panel lo recuperan al recargar o al reconectar (carga inicial por la
+  API).
+- **Líneas nuevas mientras Redis estaba caído.** El pedido no trae `id_linea`, así que se
+  quitan **todas** las líneas de esos alias. Si Redis se cae antes del paso 1 y, cuando
+  vuelve, el comensal agrega platos antes de que llegue el reintento, el reintento también
+  se los lleva. La ventana es corta: mientras Redis está caído nadie puede editar el
+  carrito.
+
 ### `order:status`
 
 Notifica un cambio de estado. Roles por socket: `cocina`, `mesero`, `cajero`, `admin`
@@ -634,7 +678,9 @@ Content-Type: application/json
 ```
 
 Responde `200 { "ok": true, "duplicado": false }`. Reintentar con el mismo `eventId` es
-seguro.
+seguro. En `order-created`, ante un `5xx` hay que reintentar con el mismo `eventId`: el
+reintento termina de quitar las líneas del carrito sin volver a emitir la comanda (ver
+[`order:created`](#ordercreated), "Orden y reintentos").
 
 ---
 
@@ -1043,4 +1089,5 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Alias del comensal (R-18) | Lo mandaba el cliente en cada evento (`join:table`, `cart:update`, pago, push) | Sale **solo del JWT**; otro alias → `NO_AUTORIZADO`; JWT sin alias → `TOKEN_INVALIDO`; solo se tocan las líneas propias | PWA: enviar `{ comensal }` al abrir la sesión y dejar de mandarlo en los eventos. Backend: `feature/mesas-alias-en-jwt` |
 | `order:created` · `ingredientes[].paso` | Los ingredientes no traían su paso | Cada ingrediente lleva `paso` (nombre del paso o `null`) | Nadie: compatible hacia atrás. KDS: agrupar por `paso` |
 | `order:created` · carrito y dueños | Vaciaba el carrito de **toda** la mesa; dueños = todos los alias del carrito | Quita solo las líneas de `items[].comensal`; sin alias no toca el carrito; dueños = solo esos alias | PWA: nada (sigue reemplazando el carrito con `cart:updated`). Backend: mantener `comensal` en cada ítem |
+| `order:created` · orden y reintentos | Reservaba el aviso antes de tocar el carrito: si Redis fallaba a mitad de camino, el reintento llegaba como duplicado y las líneas nunca se quitaban | Primero quita líneas y guarda dueños, después reserva por `id_pedido` y emite; un reintento ante `5xx`/`ERROR_INTERNO` completa lo que faltó. `cart:updated` llega **antes** que `order:created` | Nadie que dependa del orden. Backend: reintentar ante `5xx` con el mismo `eventId` es seguro |
 | Catálogo · estado de endpoints | `/pagos/intencion`, `/pagos/webhook`, `/internal/ingrediente-disponibilidad`, `/internal/payment-confirmed` y sus eventos (`payment:confirmed`, `pago:alerta`, `ingrediente:disponibilidad`, `mesa:liberada` con `motivo: "pagada"`) figuraban como «Espera backend» | Estables `/internal/ingrediente-disponibilidad` (PR #70) y `/internal/payment-confirmed` (PR #58). Los pagos en línea (`/pagos/*`, `pago:alerta` y la parte Wompi de `payment:confirmed` y `mesa:liberada`) quedan «Conectado (falta prueba E2E con Wompi sandbox)» (PR #33) | Nadie: solo documentación |
