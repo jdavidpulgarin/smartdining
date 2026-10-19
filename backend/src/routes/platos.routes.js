@@ -29,4 +29,15 @@ router.post('/', requireAuth, requireRole('admin'), ctrl.crear);
 router.put('/:id', requireAuth, requireRole('admin'), ctrl.actualizar);
 router.delete('/:id', requireAuth, requireRole('admin'), ctrl.eliminar);
 
+// D-05. La ÚNICA escritura de la carta que no es solo de admin: agotar o
+// reponer un plato no es editarlo, es reportar lo que pasa en la cocina, y es
+// lo que usa el panel de agotados. Va con el aviso plato:disponibilidad al
+// socket-server (EVENTS.md §5.4), gemelo del de ingredientes (D-05).
+router.patch(
+  '/:id/disponible',
+  requireAuth,
+  requireRole('admin', 'cocina'),
+  ctrl.cambiarDisponibilidad
+);
+
 module.exports = router;
