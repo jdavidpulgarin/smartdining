@@ -119,6 +119,15 @@ const TABLA = [
     cuerpo: { nombre: 'Arepa', precio: 12000, id_categoria: 1 },
   },
   { metodo: 'DELETE', patron: '/api/platos/:id', url: '/api/platos/7', roles: ['admin'] },
+  {
+    // D-05: la única escritura de la carta que no es solo de admin, porque la
+    // usa el panel de agotados (gemela de la de ingredientes).
+    metodo: 'PATCH',
+    patron: '/api/platos/:id/disponible',
+    url: '/api/platos/7/disponible',
+    roles: ['admin', 'cocina'],
+    cuerpo: { disponible: false },
+  },
 
   // --- Constructor (D-04): leer es del personal de sala, escribir de admin --
   {
