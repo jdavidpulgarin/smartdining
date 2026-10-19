@@ -159,7 +159,7 @@ export function QRModal({
   const infoToken = decodificarTokenQr(token)
   const sid = infoToken.sid || (token ? token.slice(-8) : null)
 
-  const defaultClientPort = (import.meta.env && import.meta.env.VITE_CLIENTE_PORT) || '5173'
+  const defaultClientPort = (import.meta.env && import.meta.env.VITE_CLIENTE_PORT) || '5174'
   const activeDomain = useWifiIp ? hostIp : 'localhost'
 
   // Priorizar la url devuelta por el backend al abrir la mesa (apunta a frontend-cliente).
