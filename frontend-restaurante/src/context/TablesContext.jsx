@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useContext } from 'react'
 import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
 import { TablesContext } from './tablesContextDef'
+import { AuthContext } from './authContextDef'
 
 function normalizarMesa(backendMesa, prev = {}) {
   const id = backendMesa.id_mesa || backendMesa.numero
@@ -39,6 +40,9 @@ function normalizarMesa(backendMesa, prev = {}) {
 }
 
 export function TablesProvider({ children }) {
+  const authContext = useContext(AuthContext)
+  const user = authContext?.user
+
   const [tables, setTables] = useState(() => {
     try {
       const stored = sessionStorage.getItem('smartdining_tables_state')
@@ -134,10 +138,10 @@ export function TablesProvider({ children }) {
     }
   }, [])
 
-  // Cargar mesas y pedidos al montar de forma asíncrona si hay sesión activa
+  // Cargar mesas y pedidos al montar o cuando el usuario inicie sesión
   useEffect(() => {
     let isSubscribed = true
-    const token = getAuthToken()
+    const token = getAuthToken() || user?.token
     if (!token) return
 
     const fetchInitialData = async () => {
@@ -169,7 +173,7 @@ export function TablesProvider({ children }) {
     return () => {
       isSubscribed = false
     }
-  }, [])
+  }, [user])
 
 
   // Escuchar cuando entra un pedido nuevo (order:created)

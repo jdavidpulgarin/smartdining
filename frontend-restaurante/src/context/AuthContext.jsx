@@ -69,6 +69,8 @@ export function AuthProvider({ children }) {
       token: data.token,
     }
 
+    sessionStorage.setItem('smartdining_token', data.token)
+    sessionStorage.setItem('smartdining_staff_user', JSON.stringify(userObj))
     setUser(userObj)
     return { success: true, user: userObj }
   }

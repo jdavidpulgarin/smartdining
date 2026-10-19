@@ -20,23 +20,14 @@ function formatoCOP(n) {
   if (typeof n === 'string') {
     const cleaned = n.replace(/[^0-9.-]/g, '')
     num = parseFloat(cleaned) || 0
-    if (num > 0 && num < 100000) {
-      num = num * 1000
-    }
-  } else if (typeof n === 'number' && n > 0 && n < 100000) {
-    num = n * 1000
   }
-  return copFormatter.format(num).replace(/\u00A0/g, '').trim()
+  return copFormatter.format(num || 0).replace(/\u00A0/g, '').trim()
 }
 
 function calcularTicketComensal(data) {
   if (!data) return 0
-  if (data.ticketPromedio) {
-    const raw = String(data.ticketPromedio).replace(/[^0-9.]/g, '')
-    const val = parseFloat(raw) || 0
-    return val > 0 && val < 1000 ? val * 1000 : val
-  }
-  return 37600
+  const valor = Number(data.ticketPromedio)
+  return Number.isFinite(valor) ? valor : 0
 }
 
 const obtenerRangoFechasTexto = (rango) => {
@@ -351,7 +342,9 @@ export function Reportes() {
               <div className="sd-indicator-card">
                 <span className="sd-indicator-label">TIEMPO DE PREPARACIÓN</span>
                 <strong className="sd-indicator-value">
-                  {currentData.tiempoCocinaPromedio || '12.4 min'}
+                  {currentData?.tiempoCocinaPromedio != null
+                    ? `${Number(currentData.tiempoCocinaPromedio).toFixed(1)} min`
+                    : '—'}
                 </strong>
                 <span className="sd-indicator-sub">
                   Meta: &lt; 15 min por comanda

@@ -23,7 +23,9 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
   const notification = tablesContext?.notification
 
   const [localTables, setLocalTables] = useState(propTables || [])
-  const tablesList = (contextTables && contextTables.length > 0) ? contextTables : (propTables || localTables)
+  const tablesList = (contextTables && contextTables.length > 0)
+    ? contextTables
+    : ((propTables && propTables.length > 0) ? propTables : localTables)
 
   const [filter, setFilter] = useState('TODAS')
   const [searchQuery, setSearchQuery] = useState('')
@@ -234,6 +236,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
                   onClick={() => {
                     setFilter('TODAS')
                     setSearchQuery('')
+                    if (tablesContext?.cargarMesas) tablesContext.cargarMesas()
                   }}
                 >
                   VER TODAS LAS MESAS

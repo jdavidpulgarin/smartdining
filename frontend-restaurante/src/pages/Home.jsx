@@ -9,9 +9,14 @@ import { menuApi } from '../services/api'
 import { useTables } from '../hooks'
 
 export function Home() {
-  const { tables, pedidosActivos, marcarEntregado } = useTables()
+  const { tables, pedidosActivos, marcarEntregado, cargarMesas, cargarPedidosActivos } = useTables()
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [menuItems, setMenuItems] = useState([])
+
+  useEffect(() => {
+    if (cargarMesas) cargarMesas()
+    if (cargarPedidosActivos) cargarPedidosActivos()
+  }, [cargarMesas, cargarPedidosActivos])
 
   useEffect(() => {
     let isMounted = true

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Bell, LogOut } from 'lucide-react'
+import { Bell, LogOut, LogIn } from 'lucide-react'
 import { useAuth, useTables } from '../hooks'
 
 const navLinks = [
@@ -78,7 +78,7 @@ export function Topbar() {
           )}
         </Link>
 
-        {user && (
+        {user ? (
           <div className="sd-user-info-pill">
             <span className="sd-user-name">{user.name}</span>
             <span className="sd-user-role">{user.roleLabel || user.role}</span>
@@ -92,6 +92,22 @@ export function Topbar() {
               <LogOut size={18} />
             </button>
           </div>
+        ) : (
+          <Link
+            to="/login"
+            className="sd-btn sd-btn-primary"
+            style={{
+              padding: '6px 14px',
+              fontSize: '13px',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <LogIn size={15} />
+            <span>Iniciar Sesión</span>
+          </Link>
         )}
       </div>
     </header>

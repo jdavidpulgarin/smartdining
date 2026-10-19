@@ -767,12 +767,12 @@ function generarReporteFallback(rango = 'hoy') {
     return {
       isFallback: true,
       rango: 'semana',
-      totalVentas: '$8,940.00',
+      totalVentas: 8940000,
       totalPedidos: 242,
       pedidosLiquidados: 236,
-      tiempoCocinaPromedio: '13.1 min',
+      tiempoCocinaPromedio: 13.1,
       ocupacionMesas: '76%',
-      ticketPromedio: '$36.94',
+      ticketPromedio: 36940,
       kdsAlertsCount: 8,
       topPlatos: [
         { name: 'Hamburguesa Smart Angus', category: 'Hamburguesas', qty: 114, total: '$2,622.00', percentage: 95 },
@@ -782,9 +782,9 @@ function generarReporteFallback(rango = 'hoy') {
         { name: 'Limonada de Coco', category: 'Bebidas', qty: 58, total: '$406.00', percentage: 46 },
       ],
       metodosPago: [
-        { metodo: 'Tarjeta', porcentaje: 54, monto: '$4,827.60', color: '#10b981' },
-        { metodo: 'Efectivo', porcentaje: 28, monto: '$2,503.20', color: '#3b82f6' },
-        { metodo: 'Transferencia', porcentaje: 18, monto: '$1,609.20', color: '#a855f7' },
+        { metodo: 'Tarjeta', porcentaje: 54, monto: 4827600, color: '#10b981' },
+        { metodo: 'Efectivo', porcentaje: 28, monto: 2503200, color: '#3b82f6' },
+        { metodo: 'Transferencia', porcentaje: 18, monto: 1609200, color: '#a855f7' },
       ],
       horasPico: [
         { hora: '12:00 - 13:00', volumen: 70 },
@@ -811,12 +811,12 @@ function generarReporteFallback(rango = 'hoy') {
     return {
       isFallback: true,
       rango: 'mes',
-      totalVentas: '$38,420.00',
+      totalVentas: 38420000,
       totalPedidos: 1045,
       pedidosLiquidados: 1022,
-      tiempoCocinaPromedio: '13.5 min',
+      tiempoCocinaPromedio: 13.5,
       ocupacionMesas: '81%',
-      ticketPromedio: '$36.76',
+      ticketPromedio: 36760,
       kdsAlertsCount: 26,
       topPlatos: [
         { name: 'Hamburguesa Smart Angus', category: 'Hamburguesas', qty: 480, total: '$11,040.00', percentage: 98 },
@@ -826,9 +826,9 @@ function generarReporteFallback(rango = 'hoy') {
         { name: 'Limonada de Coco', category: 'Bebidas', qty: 250, total: '$1,750.00', percentage: 48 },
       ],
       metodosPago: [
-        { metodo: 'Tarjeta', porcentaje: 56, monto: '$21,515.20', color: '#10b981' },
-        { metodo: 'Efectivo', porcentaje: 26, monto: '$9,989.20', color: '#3b82f6' },
-        { metodo: 'Transferencia', porcentaje: 18, monto: '$6,915.60', color: '#a855f7' },
+        { metodo: 'Tarjeta', porcentaje: 56, monto: 21515200, color: '#10b981' },
+        { metodo: 'Efectivo', porcentaje: 26, monto: 9989200, color: '#3b82f6' },
+        { metodo: 'Transferencia', porcentaje: 18, monto: 6915600, color: '#a855f7' },
       ],
       horasPico: [
         { hora: '12:00 - 13:00', volumen: 75 },
@@ -855,12 +855,12 @@ function generarReporteFallback(rango = 'hoy') {
   return {
     isFallback: true,
     rango: 'hoy',
-    totalVentas: '$1,280.00',
+    totalVentas: 1280000,
     totalPedidos: 34,
     pedidosLiquidados: 32,
-    tiempoCocinaPromedio: '12.4 min',
+    tiempoCocinaPromedio: 12.4,
     ocupacionMesas: '72%',
-    ticketPromedio: '$37.64',
+    ticketPromedio: 37640,
     kdsAlertsCount: 2,
     topPlatos: [
       { name: 'Hamburguesa Smart Angus', category: 'Hamburguesas', qty: 18, total: '$414.00', percentage: 90 },
@@ -870,9 +870,9 @@ function generarReporteFallback(rango = 'hoy') {
       { name: 'Limonada de Coco', category: 'Bebidas', qty: 9, total: '$63.00', percentage: 45 },
     ],
     metodosPago: [
-      { metodo: 'Tarjeta', porcentaje: 52, monto: '$665.60', color: '#10b981' },
-      { metodo: 'Efectivo', porcentaje: 30, monto: '$384.00', color: '#3b82f6' },
-      { metodo: 'Transferencia', porcentaje: 18, monto: '$230.40', color: '#a855f7' },
+      { metodo: 'Tarjeta', porcentaje: 52, monto: 665600, color: '#10b981' },
+      { metodo: 'Efectivo', porcentaje: 30, monto: 384000, color: '#3b82f6' },
+      { metodo: 'Transferencia', porcentaje: 18, monto: 230400, color: '#a855f7' },
     ],
     horasPico: [
       { hora: '12:00 - 13:00', volumen: 65 },
@@ -926,10 +926,21 @@ export const reportesApi = {
  */
 export const agotadosApi = {
   async togglePlato(idPlato, disponible) {
-    return apiFetch(`/platos/${idPlato}/disponible`, {
-      method: 'PATCH',
-      body: JSON.stringify({ disponible }),
-    })
+    try {
+      return await apiFetch(`/platos/${idPlato}/disponible`, {
+        method: 'PATCH',
+        body: JSON.stringify({ disponible }),
+      })
+    } catch (err) {
+      // Si el backend no expone PATCH /api/platos/:id/disponible (404), usamos PUT /api/platos/:id
+      if (err.status === 404) {
+        return await apiFetch(`/platos/${idPlato}`, {
+          method: 'PUT',
+          body: JSON.stringify({ disponible }),
+        })
+      }
+      throw err
+    }
   },
   async toggleIngrediente(idIngrediente, disponible) {
     return apiFetch(`/ingredientes/${idIngrediente}/disponible`, {
