@@ -88,6 +88,63 @@ Cada estado cuenta con su propia ilustración SVG inline, paleta cromática, hal
 - **Aviso global "Sale caliente":** Notificación flotante de 5 segundos que se dispara en cualquier pantalla de la app (`Layout.jsx`) cuando un pedido perteneciente al usuario transiciona a estado `listo`.
 - **Llamar al mesero:** Emisión de `mesa:llamar_mesero` con `eventId` único y cooldown de 60 segundos con cuenta regresiva en el botón y mensajes amigables ante `RATE_LIMIT` o problemas de red.
 
+## La cuenta y el pago (J-08)
+
+El módulo de pago (`/pago`) permite a los comensales consultar la cuenta de la mesa en tiempo real, dividirla según su preferencia (su parte, partes iguales o cuenta completa), pagar en línea mediante la pasarela Wompi o solicitar la cuenta para pagar en efectivo en la caja.
+
+### Estados de la Pantalla
+
+La pantalla de pago implementa una máquina de estados con transiciones fluidas e ilustraciones SVG vectoriales sincronizadas con el tema oscuro:
+
+1. **`cuenta` (Vista principal):**
+   - **Banner "TU PARTE":** Saldo personal en tipografía Bebas Neue de gran tamaño, destacando en verde (`#2FA35A`) si ya pagó su parte o en rojo tenue si aún tiene saldo pendiente.
+   - **Barra de progreso:** Indicador visual animado que refleja el porcentaje pagado de la mesa (`Pagado $X / Falta $Y de $Z`).
+   - **Desglose "QUIÉN DEBE QUÉ":** Lista con avatar de inicial de cada comensal, detalle de ítems consumidos, badge verde "PAGÓ" con checkmark o saldo pendiente formateado.
+   - **Selector de modo de pago (`¿CÓMO QUIERES PAGAR?`):** Control segmentado accesible (`role="radiogroup"`) para alternar entre `Mi parte`, `En partes iguales` y `Mesa completa`. Si el comensal ya pagó su parte individual pero la mesa aún tiene saldo, se muestra el banner "YA PAGASTE TU PARTE" con opciones para colaborar con el saldo restante.
+   - **Acceso a caja:** Enlace inferior punteado ("Pedir la cuenta al mesero / Pagar en la caja") para comensales que prefieren efectivo o datáfono físico.
+
+2. **`confirmando` (Espera de confirmación de pasarela):**
+   - Ilustración vectorial con ondas concéntricas animadas (`.onda`), tarjeta de crédito flotante (`.tarjeta-flota`) y anillo giratorio de carga (`.gira`).
+   - Se muestra mientras se abre el widget de Wompi o cuando el usuario regresa tras una redirección 3DS con `?id=` en la URL.
+   - Acompañado de textos explicativos claros: "Estamos esperando la confirmación de tu banco... No cierres esta pantalla".
+
+3. **`confirmado` (Celebración de pago propio):**
+   - Disparado instantáneamente cuando llega el evento `payment:confirmed` correspondiente al comensal actual.
+   - Círculo de éxito verde con rebote elástico (`pop`), checkmark trazado dinámicamente mediante `stroke-dashoffset` (`.check`) y cuatro chispas luminosas titilando (`.chispa`).
+   - Botón accesible de al menos 48 px para volver a ver el estado general de la cuenta.
+
+4. **`caja` (Pagar en la caja física):**
+   - Ilustración SVG con caja registradora clásica y ticket de recibo animado saliendo (`.recibo`).
+   - Tarjeta destacada con borde primario: `DILE AL CAJERO: MESA {N} · {ALIAS} · ${MONTO}` para facilitar la identificación rápida por el cajero.
+   - Botón "Pedir la cuenta al mesero" que emite `cuenta:solicitada` al socket del restaurante.
+   - Enlace "Prefiero pagar con Wompi" para regresar al flujo digital en cualquier momento.
+
+5. **`despedida` (`/despedida` al liberar la mesa):**
+   - Rediseño animado cuando `motivo === 'pagada'` tras recibir `mesa:liberada`.
+   - SVG con corazón latiendo en bucle continuo (`.late`) y lluvia festiva de 6 piezas de confeti con trayectorias y retardos escalonados (`.confeti`, `.f2`–`.f6`).
+   - Titular "¡GRACIAS POR VENIR!" en Bebas Neue 52 px (`#FF5A5F`), número de mesa y mensaje informativo para reescanear el código QR en futuras visitas.
+
+### Contrato y Seguridad con Wompi
+
+- **Carga bajo demanda (On-demand):** El script del widget (`https://checkout.wompi.co/widget.js`) se inyecta dinámicamente en el DOM únicamente en entornos de producción/staging cuando el comensal pulsa el botón de pagar. El service worker PWA no cachea scripts externos de pasarelas.
+- **Sin secretos en el cliente:** La aplicación cliente no almacena llaves privadas ni públicas en variables `.env` con prefijo `VITE_`. La llave pública (`publicKey`) y la firma de integridad (`signature.integrity`) se reciben directamente y de forma segura en la respuesta del backend (`POST /pagos/intencion`).
+- **Cálculo íntegro en servidor:** La aplicación frontend nunca calcula ni envía montos, precios, identificador de mesa ni comensal en el cuerpo de la intención de pago. Solo transmite el identificador del modo (`propio`, `igual`, `total`) y un `eventId` idempotente (UUID v4). El backend y socket-server derivan el monto exacto en centavos desde el JWT firmado del comensal.
+- **Confirmación estricta por WebSocket:** La interfaz nunca asume un pago como completado basándose en las pantallas de éxito o callbacks del iframe de Wompi. La confirmación oficial ocurre de manera exclusiva al recibir el evento autenticado `payment:confirmed` a través del socket de la mesa.
+
+### División de la Cuenta (`montosPorModo`)
+
+La lógica de cálculo de división se encuentra encapsulada en la función pura `montosPorModo(cuenta, miAlias)`:
+
+- **`propio`:** Liquida exclusivamente el saldo individual pendiente del usuario (`comensal.saldo`).
+- **`igual`:** Divide el saldo total restante de la mesa de forma equitativa entre todos los comensales que aún tienen saldo pendiente (`Math.ceil(saldoMesa / comensalesPendientes)`). El último comensal en pagar asume automáticamente el centavo o peso de redondeo restante.
+- **`total`:** Liquida la totalidad del saldo pendiente de la mesa (`saldoMesa`).
+
+### Notificaciones y Sincronización en Vivo
+
+- **Deduplicación por `eventId` (Búfer circular de 200):** Para evitar procesar eventos duplicados por reconexiones de socket o reintentos de red, el hook `useCuentaMesa` y el listener global de `Layout.jsx` mantienen un conjunto en anillo con los últimos 200 identificadores de evento recibidos.
+- **Toast global de pago (`Layout.jsx`):** Cuando cualquier integrante de la mesa o la caja realiza un abono, un toast informativo en la parte superior notifica a todos los comensales presentes (ej. `"Beto pagó su parte ($32.000). Falta $26.000 de la mesa"` o `"Se pagó la cuenta completa de la mesa. ¡Buen provecho!"`).
+- **Resiliencia ante desconexión:** Si el socket pierde conexión, los botones de acción se deshabilitan preventivamente mostrando el estado "Reconectando...". Al recuperar la conexión con el servidor, la cuenta se vuelve a consultar automáticamente mediante `GET /api/pedidos/mesa/cuenta`.
+
 ## Componentes
 
 - **Button** (primario y secundario, altura mínima de `48 px`)
@@ -101,3 +158,4 @@ Cada estado cuenta con su propia ilustración SVG inline, paleta cromática, hal
 - **Imagen**
 
 Implementados en `frontend-cliente/src/components/ui/` y visibles en `/dev/ui` (solo en desarrollo).
+

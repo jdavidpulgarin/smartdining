@@ -1,0 +1,436 @@
+import { describe, it, expect } from 'vitest';
+import {
+  formatoPesos,
+  normalizarCuenta,
+  montosPorModo,
+  aplicarPagoConfirmado,
+  textoPagoConfirmado,
+  traducirErrorPago,
+  ESTADO_CUENTA_INICIAL,
+  ESTADO_CUENTA_ENVIANDO,
+  estadoCuentaSolicitada,
+  textoCajaSegunEstado,
+} from './cuenta';
+
+describe('utils/cuenta.js (J-08)', () => {
+  describe('formatoPesos', () => {
+    it('formatea números a pesos colombianos sin decimales', () => {
+      expect(formatoPesos(28000)).toBe('$ 28.000');
+      expect(formatoPesos(0)).toBe('$ 0');
+      expect(formatoPesos('15500')).toBe('$ 15.500');
+    });
+
+    it('maneja valores no numéricos o nulos de forma segura', () => {
+      expect(formatoPesos(null)).toBe('$ 0');
+      expect(formatoPesos(undefined)).toBe('$ 0');
+      expect(formatoPesos(NaN)).toBe('$ 0');
+    });
+  });
+
+  describe('normalizarCuenta', () => {
+    it('normaliza la cuenta de la API colocando al usuario actual de primero', () => {
+      const api = {
+        id_mesa: 5,
+        numero: 5,
+        ubicacion: 'Terraza',
+        total_mesa: 90000,
+        pagado_mesa: 30000,
+        saldo_mesa: 60000,
+        items_totales: 6,
+        comensales: [
+          { comensal: 'Ana', items_pedidos: 2, subtotal: 30000, pagado: 0, saldo: 30000 },
+          { comensal: 'Beto', items_pedidos: 2, subtotal: 30000, pagado: 10000, saldo: 20000 },
+          { comensal: 'Carla', items_pedidos: 2, subtotal: 30000, pagado: 20000, saldo: 10000 },
+        ],
+      };
+
+      const res = normalizarCuenta(api, 'Beto');
+
+      expect(res.total).toBe(90000);
+      expect(res.pagado).toBe(30000);
+      expect(res.saldo).toBe(60000);
+      expect(res.comensales).toHaveLength(3);
+      // Beto debe estar de primero
+      expect(res.comensales[0].nombre).toBe('Beto');
+      expect(res.comensales[0].esMio).toBe(true);
+      expect(res.comensales[0].saldo).toBe(20000);
+      expect(res.comensales[0].pago).toBe(false);
+
+      // mia debe reflejar el saldo de Beto
+      expect(res.mia).toEqual({
+        subtotal: 30000,
+        pagado: 10000,
+        saldo: 20000,
+      });
+
+      // Ana y Carla no son míos
+      expect(res.comensales[1].esMio).toBe(false);
+      expect(res.comensales[2].esMio).toBe(false);
+    });
+
+    it('identifica y envía a "General" al final de la lista', () => {
+      const api = {
+        total_mesa: 50000,
+        pagado_mesa: 0,
+        saldo_mesa: 50000,
+        comensales: [
+          { comensal: 'General', subtotal: 10000, pagado: 0, saldo: 10000 },
+          { comensal: 'Ana', subtotal: 20000, pagado: 0, saldo: 20000 },
+          { comensal: 'Beto', subtotal: 20000, pagado: 0, saldo: 20000 },
+        ],
+      };
+
+      const res = normalizarCuenta(api, 'Ana');
+      expect(res.comensales[0].nombre).toBe('Ana');
+      expect(res.comensales[1].nombre).toBe('Beto');
+      expect(res.comensales[2].nombre).toBe('General');
+      expect(res.comensales[2].esGeneral).toBe(true);
+    });
+
+    it('marca pago: true cuando el saldo de un comensal es 0', () => {
+      const api = {
+        total_mesa: 20000,
+        pagado_mesa: 20000,
+        saldo_mesa: 0,
+        comensales: [
+          { comensal: 'Ana', subtotal: 20000, pagado: 20000, saldo: 0 },
+        ],
+      };
+
+      const res = normalizarCuenta(api, 'Ana');
+      expect(res.comensales[0].pago).toBe(true);
+      expect(res.mia.saldo).toBe(0);
+    });
+
+    it('devuelve valores por defecto seguros si api es nulo o vacío', () => {
+      const res = normalizarCuenta(null, 'Ana');
+      expect(res.total).toBe(0);
+      expect(res.pagado).toBe(0);
+      expect(res.saldo).toBe(0);
+      expect(res.comensales).toEqual([]);
+      expect(res.mia).toEqual({ subtotal: 0, pagado: 0, saldo: 0 });
+    });
+  });
+
+  describe('montosPorModo', () => {
+    it('calcula propio, igual y total correctamente', () => {
+      const cuenta = {
+        total: 60000,
+        pagado: 0,
+        saldo: 60000,
+        mia: { saldo: 25000 },
+        comensales: [
+          { nombre: 'Beto', esGeneral: false },
+          { nombre: 'Ana', esGeneral: false },
+          { nombre: 'Carla', esGeneral: false },
+        ],
+      };
+
+      const montos = montosPorModo(cuenta, 3);
+      expect(montos.propio).toBe(25000);
+      expect(montos.igual).toBe(20000); // 60000 / 3
+      expect(montos.total).toBe(60000);
+    });
+
+    it('calcula total 62.000 entre 3 sin pagos → 20.667', () => {
+      const cuenta = {
+        total: 62000,
+        pagado: 0,
+        saldo: 62000,
+        mia: { saldo: 20000 },
+      };
+
+      const montos = montosPorModo(cuenta, 3);
+      expect(montos.igual).toBe(20667);
+      expect(montos.total).toBe(62000);
+    });
+
+    it('calcula total 62.000, ya pagaron 20.000, saldo 42.000 → 20.667 (no 42.000)', () => {
+      const cuenta = {
+        total: 62000,
+        pagado: 20000,
+        saldo: 42000,
+        mia: { saldo: 20000 },
+      };
+
+      const montos = montosPorModo(cuenta, 3);
+      expect(montos.igual).toBe(20667);
+      expect(montos.total).toBe(42000);
+    });
+
+    it('calcula total 62.000, saldo 20.666 → 20.666 (último paga el saldo)', () => {
+      const cuenta = {
+        total: 62000,
+        pagado: 41334,
+        saldo: 20666,
+        mia: { saldo: 20666 },
+      };
+
+      const montos = montosPorModo(cuenta, 3);
+      expect(montos.igual).toBe(20666);
+      expect(montos.total).toBe(20666);
+    });
+
+    it('calcula total 50.000 entre 2 sin pagos → 25.000', () => {
+      const cuenta = {
+        total: 50000,
+        pagado: 0,
+        saldo: 50000,
+        mia: { saldo: 25000 },
+      };
+
+      const montos = montosPorModo(cuenta, 2);
+      expect(montos.igual).toBe(25000);
+      expect(montos.total).toBe(50000);
+    });
+
+    it('calcula total 50.000 entre 2, un comensal ya pagó y solo queda uno (saldo 25.000) → 25.000', () => {
+      const cuenta = {
+        total: 50000,
+        pagado: 25000,
+        saldo: 25000,
+        mia: { saldo: 25000 },
+      };
+
+      const montos = montosPorModo(cuenta, 2);
+      expect(montos.igual).toBe(25000);
+      expect(montos.total).toBe(25000);
+    });
+
+    it('cubre el residuo de redondeo cuando el último comensal paga', () => {
+      const cuenta = {
+        total: 100,
+        pagado: 66,
+        saldo: 34,
+        mia: { saldo: 34 },
+      };
+
+      const montos = montosPorModo(cuenta, 3);
+      // parte = Math.round(100/3) = 33; residuo = 1; saldo 34 <= 33+1 -> 34
+      expect(montos.igual).toBe(34);
+      expect(montos.total).toBe(34);
+    });
+
+    it('el modo igual nunca excede el saldo restante de la mesa', () => {
+      const cuenta = {
+        total: 90000,
+        pagado: 80000,
+        saldo: 10000, // solo faltan 10000
+        mia: { saldo: 10000 },
+        comensales: [{ nombre: 'Beto' }, { nombre: 'Ana' }],
+      };
+
+      const montos = montosPorModo(cuenta, 2);
+      expect(montos.igual).toBe(10000);
+      expect(montos.total).toBe(10000);
+    });
+
+    it('si el saldo de la mesa es 0, todos los modos devuelven 0', () => {
+      const cuenta = {
+        total: 50000,
+        pagado: 50000,
+        saldo: 0,
+        mia: { saldo: 0 },
+      };
+
+      const montos = montosPorModo(cuenta, 2);
+      expect(montos.propio).toBe(0);
+      expect(montos.igual).toBe(0);
+      expect(montos.total).toBe(0);
+    });
+  });
+
+  describe('aplicarPagoConfirmado', () => {
+    it('abona al comensal específico y actualiza saldo de la mesa', () => {
+      const cuenta = {
+        total: 60000,
+        pagado: 0,
+        saldo: 60000,
+        mia: { subtotal: 30000, pagado: 0, saldo: 30000 },
+        comensales: [
+          { nombre: 'Beto', esMio: true, subtotal: 30000, pagado: 0, saldo: 30000, pago: false },
+          { nombre: 'Ana', esMio: false, subtotal: 30000, pagado: 0, saldo: 30000, pago: false },
+        ],
+      };
+
+      const evento = {
+        comensal: 'Beto',
+        monto: 30000,
+        saldo_restante: 30000,
+      };
+
+      const res = aplicarPagoConfirmado(cuenta, evento);
+      expect(res.saldo).toBe(30000);
+      expect(res.pagado).toBe(30000);
+      expect(res.comensales[0].pagado).toBe(30000);
+      expect(res.comensales[0].saldo).toBe(0);
+      expect(res.comensales[0].pago).toBe(true);
+      expect(res.mia.saldo).toBe(0);
+      expect(res.comensales[1].saldo).toBe(30000);
+    });
+
+    it('con comensal null abona a todos los comensales pendientes', () => {
+      const cuenta = {
+        total: 50000,
+        pagado: 0,
+        saldo: 50000,
+        mia: { subtotal: 20000, pagado: 0, saldo: 20000 },
+        comensales: [
+          { nombre: 'Beto', esMio: true, subtotal: 20000, pagado: 0, saldo: 20000, pago: false },
+          { nombre: 'Ana', esMio: false, subtotal: 30000, pagado: 0, saldo: 30000, pago: false },
+        ],
+      };
+
+      const evento = {
+        comensal: null,
+        monto: 50000,
+        saldo_restante: 0,
+      };
+
+      const res = aplicarPagoConfirmado(cuenta, evento);
+      expect(res.saldo).toBe(0);
+      expect(res.pagado).toBe(50000);
+      expect(res.comensales[0].pago).toBe(true);
+      expect(res.comensales[1].pago).toBe(true);
+      expect(res.mia.saldo).toBe(0);
+    });
+
+    it('acepta monto_centavos y saldo_restante_centavos', () => {
+      const cuenta = {
+        total: 20000,
+        pagado: 0,
+        saldo: 20000,
+        mia: { subtotal: 20000, pagado: 0, saldo: 20000 },
+        comensales: [
+          { nombre: 'Beto', esMio: true, subtotal: 20000, pagado: 0, saldo: 20000, pago: false },
+        ],
+      };
+
+      const evento = {
+        comensal: 'Beto',
+        monto_centavos: 2000000,
+        saldo_restante_centavos: 0,
+      };
+
+      const res = aplicarPagoConfirmado(cuenta, evento);
+      expect(res.saldo).toBe(0);
+      expect(res.pagado).toBe(20000);
+    });
+  });
+
+  describe('textoPagoConfirmado', () => {
+    it('muestra "Pago confirmado: $X" si el pago fue propio', () => {
+      const evento = { comensal: 'Beto', monto: 28000 };
+      expect(textoPagoConfirmado(evento, 'Beto')).toBe('Pago confirmado: $ 28.000');
+    });
+
+    it('muestra "Carla pagó $X" si fue otro comensal', () => {
+      const evento = { comensal: 'Carla', monto: 15000 };
+      expect(textoPagoConfirmado(evento, 'Beto')).toBe('Carla pagó $ 15.000');
+    });
+
+    it('muestra "Se pagó la cuenta completa" si comensal es null', () => {
+      const evento = { comensal: null, monto: 90000 };
+      expect(textoPagoConfirmado(evento, 'Beto')).toBe('Se pagó la cuenta completa');
+    });
+  });
+
+  describe('traducirErrorPago', () => {
+    it('traduce 409 o SIN_SALDO', () => {
+      expect(traducirErrorPago(409)).toBe('No hay saldo pendiente para pagar');
+      expect(traducirErrorPago(null, 'SIN_SALDO')).toBe('No hay saldo pendiente para pagar');
+    });
+
+    it('traduce 429 o RATE_LIMIT', () => {
+      expect(traducirErrorPago(429)).toBe('Demasiados intentos, espera un minuto');
+      expect(traducirErrorPago(null, 'RATE_LIMIT')).toBe('Demasiados intentos, espera un minuto');
+    });
+
+    it('traduce 503 NO_CONFIGURADO', () => {
+      expect(traducirErrorPago(503, 'NO_CONFIGURADO')).toBe(
+        'Los pagos en línea no están disponibles; paga en la caja'
+      );
+    });
+
+    it('traduce 401 y 403', () => {
+      expect(traducirErrorPago(401)).toBe('Tu sesión de la mesa terminó, escanea el QR de nuevo');
+      expect(traducirErrorPago(403)).toBe('Tu sesión de la mesa terminó, escanea el QR de nuevo');
+    });
+
+    it('traduce errores desconocidos con mensaje genérico', () => {
+      expect(traducirErrorPago(500)).toBe('No pudimos iniciar el pago, intenta de nuevo');
+    });
+  });
+
+  describe('estadoCuentaSolicitada', () => {
+    it('devuelve estado inicial cuando no hay resultado', () => {
+      expect(estadoCuentaSolicitada(null)).toEqual(ESTADO_CUENTA_INICIAL);
+      expect(estadoCuentaSolicitada(undefined)).toEqual(ESTADO_CUENTA_INICIAL);
+    });
+
+    it('devuelve estado enviando al pasar "enviando"', () => {
+      expect(estadoCuentaSolicitada('enviando')).toEqual(ESTADO_CUENTA_ENVIANDO);
+    });
+
+    it('devuelve estado ok al recibir ack { ok: true }', () => {
+      const res = estadoCuentaSolicitada({ ok: true });
+      expect(res.estado).toBe('ok');
+      expect(res.mensaje).toBe('Ya le avisamos al mesero que quieres la cuenta');
+      expect(res.deshabilitado).toBe(true);
+      expect(res.tipo).toBe('exito');
+    });
+
+    it('devuelve estado ok al recibir ack exitoso con eventId', () => {
+      const res = estadoCuentaSolicitada({ ok: true, eventId: '123' });
+      expect(res.estado).toBe('ok');
+    });
+
+    it('detecta RATE_LIMIT en el error o mensaje', () => {
+      const errObj = { codigo: 'RATE_LIMIT', message: 'RATE_LIMIT' };
+      const res = estadoCuentaSolicitada(errObj, true);
+      expect(res.estado).toBe('rate_limit');
+      expect(res.mensaje).toBe('La mesa ya pidió la cuenta; espera un momento');
+      expect(res.deshabilitado).toBe(true);
+      expect(res.tipo).toBe('advertencia');
+
+      const errConTexto = new Error('Hubo RATE_LIMIT en la sala');
+      expect(estadoCuentaSolicitada(errConTexto, true).estado).toBe('rate_limit');
+    });
+
+    it('devuelve estado error y habilita el botón ante fallos de conexión', () => {
+      const err = new Error('Timeout al esperar ack');
+      const res = estadoCuentaSolicitada(err, true);
+      expect(res.estado).toBe('error');
+      expect(res.mensaje).toBe('No pudimos avisar al mesero. Toca para reintentar.');
+      expect(res.deshabilitado).toBe(false);
+      expect(res.tipo).toBe('error');
+    });
+
+    it('devuelve estado error si el ack trae ok: false', () => {
+      const ackFallo = { ok: false, codigo: 'ERROR_INTERNO' };
+      const res = estadoCuentaSolicitada(ackFallo, false);
+      expect(res.estado).toBe('error');
+      expect(res.deshabilitado).toBe(false);
+    });
+  });
+
+  describe('textoCajaSegunEstado', () => {
+    it('devuelve el texto adecuado según el estado del aviso', () => {
+      expect(textoCajaSegunEstado({ estado: 'enviando' })).toBe(
+        'Avisando al mesero que pagarás en la caja...'
+      );
+      expect(textoCajaSegunEstado({ estado: 'ok' })).toBe(
+        'Ya le avisamos al mesero. Puedes acercarte a la caja o esperarlo en la mesa.'
+      );
+      expect(textoCajaSegunEstado({ estado: 'rate_limit' })).toBe(
+        'La mesa ya pidió la cuenta. Puedes acercarte a la caja o esperar al mesero.'
+      );
+      expect(textoCajaSegunEstado({ estado: 'error' })).toBe(
+        'No pudimos avisar al mesero. Puedes acercarte directamente a la caja a pagar.'
+      );
+      expect(textoCajaSegunEstado(null)).toBe(
+        'Puedes acercarte a la caja a pagar o esperar al mesero en la mesa.'
+      );
+    });
+  });
+});

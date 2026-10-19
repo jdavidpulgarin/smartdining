@@ -6,9 +6,10 @@ import { useCarrito } from '../../context/CarritoContext';
 import { useMesaSocketContext } from '../../context/MesaSocketContext';
 import { formatearMensajePedidoCreado } from '../../utils/notificacionesMesa';
 import { esPedidoMio } from '../../utils/seguimiento';
+import { textoPagoConfirmado } from '../../utils/cuenta';
 
 function Layout({ children }) {
-  const { mesa, comensal, valida, cargando } = useMesaSession();
+  const { mesa, comensal, valida, cargando, motivoCierre } = useMesaSession();
   const { totalUnidades } = useCarrito();
   const { on: socketOn } = useMesaSocketContext();
 
@@ -57,9 +58,22 @@ function Layout({ children }) {
       }
     });
 
+    const bajaPayment = socketOn('payment:confirmed', (data) => {
+      if (!data) return;
+      const mensaje = textoPagoConfirmado(data, comensal);
+      if (mensaje) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        setToastPedido({ tipo: 'pago', mensaje });
+        timerRef.current = setTimeout(() => {
+          setToastPedido(null);
+        }, 5000);
+      }
+    });
+
     return () => {
       bajaCreated?.();
       bajaStatus?.();
+      bajaPayment?.();
     };
   }, [socketOn, comensal]);
 
@@ -68,6 +82,11 @@ function Layout({ children }) {
   }
 
   if (!valida) {
+    const motivosDespedida = ['pagada', 'liberada', 'MESA_LIBERADA'];
+    if (motivoCierre && motivosDespedida.includes(motivoCierre)) {
+      const motivoNorm = motivoCierre === 'MESA_LIBERADA' ? 'liberada' : motivoCierre;
+      return <Navigate to="/despedida" replace state={{ motivo: motivoNorm, numeroMesa: mesa }} />;
+    }
     return <Navigate to="/" replace />;
   }
 
