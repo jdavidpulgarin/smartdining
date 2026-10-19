@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { z } = require('zod');
 const usuariosService = require('../services/usuarios.service');
-const { ROLES_STAFF } = require('../middleware/auth.middleware');
+const { ALGORITMO_JWT, ROLES_STAFF } = require('../middleware/auth.middleware');
 
 // Solo se registran usuarios del personal: admin, mesero, cajero, cocina.
 // El comensal NO se registra — obtiene su sesión escaneando el QR de la mesa
@@ -65,7 +65,9 @@ function firmarTokenStaff(usuario) {
   return jwt.sign(
     { id_usuario: usuario.id_usuario, rol: usuario.rol },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+    // El algoritmo va explícito, y es la misma constante que exige requireAuth:
+    // así firmar y verificar no pueden separarse sin que se note.
+    { algorithm: ALGORITMO_JWT, expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
   );
 }
 
