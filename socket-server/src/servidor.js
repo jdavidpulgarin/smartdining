@@ -96,6 +96,9 @@ function crearServidor(config, deps = {}) {
   // durante días, mucho más que los 10 min de los eventos de socket.
   const TTL_PAGOS_MS = 7 * 24 * 60 * 60 * 1000;
   const registro = cliente ? crearRegistroIdempotenciaRedis({ cliente }) : crearRegistroIdempotencia();
+  // Estado de sala por mesa (cuenta pedida, llamadas, quién pagó). La presencia
+  // lo lee para anunciar `pagaron`.
+  const estadoMesas = cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria();
   Object.assign(ctx, {
     io,
     redis,
@@ -104,13 +107,13 @@ function crearServidor(config, deps = {}) {
     registroPagos: cliente
       ? crearRegistroIdempotenciaRedis({ cliente, ttlMs: TTL_PAGOS_MS })
       : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
-    estadoMesas: cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria(),
+    estadoMesas,
     duenosPedidos: cliente ? crearDuenosRedis({ cliente }) : crearDuenosMemoria(),
     // Pagos: pasarela (null = pagos apagados), intenciones y límites.
     pasarela: deps.pasarela || (config.wompi ? verificarImplementacion(crearPasarelaWompi(config.wompi)) : null),
     almacenPagos: cliente ? crearAlmacenPagosRedis({ cliente }) : crearAlmacenPagosMemoria(),
     limites: cliente ? crearLimitesRedis({ cliente }) : crearLimitesMemoria(),
-    presencia: crearPresencia({ io, ...(deps.presencia || {}) }),
+    presencia: crearPresencia({ io, estadoMesas, ...(deps.presencia || {}) }),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),
     suscripciones: cliente

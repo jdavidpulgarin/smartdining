@@ -9,7 +9,9 @@ const {
   verificarJwt, esComensalSinAlias, ROL_COMENSAL, MAX_ALIAS,
 } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
-const { calcularMonto, validarCuenta, MODOS } = require('./cuenta');
+const {
+  calcularMonto, personasPorPagar, validarCuenta, MODOS,
+} = require('./cuenta');
 
 // 5 intenciones por minuto por comensal: de sobra para reintentar un pago
 // fallido y corta a quien intenta martillar al backend o a la pasarela.
@@ -62,7 +64,8 @@ async function crearIntencionPago(req, res, ctx) {
   if (cuerpo.comensal !== undefined && cuerpo.comensal !== comensal) {
     throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Solo puedes pagar con tu propio nombre');
   }
-  // El modo "igual" reparte entre las personas sentadas ahora en la mesa.
+  // El modo "igual" reparte el saldo entre las personas sentadas que aún no
+  // han pagado (más quien paga).
   const presencia = await ctx.presencia.calcular(idMesa);
 
   // Reintento del mismo eventId: misma respuesta, sin otra intención.
@@ -107,7 +110,10 @@ async function crearIntencionPago(req, res, ctx) {
   }
 
   const monto = calcularMonto({
-    modo: cuerpo.modo, cuenta: cuenta.cuerpo, comensal, presentes: presencia.total,
+    modo: cuerpo.modo,
+    cuenta: cuenta.cuerpo,
+    comensal,
+    personas: personasPorPagar({ comensales: presencia.comensales, pagaron: presencia.pagaron, comensal }),
   });
   if (monto.error) throw new ErrorHttp(409, 'SIN_SALDO', 'No hay saldo por pagar en ese modo');
 
@@ -335,6 +341,13 @@ async function recibirEventoPasarela(req, res, ctx) {
       return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
     }
 
+    // Quien pagó deja de contar en "igual" (en cualquier modo). Va ANTES de
+    // marcar la intención como pagada: si esto falla, el 503 hace que Wompi
+    // reintente y el reintento la encuentra todavía cobrable (el backend es
+    // idempotente por referencia_externa y marcarPago también). Con saldo 0
+    // no hay nada que repartir y el backend libera la mesa (quizá antes de
+    // que lleguemos aquí): no se anota, para no ensuciar la sesión siguiente.
+    if (registro.saldo > 0) await ctx.estadoMesas.marcarPago(intencion.id_mesa, intencion.comensal);
     await ctx.almacenPagos.actualizarEstado(evento.referencia, 'pagada', TTL_INTENCION_RESUELTA_SEG);
     // Solo libera la marca si apunta a ESTA referencia: si se pagó una
     // reemplazada, la intención nueva sigue pendiente (y, como el saldo
@@ -351,6 +364,8 @@ async function recibirEventoPasarela(req, res, ctx) {
       saldoCentavos: registro.saldo,
       referencia: evento.referencia,
     });
+    // La mesa ve al instante quién ya pagó (la PWA recalcula "igual").
+    ctx.presencia.programar(intencion.id_mesa);
     return enviarJson(res, 200, { ok: true, duplicado: false, registrado: true });
   } catch (err) {
     // No se pudo terminar (pasarela o backend sin respuesta): se libera la
@@ -397,6 +412,13 @@ async function difundirPagoConfirmado(ctx, p) {
   const errorPayload = validarPagoCaja(p);
   if (errorPayload) return fallo('PAYLOAD_INVALIDO', errorPayload, { eventId: p.eventId });
 
+  // Un cobro de caja con alias también saca a ese comensal del reparto
+  // "igual". Antes de las marcas de idempotencia: si falla, el reintento del
+  // backend lo vuelve a intentar (marcarPago es idempotente). Con saldo 0 no
+  // se anota (la mesa se libera; ver el webhook).
+  const conAlias = typeof p.comensal === 'string' && p.saldo_restante_centavos > 0;
+  if (conAlias) await ctx.estadoMesas.marcarPago(p.id_mesa, p.comensal);
+
   // Doble guardia, como order:created: por eventId (reintento exacto) y por
   // id_transaccion (el backend reintenta el mismo cobro con otro eventId).
   // Se reservan ambas claves; si cualquiera ya existía, es un duplicado.
@@ -413,6 +435,7 @@ async function difundirPagoConfirmado(ctx, p) {
     saldoCentavos: p.saldo_restante_centavos,
     referencia: p.referencia_externa,
   });
+  if (conAlias) ctx.presencia.programar(p.id_mesa);
   return exito({ eventId: p.eventId, duplicado: false });
 }
 

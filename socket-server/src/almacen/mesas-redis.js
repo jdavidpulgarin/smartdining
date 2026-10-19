@@ -21,7 +21,17 @@ function crearEstadoMesasRedis({ cliente }) {
     },
     /** La sesión de mesa terminó: nada de su estado de sala pasa al grupo siguiente. */
     async limpiarMesa(idMesa) {
-      await cliente.del([llave(idMesa, 'cuenta'), llave(idMesa, 'llamada')]);
+      await cliente.del([llave(idMesa, 'cuenta'), llave(idMesa, 'llamada'), llave(idMesa, 'pagaron')]);
+    },
+    /** Anota que `alias` pagó en esta sesión (hash sd:mesa:{ID}:pagaron, idempotente). */
+    async marcarPago(idMesa, alias) {
+      const k = llave(idMesa, 'pagaron');
+      await cliente.hSet(k, alias, alias);
+      await cliente.expire(k, TTL_CUENTA_SEG);
+    },
+    /** Alias que ya pagaron en esta sesión, ordenados. */
+    async pagaron(idMesa) {
+      return (await cliente.hVals(llave(idMesa, 'pagaron'))).sort((a, b) => a.localeCompare(b));
     },
     /** true si la mesa puede llamar ahora (y deja la marca por `segundos`). */
     async reservarLlamada(idMesa, segundos) {

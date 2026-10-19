@@ -18,49 +18,46 @@ const { crearRedisFalso } = require('./redis-falso');
 // ---------------------------------------------------------------------------
 
 test('total: cobra el saldo completo de la mesa', () => {
-  assert.deepStrictEqual(calcularMonto({ modo: 'total', cuenta: cuenta(5, 9_000_000, 6_000_000), comensal: 'Ana', presentes: 3 }), { montoCentavos: 6_000_000 });
+  assert.deepStrictEqual(calcularMonto({ modo: 'total', cuenta: cuenta(5, 9_000_000, 6_000_000), comensal: 'Ana', personas: 3 }), { montoCentavos: 6_000_000 });
 });
 
-test('igual: reparte el TOTAL entre los presentes, redondeado a pesos', () => {
+test('igual: reparte el SALDO entre quienes faltan por pagar, redondeado a pesos', () => {
   const c = cuenta(5, 10_000_000); // $100.000 entre 3 → $33.333 c/u
-  assert.deepStrictEqual(calcularMonto({ modo: 'igual', cuenta: c, comensal: 'Ana', presentes: 3 }), { montoCentavos: 3_333_300 });
+  assert.deepStrictEqual(calcularMonto({ modo: 'igual', cuenta: c, comensal: 'Ana', personas: 3 }), { montoCentavos: 3_333_300 });
   assert.strictEqual(3_333_300 % 100, 0, 'en pesos enteros');
 });
 
-test('igual: el último cubre el residuo y nadie paga más que el saldo', () => {
-  const total = 10_000_000;
-  let saldo = total;
-  const pagos = [];
-  for (let i = 0; i < 3; i += 1) {
-    const { montoCentavos } = calcularMonto({ modo: 'igual', cuenta: cuenta(5, total, saldo), comensal: 'X', presentes: 3 });
-    assert.ok(montoCentavos <= saldo);
-    pagos.push(montoCentavos);
-    saldo -= montoCentavos;
-  }
-  assert.deepStrictEqual(pagos, [3_333_300, 3_333_300, 3_333_400]);
-  assert.strictEqual(saldo, 0);
-  // Total con centavos sueltos: la parte se redondea a pesos y el último
-  // absorbe la diferencia exacta, sin pasarse del saldo.
-  const c = cuenta(5, 1_000_050, 1_000_050); // $10.000,50 entre 2 → parte $5.000
-  const a = calcularMonto({ modo: 'igual', cuenta: c, comensal: 'X', presentes: 2 }).montoCentavos;
-  const b = calcularMonto({ modo: 'igual', cuenta: cuenta(5, 1_000_050, 1_000_050 - a), comensal: 'X', presentes: 2 }).montoCentavos;
+test('igual: el último (n = 1) cubre el saldo exacto, con centavos sueltos incluidos', () => {
+  // $10.000,50 entre 2 → parte $5.000; el último paga $5.000,50.
+  const a = calcularMonto({ modo: 'igual', cuenta: cuenta(5, 1_000_050), comensal: 'X', personas: 2 }).montoCentavos;
+  assert.strictEqual(a, 500_000);
+  const b = calcularMonto({ modo: 'igual', cuenta: cuenta(5, 1_000_050, 1_000_050 - a), comensal: 'X', personas: 1 }).montoCentavos;
   assert.strictEqual(a + b, 1_000_050);
 });
 
+test('igual: nunca más que el saldo; parte que redondea a 0 → el saldo', () => {
+  // $0,30 entre 2: la parte redondea a $0 → se cobra el saldo.
+  assert.deepStrictEqual(calcularMonto({ modo: 'igual', cuenta: cuenta(5, 30), comensal: 'X', personas: 2 }), { montoCentavos: 30 });
+  // $1,50 entre 2: la parte redondea a $1 (< saldo) → $1.
+  assert.deepStrictEqual(calcularMonto({ modo: 'igual', cuenta: cuenta(5, 150), comensal: 'X', personas: 2 }), { montoCentavos: 100 });
+  // $1 entre 2: redondea a $1 = saldo → el saldo, no más.
+  assert.deepStrictEqual(calcularMonto({ modo: 'igual', cuenta: cuenta(5, 100), comensal: 'X', personas: 2 }), { montoCentavos: 100 });
+});
+
 test('igual: sin presencia cuenta como 1 persona', () => {
-  assert.deepStrictEqual(calcularMonto({ modo: 'igual', cuenta: cuenta(5, 500_000), comensal: 'Ana', presentes: 0 }), { montoCentavos: 500_000 });
+  assert.deepStrictEqual(calcularMonto({ modo: 'igual', cuenta: cuenta(5, 500_000), comensal: 'Ana', personas: 0 }), { montoCentavos: 500_000 });
 });
 
 test('propio: el saldo de ese alias; 0 o desconocido → SIN_SALDO; nunca más que el saldo de la mesa', () => {
   const c = cuenta(5, 9_000_000, 2_000_000, { Ana: 2_500_000, Beto: 0 });
-  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Ana', presentes: 2 }), { montoCentavos: 2_000_000 });
-  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Beto', presentes: 2 }), { error: 'SIN_SALDO' });
-  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Zoe', presentes: 2 }), { error: 'SIN_SALDO' });
+  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Ana', personas: 2 }), { montoCentavos: 2_000_000 });
+  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Beto', personas: 2 }), { error: 'SIN_SALDO' });
+  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Zoe', personas: 2 }), { error: 'SIN_SALDO' });
 });
 
 test('saldo 0 → SIN_SALDO en cualquier modo', () => {
   for (const modo of ['total', 'igual', 'propio']) {
-    assert.deepStrictEqual(calcularMonto({ modo, cuenta: cuenta(5, 100, 0, { Ana: 0 }), comensal: 'Ana', presentes: 1 }), { error: 'SIN_SALDO' });
+    assert.deepStrictEqual(calcularMonto({ modo, cuenta: cuenta(5, 100, 0, { Ana: 0 }), comensal: 'Ana', personas: 1 }), { error: 'SIN_SALDO' });
   }
 });
 
