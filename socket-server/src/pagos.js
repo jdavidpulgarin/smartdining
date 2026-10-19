@@ -86,13 +86,9 @@ async function crearIntencionPago(req, res, ctx) {
     return enviarJson(res, status, respuesta);
   };
 
-  // Una sola intención pendiente por comensal: si ya hay una, es esa.
-  const pendiente = await ctx.almacenPagos.obtenerPendiente(idMesa, comensal);
-  if (pendiente) {
-    const intencion = await ctx.almacenPagos.obtener(pendiente);
-    if (intencion && intencion.estado === 'pendiente') return responder({ ...intencion, referencia: pendiente }, 200);
-  }
-
+  // La cuenta se consulta SIEMPRE, también si ya hay una intención pendiente:
+  // solo así se sabe si su monto sigue valiendo. Sin backend no se cobra con
+  // datos viejos (503).
   let cuenta;
   try {
     cuenta = await ctx.backend.get(`/api/mesas/${idMesa}/cuenta/interno`);
@@ -115,6 +111,18 @@ async function crearIntencionPago(req, res, ctx) {
   });
   if (monto.error) throw new ErrorHttp(409, 'SIN_SALDO', 'No hay saldo por pagar en ese modo');
 
+  // Una sola intención pendiente por comensal. Se reutiliza solo si es del
+  // mismo modo y por el mismo monto recalculado; si no (cambió de modo, llegó
+  // un pedido o cambió la presencia), se reemplaza por una nueva.
+  const pendiente = await ctx.almacenPagos.obtenerPendiente(idMesa, comensal);
+  if (pendiente) {
+    const vigente = await ctx.almacenPagos.obtener(pendiente);
+    if (vigente && vigente.estado === 'pendiente'
+      && vigente.modo === cuerpo.modo && vigente.monto_centavos === monto.montoCentavos) {
+      return responder({ ...vigente, referencia: pendiente }, 200);
+    }
+  }
+
   const ahora = Date.now();
   const referencia = generarReferencia(idMesa, () => ahora);
   const intencion = {
@@ -126,20 +134,32 @@ async function crearIntencionPago(req, res, ctx) {
     creada_en: new Date(ahora).toISOString(),
     expira_en: new Date(ahora + ttlSeg * 1000).toISOString(),
   };
-  // Primero la intención y luego la marca de pendiente (SET NX): si otra
-  // petición del mismo comensal ganó la carrera, se descarta la nuestra.
+  // Primero la intención y luego la marca de pendiente (SET NX, o cambio
+  // atómico si reemplaza a otra): si otra petición del mismo comensal ganó la
+  // carrera, se descarta la nuestra.
   await ctx.almacenPagos.guardarIntencion(referencia, intencion, ttlSeg);
-  const ganadora = await ctx.almacenPagos.reservarPendiente(idMesa, comensal, referencia, ttlSeg);
+  const ganadora = pendiente
+    ? await ctx.almacenPagos.reemplazarPendiente(idMesa, comensal, pendiente, referencia, ttlSeg)
+    : await ctx.almacenPagos.reservarPendiente(idMesa, comensal, referencia, ttlSeg);
   if (ganadora !== referencia) {
     await ctx.almacenPagos.borrarIntencion(referencia);
     const otra = await ctx.almacenPagos.obtener(ganadora);
     if (otra) return responder({ ...otra, referencia: ganadora }, 200);
   }
+  // La vieja no se borra: si ya se pagó en otra pestaña, su webhook todavía
+  // se registra (ver compararTransaccion). Se guarda 7 días, como una resuelta.
+  if (pendiente) await ctx.almacenPagos.marcarReemplazada(pendiente, referencia, TTL_INTENCION_RESUELTA_SEG);
   return responder({ ...intencion, referencia }, 201);
 }
 
-// Una intención ya resuelta se conserva 7 días para reconocer reintentos tardíos.
+// Una intención ya resuelta (o reemplazada) se conserva 7 días para reconocer
+// reintentos tardíos.
 const TTL_INTENCION_RESUELTA_SEG = 7 * 24 * 60 * 60;
+
+// Estados de una intención que el webhook acepta como "se esperaba este cobro".
+// Una reemplazada sigue valiendo: el comensal pudo pagarla en otra pestaña
+// antes de pedir la nueva, y ese dinero ya salió de su cuenta.
+const ESTADOS_COBRABLES = ['pendiente', 'reemplazada'];
 const ESTADOS_FALLIDOS = { DECLINED: 'rechazada', ERROR: 'error', VOIDED: 'anulada' };
 
 /**
@@ -153,7 +173,7 @@ function compararTransaccion({ evento, tx, intencion }) {
   if (tx.estado !== 'APPROVED') return 'estado_no_aprobado';
   if (tx.referencia !== evento.referencia) return 'referencia_distinta';
   if (!intencion) return 'referencia_desconocida';
-  if (intencion.estado !== 'pendiente') return 'intencion_no_pendiente';
+  if (!ESTADOS_COBRABLES.includes(intencion.estado)) return 'intencion_no_pendiente';
   // EXACTAMENTE igual: ni un centavo de menos (pago parcial con la firma de
   // otra intención) ni de más.
   if (tx.monto_centavos !== intencion.monto_centavos) return 'monto_distinto';
@@ -256,9 +276,10 @@ async function alertarPago(ctx, { evento, tx, intencion, motivo }) {
 /** Un pago rechazado o con error libera al comensal para que pueda reintentar. */
 async function registrarFallo(ctx, evento) {
   const intencion = await ctx.almacenPagos.obtener(evento.referencia);
-  if (!intencion || intencion.estado !== 'pendiente') return;
+  if (!intencion || !ESTADOS_COBRABLES.includes(intencion.estado)) return;
   await ctx.almacenPagos.actualizarEstado(evento.referencia, ESTADOS_FALLIDOS[evento.estado] || 'fallida', TTL_INTENCION_RESUELTA_SEG);
-  await ctx.almacenPagos.liberarPendiente(intencion.id_mesa, intencion.comensal);
+  // Si era una reemplazada, la marca apunta a la nueva y no se toca.
+  await ctx.almacenPagos.liberarPendiente(intencion.id_mesa, intencion.comensal, evento.referencia);
 }
 
 /**
@@ -315,7 +336,10 @@ async function recibirEventoPasarela(req, res, ctx) {
     }
 
     await ctx.almacenPagos.actualizarEstado(evento.referencia, 'pagada', TTL_INTENCION_RESUELTA_SEG);
-    await ctx.almacenPagos.liberarPendiente(intencion.id_mesa, intencion.comensal);
+    // Solo libera la marca si apunta a ESTA referencia: si se pagó una
+    // reemplazada, la intención nueva sigue pendiente (y, como el saldo
+    // cambió, se reemplazará en la próxima petición).
+    await ctx.almacenPagos.liberarPendiente(intencion.id_mesa, intencion.comensal, evento.referencia);
 
     // Recién ahora, con el pago guardado en la base, se anuncia. Si el saldo
     // llegó a 0, el backend libera la mesa y avisa por /internal/mesa-liberada.

@@ -163,16 +163,22 @@ test('propio sin saldo → 409 SIN_SALDO', async (t) => {
   assert.deepStrictEqual([r.status, (await r.json()).codigo], [409, 'SIN_SALDO']);
 });
 
-test('una sola intención pendiente por comensal: otra petición devuelve la misma', async (t) => {
-  const { sentar, pedir, backend } = await escenario(t);
+test('una sola intención pendiente por comensal: mismo modo y monto devuelve la misma; otro modo la reemplaza', async (t) => {
+  const { s, sentar, pedir } = await escenario(t);
   const ana = await sentar('Ana');
+  await sentar('Beto');
   const a = await (await pedir(ana, cuerpo('total'))).json();
-  const r2 = await pedir(ana, cuerpo('igual'));
+  const r2 = await pedir(ana, cuerpo('total'));
   assert.strictEqual(r2.status, 200);
   const b = await r2.json();
-  assert.strictEqual(b.referencia, a.referencia);
-  assert.strictEqual(b.monto_en_centavos, a.monto_en_centavos);
-  assert.strictEqual(backend.llamadas.filter((l) => l.ruta.includes('/cuenta/')).length, 1, 'no vuelve a pedir la cuenta');
+  assert.deepStrictEqual([b.referencia, b.monto_en_centavos], [a.referencia, a.monto_en_centavos]);
+  // Más casos (cuenta cambiada, otra pestaña, Redis) en pagos-reemplazo.test.js.
+  const r3 = await pedir(ana, cuerpo('igual'));
+  assert.strictEqual(r3.status, 201);
+  const c = await r3.json();
+  assert.notStrictEqual(c.referencia, a.referencia);
+  assert.strictEqual(c.monto_en_centavos, 4_500_000);
+  assert.strictEqual((await s.almacenPagos.obtener(a.referencia)).estado, 'reemplazada');
 });
 
 test('mismo eventId: misma respuesta', async (t) => {

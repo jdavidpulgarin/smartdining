@@ -708,7 +708,7 @@ Auth: `Authorization: Bearer <JWT del comensal>` (sesión de mesa vigente). La m
 Cualquier otro campo (`monto`, `id_mesa`, `precio`…) **se ignora**: el monto lo calcula el
 servidor con la cuenta del backend.
 
-`201` (o `200` si es la misma intención pendiente o el mismo `eventId`):
+`201` (o `200` si es la misma intención pendiente, con el mismo modo y monto, o el mismo `eventId`):
 
 ```json
 {
@@ -739,7 +739,16 @@ Reglas de la cuenta dividida:
   redondeado a pesos. Quien paga de último cubre el residuo del redondeo; nunca se cobra más
   que el saldo.
 - **propio**: el saldo de ese alias según el backend (nunca más que el saldo de la mesa).
-- **Una sola intención pendiente por comensal**: si ya tiene una sin pagar, se devuelve esa.
+- **Una sola intención pendiente por comensal**, reutilizada **solo si sigue valiendo**. En
+  cada petición el servidor consulta la cuenta y recalcula el monto:
+  - mismo `modo` **y** mismo monto recalculado → `200` con la misma intención (misma
+    referencia y firma);
+  - otro `modo`, o el monto cambió (pedido nuevo, otro pago, cambio de presencia en `igual`)
+    → `201` con una intención **nueva**. La vieja no se borra: queda `reemplazada` 7 días y
+    su webhook se sigue aceptando por **su** monto exacto (§8.3), por si ya se pagó en otra
+    pestaña;
+  - si el backend no responde → `503 ERROR_INTERNO`, aunque haya una pendiente: nunca se
+    cobra con un monto viejo.
 - La intención vive `PAGOS_TTL_MINUTOS` (30). Después el widget la rechaza (`expiration-time`
   va dentro de la firma).
 
@@ -810,8 +819,15 @@ Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún fron
    comensal puede pedir otra. No se registra ni se anuncia nada.
 6. `APPROVED` → **reverificación** con `GET /v1/transactions/{id}` (llave privada, 5 s de
    timeout). Debe coincidir: `status APPROVED`, la misma referencia, una intención conocida y
-   **pendiente**, `amount_in_cents` **exactamente** igual al esperado y `currency COP`.
+   **pendiente o reemplazada** (§8.1), `amount_in_cents` **exactamente** igual al esperado
+   por **esa** intención y `currency COP`.
    Si algo no cuadra → intento fallido + `pago:alerta` (§8.5), `200`.
+   - Pago de una **reemplazada** (el comensal la pagó en otra pestaña): se registra como
+     cualquier otro. Si además pagó la nueva y la suma excede el saldo, el backend responde
+     `409` a la segunda → intento fallido + `pago:alerta` (`backend_rechazo_409`) para que
+     caja devuelva el dinero. Ningún pago real se pierde en silencio.
+   - Al resolverse una intención solo se libera la marca de pendiente del comensal **si
+     apunta a esa referencia**: pagar o rechazar una reemplazada no toca la intención nueva.
 7. **Registro** en el backend (`POST /api/transacciones/internal`, §8.4). **Solo si el backend
    confirma** se emite `payment:confirmed`.
 8. Si la pasarela o el backend no responden (o dan 5xx) → `503`, se libera la marca de
@@ -1044,3 +1060,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `order:created` · `ingredientes[].paso` | Los ingredientes no traían su paso | Cada ingrediente lleva `paso` (nombre del paso o `null`) | Nadie: compatible hacia atrás. KDS: agrupar por `paso` |
 | `order:created` · carrito y dueños | Vaciaba el carrito de **toda** la mesa; dueños = todos los alias del carrito | Quita solo las líneas de `items[].comensal`; sin alias no toca el carrito; dueños = solo esos alias | PWA: nada (sigue reemplazando el carrito con `cart:updated`). Backend: mantener `comensal` en cada ítem |
 | Catálogo · estado de endpoints | `/pagos/intencion`, `/pagos/webhook`, `/internal/ingrediente-disponibilidad`, `/internal/payment-confirmed` y sus eventos (`payment:confirmed`, `pago:alerta`, `ingrediente:disponibilidad`, `mesa:liberada` con `motivo: "pagada"`) figuraban como «Espera backend» | Estables `/internal/ingrediente-disponibilidad` (PR #70) y `/internal/payment-confirmed` (PR #58). Los pagos en línea (`/pagos/*`, `pago:alerta` y la parte Wompi de `payment:confirmed` y `mesa:liberada`) quedan «Conectado (falta prueba E2E con Wompi sandbox)» (PR #33) | Nadie: solo documentación |
+| `POST /pagos/intencion` · reutilizar la pendiente | Si el comensal tenía una intención pendiente se devolvía esa, sin mirar `modo` ni monto (se cobraba el monto viejo hasta 30 min) | Se reutiliza solo con el mismo `modo` y el mismo monto recalculado; si no, intención nueva y la vieja queda `reemplazada` 7 días. El webhook acepta una reemplazada por su monto exacto. Sin backend → `503` aunque haya pendiente | PWA: usar siempre la respuesta más reciente (puede traer otra `referencia`). Backend: nada |
