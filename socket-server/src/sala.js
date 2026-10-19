@@ -182,19 +182,21 @@ function registrarSala(socket, ctx) {
 }
 
 /**
- * Rutas internas de sala (solo backend, con x-internal-key).
+ * Ruta interna "algo del menú se agotó o volvió" (solo backend, con
+ * x-internal-key). Se difunde a TODOS los sockets: es información pública del
+ * menú y le sirve a cada mesa, a la cocina y al panel. Solo se reenvían el id
+ * y `disponible` validados; cualquier otro campo del cuerpo se descarta.
  *
- * POST /internal/ingrediente-disponibilidad — un ingrediente se agotó o volvió.
- * Se difunde a TODOS los sockets: es información pública del menú y le sirve
- * a cada mesa (el constructor deshabilita la opción en vivo), a la cocina y al
- * panel. Solo se reenvían los dos campos validados.
+ * - campoId: nombre del id en el cuerpo y en el evento (id_ingrediente, id_plato).
+ * - evento: evento de socket que se emite.
+ * - prefijo: clave de idempotencia por eventId (backend:{prefijo}:{eventId}).
  */
-const rutasSala = {
-  'POST /internal/ingrediente-disponibilidad': async (req, res, ctx) => {
+function rutaDisponibilidad({ campoId, evento, prefijo }) {
+  return async (req, res, ctx) => {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    if (!Number.isSafeInteger(cuerpo.id_ingrediente) || cuerpo.id_ingrediente <= 0) {
-      throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'id_ingrediente debe ser un entero positivo');
+    if (!Number.isSafeInteger(cuerpo[campoId]) || cuerpo[campoId] <= 0) {
+      throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', `${campoId} debe ser un entero positivo`);
     }
     if (typeof cuerpo.disponible !== 'boolean') {
       throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'disponible debe ser true o false');
@@ -202,17 +204,34 @@ const rutasSala = {
     // eventId opcional: si el backend reintenta el mismo aviso, no se repite.
     if (cuerpo.eventId !== undefined) {
       if (!esEventIdValido(cuerpo.eventId)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
-      if (!(await ctx.registro.reservar(`backend:ingrediente:${cuerpo.eventId}`))) {
+      if (!(await ctx.registro.reservar(`backend:${prefijo}:${cuerpo.eventId}`))) {
         return enviarJson(res, 200, { ok: true, duplicado: true });
       }
     }
-    ctx.io.emit('ingrediente:disponibilidad', {
-      id_ingrediente: cuerpo.id_ingrediente,
+    ctx.io.emit(evento, {
+      [campoId]: cuerpo[campoId],
       disponible: cuerpo.disponible,
       emitidoEn: new Date().toISOString(),
     });
     return enviarJson(res, 200, { ok: true, duplicado: false });
-  },
+  };
+}
+
+/**
+ * Rutas internas de sala (solo backend, con x-internal-key).
+ *
+ * POST /internal/ingrediente-disponibilidad — un ingrediente se agotó o volvió
+ * (el constructor de la PWA deshabilita la opción en vivo).
+ * POST /internal/plato-disponibilidad — un plato se agotó o volvió (lo llama el
+ * backend después del COMMIT de PATCH /api/platos/:id/disponible).
+ */
+const rutasSala = {
+  'POST /internal/ingrediente-disponibilidad': rutaDisponibilidad({
+    campoId: 'id_ingrediente', evento: 'ingrediente:disponibilidad', prefijo: 'ingrediente',
+  }),
+  'POST /internal/plato-disponibilidad': rutaDisponibilidad({
+    campoId: 'id_plato', evento: 'plato:disponibilidad', prefijo: 'plato',
+  }),
 };
 
 module.exports = {

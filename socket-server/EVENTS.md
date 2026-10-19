@@ -79,6 +79,7 @@ contratos coinciden, pero aún no se ha hecho un pago real de punta a punta.
 | `mesa:presencia` | `room:admin` | No (estado completo) | Estable | [§5.2](#52-mesapresencia) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable. `motivo: "pagada"`: caja Estable (PR #58); en línea Conectado (falta prueba E2E con Wompi sandbox) (PR #33) | [§5.1](#51-mesaliberada) |
 | `ingrediente:disponibilidad` | todos los sockets | Opcional | Estable (el backend lo llama desde PR #70) | [§5.3](#53-ingredientedisponibilidad) |
+| `plato:disponibilidad` | todos los sockets | Opcional | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Caja: Estable vía `/internal/payment-confirmed` (PR #58). Wompi: Conectado (falta prueba E2E con Wompi sandbox), vía webhook con cuenta ([§8.2](#82-contrato-que-necesita-del-backend)) y registro ([§8.4](#84-contrato-de-registro-que-necesita-del-backend)) en el backend (PR #33) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6), [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 | `pago:alerta` | `room:admin` | Sí | Conectado (falta prueba E2E con Wompi sandbox); el backend guarda el intento (PR #33) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
 
@@ -94,6 +95,7 @@ contratos coinciden, pero aún no se ha hecho un pago real de punta a punta.
 | `POST /internal/order-created`, `/internal/order-status` | backend | Estable (el backend ya las usa) | [§6.3](#63-cómo-emite-el-backend-ordercreated--orderstatus) |
 | `POST /internal/qr-rotado`, `/internal/mesa-liberada` | backend | Estable (el backend ya las usa) | [§6](#6-endpoints-http) |
 | `POST /internal/ingrediente-disponibilidad` | backend | Estable (el backend ya la usa, PR #70) | [§5.3](#53-ingredientedisponibilidad) |
+| `POST /internal/plato-disponibilidad` | backend (`PATCH /api/platos/:id/disponible`) | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
 | `POST /internal/payment-confirmed` | backend (cobros de caja) | Estable (el backend la llama desde `registrarPago`, PR #58) | [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
@@ -534,6 +536,7 @@ hasta que se libere.
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
 | `mesa:presencia` | `room:admin` | `{ id_mesa, comensales: [alias], total }` (ver §5.2) |
 | `ingrediente:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_ingrediente, disponible, emitidoEn }` |
+| `plato:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_plato, disponible, emitidoEn }` |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | `{ id_mesa, motivo, emitidoEn }` (`motivo`: `pagada` o `liberada`) |
 
 Notas para el frontend:
@@ -605,6 +608,34 @@ El backend avisa que un ingrediente se agotó (`disponible: false`) o volvió (`
 `POST /internal/ingrediente-disponibilidad`. El constructor de la PWA debe deshabilitar o
 habilitar esa opción en vivo; el KDS puede mostrar una alerta. No lo puede emitir un cliente.
 
+### 5.4. `plato:disponibilidad`
+
+El backend avisa que un plato se agotó (`disponible: false`) o volvió (`true`) con
+`POST /internal/plato-disponibilidad`, **después del COMMIT** de
+`PATCH /api/platos/:id/disponible` (roles `admin` y `cocina`). Se comporta igual que
+[`ingrediente:disponibilidad`](#53-ingredientedisponibilidad):
+
+```http
+POST /internal/plato-disponibilidad
+x-internal-key: <INTERNAL_API_KEY>
+Content-Type: application/json
+
+{ "id_plato": 7, "disponible": false, "eventId": "<uuid opcional>" }
+```
+
+- `id_plato`: entero positivo (seguro). `disponible`: `true` o `false` estricto. Si no,
+  `400 PAYLOAD_INVALIDO`; un cuerpo que no es un objeto JSON, `400 JSON_INVALIDO`. Sin
+  `x-internal-key` o con una equivocada, `401 NO_AUTORIZADO`. En ningún error se emite nada.
+- `eventId` opcional; si viene, debe ser un UUID. Un reintento con el mismo `eventId`
+  responde `{ "ok": true, "duplicado": true }` y no reemite (clave propia
+  `backend:plato:{eventId}`, independiente de la de ingredientes). Sin `eventId`, cada
+  llamada se difunde.
+- Respuesta normal: `200 { "ok": true, "duplicado": false }`.
+- Emite a **todos** los sockets `plato:disponibilidad { id_plato, disponible, emitidoEn }`.
+  Cualquier otro campo del cuerpo se descarta. La PWA debe mostrar u ocultar (o marcar
+  como agotado) el plato en el menú en vivo; el KDS y el panel pueden refrescar su lista.
+  No lo puede emitir un cliente.
+
 ---
 
 ## 6. Endpoints HTTP
@@ -625,6 +656,7 @@ CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
 | POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` (token de 1 a 255 caracteres) → reenvía `qr:actualizado` a la pantalla de esa mesa |
 | POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "motivo": "pagada" }` (`motivo` opcional: `pagada` o `liberada`, por defecto `liberada`) → revoca los QR, emite `mesa:liberada`, desconecta a los comensales y borra carrito y suscripciones. Responde `{ ok, duplicado }` |
 | POST | `/internal/ingrediente-disponibilidad` | Header `x-internal-key` | Solo backend. `{ "id_ingrediente": 12, "disponible": false, "eventId": "<uuid opcional>" }` → emite `ingrediente:disponibilidad`. Con `eventId`, un reintento responde `duplicado: true` |
+| POST | `/internal/plato-disponibilidad` | Header `x-internal-key` | Solo backend, tras el COMMIT de `PATCH /api/platos/:id/disponible`. `{ "id_plato": 7, "disponible": false, "eventId": "<uuid opcional>" }` → emite `plato:disponibilidad` (§5.4). Con `eventId`, un reintento responde `duplicado: true` |
 | POST | `/internal/payment-confirmed` | Header `x-internal-key` | Solo backend. Cobro de caja (efectivo, datáfono o abono) ya registrado → emite `payment:confirmed` con el mismo payload que Wompi (§8.6) |
 | POST | `/pagos/intencion` | Bearer JWT `comensal` | Intención de pago (§8.1) |
 | POST | `/pagos/webhook` | Checksum de Wompi | Eventos de Wompi (§8.3) |
@@ -1091,3 +1123,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `order:created` · carrito y dueños | Vaciaba el carrito de **toda** la mesa; dueños = todos los alias del carrito | Quita solo las líneas de `items[].comensal`; sin alias no toca el carrito; dueños = solo esos alias | PWA: nada (sigue reemplazando el carrito con `cart:updated`). Backend: mantener `comensal` en cada ítem |
 | `order:created` · orden y reintentos | Reservaba el aviso antes de tocar el carrito: si Redis fallaba a mitad de camino, el reintento llegaba como duplicado y las líneas nunca se quitaban | Primero quita líneas y guarda dueños, después reserva por `id_pedido` y emite; un reintento ante `5xx`/`ERROR_INTERNO` completa lo que faltó. `cart:updated` llega **antes** que `order:created` | Nadie que dependa del orden. Backend: reintentar ante `5xx` con el mismo `eventId` es seguro |
 | Catálogo · estado de endpoints | `/pagos/intencion`, `/pagos/webhook`, `/internal/ingrediente-disponibilidad`, `/internal/payment-confirmed` y sus eventos (`payment:confirmed`, `pago:alerta`, `ingrediente:disponibilidad`, `mesa:liberada` con `motivo: "pagada"`) figuraban como «Espera backend» | Estables `/internal/ingrediente-disponibilidad` (PR #70) y `/internal/payment-confirmed` (PR #58). Los pagos en línea (`/pagos/*`, `pago:alerta` y la parte Wompi de `payment:confirmed` y `mesa:liberada`) quedan «Conectado (falta prueba E2E con Wompi sandbox)» (PR #33) | Nadie: solo documentación |
+| `POST /internal/plato-disponibilidad` · `plato:disponibilidad` | — | Nuevos: el backend avisa tras el COMMIT de `PATCH /api/platos/:id/disponible`; se difunde `{ id_plato, disponible, emitidoEn }` a todos los sockets (mismas reglas que `ingrediente:disponibilidad`, idempotencia propia `backend:plato:{eventId}`) | Backend: llamarla después del COMMIT. PWA, KDS y panel: escuchar `plato:disponibilidad` |
