@@ -87,9 +87,34 @@ export async function crearPedido({ lineas = [], notasGenerales = '' } = {}) {
   });
 }
 
+/**
+ * Lista los pedidos de la mesa actual para el comensal.
+ * El backend extrae el id_mesa directamente del JWT del comensal.
+ *
+ * @param {number|string|null} [idMesa] - Opcional, usado en modo simulado para filtrar
+ * @returns {Promise<Array<object>>} Lista de pedidos de la mesa
+ */
+export async function listarPedidosMesa(idMesa = null) {
+  if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+    const { listarPedidosMesaSimulados } = await import('./pedidoSimulado');
+    return listarPedidosMesaSimulados(idMesa);
+  }
+
+  const sesion = obtenerSesion();
+  const token = sesion?.token;
+
+  const data = await pedirJson('/pedidos/mesa', {
+    method: 'GET',
+    token,
+  });
+
+  return Array.isArray(data?.pedidos) ? data.pedidos : [];
+}
+
 export default {
   NOTAS_MAX_SERVIDOR,
   NOTAS_GENERALES_MAX_SERVIDOR,
   MAX_INGREDIENTES_POR_ITEM,
   crearPedido,
+  listarPedidosMesa,
 };

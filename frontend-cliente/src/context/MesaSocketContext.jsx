@@ -72,6 +72,7 @@ export function MesaSocketProvider({ children }) {
         setCarrito(nuevoCarrito);
       }),
       nuevoCliente.on('sesion_cerrada', (motivo) => {
+        if (motivo === 'MESA_LIBERADA') return;
         despedirRef.current?.(motivo);
       }),
       nuevoCliente.on('mesa:liberada', (ev) => {

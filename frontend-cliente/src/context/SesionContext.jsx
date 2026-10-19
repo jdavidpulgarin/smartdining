@@ -64,28 +64,33 @@ function obtenerEstadoInicial() {
     // Ignorar error de lectura de URL
   }
 
+  const sesionAlmacenada = leerSesionAlmacenada();
+  const mesaInicial =
+    sesionAlmacenada?.numeroMesa ?? sesionAlmacenada?.idMesa ?? null;
+
   if (tokenUrl) {
     return {
-      sesion: leerSesionAlmacenada(),
+      sesion: sesionAlmacenada,
       tokenQrPendiente: tokenUrl,
       estado: 'pide_nombre',
       error: null,
       enviando: false,
       recienUnido: false,
       motivoCierre: null,
+      ultimaMesa: mesaInicial,
     };
   }
 
-  const sesionGuardada = leerSesionAlmacenada();
-  if (sesionGuardada) {
+  if (sesionAlmacenada) {
     return {
-      sesion: sesionGuardada,
+      sesion: sesionAlmacenada,
       tokenQrPendiente: null,
       estado: 'activa',
       error: null,
       enviando: false,
       recienUnido: false,
       motivoCierre: null,
+      ultimaMesa: mesaInicial,
     };
   }
 
@@ -97,6 +102,7 @@ function obtenerEstadoInicial() {
     enviando: false,
     recienUnido: false,
     motivoCierre: null,
+    ultimaMesa: null,
   };
 }
 
@@ -147,6 +153,18 @@ export function SesionProvider({ children }) {
         // Ignorar errores de localStorage
       }
 
+      const motivosPrioritarios = ['pagada', 'liberada'];
+      const motivoFinal =
+        motivo === 'MESA_LIBERADA' && motivosPrioritarios.includes(prev.motivoCierre)
+          ? prev.motivoCierre
+          : motivo;
+
+      const ultimaMesa =
+        prev.sesion?.numeroMesa ??
+        prev.sesion?.idMesa ??
+        prev.ultimaMesa ??
+        null;
+
       return {
         sesion: null,
         tokenQrPendiente: null,
@@ -154,7 +172,8 @@ export function SesionProvider({ children }) {
         error: null,
         enviando: false,
         recienUnido: false,
-        motivoCierre: motivo,
+        motivoCierre: motivoFinal,
+        ultimaMesa,
       };
     });
   }, []);
@@ -294,6 +313,7 @@ export function SesionProvider({ children }) {
       enviando: state.enviando,
       recienUnido: state.recienUnido,
       motivoCierre: state.motivoCierre,
+      ultimaMesa: state.ultimaMesa,
       unirse,
       cerrarSesion,
       despedir,

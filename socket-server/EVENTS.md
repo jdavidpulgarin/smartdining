@@ -47,6 +47,8 @@ mesa) y lo **firma en el JWT**. El socket-server lo toma **solo del JWT**:
 Estado: **Estable** = implementado, probado y usable hoy. **Espera backend** =
 el socket-server ya lo implementa y lo prueba contra dobles, pero falta la parte
 del backend que lo dispara o lo alimenta (contrato en la sección indicada).
+**Conectado (falta prueba E2E con Wompi sandbox)** = las dos partes existen y sus
+contratos coinciden, pero aún no se ha hecho un pago real de punta a punta.
 
 ### Cliente → servidor (por socket, con ack)
 
@@ -75,10 +77,10 @@ del backend que lo dispara o lo alimenta (contrato en la sección indicada).
 | `mesa:llamar_mesero` | `room:admin` | Sí | Estable | [§4](#mesallamar_mesero) |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§4](#cuentasolicitada) |
 | `mesa:presencia` | `room:admin` | No (estado completo) | Estable | [§5.2](#52-mesapresencia) |
-| `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable; `motivo: "pagada"` espera backend | [§5.1](#51-mesaliberada) |
-| `ingrediente:disponibilidad` | todos los sockets | Opcional | Espera backend (nadie llama aún al endpoint) | [§5.3](#53-ingredientedisponibilidad) |
-| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Caja: ruta lista, espera que el backend la llame ([§8.6](#86-cobros-de-caja-post-internalpayment-confirmed)). Wompi: espera backend ([§8.2](#82-contrato-que-necesita-del-backend-pendiente-daniel), [§8.4](#84-contrato-de-registro-que-necesita-del-backend-pendiente-daniel)) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6), [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
-| `pago:alerta` | `room:admin` | Sí | Espera backend ([§8.5](#85-pagoalerta-e-intentos-fallidos)) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
+| `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable. `motivo: "pagada"`: caja Estable (PR #58); en línea Conectado (falta prueba E2E con Wompi sandbox) (PR #33) | [§5.1](#51-mesaliberada) |
+| `ingrediente:disponibilidad` | todos los sockets | Opcional | Estable (el backend lo llama desde PR #70) | [§5.3](#53-ingredientedisponibilidad) |
+| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Caja: Estable vía `/internal/payment-confirmed` (PR #58). Wompi: Conectado (falta prueba E2E con Wompi sandbox), vía webhook con cuenta ([§8.2](#82-contrato-que-necesita-del-backend)) y registro ([§8.4](#84-contrato-de-registro-que-necesita-del-backend)) en el backend (PR #33) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6), [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
+| `pago:alerta` | `room:admin` | Sí | Conectado (falta prueba E2E con Wompi sandbox); el backend guarda el intento (PR #33) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
 
 ### HTTP
 
@@ -87,12 +89,12 @@ del backend que lo dispara o lo alimenta (contrato en la sección indicada).
 | `GET /health` | Docker, nginx, Deploy | Estable | [§6](#6-endpoints-http) |
 | `POST /qr/generar`, `/qr/validar`, `/qr/pantalla` | personal / cualquiera / personal | Estable | [§6.1](#61-token-qr) |
 | `GET /push/clave-publica`, `POST`/`DELETE /push/suscripcion` | PWA del comensal | Estable | [§7](#7-web-push) |
-| `POST /pagos/intencion` | PWA del comensal | Espera backend (cuenta de la mesa) | [§8.1](#81-post-pagosintencion) |
-| `POST /pagos/webhook` | Wompi | Espera backend (registro) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6) |
+| `POST /pagos/intencion` | PWA del comensal | Conectado (falta prueba E2E con Wompi sandbox); el backend expone `GET /api/mesas/:id/cuenta/interno` (PR #33) | [§8.1](#81-post-pagosintencion) |
+| `POST /pagos/webhook` | Wompi | Conectado (falta prueba E2E con Wompi sandbox); el backend expone `POST /api/transacciones/internal` (PR #33) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6) |
 | `POST /internal/order-created`, `/internal/order-status` | backend | Estable (el backend ya las usa) | [§6.3](#63-cómo-emite-el-backend-ordercreated--orderstatus) |
 | `POST /internal/qr-rotado`, `/internal/mesa-liberada` | backend | Estable (el backend ya las usa) | [§6](#6-endpoints-http) |
-| `POST /internal/ingrediente-disponibilidad` | backend | Espera backend | [§5.3](#53-ingredientedisponibilidad) |
-| `POST /internal/payment-confirmed` | backend (cobros de caja) | Ruta lista, espera que el backend la llame | [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
+| `POST /internal/ingrediente-disponibilidad` | backend | Estable (el backend ya la usa, PR #70) | [§5.3](#53-ingredientedisponibilidad) |
+| `POST /internal/payment-confirmed` | backend (cobros de caja) | Estable (el backend la llama desde `registrarPago`, PR #58) | [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
 responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
@@ -810,7 +812,7 @@ checkout.open(() => { /* el resultado oficial llega por payment:confirmed, no po
 El resultado que muestra el widget **no** es la confirmación: la confirmación es el evento
 `payment:confirmed`, que solo se emite después de verificar el webhook y registrar el pago.
 
-### 8.2. Contrato que necesita del backend (pendiente: Daniel)
+### 8.2. Contrato que necesita del backend
 
 ```
 GET /api/mesas/:id/cuenta/interno
@@ -881,7 +883,7 @@ Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún fron
 > agrega `comensal` y `saldo_restante`. `monto` sigue en pesos. Cuando `saldo_restante` llega a
 > 0, el backend libera la mesa y llega `mesa:liberada` con `motivo: "pagada"`.
 
-### 8.4. Contrato de registro que necesita del backend (pendiente: Daniel)
+### 8.4. Contrato de registro que necesita del backend
 
 ```
 POST /api/transacciones/internal
@@ -926,7 +928,7 @@ x-internal-key: <INTERNAL_API_KEY>
 `transaccion_distinta`, `referencia_distinta`, `referencia_desconocida`,
 `intencion_no_pendiente`, `backend_rechazo_<status>`.
 
-Contrato pendiente (Daniel; y Jarrinson para la tabla):
+Contrato (el backend lo expone desde PR #33):
 
 ```
 POST /api/pagos/intentos-fallidos/interno
@@ -937,9 +939,17 @@ x-internal-key: <INTERNAL_API_KEY>
 → 201 { "ok": true }
 ```
 
-Guarda en `intentos_pago_fallidos` (`razon_rechazo` = motivo). Ojo: hoy `id_pedido` es
-`NOT NULL` y una referencia desconocida no tiene pedido; hace falta permitir `NULL` o agregar
-`id_mesa` y `referencia_externa`. Si responde 5xx, el webhook responde 503 y Wompi reintenta.
+Guarda en `intentos_pago_fallidos` (`razon_rechazo` = motivo), con `id_pedido` en `NULL`:
+`database/scripts/16_pagos_integracion.sql` ya permite `NULL` ahí y agregó `id_mesa`,
+`referencia_externa`, `id_transaccion_pasarela`, `pasarela` y `moneda`.
+
+- **Idempotente** por (`referencia_externa`, `id_transaccion_pasarela`, `motivo`): un reintento
+  responde `201` sin guardar dos filas.
+- **Tolerante**: un `id_mesa` que no existe, o un monto ausente, cero o negativo, se guardan como
+  `NULL` en vez de rechazar la alerta. `monto_esperado_centavos` se valida pero no se guarda (no
+  hay columna).
+- Un `4xx` se da por resuelto (la alerta no se reintenta). Si responde 5xx, el webhook responde
+  503 y Wompi reintenta.
 
 ### 8.6. Cobros de caja: `POST /internal/payment-confirmed`
 
@@ -1080,3 +1090,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `order:created` · `ingredientes[].paso` | Los ingredientes no traían su paso | Cada ingrediente lleva `paso` (nombre del paso o `null`) | Nadie: compatible hacia atrás. KDS: agrupar por `paso` |
 | `order:created` · carrito y dueños | Vaciaba el carrito de **toda** la mesa; dueños = todos los alias del carrito | Quita solo las líneas de `items[].comensal`; sin alias no toca el carrito; dueños = solo esos alias | PWA: nada (sigue reemplazando el carrito con `cart:updated`). Backend: mantener `comensal` en cada ítem |
 | `order:created` · orden y reintentos | Reservaba el aviso antes de tocar el carrito: si Redis fallaba a mitad de camino, el reintento llegaba como duplicado y las líneas nunca se quitaban | Primero quita líneas y guarda dueños, después reserva por `id_pedido` y emite; un reintento ante `5xx`/`ERROR_INTERNO` completa lo que faltó. `cart:updated` llega **antes** que `order:created` | Nadie que dependa del orden. Backend: reintentar ante `5xx` con el mismo `eventId` es seguro |
+| Catálogo · estado de endpoints | `/pagos/intencion`, `/pagos/webhook`, `/internal/ingrediente-disponibilidad`, `/internal/payment-confirmed` y sus eventos (`payment:confirmed`, `pago:alerta`, `ingrediente:disponibilidad`, `mesa:liberada` con `motivo: "pagada"`) figuraban como «Espera backend» | Estables `/internal/ingrediente-disponibilidad` (PR #70) y `/internal/payment-confirmed` (PR #58). Los pagos en línea (`/pagos/*`, `pago:alerta` y la parte Wompi de `payment:confirmed` y `mesa:liberada`) quedan «Conectado (falta prueba E2E con Wompi sandbox)» (PR #33) | Nadie: solo documentación |

@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { z } = require('zod');
 const mesasService = require('../services/mesas.service');
-const { ROL_COMENSAL } = require('../middleware/auth.middleware');
+const { ALGORITMO_JWT, ROL_COMENSAL } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
 const { extraerSid } = require('../services/qr.token');
 const aliasComensal = require('../services/alias-comensal');
@@ -349,7 +349,8 @@ async function crearSesionPorToken(req, res, next) {
     const token = jwt.sign(
       { id_mesa: mesa.id_mesa, sid, rol: ROL_COMENSAL, comensal: alias.alias },
       process.env.JWT_SECRET,
-      { expiresIn: COMENSAL_EXPIRES_IN }
+      // Algoritmo explícito, el mismo que exige requireAuth (ver ALGORITMO_JWT).
+      { algorithm: ALGORITMO_JWT, expiresIn: COMENSAL_EXPIRES_IN }
     );
 
     return res.status(201).json({

@@ -1,0 +1,227 @@
+/* Animaciones del seguimiento de pedidos (J-07) */
+.ilu * {
+  transform-box: fill-box;
+}
+
+.drop {
+  animation: drop 4s cubic-bezier(0.2, 0.8, 0.3, 1) infinite;
+}
+
+.sway {
+  transform-origin: 50% 0;
+  animation: sway 1.6s ease-in-out infinite;
+}
+
+.linea {
+  transform-origin: 0 50%;
+  animation: linea 4s ease-out infinite;
+}
+
+.l1 { animation-delay: 0s; }
+.l2 { animation-delay: 0.2s; }
+.l3 { animation-delay: 0.4s; }
+.l4 { animation-delay: 0.6s; }
+
+.sello {
+  transform-origin: 50% 50%;
+  animation: sello 4s cubic-bezier(0.2, 0.9, 0.3, 1.4) infinite;
+}
+
+.riel {
+  animation: riel 4s ease-in-out infinite;
+}
+
+.sacude {
+  transform-origin: 85% 50%;
+  animation: sacude 0.5s ease-in-out infinite;
+}
+
+.salta {
+  transform-origin: 50% 50%;
+  animation: salta 1.4s cubic-bezier(0.3, 0.6, 0.4, 1) infinite;
+}
+
+.d1 { animation-delay: 0s; }
+.d2 { animation-delay: 0.18s; }
+.d3 { animation-delay: 0.36s; }
+.d4 { animation-delay: 0.54s; }
+.d5 { animation-delay: 0.72s; }
+
+.llama {
+  transform-origin: 50% 100%;
+  animation: llama 0.35s ease-in-out infinite alternate;
+}
+
+.f2 { animation-delay: 0.1s; }
+.f3 { animation-delay: 0.2s; }
+.f4 { animation-delay: 0.05s; }
+.f5 { animation-delay: 0.15s; }
+
+.vapor {
+  animation: vapor 2.2s ease-out infinite;
+}
+
+.v2 { animation-delay: 0.7s; }
+.v3 { animation-delay: 1.4s; }
+
+.campana {
+  transform-origin: 50% 100%;
+  animation: campana 2.4s ease-in-out infinite;
+}
+
+.ondas {
+  animation: ondas 2.4s ease-out infinite;
+}
+
+.tapa {
+  transform-origin: 50% 100%;
+  animation: tapa 2.4s ease-in-out infinite;
+}
+
+.brillo {
+  transform-origin: 50% 50%;
+  animation: brillo 2.4s ease-in-out infinite;
+}
+
+.plato-pop {
+  transform-origin: 50% 80%;
+  animation: pop 0.7s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+.chispa {
+  transform-origin: 50% 50%;
+  animation: chispa 1.8s ease-in-out infinite;
+}
+
+.c2 { animation-delay: 0.6s; }
+.c3 { animation-delay: 1.2s; }
+.c4 { animation-delay: 0.3s; }
+
+.titulo-in {
+  animation: tituloIn 0.5s ease-out both;
+}
+
+.cancel-pop {
+  transform-origin: 50% 50%;
+  animation: pop 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
+}
+
+@keyframes drop {
+  0% { transform: translateY(-80px); opacity: 0; }
+  10% { opacity: 1; }
+  18% { transform: translateY(6px); }
+  24% { transform: translateY(-4px); }
+  30% { transform: translateY(0); }
+  88% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(18px); opacity: 0; }
+}
+
+@keyframes sway {
+  0%, 100% { transform: rotate(-5deg); }
+  50% { transform: rotate(5deg); }
+}
+
+@keyframes linea {
+  0%, 30% { transform: scaleX(0); }
+  42% { transform: scaleX(1); }
+  88% { transform: scaleX(1); }
+  100% { transform: scaleX(0); }
+}
+
+@keyframes sello {
+  0%, 55% { transform: scale(0) rotate(-30deg); }
+  63% { transform: scale(1.25) rotate(8deg); }
+  70% { transform: scale(1) rotate(0); }
+  88% { transform: scale(1); }
+  100% { transform: scale(0); }
+}
+
+@keyframes riel {
+  0%, 14%, 24%, 100% { transform: translateY(0); }
+  18% { transform: translateY(2px); }
+}
+
+@keyframes sacude {
+  0%, 100% { transform: rotate(0); }
+  30% { transform: rotate(-2.5deg); }
+  70% { transform: rotate(2deg); }
+}
+
+@keyframes salta {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  45% { transform: translate(var(--dx), -62px) rotate(210deg); }
+  70% { transform: translate(0, -6px) rotate(320deg); }
+}
+
+@keyframes llama {
+  0% { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(1.35); opacity: 0.7; }
+}
+
+@keyframes vapor {
+  0% { transform: translateY(10px); opacity: 0; }
+  30% { opacity: 0.75; }
+  100% { transform: translateY(-30px); opacity: 0; }
+}
+
+@keyframes campana {
+  0%, 55%, 100% { transform: rotate(0); }
+  62% { transform: rotate(-16deg); }
+  70% { transform: rotate(14deg); }
+  78% { transform: rotate(-9deg); }
+  86% { transform: rotate(5deg); }
+}
+
+@keyframes ondas {
+  0%, 55% { opacity: 0; transform: scale(0.6); }
+  65% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+
+@keyframes tapa {
+  0%, 55%, 100% { transform: translateY(0); }
+  64% { transform: translateY(-12px); }
+  74% { transform: translateY(0); }
+  80% { transform: translateY(-4px); }
+  86% { transform: translateY(0); }
+}
+
+@keyframes brillo {
+  0%, 100% { opacity: 0.35; transform: scale(0.92); }
+  50% { opacity: 0.7; transform: scale(1.06); }
+}
+
+@keyframes pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  70% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes chispa {
+  0%, 100% { transform: scale(0) rotate(0); opacity: 0; }
+  50% { transform: scale(1) rotate(45deg); opacity: 1; }
+}
+
+@keyframes tituloIn {
+  0% { transform: translateY(14px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.dot-latido {
+  animation: latido 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes latido {
+  0% { transform: scale(0.85); opacity: 0.6; }
+  100% { transform: scale(1.3); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ilu *,
+  .titulo-in,
+  .cancel-pop,
+  .dot-latido {
+    animation: none !important;
+  }
+}
+

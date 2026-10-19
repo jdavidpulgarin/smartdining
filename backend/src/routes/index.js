@@ -11,6 +11,7 @@ const pedidosRoutes = require('./pedidos.routes');
 const kdsRoutes = require('./kds.routes');
 const transaccionesRoutes = require('./transacciones.routes');
 const pagosRoutes = require('./pagos.routes');
+const reportesRoutes = require('./reportes.routes');
 
 const router = express.Router();
 
@@ -29,5 +30,7 @@ router.use('/pedidos', pedidosRoutes);
 router.use('/kds', kdsRoutes);
 router.use('/transacciones', transaccionesRoutes);
 router.use('/pagos', pagosRoutes);
+// D-07: metricas del panel de administracion.
+router.use('/reportes', reportesRoutes);
 
 module.exports = router;
