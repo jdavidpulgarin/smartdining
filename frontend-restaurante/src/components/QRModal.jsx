@@ -42,6 +42,13 @@ export function QRModal({
     setToken(table?.token_qr || '')
   }
 
+  const [qrUrl, setQrUrl] = useState(table?.qr_url || '')
+  const [prevTableQrUrl, setPrevTableQrUrl] = useState(table?.qr_url)
+  if (table?.qr_url !== prevTableQrUrl) {
+    setPrevTableQrUrl(table?.qr_url)
+    setQrUrl(table?.qr_url || '')
+  }
+
   const [loadingAction, setLoadingAction] = useState(false)
   const [justRotated, setJustRotated] = useState(false)
   const [segundosRestantes, setSegundosRestantes] = useState(ROTACION_INTERVALO_SEGUNDOS)
@@ -68,6 +75,7 @@ export function QRModal({
   useSocketListener('qr:actualizado', (data) => {
     if (data?.id_mesa && Number(data.id_mesa) === tableId && data.token_qr) {
       setToken(data.token_qr)
+      if (data?.url) setQrUrl(data.url)
       setSegundosRestantes(ROTACION_INTERVALO_SEGUNDOS)
       setJustRotated(true)
       setTimeout(() => setJustRotated(false), 2000)
@@ -84,6 +92,7 @@ export function QRModal({
           const res = await onUpdateToken(tableId)
           if (res?.token) {
             setToken(res.token)
+            if (res?.url) setQrUrl(res.url)
           }
         }
         setSegundosRestantes(ROTACION_INTERVALO_SEGUNDOS)
@@ -150,16 +159,17 @@ export function QRModal({
   const infoToken = decodificarTokenQr(token)
   const sid = infoToken.sid || (token ? token.slice(-8) : null)
 
-  const defaultClientPort = (import.meta.env && import.meta.env.VITE_CLIENTE_PORT) || '5174'
+  const defaultClientPort = (import.meta.env && import.meta.env.VITE_CLIENTE_PORT) || '5173'
   const activeDomain = useWifiIp ? hostIp : 'localhost'
 
-  // Priorizar table.qr_url enviada por el backend (apunta a frontend-cliente).
-  // Si se prueba con Wi-Fi en red local, se sustituye localhost por hostIp manteniendo el puerto del comensal.
+  // Priorizar la url devuelta por el backend al abrir la mesa (apunta a frontend-cliente).
+  // Si se prueba con Wi-Fi en red local y la url viene con localhost, se sustituye por hostIp manteniendo el puerto del comensal.
+  const backendUrl = qrUrl || table.qr_url
   let diningUrl = ''
-  if (table.qr_url) {
+  if (backendUrl) {
     diningUrl = useWifiIp && hostIp !== 'localhost'
-      ? table.qr_url.replace(/localhost|127\.0\.0\.1/, hostIp)
-      : table.qr_url
+      ? backendUrl.replace(/localhost|127\.0\.0\.1/, hostIp)
+      : backendUrl
   } else if (token) {
     diningUrl = `http://${activeDomain}:${defaultClientPort}/?token=${encodeURIComponent(token)}&mesa=${table.number || table.id}`
   }
@@ -184,6 +194,9 @@ export function QRModal({
       const res = await onOpenTable(table.id || table.number)
       if (res?.token) {
         setToken(res.token)
+        if (res?.url) {
+          setQrUrl(res.url)
+        }
         setSegundosRestantes(ROTACION_INTERVALO_SEGUNDOS)
       }
     } finally {
