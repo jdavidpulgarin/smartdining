@@ -34,15 +34,33 @@ function validarCuenta(c, idMesa) {
 }
 
 /**
+ * Entre cuántas personas se reparte el saldo en modo "igual": las presentes
+ * que todavía no han pagado en esta sesión de mesa, más quien paga (si ya
+ * pagó algo o no está sentado, igual cuenta). Nunca menos de 1. Quien se fue
+ * sin pagar deja de contar.
+ *
+ * @param {object} datos
+ * @param {string[]} datos.comensales  Alias presentes (mesa:presencia.comensales)
+ * @param {string[]} datos.pagaron     Alias que ya pagaron (mesa:presencia.pagaron)
+ * @param {string} datos.comensal      Alias de quien paga
+ */
+function personasPorPagar({ comensales, pagaron, comensal }) {
+  const yaPagaron = new Set(pagaron);
+  const pendientes = new Set(comensales.filter((a) => !yaPagaron.has(a)));
+  pendientes.add(comensal);
+  return Math.max(1, pendientes.size);
+}
+
+/**
  * @param {object} datos
  * @param {'total'|'igual'|'propio'} datos.modo
  * @param {object} datos.cuenta      Cuenta ya validada (validarCuenta)
  * @param {string} datos.comensal    Alias de quien paga
- * @param {number} datos.presentes   Personas en la mesa (mesa:presencia.total)
+ * @param {number} datos.personas    Para "igual": personasPorPagar(...)
  * @returns {{ montoCentavos: number } | { error: 'SIN_SALDO' }}
  */
 function calcularMonto({
-  modo, cuenta, comensal, presentes,
+  modo, cuenta, comensal, personas,
 }) {
   const saldo = cuenta.saldo_centavos;
   if (saldo <= 0) return { error: 'SIN_SALDO' };
@@ -55,18 +73,17 @@ function calcularMonto({
     return monto > 0 ? { montoCentavos: monto } : { error: 'SIN_SALDO' };
   }
 
-  // igual: se reparte el TOTAL de la cuenta (no el saldo que va quedando),
-  // así las partes son iguales aunque se paguen en momentos distintos. Cada
-  // parte se redondea a pesos. El residuo del redondeo lo cubre quien paga
-  // de último, y nunca se cobra más que el saldo.
-  const n = Math.max(1, presentes);
-  const parte = Math.round(cuenta.total_centavos / n / CENTAVOS_POR_PESO) * CENTAVOS_POR_PESO;
-  const residuo = Math.max(0, cuenta.total_centavos - parte * n);
-  // "Último en pagar": lo que queda cabe en una parte más el residuo.
-  if (parte <= 0 || saldo <= parte + residuo) return { montoCentavos: saldo };
+  // igual: se reparte el SALDO que queda entre quienes aún no han pagado
+  // (incluido quien paga). Así ningún pago "propio" o de caja deja un saldo
+  // sin dueño ni le carga a uno la parte de otro. La parte se redondea a
+  // pesos; quien paga de último (n = 1) cubre el saldo exacto, y nunca se
+  // cobra más que el saldo. La PWA replica esta fórmula (EVENTS.md §8.1).
+  const n = Math.max(1, personas);
+  const parte = Math.round(saldo / n / CENTAVOS_POR_PESO) * CENTAVOS_POR_PESO;
+  if (n === 1 || parte <= 0 || parte >= saldo) return { montoCentavos: saldo };
   return { montoCentavos: parte };
 }
 
 module.exports = {
-  calcularMonto, validarCuenta, MODOS, CENTAVOS_POR_PESO,
+  calcularMonto, personasPorPagar, validarCuenta, MODOS, CENTAVOS_POR_PESO,
 };

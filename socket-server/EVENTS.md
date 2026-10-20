@@ -76,7 +76,7 @@ contratos coinciden, pero aún no se ha hecho un pago real de punta a punta.
 | `qr:actualizado` | `room:mesa-{ID}` (incluye la pantalla) | No | Estable | [§6.2](#62-cómo-avisa-el-backend-una-rotación-de-token_qr-pantalla-de-mesa) |
 | `mesa:llamar_mesero` | `room:admin` | Sí | Estable | [§4](#mesallamar_mesero) |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§4](#cuentasolicitada) |
-| `mesa:presencia` | `room:admin` | No (estado completo) | Estable | [§5.2](#52-mesapresencia) |
+| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` | No (estado completo) | Estable | [§5.2](#52-mesapresencia) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable. `motivo: "pagada"`: caja Estable (PR #58); en línea Conectado (falta prueba E2E con Wompi sandbox) (PR #33) | [§5.1](#51-mesaliberada) |
 | `ingrediente:disponibilidad` | todos los sockets | Opcional | Estable (el backend lo llama desde PR #70) | [§5.3](#53-ingredientedisponibilidad) |
 | `plato:disponibilidad` | todos los sockets | Opcional | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
@@ -534,7 +534,7 @@ hasta que se libere.
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
-| `mesa:presencia` | `room:admin` | `{ id_mesa, comensales: [alias], total }` (ver §5.2) |
+| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` (solo la de esa mesa) | `{ id_mesa, comensales: [alias], total, pagaron: [alias] }` (ver §5.2) |
 | `ingrediente:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_ingrediente, disponible, emitidoEn }` |
 | `plato:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_plato, disponible, emitidoEn }` |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | `{ id_mesa, motivo, emitidoEn }` (`motivo`: `pagada` o `liberada`) |
@@ -588,19 +588,31 @@ no vuelve a emitir. La mesa vuelve a tener sesión cuando el personal genera un 
 
 ### 5.2. `mesa:presencia`
 
-Quién está sentado en cada mesa, para el panel. Se emite a `room:admin` cada vez que un
-**comensal** hace `join:table`, `leave:table` o se desconecta, con un máximo de **un aviso
-por mesa cada 500 ms**: el primero sale al instante y, si hubo más cambios dentro de esa
-ventana, se envía uno más al cerrarla (el último estado siempre llega).
+Quién está sentado en cada mesa y quién ya pagó. Se emite a `room:admin` (panel) **y a
+`room:mesa-{ID}`** (los comensales y la pantalla de **esa** mesa; ninguna otra mesa lo
+recibe) cada vez que:
+
+- un **comensal** hace `join:table`, `leave:table` o se desconecta;
+- se confirma un pago con alias: un pago en línea (webhook, §8.3) o un cobro de caja con
+  `comensal` (§8.6), siempre que quede saldo.
+
+Máximo **un aviso por mesa cada 500 ms**: el primero sale al instante y, si hubo más cambios
+dentro de esa ventana, se envía uno más al cerrarla (el último estado siempre llega).
 
 ```json
-{ "id_mesa": 5, "comensales": ["Ana", "Beto"], "total": 3 }
+{ "id_mesa": 5, "comensales": ["Ana", "Beto"], "total": 2, "pagaron": ["Ana"] }
 ```
 
 - `comensales`: alias distintos, ordenados. Dos pestañas de "Ana" cuentan como una persona.
 - `total`: personas en la mesa = alias distintos (cada JWT de comensal trae el suyo).
+- `pagaron`: alias que ya pagaron algo **en esta sesión de mesa**, en cualquier modo, estén
+  sentados o no; ordenados. Se borra al liberarse la mesa. Un cobro de caja sin `comensal`
+  no aparece (no se sabe de quién es). Un pago que deja el saldo en 0 tampoco (la mesa se
+  libera).
 - El personal y la pantalla no cuentan.
 - No lleva `eventId`: es un estado completo; quédate siempre con el último.
+- La PWA lo usa para mostrar cuánto es «igual» antes de pedir la intención
+  ([§8.1](#81-post-pagosintencion)).
 
 ### 5.3. `ingrediente:disponibilidad`
 
@@ -779,14 +791,14 @@ Auth: `Authorization: Bearer <JWT del comensal>` (sesión de mesa vigente). La m
 
 | Campo | Reglas |
 |---|---|
-| `modo` | `total` (saldo de la mesa), `igual` (total ÷ personas presentes), `propio` (lo de ese comensal) |
+| `modo` | `total` (saldo de la mesa), `igual` (saldo ÷ personas que aún no pagaron, fórmula abajo), `propio` (lo de ese comensal) |
 | `eventId` | UUID. Repetirlo devuelve la **misma** respuesta |
 | `comensal` | Opcional. Quien paga es el alias **del JWT**; si viene uno distinto → `403 NO_AUTORIZADO` (nadie paga ni consulta "lo propio" de otro) |
 
 Cualquier otro campo (`monto`, `id_mesa`, `precio`…) **se ignora**: el monto lo calcula el
 servidor con la cuenta del backend.
 
-`201` (o `200` si es la misma intención pendiente o el mismo `eventId`):
+`201` (o `200` si es la misma intención pendiente, con el mismo modo y monto, o el mismo `eventId`):
 
 ```json
 {
@@ -813,11 +825,46 @@ servidor con la cuenta del backend.
 Reglas de la cuenta dividida:
 
 - **total**: el saldo completo de la mesa.
-- **igual**: el **total** de la cuenta entre las personas presentes (`mesa:presencia.total`),
-  redondeado a pesos. Quien paga de último cubre el residuo del redondeo; nunca se cobra más
-  que el saldo.
+- **igual**: el **saldo** que queda, entre las personas presentes que **aún no han pagado**
+  más quien paga. Así ningún pago `propio` o de caja deja saldo sin dueño, ni a uno le toca
+  la parte de otro. Quien se va sin pagar deja de contar. Fórmula exacta, en centavos
+  enteros (la PWA debe replicarla tal cual con los datos de `mesa:presencia` y la cuenta):
+
+  ```js
+  // saldo:      saldo_centavos de la cuenta de la mesa
+  // comensales: mesa:presencia.comensales · pagaron: mesa:presencia.pagaron
+  // yo:         alias de quien paga (el del JWT)
+  const pendientes = new Set(comensales.filter((a) => !pagaron.includes(a)));
+  pendientes.add(yo);                 // quien paga siempre cuenta
+  const n = Math.max(1, pendientes.size);
+  const parte = Math.round(saldo / n / 100) * 100;   // a pesos; .5 redondea hacia arriba
+  const monto = (n === 1 || parte <= 0 || parte >= saldo) ? saldo : parte;
+  ```
+
+  Con `saldo` = 0 → `409 SIN_SALDO`. El último (n = 1) paga el saldo exacto, centavos
+  incluidos; nunca se cobra más que el saldo. Ejemplos:
+
+  | Mesa | Pagos (en orden) |
+  |---|---|
+  | 2 personas, $85.000 | Ana propio $20.000 → Beto igual **$65.000** |
+  | 3 personas, $100.000 | Ana propio $30.000 → Beto igual **$35.000** → Carlos igual **$35.000** |
+  | 4 personas, $120.000 | Ana propio $45.000 → Beto, Carlos y Dani igual **$25.000** c/u |
+  | 4 personas, $120.000 | Ana propio $10.000 → Beto **$36.667** → Carlos **$36.667** → Dani **$36.666** |
+  | 3 personas, $100.000 | Ana **$33.333** → Beto **$33.334** → Carlos **$33.333** (todos igual) |
+
+  Si la presencia o `pagaron` cambian entre lo que mostró la PWA y la petición, manda el
+  cálculo del servidor (y una pendiente anterior se reemplaza, ver abajo).
 - **propio**: el saldo de ese alias según el backend (nunca más que el saldo de la mesa).
-- **Una sola intención pendiente por comensal**: si ya tiene una sin pagar, se devuelve esa.
+- **Una sola intención pendiente por comensal**, reutilizada **solo si sigue valiendo**. En
+  cada petición el servidor consulta la cuenta y recalcula el monto:
+  - mismo `modo` **y** mismo monto recalculado → `200` con la misma intención (misma
+    referencia y firma);
+  - otro `modo`, o el monto cambió (pedido nuevo, otro pago, cambio de presencia en `igual`)
+    → `201` con una intención **nueva**. La vieja no se borra: queda `reemplazada` 7 días y
+    su webhook se sigue aceptando por **su** monto exacto (§8.3), por si ya se pagó en otra
+    pestaña;
+  - si el backend no responde → `503 ERROR_INTERNO`, aunque haya una pendiente: nunca se
+    cobra con un monto viejo.
 - La intención vive `PAGOS_TTL_MINUTOS` (30). Después el widget la rechaza (`expiration-time`
   va dentro de la firma).
 
@@ -888,8 +935,15 @@ Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún fron
    comensal puede pedir otra. No se registra ni se anuncia nada.
 6. `APPROVED` → **reverificación** con `GET /v1/transactions/{id}` (llave privada, 5 s de
    timeout). Debe coincidir: `status APPROVED`, la misma referencia, una intención conocida y
-   **pendiente**, `amount_in_cents` **exactamente** igual al esperado y `currency COP`.
+   **pendiente o reemplazada** (§8.1), `amount_in_cents` **exactamente** igual al esperado
+   por **esa** intención y `currency COP`.
    Si algo no cuadra → intento fallido + `pago:alerta` (§8.5), `200`.
+   - Pago de una **reemplazada** (el comensal la pagó en otra pestaña): se registra como
+     cualquier otro. Si además pagó la nueva y la suma excede el saldo, el backend responde
+     `409` a la segunda → intento fallido + `pago:alerta` (`backend_rechazo_409`) para que
+     caja devuelva el dinero. Ningún pago real se pierde en silencio.
+   - Al resolverse una intención solo se libera la marca de pendiente del comensal **si
+     apunta a esa referencia**: pagar o rechazar una reemplazada no toca la intención nueva.
 7. **Registro** en el backend (`POST /api/transacciones/internal`, §8.4). **Solo si el backend
    confirma** se emite `payment:confirmed`.
 8. Si la pasarela o el backend no responden (o dan 5xx) → `503`, se libera la marca de
@@ -1125,3 +1179,6 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `order:created` · orden y reintentos | Reservaba el aviso antes de tocar el carrito: si Redis fallaba a mitad de camino, el reintento llegaba como duplicado y las líneas nunca se quitaban | Primero quita líneas y guarda dueños, después reserva por `id_pedido` y emite; un reintento ante `5xx`/`ERROR_INTERNO` completa lo que faltó. `cart:updated` llega **antes** que `order:created` | Nadie que dependa del orden. Backend: reintentar ante `5xx` con el mismo `eventId` es seguro |
 | Catálogo · estado de endpoints | `/pagos/intencion`, `/pagos/webhook`, `/internal/ingrediente-disponibilidad`, `/internal/payment-confirmed` y sus eventos (`payment:confirmed`, `pago:alerta`, `ingrediente:disponibilidad`, `mesa:liberada` con `motivo: "pagada"`) figuraban como «Espera backend» | Estables `/internal/ingrediente-disponibilidad` (PR #70) y `/internal/payment-confirmed` (PR #58). Los pagos en línea (`/pagos/*`, `pago:alerta` y la parte Wompi de `payment:confirmed` y `mesa:liberada`) quedan «Conectado (falta prueba E2E con Wompi sandbox)» (PR #33) | Nadie: solo documentación |
 | `POST /internal/plato-disponibilidad` · `plato:disponibilidad` | — | Nuevos: el backend avisa tras el COMMIT de `PATCH /api/platos/:id/disponible`; se difunde `{ id_plato, disponible, emitidoEn }` a todos los sockets (mismas reglas que `ingrediente:disponibilidad`, idempotencia propia `backend:plato:{eventId}`) | Backend: llamarla después del COMMIT. PWA, KDS y panel: escuchar `plato:disponibilidad` |
+| `POST /pagos/intencion` · reutilizar la pendiente | Si el comensal tenía una intención pendiente se devolvía esa, sin mirar `modo` ni monto (se cobraba el monto viejo hasta 30 min) | Se reutiliza solo con el mismo `modo` y el mismo monto recalculado; si no, intención nueva y la vieja queda `reemplazada` 7 días. El webhook acepta una reemplazada por su monto exacto. Sin backend → `503` aunque haya pendiente | PWA: usar siempre la respuesta más reciente (puede traer otra `referencia`). Backend: nada |
+| `POST /pagos/intencion` · modo `igual` | Total ÷ personas presentes; mezclar modos podía dejar saldo sin dueño (p. ej. quedaban $3.334 de $100.000) | **Saldo** ÷ (presentes que aún no pagaron + quien paga), redondeado a pesos; el último paga el saldo exacto. Fórmula exacta en §8.1 | PWA: replicar la fórmula con `mesa:presencia` y la cuenta. Backend: nada |
+| `mesa:presencia` · destino y `pagaron` | Solo `room:admin`; `{ id_mesa, comensales, total }` | También `room:mesa-{ID}` (solo esa mesa) y nuevo campo `pagaron: [alias]`; también se emite al confirmarse un pago con alias | PWA: escucharlo para mostrar «igual». Panel: nada (campo nuevo, compatible) |
