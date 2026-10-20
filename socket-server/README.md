@@ -63,6 +63,12 @@ Pasos:
    es el propio celular.
 4. En el celular abre `http://192.168.1.22:5173`.
 
+> **Temporal:** los pasos manuales (el `--host` en `frontend-cliente`, `VITE_SOCKET_URL` /
+> `VITE_API_URL` con la IP, y agregar la IP a `CORS_ORIGINS` del backend) son provisionales.
+> El equipo está haciendo el mismo «modo red local» en el backend (Daniel), en
+> `frontend-cliente` (Juan) y en el panel (Jarrinson). Cuando entren esos PR bastará con
+> `npm run dev`.
+
 Ojo:
 
 - **El backend REST tiene su propia lista CORS** (`backend/src/config/cors.js`) y no acepta
