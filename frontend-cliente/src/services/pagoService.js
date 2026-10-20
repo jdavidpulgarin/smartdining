@@ -2,6 +2,7 @@ import { obtenerSesion } from '../utils/sesion';
 import { traducirErrorPago } from '../utils/cuenta';
 import { urlsServidor } from '../utils/urlsServidor';
 import { ErrorApi } from './api';
+import { uuidV4 } from './clienteMesa';
 
 /**
  * Servicio para crear intenciones de pago con Wompi (J-08).
@@ -21,7 +22,7 @@ import { ErrorApi } from './api';
  * @returns {Promise<object>} Intención de pago generada
  */
 export async function crearIntencion(modo = 'propio', eventIdReintento = null) {
-  const eventId = eventIdReintento || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ev-${Date.now()}`);
+  const eventId = eventIdReintento || uuidV4();
 
   if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
     let simPago = null;
