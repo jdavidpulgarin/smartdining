@@ -15,6 +15,7 @@ const {
 const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
 const { log } = require('./log');
+const { crearOrigenCors } = require('./origenes');
 const { crearIpCliente } = require('./ip-cliente');
 const { crearConexionRedis } = require('./almacen/redis');
 const { crearClienteBackend } = require('./backend');
@@ -55,9 +56,12 @@ const rutasBase = {
  * las pruebas puedan levantarlo en un puerto efímero.
  */
 function crearServidor(config, deps = {}) {
-  // Se usa la misma lista blanca para HTTP (health, webhooks) y para el
-  // handshake de Socket.io, así no hay dos políticas que se desincronicen.
-  const corsHttp = cors({ origin: config.origenes, credentials: true });
+  // Se usa la misma política para HTTP (health, webhooks) y para el
+  // handshake de Socket.io, así no hay dos que se desincronicen. Es la lista
+  // blanca CORS_ORIGINS, más las IP privadas de la Wi-Fi en modo red local
+  // (solo con NODE_ENV=development, ver origenes.js).
+  const origenCors = crearOrigenCors(config);
+  const corsHttp = cors({ origin: origenCors, credentials: true });
 
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
@@ -69,7 +73,7 @@ function crearServidor(config, deps = {}) {
   });
 
   const io = new Server(httpServer, {
-    cors: { origin: config.origenes, methods: ['GET', 'POST'], credentials: true },
+    cors: { origin: origenCors, methods: ['GET', 'POST'], credentials: true },
     // Al reconectar tras un corte corto, Socket.io recupera la sesión y los
     // eventos perdidos. No basta por sí solo: la garantía de no duplicar la
     // da la idempotencia por eventId (idempotencia.js), que cubre también los

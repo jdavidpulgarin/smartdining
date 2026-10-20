@@ -640,7 +640,7 @@ Content-Type: application/json
 
 ## 6. Endpoints HTTP
 
-CORS con la misma lista blanca que el socket (`CORS_ORIGINS`).
+CORS con la misma política que el socket: la lista blanca `CORS_ORIGINS` y, solo con `NODE_ENV=development`, el modo red local (ver §9).
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
@@ -1079,6 +1079,7 @@ Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 |---|---|
 | `PORT` | Puerto (4001) |
 | `CORS_ORIGINS` | Orígenes permitidos, separados por coma (sin `*`) |
+| `NODE_ENV` | `production` exige `REDIS_URL`. Solo `development` **escrito** activa el modo red local: CORS acepta también `http://<IPv4 privada>:5173-5175` ([README](README.md#probar-desde-el-celular-modo-red-local)). Sin `NODE_ENV`, el CORS es solo `CORS_ORIGINS` |
 | `JWT_SECRET` | Igual al del backend |
 | `INTERNAL_API_KEY` | Clave que el backend envía en `x-internal-key` |
 | `QR_SECRET` | Secreto de firma de los tokens QR |

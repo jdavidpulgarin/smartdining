@@ -14,6 +14,7 @@ Servidor de comunicación bidireccional en tiempo real con **Socket.io** para si
    - `INTERNAL_API_KEY`: la **misma** que usa `backend/` para llamar a `/internal/*`.
    - `CORS_ORIGINS` ya trae por defecto los puertos de Vite 5173 a 5175
      (`frontend-cliente`, `frontend-restaurante`, `frontend-kds`); ajústalo si usas otro.
+     Para probar desde el celular, ver [modo red local](#probar-desde-el-celular-modo-red-local).
 3. `npm run dev` → escucha en `http://localhost:4001` (el backend REST usa el `4000`).
 4. Token de prueba sin depender del backend: `npm run token:comensal -- --mesa 5 --comensal Ana`
    (opcional `--sid <texto>` y `--horas <n>`, por defecto 3). Se niega a correr si falta
@@ -36,6 +37,50 @@ socket.emit('cart:update', {
   notas: 'sin cebolla',
 }, (ack) => { /* ack.carrito trae el snapshot resultante */ });
 ```
+
+### Probar desde el celular (modo red local)
+
+Solo para desarrollo: un celular en la **misma Wi-Fi** puede abrir la app por la IP de tu
+máquina sin editar `CORS_ORIGINS`.
+
+- **Se activa solo con `NODE_ENV=development` escrito en el `.env`** (`.env.example` ya lo
+  trae). Si `NODE_ENV` falta o vale otra cosa (`production`, `test`…), CORS se comporta
+  como siempre: solo `CORS_ORIGINS`. Al arrancar en este modo el servidor lo avisa con una
+  línea `modo red local activo` en el log.
+- Además de `CORS_ORIGINS`, acepta **exactamente** `http://` + una IPv4 privada
+  (`10.x.x.x`, `172.16.x.x`–`172.31.x.x`, `192.168.x.x`) + puerto `5173`, `5174` o `5175`
+  (los de Vite). Nada más: ni `https`, ni otros puertos, ni nombres de host. El origen se
+  refleja tal cual (nunca `*`), igual en HTTP y en Socket.io.
+
+Pasos:
+
+1. Averigua la IP de tu máquina en la Wi-Fi (`ipconfig` en Windows; `ip addr` o `ifconfig`
+   en Linux/macOS), p. ej. `192.168.1.22`.
+2. Levanta el frontend escuchando en la red. En `frontend-cliente`: `npm run dev -- --host`
+   (`frontend-restaurante` y `frontend-kds` ya arrancan con `vite --host`).
+3. En el `.env` del frontend apunta `VITE_SOCKET_URL=http://192.168.1.22:4001` (y
+   `VITE_API_URL=http://192.168.1.22:4000`), no a `localhost`: en el celular, `localhost`
+   es el propio celular.
+4. En el celular abre `http://192.168.1.22:5173`.
+
+> **Temporal:** los pasos manuales (el `--host` en `frontend-cliente`, `VITE_SOCKET_URL` /
+> `VITE_API_URL` con la IP, y agregar la IP a `CORS_ORIGINS` del backend) son provisionales.
+> El equipo está haciendo el mismo «modo red local» en el backend (Daniel), en
+> `frontend-cliente` (Juan) y en el panel (Jarrinson). Cuando entren esos PR bastará con
+> `npm run dev`.
+
+Ojo:
+
+- **El backend REST tiene su propia lista CORS** (`backend/src/config/cors.js`) y no acepta
+  IP de la red local: agrega `http://<tu IP>:5173` a `CORS_ORIGINS` en `backend/.env`, o la
+  app cargará pero las llamadas a la API fallarán.
+- Si el celular no llega, revisa que el firewall de tu máquina permita los puertos 4001,
+  4000 y 5173-5175 en la red privada.
+- **Push y PWA instalable no funcionan por IP.** El service worker, `PushManager` y la
+  instalación ("Agregar a pantalla de inicio") exigen un *contexto seguro* (HTTPS o
+  `localhost`), y `http://192.168.x.x` no lo es. Por IP se prueban el menú, el carrito, los
+  pedidos y el estado en vivo por socket; el push y la instalación se prueban en
+  `localhost` o con HTTPS.
 
 ### Notificaciones push y iPhone
 
