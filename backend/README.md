@@ -73,7 +73,7 @@ Token QR de la mesa 1 recién sembrada: `qr-token-mesa-01-a1b2c3d4`.
 
 - Node.js 18+
 - PostgreSQL corriendo localmente, con `database/schema.sql` y `database/seed.sql` de Jarrison ya ejecutados
-- Redis (o Memurai en Windows) corriendo localmente
+- Redis **opcional en desarrollo**: sin él todo funciona, solo sin caché (ver [Redis en desarrollo](#redis-en-desarrollo-es-opcional))
 
 ## Instalación
 
@@ -90,6 +90,48 @@ cp .env.example .env
 npm run dev     # con nodemon, recarga automática
 npm start       # modo normal
 ```
+
+### Redis en desarrollo (es opcional)
+
+**Con Redis apagado el backend funciona igual, sin caché.** No hay que levantarlo para
+trabajar: las rutas responden consultando PostgreSQL y en el log queda un aviso corto.
+
+Redis aquí es solo caché —la comprobación de cuenta activa (H-09) y el menú— y **nunca
+puede tumbar una petición**. Quien decide es PostgreSQL: si la base falla, el error sube
+(falla cerrada). La única pieza que cambia de comportamiento sin Redis es la reserva de
+alias del comensal, que fuera de producción usa un respaldo en memoria.
+
+Si Redis no responde, `connectRedis()` **rechaza rápido** (no se queda esperando) y entra
+en un **enfriamiento**: durante unos segundos ni se intenta, para que cada petición no
+pague el intento otra vez. Cuando Redis vuelve, la caché se reactiva sola en la siguiente
+petición, **sin reiniciar el backend**.
+
+Dos variables **opcionales** (si faltan o traen algo que no es un entero positivo, se usa
+el valor por defecto):
+
+| Variable | Defecto | Para qué |
+|---|---|---|
+| `REDIS_CONNECT_TIMEOUT_MS` | `1500` | espera máxima al conectar, para que un Redis que no contesta no retenga la petición |
+| `REDIS_ENFRIAMIENTO_MS` | `15000` | cuánto se deja de intentar tras un fallo |
+
+#### Levantarlo, si quieres caché
+
+1. **Docker** (lo que usa `docker-compose.yml`):
+
+   ```bash
+   docker compose up -d redis     # desde la raíz del repo
+   ```
+
+2. **Windows sin Docker ni WSL**: el Redis portable de
+   [tporadowski](https://github.com/tporadowski/redis/releases) —
+   `Redis-x64-5.0.14.1.zip`—: descomprimir y ejecutar `redis-server.exe`, que queda
+   escuchando en el `6379`. Es la alternativa que usa el equipo en Windows; su versión 5
+   es antigua y **no se ha comprobado** contra ella la caché del backend.
+3. **Un servicio nativo equivalente**, como Memurai, también en el `6379`.
+
+El backend solo usa `GET`, `SET` con `EX`, `DEL`, `HSETNX` y `EXPIRE`, y se ha
+comprobado contra el Redis **7.4.9** de desarrollo. Con cualquiera de las tres opciones,
+`REDIS_URL=redis://localhost:6379` en el `.env` y listo.
 
 ### Límites del pool y cierre ordenado (H-25)
 
