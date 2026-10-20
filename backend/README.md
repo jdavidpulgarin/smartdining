@@ -283,12 +283,40 @@ afecta a ninguna validación.
 
 El backend avisa al socket-server de Roberto por HTTP interno
 (`/internal/order-created`, `/internal/order-status`, `/internal/qr-rotado`,
-`/internal/mesa-liberada`) desde
+`/internal/mesa-liberada`, `/internal/ingrediente-disponibilidad`,
+`/internal/plato-disponibilidad`) desde
 `src/services/socket.notifier.js`, con `x-internal-key` y un `eventId` por acción.
 
 Ese cliente **nunca lanza**: con timeout corto, registra el fallo y sigue, así que un
 socket-server caído no rompe un pedido ni un cobro. La excepción son `/qr/generar` y
 `/qr/validar`: ahí sin respuesta no se puede abrir la mesa ni la sesión, y se responde 503.
+
+## Agotados: agotar o reponer en vivo (D-05)
+
+Dos rutas gemelas, las únicas escrituras del catálogo que no son **solo de admin**:
+también las puede llamar `cocina`, porque agotar algo no es editar la carta, es reportar
+lo que pasa en la cocina. Es lo que usa el panel de agotados.
+
+| Ruta | Roles | Cuerpo | Respuesta |
+|---|---|---|---|
+| `PATCH /api/platos/:id/disponible` | `admin`, `cocina` | `{ "disponible": false }` | 200, la fila del plato |
+| `PATCH /api/ingredientes/:id/disponible` | `admin`, `cocina` | `{ "disponible": false }` | 200, la fila del ingrediente |
+
+- `disponible` es **booleano estricto** y el cuerpo es `.strict()`: `"false"`, `0`, `null`
+  o una clave de más responden **400**. Un `:id` que no es entero positivo, **400**; algo
+  que no existe, **404**.
+- **Idempotentes**: ponerlo al valor que ya tenía responde **200**, no 409.
+- El orden es parte del contrato: **COMMIT → invalidar `cache:menu` → avisar al
+  socket-server**. Al revés, un cliente que reaccione al evento pidiendo `GET /menu`
+  recibiría la copia vieja de la caché y seguiría mostrando el plato como disponible.
+- El aviso (`/internal/plato-disponibilidad`, `/internal/ingrediente-disponibilidad`) es
+  un **extra**: si el socket-server está caído la respuesta sigue siendo 200, porque el
+  cambio ya está guardado. Tampoco se espera para responder.
+- La bitácora del cambio la escribe la base (trigger `tr_auditar_cambios` sobre `platos`),
+  no el backend.
+
+El detalle completo está en `docs/api-spec.md`; los eventos que emite el socket-server,
+en `socket-server/EVENTS.md` §5.3 y §5.4.
 
 ## Pruebas
 

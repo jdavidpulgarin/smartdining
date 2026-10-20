@@ -465,6 +465,30 @@ async function notificarIngredienteDisponibilidad(id_ingrediente, disponible) {
   });
 }
 
+/**
+ * POST /internal/plato-disponibilidad (D-05) — un plato se agotó (`false`) o
+ * volvió (`true`). El socket-server lo difunde a TODOS los sockets como
+ * `plato:disponibilidad` (EVENTS.md §5.4): la PWA lo oculta o lo marca como
+ * agotado en el menú en vivo, y el KDS y el panel refrescan su lista.
+ *
+ * Gemela de notificarIngredienteDisponibilidad y con las mismas reglas: solo
+ * viajan los dos campos y el eventId, y `emitidoEn` NO se manda porque lo pone
+ * él al emitir (sala.js). Su idempotencia va por una clave propia
+ * (`backend:plato:{eventId}`), independiente de la de ingredientes, así que un
+ * plato y un ingrediente nunca se deduplican entre sí.
+ *
+ * Un eventId por llamada, incluso si el valor no cambió: así un reenvío lo
+ * recuperan los clientes que se perdieron el anterior, en vez de que Roberto lo
+ * deduplique y el aviso se pierda en silencio.
+ */
+async function notificarPlatoDisponibilidad(id_plato, disponible) {
+  return enviar('/internal/plato-disponibilidad', {
+    id_plato,
+    disponible,
+    eventId: nuevoEventId(),
+  });
+}
+
 module.exports = {
   nuevoEventId,
   armarPedido,
@@ -478,6 +502,7 @@ module.exports = {
   notificarPagoConfirmado,
   notificarMesaLiberada,
   notificarIngredienteDisponibilidad,
+  notificarPlatoDisponibilidad,
   motivoPorEstadoFinal,
   MOTIVO_PAGADA,
   MOTIVO_LIBERADA,

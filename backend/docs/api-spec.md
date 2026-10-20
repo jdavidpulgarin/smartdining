@@ -300,6 +300,7 @@ El resultado se guarda en Redis (`sd:usuario:{id}:activo`) con TTL **`CACHE_USUA
 | POST | /platos | admin | Crea |
 | PUT | /platos/:id | admin | Actualiza |
 | DELETE | /platos/:id | admin | Elimina |
+| PATCH | /platos/:id/disponible | **admin, cocina** | Agota o repone (D-05, ver abajo) |
 
 ```json
 {
@@ -315,6 +316,65 @@ El resultado se guarda en Redis (`sd:usuario:{id}:activo`) con TTL **`CACHE_USUA
 >
 > Lo que agregó el constructor (`personalizable`, `calorias` en `platos`;
 > `alergenos` en `ingredientes`) sale por `GET /menu`, no por estas rutas.
+
+### PATCH /platos/:id/disponible — agotar o reponer (D-05)
+
+El interruptor de "se acabó" / "volvió" del plato, **gemelo del de ingredientes**
+(§`PATCH /ingredientes/:id/disponible`) y con las mismas reglas. Cuerpo con **un solo
+campo**:
+
+```json
+{ "disponible": false }
+```
+
+- `disponible` es **booleano estricto**: `"false"`, `0` o `null` responden **400**. Sin
+  coerción a propósito — un `"false"` en texto es `true` para JavaScript, y aquí eso
+  significaría reponer algo que está agotado.
+- El cuerpo es `.strict()`: una clave de más es **400**. Colar un `precio` por aquí sería
+  editar la carta con permisos de `cocina`; para eso está el `PUT`, que es solo de admin.
+- `:id` tiene que ser un **entero positivo**, o **400**. Un plato que no existe, **404**.
+- **Idempotente**: ponerlo al valor que ya tenía responde **200**, no 409.
+- **200** devuelve la fila del plato, con la misma forma que el `PUT`. Es lo que espera hoy
+  el panel (`agotadosApi.togglePlato`), que manda ese cuerpo y solo exige un 2xx.
+
+**La excepción al "solo de admin" (D-05).** Es la única escritura de la carta que también
+puede hacer `cocina`, por la misma razón que en ingredientes: **agotar un plato no es
+editar la carta, es reportar lo que pasa en la cocina.** `cajero`, `mesero` y el comensal
+reciben 403.
+
+**El orden es parte del contrato**, igual que en ingredientes:
+
+1. `UPDATE` dentro de la transacción, con la fila bloqueada (`SELECT … FOR UPDATE`), y
+   **COMMIT**. El `UPDATE` toca **solo la columna `disponible`**: a diferencia del `PUT`,
+   que reescribe la fila entera, agotar un plato no puede perder por el camino un precio
+   que otro acabara de guardar.
+2. **Invalidar `cache:menu`.**
+3. **Recién entonces** avisar al socket-server.
+
+El paso 2 va antes del 3 y no al revés: si se avisara primero, un cliente que reaccione al
+evento pidiendo `GET /menu` podría recibir la copia vieja de la caché (TTL 60 s) y seguir
+mostrando el plato como disponible.
+
+**El aviso es un extra, no parte de la operación.** Se manda
+`POST /internal/plato-disponibilidad` con `{ id_plato, disponible, eventId }`, y el
+socket-server difunde `plato:disponibilidad` a todos los sockets
+([EVENTS.md §5.4](../../socket-server/EVENTS.md)). `emitidoEn` **lo pone él** al emitir, no
+el backend. Si el socket-server está caído, lento o responde mal: **no se revierte nada**, se
+registra en el log y **la respuesta sigue siendo 200**, porque el cambio ya está guardado.
+Su idempotencia va por una clave propia (`backend:plato:{eventId}`), independiente de la de
+ingredientes.
+
+**Un `eventId` nuevo por llamada, incluso si el valor no cambió**, como en ingredientes: así
+un reenvío lo recuperan los clientes que se perdieron el anterior.
+
+**El `PUT /platos/:id` NO avisa.** Diferencia con ingredientes, donde el `PUT` del editor
+también avisa si el valor cambió: aquí el `PUT` reescribe la fila con lo que ya había leído,
+así que no sabe si `disponible` cambió de verdad. Para agotar está este `PATCH`, que es lo
+que usa el panel. La caché sí se invalida en los dos casos.
+
+**La bitácora la escribe la base.** El trigger `tr_auditar_cambios` audita todo `UPDATE` de
+`platos` en `auditoria_cambios` (modelo-er.md §11); el backend no registra nada por su
+cuenta.
 
 ---
 
