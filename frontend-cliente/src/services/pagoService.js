@@ -1,5 +1,6 @@
 import { obtenerSesion } from '../utils/sesion';
 import { traducirErrorPago } from '../utils/cuenta';
+import { urlsServidor } from '../utils/urlsServidor';
 import { ErrorApi } from './api';
 
 /**
@@ -126,7 +127,7 @@ export async function crearIntencion(modo = 'propio', eventIdReintento = null) {
 
   const sesion = obtenerSesion();
   const token = sesion?.token;
-  const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001';
+  const socketUrl = urlsServidor().socket || 'http://localhost:4001';
 
   let res;
   try {
