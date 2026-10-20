@@ -170,12 +170,36 @@ export async function apiFetch(endpoint, options = {}) {
     }
   }
 
+  const timeoutMs = options.timeout !== undefined ? options.timeout : 10000
+  let controller = null
+  let timeoutId = null
+
+  if (timeoutMs && timeoutMs > 0 && !options.signal) {
+    controller = new AbortController()
+    timeoutId = setTimeout(() => {
+      controller.abort()
+    }, timeoutMs)
+  }
+
   const config = {
     ...options,
     headers,
+    signal: options.signal || (controller ? controller.signal : undefined),
   }
 
-  const response = await fetch(url, config)
+  let response
+  try {
+    response = await fetch(url, config)
+  } catch (fetchErr) {
+    if (fetchErr.name === 'AbortError' || (controller && controller.signal.aborted)) {
+      throw new Error(`Tiempo de espera agotado al conectar con el servidor (${(timeoutMs || 10000) / 1000}s)`)
+    }
+    throw fetchErr
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
+  }
 
   // Extraer cabecera Retry-After (en segundos según draft-7 de RFC)
   const retryHeader = response.headers?.get
@@ -318,8 +342,8 @@ export const pedidosApi = {
   /**
    * Obtiene la lista de pedidos activos para sala/cocina: GET /api/pedidos/activos
    */
-  async listarActivos() {
-    return apiFetch('/pedidos/activos')
+  async listarActivos(options = {}) {
+    return apiFetch('/pedidos/activos', { timeout: 10000, ...options })
   },
 
   /**
