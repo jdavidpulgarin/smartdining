@@ -90,17 +90,21 @@ function origenesPermitidos(env = process.env) {
  * vienen de uno. Lo que decide el acceso en esos casos es el JWT o la clave
  * interna, no esta lista.
  *
- * MODO RED LOCAL: con `NODE_ENV=development` **y** sin `CORS_ORIGINS`, además
- * de los tres localhost se acepta la regla de `esOrigenRedLocal`, que es lo que
+ * MODO RED LOCAL: con `NODE_ENV=development`, además de la lista que haya se
+ * acepta siempre la regla de `esOrigenRedLocal`, que es lo que
  * deja a un celular de la misma Wi-Fi llamar a la API tras abrir el cliente por
- * la IP de la máquina. Si `CORS_ORIGINS` está configurado manda esa lista y no
- * se amplía nada: quien la escribió sabe lo que quiere permitir.
+ * la IP de la máquina.
+ *
+ * Dentro del modo, la regla de IP se SUMA a la lista que haya, sea la de los
+ * tres localhost por omisión o una `CORS_ORIGINS` propia — igual que hace el
+ * socket-server (`socket-server/src/origenes.js`), para que las dos piezas se
+ * comporten igual y nadie tenga que recordar en cuál de las dos la lista
+ * desactiva la regla. Fuera del modo no se suma nada: en producción sin
+ * `CORS_ORIGINS` no entra nadie, y con ella manda esa lista exacta.
  */
 function opcionesCors(env = process.env) {
   const permitidos = origenesPermitidos(env);
-  // Se mide igual que en origenesPermitidos: una lista de solo comas y
-  // espacios no es una lista, y ahí el modo sí debe poder activarse.
-  const redLocal = enModoRedLocal(env) && listaDe(env).length === 0;
+  const redLocal = enModoRedLocal(env);
 
   return {
     origin(origen, callback) {
