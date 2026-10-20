@@ -20,9 +20,16 @@ import {
   Play,
   Pause,
   RotateCw,
+  AlertCircle,
 } from 'lucide-react'
 import { decodificarTokenQr } from '../services/qrService'
 import { useSocketListener, useTables } from '../hooks'
+import {
+  extraerHostDeUrl,
+  esHostLocal,
+  obtenerHostPorDefecto,
+  resolverDiningUrl,
+} from '../utils/qrUrl'
 
 const ROTACION_INTERVALO_SEGUNDOS = 180 // 3 minutos
 
@@ -144,24 +151,8 @@ export function QRModal({
 
   // Extraer host de la url del backend (qr_url) o del navegador si se accede por red
   const backendUrl = qrUrl || table?.qr_url || ''
-  const obtenerHostDeUrl = (urlStr) => {
-    if (!urlStr) return ''
-    try {
-      return new URL(urlStr).hostname
-    } catch {
-      return ''
-    }
-  }
-  const hostBackend = obtenerHostDeUrl(backendUrl)
-
-  // Host Wi-Fi o Localhost: se llena con el host de qr_url del backend sin IP fija
-  const defaultHost =
-    hostBackend ||
-    (typeof window !== 'undefined' &&
-    window.location.hostname !== 'localhost' &&
-    window.location.hostname !== '127.0.0.1'
-      ? window.location.hostname
-      : 'localhost')
+  const hostBackend = extraerHostDeUrl(backendUrl)
+  const defaultHost = obtenerHostPorDefecto(backendUrl)
 
   const [useWifiIp, setUseWifiIp] = useState(true)
   const [hostIp, setHostIp] = useState(defaultHost)
@@ -179,33 +170,19 @@ export function QRModal({
   const sid = infoToken.sid || (token ? token.slice(-8) : null)
 
   const defaultClientPort = (import.meta.env && import.meta.env.VITE_CLIENTE_PORT) || '5174'
-  const activeDomain = useWifiIp ? hostIp : 'localhost'
 
-  // El QR usa la url tal cual enviada por el backend (qr_url)
-  let diningUrl = ''
-  if (backendUrl) {
-    if (!useWifiIp) {
-      try {
-        const parsed = new URL(backendUrl)
-        parsed.hostname = 'localhost'
-        diningUrl = parsed.toString()
-      } catch {
-        diningUrl = backendUrl.replace(/localhost|127\.0\.0\.1|[\d.]+/i, 'localhost')
-      }
-    } else if (hostIp && hostIp !== hostBackend) {
-      try {
-        const parsed = new URL(backendUrl)
-        parsed.hostname = hostIp
-        diningUrl = parsed.toString()
-      } catch {
-        diningUrl = backendUrl
-      }
-    } else {
-      diningUrl = backendUrl
-    }
-  } else if (token) {
-    diningUrl = `http://${activeDomain}:${defaultClientPort}/?token=${encodeURIComponent(token)}&mesa=${table.number || table.id}`
-  }
+  // El QR usa la url del backend y se regenera con hostIp manteniendo puerto y token
+  const diningUrl = resolverDiningUrl({
+    backendUrl,
+    token,
+    tableNumber: table.number || table.id,
+    hostIp,
+    useWifiIp,
+    fallbackPort: defaultClientPort,
+  })
+
+  // Aviso cuando el QR apunta a localhost y no se podrá abrir desde celular
+  const qrApuntaALocalhost = useWifiIp && esHostLocal(hostIp)
 
   const tabletUrl =
     typeof window !== 'undefined'
@@ -673,6 +650,29 @@ export function QRModal({
                       placeholder="192.168.1.X"
                       className="sd-input"
                     />
+                    {qrApuntaALocalhost && (
+                      <div
+                        className="sd-localhost-warning"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          marginTop: 8,
+                          padding: '8px 12px',
+                          borderRadius: 6,
+                          background: 'rgba(238, 28, 37, 0.12)',
+                          border: '1px solid rgba(238, 28, 37, 0.35)',
+                          color: 'var(--sd-red-text, #ff6b6b)',
+                          fontSize: 12,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        <AlertCircle size={15} style={{ flexShrink: 0, color: 'var(--sd-red)' }} />
+                        <span>
+                          El QR apunta a localhost: un celular no podrá abrirlo. Escribe la IP de este PC en la red Wi-Fi.
+                        </span>
+                      </div>
+                    )}
                     <small className="ip-hint">
                       💡 Los comensales deben estar conectados al mismo Wi-Fi del restaurante.
                     </small>
