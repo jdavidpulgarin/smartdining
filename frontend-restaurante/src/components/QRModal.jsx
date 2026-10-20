@@ -142,16 +142,35 @@ export function QRModal({
   const tiempoFormateado = `${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`
   const porcentajeTiempo = ((ROTACION_INTERVALO_SEGUNDOS - segundosRestantes) / ROTACION_INTERVALO_SEGUNDOS) * 100
 
-  // Host Wi-Fi o Localhost para probar con celulares en la misma red
+  // Extraer host de la url del backend (qr_url) o del navegador si se accede por red
+  const backendUrl = qrUrl || table?.qr_url || ''
+  const obtenerHostDeUrl = (urlStr) => {
+    if (!urlStr) return ''
+    try {
+      return new URL(urlStr).hostname
+    } catch {
+      return ''
+    }
+  }
+  const hostBackend = obtenerHostDeUrl(backendUrl)
+
+  // Host Wi-Fi o Localhost: se llena con el host de qr_url del backend sin IP fija
   const defaultHost =
-    typeof window !== 'undefined' &&
+    hostBackend ||
+    (typeof window !== 'undefined' &&
     window.location.hostname !== 'localhost' &&
     window.location.hostname !== '127.0.0.1'
       ? window.location.hostname
-      : '192.168.1.22'
+      : 'localhost')
 
   const [useWifiIp, setUseWifiIp] = useState(true)
   const [hostIp, setHostIp] = useState(defaultHost)
+  const [prevHostBackend, setPrevHostBackend] = useState(hostBackend)
+
+  if (hostBackend && hostBackend !== prevHostBackend) {
+    setPrevHostBackend(hostBackend)
+    setHostIp(hostBackend)
+  }
 
   if (!table) return null
 
@@ -162,14 +181,28 @@ export function QRModal({
   const defaultClientPort = (import.meta.env && import.meta.env.VITE_CLIENTE_PORT) || '5174'
   const activeDomain = useWifiIp ? hostIp : 'localhost'
 
-  // Priorizar la url devuelta por el backend al abrir la mesa (apunta a frontend-cliente).
-  // Si se prueba con Wi-Fi en red local y la url viene con localhost, se sustituye por hostIp manteniendo el puerto del comensal.
-  const backendUrl = qrUrl || table.qr_url
+  // El QR usa la url tal cual enviada por el backend (qr_url)
   let diningUrl = ''
   if (backendUrl) {
-    diningUrl = useWifiIp && hostIp !== 'localhost'
-      ? backendUrl.replace(/localhost|127\.0\.0\.1/, hostIp)
-      : backendUrl
+    if (!useWifiIp) {
+      try {
+        const parsed = new URL(backendUrl)
+        parsed.hostname = 'localhost'
+        diningUrl = parsed.toString()
+      } catch {
+        diningUrl = backendUrl.replace(/localhost|127\.0\.0\.1|[\d.]+/i, 'localhost')
+      }
+    } else if (hostIp && hostIp !== hostBackend) {
+      try {
+        const parsed = new URL(backendUrl)
+        parsed.hostname = hostIp
+        diningUrl = parsed.toString()
+      } catch {
+        diningUrl = backendUrl
+      }
+    } else {
+      diningUrl = backendUrl
+    }
   } else if (token) {
     diningUrl = `http://${activeDomain}:${defaultClientPort}/?token=${encodeURIComponent(token)}&mesa=${table.number || table.id}`
   }
