@@ -177,6 +177,66 @@ JWT contra el del token que la mesa tiene ahora. El QR impreso es fijo mientras 
 dure; Jarrison retiró el trigger `tr_regenerar_token_qr`, así que ese ciclo de vida lo
 maneja el backend.
 
+## Puertos
+
+| Pieza | Puerto | Nota |
+|---|---|---|
+| Panel del restaurante | **5173** | `frontend-restaurante` |
+| Cliente del comensal | **5174** | `frontend-cliente`, puerto fijo (`strictPort`) |
+| KDS de cocina | **5175** | `frontend-kds` |
+| Backend (esta API) | **4000** | `PORT` |
+| socket-server | **4001** | `SOCKET_URL` |
+
+El enlace del QR apunta al **cliente (5174)**. Antes el valor por defecto de
+`FRONTEND_CLIENTE_URL` era `http://localhost:5173`, que es el puerto del panel: el QR
+llevaba al comensal a la pantalla de administración.
+
+## Modo red local: probar el cliente desde un celular (desarrollo)
+
+El comensal entra escaneando el QR con su teléfono, y para un teléfono `localhost` es él
+mismo. Para que funcione sin configurar nada, el backend tiene un **modo red local**.
+
+**Se activa solo con `NODE_ENV=development`**, escrito así, exacto. Es la misma regla que
+el socket-server. Con `production`, `test`, vacío o ausente **no cambia nada**, ni el
+enlace del QR ni el CORS.
+
+`npm run dev` ya lo fija: `nodemon.json` pone `NODE_ENV=development` en el proceso, así
+que funciona igual en Windows, macOS y Linux sin `cross-env` ni variables a mano.
+`npm start` (producción) **no** lo fija.
+
+Qué cambia estando activo:
+
+- **Enlace del QR.** Se detecta la IPv4 privada de la LAN (`src/utils/ip-local.js`:
+  descarta adaptadores virtuales —WSL, Docker, VirtualBox, VMware, Hyper-V, Tailscale,
+  ZeroTier, VPN— y prefiere `192.168` sobre `10` sobre `172.16-31`) y:
+  - si `FRONTEND_CLIENTE_URL` apunta a `localhost` o `127.0.0.1`, se sustituye **solo el
+    host** por esa IP (protocolo, puerto y path se conservan);
+  - si **no está definida**, el enlace se arma con `http://<IP>:5174`;
+  - si no se detecta ninguna IP, queda como siempre.
+
+  **Un dominio real nunca se sustituye**, ni en desarrollo. La detección se cachea 30 s,
+  así que cambiar de Wi-Fi no obliga a reiniciar el backend.
+- **CORS.** Además de la lista que haya —los tres `localhost` por omisión, o tu
+  `CORS_ORIGINS` si la configuraste— se acepta **siempre** esta regla exacta:
+
+  ```
+  http://  +  IPv4 privada (10/8, 172.16/12, 192.168/16)  +  :5173 | :5174 | :5175
+  ```
+
+  Nada más: ni `https`, ni otros puertos, ni dominios, ni rutas, ni octetos con ceros a
+  la izquierda o mayores que 255. Es la misma regla que `socket-server/src/origenes.js`.
+
+**En desarrollo ya no hace falta definir `FRONTEND_CLIENTE_URL`.** En producción sí, con
+el dominio real.
+
+`HOST_LAN_IP` (opcional, solo desarrollo) fuerza la IP del enlace cuando la máquina tiene
+varias tarjetas y la heurística elige la que no es. Si no es una IPv4 válida se ignora con
+un aviso en el log.
+
+Lo que **no** cambia: la firma del token QR, su vigencia y lo que valida el socket-server
+en `/qr/validar`. El token no lleva dentro el host del enlace, así que cambiar el host no
+afecta a ninguna validación.
+
 ## Tiempo real
 
 El backend avisa al socket-server de Roberto por HTTP interno
@@ -210,6 +270,7 @@ valores llega cada `INSERT`.
     /controllers               → lógica HTTP de cada endpoint
     /services                  → consultas SQL y lógica de negocio
     /routes                    → definición de endpoints
+    /utils                     → IP de la LAN y enlace del QR (modo red local)
   /docs
     modelo-er.md               → modelo ER oficial de Jarrison (fuente de verdad)
     api-spec.md                → contrato formal de la API (compartir con Juan y Jarrison)

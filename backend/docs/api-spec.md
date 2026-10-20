@@ -206,7 +206,8 @@ comas):
 | Entorno | Si falta `CORS_ORIGINS` |
 |---|---|
 | `NODE_ENV=production` | **Ningún origen cruzado permitido**: un despliegue sin configurar se queda corto, no abierto |
-| desarrollo y pruebas | `http://localhost:5173`, `:5174`, `:5175` (cliente, restaurante y KDS) |
+| desarrollo y pruebas | `http://localhost:5173`, `:5174`, `:5175` (restaurante, cliente y KDS) |
+| `NODE_ENV=development` (modo red local) | lo anterior **más** cualquier `http://<IPv4 privada>` en los puertos 5173, 5174 o 5175 (solo `http`), para probar desde un celular de la misma Wi-Fi (ver `backend/README.md`) |
 
 Cabeceras permitidas: `Content-Type`, `Authorization` y `x-internal-key`. **No** se
 habilitan credenciales: la API autentica con `Authorization: Bearer`, no con cookies.
@@ -706,7 +707,7 @@ así que dos meseros pulsando "abrir" a la vez reciben el mismo token:
 ```json
 {
   "token": "v1.eyJtIjoxLCJpYXQiOjE3OTA2…",
-  "url": "http://localhost:5173/?token=v1.eyJtIjoxLCJpYXQiOjE3OTA2…",
+  "url": "http://localhost:5174/?token=v1.eyJtIjoxLCJpYXQiOjE3OTA2…",
   "reutilizado": false,
   "mesa": { "id_mesa": 5, "numero": 5, "estado": "ocupada" }
 }
@@ -731,7 +732,7 @@ avisa a la tablet con `/internal/qr-rotado` (socket.notifier). Ningún frontend 
 `201`:
 
 ```json
-{ "url": "http://localhost:5173/?token=v1....", "expira_en": 1760000000000, "mesa": { "id_mesa": 5, "numero": 5, "estado": "ocupada" } }
+{ "url": "http://localhost:5174/?token=v1....", "expira_en": 1760000000000, "mesa": { "id_mesa": 5, "numero": 5, "estado": "ocupada" } }
 ```
 
 El token solo viaja dentro de `url`. 400 id inválido · 404 mesa inexistente · **409 si la mesa
