@@ -24,6 +24,12 @@ import {
   rotarTokenQrMesa,
   decodificarTokenQr,
 } from '../services/qrService'
+import {
+  extraerHostDeUrl,
+  esHostLocal,
+  obtenerHostPorDefecto,
+  resolverDiningUrl,
+} from '../utils/qrUrl'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
 const ROTACION_INTERVALO = 180 // 3 minutos
@@ -36,8 +42,20 @@ export function PantallaMesa() {
   const numMesa = Number(id) || 1
   const tableData = tables?.find((t) => t.id === numMesa || t.number === numMesa)
 
-  // Token QR activo mostrado en pantalla (inicia con el de la mesa o un fallback)
+  // Token QR y URL activa de la mesa
   const [tokenQr, setTokenQr] = useState(() => tableData?.token_qr || `qr-mesa-${numMesa}-demo`)
+  const [qrUrl, setQrUrl] = useState(() => tableData?.qr_url || '')
+  const [prevTableToken, setPrevTableToken] = useState(tableData?.token_qr)
+  if (tableData?.token_qr !== prevTableToken) {
+    setPrevTableToken(tableData?.token_qr)
+    setTokenQr(tableData?.token_qr || `qr-mesa-${numMesa}-demo`)
+  }
+  const [prevTableQrUrl, setPrevTableQrUrl] = useState(tableData?.qr_url)
+  if (tableData?.qr_url !== prevTableQrUrl) {
+    setPrevTableQrUrl(tableData?.qr_url)
+    setQrUrl(tableData?.qr_url || '')
+  }
+
   const [justRotated, setJustRotated] = useState(false)
 
   // Temporizador de 3 minutos de rotación de seguridad
@@ -53,25 +71,38 @@ export function PantallaMesa() {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
 
-  // Configuración de red para comensales con celular
-  const defaultHost =
-    typeof window !== 'undefined' &&
-    window.location.hostname !== 'localhost' &&
-    window.location.hostname !== '127.0.0.1'
-      ? window.location.hostname
-      : '192.168.1.22'
+  // Configuración de red para comensales con celular (sin IP fija escrita a mano)
+  const backendUrl = qrUrl || tableData?.qr_url || ''
+  const hostBackend = extraerHostDeUrl(backendUrl)
+  const defaultHost = obtenerHostPorDefecto(backendUrl)
 
   const [useWifiIp, setUseWifiIp] = useState(true)
   const [hostIp, setHostIp] = useState(defaultHost)
-  const [clientPort, setClientPort] = useState('5173')
+  const [prevHostBackend, setPrevHostBackend] = useState(hostBackend)
+
+  if (hostBackend && hostBackend !== prevHostBackend) {
+    setPrevHostBackend(hostBackend)
+    setHostIp(hostBackend)
+  }
+
+  const defaultClientPort = (import.meta.env && import.meta.env.VITE_CLIENTE_PORT) || '5174'
+  const [clientPort, setClientPort] = useState(defaultClientPort)
   const [loadingAction, setLoadingAction] = useState(false)
   // Error visible en la tablet (rotación o credencial de pantalla fallidas)
   const [errorPantalla, setErrorPantalla] = useState('')
 
-  const activeHost = useWifiIp ? hostIp : 'localhost'
-  const diningUrl = tokenQr
-    ? `http://${activeHost}:${clientPort}/?token=${tokenQr}&mesa=${numMesa}`
-    : `http://${activeHost}:${clientPort}/?mesa=${numMesa}`
+  // El QR usa la url del backend y se regenera con hostIp manteniendo puerto y token
+  const diningUrl = resolverDiningUrl({
+    backendUrl,
+    token: tokenQr,
+    tableNumber: numMesa,
+    hostIp,
+    useWifiIp,
+    fallbackPort: clientPort,
+  })
+
+  // Aviso cuando el QR apunta a localhost y un celular no podrá abrirlo
+  const qrApuntaALocalhost = useWifiIp && esHostLocal(hostIp)
 
   const infoToken = decodificarTokenQr(tokenQr)
   const sid = infoToken?.sid || (tokenQr ? tokenQr.slice(-8) : 'activo')
@@ -97,6 +128,7 @@ export function PantallaMesa() {
       const res = await rotarTokenQrMesa(numMesa)
       if (res?.token) {
         setTokenQr(res.token)
+        if (res?.url) setQrUrl(res.url)
       }
       setSegundosRestantes(ROTACION_INTERVALO)
       setJustRotated(true)
@@ -178,6 +210,7 @@ export function PantallaMesa() {
         if (isCancelled) return
         if (data?.token_qr) {
           setTokenQr(data.token_qr)
+          if (data?.url) setQrUrl(data.url)
           setSegundosRestantes(ROTACION_INTERVALO)
           setJustRotated(true)
           setTimeout(() => setJustRotated(false), 3000)
@@ -217,9 +250,10 @@ export function PantallaMesa() {
     setLoadingAction(true)
     setErrorPantalla('')
     try {
-      const { token } = await notificarQrRotado(numMesa)
-      if (token) {
-        setTokenQr(token)
+      const res = await notificarQrRotado(numMesa)
+      if (res?.token) {
+        setTokenQr(res.token)
+        if (res?.url) setQrUrl(res.url)
         setSegundosRestantes(ROTACION_INTERVALO)
         setJustRotated(true)
         setTimeout(() => setJustRotated(false), 2000)
@@ -425,6 +459,29 @@ export function PantallaMesa() {
               <span>Sesión activa · sid: {sid}</span>
             </div>
 
+            {qrApuntaALocalhost && (
+              <div
+                className="sd-localhost-warning"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(238, 28, 37, 0.15)',
+                  border: '1px solid rgba(238, 28, 37, 0.4)',
+                  color: '#ff8a80',
+                  fontSize: 12,
+                  maxWidth: 320,
+                  textAlign: 'center',
+                  lineHeight: 1.3,
+                }}
+              >
+                <Info size={14} style={{ flexShrink: 0 }} />
+                <span>El QR apunta a localhost: un celular no podrá abrirlo. Configura la IP Wi-Fi en opciones.</span>
+              </div>
+            )}
+
             <div
               style={{
                 width: '100%',
@@ -584,9 +641,31 @@ export function PantallaMesa() {
                     type="text"
                     value={hostIp}
                     onChange={(e) => setHostIp(e.target.value.trim())}
-                    placeholder="192.168.1.XX"
+                    placeholder="192.168.1.X"
                     className="sd-input"
                   />
+                  {qrApuntaALocalhost && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        marginTop: 6,
+                        padding: '6px 10px',
+                        borderRadius: 4,
+                        background: 'rgba(238, 28, 37, 0.15)',
+                        border: '1px solid rgba(238, 28, 37, 0.35)',
+                        color: 'var(--sd-red-text, #ff6b6b)',
+                        fontSize: 11,
+                        lineHeight: 1.3,
+                      }}
+                    >
+                      <Info size={14} style={{ flexShrink: 0 }} />
+                      <span>
+                        El QR apunta a localhost: un celular no podrá abrirlo. Escribe la IP de este PC en la red Wi-Fi.
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -596,7 +675,7 @@ export function PantallaMesa() {
                   type="text"
                   value={clientPort}
                   onChange={(e) => setClientPort(e.target.value.trim())}
-                  placeholder="5173"
+                  placeholder="5174"
                   className="sd-input"
                 />
               </div>
