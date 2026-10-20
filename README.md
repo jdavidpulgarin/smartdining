@@ -107,8 +107,9 @@ Requisitos: **Node 22** y **Docker Desktop** (o Docker Engine con el plugin `com
 | Redis 7 | 6379 | `docker compose up -d` |
 | backend | 4000 | `npm run dev` en `backend/` |
 | socket-server | 4001 | `npm run dev` en `socket-server/` |
-| frontend-cliente | 5173 | `npm run dev` en `frontend-cliente/` |
-| frontend-restaurante | 5174 | `npm run dev` en `frontend-restaurante/` (Vite toma el siguiente libre) |
+| frontend-restaurante | 5173 | `npm run dev` en `frontend-restaurante/` |
+| frontend-cliente | 5174 (strictPort) | `npm run dev` en `frontend-cliente/` |
+| frontend-kds | 5175 | `npm run dev` en `frontend-kds/` |
 
 ### 1. Base de datos y Redis
 
