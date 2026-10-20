@@ -5,6 +5,9 @@ const { ALGORITMO_JWT, ROL_COMENSAL } = require('../middleware/auth.middleware')
 const socketNotifier = require('../services/socket.notifier');
 const { extraerSid } = require('../services/qr.token');
 const aliasComensal = require('../services/alias-comensal');
+// El enlace del QR se arma aparte: en desarrollo lleva la IP de la LAN para que
+// el celular del comensal pueda abrirlo (ver src/utils/url-comensal.js).
+const { urlDelComensal } = require('../utils/url-comensal');
 
 // Vigencia de la sesión del comensal: una estadía en la mesa (3 h por defecto).
 const COMENSAL_EXPIRES_IN = process.env.JWT_COMENSAL_EXPIRES_IN || '3h';
@@ -44,12 +47,6 @@ function vistaMesa(mesa) {
  */
 function vistaMesaPersonal(mesa) {
   return { ...vistaMesa(mesa), sesion_abierta: Boolean(mesa.token_qr) };
-}
-
-/** URL que se codifica en el QR impreso de la mesa. */
-function urlDelComensal(token) {
-  const base = (process.env.FRONTEND_CLIENTE_URL || 'http://localhost:5173').replace(/\/+$/, '');
-  return `${base}/?token=${encodeURIComponent(token)}`;
 }
 
 const mesaSchema = z.object({
