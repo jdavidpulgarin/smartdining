@@ -8,6 +8,15 @@ const mesasService = require('../src/services/mesas.service');
 
 const MESA = { id_mesa: 5, numero: 5, capacidad: 4, ubicacion: 'Terraza', estado: 'disponible' };
 
+// La url del QR se arma con FRONTEND_CLIENTE_URL, así que la prueba la FIJA en
+// vez de confiar en el entorno: antes esperaba el valor por defecto y fallaba
+// en cualquier máquina cuyo .env definiera la variable con otro puerto.
+// El modo red local (NODE_ENV=development) tiene sus propias pruebas en
+// tests/modo-red-local.test.js; aquí la suite corre con NODE_ENV=test, así que
+// el enlace sale tal cual, sin sustituir el host por ninguna IP.
+const BASE_CLIENTE = 'http://localhost:5174';
+process.env.FRONTEND_CLIENTE_URL = BASE_CLIENTE;
+
 /** Doble de BD que simula la fila de la mesa, con el token_qr que se le pase. */
 function dbMesa(tokenQr, estado = 'disponible') {
   return instalarFakeDb((sql, params) => {
@@ -46,7 +55,7 @@ test('abrir una mesa sin token pide uno a /qr/generar y lo guarda', async () => 
     assert.strictEqual(res.body.mesa.estado, 'ocupada');
 
     // La url se arma desde FRONTEND_CLIENTE_URL
-    assert.match(res.body.url, /^http:\/\/localhost:5173\/\?token=/);
+    assert.ok(res.body.url.startsWith(`${BASE_CLIENTE}/?token=`), res.body.url);
     assert.ok(res.body.url.includes(encodeURIComponent(token)));
 
     // Se guardó el token y la mesa quedó ocupada, con la fila bloqueada.

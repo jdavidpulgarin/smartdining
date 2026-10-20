@@ -57,6 +57,18 @@ test('h-10: en desarrollo valen los tres puertos locales', () => {
   assert.strictEqual(ORIGENES_LOCALES.length, 3, 'cliente, restaurante y KDS');
 });
 
+test('h-10: el modo red local NO mete nada en la LISTA de orígenes', () => {
+  // La regla de IP privada del modo red local (tests/modo-red-local.test.js) es
+  // un predicado dentro de `origin`, no una entrada de la lista: así la lista
+  // sigue siendo finita y comparable letra por letra, que es lo que sostiene
+  // todo lo demás de este archivo. Si alguien la convirtiera en entradas
+  // generadas, esta prueba lo avisa.
+  assert.deepStrictEqual(origenesPermitidos({ NODE_ENV: 'development' }), ORIGENES_LOCALES);
+  for (const origen of origenesPermitidos({ NODE_ENV: 'development' })) {
+    assert.ok(origen.startsWith('http://localhost:'), origen);
+  }
+});
+
 test('h-10: CORS_ORIGINS manda en cualquier entorno', () => {
   const env = { NODE_ENV: 'production', CORS_ORIGINS: 'https://sala.smartdining.co, https://kds.smartdining.co' };
 
