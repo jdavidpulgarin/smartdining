@@ -49,7 +49,7 @@ function Pago() {
   const [errorPago, setErrorPago] = useState(null);
   const [intencionActual, setIntencionActual] = useState(null);
   const [ultimoPago, setUltimoPago] = useState(0);
-  const [tipoConfirmado, setTipoConfirmado] = useState('propio');
+  const [tipoConfirmado, setTipoConfirmado] = useState('mesa');
   const intentoPrevioRef = useRef(null);
 
   const deduplicador = useMemo(
@@ -63,7 +63,16 @@ function Pago() {
 
     const bajaPayment = socketOn('payment:confirmed', (evento) => {
       if (!evento || deduplicador.visto(evento.eventId)) return;
-      const tipo = mensajePagoConfirmado({ comensal: evento.comensal, yo: comensal });
+
+      const saldoRestante = evento.saldo_restante_centavos != null
+        ? Number(evento.saldo_restante_centavos) / 100
+        : (evento.saldo_restante != null ? Number(evento.saldo_restante) : null);
+
+      const tipo = mensajePagoConfirmado({
+        comensal: evento.comensal,
+        yo: comensal,
+        saldoRestante,
+      });
 
       if (tipo === 'propio' || tipo === 'mesa') {
         if (intentoPrevioRef.current) {
@@ -76,6 +85,7 @@ function Pago() {
         setTipoConfirmado(tipo);
         setPantalla('confirmado');
       }
+      // 'otro' con saldo restante > 0: solo el aviso "X pagó", sin cambiar de pantalla
     });
 
     const bajaCuenta = socketOn('cuenta:solicitada', () => {
@@ -133,11 +143,27 @@ function Pago() {
           intentoPrevioRef.current.confirmado = true;
         }
         queueMicrotask(() => {
-          setPantalla('cuenta');
+          if (cuenta.saldo === 0) {
+            setTipoConfirmado((prev) => (prev === 'propio' ? 'propio' : 'mesa'));
+            setPantalla('confirmado');
+          } else {
+            setPantalla('cuenta');
+          }
         });
       }
     }
   }, [pantalla, cuenta]);
+
+  // Si la cuenta tiene saldo 0 (y total > 0) al montar o recargar sin un evento propio, mostrar pantalla de mesa pagada
+  useEffect(() => {
+    if (!cuenta) return;
+    if (cuenta.saldo === 0 && (cuenta.total ?? 0) > 0 && pantalla !== 'confirmado') {
+      queueMicrotask(() => {
+        setTipoConfirmado((prev) => (prev === 'propio' ? 'propio' : 'mesa'));
+        setPantalla('confirmado');
+      });
+    }
+  }, [cuenta, pantalla]);
 
   if (cargando && !cuenta) {
     return (
@@ -290,7 +316,7 @@ function Pago() {
     }
     setPantalla('cuenta');
     setErrorPago(null);
-    setTipoConfirmado('propio');
+    setTipoConfirmado('mesa');
   };
 
   return (
@@ -804,13 +830,13 @@ function Pago() {
             ¡PAGO CONFIRMADO!
           </h1>
 
-          {tipoConfirmado === 'mesa' ? (
+          {tipoConfirmado === 'propio' ? (
             <p className="m-0 text-[15px] text-white">
-              La mesa quedó pagada.
+              Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
             </p>
           ) : (
             <p className="m-0 text-[15px] text-white">
-              Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
+              La mesa quedó pagada.
             </p>
           )}
 

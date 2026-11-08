@@ -18,6 +18,7 @@ import {
   debeMostrarSugerenciaSinCelular,
   debeSalirDeEspera,
   mensajePagoConfirmado,
+  textoDetalleConfirmacion,
   eventIdParaIntento,
 } from './cuenta';
 
@@ -761,6 +762,51 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(mensajePagoConfirmado({ comensal: 'Beto', yo: 'Ana' })).toBe('otro');
       expect(mensajePagoConfirmado({ comensal: 'Carlos', yo: 'Beto' })).toBe('otro');
       expect(mensajePagoConfirmado({ comensal: 'Beto', yo: null })).toBe('otro');
+      expect(mensajePagoConfirmado({ comensal: 'Beto', yo: 'Ana', saldoRestante: 15000 })).toBe('otro');
+    });
+
+    it('comensal es otra persona pero saldoRestante es 0 → "mesa"', () => {
+      expect(mensajePagoConfirmado({ comensal: 'Beto', yo: 'Ana', saldoRestante: 0 })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: 'Carlos', yo: 'Ana', saldoRestante: 0 })).toBe('mesa');
+    });
+
+    it('sin evento propio y saldo 0 → "mesa"', () => {
+      expect(mensajePagoConfirmado({ comensal: null, yo: 'Ana', saldoRestante: 0 })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: null, yo: null, saldoRestante: 0 })).toBe('mesa');
+    });
+  });
+
+  describe('textoDetalleConfirmacion (J-15)', () => {
+    it('tipo "propio" → esPropio true, monto formateado y comprobante Wompi', () => {
+      const res = textoDetalleConfirmacion({ tipo: 'propio', monto: 46000 });
+      expect(res.esPropio).toBe(true);
+      expect(res.mensaje).toBe('Pagaste $ 46.000.');
+      expect(res.comprobante).toBe('Te llegará el comprobante de Wompi.');
+    });
+
+    it('tipo "mesa" → esPropio false, "La mesa quedó pagada." y sin comprobante', () => {
+      const res = textoDetalleConfirmacion({ tipo: 'mesa', monto: 46000 });
+      expect(res.esPropio).toBe(false);
+      expect(res.mensaje).toBe('La mesa quedó pagada.');
+      expect(res.comprobante).toBeNull();
+    });
+
+    it('cualquier otro caso ("otro", null, undefined) → "La mesa quedó pagada."', () => {
+      expect(textoDetalleConfirmacion({ tipo: 'otro' })).toEqual({
+        esPropio: false,
+        mensaje: 'La mesa quedó pagada.',
+        comprobante: null,
+      });
+      expect(textoDetalleConfirmacion({})).toEqual({
+        esPropio: false,
+        mensaje: 'La mesa quedó pagada.',
+        comprobante: null,
+      });
+      expect(textoDetalleConfirmacion()).toEqual({
+        esPropio: false,
+        mensaje: 'La mesa quedó pagada.',
+        comprobante: null,
+      });
     });
   });
 

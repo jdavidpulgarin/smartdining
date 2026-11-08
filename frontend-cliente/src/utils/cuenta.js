@@ -623,17 +623,19 @@ export function debeSalirDeEspera({ saldoAntes, saldoAhora } = {}) {
 }
 
 /**
- * Clasifica un evento payment:confirmed según quién realizó el pago (J-15).
+ * Clasifica un evento payment:confirmed o el estado de confirmación (J-15).
  * - 'propio': el comensal coincide con el usuario actual ('yo').
- * - 'mesa': comensal es null o no especificado (cobro de toda la mesa en caja).
- * - 'otro': el pago fue realizado por otro comensal de la mesa.
+ * - 'mesa': cobro de toda la mesa en caja (comensal null/vacío), pago de otro
+ *           comensal con el que la mesa queda en saldo 0, o estado de saldo 0 sin evento propio.
+ * - 'otro': pago realizado por otro comensal dejando aún saldo pendiente.
  *
  * @param {object} [opciones]
  * @param {string|null} [opciones.comensal] - Alias del comensal en el evento
  * @param {string|null} [opciones.yo] - Alias del usuario actual
+ * @param {number|null} [opciones.saldoRestante] - Saldo restante de la mesa tras el pago
  * @returns {'propio' | 'mesa' | 'otro'}
  */
-export function mensajePagoConfirmado({ comensal, yo } = {}) {
+export function mensajePagoConfirmado({ comensal, yo, saldoRestante } = {}) {
   const comensalNorm = comensal ? String(comensal).trim().toLowerCase() : null;
   const yoNorm = yo ? String(yo).trim().toLowerCase() : null;
 
@@ -645,7 +647,39 @@ export function mensajePagoConfirmado({ comensal, yo } = {}) {
     return 'propio';
   }
 
+  // Si pagó otro comensal pero con eso la mesa quedó en $0:
+  if (saldoRestante !== undefined && saldoRestante !== null && Number(saldoRestante) <= 0) {
+    return 'mesa';
+  }
+
   return 'otro';
+}
+
+/**
+ * Determina el texto a mostrar en la pantalla de confirmación de pago (J-15).
+ * Solo si tipo === 'propio' se muestra "Pagaste $X. Te llegará el comprobante de Wompi."
+ * En cualquier otro caso ('mesa', 'otro', etc.) se muestra "La mesa quedó pagada."
+ *
+ * @param {object} [opciones]
+ * @param {'propio'|'mesa'|'otro'|string} [opciones.tipo]
+ * @param {number} [opciones.monto]
+ * @param {function} [opciones.formato]
+ * @returns {{ esPropio: boolean, mensaje: string, comprobante: string|null }}
+ */
+export function textoDetalleConfirmacion({ tipo, monto = 0, formato = formatoPesos } = {}) {
+  if (tipo === 'propio') {
+    return {
+      esPropio: true,
+      mensaje: `Pagaste ${formato(monto)}.`,
+      comprobante: 'Te llegará el comprobante de Wompi.',
+    };
+  }
+
+  return {
+    esPropio: false,
+    mensaje: 'La mesa quedó pagada.',
+    comprobante: null,
+  };
 }
 
 /**
@@ -689,5 +723,6 @@ export default {
   debeMostrarSugerenciaSinCelular,
   debeSalirDeEspera,
   mensajePagoConfirmado,
+  textoDetalleConfirmacion,
   eventIdParaIntento,
 };
