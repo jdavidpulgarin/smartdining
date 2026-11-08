@@ -603,7 +603,9 @@ async function agregarComensal(req, res, next) {
  *
  * Un alias que NO está reservado se trata como un borrado idempotente: 204. No
  * hay nada que soltar, y pedir dos veces que se quite a la misma persona no es
- * un error (es también lo que hace §6.4 con un 'quitar' de quien no está).
+ * un error (es también lo que hace §6.4 con un 'quitar' de quien no está). En
+ * ese caso el aviso va con el alias normalizado de la URL, que es el único texto
+ * que hay; cuando SÍ había reserva, va con el texto que ella guardaba.
  *
  * El aviso de 'quitar' NO se espera: aquí no hay nada que decidir con su
  * respuesta —el alias ya está suelto en el backend, que es la fuente de verdad—
@@ -622,26 +624,29 @@ async function quitarComensal(req, res, next) {
     const cuentaMesa = await mesasService.cuentaPorComensal(idMesa);
     if (!cuentaMesa) return res.status(404).json({ error: 'Mesa no encontrada' });
 
-    const marca = await aliasComensal.esSinCelular(idMesa, alias.clave);
-    if (marca.noDisponible) {
+    // UNA sola lectura de la reserva, que da las dos cosas que hacen falta: de
+    // qué tipo es (para decidir) y con qué texto se registró (para el aviso).
+    const reserva = await aliasComensal.leerReserva(idMesa, alias.clave);
+    if (reserva.noDisponible) {
       return res.status(503).json({
         error: 'No se pudo quitar al comensal, intenta de nuevo en unos segundos',
         motivo: 'alias_no_disponible',
       });
     }
-    if (marca.sinCelular === false) {
+    if (reserva.ilegible || reserva.sinCelular === false) {
       // Reservado pero sin la marca: es la sesión de alguien que entró con su
-      // celular, o una reserva de antes de que la marca existiera. En los dos
-      // casos no se toca desde aquí.
+      // celular, o una reserva de antes de que la marca existiera. Y un valor
+      // que no se puede leer cuenta igual: ante la duda no se toca.
       return res.status(409).json({
         error: 'Esa persona entró con su celular: su sesión no se puede quitar desde aquí',
         motivo: 'comensal_con_sesion',
       });
     }
 
-    if (marca.noExiste) {
+    if (reserva.noExiste) {
       // Nada que soltar. Se avisa igual al socket-server, por si allí sí quedó
-      // en la lista (su TTL y el de aquí son dos relojes distintos).
+      // en la lista (su TTL y el de aquí son dos relojes distintos), con el
+      // único texto que hay: el normalizado de la URL.
       socketNotifier.notificarMesaComensal(idMesa, alias.alias, 'quitar', alias.clave);
       return res.status(204).send();
     }
@@ -661,7 +666,12 @@ async function quitarComensal(req, res, next) {
       });
     }
 
-    socketNotifier.notificarMesaComensal(idMesa, alias.alias, 'quitar', alias.clave);
+    // EL ALIAS GUARDADO, no el de la URL: la reserva se libera por clave, pero
+    // el socket-server compara 'quitar' por TEXTO IDÉNTICO (EVENTS.md §6.4). Si
+    // se mandara lo que escribió el mesero, un DELETE de «abuela» sobre la
+    // reserva de «Abuela» respondería 204 y soltaría la reserva, pero la
+    // persona se quedaría 24 h en la presencia de la mesa.
+    socketNotifier.notificarMesaComensal(idMesa, reserva.alias, 'quitar', alias.clave);
 
     return res.status(204).send();
   } catch (err) {
