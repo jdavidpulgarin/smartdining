@@ -738,6 +738,57 @@ export function estadoSelectorPago({ saldoMesa = 0, miSaldo = 0, miPagado = 0 } 
   };
 }
 
+/**
+ * Determina el color y texto de ayuda de la tarjeta "TU PARTE" (J-15).
+ * - yaPague true: $0 en verde (#2FA35A) y "Ya pagaste lo tuyo. ¡Gracias!".
+ * - Sin consumos propios (miSaldo 0 y miPagado 0): color normal (#FFFFFF) y
+ *   "No tienes nada a tu nombre. Puedes aportar con DIVIDIR o TODA LA MESA.".
+ * - Saldo propio pendiente (miSaldo > 0): color normal (#FFFFFF) y "Consumiste $X".
+ *
+ * @param {object} [opciones]
+ * @param {number} [opciones.miSaldo=0] - Saldo personal del comensal
+ * @param {number} [opciones.miPagado=0] - Monto ya pagado por el comensal
+ * @param {number} [opciones.miSubtotal=0] - Subtotal consumido por el comensal
+ * @param {boolean} [opciones.yaPague] - Si ya pagó según estadoSelectorPago
+ * @param {function} [opciones.formato=formatoPesos]
+ * @returns {{ color: string, esVerde: boolean, mensaje: string }}
+ */
+export function infoTuParte({
+  miSaldo = 0,
+  miPagado = 0,
+  miSubtotal = 0,
+  yaPague,
+  formato = formatoPesos,
+} = {}) {
+  const saldo = Math.max(0, Number(miSaldo) || 0);
+  const pagado = Math.max(0, Number(miPagado) || 0);
+  const subtotal = Math.max(0, Number(miSubtotal) || 0);
+
+  const pago = yaPague !== undefined ? Boolean(yaPague) : (pagado > 0 && saldo <= 0);
+
+  if (pago) {
+    return {
+      color: '#2FA35A',
+      esVerde: true,
+      mensaje: 'Ya pagaste lo tuyo. ¡Gracias!',
+    };
+  }
+
+  if (saldo <= 0) {
+    return {
+      color: '#FFFFFF',
+      esVerde: false,
+      mensaje: 'No tienes nada a tu nombre. Puedes aportar con DIVIDIR o TODA LA MESA.',
+    };
+  }
+
+  return {
+    color: '#FFFFFF',
+    esVerde: false,
+    mensaje: `Consumiste ${formato(subtotal)}`,
+  };
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -759,4 +810,5 @@ export default {
   textoDetalleConfirmacion,
   eventIdParaIntento,
   estadoSelectorPago,
+  infoTuParte,
 };

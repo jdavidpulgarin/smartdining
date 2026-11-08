@@ -21,6 +21,7 @@ import {
   textoDetalleConfirmacion,
   eventIdParaIntento,
   estadoSelectorPago,
+  infoTuParte,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -900,6 +901,50 @@ describe('utils/cuenta.js (J-08)', () => {
         loMioHabilitado: false,
         modoInicial: 'igual',
         yaPague: false,
+      });
+    });
+  });
+
+  describe('infoTuParte (J-15)', () => {
+    it('yaPague true: $0 en verde y "Ya pagaste lo tuyo. ¡Gracias!"', () => {
+      const res = infoTuParte({
+        miSaldo: 0,
+        miPagado: 25000,
+        miSubtotal: 25000,
+        yaPague: true,
+      });
+      expect(res).toEqual({
+        color: '#2FA35A',
+        esVerde: true,
+        mensaje: 'Ya pagaste lo tuyo. ¡Gracias!',
+      });
+    });
+
+    it('sin consumos propios (miSaldo 0 y miPagado 0): color blanco y texto exacto para aportar', () => {
+      const res = infoTuParte({
+        miSaldo: 0,
+        miPagado: 0,
+        miSubtotal: 0,
+        yaPague: false,
+      });
+      expect(res).toEqual({
+        color: '#FFFFFF',
+        esVerde: false,
+        mensaje: 'No tienes nada a tu nombre. Puedes aportar con DIVIDIR o TODA LA MESA.',
+      });
+    });
+
+    it('con saldo pendiente (miSaldo > 0): color blanco y texto Consumiste $X', () => {
+      const res = infoTuParte({
+        miSaldo: 18000,
+        miPagado: 0,
+        miSubtotal: 18000,
+        yaPague: false,
+      });
+      expect(res).toEqual({
+        color: '#FFFFFF',
+        esVerde: false,
+        mensaje: 'Consumiste $ 18.000',
       });
     });
   });

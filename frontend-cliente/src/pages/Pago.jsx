@@ -17,6 +17,7 @@ import {
   mensajePagoConfirmado,
   eventIdParaIntento,
   estadoSelectorPago,
+  infoTuParte,
 } from '../utils/cuenta';
 import { crearDeduplicador } from '../utils/deduplicador';
 import { crearIntencion } from '../services/pagoService';
@@ -228,6 +229,13 @@ function Pago() {
     miPagado,
   });
 
+  const tuParte = infoTuParte({
+    miSaldo,
+    miPagado,
+    miSubtotal,
+    yaPague,
+  });
+
   const comensales = cuenta?.comensales || [];
   const numPersonasDividir = personasDividir(cuenta, { presencia, yo: comensal });
 
@@ -399,14 +407,12 @@ function Pago() {
               </span>
               <span
                 className="font-titulo text-[64px] tracking-wider leading-[0.95]"
-                style={{ color: miSaldo === 0 ? '#2FA35A' : '#FFFFFF' }}
+                style={{ color: tuParte.color }}
               >
                 {formatoPesos(miSaldo)}
               </span>
               <span className="text-xs text-texto-suave">
-                {miSaldo === 0
-                  ? 'Ya pagaste lo tuyo. ¡Gracias!'
-                  : `Consumiste ${formatoPesos(miSubtotal)}`}
+                {tuParte.mensaje}
               </span>
             </div>
 
@@ -437,7 +443,7 @@ function Pago() {
             <div className="flex flex-col divide-y divide-[#222222]">
               {comensales.map((c, idx) => {
                 const deb = Math.max(0, c.saldo);
-                const yaPago = deb === 0;
+                const yaPago = c.esMio ? yaPague : (c.pagado > 0 && deb === 0);
                 const inicial = c.nombre ? c.nombre.charAt(0).toUpperCase() : '?';
 
                 return (
