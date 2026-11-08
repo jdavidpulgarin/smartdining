@@ -94,11 +94,17 @@ export default function Tablero() {
 
   const agotados = useAgotados({ token })
 
+  // La insignia suma ingredientes y platos: desde D-14 el panel apaga las dos
+  // cosas, y una insignia que solo contara ingredientes dejaria un plato
+  // agotado sin avisar a nadie desde el header.
+  const totalAgotados = agotados.agotados + agotados.platosAgotados
+
   const { estado, conectado, recargar, avanzar } = useTablero({
     token,
     alCaducarSesion,
     alLlegarComandaNueva,
     alCambiarDisponibilidad: agotados.alLlegarEvento,
+    alCambiarDisponibilidadPlato: agotados.alLlegarEventoPlato,
   })
 
   // Al RECONECTAR se vuelve a leer la carta: mientras el socket estuvo caido,
@@ -193,23 +199,21 @@ export default function Tablero() {
             onClick={() => setPanelAbierto(true)}
             className={`relative ${botonBarra}`}
             aria-label={
-              agotados.agotados > 0
-                ? `Ingredientes agotados: ${agotados.agotados}`
-                : 'Ingredientes agotados'
+              totalAgotados > 0 ? `Agotados: ${totalAgotados}` : 'Ingredientes y platos agotados'
             }
-            title="Ingredientes agotados"
+            title="Ingredientes y platos agotados"
           >
             <PackageX size={22} aria-hidden="true" />
             {/* La insignia solo aparece si hay algo agotado: un cero permanente
                 seria ruido. Si GET /menu fallo, el contador es 0 y no se pinta
                 nada, que es justo lo que se quiere: el panel no estorba al
                 tablero por no haber podido leer la carta. */}
-            {agotados.agotados > 0 && (
+            {totalAgotados > 0 && (
               <span
                 aria-hidden="true"
                 className="absolute -right-1 -top-1 grid h-6 min-w-6 place-items-center rounded-full bg-[color:var(--color-alerta)] px-1 text-xs font-bold text-white"
               >
-                {agotados.agotados}
+                {totalAgotados}
               </span>
             )}
           </button>
@@ -358,6 +362,8 @@ export default function Tablero() {
         onConmutar={agotados.conmutar}
         onRecargar={agotados.recargar}
         onDescartarError={agotados.descartarError}
+        onConmutarPlato={agotados.conmutarPlato}
+        onDescartarErrorPlato={agotados.descartarErrorPlato}
       />
     </div>
   )
