@@ -12,6 +12,7 @@ import {
 } from '../utils/cuenta';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout } from '../services/wompiWidget';
+import { uuidV4 } from '../services/clienteMesa';
 
 /**
  * Pantalla principal de La Cuenta y Pagos (J-08).
@@ -151,10 +152,7 @@ function Pago() {
     }
 
     try {
-      const eventId =
-        typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `cs-${Date.now()}`;
+      const eventId = uuidV4();
       const ack = await enviar('cuenta:solicitada', { eventId });
       const res = estadoCuentaSolicitada(ack ?? { ok: true }, false);
       setAvisoCuenta(res);

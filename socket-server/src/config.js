@@ -91,6 +91,10 @@ function cargarConfig(env = process.env) {
   exigirSecretos(env);
 
   const entorno = env.NODE_ENV || 'development';
+  // Modo red local (origenes.js): solo si NODE_ENV=development está ESCRITO en
+  // el entorno. El valor por defecto de `entorno` no lo activa, así un
+  // despliegue al que le falte NODE_ENV no abre CORS a la red.
+  const redLocal = env.NODE_ENV === 'development';
   const redisUrl = (env.REDIS_URL || '').trim() || null;
   // En producción el estado (carritos, idempotencia, revocaciones de QR) DEBE
   // sobrevivir a un reinicio: arrancar en memoria en silencio perdería los
@@ -133,6 +137,7 @@ function cargarConfig(env = process.env) {
     // Sin REDIS_URL (solo fuera de producción) el estado vive en memoria.
     redisUrl,
     origenes,
+    redLocal,
     jwtSecret: env.JWT_SECRET,
     internalApiKey: env.INTERNAL_API_KEY,
     qrSecret: env.QR_SECRET,

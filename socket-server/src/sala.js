@@ -20,12 +20,14 @@ const PREFIJO_SALA_MESA = 'room:mesa-';
  * - comensales: alias distintos de los comensales conectados, ordenados.
  * - total: personas en la mesa = alias distintos + sockets de comensal sin
  *   alias (dos pestañas de "Ana" cuentan como una persona).
+ * - pagaron: alias que ya pagaron algo en esta sesión de mesa (estén o no
+ *   sentados), ordenados. Con esto la PWA calcula "igual" como el servidor.
  *
- * `programar(idMesa)` emite `mesa:presencia` a room:admin al instante si no
- * hubo aviso reciente; si lo hubo, deja uno pendiente para el final de la
- * ventana, así el último estado siempre llega.
+ * `programar(idMesa)` emite `mesa:presencia` a room:admin y a la sala de esa
+ * mesa al instante si no hubo aviso reciente; si lo hubo, deja uno pendiente
+ * para el final de la ventana, así el último estado siempre llega.
  */
-function crearPresencia({ io, ventanaMs = VENTANA_PRESENCIA_MS }) {
+function crearPresencia({ io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS }) {
   const ventanas = new Map(); // idMesa -> { pendiente: boolean, temporizador }
 
   async function calcular(idMesa) {
@@ -38,12 +40,17 @@ function crearPresencia({ io, ventanaMs = VENTANA_PRESENCIA_MS }) {
       else anonimos += 1;
     }
     const comensales = [...alias].sort((a, b) => a.localeCompare(b));
-    return { id_mesa: idMesa, comensales, total: comensales.length + anonimos };
+    const pagaron = await estadoMesas.pagaron(idMesa);
+    return {
+      id_mesa: idMesa, comensales, total: comensales.length + anonimos, pagaron,
+    };
   }
 
+  // A la mesa también: sus comensales necesitan quién está y quién pagó para
+  // mostrar cuánto es "igual". Solo llevan datos de esa misma mesa.
   async function emitir(idMesa) {
     const presencia = await calcular(idMesa);
-    io.to(SALA_ADMIN).emit('mesa:presencia', presencia);
+    io.to(SALA_ADMIN).to(salaMesa(idMesa)).emit('mesa:presencia', presencia);
   }
 
   function abrirVentana(idMesa) {
@@ -77,13 +84,20 @@ const LIMITE_LLAMADA_SEG = 60;
 function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
   const llamadas = new Map(); // idMesa -> ms en que vence el bloqueo
   const cuentas = new Set(); // mesas que pidieron la cuenta
+  const pagos = new Map(); // idMesa -> Set de alias que ya pagaron
   return {
     marcarCuenta(idMesa) { cuentas.add(idMesa); },
     cuentaSolicitada(idMesa) { return cuentas.has(idMesa); },
     limpiarMesa(idMesa) {
       cuentas.delete(idMesa);
       llamadas.delete(idMesa);
+      pagos.delete(idMesa);
     },
+    marcarPago(idMesa, alias) {
+      if (!pagos.has(idMesa)) pagos.set(idMesa, new Set());
+      pagos.get(idMesa).add(alias);
+    },
+    pagaron(idMesa) { return [...(pagos.get(idMesa) || [])].sort((a, b) => a.localeCompare(b)); },
     reservarLlamada(idMesa, segundos) {
       if ((llamadas.get(idMesa) || 0) > ahora()) return false;
       llamadas.set(idMesa, ahora() + segundos * 1000);

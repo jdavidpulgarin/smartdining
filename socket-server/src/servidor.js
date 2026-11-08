@@ -15,6 +15,7 @@ const {
 const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
 const { log } = require('./log');
+const { crearOrigenCors } = require('./origenes');
 const { crearIpCliente } = require('./ip-cliente');
 const { crearConexionRedis } = require('./almacen/redis');
 const { crearClienteBackend } = require('./backend');
@@ -55,9 +56,12 @@ const rutasBase = {
  * las pruebas puedan levantarlo en un puerto efímero.
  */
 function crearServidor(config, deps = {}) {
-  // Se usa la misma lista blanca para HTTP (health, webhooks) y para el
-  // handshake de Socket.io, así no hay dos políticas que se desincronicen.
-  const corsHttp = cors({ origin: config.origenes, credentials: true });
+  // Se usa la misma política para HTTP (health, webhooks) y para el
+  // handshake de Socket.io, así no hay dos que se desincronicen. Es la lista
+  // blanca CORS_ORIGINS, más las IP privadas de la Wi-Fi en modo red local
+  // (solo con NODE_ENV=development, ver origenes.js).
+  const origenCors = crearOrigenCors(config);
+  const corsHttp = cors({ origin: origenCors, credentials: true });
 
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
@@ -69,7 +73,7 @@ function crearServidor(config, deps = {}) {
   });
 
   const io = new Server(httpServer, {
-    cors: { origin: config.origenes, methods: ['GET', 'POST'], credentials: true },
+    cors: { origin: origenCors, methods: ['GET', 'POST'], credentials: true },
     // Al reconectar tras un corte corto, Socket.io recupera la sesión y los
     // eventos perdidos. No basta por sí solo: la garantía de no duplicar la
     // da la idempotencia por eventId (idempotencia.js), que cubre también los
@@ -96,6 +100,9 @@ function crearServidor(config, deps = {}) {
   // durante días, mucho más que los 10 min de los eventos de socket.
   const TTL_PAGOS_MS = 7 * 24 * 60 * 60 * 1000;
   const registro = cliente ? crearRegistroIdempotenciaRedis({ cliente }) : crearRegistroIdempotencia();
+  // Estado de sala por mesa (cuenta pedida, llamadas, quién pagó). La presencia
+  // lo lee para anunciar `pagaron`.
+  const estadoMesas = cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria();
   Object.assign(ctx, {
     io,
     redis,
@@ -104,13 +111,13 @@ function crearServidor(config, deps = {}) {
     registroPagos: cliente
       ? crearRegistroIdempotenciaRedis({ cliente, ttlMs: TTL_PAGOS_MS })
       : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
-    estadoMesas: cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria(),
+    estadoMesas,
     duenosPedidos: cliente ? crearDuenosRedis({ cliente }) : crearDuenosMemoria(),
     // Pagos: pasarela (null = pagos apagados), intenciones y límites.
     pasarela: deps.pasarela || (config.wompi ? verificarImplementacion(crearPasarelaWompi(config.wompi)) : null),
     almacenPagos: cliente ? crearAlmacenPagosRedis({ cliente }) : crearAlmacenPagosMemoria(),
     limites: cliente ? crearLimitesRedis({ cliente }) : crearLimitesMemoria(),
-    presencia: crearPresencia({ io, ...(deps.presencia || {}) }),
+    presencia: crearPresencia({ io, estadoMesas, ...(deps.presencia || {}) }),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),
     suscripciones: cliente

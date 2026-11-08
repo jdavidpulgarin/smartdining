@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { useSesion } from './SesionContext';
 import { crearClienteMesa, aliasDelToken } from '../services/clienteMesa';
+import { urlsServidor } from '../utils/urlsServidor';
 
 const MesaSocketContext = createContext(null);
 
@@ -30,7 +31,7 @@ export function esModoCompartido(token, socketUrl) {
 export function MesaSocketProvider({ children }) {
   const { sesion, despedir } = useSesion();
   const token = sesion?.token;
-  const socketUrl = import.meta.env.VITE_SOCKET_URL;
+  const socketUrl = urlsServidor().socket;
 
   const modo = useMemo(
     () => (esModoCompartido(token, socketUrl) ? 'compartido' : 'local'),

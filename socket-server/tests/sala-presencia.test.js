@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { levantar, emitir, esperar, tokenComensal, tokenPersonal } = require('./helpers');
+const {
+  levantar, emitir, esperar, tokenComensal, tokenPersonal, tokenPantalla,
+} = require('./helpers');
 
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Junta todos los mesa:presencia que reciba el socket. */
@@ -22,7 +24,9 @@ test('join: el panel recibe los comensales presentes (alias del JWT) y el total'
   const llega = esperar(admin, 'mesa:presencia');
   const ana = await s.conectar(tokenComensal(5, '  Ana '));
   await emitir(ana, 'join:table', {});
-  assert.deepStrictEqual(await llega, { id_mesa: 5, comensales: ['Ana'], total: 1 });
+  assert.deepStrictEqual(await llega, {
+    id_mesa: 5, comensales: ['Ana'], total: 1, pagaron: [],
+  });
 });
 
 test('leave y disconnect actualizan la presencia (último estado siempre llega)', async (t) => {
@@ -33,13 +37,17 @@ test('leave y disconnect actualizan la presencia (último estado siempre llega)'
   await emitir(ana, 'join:table', {});
   await emitir(beto, 'join:table', { comensal: 'Beto' });
   await pausa(250);
-  assert.deepStrictEqual(vistos.at(-1), { id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2 });
+  assert.deepStrictEqual(vistos.at(-1), {
+    id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: [],
+  });
   await emitir(beto, 'leave:table', {});
   await pausa(250);
   assert.deepStrictEqual(vistos.at(-1).comensales, ['Ana']);
   ana.close();
   await pausa(250);
-  assert.deepStrictEqual(vistos.at(-1), { id_mesa: 5, comensales: [], total: 0 });
+  assert.deepStrictEqual(vistos.at(-1), {
+    id_mesa: 5, comensales: [], total: 0, pagaron: [],
+  });
 });
 
 test('límite de frecuencia: muchas entradas seguidas producen pocos avisos', async (t) => {
@@ -63,7 +71,9 @@ test('dos pestañas del mismo comensal cuentan como una persona', async (t) => {
     await emitir(c, 'join:table', {});
   }
   await pausa(250);
-  assert.deepStrictEqual(vistos.at(-1), { id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2 });
+  assert.deepStrictEqual(vistos.at(-1), {
+    id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: [],
+  });
   assert.deepStrictEqual(await s.presencia.calcular(5), vistos.at(-1));
 });
 
@@ -76,17 +86,38 @@ test('suplantación: un join:table con otro alias que el del JWT se rechaza y no
   assert.strictEqual(s.io.sockets.adapter.rooms.get('room:mesa-5'), undefined);
 });
 
-test('rol: el personal no cuenta como comensal; los comensales no reciben presencia', async (t) => {
+test('rol: el personal no cuenta como comensal', async (t) => {
   const { s, admin } = await escenario(t);
   const vistos = recolectar(admin);
   const mesero = await s.conectar(tokenPersonal('mesero'));
   await emitir(mesero, 'join:table', { id_mesa: 5, comensal: 'Mesero' });
   const ana = await s.conectar(tokenComensal(5));
-  const enAna = esperar(ana, 'mesa:presencia', 300);
   await emitir(ana, 'join:table', { comensal: 'Ana' });
   await pausa(250);
   assert.deepStrictEqual(vistos.at(-1).comensales, ['Ana']);
-  assert.strictEqual(await enAna, null);
+});
+
+test('la mesa recibe su propia presencia (y la pantalla de esa mesa); otra mesa no', async (t) => {
+  const { s } = await escenario(t);
+  // La pantalla entra sola a la sala de su mesa (no emite join:table).
+  const pantalla5 = await s.conectar(tokenPantalla(5));
+  const ana = await s.conectar(tokenComensal(5, 'Ana'));
+  const zoe = await s.conectar(tokenComensal(6, 'Zoe'));
+  await emitir(zoe, 'join:table', {});
+  await pausa(250);
+  const enAna = recolectar(ana);
+  const enPantalla = recolectar(pantalla5);
+  const enZoe = recolectar(zoe);
+  await emitir(ana, 'join:table', {});
+  const beto = await s.conectar(tokenComensal(5, 'Beto'));
+  await emitir(beto, 'join:table', {});
+  await pausa(250);
+  const esperado = {
+    id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: [],
+  };
+  assert.deepStrictEqual(enAna.at(-1), esperado);
+  assert.deepStrictEqual(enPantalla.at(-1), esperado);
+  assert.deepStrictEqual(enZoe, [], 'la mesa 6 no recibe nada de la mesa 5');
 });
 
 test('aislamiento: la presencia de una mesa no mezcla la de otra', async (t) => {

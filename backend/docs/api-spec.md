@@ -193,6 +193,123 @@ acertar una sola contraseña. Ahora:
 
 ---
 
+## Usuarios del personal (D-16)
+
+Administración de las cuentas del personal. **Todo es solo de `admin`**, sin excepciones:
+aquí se reparte quién entra y con qué permisos, así que no hay ninguna lectura
+"inofensiva" que abrir a otro rol.
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| GET | /usuarios | **admin** | Lista el personal |
+| PATCH | /usuarios/:id | **admin** | Cambia `nombre`, `rol` y `activo` |
+| POST | /usuarios/:id/clave | **admin** | Guarda una clave nueva |
+
+El **alta** sigue en [`POST /auth/register`](#post-authregister--solo-admin), que ya es de
+admin: no se duplica aquí. **No hay baja**: `usuarios` está referenciada por pedidos y
+pagos, así que borrar una fila sería perder quién cobró qué. Lo que se hace es desactivar
+(`activo: false`), que es lo que el middleware comprueba en cada petición (H-09).
+
+**El hash de la clave no sale de ninguna de las tres rutas.** Las lecturas piden las
+columnas una por una (`id_usuario`, `nombre`, `email`, `rol`, `activo`, `creado_en`), nunca
+`SELECT *`, para que agregar una columna sensible a la tabla no la publique sola.
+
+### GET /usuarios
+
+200:
+
+```json
+{ "usuarios": [
+  { "id_usuario": 1, "nombre": "Carlos Ospino", "email": "admin@mail.com",
+    "rol": "admin", "activo": true, "creado_en": "2026-01-01T00:00:00.000Z" }
+] }
+```
+
+Ordenada por `id_usuario`: es el orden de alta, que es estable (dos personas pueden
+llamarse igual) y el que espera quien acaba de crear una cuenta y la busca al final.
+
+### PATCH /usuarios/:id
+
+Body, **todos los campos opcionales** pero al menos uno:
+
+```json
+{ "nombre": "Ana María Ríos", "rol": "cajero", "activo": false }
+```
+
+- El cuerpo es `.strict()`: una clave de más es **400**. El **`email` queda fuera a
+  propósito**: es la credencial de entrada y la clave de unicidad de la tabla, así que
+  cambiarlo es dar de alta otra identidad, no editar un perfil. Sin `.strict()`, un panel
+  que reenviara la fila entera colaría `email` o `password_hash` y el `COALESCE` los
+  ignoraría en silencio: quien llama creería haber cambiado algo que no cambió.
+- Un cuerpo vacío `{}` es **400**: no es una edición.
+- `rol` solo acepta `admin`, `mesero`, `cajero`, `cocina` — los del CHECK de la tabla.
+  `comensal` **no** está: no es una fila de `usuarios`, es un rol que solo existe dentro
+  del JWT de una mesa.
+- `:id` tiene que ser un **entero positivo**, o **400**. Un usuario que no existe, **404**.
+- Lo que no se manda **no se toca** (`COALESCE`), así que el panel puede enviar solo lo que
+  cambió.
+- 200 devuelve `{ "usuario": { … } }` con la fila actualizada, sin el hash.
+
+#### Los dos 409
+
+```json
+{ "error": "No se puede dejar el sistema sin ningún admin activo: asciende o activa a otro antes." }
+{ "error": "No puedes desactivarte ni cambiarte el rol a ti mismo: pídeselo a otro admin." }
+```
+
+- **Siempre tiene que quedar al menos un admin activo.** Sin esta regla, el último admin
+  puede desactivarse o quitarse el rol y no queda nadie que pueda volver a repartir
+  permisos: habría que entrar a la base a mano. Se comprueba **dentro de la transacción y
+  con la fila bloqueada** (`SELECT … FOR UPDATE`), porque si no dos admins podrían
+  desactivarse a la vez, cada uno viendo al otro como activo.
+- **Un admin no puede desactivarse ni cambiarse el rol a sí mismo.** No es paternalismo: es
+  el error que deja a alguien fuera de su propio panel, con la sesión abierta y sin forma
+  de deshacerlo. **Otro** admin sí puede hacerlo, y cambiarse el **nombre** a sí mismo
+  también se puede. Reafirmar el rol que ya se tiene no cuenta como cambio, para que un
+  panel que reenvía el rol sin tocarlo no choque.
+- Reactivar a alguien o devolverle el rol de admin **nunca** se bloquea: esas operaciones
+  suman admins, no los quitan.
+
+### POST /usuarios/:id/clave
+
+Body: `{ "password": "clave-nueva-larga" }`, `.strict()`.
+
+- **Mínimo 8 caracteres** (400 si no). Más que los 6 de `/auth/register`, cuyo mínimo ya
+  está publicado en este contrato: bajarlo aquí para igualarlo sería empeorar a propósito.
+  El mínimo se mide en **caracteres**, que es lo que la persona escribe y cuenta.
+- **Máximo 72 BYTES** (no 72 caracteres), medidos con `Buffer.byteLength(clave, 'utf8')`.
+  Es por bytes como trunca bcrypt: a partir del byte 72 ignora el resto **en silencio**. Y
+  la diferencia no es teórica en español: una `ñ` o una tilde ocupan **dos** bytes en
+  UTF-8, así que una clave de 40 caracteres puede pasarse de 72 bytes. Contando caracteres,
+  esa clave entraría, bcrypt la cortaría por la mitad y el usuario acabaría con una
+  contraseña que no es la que escribió. Rechazarla es mejor que cortarla sin avisar.
+
+  > `POST /auth/register` **no** valida igual: pide `password` de **mínimo 6 caracteres y
+  > sin máximo**, así que por ahí una clave larga sí se trunca en silencio. No se cambia en
+  > este PR para no tocar un contrato ya publicado; queda anotado.
+- Se guarda con el **mismo bcrypt y el mismo costo** que `/auth/register` (`COSTO_BCRYPT`,
+  importado y no copiado): dos costos distintos en el proyecto producen hashes que el login
+  reconoce pero que cuestan tiempos distintos, y eso es justo lo que evita H-12.
+- 200 devuelve `{ "usuario": { … } }` **sin la clave ni el hash**: la respuesta de un cambio
+  de clave no tiene ninguna razón para llevar la clave. **404** si el usuario no existe.
+
+### La caché de usuario activo se invalida (H-09)
+
+Al **desactivar**, **cambiar el rol** o **cambiar la clave** se borra la llave
+`sd:usuario:{id}:activo`. Sin eso, el cambio tardaría hasta el TTL (60 s por defecto) en
+surtir efecto, porque `estaActivo` contesta desde Redis sin preguntarle a la base: el token
+de alguien recién desactivado seguiría abriendo la API hasta un minuto.
+
+Se invalida **después del COMMIT**, no antes: hacerlo antes sería peor que no hacerlo, ya
+que una petición en vuelo podría volver a cachear el valor viejo justo antes de que el
+cambio se guarde. Cambiar **solo el nombre** no toca la caché: el middleware solo mira
+`activo`, y tirar la llave por un nombre sería perder caché sin ninguna razón.
+
+**Si Redis no responde, la operación NO falla**: el cambio ya está guardado en PostgreSQL,
+que es quien manda, y lo único que se pierde es que tarde el TTL en verse.
+
+---
+
 ## Seguridad del transporte y del acceso
 
 ### Cabeceras y CORS (H-10)
@@ -206,7 +323,8 @@ comas):
 | Entorno | Si falta `CORS_ORIGINS` |
 |---|---|
 | `NODE_ENV=production` | **Ningún origen cruzado permitido**: un despliegue sin configurar se queda corto, no abierto |
-| desarrollo y pruebas | `http://localhost:5173`, `:5174`, `:5175` (cliente, restaurante y KDS) |
+| desarrollo y pruebas | `http://localhost:5173`, `:5174`, `:5175` (restaurante, cliente y KDS) |
+| `NODE_ENV=development` (modo red local) | lo anterior **más** cualquier `http://<IPv4 privada>` en los puertos 5173, 5174 o 5175 (solo `http`), para probar desde un celular de la misma Wi-Fi (ver `backend/README.md`) |
 
 Cabeceras permitidas: `Content-Type`, `Authorization` y `x-internal-key`. **No** se
 habilitan credenciales: la API autentica con `Authorization: Bearer`, no con cookies.
@@ -215,15 +333,20 @@ Una petición **sin** cabecera `Origin` (curl, el socket-server, una prueba) se 
 CORS protege al navegador y esas peticiones no vienen de uno. Lo que decide el acceso ahí
 es el JWT o la clave interna.
 
-### Límite de intentos (H-04 y H-27)
+### Límite de peticiones (H-04, H-27 y D-21)
 
-Las dos rutas públicas —las que no piden sesión previa— están limitadas y responden **429**
-con `Retry-After`:
+Hay **tres** límites. Los dos de ruta cubren las públicas —las que no piden sesión
+previa— y el global es un techo de respaldo para todo lo demás. Todos responden **429**
+con `Retry-After` y el mismo cuerpo `{ "error": … }` que el resto de la API:
 
 | Ruta | Límite por defecto | Clave del contador | Qué cuenta |
 |---|---|---|---|
 | `POST /auth/login` | **5 / minuto** | IP **+ email** | Solo los intentos **fallidos** |
 | `POST /mesas/qr/:token/sesion` | **20 / minuto** | IP | Todos los intentos |
+| **todas las demás** (D-21) | **2000 / minuto** | IP | Todas las peticiones |
+
+Los contadores son **independientes**: una petición al login gasta cupo del límite de
+login **y** del global, pero agotar uno no agota el otro.
 
 ```json
 { "error": "Demasiados intentos de inicio de sesión. Espera un momento y vuelve a intentarlo." }
@@ -236,8 +359,30 @@ va más holgado porque una mesa entera escanea desde la misma IP del local, y ah
 cuentan los aciertos: reusar un token válido muchas veces por segundo tampoco debería
 pasar.
 
+#### El límite global (D-21)
+
+```json
+{ "error": "Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo." }
+```
+
+**No cuenta** dos cosas:
+
+- **`GET /api/health`**: es la sonda de Docker y del balanceador. Si contara, un límite
+  agotado haría que el contenedor se declarara enfermo y se reiniciara solo.
+- **El canal interno**: `POST /api/transacciones/internal` y
+  `GET /api/mesas/:id/cuenta/interno`. Los llama el socket-server con `x-internal-key`,
+  toda esa máquina sale con **una** IP, y ya tienen su propia autenticación.
+
+**Por qué 2000 por minuto, que parece muchísimo:** los comensales de un local comparten
+**una sola IP pública**, la del wifi, así que el cupo no es de una persona sino del
+restaurante entero. Con 20 mesas de 4 son 80 teléfonos y, en el pico, cada uno hace del
+orden de 15 a 20 peticiones en ese minuto (80 × 20 = 1600), más las tablets del personal.
+2000 deja pasar ese pico y aun así corta a una sola máquina que intente raspar la API: 33
+por segundo sostenidos no los hace ningún comensal.
+
 **Variables:** `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS`, `RATE_LIMIT_QR_MAX`,
-`RATE_LIMIT_QR_VENTANA_MS`. Los límites se desactivan solos dentro de las pruebas.
+`RATE_LIMIT_QR_VENTANA_MS`, `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS`. Los
+tres límites se desactivan solos dentro de las pruebas.
 
 > **Detrás de un proxy** (nginx, Docker), `req.ip` es la IP del proxy y el límite contaría
 > a todo el mundo como un solo visitante. Hay que poner **`TRUST_PROXY`** (`true`, un
@@ -245,8 +390,8 @@ pasar.
 > `X-Forwarded-For` sin un proxy delante permite falsificar la IP.
 >
 > **Limitación:** el contador vive en memoria del proceso. Con varias instancias el límite
-> es por instancia (con N instancias, el techo real es 5×N). Para hacerlo global haría
-> falta un store compartido en Redis.
+> es por instancia (con N instancias, el techo real es 5×N, o 2000×N en el global). Para
+> hacerlo global de verdad haría falta un store compartido en Redis.
 
 ### Cuenta desactivada (H-09)
 
@@ -299,6 +444,7 @@ El resultado se guarda en Redis (`sd:usuario:{id}:activo`) con TTL **`CACHE_USUA
 | POST | /platos | admin | Crea |
 | PUT | /platos/:id | admin | Actualiza |
 | DELETE | /platos/:id | admin | Elimina |
+| PATCH | /platos/:id/disponible | **admin, cocina** | Agota o repone (D-05, ver abajo) |
 
 ```json
 {
@@ -314,6 +460,65 @@ El resultado se guarda en Redis (`sd:usuario:{id}:activo`) con TTL **`CACHE_USUA
 >
 > Lo que agregó el constructor (`personalizable`, `calorias` en `platos`;
 > `alergenos` en `ingredientes`) sale por `GET /menu`, no por estas rutas.
+
+### PATCH /platos/:id/disponible — agotar o reponer (D-05)
+
+El interruptor de "se acabó" / "volvió" del plato, **gemelo del de ingredientes**
+(§`PATCH /ingredientes/:id/disponible`) y con las mismas reglas. Cuerpo con **un solo
+campo**:
+
+```json
+{ "disponible": false }
+```
+
+- `disponible` es **booleano estricto**: `"false"`, `0` o `null` responden **400**. Sin
+  coerción a propósito — un `"false"` en texto es `true` para JavaScript, y aquí eso
+  significaría reponer algo que está agotado.
+- El cuerpo es `.strict()`: una clave de más es **400**. Colar un `precio` por aquí sería
+  editar la carta con permisos de `cocina`; para eso está el `PUT`, que es solo de admin.
+- `:id` tiene que ser un **entero positivo**, o **400**. Un plato que no existe, **404**.
+- **Idempotente**: ponerlo al valor que ya tenía responde **200**, no 409.
+- **200** devuelve la fila del plato, con la misma forma que el `PUT`. Es lo que espera hoy
+  el panel (`agotadosApi.togglePlato`), que manda ese cuerpo y solo exige un 2xx.
+
+**La excepción al "solo de admin" (D-05).** Es la única escritura de la carta que también
+puede hacer `cocina`, por la misma razón que en ingredientes: **agotar un plato no es
+editar la carta, es reportar lo que pasa en la cocina.** `cajero`, `mesero` y el comensal
+reciben 403.
+
+**El orden es parte del contrato**, igual que en ingredientes:
+
+1. `UPDATE` dentro de la transacción, con la fila bloqueada (`SELECT … FOR UPDATE`), y
+   **COMMIT**. El `UPDATE` toca **solo la columna `disponible`**: a diferencia del `PUT`,
+   que reescribe la fila entera, agotar un plato no puede perder por el camino un precio
+   que otro acabara de guardar.
+2. **Invalidar `cache:menu`.**
+3. **Recién entonces** avisar al socket-server.
+
+El paso 2 va antes del 3 y no al revés: si se avisara primero, un cliente que reaccione al
+evento pidiendo `GET /menu` podría recibir la copia vieja de la caché (TTL 60 s) y seguir
+mostrando el plato como disponible.
+
+**El aviso es un extra, no parte de la operación.** Se manda
+`POST /internal/plato-disponibilidad` con `{ id_plato, disponible, eventId }`, y el
+socket-server difunde `plato:disponibilidad` a todos los sockets
+([EVENTS.md §5.4](../../socket-server/EVENTS.md)). `emitidoEn` **lo pone él** al emitir, no
+el backend. Si el socket-server está caído, lento o responde mal: **no se revierte nada**, se
+registra en el log y **la respuesta sigue siendo 200**, porque el cambio ya está guardado.
+Su idempotencia va por una clave propia (`backend:plato:{eventId}`), independiente de la de
+ingredientes.
+
+**Un `eventId` nuevo por llamada, incluso si el valor no cambió**, como en ingredientes: así
+un reenvío lo recuperan los clientes que se perdieron el anterior.
+
+**El `PUT /platos/:id` NO avisa.** Diferencia con ingredientes, donde el `PUT` del editor
+también avisa si el valor cambió: aquí el `PUT` reescribe la fila con lo que ya había leído,
+así que no sabe si `disponible` cambió de verdad. Para agotar está este `PATCH`, que es lo
+que usa el panel. La caché sí se invalida en los dos casos.
+
+**La bitácora la escribe la base.** El trigger `tr_auditar_cambios` audita todo `UPDATE` de
+`platos` en `auditoria_cambios` (modelo-er.md §11); el backend no registra nada por su
+cuenta.
 
 ---
 
@@ -620,7 +825,8 @@ devuelve `false` y no lanza. **No se avisa al socket-server:** no existe un even
 | GET | /mesas/:id | No | Obtiene una |
 | POST | /mesas | admin | Crea |
 | PATCH | /mesas/:id/estado | admin, cajero, mesero | Cambia estado (`disponible`, `ocupada`, `reservada`, `mantenimiento`) |
-| DELETE | /mesas/:id | admin | Elimina |
+| **PATCH** | **/mesas/:id** | **admin** | **Edita `numero`, `capacidad` y `ubicacion` (D-16, ver abajo)** |
+| DELETE | /mesas/:id | admin | Elimina. **409 si está ocupada o tiene pedidos** (ver abajo) |
 
 ```json
 { "id_mesa": 5, "numero": 5, "capacidad": 4, "ubicacion": "Terraza", "estado": "ocupada" }
@@ -646,6 +852,72 @@ está restringido a mesero/admin.
 READMEs, ni el socket-server, ni las pruebas), el camino del comensal es
 `POST /mesas/qr/:token/sesion`, y al responder 200 con la mesa servía de oráculo para
 adivinar tokens válidos sin abrir sesión.
+
+### PATCH /mesas/:id — editar el mobiliario (D-16), solo `admin`
+
+Body, **todos opcionales** pero al menos uno:
+
+```json
+{ "numero": 12, "capacidad": 6, "ubicacion": "Terraza" }
+```
+
+- `.strict()`: una clave de más es **400**. **`estado` y `token_qr` no se aceptan aquí.** El
+  estado tiene su propia ruta (`PATCH /mesas/:id/estado`, con otros permisos: también
+  mesero y cajero) porque moverlo es la operación del salón, con su propia lógica de
+  `sesion_iniciada_en`; y el `token_qr` es una credencial que solo escribe el flujo de
+  apertura. Esto es el alta/baja del mobiliario, que es de admin.
+- Un cuerpo vacío es **400**. `numero` y `capacidad` son **enteros positivos**; `ubicacion`
+  no puede ir vacía (máx. 50, como la columna).
+- Una mesa que no existe, **404**. Lo que no se manda **no se toca** (`COALESCE`).
+- 200 devuelve la **vista del personal**: `id_mesa`, `numero`, `capacidad`, `ubicacion`,
+  `estado` y `sesion_abierta`. Nunca el `token_qr`.
+- `actualizado_en` y `version_control` los pone el trigger
+  `tr_control_concurrencia_mesa`: el backend no los escribe.
+
+#### Los dos 409
+
+```json
+{ "error": "Ya hay otra mesa con ese número" }
+{ "error": "Esa mesa está ocupada: no se puede cambiar su número mientras haya gente sentada. Libérala primero." }
+```
+
+- **Número repetido**: lo impone el `UNIQUE` de `mesas.numero`. El 23505 se traduce aquí con
+  un mensaje que dice **qué** choca, en vez del "Ya existe un registro con esos datos"
+  genérico del manejador central.
+- **Una mesa ocupada no se renumera.** El número es lo que la gente ve en el QR impreso, lo
+  que grita el mesero y lo que el comensal confirma al escanear: cambiárselo con gente
+  sentada y pedidos en marcha deja los tiquetes de cocina apuntando a una mesa que ya no
+  existe con ese nombre. **Capacidad y ubicación sí** se pueden corregir con la mesa
+  ocupada, porque no identifican nada. Mandar el **mismo** número que ya tiene no cuenta
+  como renumerar.
+
+Todo va en una transacción con la fila **bloqueada** (`FOR UPDATE`): sin el bloqueo, el
+estado podría cambiar entre la comprobación y el `UPDATE`.
+
+### DELETE /mesas/:id — por qué puede responder 409
+
+Cuando **sí** se puede borrar, el comportamiento es el de siempre: **204** sin cuerpo, y
+**404** si la mesa no existe. Lo que cambia (D-16) es que las dos razones por las que no se
+puede se comprueban **antes** y se explican:
+
+```json
+{ "error": "Esa mesa está ocupada: libérala antes de borrarla." }
+{ "error": "Esa mesa tiene pedidos registrados: no se puede borrar sin perder el historial. Déjala en mantenimiento si ya no se usa." }
+```
+
+- **Mesa `ocupada`**: antes se borraba con **204** si todavía no tenía pedidos (recién
+  abierta), y dejaba una sesión de QR viva apuntando a una mesa que ya no existe.
+- **Mesa con pedidos**: el `ON DELETE RESTRICT` de `fk_pedidos_mesa` ya lo impedía, pero el
+  error llegaba al manejador central y salía como el **409 genérico** ("La operación choca
+  con otro registro relacionado"), que no dice ni cuál es el problema ni qué hacer.
+- Se cuentan **todos** los pedidos, no solo los abiertos: el `RESTRICT` no distingue
+  estados, así que uno pagado de hace un mes impide el borrado igual que uno en curso. Y
+  con razón: borrar la mesa dejaría el histórico sin a qué mesa pertenecía.
+- Si el conteo no se puede leer, **no se borra**: es más seguro negar el borrado que
+  llevarse por delante el historial de una mesa.
+
+Las dos comprobaciones van dentro de la transacción y con la fila bloqueada, para que no se
+cuele un pedido entre el conteo y el `DELETE`.
 
 ---
 
@@ -706,7 +978,7 @@ así que dos meseros pulsando "abrir" a la vez reciben el mismo token:
 ```json
 {
   "token": "v1.eyJtIjoxLCJpYXQiOjE3OTA2…",
-  "url": "http://localhost:5173/?token=v1.eyJtIjoxLCJpYXQiOjE3OTA2…",
+  "url": "http://localhost:5174/?token=v1.eyJtIjoxLCJpYXQiOjE3OTA2…",
   "reutilizado": false,
   "mesa": { "id_mesa": 5, "numero": 5, "estado": "ocupada" }
 }
@@ -731,7 +1003,7 @@ avisa a la tablet con `/internal/qr-rotado` (socket.notifier). Ningún frontend 
 `201`:
 
 ```json
-{ "url": "http://localhost:5173/?token=v1....", "expira_en": 1760000000000, "mesa": { "id_mesa": 5, "numero": 5, "estado": "ocupada" } }
+{ "url": "http://localhost:5174/?token=v1....", "expira_en": 1760000000000, "mesa": { "id_mesa": 5, "numero": 5, "estado": "ocupada" } }
 ```
 
 El token solo viaja dentro de `url`. 400 id inválido · 404 mesa inexistente · **409 si la mesa

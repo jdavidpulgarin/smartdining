@@ -6,6 +6,7 @@ const routes = require('./src/routes');
 const { manejadorErrores } = require('./src/middleware/errores.middleware');
 const { exigirEntornoValido } = require('./src/config/verificar-entorno');
 const { opcionesCors } = require('./src/config/cors');
+const { crearLimitadorGlobal } = require('./src/middleware/limites.middleware');
 const pool = require('./src/config/db');
 const { redisClient } = require('./src/config/redis');
 
@@ -38,6 +39,18 @@ if (process.env.TRUST_PROXY) {
   const numero = Number(valor);
   app.set('trust proxy', Number.isInteger(numero) ? numero : valor === 'true' ? 1 : valor);
 }
+
+/**
+ * D-21: techo global de peticiones por IP.
+ *
+ * Va DESPUÉS de `trust proxy` —si no, contaría a todo el local como un solo
+ * visitante o, peor, a todo el mundo como el proxy— y ANTES de
+ * `express.json()`: a una petición que se va a rechazar con 429 no hace falta
+ * parsearle el cuerpo. El límite no cuenta `/health` ni el canal interno
+ * (ver limites.middleware.js), y los límites de login y QR siguen aparte,
+ * dentro de sus rutas, con sus propios contadores.
+ */
+app.use(crearLimitadorGlobal());
 
 app.use(express.json());
 

@@ -20,9 +20,16 @@ import {
   Play,
   Pause,
   RotateCw,
+  AlertCircle,
 } from 'lucide-react'
 import { decodificarTokenQr } from '../services/qrService'
 import { useSocketListener, useTables } from '../hooks'
+import {
+  extraerHostDeUrl,
+  esHostLocal,
+  obtenerHostPorDefecto,
+  resolverDiningUrl,
+} from '../utils/qrUrl'
 
 const ROTACION_INTERVALO_SEGUNDOS = 180 // 3 minutos
 
@@ -40,6 +47,13 @@ export function QRModal({
   if (table?.token_qr !== prevTableToken) {
     setPrevTableToken(table?.token_qr)
     setToken(table?.token_qr || '')
+  }
+
+  const [qrUrl, setQrUrl] = useState(table?.qr_url || '')
+  const [prevTableQrUrl, setPrevTableQrUrl] = useState(table?.qr_url)
+  if (table?.qr_url !== prevTableQrUrl) {
+    setPrevTableQrUrl(table?.qr_url)
+    setQrUrl(table?.qr_url || '')
   }
 
   const [loadingAction, setLoadingAction] = useState(false)
@@ -68,6 +82,7 @@ export function QRModal({
   useSocketListener('qr:actualizado', (data) => {
     if (data?.id_mesa && Number(data.id_mesa) === tableId && data.token_qr) {
       setToken(data.token_qr)
+      if (data?.url) setQrUrl(data.url)
       setSegundosRestantes(ROTACION_INTERVALO_SEGUNDOS)
       setJustRotated(true)
       setTimeout(() => setJustRotated(false), 2000)
@@ -84,6 +99,7 @@ export function QRModal({
           const res = await onUpdateToken(tableId)
           if (res?.token) {
             setToken(res.token)
+            if (res?.url) setQrUrl(res.url)
           }
         }
         setSegundosRestantes(ROTACION_INTERVALO_SEGUNDOS)
@@ -133,16 +149,19 @@ export function QRModal({
   const tiempoFormateado = `${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`
   const porcentajeTiempo = ((ROTACION_INTERVALO_SEGUNDOS - segundosRestantes) / ROTACION_INTERVALO_SEGUNDOS) * 100
 
-  // Host Wi-Fi o Localhost para probar con celulares en la misma red
-  const defaultHost =
-    typeof window !== 'undefined' &&
-    window.location.hostname !== 'localhost' &&
-    window.location.hostname !== '127.0.0.1'
-      ? window.location.hostname
-      : '192.168.1.22'
+  // Extraer host de la url del backend (qr_url) o del navegador si se accede por red
+  const backendUrl = qrUrl || table?.qr_url || ''
+  const hostBackend = extraerHostDeUrl(backendUrl)
+  const defaultHost = obtenerHostPorDefecto(backendUrl)
 
   const [useWifiIp, setUseWifiIp] = useState(true)
   const [hostIp, setHostIp] = useState(defaultHost)
+  const [prevHostBackend, setPrevHostBackend] = useState(hostBackend)
+
+  if (hostBackend && hostBackend !== prevHostBackend) {
+    setPrevHostBackend(hostBackend)
+    setHostIp(hostBackend)
+  }
 
   if (!table) return null
 
@@ -151,18 +170,19 @@ export function QRModal({
   const sid = infoToken.sid || (token ? token.slice(-8) : null)
 
   const defaultClientPort = (import.meta.env && import.meta.env.VITE_CLIENTE_PORT) || '5174'
-  const activeDomain = useWifiIp ? hostIp : 'localhost'
 
-  // Priorizar table.qr_url enviada por el backend (apunta a frontend-cliente).
-  // Si se prueba con Wi-Fi en red local, se sustituye localhost por hostIp manteniendo el puerto del comensal.
-  let diningUrl = ''
-  if (table.qr_url) {
-    diningUrl = useWifiIp && hostIp !== 'localhost'
-      ? table.qr_url.replace(/localhost|127\.0\.0\.1/, hostIp)
-      : table.qr_url
-  } else if (token) {
-    diningUrl = `http://${activeDomain}:${defaultClientPort}/?token=${encodeURIComponent(token)}&mesa=${table.number || table.id}`
-  }
+  // El QR usa la url del backend y se regenera con hostIp manteniendo puerto y token
+  const diningUrl = resolverDiningUrl({
+    backendUrl,
+    token,
+    tableNumber: table.number || table.id,
+    hostIp,
+    useWifiIp,
+    fallbackPort: defaultClientPort,
+  })
+
+  // Aviso cuando el QR apunta a localhost y no se podrá abrir desde celular
+  const qrApuntaALocalhost = useWifiIp && esHostLocal(hostIp)
 
   const tabletUrl =
     typeof window !== 'undefined'
@@ -184,6 +204,9 @@ export function QRModal({
       const res = await onOpenTable(table.id || table.number)
       if (res?.token) {
         setToken(res.token)
+        if (res?.url) {
+          setQrUrl(res.url)
+        }
         setSegundosRestantes(ROTACION_INTERVALO_SEGUNDOS)
       }
     } finally {
@@ -627,6 +650,29 @@ export function QRModal({
                       placeholder="192.168.1.X"
                       className="sd-input"
                     />
+                    {qrApuntaALocalhost && (
+                      <div
+                        className="sd-localhost-warning"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          marginTop: 8,
+                          padding: '8px 12px',
+                          borderRadius: 6,
+                          background: 'rgba(238, 28, 37, 0.12)',
+                          border: '1px solid rgba(238, 28, 37, 0.35)',
+                          color: 'var(--sd-red-text, #ff6b6b)',
+                          fontSize: 12,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        <AlertCircle size={15} style={{ flexShrink: 0, color: 'var(--sd-red)' }} />
+                        <span>
+                          El QR apunta a localhost: un celular no podrá abrirlo. Escribe la IP de este PC en la red Wi-Fi.
+                        </span>
+                      </div>
+                    )}
                     <small className="ip-hint">
                       💡 Los comensales deben estar conectados al mismo Wi-Fi del restaurante.
                     </small>
