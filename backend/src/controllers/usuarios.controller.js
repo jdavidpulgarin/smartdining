@@ -46,18 +46,26 @@ const actualizarSchema = z
 /**
  * Cuerpo de POST /usuarios/:id/clave.
  *
- * Mínimo 8 caracteres, más que los 6 del registro: en el registro el mínimo lo
+ * Mínimo 8 CARACTERES, más que los 6 del registro: en el registro el mínimo lo
  * fija un contrato que ya está publicado, y bajarlo aquí para igualarlo sería
- * empeorar a propósito. El máximo son los 72 bytes que bcrypt mira: a partir de
- * ahí trunca en silencio, y una contraseña que se corta sin avisar es peor que
- * una rechazada.
+ * empeorar a propósito.
+ *
+ * Máximo 72 BYTES, no 72 caracteres, porque es por bytes como trunca bcrypt: a
+ * partir del byte 72 ignora el resto en silencio. Y la diferencia no es teórica
+ * en español: una `ñ` o una tilde ocupan DOS bytes en UTF-8, así que
+ * "contraseña" de 40 caracteres puede pasarse de 72 bytes. Con `.max(72)` de zod
+ * —que cuenta caracteres— esa clave entraría, bcrypt la cortaría por la mitad y
+ * el usuario tendría una contraseña que no es la que escribió. Rechazarla es
+ * mejor que cortarla sin avisar.
  */
 const claveSchema = z
   .object({
     password: z
       .string()
       .min(8, 'La clave debe tener al menos 8 caracteres')
-      .max(72, 'La clave no puede pasar de 72 caracteres'),
+      .refine((clave) => Buffer.byteLength(clave, 'utf8') <= 72, {
+        message: 'La clave no puede pasar de 72 bytes (una ñ o una tilde cuentan dos)',
+      }),
   })
   .strict();
 

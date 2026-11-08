@@ -613,6 +613,71 @@ test('d-16: una clave de mas de 72 bytes es 400, no un truncado en silencio', as
   }
 });
 
+test('d-16: el tope son 72 BYTES, no 72 caracteres', async () => {
+  const db = fakeClave();
+  try {
+    // 40 caracteres, pero 80 bytes: en UTF-8 una ñ ocupa DOS. Con un .max(72)
+    // de zod (que cuenta caracteres) esta clave entraria, bcrypt la cortaria
+    // por la mitad y el usuario acabaria con una contrasena que no escribio.
+    const clave = 'ñ'.repeat(40);
+    assert.strictEqual(clave.length, 40, '40 caracteres');
+    assert.strictEqual(Buffer.byteLength(clave, 'utf8'), 80, 'pero 80 bytes');
+
+    const res = await request(app)
+      .post(`/api/usuarios/${OTRO}/clave`)
+      .set('Authorization', `Bearer ${tokenAdmin()}`)
+      .send({ password: clave });
+
+    assert.strictEqual(res.status, 400);
+    assert.match(res.body.error, /72 bytes/);
+    assert.ok(!db.buscar('UPDATE usuarios SET password_hash'), 'no se guardo nada');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-16: el minimo sigue siendo 8 CARACTERES, aunque ocupen mas bytes', async () => {
+  const db = fakeClave();
+  try {
+    // 8 caracteres y 9 bytes: el minimo se mide en caracteres, que es lo que
+    // la persona escribe y cuenta. Medir el minimo en bytes premiaria a quien
+    // use tildes, que no tiene ningun sentido.
+    const clave = 'clavñ123';
+    assert.strictEqual(clave.length, 8);
+    assert.strictEqual(Buffer.byteLength(clave, 'utf8'), 9);
+
+    const res = await request(app)
+      .post(`/api/usuarios/${OTRO}/clave`)
+      .set('Authorization', `Bearer ${tokenAdmin()}`)
+      .send({ password: clave });
+
+    assert.strictEqual(res.status, 200);
+    // Y se guarda tal cual: el hash tiene que reconocer la clave con la ñ.
+    const guardado = db.buscar('UPDATE usuarios SET password_hash').params[1];
+    assert.strictEqual(await bcrypt.compare(clave, guardado), true);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-16: una clave de 72 bytes justos pasa', async () => {
+  const db = fakeClave();
+  try {
+    // 71 caracteres ASCII + una ñ = 73 bytes, se pasa; 70 + ñ = 72, entra.
+    const clave = 'a'.repeat(70) + 'ñ';
+    assert.strictEqual(Buffer.byteLength(clave, 'utf8'), 72);
+
+    const res = await request(app)
+      .post(`/api/usuarios/${OTRO}/clave`)
+      .set('Authorization', `Bearer ${tokenAdmin()}`)
+      .send({ password: clave });
+
+    assert.strictEqual(res.status, 200, 'el tope es inclusivo');
+  } finally {
+    db.restaurar();
+  }
+});
+
 test('d-16: un cuerpo con claves de mas es 400', async () => {
   const db = fakeClave();
   try {

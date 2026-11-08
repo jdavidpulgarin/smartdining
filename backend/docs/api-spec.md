@@ -276,8 +276,17 @@ Body: `{ "password": "clave-nueva-larga" }`, `.strict()`.
 
 - **Mínimo 8 caracteres** (400 si no). Más que los 6 de `/auth/register`, cuyo mínimo ya
   está publicado en este contrato: bajarlo aquí para igualarlo sería empeorar a propósito.
-- **Máximo 72 caracteres**: son los bytes que bcrypt mira. A partir de ahí trunca en
-  silencio, y una contraseña que se corta sin avisar es peor que una rechazada.
+  El mínimo se mide en **caracteres**, que es lo que la persona escribe y cuenta.
+- **Máximo 72 BYTES** (no 72 caracteres), medidos con `Buffer.byteLength(clave, 'utf8')`.
+  Es por bytes como trunca bcrypt: a partir del byte 72 ignora el resto **en silencio**. Y
+  la diferencia no es teórica en español: una `ñ` o una tilde ocupan **dos** bytes en
+  UTF-8, así que una clave de 40 caracteres puede pasarse de 72 bytes. Contando caracteres,
+  esa clave entraría, bcrypt la cortaría por la mitad y el usuario acabaría con una
+  contraseña que no es la que escribió. Rechazarla es mejor que cortarla sin avisar.
+
+  > `POST /auth/register` **no** valida igual: pide `password` de **mínimo 6 caracteres y
+  > sin máximo**, así que por ahí una clave larga sí se trunca en silencio. No se cambia en
+  > este PR para no tocar un contrato ya publicado; queda anotado.
 - Se guarda con el **mismo bcrypt y el mismo costo** que `/auth/register` (`COSTO_BCRYPT`,
   importado y no copiado): dos costos distintos en el proyecto producen hashes que el login
   reconoce pero que cuestan tiempos distintos, y eso es justo lo que evita H-12.
