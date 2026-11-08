@@ -13,6 +13,7 @@ const kdsRoutes = require('./kds.routes');
 const transaccionesRoutes = require('./transacciones.routes');
 const pagosRoutes = require('./pagos.routes');
 const reportesRoutes = require('./reportes.routes');
+const configuracionRoutes = require('./configuracion.routes');
 
 const router = express.Router();
 
@@ -35,5 +36,7 @@ router.use('/transacciones', transaccionesRoutes);
 router.use('/pagos', pagosRoutes);
 // D-07: metricas del panel de administracion.
 router.use('/reportes', reportesRoutes);
+// D-16 parte B: configuracion del restaurante. GET / es publica; el resto, admin.
+router.use('/configuracion', configuracionRoutes);
 
 module.exports = router;

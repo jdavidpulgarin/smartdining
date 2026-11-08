@@ -36,23 +36,70 @@ async function crear(p) {
   return result.rows[0];
 }
 
-async function actualizar(id, datos) {
-  const result = await pool.query(
-    `UPDATE platos SET id_categoria = $1, nombre = $2, descripcion = $3, precio = $4,
-      url_imagen = $5, disponible = $6, tiempo_preparacion_estimado = $7
-     WHERE id_plato = $8 RETURNING *`,
-    [
-      datos.id_categoria,
-      datos.nombre,
-      datos.descripcion,
-      datos.precio,
-      datos.url_imagen,
-      datos.disponible,
-      datos.tiempo_preparacion_estimado,
-      id,
-    ]
-  );
-  return result.rows[0] || null;
+/**
+ * Actualiza un plato. En una TRANSACCIÓN por el historial de precios (D-16 B).
+ *
+ * El trigger `tr_historial_precio_plato` (database/scripts/26_configuracion.sql)
+ * registra cada cambio de `precio` en `historial_precios`, y el autor lo saca de
+ * `app.id_usuario` con `fn_usuario_de_sesion()`. Ese valor se fija con
+ * `set_config(..., true)`, que vive **solo hasta el fin de la transacción**: con
+ * el `pool.query` de antes, el `set_config` y el `UPDATE` podían salir por
+ * conexiones distintas y el historial quedaba con `id_usuario` NULL. De ahí la
+ * transacción: no es por atomicidad —es un solo UPDATE— sino para que el
+ * `set_config` y el `UPDATE` compartan conexión y transacción.
+ *
+ * `set_config` y no `SET LOCAL` porque solo la primera admite parámetros ($1).
+ *
+ * `personalizable` y `calorias` también se escriben aquí: las columnas ya
+ * existían (13_constructor.sql) pero el UPDATE no las tocaba, así que un PUT que
+ * las mandara las perdía en silencio.
+ *
+ * @param {number|string} id
+ * @param {object} datos la fila completa ya mezclada por el controller.
+ * @param {{idUsuario?: number|null}} contexto quién hace el cambio, para el historial.
+ */
+async function actualizar(id, datos, { idUsuario = null } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // El autor del cambio de precio, para el trigger del historial.
+    await client.query('SELECT set_config($1, $2, true)', [
+      'app.id_usuario',
+      idUsuario === null || idUsuario === undefined ? '' : String(idUsuario),
+    ]);
+
+    const result = await client.query(
+      `UPDATE platos SET id_categoria = $1, nombre = $2, descripcion = $3, precio = $4,
+        url_imagen = $5, disponible = $6, tiempo_preparacion_estimado = $7,
+        personalizable = COALESCE($8, personalizable), calorias = COALESCE($9, calorias)
+       WHERE id_plato = $10 RETURNING *`,
+      [
+        datos.id_categoria,
+        datos.nombre,
+        datos.descripcion,
+        datos.precio,
+        datos.url_imagen,
+        datos.disponible,
+        datos.tiempo_preparacion_estimado,
+        datos.personalizable ?? null,
+        datos.calorias ?? null,
+        id,
+      ]
+    );
+
+    await client.query('COMMIT');
+    return result.rows[0] || null;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Ya estaba cerrada: no hay nada que deshacer.
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -104,4 +151,44 @@ async function eliminar(id) {
   return result.rows[0] || null;
 }
 
-module.exports = { listar, obtenerPorId, crear, actualizar, cambiarDisponibilidad, eliminar };
+/**
+ * Tope de filas del historial. Es defensivo, no una regla de negocio: un plato
+ * con miles de cambios de precio no debería devolver una respuesta de megas.
+ */
+const MAX_HISTORIAL = 500;
+
+/**
+ * Cambios de precio de un plato, los más recientes primero (D-16 B, P2).
+ *
+ * Sale de `historial_precios`, que llenan los triggers. El índice
+ * `idx_historial_precios_referencia` es exactamente `(tipo, id_referencia,
+ * cambiado_en DESC)`, así que este orden no cuesta un sort.
+ *
+ * `id_usuario` puede ser NULL: un cambio hecho antes de D-16 B, por una
+ * consulta a mano, o por un usuario que después se borró (la FK es
+ * `ON DELETE SET NULL`). Se devuelve tal cual; quien lo muestre decide qué
+ * poner.
+ */
+async function historialPrecios(id, { limite = 100 } = {}) {
+  const tope = Math.min(Math.max(Number(limite) || 100, 1), MAX_HISTORIAL);
+  const result = await pool.query(
+    `SELECT id, tipo, id_referencia, precio_anterior, precio_nuevo, id_usuario, cambiado_en
+       FROM historial_precios
+      WHERE tipo = 'plato' AND id_referencia = $1
+      ORDER BY cambiado_en DESC, id DESC
+      LIMIT $2`,
+    [id, tope]
+  );
+  return result.rows;
+}
+
+module.exports = {
+  listar,
+  obtenerPorId,
+  crear,
+  actualizar,
+  cambiarDisponibilidad,
+  eliminar,
+  historialPrecios,
+  MAX_HISTORIAL,
+};
