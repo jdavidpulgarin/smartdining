@@ -997,6 +997,13 @@
   color: #a5b4fc;
 }
 
+/* Un cambio que NO se guardó (P-13): tiene que verse distinto de un aviso. */
+.table-toast-banner.error {
+  background: rgba(238, 28, 37, 0.12);
+  border: 1px solid rgba(238, 28, 37, 0.55);
+  color: var(--sd-red-text);
+}
+
 @keyframes slideDownFade {
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: translateY(0); }

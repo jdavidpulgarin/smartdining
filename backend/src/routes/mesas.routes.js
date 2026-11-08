@@ -25,6 +25,12 @@ router.post('/:id/rotar-qr', requireAuth, requireRole('mesero', 'admin'), ctrl.r
 // la capture la ruta pública de la mesa.
 router.get('/:id/cuenta/interno', requireInternalKey, ctrl.cuentaInterna);
 
+// D-18: comensales SIN CELULAR de la mesa. Los da de alta el personal de sala,
+// no el comensal: la persona no tiene teléfono con el que escanear el QR. Van
+// antes de GET /:id y de PATCH /:id para que 'comensales' no se lea como un id.
+router.post('/:id/comensales', requireAuth, requireRole('mesero', 'admin'), ctrl.agregarComensal);
+router.delete('/:id/comensales/:alias', requireAuth, requireRole('mesero', 'admin'), ctrl.quitarComensal);
+
 // La cuenta del personal. Va antes de GET /:id (si no, 'cuenta' se leería como
 // parte del id) y después de /cuenta/interno, que es ruta distinta por el
 // segmento extra y no se solapa con esta.
@@ -33,6 +39,9 @@ router.get('/:id/cuenta', requireAuth, requireRole('admin', 'cajero', 'mesero'),
 router.get('/:id', ctrl.obtener);
 router.post('/', requireAuth, requireRole('admin'), ctrl.crear);
 router.patch('/:id/estado', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.actualizarEstado);
+// D-16: editar los datos del mobiliario (numero, capacidad, ubicacion). Solo
+// admin, y va DESPUES de /:id/estado para no capturar esa ruta.
+router.patch('/:id', requireAuth, requireRole('admin'), ctrl.actualizarDatos);
 router.delete('/:id', requireAuth, requireRole('admin'), ctrl.eliminar);
 
 module.exports = router;

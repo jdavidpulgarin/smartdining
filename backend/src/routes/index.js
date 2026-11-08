@@ -1,6 +1,7 @@
 const express = require('express');
 
 const authRoutes = require('./auth.routes');
+const usuariosRoutes = require('./usuarios.routes');
 const categoriasRoutes = require('./categorias.routes');
 const platosRoutes = require('./platos.routes');
 const menuRoutes = require('./menu.routes');
@@ -18,6 +19,8 @@ const router = express.Router();
 router.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 router.use('/auth', authRoutes);
+// D-16: administracion de usuarios del personal, solo admin.
+router.use('/usuarios', usuariosRoutes);
 router.use('/categorias', categoriasRoutes);
 router.use('/platos', platosRoutes);
 router.use('/menu', menuRoutes);

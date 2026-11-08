@@ -43,6 +43,7 @@ export function useTablero({
   alCaducarSesion,
   alLlegarComandaNueva,
   alCambiarDisponibilidad,
+  alCambiarDisponibilidadPlato,
 }) {
   const [estado, despachar] = useReducer(reducer, undefined, estadoInicial)
   const [conectado, setConectado] = useState(false)
@@ -72,6 +73,15 @@ export function useTablero({
   useEffect(() => {
     alCambiarDisponibilidadRef.current = alCambiarDisponibilidad
   }, [alCambiarDisponibilidad])
+
+  // D-14: y lo mismo con los PLATOS. Es otro evento (`plato:disponibilidad`,
+  // EVENTS.md 5.4) con otro id en el cuerpo, asi que va por su propio callback
+  // en vez de mezclar los dos en uno: quien reciba el de platos no tiene que
+  // adivinar de que lista hablan.
+  const alCambiarDisponibilidadPlatoRef = useRef(alCambiarDisponibilidadPlato)
+  useEffect(() => {
+    alCambiarDisponibilidadPlatoRef.current = alCambiarDisponibilidadPlato
+  }, [alCambiarDisponibilidadPlato])
 
   // El aviso sonoro solo debe sonar por una comanda que ENTRA por el socket, no
   // al recargar ni al reconectar. Para saber si el evento aporta algo nuevo hay
@@ -155,6 +165,10 @@ export function useTablero({
 
     socket.on('ingrediente:disponibilidad', (evento) => {
       if (vivo) alCambiarDisponibilidadRef.current?.(evento)
+    })
+
+    socket.on('plato:disponibilidad', (evento) => {
+      if (vivo) alCambiarDisponibilidadPlatoRef.current?.(evento)
     })
 
     return () => {
