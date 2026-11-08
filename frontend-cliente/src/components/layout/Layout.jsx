@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Navigate } from 'react-router-dom';
 import Header from './Header';
 import { useMesaSession } from '../../hooks/useMesaSession';
@@ -16,10 +16,10 @@ function Layout({ children }) {
 
   const [toastPedido, setToastPedido] = useState(null);
   const timerRef = useRef(null);
-  const dedupRef = useRef(null);
-  if (!dedupRef.current) {
-    dedupRef.current = crearDeduplicador({ capacidad: 200 });
-  }
+  const deduplicador = useMemo(
+    () => crearDeduplicador({ capacidad: 200 }),
+    []
+  );
 
   useEffect(() => {
     return () => {
@@ -31,7 +31,7 @@ function Layout({ children }) {
     if (!socketOn) return undefined;
 
     const bajaCreated = socketOn('order:created', (data) => {
-      if (!data || dedupRef.current.visto(data.eventId)) return;
+      if (!data || deduplicador.visto(data.eventId)) return;
       const mensaje = formatearMensajePedidoCreado(data, comensal);
       if (mensaje) {
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -43,7 +43,7 @@ function Layout({ children }) {
     });
 
     const bajaStatus = socketOn('order:status', (data) => {
-      if (!data || dedupRef.current.visto(data.eventId)) return;
+      if (!data || deduplicador.visto(data.eventId)) return;
       const estadoNorm = String(data.estado || '').toLowerCase();
       if (estadoNorm === 'listo' && esPedidoMio(data.id_pedido, comensal)) {
         const codigoRaw =
@@ -65,7 +65,7 @@ function Layout({ children }) {
     });
 
     const bajaPayment = socketOn('payment:confirmed', (data) => {
-      if (!data || dedupRef.current.visto(data.eventId)) return;
+      if (!data || deduplicador.visto(data.eventId)) return;
       const mensaje = textoPagoConfirmado(data, comensal);
       if (mensaje) {
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -81,7 +81,7 @@ function Layout({ children }) {
       bajaStatus?.();
       bajaPayment?.();
     };
-  }, [socketOn, comensal]);
+  }, [socketOn, comensal, deduplicador]);
 
   if (cargando) {
     return null;

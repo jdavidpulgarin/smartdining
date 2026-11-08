@@ -75,7 +75,7 @@ export function MesaSocketProvider({ children }) {
     [token, socketUrl]
   );
 
-  const [cliente, setCliente] = useState(null);
+  const clienteRef = useRef(null);
   const [estado, setEstado] = useState(
     modo === 'compartido' ? 'conectando' : 'local'
   );
@@ -90,27 +90,18 @@ export function MesaSocketProvider({ children }) {
 
   useEffect(() => {
     if (modo !== 'compartido' || !token || !socketUrl) {
-      setCliente(null);
-      setEstado('local');
-      setCarrito(CARRITO_VACIO);
-      setPresencia(null);
-      setErrorMesaLlena(null);
       return undefined;
     }
 
     const nuevoCliente = crearClienteMesa({ url: socketUrl, token });
+    clienteRef.current = nuevoCliente;
+
     const bajaPresencia = nuevoCliente.on('mesa:presencia', (ev) => {
       const datos = validarPresencia(ev);
       if (datos) {
         setPresencia(datos);
       }
     });
-
-    setCliente(nuevoCliente);
-    setEstado(nuevoCliente.estado);
-    setCarrito(nuevoCliente.carrito);
-    setPresencia(null);
-    setErrorMesaLlena(null);
 
     const bajas = [
       bajaPresencia,
@@ -141,32 +132,36 @@ export function MesaSocketProvider({ children }) {
       socket.off('connect_error', manejarConnectError);
       bajas.forEach((baja) => baja());
       nuevoCliente.cerrar();
-      setCliente(null);
+      clienteRef.current = null;
+      setEstado('local');
       setCarrito(CARRITO_VACIO);
       setPresencia(null);
+      setErrorMesaLlena(null);
     };
   }, [modo, token, socketUrl]);
 
   const enviar = useCallback(
     (evento, payload) => {
-      if (modo !== 'compartido' || !cliente) {
+      const clienteActual = clienteRef.current;
+      if (modo !== 'compartido' || !clienteActual) {
         return Promise.reject(
           Object.assign(new Error('Sin conexión compartida a la mesa'), {
             codigo: 'MODO_LOCAL',
           })
         );
       }
-      return cliente.enviar(evento, payload);
+      return clienteActual.enviar(evento, payload);
     },
-    [modo, cliente]
+    [modo]
   );
 
   const on = useCallback(
     (evento, fn) => {
-      if (modo !== 'compartido' || !cliente) return () => {};
-      return cliente.on(evento, fn);
+      const clienteActual = clienteRef.current;
+      if (modo !== 'compartido' || !clienteActual) return () => {};
+      return clienteActual.on(evento, fn);
     },
-    [modo, cliente]
+    [modo]
   );
 
   const comensal = useMemo(() => {

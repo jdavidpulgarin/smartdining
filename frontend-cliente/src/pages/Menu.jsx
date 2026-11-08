@@ -63,18 +63,6 @@ function Menu() {
     return baja;
   }, [socketOn]);
 
-  const estadoAnteriorSocketRef = useRef(estadoSocket);
-  useEffect(() => {
-    if (
-      estadoAnteriorSocketRef.current === 'reconectando' &&
-      estadoSocket === 'conectado'
-    ) {
-      recargarMenu();
-      cargarDatos();
-    }
-    estadoAnteriorSocketRef.current = estadoSocket;
-  }, [estadoSocket, cargarDatos]);
-
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) {
@@ -103,9 +91,48 @@ function Menu() {
     }
   }, []);
 
+  // Carga inicial al montar el componente
   useEffect(() => {
-    cargarDatos();
-  }, [cargarDatos]);
+    let activo = true;
+    (async () => {
+      try {
+        const [cats, plats, armables] = await Promise.all([
+          obtenerCategorias(),
+          obtenerPlatos(),
+          obtenerPlatosArmables(),
+        ]);
+        if (!activo) return;
+        setErrorMenu(null);
+        setCategorias(cats);
+        setPlatos(plats);
+        setPlatosArmables(Array.isArray(armables) ? armables : []);
+      } catch (error) {
+        console.error('Error al cargar datos del menú:', error);
+        if (activo) {
+          setErrorMenu(error?.mensaje || 'No se pudo cargar el menú. Intenta de nuevo.');
+        }
+      } finally {
+        if (activo) setCargando(false);
+      }
+    })();
+
+    return () => {
+      activo = false;
+    };
+  }, []);
+
+  const estadoAnteriorSocketRef = useRef(estadoSocket);
+  useEffect(() => {
+    if (
+      estadoAnteriorSocketRef.current === 'reconectando' &&
+      estadoSocket === 'conectado'
+    ) {
+      recargarMenu();
+      setCargando(true);
+      cargarDatos();
+    }
+    estadoAnteriorSocketRef.current = estadoSocket;
+  }, [estadoSocket, cargarDatos]);
 
   const platosFiltrados = categoriaSeleccionada
     ? platos.filter((p) => p.categoriaId === categoriaSeleccionada)
