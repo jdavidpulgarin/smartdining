@@ -281,7 +281,13 @@ async function actualizarIngrediente(req, res, next) {
   if (cambios.calorias === null) cambios.calorias = 0;
 
   try {
-    const resultado = await constructorService.actualizarIngrediente(idIngrediente, cambios);
+    const resultado = await constructorService.actualizarIngrediente(
+      idIngrediente,
+      cambios,
+      undefined,
+      // El autor del cambio de precio_extra, para el historial (D-16 parte B).
+      { idUsuario: req.user?.id_usuario ?? null }
+    );
     if (!resultado) return res.status(404).json({ error: 'Ingrediente no encontrado' });
 
     const { ingrediente, anterior } = resultado;
