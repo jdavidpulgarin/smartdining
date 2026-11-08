@@ -951,19 +951,65 @@ Body: `{ "alias": "Abuela" }`
   «abuela» y «Abuéla» son la misma persona. Un alias inválido es **400** con
   `{ "error": …, "campo": "alias" }`.
 - `:id` tiene que ser un **entero positivo**, o **400**. Una mesa que no existe, **404**.
-- **201** devuelve `{ "id_mesa": 5, "alias": "Abuela" }`, con el alias **ya normalizado**:
-  es el texto con el que habrá que quitarlo después.
+- **201** devuelve `{ "id_mesa": 5, "alias": "Abuela" }` con el alias **tal como quedó
+  reservado**: el escrito ya normalizado o, si esa persona ya tenía platos, el texto con el
+  que aparece en la cuenta (ver abajo). **Puede no ser el que se mandó**, y es el que habrá
+  que usar para pedir y para quitarlo después.
 
 **El orden de las comprobaciones es parte del contrato:**
 
 1. alias válido → **400**
 2. la mesa existe → **404**
 3. la mesa tiene **sesión abierta** (`estado = 'ocupada'`) → **409**
-4. reservar el alias → **409** si ya está en uso, **503** si no hay Redis
-5. avisar al socket-server
+4. si esa persona **ya tiene platos en la cuenta**, se usa el texto de la cuenta (abajo)
+5. reservar el alias → **409** si ya está en uso, **503** si no hay Redis
+6. avisar al socket-server
 
-El paso 3 va **antes** del 4 a propósito: al revés quedaría un alias reservado en una mesa
-que nadie va a usar, y ese nombre no se podría volver a dar de alta hasta que venciera.
+El paso 3 va **antes** de los demás a propósito: al revés quedaría un alias reservado en una
+mesa que nadie va a usar, y ese nombre no se podría volver a dar de alta hasta que venciera.
+Una mesa sin sesión no llega ni a leer la cuenta.
+
+#### Si ya tiene platos, se reserva el texto de la cuenta
+
+Antes de reservar se mira la cuenta de la mesa (la misma fuente que
+`GET /mesas/:id/cuenta`) buscando por **clave**. Si esa persona ya aparece ahí **con platos**
+(`items_pedidos > 0`), se reserva **el texto con el que aparece en la cuenta**, no el que
+escribió el mesero, y es ese el que viaja en el aviso y el que devuelve el **201**:
+
+```http
+POST /api/mesas/5/comensales
+{ "alias": "abuela" }
+```
+
+```json
+{ "id_mesa": 5, "alias": "Abuela" }
+```
+
+**Por qué.** Si «Abuela» ya tiene platos, su reserva vence (24 h) y el mesero la registra de
+nuevo escribiendo «abuela», la reserva nueva quedaría como «abuela» mientras sus platos
+viejos siguen como «Abuela»: la cuenta agrupa por **texto exacto** y se partiría otra vez en
+dos filas. Reservando el texto de la cuenta, los platos nuevos caen en la fila que ya existe.
+
+- Se devuelve el texto **tal como está en la cuenta**, no su forma normalizada: es el valor
+  por el que la base agrupa, y guardar otro crearía una tercera fila.
+- **Si hay varios textos distintos con la misma clave** —porque se escribió de dos formas
+  antes de que esto existiera— gana el que tiene **más platos**; con **empate**, el
+  **primero en el orden de la cuenta**. Es determinista, que es lo que importa para que dos
+  llamadas seguidas no contesten distinto.
+- La fila **`General`** se ignora: no es una persona, la pone la propia función SQL para los
+  ítems sin comensal.
+- Un texto de la cuenta que **ya no sería un alias válido** (un dato viejo escrito a mano) se
+  ignora y se usa el alias escrito.
+- **Si la cuenta no se puede leer, el alta NO se bloquea**: se usa el alias escrito y queda
+  un aviso en el log **sin el alias**, solo con el `id_mesa`. Lo peor que pasa es que la
+  cuenta quede partida, y eso se arregla; no poder sentar a una persona, no.
+- Si **nadie** con esa clave aparece en la cuenta, todo igual que antes: se reserva el alias
+  escrito, ya normalizado.
+- El **409 `alias_en_uso`** no cambia: si la clave ya está reservada, da igual cómo se
+  escriba.
+
+**El panel debe usar el `alias` que devuelve este 201** en los `POST /pedidos` siguientes:
+puede no ser el que escribió el mesero.
 
 ```json
 { "error": "Esa mesa no tiene una sesión abierta: ábrela antes de agregar comensales", "motivo": "mesa_sin_sesion" }
@@ -1553,17 +1599,30 @@ mesa**. Se busca por clave en dos sitios, en este orden:
    pero cuya reserva venció (24 h para un sin celular, 3 h para una sesión de QR). Se exige
    que esa fila tenga **platos** (`items_pedidos > 0`): una que solo existe por un pago no
    dice cómo se escribe el nombre de quien está pidiendo ahora. Es la misma fuente que
-   `GET /mesas/:id/cuenta`.
+   `GET /mesas/:id/cuenta`, y la búsqueda es **la misma** que usa el alta de un comensal
+   (`services/alias-en-cuenta.js`): se guarda el texto tal como está en la cuenta, se ignora
+   la fila `General`, y si hay varios textos con la misma clave gana el de **más platos**
+   (con empate, el primero en el orden de la cuenta).
 
 Si no aparece en ninguno de los dos, es un nombre que **nadie registró**:
 
 ```json
-{ "error": "Esa persona no está registrada en la mesa: agrégala primero (POST /api/mesas/:id/comensales) o usa el nombre con el que ya aparece en la cuenta", "motivo": "comensal_no_registrado" }
+{
+  "error": "Esa persona no está registrada en la mesa: agrégala primero (POST /api/mesas/:id/comensales) o usa el nombre con el que ya aparece en la cuenta",
+  "motivo": "comensal_no_registrado",
+  "alias": "Abuela"
+}
 ```
 
 **409 `comensal_no_registrado`**, y **el pedido NO se crea**: basta con que **uno** de los
 comensales del cuerpo no esté registrado para que se rechace el pedido entero, sin abrir
-siquiera la transacción. Es deliberado: un alias escrito a mano que no corresponde a nadie
+siquiera la transacción.
+
+El campo **`alias`** dice **cuál** de ellos no se pudo resolver: con un pedido de varias
+personas, «esa persona no está registrada» sin decir quién obliga a adivinar. Es el texto
+**normalizado** que se intentó usar, y si fallan varios se informa el **primero en el orden
+de los ítems**. Solo ese: el alias lo mandó quien llama, así que la respuesta **no devuelve
+ningún dato de las otras personas** de la mesa. Es deliberado: un alias escrito a mano que no corresponde a nadie
 es casi siempre un error de tecleo, y guardarlo crea una persona fantasma en la cuenta que
 luego hay que arreglar a mano.
 
