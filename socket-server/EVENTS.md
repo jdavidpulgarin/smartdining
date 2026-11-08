@@ -20,8 +20,8 @@ código y este documento no coinciden, es un error y se corrige en el mismo PR.
 - [2. Salas](#2-salas-rooms)
 - [3. Convenciones](#3-convenciones): idempotencia, formato del ack, reconexión
 - [4. Eventos cliente → servidor](#4-eventos-cliente--servidor)
-- [5. Eventos servidor → cliente](#5-eventos-servidor--cliente)
-- [6. Endpoints HTTP](#6-endpoints-http)
+- [5. Eventos servidor → cliente](#5-eventos-servidor--cliente) · [5.5. `inventario:alerta`](#55-inventarioalerta)
+- [6. Endpoints HTTP](#6-endpoints-http) · [6.4. Comensales sin celular](#64-comensales-sin-celular-post-internalmesa-comensal)
 - [7. Web Push](#7-web-push)
 - [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox) · [8.6. Cobros de caja](#86-cobros-de-caja-post-internalpayment-confirmed)
 - [9. Variables de entorno](#9-variables-de-entorno)
@@ -49,6 +49,8 @@ el socket-server ya lo implementa y lo prueba contra dobles, pero falta la parte
 del backend que lo dispara o lo alimenta (contrato en la sección indicada).
 **Conectado (falta prueba E2E con Wompi sandbox)** = las dos partes existen y sus
 contratos coinciden, pero aún no se ha hecho un pago real de punta a punta.
+**Propuesta (v1.1)** = contrato acordado o por acordar en G-06; aún no implementado.
+Nadie debe depender de él en producción hasta que pase a Estable.
 
 ### Cliente → servidor (por socket, con ack)
 
@@ -76,10 +78,11 @@ contratos coinciden, pero aún no se ha hecho un pago real de punta a punta.
 | `qr:actualizado` | `room:mesa-{ID}` (incluye la pantalla) | No | Estable | [§6.2](#62-cómo-avisa-el-backend-una-rotación-de-token_qr-pantalla-de-mesa) |
 | `mesa:llamar_mesero` | `room:admin` | Sí | Estable | [§4](#mesallamar_mesero) |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§4](#cuentasolicitada) |
-| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` | No (estado completo) | Estable | [§5.2](#52-mesapresencia) |
+| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` | No (estado completo) | Estable; campo `sin_celular`: Propuesta (v1.1) | [§5.2](#52-mesapresencia) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable. `motivo: "pagada"`: caja Estable (PR #58); en línea Conectado (falta prueba E2E con Wompi sandbox) (PR #33) | [§5.1](#51-mesaliberada) |
 | `ingrediente:disponibilidad` | todos los sockets | Opcional | Estable (el backend lo llama desde PR #70) | [§5.3](#53-ingredientedisponibilidad) |
 | `plato:disponibilidad` | todos los sockets | Opcional | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
+| `inventario:alerta` | `room:admin` | Sí | Propuesta (v1.1) | [§5.5](#55-inventarioalerta) |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Caja: Estable vía `/internal/payment-confirmed` (PR #58). Wompi: Conectado (falta prueba E2E con Wompi sandbox), vía webhook con cuenta ([§8.2](#82-contrato-que-necesita-del-backend)) y registro ([§8.4](#84-contrato-de-registro-que-necesita-del-backend)) en el backend (PR #33) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6), [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 | `pago:alerta` | `room:admin` | Sí | Conectado (falta prueba E2E con Wompi sandbox); el backend guarda el intento (PR #33) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
 
@@ -97,6 +100,8 @@ contratos coinciden, pero aún no se ha hecho un pago real de punta a punta.
 | `POST /internal/ingrediente-disponibilidad` | backend | Estable (el backend ya la usa, PR #70) | [§5.3](#53-ingredientedisponibilidad) |
 | `POST /internal/plato-disponibilidad` | backend (`PATCH /api/platos/:id/disponible`) | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
 | `POST /internal/payment-confirmed` | backend (cobros de caja) | Estable (el backend la llama desde `registrarPago`, PR #58) | [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
+| `POST /internal/mesa-comensal` | backend (tras el COMMIT de D-18) | Propuesta (v1.1) | [§6.4](#64-comensales-sin-celular-post-internalmesa-comensal) |
+| `POST /internal/inventario-alerta` | backend (D-17) | Propuesta (v1.1) | [§5.5](#55-inventarioalerta) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
 responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
@@ -138,6 +143,9 @@ motivo exacto) va solo al log del servidor.
 | `403 NO_AUTORIZADO` | Credencial válida sin permiso (rol, alias que no está en la mesa) |
 | `404` | Ruta inexistente (y toda `/internal/*` desde Internet, en nginx) |
 | `409 SIN_SALDO` | Intención de pago sin nada que cobrar |
+| `409 MESA_LIBERADA` | Propuesta (v1.1). La mesa figura liberada y no se ha generado un QR nuevo ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
+| `409 ALIAS_EN_USO` | Propuesta (v1.1). La clave del alias ya está en uso en la mesa ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
+| `409 LIMITE_COMENSALES` | Propuesta (v1.1). La mesa ya tiene 20 comensales sin celular ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
 | `413 CUERPO_DEMASIADO_GRANDE` | Cuerpo de más de 100 KB |
 | `429 RATE_LIMIT` | Más de 5 intenciones de pago por minuto (o límite de nginx en login y pagos) |
 | `500/502/503 ERROR_INTERNO` | Fallo propio, del backend o reinicio en curso; reintentar |
@@ -534,9 +542,10 @@ hasta que se libere.
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
-| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` (solo la de esa mesa) | `{ id_mesa, comensales: [alias], total, pagaron: [alias] }` (ver §5.2) |
+| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` (solo la de esa mesa) | `{ id_mesa, comensales: [alias], total, pagaron: [alias] }` (ver §5.2). Propuesta (v1.1): además `sin_celular: [alias]` |
 | `ingrediente:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_ingrediente, disponible, emitidoEn }` |
 | `plato:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_plato, disponible, emitidoEn }` |
+| `inventario:alerta` (Propuesta v1.1) | `room:admin` | `{ eventId, id_insumo, nombre, unidad, stock_actual, stock_minimo, agotado, emitidoEn }` (§5.5) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | `{ id_mesa, motivo, emitidoEn }` (`motivo`: `pagada` o `liberada`) |
 
 Notas para el frontend:
@@ -614,6 +623,22 @@ dentro de esa ventana, se envía uno más al cerrarla (el último estado siempre
 - La PWA lo usa para mostrar cuánto es «igual» antes de pedir la intención
   ([§8.1](#81-post-pagosintencion)).
 
+**Propuesta (v1.1): campo `sin_celular`** (aún no implementado; compatible hacia atrás). Las
+personas sin celular las agrega el personal con
+[`POST /internal/mesa-comensal`](#64-comensales-sin-celular-post-internalmesa-comensal):
+
+```json
+{ "id_mesa": 5, "comensales": ["Abuela", "Ana", "Beto"], "total": 3, "pagaron": ["Ana"], "sin_celular": ["Abuela"] }
+```
+
+- `sin_celular` (nuevo): alias agregados por el personal, ordenados. Siempre presente (`[]` si
+  no hay).
+- `comensales`: unión de los alias conectados y `sin_celular`, sin repetidos, ordenada.
+- `total`: cuenta ambos.
+- `pagaron`: sin cambios; un alias sin celular aparece si se cobra en caja con `comensal` (§8.6).
+- Se emite también cuando cambia `sin_celular`, con la misma ventana de 500 ms.
+- Los clientes viejos que ignoran `sin_celular` siguen funcionando.
+
 ### 5.3. `ingrediente:disponibilidad`
 
 El backend avisa que un ingrediente se agotó (`disponible: false`) o volvió (`true`) con
@@ -647,6 +672,65 @@ Content-Type: application/json
   Cualquier otro campo del cuerpo se descarta. La PWA debe mostrar u ocultar (o marcar
   como agotado) el plato en el menú en vivo; el KDS y el panel pueden refrescar su lista.
   No lo puede emitir un cliente.
+
+### 5.5. `inventario:alerta`
+
+> **Propuesta (v1.1) · R-20.** Aún no implementado. Nadie debe depender de él en producción
+> hasta que pase a Estable.
+>
+> Los nombres de campos se confirman con Jarrinson en G-06 contra la tabla insumos.
+
+El backend (D-17, `LISTEN 'inventario'`) detecta que un insumo cruzó su stock mínimo y avisa al
+panel de administración en vivo con `POST /internal/inventario-alerta`:
+
+```http
+POST /internal/inventario-alerta
+x-internal-key: <INTERNAL_API_KEY>
+Content-Type: application/json
+
+{ "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "stock_actual": 450, "stock_minimo": 500, "eventId": "<uuid>" }
+```
+
+**Quién la llama:** el backend, cuando el insumo **pasa** de estar sobre el mínimo a estar en o
+bajo el mínimo (o llega a 0). No en cada movimiento. Esa decisión es del backend; el
+socket-server solo retransmite. Ningún frontend la llama; nginx responde 404 desde Internet
+(igual que toda `/internal/*`).
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `id_insumo` | Sí | Entero positivo seguro |
+| `nombre` | Sí | Texto de 1 a 80 caracteres |
+| `unidad` | Sí | Texto de 1 a 15 caracteres |
+| `stock_actual` | Sí | Número JSON finito ≥ 0 (puede tener decimales) |
+| `stock_minimo` | Sí | Número JSON finito ≥ 0 (puede tener decimales) |
+| `eventId` | Sí | UUID |
+
+`stock_actual` y `stock_minimo` deben ser números JSON, no texto: D-17 debe convertir los
+`NUMERIC` que devuelve `pg` (llegan como texto); si no, recibe `400 PAYLOAD_INVALIDO`.
+
+Errores, sin emitir nada en ningún caso: `400 PAYLOAD_INVALIDO`, `400 JSON_INVALIDO`,
+`401 NO_AUTORIZADO` (sin clave o clave errada) y `503 NO_CONFIGURADO`.
+
+- Respuesta normal: `200 { "ok": true, "duplicado": false }`.
+- **Idempotencia:** clave propia `backend:inventario-alerta:{eventId}`, TTL de 10 min. Repetido
+  → `200 { "ok": true, "duplicado": true }` sin reemitir. Se reserva el `eventId`, se emite y,
+  si falla la emisión, se libera la clave. Un `4xx` no consume el `eventId`.
+- **Reintentos:** el backend solo reintenta, con el mismo `eventId`, ante
+  `500/502/503 ERROR_INTERNO`; nunca ante `503 NO_CONFIGURADO` ni ante un `4xx`.
+
+Emite `inventario:alerta` **solo a `room:admin`** (`admin`, `mesero` y `cajero`: el mesero
+necesita saber qué se agota); nunca a las mesas ni a `room:kds`:
+
+```json
+{ "eventId": "7d3f0c52-8a41-4e6b-b1f7-3c9a2e5d6f10", "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "stock_actual": 450, "stock_minimo": 500, "agotado": false, "emitidoEn": "2026-11-09T20:15:00.000Z" }
+```
+
+- `agotado`: `stock_actual === 0`, calculado por el socket-server. Cualquier otro campo del
+  cuerpo se descarta.
+- **No se guarda:** si el panel estaba desconectado, se pierde el aviso. El panel debe cargar al
+  iniciar la lista de stock bajo por REST (vista `v_stock_bajo` del backend, ruta a definir por
+  Daniel y Jarrinson) y usar `inventario:alerta` solo para avisos en vivo. Deduplica por
+  `eventId`.
 
 ---
 
@@ -725,6 +809,103 @@ Responde `200 { "ok": true, "duplicado": false }`. Reintentar con el mismo `even
 seguro. En `order-created`, ante un `5xx` hay que reintentar con el mismo `eventId`: el
 reintento termina de quitar las líneas del carrito sin volver a emitir la comanda (ver
 [`order:created`](#ordercreated), "Orden y reintentos").
+
+### 6.4. Comensales sin celular: `POST /internal/mesa-comensal`
+
+> **Propuesta (v1.1) · R-19.** Aún no implementada. Nadie debe depender de ella en producción
+> hasta que pase a Estable.
+
+Alguien en la mesa no tiene celular y el mesero (o el admin) pide por esa persona desde el panel
+(D-18: `POST /api/mesas/:id/comensales` en el backend). Debe contar como persona en
+[`mesa:presencia`](#52-mesapresencia) y en «igual» ([§8.1](#81-post-pagosintencion)), y puede
+pagar en caja con su alias ([§8.6](#86-cobros-de-caja-post-internalpayment-confirmed)).
+
+**Quién la llama:** el backend, **después del COMMIT** de D-18, tanto al agregar como al quitar.
+Ningún frontend la llama; nginx responde 404 desde Internet (igual que toda `/internal/*`).
+
+```http
+POST /internal/mesa-comensal
+x-internal-key: <INTERNAL_API_KEY>
+Content-Type: application/json
+
+{ "id_mesa": 5, "alias": "Abuela", "accion": "agregar", "eventId": "<uuid>" }
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `id_mesa` | Sí | Entero positivo seguro |
+| `alias` | Sí | La regla del alias de abajo |
+| `accion` | Sí | `"agregar"` o `"quitar"`, estricto |
+| `eventId` | Sí | UUID. Obligatorio porque el backend reintenta estos avisos (ver "Idempotencia y reintentos") |
+
+Cualquier otro campo del cuerpo se descarta.
+
+**Regla del alias:** la misma de [R-18](#alias-del-comensal-r-18), definida en
+[`backend/src/services/alias-comensal.js`](../backend/src/services/alias-comensal.js):
+
+- Se normaliza con NFC, sin espacios a los lados y con los espacios dobles reducidos a uno.
+- De 2 a 40 puntos de código.
+- Solo letras, marcas, números, espacio y `. _ ' -`.
+- La unicidad se mide por **clave**: sin tildes, en minúsculas y sin espacios ni `. _ ' -`
+  («Ana», «ana» y «Ána» tienen la misma). Una clave vacía es inválida.
+
+Respuestas (`{ ok: false, codigo, mensaje }` en los errores; **en ningún error se emite nada**):
+
+| Status · `codigo` | Cuándo |
+|---|---|
+| `200 { "ok": true, "duplicado": false }` | Cambio aplicado, o sin cambio: `agregar` un alias idéntico que ya está en `sin_celular`, o `quitar` uno que no está. Sin cambio **no** se emite `mesa:presencia` |
+| `200 { "ok": true, "duplicado": true }` | Ese `eventId` ya se procesó; no reemite |
+| `400 PAYLOAD_INVALIDO` | Algún campo no cumple la tabla o la regla del alias |
+| `400 JSON_INVALIDO` | El cuerpo no es un objeto JSON |
+| `401 NO_AUTORIZADO` | Falta `x-internal-key` o no coincide |
+| `409 MESA_LIBERADA` | La mesa figura liberada y no se ha generado un QR nuevo (al agregar y al quitar) |
+| `409 ALIAS_EN_USO` | Al agregar: la clave coincide con la de un alias conectado, o con la de un alias **distinto** que ya está en `sin_celular` (p. ej. `ana` cuando existe `Ana`) |
+| `409 LIMITE_COMENSALES` | Al agregar: la mesa ya tiene 20 sin celular. Es una protección contra errores o abuso, no la capacidad de la mesa |
+| `500/502/503 ERROR_INTERNO` | Fallo propio o de Redis, o reinicio en curso; reintentar |
+| `503 NO_CONFIGURADO` | El socket-server no tiene `INTERNAL_API_KEY` |
+
+«Idéntico» significa el mismo texto ya normalizado. `quitar` compara así, no por clave.
+
+**Las guardias no reemplazan al backend:**
+
+- `ALIAS_EN_USO`: la fuente de verdad es la reserva del backend. D-18 reserva el alias con la
+  misma función que R-18; el `409` del socket es solo una guardia.
+- `MESA_LIBERADA`: el backend valida la sesión de la mesa antes del COMMIT; este `409` es solo
+  una guardia.
+
+**Idempotencia y reintentos:**
+
+- Clave propia `backend:mesa-comensal:{eventId}`, TTL de 10 min (el de las demás rutas internas).
+- Se reserva el `eventId`, se aplica el cambio y, si falla, se libera la clave, para que el
+  reintento lo aplique. Un `4xx` (`400`, `401`, `409`) no consume el `eventId`.
+- El backend solo reintenta, con el mismo `eventId`, ante `500/502/503 ERROR_INTERNO`; nunca ante
+  `503 NO_CONFIGURADO` ni ante un `4xx`. La función `enviar` del notificador no reintenta hoy:
+  D-18 debe agregarlo.
+- El `eventId` evita aplicar dos veces un reintento, pero **no ordena** los avisos. El backend
+  envía los de una misma mesa en serie, reutilizando `encadenarAvisos` (hoy solo ordena los pasos
+  de una misma llamada: hace falta una cadena por mesa), y no reintenta un `agregar` viejo después
+  de haber enviado un `quitar` posterior de ese alias.
+
+**Efectos:**
+
+- Si cambió el estado, emite `mesa:presencia` respetando la ventana de 500 ms
+  ([§5.2](#52-mesapresencia)).
+- La lista vive en `sd:mesa:{ID}:sin_celular` con TTL de 24 h, igual que `pagaron`, y se borra al
+  liberarse la mesa, en el mismo momento que `pagaron`.
+- **«Igual»:** cuenta a los sin celular porque van en `comensales`.
+- **Cobro en caja:** el `comensal` debe coincidir **exacto** con el alias de `sin_celular`; si no,
+  esa persona sigue contando en «igual».
+- **Rotación del QR:** con un sin celular `total` es mayor que 0 y el QR deja de rotar, igual que
+  con el primer comensal conectado: hay alguien sentado.
+- **Mesa solo con sin celular:** al liberarla no sale `mesa:presencia`, porque no hay comensales
+  que desconectar. El panel la limpia con `mesa:liberada`.
+
+**Notas para la implementación (R-19.2):**
+
+- Usar los mismos casos de prueba del alias que el backend, para que las dos validaciones no se
+  separen.
+- Llevar a Redis la marca de mesa liberada (hoy `mesasLiberadas`, en memoria) para que sobreviva
+  a los reinicios.
 
 ---
 
@@ -851,6 +1032,11 @@ Reglas de la cuenta dividida:
   | 4 personas, $120.000 | Ana propio $45.000 → Beto, Carlos y Dani igual **$25.000** c/u |
   | 4 personas, $120.000 | Ana propio $10.000 → Beto **$36.667** → Carlos **$36.667** → Dani **$36.666** |
   | 3 personas, $100.000 | Ana **$33.333** → Beto **$33.334** → Carlos **$33.333** (todos igual) |
+
+  **Propuesta (v1.1):** las «personas presentes» incluyen los alias de `sin_celular`
+  ([§5.2](#52-mesapresencia)), que ya van en `comensales`; la PWA debe usar `comensales` y
+  `pagaron` de `mesa:presencia`, tal como dice la fórmula, y no calcular con `total`. Ejemplo:
+  3 personas (1 sin celular), $90.000, nadie ha pagado → igual **$30.000** cada uno.
 
   Si la presencia o `pagaron` cambian entre lo que mostró la PWA y la petición, manda el
   cálculo del servidor (y una pendiente anterior se reemplaza, ver abajo).
@@ -1182,3 +1368,5 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `POST /pagos/intencion` · reutilizar la pendiente | Si el comensal tenía una intención pendiente se devolvía esa, sin mirar `modo` ni monto (se cobraba el monto viejo hasta 30 min) | Se reutiliza solo con el mismo `modo` y el mismo monto recalculado; si no, intención nueva y la vieja queda `reemplazada` 7 días. El webhook acepta una reemplazada por su monto exacto. Sin backend → `503` aunque haya pendiente | PWA: usar siempre la respuesta más reciente (puede traer otra `referencia`). Backend: nada |
 | `POST /pagos/intencion` · modo `igual` | Total ÷ personas presentes; mezclar modos podía dejar saldo sin dueño (p. ej. quedaban $3.334 de $100.000) | **Saldo** ÷ (presentes que aún no pagaron + quien paga), redondeado a pesos; el último paga el saldo exacto. Fórmula exacta en §8.1 | PWA: replicar la fórmula con `mesa:presencia` y la cuenta. Backend: nada |
 | `mesa:presencia` · destino y `pagaron` | Solo `room:admin`; `{ id_mesa, comensales, total }` | También `room:mesa-{ID}` (solo esa mesa) y nuevo campo `pagaron: [alias]`; también se emite al confirmarse un pago con alias | PWA: escucharlo para mostrar «igual». Panel: nada (campo nuevo, compatible) |
+| Propuesta (v1.1) · `POST /internal/mesa-comensal` · `mesa:presencia.sin_celular` | Una persona sin celular no contaba en la presencia ni en «igual» | Nueva ruta para agregar o quitar comensales sin celular y campo `sin_celular`; `comensales` y `total` los incluyen (§6.4, §5.2) | Backend: llamarla tras el COMMIT de D-18. PWA (J-11/J-16): usar `comensales` y `pagaron`, que ya incluyen a los sin celular. Panel: mostrarlos en la mesa |
+| Propuesta (v1.1) · `POST /internal/inventario-alerta` · `inventario:alerta` | — | Nuevos: el backend avisa cuando un insumo cruza su stock mínimo y se difunde solo a `room:admin` (§5.5) | Backend (D-17): llamarla en la transición. Panel (P-22): escuchar `inventario:alerta` en `room:admin` y cargar stock bajo por REST al iniciar |
