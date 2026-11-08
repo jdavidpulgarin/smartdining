@@ -25,6 +25,12 @@ router.post('/:id/rotar-qr', requireAuth, requireRole('mesero', 'admin'), ctrl.r
 // la capture la ruta pública de la mesa.
 router.get('/:id/cuenta/interno', requireInternalKey, ctrl.cuentaInterna);
 
+// D-18: comensales SIN CELULAR de la mesa. Los da de alta el personal de sala,
+// no el comensal: la persona no tiene teléfono con el que escanear el QR. Van
+// antes de GET /:id y de PATCH /:id para que 'comensales' no se lea como un id.
+router.post('/:id/comensales', requireAuth, requireRole('mesero', 'admin'), ctrl.agregarComensal);
+router.delete('/:id/comensales/:alias', requireAuth, requireRole('mesero', 'admin'), ctrl.quitarComensal);
+
 // La cuenta del personal. Va antes de GET /:id (si no, 'cuenta' se leería como
 // parte del id) y después de /cuenta/interno, que es ruta distinta por el
 // segmento extra y no se solapa con esta.

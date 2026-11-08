@@ -118,7 +118,14 @@ function encadenarAvisos(pasos) {
  * harían la suite lenta y frágil.
  */
 function esperarAvisos() {
-  return ultimaCadena;
+  // No basta con `ultimaCadena`: desde D-18 hay una cadena por mesa y pueden
+  // estar varias en vuelo a la vez. Se esperan todas y se vuelve a mirar, porque
+  // una cadena puede haber encolado otra mientras se esperaba.
+  const pendientes = [ultimaCadena, ...cadenasPorMesa.values()];
+  return Promise.allSettled(pendientes).then(() => {
+    if (cadenasPorMesa.size > 0) return esperarAvisos();
+    return undefined;
+  });
 }
 
 /**
@@ -489,6 +496,205 @@ async function notificarPlatoDisponibilidad(id_plato, disponible) {
   });
 }
 
+/* -------------------------------------------------------------------------- *
+ * Reintentos y serie por mesa (D-18, contrato propuesto en EVENTS.md §6.4)
+ *
+ * `enviar` NO reintenta y se queda así: los avisos que ya existen (pedido
+ * creado, pago, mesa liberada, disponibilidad) llevan su propia semántica y
+ * cambiarles el comportamiento de golpe es lo que no se quiere. Lo de abajo es
+ * una capa aparte que solo usa quien la pide.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Pocos intentos y espera corta a propósito: esto corre dentro de una petición
+ * HTTP del personal. Tres intentos con 150 ms entre ellos son como mucho ~300 ms
+ * de espera añadida, más el timeout de cada intento, que ya lo pone `enviar`
+ * (`SOCKET_TIMEOUT_MS`, 1500 ms por defecto) y es POR INTENTO, no total.
+ */
+const MAX_INTENTOS = 3;
+const ESPERA_ENTRE_INTENTOS_MS = 150;
+
+/** Los únicos status que el contrato manda reintentar (§6.4). */
+const STATUS_REINTENTABLES = new Set(['HTTP_500', 'HTTP_502', 'HTTP_503']);
+
+/** El código de error del socket-server que sí se reintenta. */
+const CODIGO_ERROR_INTERNO = 'ERROR_INTERNO';
+
+/**
+ * ¿Este resultado de `enviar` se puede reintentar?
+ *
+ * Solo 500/502/503 **con `codigo: 'ERROR_INTERNO'`**. Mirar el código y no solo
+ * el status es lo que separa los dos 503 del contrato: `ERROR_INTERNO` es "se
+ * cayó Redis o estoy reiniciando, vuelve a intentarlo" y `NO_CONFIGURADO` es "no
+ * tengo INTERNAL_API_KEY", que no se arregla reintentando y solo serviría para
+ * triplicar el ruido en el log.
+ *
+ * Un 4xx tampoco: 400 es un cuerpo mal armado (reintentar da el mismo 400), 401
+ * es una clave que no coincide y 409 es una guardia de negocio que quien llama
+ * tiene que atender, no repetir.
+ *
+ * Un TIMEOUT o un INALCANZABLE no se reintentan: el contrato nombra solo esos
+ * tres status, y con la ruta todavía sin implementar (R-19) lo más probable es
+ * que no haya nadie al otro lado. Reintentar eso sería alargar cada petición del
+ * mesero por un aviso que no va a llegar.
+ */
+function esReintentable(resultado) {
+  if (!resultado || resultado.ok) return false;
+  if (!STATUS_REINTENTABLES.has(resultado.motivo)) return false;
+  // Boolean() y no el `&&` a secas: sin cuerpo esto devolvía `undefined`, que
+  // es falso al evaluarlo pero no es lo que promete una función `es...`.
+  return Boolean(resultado.respuesta && resultado.respuesta.codigo === CODIGO_ERROR_INTERNO);
+}
+
+/**
+ * Espera `ms` entre dos intentos.
+ *
+ * El temporizador **SÍ retiene el proceso**, a propósito: son 150 ms, y es
+ * trabajo pendiente de verdad —hay un reintento que todavía no se ha mandado—,
+ * no un temporizador de fondo que se pueda abandonar.
+ *
+ * Con `unref()` el proceso podía terminar en medio de la espera si no quedaba
+ * nada más pendiente: en Linux eso dejaba 27 pruebas CANCELADAS a partir de la
+ * primera que espera un reintento ("Promise resolution is still pending but the
+ * event loop has already resolved"), porque el runner veía el event loop vacío
+ * y cerraba el archivo. Y fuera de las pruebas significaba lo mismo: un reintento
+ * perdido si el proceso se estaba cerrando justo en esos 150 ms.
+ */
+function esperar(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * `enviar` con reintentos, SIEMPRE con el mismo cuerpo y por tanto el mismo
+ * `eventId`: es lo que hace seguro repetir, porque el socket-server deduplica
+ * por `backend:mesa-comensal:{eventId}` (§6.4).
+ *
+ * @param {() => boolean} [abortar] Se consulta antes de CADA reintento (no antes
+ *   del primer intento): si devuelve true, se deja de reintentar. Sirve para no
+ *   insistir con un aviso que ya quedó obsoleto.
+ */
+async function enviarConReintento(ruta, cuerpo, { abortar } = {}) {
+  let resultado = await enviar(ruta, cuerpo);
+
+  for (let intento = 2; intento <= MAX_INTENTOS; intento += 1) {
+    if (!esReintentable(resultado)) return resultado;
+    if (abortar && abortar()) {
+      console.error(`[socket] ${ruta}: no se reintenta, el aviso quedo obsoleto`);
+      return { ...resultado, obsoleto: true };
+    }
+    await esperar(ESPERA_ENTRE_INTENTOS_MS);
+    resultado = await enviar(ruta, cuerpo);
+  }
+
+  return resultado;
+}
+
+/**
+ * Cadenas de avisos en vuelo, una por mesa: id_mesa -> Promise.
+ *
+ * `encadenarAvisos` ordena los pasos de UNA llamada, pero no ordena dos
+ * llamadas distintas: con esto, un "agregar Ana" y un "quitar Ana" seguidos
+ * salen en ese orden y no al azar de la red. Es por mesa y no global para que la
+ * mesa 5 no espere a que termine el aviso de la mesa 9 (y menos con reintentos
+ * de por medio). La entrada se borra cuando su cadena queda vacía, así el Map no
+ * crece con el tiempo.
+ *
+ * Con UNA instancia del backend esto basta, que es el escenario de hoy. Con
+ * varias, cada proceso ordenaría solo sus propios avisos; lo que impide aplicar
+ * dos veces un reintento sigue siendo el `eventId`.
+ */
+const cadenasPorMesa = new Map();
+
+/** Orden global de los avisos encolados, para saber cuál es más nuevo. */
+let ordenAviso = 0;
+
+/**
+ * Último 'quitar' encolado por alias: "idMesa|clave" -> orden.
+ *
+ * Es lo que permite no insistir con un 'agregar' viejo cuando ya se pidió
+ * quitar a esa misma persona (§6.4): reintentarlo la volvería a sentar en la
+ * mesa después de que el mesero la quitó.
+ */
+const ultimoQuitar = new Map();
+
+const claveAlias = (idMesa, clave) => `${idMesa}|${clave}`;
+
+/**
+ * Encola un aviso en la cadena de su mesa. Devuelve lo que devuelva el aviso.
+ *
+ * El `catch` es defensivo, como en `encadenarAvisos`: las funciones de este
+ * módulo no lanzan, así que algo que llegue aquí es un error de programación y
+ * se registra en vez de volverse un rechazo sin dueño.
+ */
+function encolarPorMesa(idMesa, aviso) {
+  const llaveMesa = String(idMesa);
+  const previa = cadenasPorMesa.get(llaveMesa) || Promise.resolve();
+
+  const cadena = previa.then(aviso, aviso).catch((err) => {
+    console.error('[socket] un aviso de la mesa fallo inesperadamente:', err && err.message);
+    return { ok: false, motivo: 'ERROR_INESPERADO' };
+  });
+
+  cadenasPorMesa.set(llaveMesa, cadena);
+  ultimaCadena = cadena;
+
+  // Limpieza: si nadie encoló nada después, se olvida la mesa. Se compara la
+  // identidad de la promesa para no borrar una cadena que ya es de otro aviso.
+  cadena.then(() => {
+    if (cadenasPorMesa.get(llaveMesa) === cadena) {
+      cadenasPorMesa.delete(llaveMesa);
+      for (const k of ultimoQuitar.keys()) {
+        if (k.startsWith(`${llaveMesa}|`)) ultimoQuitar.delete(k);
+      }
+    }
+  });
+
+  return cadena;
+}
+
+/**
+ * POST /internal/mesa-comensal (D-18 · R-19) — una persona SIN CELULAR entra o
+ * sale de la mesa, agregada por el mesero o el admin desde el panel.
+ *
+ * El socket-server la suma a `sd:mesa:{id}:sin_celular` y la incluye en
+ * `mesa:presencia` (EVENTS.md §6.4 y §5.2), así cuenta como persona para "igual"
+ * y puede pagar en caja con su alias.
+ *
+ * PROPUESTA, NO ESTABLE: §6.4 llega con el PR #99 de Roberto, que todavía no
+ * está fusionado, y la ruta es R-19, que puede no existir aún en el
+ * socket-server. Si responde 404 o no hay nadie escuchando, el aviso falla y no
+ * pasa nada más: la reserva del alias ya está hecha en el backend, que es la
+ * fuente de verdad, y la respuesta HTTP del mesero sigue siendo correcta.
+ *
+ * El `alias` que viaja es SIEMPRE el normalizado que se reservó, tanto al
+ * agregar como al quitar: el socket-server compara texto idéntico para quitar
+ * (§6.4), así que mandar lo que escribió el mesero —con otra capitalización o un
+ * espacio doble— dejaría a la persona sentada para siempre.
+ *
+ * @param {number} id_mesa
+ * @param {string} alias Forma normalizada (`normalizarAlias().alias`).
+ * @param {'agregar'|'quitar'} accion
+ * @param {string} clave Clave del alias, para la regla del 'agregar' obsoleto.
+ * @returns {Promise<{ok: boolean, motivo?: string, respuesta?: object}>}
+ */
+function notificarMesaComensal(id_mesa, alias, accion, clave) {
+  const cuerpo = { id_mesa, alias, accion, eventId: nuevoEventId() };
+  const orden = (ordenAviso += 1);
+  const k = claveAlias(id_mesa, clave);
+
+  if (accion === 'quitar') ultimoQuitar.set(k, orden);
+
+  return encolarPorMesa(id_mesa, () =>
+    enviarConReintento('/internal/mesa-comensal', cuerpo, {
+      // Un 'agregar' deja de reintentarse si ya se pidió quitar a esa persona
+      // después. Un 'quitar' se reintenta siempre: es el estado final.
+      abortar: accion === 'agregar' ? () => (ultimoQuitar.get(k) || 0) > orden : undefined,
+    })
+  );
+}
+
 module.exports = {
   nuevoEventId,
   armarPedido,
@@ -503,6 +709,11 @@ module.exports = {
   notificarMesaLiberada,
   notificarIngredienteDisponibilidad,
   notificarPlatoDisponibilidad,
+  notificarMesaComensal,
+  enviarConReintento,
+  esReintentable,
+  MAX_INTENTOS,
+  ESPERA_ENTRE_INTENTOS_MS,
   motivoPorEstadoFinal,
   MOTIVO_PAGADA,
   MOTIVO_LIBERADA,
