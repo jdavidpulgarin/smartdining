@@ -17,8 +17,25 @@ import {
   Layers,
   Flame,
 } from 'lucide-react'
-import { menuApi, agotadosApi, platosApi, categoriasApi } from '../services/api'
+import { agotadosApi, platosApi, categoriasApi, mensajeNoGuardado } from '../services/api'
 import { EditorPasos } from '../components/admin/EditorPasos'
+
+/**
+ * Carta para ADMINISTRAR: todas las categorías y TODOS los platos, también los
+ * agotados. GET /menu no sirve aquí: es la carta del comensal y solo trae los
+ * platos disponibles, así que un plato agotado desaparecería del panel y no
+ * habría cómo reponerlo.
+ */
+async function obtenerCartaAdmin() {
+  const [respCategorias, respPlatos] = await Promise.all([categoriasApi.listar(), platosApi.listar()])
+  const platos = respPlatos?.platos || []
+  return {
+    categorias: (respCategorias?.categorias || []).map((c) => ({
+      ...c,
+      platos: platos.filter((p) => p.id_categoria === c.id_categoria),
+    })),
+  }
+}
 
 export function Menu() {
   const [dishesList, setDishesList] = useState([])
@@ -26,6 +43,7 @@ export function Menu() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [apiNotice, setApiNotice] = useState(null)
+  const [apiNoticeTipo, setApiNoticeTipo] = useState('info')
   const [activeCategory, setActiveCategory] = useState('Todas')
   const [searchQuery, setSearchQuery] = useState('')
   const [onlyAvailable, setOnlyAvailable] = useState(false)
@@ -33,9 +51,11 @@ export function Menu() {
   // Modal del Constructor de Pasos e Ingredientes (P-09 / D-04)
   const [selectedDishForConstructor, setSelectedDishForConstructor] = useState(null)
 
-  const showNotice = (msg) => {
+  // tipo 'error': el cambio NO se guardó; se queda más tiempo a la vista.
+  const showNotice = (msg, tipo = 'info') => {
     setApiNotice(msg)
-    setTimeout(() => setApiNotice(null), 5000)
+    setApiNoticeTipo(tipo)
+    setTimeout(() => setApiNotice(null), tipo === 'error' ? 8000 : 5000)
   }
 
   const procesarMenuData = useCallback((data) => {
@@ -77,7 +97,7 @@ export function Menu() {
 
   const recargarCarta = useCallback(async () => {
     try {
-      const data = await menuApi.obtenerMenu()
+      const data = await obtenerCartaAdmin()
       procesarMenuData(data)
     } catch (err) {
       setError(err.message || 'No se pudo cargar el catálogo de platos')
@@ -86,8 +106,7 @@ export function Menu() {
 
   useEffect(() => {
     let isMounted = true
-    menuApi
-      .obtenerMenu()
+    obtenerCartaAdmin()
       .then((data) => {
         if (!isMounted) return
         procesarMenuData(data)
@@ -109,6 +128,8 @@ export function Menu() {
   const [editingDish, setEditingDish] = useState(null)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
   const [submittingAction, setSubmittingAction] = useState(false)
+  // Error al guardar el plato: va DENTRO del modal, que tapa el aviso de la página.
+  const [dishFormError, setDishFormError] = useState(null)
 
   // Form states para plato
   const [dishForm, setDishForm] = useState({
@@ -148,15 +169,19 @@ export function Menu() {
     const dish = dishesList.find((d) => d.id === dishId)
     if (!dish) return
     const nuevoEstado = !dish.available
-    setDishesList((prev) =>
-      prev.map((d) => (d.id === dishId ? { ...d, available: nuevoEstado } : d))
-    )
+    const ponerEstado = (estado) =>
+      setDishesList((prev) => prev.map((d) => (d.id === dishId ? { ...d, available: estado } : d)))
+
+    // Optimista para que el interruptor responda al instante, pero si la API
+    // falla se REVIERTE: nada queda en pantalla como guardado sin estarlo.
+    ponerEstado(nuevoEstado)
     try {
-      await agotadosApi.togglePlato(dishId, nuevoEstado)
-    } catch {
-      showNotice(
-        'Ruta de agotados (RF-11) pendiente en backend (PATCH /api/platos/:id/disponible). Estado actualizado localmente.'
-      )
+      const plato = await agotadosApi.togglePlato(dishId, nuevoEstado)
+      // Manda el servidor, no lo que se pidió.
+      if (typeof plato?.disponible === 'boolean') ponerEstado(plato.disponible)
+    } catch (err) {
+      ponerEstado(dish.available)
+      showNotice(mensajeNoGuardado(err), 'error')
     }
   }
 
@@ -194,6 +219,7 @@ export function Menu() {
         calorias: '',
       })
     }
+    setDishFormError(null)
     setIsDishModalOpen(true)
   }
 
@@ -224,6 +250,7 @@ export function Menu() {
     }
 
     setSubmittingAction(true)
+    setDishFormError(null)
     try {
       if (editingDish) {
         await platosApi.actualizar(editingDish.id, payload)
@@ -235,48 +262,8 @@ export function Menu() {
       setIsDishModalOpen(false)
       recargarCarta()
     } catch (err) {
-      // Si la API falla por permisos o entorno, actualizar localmente para no bloquear la operación
-      if (editingDish) {
-        setDishesList((prev) =>
-          prev.map((d) =>
-            d.id === editingDish.id
-              ? {
-                  ...d,
-                  name: payload.nombre,
-                  categoryName: dishForm.categoryName,
-                  price: numericPrice,
-                  priceFormatted: `$${numericPrice.toLocaleString('es-CO')}`,
-                  prepTime: numericTime,
-                  tag: dishForm.tag,
-                  description: payload.descripcion,
-                  imageUrl: payload.url_imagen,
-                  available: payload.disponible,
-                  personalizable: payload.personalizable,
-                  calorias: payload.calorias,
-                }
-              : d
-          )
-        )
-      } else {
-        const newDish = {
-          id: Date.now(),
-          name: payload.nombre,
-          categoryName: dishForm.categoryName,
-          categoryId: Number(catId),
-          price: numericPrice,
-          priceFormatted: `$${numericPrice.toLocaleString('es-CO')}`,
-          prepTime: numericTime,
-          tag: dishForm.tag,
-          description: payload.descripcion,
-          imageUrl: payload.url_imagen,
-          available: payload.disponible,
-          personalizable: payload.personalizable,
-          calorias: payload.calorias,
-        }
-        setDishesList((prev) => [newDish, ...prev])
-      }
-      showNotice(`Operación guardada (Aviso API: ${err.message})`)
-      setIsDishModalOpen(false)
+      // El modal sigue abierto con lo escrito, para reintentar sin perderlo.
+      setDishFormError(mensajeNoGuardado(err))
     } finally {
       setSubmittingAction(false)
     }
@@ -289,9 +276,8 @@ export function Menu() {
       await platosApi.eliminar(dishId)
       showNotice('Plato eliminado de la carta.')
       recargarCarta()
-    } catch {
-      setDishesList((prev) => prev.filter((d) => d.id !== dishId))
-      showNotice('Plato eliminado de la lista local.')
+    } catch (err) {
+      showNotice(mensajeNoGuardado(err), 'error')
     }
   }
 
@@ -312,15 +298,8 @@ export function Menu() {
       showNotice(`Categoría "${catPayload.nombre}" creada exitosamente.`)
       setCategoryForm({ name: '', description: '' })
       recargarCarta()
-    } catch {
-      const newCat = {
-        id: Date.now(),
-        name: catPayload.nombre,
-        description: catPayload.descripcion,
-      }
-      setCategoriesList((prev) => [...prev, newCat])
-      setCategoryForm({ name: '', description: '' })
-      showNotice(`Categoría "${catPayload.nombre}" creada localmente.`)
+    } catch (err) {
+      showNotice(mensajeNoGuardado(err), 'error')
     }
   }
 
@@ -331,16 +310,19 @@ export function Menu() {
       await categoriasApi.eliminar(catId)
       showNotice('Categoría eliminada.')
       recargarCarta()
-    } catch {
-      setCategoriesList((prev) => prev.filter((c) => c.id !== catId))
-      showNotice('Categoría removida localmente.')
+    } catch (err) {
+      showNotice(mensajeNoGuardado(err), 'error')
     }
   }
 
   return (
     <div className="sd-page-wrapper">
       {apiNotice && (
-        <div className="table-toast-banner info" style={{ margin: '0 24px 1rem 24px' }}>
+        <div
+          className={`table-toast-banner ${apiNoticeTipo}`}
+          role={apiNoticeTipo === 'error' ? 'alert' : 'status'}
+          style={{ margin: '0 24px 1rem 24px' }}
+        >
           <AlertCircle size={16} />
           <span>{apiNotice}</span>
         </div>
@@ -883,6 +865,13 @@ export function Menu() {
                   <span>DISPONIBLE DE INMEDIATO PARA PEDIDOS</span>
                 </label>
               </div>
+
+              {dishFormError && (
+                <div className="table-toast-banner error" role="alert" style={{ margin: 0 }}>
+                  <AlertCircle size={16} />
+                  <span>{dishFormError}</span>
+                </div>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, borderTop: '1px solid var(--sd-border)', paddingTop: 16 }}>
                 <button
