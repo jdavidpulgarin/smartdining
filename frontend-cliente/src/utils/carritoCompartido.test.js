@@ -173,6 +173,33 @@ describe('carritoCompartido utils', () => {
       expect(item.disponible).toBe(false);
     });
 
+    it('marca disponible: false cuando el plato esta agotado en el menu', () => {
+      const menuConPlatoAgotado = [
+        {
+          id_categoria: 1,
+          platos: [
+            {
+              id_plato: 101,
+              nombre: 'Guacamole',
+              precio: 15000,
+              disponible: false,
+            },
+          ],
+        },
+      ];
+      const items = [
+        {
+          id_linea: 'linea-agotada',
+          comensal: 'Juan',
+          id_plato: 101,
+          cantidad: 1,
+        },
+      ];
+
+      const [enriquecido] = enriquecerItems(items, menuConPlatoAgotado, 'Juan');
+      expect(enriquecido.disponible).toBe(false);
+    });
+
     it('enriquece plato armable calculando precio con extras', () => {
       const items = [
         {

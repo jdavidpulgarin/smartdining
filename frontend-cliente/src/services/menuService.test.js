@@ -6,6 +6,7 @@ import {
   adaptarPlatosArmables,
   adaptarPlatoArmable,
   aplicarDisponibilidad,
+  aplicarDisponibilidadPlato,
   normalizarCategorias,
   obtenerCategorias,
   obtenerPlatos,
@@ -293,6 +294,65 @@ describe('menuService', () => {
       expect(aplicarDisponibilidad(null, 1, false)).toBeNull();
       const sinCambios = aplicarDisponibilidad(menuConIngredientes, 99999, false);
       expect(sinCambios[0].platos[0].pasos[0].ingredientes[0].disponible).toBe(true);
+    });
+  });
+
+  describe('aplicarDisponibilidadPlato', () => {
+    const menuOriginal = [
+      {
+        id_categoria: 1,
+        categoria: 'Entradas',
+        platos: [
+          { id_plato: 10, nombre: 'Empanadas', disponible: true },
+          { id_plato: 20, nombre: 'Papas', disponible: true },
+        ],
+      },
+      {
+        id_categoria: 2,
+        categoria: 'Favoritos',
+        platos: [
+          { id_plato: 10, nombre: 'Empanadas', disponible: true },
+        ],
+      },
+    ];
+
+    it('agota un plato en todas las categorias donde aparece sin mutar el original', () => {
+      const menuActualizado = aplicarDisponibilidadPlato(menuOriginal, 10, false);
+
+      // Comprobar que se actualizó en ambas categorías
+      expect(menuActualizado[0].platos[0].disponible).toBe(false);
+      expect(menuActualizado[1].platos[0].disponible).toBe(false);
+
+      // Comprobar que los otros platos quedan intactos
+      expect(menuActualizado[0].platos[1].disponible).toBe(true);
+
+      // Inmutabilidad
+      expect(menuActualizado).not.toBe(menuOriginal);
+      expect(menuOriginal[0].platos[0].disponible).toBe(true);
+      expect(menuOriginal[1].platos[0].disponible).toBe(true);
+    });
+
+    it('repone un plato agotado (disponible: true)', () => {
+      const menuAgotado = [
+        {
+          id_categoria: 1,
+          categoria: 'Entradas',
+          platos: [{ id_plato: 10, nombre: 'Empanadas', disponible: false }],
+        },
+      ];
+
+      const menuRepuesto = aplicarDisponibilidadPlato(menuAgotado, 10, true);
+      expect(menuRepuesto[0].platos[0].disponible).toBe(true);
+    });
+
+    it('retorna el menu sin cambios si el id de plato es inexistente', () => {
+      const res = aplicarDisponibilidadPlato(menuOriginal, 9999, false);
+      expect(res[0].platos[0].disponible).toBe(true);
+      expect(res[0].platos[1].disponible).toBe(true);
+    });
+
+    it('retorna null si recibe menu null', () => {
+      expect(aplicarDisponibilidadPlato(null, 10, false)).toBeNull();
     });
   });
 });
