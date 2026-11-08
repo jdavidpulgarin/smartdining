@@ -224,6 +224,54 @@ describe('Interceptor y cliente HTTP (apiFetch)', () => {
     })
   })
 
+  describe('Tiempo de espera de las peticiones', () => {
+    // fetch que nunca responde, salvo que se aborte su señal
+    function fetchColgado() {
+      return vi.spyOn(global, 'fetch').mockImplementation(
+        (_url, config) =>
+          new Promise((_resolve, reject) => {
+            config.signal.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted')
+              err.name = 'AbortError'
+              reject(err)
+            })
+          })
+      )
+    }
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('aborta la petición y lanza un mensaje claro si el backend no responde', async () => {
+      vi.useFakeTimers()
+      fetchColgado()
+
+      const promesa = apiFetch('/pedidos/activos', { timeout: 10000 })
+      const verificacion = expect(promesa).rejects.toThrow('Tiempo de espera agotado al conectar con el servidor (10s)')
+      await vi.advanceTimersByTimeAsync(10000)
+      await verificacion
+    })
+
+    it('respeta la señal propia de quien llama y no le impone el tiempo de espera', async () => {
+      vi.useFakeTimers()
+      fetchColgado()
+      const controller = new AbortController()
+
+      let resuelta = false
+      const promesa = apiFetch('/pedidos/activos', { signal: controller.signal }).catch((err) => {
+        resuelta = true
+        return err
+      })
+      await vi.advanceTimersByTimeAsync(15000)
+      expect(resuelta).toBe(false)
+
+      controller.abort()
+      await promesa
+      expect(resuelta).toBe(true)
+    })
+  })
+
   describe('Funciones auxiliares de almacenamiento y navegación', () => {
     it('setStoredAuthMessage y getStoredAuthMessage recuperan y consumen el mensaje una sola vez', () => {
       setStoredAuthMessage('Sesión cerrada')
