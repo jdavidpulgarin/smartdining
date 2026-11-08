@@ -35,6 +35,11 @@ function vistaMesa(mesa) {
     capacidad: mesa.capacidad,
     ubicacion: mesa.ubicacion,
     estado: mesa.estado,
+    // D-16 parte B: una mesa inactiva está retirada del servicio (ADR-06). El
+    // panel la necesita para no ofrecerla, y el comensal para entender por qué
+    // su QR dejó de servir. `?? true` por si la fila viene de una consulta que
+    // no trae la columna: el DEFAULT de la tabla es TRUE.
+    activa: mesa.activa ?? true,
   };
 }
 
@@ -65,11 +70,15 @@ const mesaDatosSchema = z
     numero: z.number().int().positive(),
     capacidad: z.number().int().positive(),
     ubicacion: z.string().min(1).max(50),
+    // D-16 parte B: `activa` es el alta/baja del mobiliario (ADR-06), que es
+    // justo de lo que va esta ruta, así que va aquí y no en /:id/estado. Una
+    // mesa inactiva no se abre, no recibe QR y no sale como disponible.
+    activa: z.boolean(),
   })
   .partial()
   .strict()
   .refine((datos) => Object.keys(datos).length > 0, {
-    message: 'Indica al menos un campo: numero, capacidad o ubicacion',
+    message: 'Indica al menos un campo: numero, capacidad, ubicacion o activa',
   });
 
 const mesaSchema = z.object({
