@@ -2173,7 +2173,7 @@ Dos SQLSTATE propios del inventario. Los dos traen en el **DETAIL** un JSON (en 
 
 | SQLSTATE | Cuándo | Status | Cuerpo |
 |---|---|---|---|
-| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "codigo": "SIN_STOCK", "error": "...", "faltantes": [...] }` |
+| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "codigo": "SIN_STOCK", "error": "...", "faltantes": [{ "tipo", "id", "nombre" }] }` |
 | **SD002** "stock negativo" | `registrar_movimiento_inventario` (merma o ajuste) dejaría el stock bajo 0 | **400** | `{ "error": "...", "stock_actual": 450 }` |
 
 **SD001**: `DETAIL = {"faltantes":[{ "tipo", "id", "nombre", "id_insumo", "insumo", "necesita", "hay" }]}`.
@@ -2181,6 +2181,9 @@ Dos SQLSTATE propios del inventario. Los dos traen en el **DETAIL** un JSON (en 
 - `tipo` es `"plato"` o `"ingrediente"`, e `id`/`nombre` dicen **qué quitar del carrito**.
   `id_insumo`, `insumo`, `necesita` y `hay` explican por qué; pueden venir en `null` cuando
   lo que falta son las opciones de un paso obligatorio del constructor.
+- **Al cliente solo van `tipo`, `id` y `nombre`**, sin repetir: el pedido puede venir de un
+  comensal anónimo y las cantidades de bodega no son de su incumbencia. `id_insumo`,
+  `insumo`, `necesita` y `hay` quedan en el log del servidor.
 - **Puede llegar en el `COMMIT`**, no en el `INSERT`: la reserva es un trigger diferido
   (`tr_reservar_inventario`) que corre al confirmar, para ver el pedido entero con sus
   ingredientes. El `catch` que traduce el error tiene que envolver también el `COMMIT`.
@@ -2193,9 +2196,19 @@ Dos SQLSTATE propios del inventario. Los dos traen en el **DETAIL** un JSON (en 
 signo: lo que se intentó mover). El `MESSAGE` ya trae el stock actual, en lenguaje para el
 usuario: `El movimiento dejaría "Queso" en negativo: hay 450.00 g`.
 
-Los números del DETAIL son números JSON; los `NUMERIC` que devuelve una consulta con `pg`
-llegan como **texto** y hay que convertirlos antes de reenviarlos (p. ej. a
-`/internal/inventario-alerta`).
+Los números del DETAIL y de los avisos `pg_notify('inventario')` ya son números JSON. Los
+que hay que convertir son los `NUMERIC` de una **consulta** con `pg` (p. ej. `v_stock_bajo`),
+que llegan como **texto**, antes de reenviarlos a `/internal/inventario-alerta`.
+
+**Al arrancar el backend** (el caso "estaba caído cuando cambió el stock"):
+
+1. `LISTEN inventario` primero, para no perder nada desde ese momento.
+2. `SELECT fn_recalcular_toda_la_carta()`. Corrige cualquier `stock_suficiente` desfasado y
+   lo que cambie sale por `pg_notify` como siempre; devuelve **solo cuántos** cambiaron.
+3. Los avisos que se emitieron mientras el backend estaba caído **se perdieron**, y el
+   recálculo no los repite (el estado ya estaba al día). Para avisar la carta completa, se
+   lee `v_carta_disponible` (`tipo`, `id`, `disponible_efectivo`, `motivo`) y se emite la
+   disponibilidad de cada plato y opción. Las apps además recargan el menú al reconectar.
 
 ### La frontera entre 400 y 422 (H-11)
 
