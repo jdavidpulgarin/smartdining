@@ -16,6 +16,43 @@ const MesaSocketContext = createContext(null);
 const CARRITO_VACIO = { version: 0, items: [] };
 
 // oxlint-disable-next-line react/only-export-components
+export function validarPresencia(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  if (
+    !Array.isArray(payload.comensales) ||
+    !payload.comensales.every((x) => typeof x === 'string')
+  ) {
+    return null;
+  }
+  if (
+    !Array.isArray(payload.pagaron) ||
+    !payload.pagaron.every((x) => typeof x === 'string')
+  ) {
+    return null;
+  }
+  if (typeof payload.total !== 'number' || !Number.isFinite(payload.total)) {
+    return null;
+  }
+  let sin_celular = [];
+  if (payload.sin_celular !== undefined) {
+    if (
+      !Array.isArray(payload.sin_celular) ||
+      !payload.sin_celular.every((x) => typeof x === 'string')
+    ) {
+      return null;
+    }
+    sin_celular = payload.sin_celular;
+  }
+
+  return {
+    comensales: payload.comensales,
+    pagaron: payload.pagaron,
+    total: payload.total,
+    sin_celular,
+  };
+}
+
+// oxlint-disable-next-line react/only-export-components
 export function esModoCompartido(token, socketUrl) {
   if (!token || !socketUrl) return false;
   if (
@@ -43,6 +80,7 @@ export function MesaSocketProvider({ children }) {
     modo === 'compartido' ? 'conectando' : 'local'
   );
   const [carrito, setCarrito] = useState(CARRITO_VACIO);
+  const [presencia, setPresencia] = useState(null);
   const [errorMesaLlena, setErrorMesaLlena] = useState(null);
 
   const despedirRef = useRef(despedir);
@@ -55,17 +93,27 @@ export function MesaSocketProvider({ children }) {
       setCliente(null);
       setEstado('local');
       setCarrito(CARRITO_VACIO);
+      setPresencia(null);
       setErrorMesaLlena(null);
       return undefined;
     }
 
     const nuevoCliente = crearClienteMesa({ url: socketUrl, token });
+    const bajaPresencia = nuevoCliente.on('mesa:presencia', (ev) => {
+      const datos = validarPresencia(ev);
+      if (datos) {
+        setPresencia(datos);
+      }
+    });
+
     setCliente(nuevoCliente);
     setEstado(nuevoCliente.estado);
     setCarrito(nuevoCliente.carrito);
+    setPresencia(null);
     setErrorMesaLlena(null);
 
     const bajas = [
+      bajaPresencia,
       nuevoCliente.on('estado', (nuevoEstado) => {
         setEstado(nuevoEstado);
       }),
@@ -95,6 +143,7 @@ export function MesaSocketProvider({ children }) {
       nuevoCliente.cerrar();
       setCliente(null);
       setCarrito(CARRITO_VACIO);
+      setPresencia(null);
     };
   }, [modo, token, socketUrl]);
 
@@ -132,13 +181,14 @@ export function MesaSocketProvider({ children }) {
     () => ({
       estado,
       carrito,
+      presencia,
       comensal,
       enviar,
       on,
       modo,
       errorMesaLlena,
     }),
-    [estado, carrito, comensal, enviar, on, modo, errorMesaLlena]
+    [estado, carrito, presencia, comensal, enviar, on, modo, errorMesaLlena]
   );
 
   return (
