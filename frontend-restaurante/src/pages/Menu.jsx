@@ -20,7 +20,7 @@ import {
 import { agotadosApi, platosApi, categoriasApi, mensajeNoGuardado } from '../services/api'
 import { EditorPasos } from '../components/admin/EditorPasos'
 import { useSocketListener } from '../hooks'
-import { crearUltimoPorId } from '../utils/eventosSocket'
+import { crearUltimoPorId } from '../utils/dedupeEventos'
 
 /**
  * Carta para ADMINISTRAR: todas las categorías y TODOS los platos, también los

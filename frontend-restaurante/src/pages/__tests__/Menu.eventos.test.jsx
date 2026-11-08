@@ -102,4 +102,14 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
     act(() => oyentes['ingrediente:disponibilidad']({ id_ingrediente: 999, disponible: true, emitidoEn: t(2) }))
     expect(screen.getByTitle('Agotado (clic para activar)')).toBeInTheDocument()
   })
+
+  it('EditorPasos: un aviso viejo del ingrediente no pisa uno más nuevo', async () => {
+    render(<EditorPasos dish={{ id: 101, name: 'Hamburguesa Doble Queso' }} onClose={() => {}} onDishUpdated={() => {}} />)
+    expect(await screen.findByText('Pollo a la Plancha')).toBeInTheDocument()
+
+    act(() => oyentes['ingrediente:disponibilidad']({ id_ingrediente: 31, disponible: false, emitidoEn: t(5) }))
+    act(() => oyentes['ingrediente:disponibilidad']({ id_ingrediente: 31, disponible: true, emitidoEn: t(3) }))
+
+    expect(screen.getByTitle('Agotado (clic para activar)')).toBeInTheDocument()
+  })
 })

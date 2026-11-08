@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { crearVentanaEventos, crearUltimoPorId, TAMANO_VENTANA_EVENTOS } from '../eventosSocket'
+import { crearVentanaEventos, crearUltimoPorId, TAMANO_VENTANA_EVENTOS } from '../dedupeEventos'
 
 describe('crearVentanaEventos (deduplicar por eventId)', () => {
   it('la primera vez es nuevo; la segunda, repetido', () => {

@@ -15,7 +15,7 @@ import {
 import { StatusBadge } from '../components/ui/Badge'
 import { pedidosApi } from '../services/api'
 import { useSocketListener, useSocketEmit } from '../hooks'
-import { crearVentanaEventos } from '../utils/eventosSocket'
+import { crearVentanaEventos } from '../utils/dedupeEventos'
 
 function backendEstadoAUI(estado) {
   switch (estado) {

@@ -3,7 +3,7 @@ import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTok
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
-import { crearVentanaEventos } from '../utils/eventosSocket'
+import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
 

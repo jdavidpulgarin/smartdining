@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { constructorApi, platosApi, mensajeNoGuardado } from '../../services/api'
 import { useSocketListener } from '../../hooks'
-import { crearUltimoPorId } from '../../utils/eventosSocket'
+import { crearUltimoPorId } from '../../utils/dedupeEventos'
 
 export function EditorPasos({ dish, onClose, onDishUpdated }) {
   const [loading, setLoading] = useState(true)
