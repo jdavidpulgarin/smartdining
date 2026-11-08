@@ -50,12 +50,16 @@ function normalizarPedido(p) {
     ? Math.max(0, Math.floor((Date.now() - new Date(p.creado_en).getTime()) / 60000))
     : 0
 
+  // GET /pedidos/activos trae las líneas en `detalles`; el evento order:created
+  // (EVENTS.md §5) las trae en `pedido.items`. Mismos campos en los dos.
+  const lineas = p.detalles || p.items || []
+
   return {
     id: p.codigo_pedido || `#${p.id_pedido}`,
     rawId: p.id_pedido,
     table: p.mesa_numero ? `Mesa ${p.mesa_numero}` : p.id_mesa ? `Mesa ${p.id_mesa}` : 'Barra',
     numeroMesa: p.mesa_numero || p.id_mesa || '?',
-    client: p.detalles?.[0]?.comensal || 'Comensal General',
+    client: lineas.find((d) => d.comensal)?.comensal || 'Comensal General',
     waiter: p.mesero || 'Mesero Asignado',
     state: backendEstadoAUI(p.estado),
     rawEstado: p.estado,
@@ -64,7 +68,7 @@ function normalizarPedido(p) {
       : 'En vivo',
     elapsedMin: minElapsed,
     total: `$${Number(p.total || 0).toLocaleString('es-CO')}`,
-    items: (p.detalles || []).map((d) => ({
+    items: lineas.map((d) => ({
       name: d.nombre || d.plato_nombre || 'Plato',
       qty: d.cantidad || 1,
       notes: d.notas_especiales || d.notas || null,
@@ -139,12 +143,19 @@ export function Pedidos() {
     }
   })
 
-  useSocketListener('order:new', (newOrder) => {
-    if (newOrder) {
-      const normalizado = normalizarPedido(newOrder)
-      setOrdersList((prev) => [normalizado, ...prev])
-      showToast(`¡Nuevo pedido comensal en ${normalizado.table}!`)
-    }
+  // Comanda nueva: { eventId, pedido, emitidoEn } (EVENTS.md §5). Antes se
+  // escuchaba 'order:new', que nadie emite, y la lista no se enteraba de nada.
+  // Un reintento del backend reenvía el mismo pedido: se reemplaza, no se duplica.
+  useSocketListener('order:created', (data) => {
+    const pedido = data?.pedido
+    if (!pedido?.id_pedido) return
+    const normalizado = normalizarPedido(pedido)
+    setOrdersList((prev) =>
+      prev.some((o) => o.rawId === normalizado.rawId)
+        ? prev.map((o) => (o.rawId === normalizado.rawId ? normalizado : o))
+        : [normalizado, ...prev]
+    )
+    showToast(`¡Nuevo pedido comensal en ${normalizado.table}!`)
   })
 
   // Avanzar estado de comanda contra la API real
