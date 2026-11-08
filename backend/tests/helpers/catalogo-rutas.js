@@ -55,6 +55,10 @@ const TABLA = [
     cuerpo: {},
   },
 
+  // D-16 parte B: la configuracion del local. La lectura publica son los mismos
+  // datos que se ven en la puerta; el resto es de admin.
+  { metodo: 'GET', patron: '/api/configuracion', url: '/api/configuracion', acceso: PUBLICA },
+
   // --- Internas: x-internal-key, sin JWT ------------------------------------
   {
     metodo: 'GET',
@@ -84,6 +88,16 @@ const TABLA = [
     url: '/api/auth/register',
     roles: ['admin'],
     cuerpo: { nombre: 'Ana Ríos', email: 'ana@mail.com', password: 'secreta123', rol: 'mesero' },
+  },
+
+  // --- D-16 parte B: configuración del restaurante (solo admin) -------------
+  { metodo: 'GET', patron: '/api/configuracion/completa', url: '/api/configuracion/completa', roles: ['admin'] },
+  {
+    metodo: 'PUT',
+    patron: '/api/configuracion',
+    url: '/api/configuracion',
+    roles: ['admin'],
+    cuerpo: { nombre: 'SmartDining' },
   },
 
   // --- D-16: administración de usuarios del personal (solo admin) -----------
