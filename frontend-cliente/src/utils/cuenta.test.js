@@ -17,6 +17,7 @@ import {
   TEXTO_SUGERENCIA_SIN_CELULAR,
   debeMostrarSugerenciaSinCelular,
   debeSalirDeEspera,
+  mensajePagoConfirmado,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -736,6 +737,29 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(debeSalirDeEspera({ saldoAntes: '50000', saldoAhora: 30000 })).toBe(false);
       expect(debeSalirDeEspera({})).toBe(false);
       expect(debeSalirDeEspera()).toBe(false);
+    });
+  });
+
+  describe('mensajePagoConfirmado (J-15)', () => {
+    it('comensal coincide con el usuario actual → "propio"', () => {
+      expect(mensajePagoConfirmado({ comensal: 'Ana', yo: 'Ana' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: 'ana', yo: 'Ana' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: '  Ana  ', yo: 'ana' })).toBe('propio');
+    });
+
+    it('comensal es null, undefined o vacío (cobro de caja de la mesa) → "mesa"', () => {
+      expect(mensajePagoConfirmado({ comensal: null, yo: 'Ana' })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: undefined, yo: 'Ana' })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: '', yo: 'Ana' })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: null, yo: null })).toBe('mesa');
+      expect(mensajePagoConfirmado({})).toBe('mesa');
+      expect(mensajePagoConfirmado()).toBe('mesa');
+    });
+
+    it('comensal es otra persona → "otro"', () => {
+      expect(mensajePagoConfirmado({ comensal: 'Beto', yo: 'Ana' })).toBe('otro');
+      expect(mensajePagoConfirmado({ comensal: 'Carlos', yo: 'Beto' })).toBe('otro');
+      expect(mensajePagoConfirmado({ comensal: 'Beto', yo: null })).toBe('otro');
     });
   });
 });

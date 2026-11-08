@@ -622,6 +622,32 @@ export function debeSalirDeEspera({ saldoAntes, saldoAhora } = {}) {
   return saldoAhora < saldoAntes;
 }
 
+/**
+ * Clasifica un evento payment:confirmed según quién realizó el pago (J-15).
+ * - 'propio': el comensal coincide con el usuario actual ('yo').
+ * - 'mesa': comensal es null o no especificado (cobro de toda la mesa en caja).
+ * - 'otro': el pago fue realizado por otro comensal de la mesa.
+ *
+ * @param {object} [opciones]
+ * @param {string|null} [opciones.comensal] - Alias del comensal en el evento
+ * @param {string|null} [opciones.yo] - Alias del usuario actual
+ * @returns {'propio' | 'mesa' | 'otro'}
+ */
+export function mensajePagoConfirmado({ comensal, yo } = {}) {
+  const comensalNorm = comensal ? String(comensal).trim().toLowerCase() : null;
+  const yoNorm = yo ? String(yo).trim().toLowerCase() : null;
+
+  if (!comensalNorm) {
+    return 'mesa';
+  }
+
+  if (yoNorm && comensalNorm === yoNorm) {
+    return 'propio';
+  }
+
+  return 'otro';
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -639,4 +665,5 @@ export default {
   TEXTO_SUGERENCIA_SIN_CELULAR,
   debeMostrarSugerenciaSinCelular,
   debeSalirDeEspera,
+  mensajePagoConfirmado,
 };

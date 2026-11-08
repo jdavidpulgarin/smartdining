@@ -14,6 +14,7 @@ import {
   TEXTO_SUGERENCIA_SIN_CELULAR,
   debeMostrarSugerenciaSinCelular,
   debeSalirDeEspera,
+  mensajePagoConfirmado,
 } from '../utils/cuenta';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout } from '../services/wompiWidget';
@@ -46,6 +47,7 @@ function Pago() {
   const [errorPago, setErrorPago] = useState(null);
   const [intencionActual, setIntencionActual] = useState(null);
   const [ultimoPago, setUltimoPago] = useState(0);
+  const [tipoConfirmado, setTipoConfirmado] = useState('propio');
 
   // Escuchar eventos de socket (payment:confirmed y cuenta:solicitada)
   useEffect(() => {
@@ -53,15 +55,14 @@ function Pago() {
 
     const bajaPayment = socketOn('payment:confirmed', (evento) => {
       if (!evento) return;
-      const comensalEvento = evento.comensal ? String(evento.comensal).trim().toLowerCase() : null;
-      const aliasActual = (comensal || '').trim().toLowerCase();
-      const esMio = !comensalEvento || (aliasActual && comensalEvento === aliasActual);
+      const tipo = mensajePagoConfirmado({ comensal: evento.comensal, yo: comensal });
 
-      if (esMio) {
+      if (tipo === 'propio' || tipo === 'mesa') {
         const monto = evento.monto != null
           ? Number(evento.monto)
           : (evento.monto_centavos != null ? Number(evento.monto_centavos) / 100 : 0);
         setUltimoPago(monto);
+        setTipoConfirmado(tipo);
         setPantalla('confirmado');
       }
     });
@@ -263,6 +264,7 @@ function Pago() {
     }
     setPantalla('cuenta');
     setErrorPago(null);
+    setTipoConfirmado('propio');
   };
 
   return (
@@ -774,9 +776,15 @@ function Pago() {
             ¡PAGO CONFIRMADO!
           </h1>
 
-          <p className="m-0 text-[15px] text-white">
-            Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
-          </p>
+          {tipoConfirmado === 'mesa' ? (
+            <p className="m-0 text-[15px] text-white">
+              La mesa quedó pagada.
+            </p>
+          ) : (
+            <p className="m-0 text-[15px] text-white">
+              Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
+            </p>
+          )}
 
           <div className="w-full box-border bg-superficie-2 border border-borde rounded-xl p-3 flex justify-between items-center text-sm">
             <span className="text-texto-suave">Le falta a la mesa</span>
