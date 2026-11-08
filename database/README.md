@@ -94,7 +94,8 @@ database/scripts/
 ├── 22_fix_h03_estado_pago.sql          # Consistencia de estado_pago
 ├── 23_fix_h08_intentos_pago_fallidos.sql # Registro y deteccion de fuerza bruta
 ├── 24_vistas_reportes.sql              # Vistas analiticas para modulo de BI
-└── 25_schema_migraciones.sql          # Registro de scripts aplicados (P-17); fin de la línea base
+├── 25_schema_migraciones.sql          # Registro de scripts aplicados (P-17); fin de la línea base
+└── 26_configuracion.sql                # Configuración del local, mesas.activa e historial de precios (P-18; lo aplica migrar.sh)
 ```
 
 ### ⚠️ Regla: un script aplicado NUNCA se edita
@@ -163,4 +164,13 @@ docker compose up -d postgres
 # Con el volumen vacío, database/docker-init.sh (montado en /docker-entrypoint-initdb.d)
 # corre migrar.sh: línea base + scripts nuevos, todo registrado en schema_migraciones.
 # Con un volumen que ya tiene datos, docker-init.sh NO corre: usa migrar.sh (arriba).
+```
+
+### Pruebas SQL
+
+Cada archivo de `database/tests/` es un bloque `DO` que lanza una excepción si algo falla y limpia lo que crea. Se corren sobre una base ya cargada:
+
+```bash
+cd database/tests
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p18_configuracion.sql
 ```
