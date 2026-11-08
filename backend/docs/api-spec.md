@@ -1046,7 +1046,10 @@ comensal conectado.
   soltar y pedir dos veces que se quite a la misma persona no es un error; es también lo que
   hace §6.4 con un `quitar` de quien no está en la lista. El aviso se manda igual, por si
   allá sí quedó en la lista (el TTL de aquí y el del socket-server son dos relojes
-  distintos).
+  distintos), con el alias **normalizado de la URL**, que es el único texto que hay.
+- **Cuando sí había reserva, el aviso de `quitar` viaja con el alias que ella tenía
+  guardado**, no con el de la URL (ver el aviso interno, abajo): es lo que hace que el
+  socket-server la quite de verdad de `sin_celular`.
 - **503 `alias_no_disponible`** también si no se puede **leer** la marca: sin saber de quién
   es la reserva no se suelta nada.
 - **409** si esa persona **ya tiene platos** en la cuenta de la mesa:
@@ -1084,9 +1087,21 @@ El socket-server lo suma a `sd:mesa:{id}:sin_celular` y lo incluye en `mesa:pres
 (§6.4 y §5.2), así cuenta para «igual» y puede pagar en caja con su alias.
 
 - **`accion`** es `"agregar"` o `"quitar"`.
-- **El `alias` que viaja es SIEMPRE el normalizado que se reservó**, en las dos acciones:
+- **El `alias` que viaja es SIEMPRE el texto con el que se reservó**, en las dos acciones:
   §6.4 compara **texto idéntico** para quitar, así que mandar lo que escribió el mesero
-  —con otra capitalización o un espacio doble— dejaría a la persona sentada para siempre.
+  —con otra capitalización, una tilde de más o un espacio doble— dejaría a la persona
+  sentada para siempre.
+
+  Al **agregar** es el alias que acaba de normalizarse y reservarse. Al **quitar** es el que
+  la reserva tenía **guardado**, no el de la URL: el `DELETE` libera la reserva por
+  **clave**, así que `DELETE …/comensales/abuela` sobre la reserva de «Abuela» responde 204 y
+  suelta la reserva, pero el socket-server solo quita a «Abuela» si recibe ese mismo texto.
+  Mandando el de la URL, la persona se quedaba **24 h** en la presencia de la mesa. Así, el
+  par `agregar`/`quitar` de una misma persona siempre viaja con el mismo texto, letra por
+  letra.
+
+  La única excepción es un alias que **no está reservado** (el 204 idempotente): ahí se
+  manda el **normalizado de la URL**, porque no hay otro texto de donde sacarlo.
 - **`eventId` UUID v4, uno por acción.** Es lo que hace seguro reintentar: el socket-server
   deduplica por `backend:mesa-comensal:{eventId}`.
 
