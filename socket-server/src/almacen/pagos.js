@@ -6,9 +6,11 @@ const { PREFIJO } = require('./redis');
  *   sd:pago:ref:{referencia}             → { id_mesa, comensal, modo, monto_centavos, estado, creada_en, expira_en }
  *   sd:pago:pendiente:{mesa}:{comensal}  → referencia de su intención pendiente
  *
- * Ambas con TTL = PAGOS_TTL_MINUTOS: una intención que nadie pagó caduca sola.
- * La referencia es la llave con la que el webhook encuentra qué se esperaba
- * cobrar; por eso el monto esperado vive aquí y no en el cliente.
+ * La marca dura PAGOS_TTL_MINUTOS: si nadie paga, el comensal puede pedir otra.
+ * El registro dura más (ttlIntencionRegistroSeg, 26 h por defecto) porque el
+ * webhook puede llegar mucho después de que venció. La referencia es la llave
+ * con la que el webhook encuentra qué se esperaba cobrar; por eso el monto
+ * esperado vive aquí y no en el cliente.
  *
  * Una intención pendiente que ya no sirve (otro modo u otro monto) no se
  * borra: queda `reemplazada` con `reemplazada_por`, porque el comensal pudo

@@ -60,6 +60,35 @@ export function actualizarDisponibilidadEnCache(idIngrediente, disponible) {
   );
 }
 
+export function aplicarDisponibilidadPlato(menu, idPlato, disponible) {
+  if (!menu) return menu;
+  const idNum = Number(idPlato);
+  if (!idNum || isNaN(idNum)) return menu;
+  const esArray = Array.isArray(menu);
+  const categorias = esArray ? menu : menu.categorias;
+  if (!Array.isArray(categorias)) return menu;
+
+  const nuevasCategorias = categorias.map((cat) => {
+    if (!Array.isArray(cat.platos)) return cat;
+    const nuevosPlatos = cat.platos.map((plato) => {
+      if (Number(plato.id_plato) === idNum) {
+        return { ...plato, disponible: Boolean(disponible) };
+      }
+      return plato;
+    });
+    return { ...cat, platos: nuevosPlatos };
+  });
+
+  return esArray ? nuevasCategorias : { ...menu, categorias: nuevasCategorias };
+}
+
+export function actualizarDisponibilidadPlatoEnCache(idPlato, disponible) {
+  if (!cacheMenuPromise) return;
+  cacheMenuPromise = cacheMenuPromise.then((raw) =>
+    aplicarDisponibilidadPlato(raw, idPlato, disponible)
+  );
+}
+
 export function normalizarCategorias(rawMenu) {
   if (Array.isArray(rawMenu)) return rawMenu;
   if (Array.isArray(rawMenu?.categorias)) return rawMenu.categorias;
@@ -166,4 +195,6 @@ export default {
   adaptarPlatoArmable,
   aplicarDisponibilidad,
   actualizarDisponibilidadEnCache,
+  aplicarDisponibilidadPlato,
+  actualizarDisponibilidadPlatoEnCache,
 };

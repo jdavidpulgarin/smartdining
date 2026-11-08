@@ -23,6 +23,15 @@ router.post(
   constructorCtrl.crearPaso
 );
 
+// D-16 parte B (P2): quién cambió el precio y cuándo. Va ANTES de GET /:id para
+// que 'historial-precios' no se lea como parte del id.
+router.get(
+  '/:id/historial-precios',
+  requireAuth,
+  requireRole('admin'),
+  ctrl.historialPrecios
+);
+
 router.get('/:id', ctrl.obtener);
 
 router.post('/', requireAuth, requireRole('admin'), ctrl.crear);

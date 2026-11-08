@@ -792,7 +792,7 @@ Auth: `Authorization: Bearer <JWT del comensal>` (sesión de mesa vigente). La m
 | Campo | Reglas |
 |---|---|
 | `modo` | `total` (saldo de la mesa), `igual` (saldo ÷ personas que aún no pagaron, fórmula abajo), `propio` (lo de ese comensal) |
-| `eventId` | UUID. Repetirlo devuelve la **misma** respuesta |
+| `eventId` | UUID. Repetirlo devuelve la **misma** respuesta, salvo que esa intención ya no siga vigente (ver abajo): entonces se trata como una petición nueva |
 | `comensal` | Opcional. Quien paga es el alias **del JWT**; si viene uno distinto → `403 NO_AUTORIZADO` (nadie paga ni consulta "lo propio" de otro) |
 
 Cualquier otro campo (`monto`, `id_mesa`, `precio`…) **se ignora**: el monto lo calcula el
@@ -857,16 +857,21 @@ Reglas de la cuenta dividida:
 - **propio**: el saldo de ese alias según el backend (nunca más que el saldo de la mesa).
 - **Una sola intención pendiente por comensal**, reutilizada **solo si sigue valiendo**. En
   cada petición el servidor consulta la cuenta y recalcula el monto:
-  - mismo `modo` **y** mismo monto recalculado → `200` con la misma intención (misma
-    referencia y firma);
-  - otro `modo`, o el monto cambió (pedido nuevo, otro pago, cambio de presencia en `igual`)
-    → `201` con una intención **nueva**. La vieja no se borra: queda `reemplazada` 7 días y
+  - mismo `modo` **y** mismo monto recalculado, y `expira_en` a más de 5 min → `200` con la
+    misma intención (misma referencia y firma);
+  - otro `modo`, el monto cambió (pedido nuevo, otro pago, cambio de presencia en `igual`) o
+    está por vencer → `201` con una intención **nueva**. La vieja no se borra: queda `reemplazada` 7 días y
     su webhook se sigue aceptando por **su** monto exacto (§8.3), por si ya se pagó en otra
     pestaña;
   - si el backend no responde → `503 ERROR_INTERNO`, aunque haya una pendiente: nunca se
     cobra con un monto viejo.
-- La intención vive `PAGOS_TTL_MINUTOS` (30). Después el widget la rechaza (`expiration-time`
-  va dentro de la firma).
+- **Dos plazos, a propósito:**
+  - **Pago y marca de pendiente:** `PAGOS_TTL_MINUTOS` (30). Después el widget la rechaza
+    (`expiration-time` va dentro de la firma) y el comensal puede pedir otra.
+  - **Registro de la intención:** `PAGOS_TTL_MINUTOS` × 60 + tolerancia del webhook
+    (`PAGOS_WEBHOOK_TOLERANCIA_SEG`, 25 h) + 30 min. Son **26 h** por defecto. Se conserva para
+    reconocer un webhook que llega tarde: Wompi solo cobra antes de `expira_en`, pero puede
+    avisar hasta un día después (§8.3).
 
 Uso en la PWA (Widget de Wompi):
 
@@ -938,6 +943,10 @@ Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún fron
    **pendiente o reemplazada** (§8.1), `amount_in_cents` **exactamente** igual al esperado
    por **esa** intención y `currency COP`.
    Si algo no cuadra → intento fallido + `pago:alerta` (§8.5), `200`.
+   - Un `APPROVED` con `expira_en` ya pasado **se acepta**: Wompi solo cobra antes de que
+     venza, así que el pago fue válido. Por eso el registro dura más que el pago (§8.1). Pasado
+     ese plazo (26 h por defecto) la referencia ya no se reconoce: `referencia_desconocida`.
+     Lo mismo vale para un `DECLINED` tardío, que marca la intención como `rechazada`.
    - Pago de una **reemplazada** (el comensal la pagó en otra pestaña): se registra como
      cualquier otro. Si además pagó la nueva y la suma excede el saldo, el backend responde
      `409` a la segunda → intento fallido + `pago:alerta` (`backend_rechazo_409`) para que
@@ -1147,7 +1156,7 @@ Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 | `WOMPI_INTEGRITY_SECRET` | Secreto de integridad (`test_integrity_…`). Firma las intenciones |
 | `WOMPI_EVENTS_SECRET` | Secreto de eventos (`test_events_…`). Verifica el webhook |
 | `WOMPI_API_URL` | `https://sandbox.wompi.co/v1` o `https://production.wompi.co/v1` (lista blanca) |
-| `PAGOS_TTL_MINUTOS` | Vida de una intención de pago (30) |
+| `PAGOS_TTL_MINUTOS` | Plazo para pagar una intención (30). Su registro dura más: ver §8.1 |
 | `REDIS_URL` | Estado persistente (obligatoria en producción) |
 | `ROTACION_QR_MINUTOS` | Rotación automática del QR con la mesa vacía (3) |
 | `MESA_CAPACIDAD_POR_DEFECTO` | Capacidad si el backend no la informa; comensales por mesa = capacidad + 4 (6) |
@@ -1182,3 +1191,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `POST /pagos/intencion` · reutilizar la pendiente | Si el comensal tenía una intención pendiente se devolvía esa, sin mirar `modo` ni monto (se cobraba el monto viejo hasta 30 min) | Se reutiliza solo con el mismo `modo` y el mismo monto recalculado; si no, intención nueva y la vieja queda `reemplazada` 7 días. El webhook acepta una reemplazada por su monto exacto. Sin backend → `503` aunque haya pendiente | PWA: usar siempre la respuesta más reciente (puede traer otra `referencia`). Backend: nada |
 | `POST /pagos/intencion` · modo `igual` | Total ÷ personas presentes; mezclar modos podía dejar saldo sin dueño (p. ej. quedaban $3.334 de $100.000) | **Saldo** ÷ (presentes que aún no pagaron + quien paga), redondeado a pesos; el último paga el saldo exacto. Fórmula exacta en §8.1 | PWA: replicar la fórmula con `mesa:presencia` y la cuenta. Backend: nada |
 | `mesa:presencia` · destino y `pagaron` | Solo `room:admin`; `{ id_mesa, comensales, total }` | También `room:mesa-{ID}` (solo esa mesa) y nuevo campo `pagaron: [alias]`; también se emite al confirmarse un pago con alias | PWA: escucharlo para mostrar «igual». Panel: nada (campo nuevo, compatible) |
+| `POST /pagos/intencion` · `POST /pagos/webhook` · plazos de la intención (R-13.4b) | El registro duraba `PAGOS_TTL_MINUTOS` (30 min): un webhook posterior no lo encontraba y un `APPROVED` quedaba como `referencia_desconocida`, sin registrar | Marca de pendiente: `PAGOS_TTL_MINUTOS`. Registro: `PAGOS_TTL_MINUTOS` × 60 + tolerancia del webhook + 30 min (26 h por defecto). Una intención a 5 min o menos de vencer no se reutiliza, ni al repetir el `eventId` | Nadie: mismo contrato; solo se acepta tarde lo que antes se perdía |

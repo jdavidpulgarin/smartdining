@@ -95,7 +95,8 @@ database/scripts/
 ├── 23_fix_h08_intentos_pago_fallidos.sql # Registro y deteccion de fuerza bruta
 ├── 24_vistas_reportes.sql              # Vistas analiticas para modulo de BI
 ├── 25_schema_migraciones.sql          # Registro de scripts aplicados (P-17); fin de la línea base
-└── 26_configuracion.sql                # Configuración del local, mesas.activa e historial de precios (P-18; lo aplica migrar.sh)
+├── 26_configuracion.sql                # Configuración del local, mesas.activa e historial de precios (P-18; lo aplica migrar.sh)
+└── 27_inventario.sql                   # Inventario real: insumos, recetas, reserva al pedir, devoluciones y avisos (P-19)
 ```
 
 ### ⚠️ Regla: un script aplicado NUNCA se edita
@@ -143,6 +144,17 @@ docker compose -f docker-compose.prod.yml exec -T postgres sh /smartdining-db/mi
 Usa el `psql` 16 del contenedor y se conecta por el socket local con `POSTGRES_USER` y
 `POSTGRES_DB`: no hace falta contraseña ni tener PostgreSQL instalado en el equipo.
 
+> **Git Bash en Windows:** Git Bash convierte las rutas que empiezan por `/` antes de
+> pasarlas a `docker`, y `/smartdining-db/migrar.sh` llega al contenedor como
+> `C:/Program Files/Git/smartdining-db/migrar.sh` (`sh: can't open ...`). Desactiva esa
+> conversión en la terminal antes de usar `docker compose exec`:
+>
+> ```bash
+> export MSYS_NO_PATHCONV=1
+> ```
+>
+> PowerShell, WSL, Linux y macOS no lo necesitan.
+
 **Git Bash en Windows**, contra un PostgreSQL instalado en el equipo:
 
 ```bash
@@ -173,4 +185,14 @@ Cada archivo de `database/tests/` es un bloque `DO` que lanza una excepción si 
 ```bash
 cd database/tests
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p18_configuracion.sql
+```
+
+Inventario (P-19): `test_p19_inventario.sql` corre dentro de `BEGIN … ROLLBACK` (no deja
+nada). La concurrencia y `pg_notify` necesitan `COMMIT` de verdad, así que van en un script
+aparte que crea y borra sus propios datos:
+
+```bash
+sh database/tests/test_p19_concurrencia.sh          # misma conexión que migrar.sh (PG*)
+PEDIDOS=50 PORCIONES=10 sh database/tests/test_p19_concurrencia.sh
+docker compose exec -T postgres sh /smartdining-db/tests/test_p19_concurrencia.sh
 ```

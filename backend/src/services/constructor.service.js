@@ -297,10 +297,19 @@ async function crearIngrediente(idPaso, datos) {
  *
  * Sigue devolviendo `null` si el ingrediente no existe.
  */
-async function actualizarIngrediente(idIngrediente, cambios, validar) {
+async function actualizarIngrediente(idIngrediente, cambios, validar, { idUsuario = null } = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // D-16 parte B: el autor del cambio de precio_extra, para el trigger
+    // tr_historial_precio_ingrediente. `set_config(..., true)` vive solo hasta
+    // el fin de ESTA transacción, que es justo lo que se quiere: el valor no se
+    // filtra a la siguiente petición que use esta conexión del pool.
+    await client.query('SELECT set_config($1, $2, true)', [
+      'app.id_usuario',
+      idUsuario === null || idUsuario === undefined ? '' : String(idUsuario),
+    ]);
 
     const actual = await client.query(
       `SELECT i.* FROM ingredientes i WHERE i.id_ingrediente = $1 FOR UPDATE`,

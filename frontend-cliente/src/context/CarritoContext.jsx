@@ -18,11 +18,15 @@ import {
   construirRemove,
   totalesMesa,
   traducirErrorSocket,
+  buscarPlatoEnMenu,
 } from '../utils/carritoCompartido';
 import {
   obtenerMenuRaw,
   aplicarDisponibilidad,
   actualizarDisponibilidadEnCache,
+  aplicarDisponibilidadPlato,
+  actualizarDisponibilidadPlatoEnCache,
+  recargarMenu,
 } from '../services/menuService';
 
 const CarritoContext = createContext(null);
@@ -177,10 +181,10 @@ export function CarritoProvider({ children }) {
     };
   }, []);
 
-  // Escuchar ingrediente:disponibilidad en tiempo real para actualizar el menú en memoria
+  // Escuchar ingrediente:disponibilidad y plato:disponibilidad en tiempo real para actualizar el menú en memoria
   useEffect(() => {
     if (!mesaSocket?.on) return undefined;
-    const baja = mesaSocket.on('ingrediente:disponibilidad', (data) => {
+    const bajaIng = mesaSocket.on('ingrediente:disponibilidad', (data) => {
       const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
       const disponible = Boolean(data?.disponible);
       if (!idIng) return;
@@ -191,8 +195,44 @@ export function CarritoProvider({ children }) {
         return aplicarDisponibilidad(prev, idIng, disponible);
       });
     });
-    return baja;
+
+    const bajaPlato = mesaSocket.on('plato:disponibilidad', (data) => {
+      const idPlato = Number(data?.id_plato ?? data?.idPlato);
+      const disponible = Boolean(data?.disponible);
+      if (!idPlato) return;
+
+      actualizarDisponibilidadPlatoEnCache(idPlato, disponible);
+      setMenuRaw((prev) => {
+        if (!prev) return prev;
+        return aplicarDisponibilidadPlato(prev, idPlato, disponible);
+      });
+    });
+
+    return () => {
+      bajaIng?.();
+      bajaPlato?.();
+    };
   }, [mesaSocket]);
+
+  // Recargar menú al reconectar el socket (de reconectando a conectado)
+  const estadoSocket = mesaSocket?.estado;
+  const estadoAnteriorSocketRef = useRef(estadoSocket);
+  useEffect(() => {
+    if (
+      estadoAnteriorSocketRef.current === 'reconectando' &&
+      estadoSocket === 'conectado'
+    ) {
+      recargarMenu();
+      obtenerMenuRaw()
+        .then((menu) => {
+          setMenuRaw(menu);
+        })
+        .catch((err) => {
+          console.error('Error al recargar menú tras reconexión:', err);
+        });
+    }
+    estadoAnteriorSocketRef.current = estadoSocket;
+  }, [estadoSocket]);
 
   // Sincronizar estado cuando la mesa cambia (modo local)
   useEffect(() => {
@@ -376,11 +416,48 @@ export function CarritoProvider({ children }) {
 
   const limpiarError = useCallback(() => setError(null), []);
 
-  const lineas = modo === 'compartido' ? misLineasCompartidas : state.lineas;
-  const misLineas = modo === 'compartido' ? misLineasCompartidas : state.lineas;
+  const lineasLocales = useMemo(() => {
+    if (modo === 'compartido') return state.lineas;
+    if (!menuRaw) return state.lineas;
+    return state.lineas.map((linea) => {
+      const idPlato = Number(linea.id_plato ?? linea.idPlato);
+      const plato = buscarPlatoEnMenu(menuRaw, idPlato);
+      if (!plato) return linea;
+
+      const platoAgotado = plato.disponible === false;
+      let ingredienteAgotado = false;
+      let disponible = !platoAgotado;
+      if (disponible && Array.isArray(linea.ingredientes) && Array.isArray(plato.pasos)) {
+        for (const ingItem of linea.ingredientes) {
+          const idIngNum = Number(ingItem.id_ingrediente ?? ingItem.idIngrediente);
+          for (const paso of plato.pasos) {
+            const ingObj = (paso.ingredientes || []).find(
+              (i) => Number(i.id_ingrediente) === idIngNum
+            );
+            if (ingObj && ingObj.disponible === false) {
+              disponible = false;
+              ingredienteAgotado = true;
+              break;
+            }
+          }
+          if (!disponible) break;
+        }
+      }
+
+      return {
+        ...linea,
+        disponible,
+        platoAgotado,
+        ingredienteAgotado,
+      };
+    });
+  }, [modo, state.lineas, menuRaw]);
+
+  const lineas = modo === 'compartido' ? misLineasCompartidas : lineasLocales;
+  const misLineas = modo === 'compartido' ? misLineasCompartidas : lineasLocales;
   const otros = modo === 'compartido' ? otrosCompartidos : ARRAY_VACIO;
   const lineasMesa =
-    modo === 'compartido' ? lineasCompartidasEnriquecidas : state.lineas;
+    modo === 'compartido' ? lineasCompartidasEnriquecidas : lineasLocales;
   const total = modo === 'compartido' ? totalesCompartidos.mio : totalLocal;
   const totalMio = modo === 'compartido' ? totalesCompartidos.mio : totalLocal;
   const totalMesa = modo === 'compartido' ? totalesCompartidos.mesa : totalLocal;
