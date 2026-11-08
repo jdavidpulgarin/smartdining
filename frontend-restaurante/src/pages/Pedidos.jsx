@@ -93,7 +93,7 @@ export function Pedidos() {
     setLoading(true)
     setError(null)
     try {
-      const data = await pedidosApi.listarActivos()
+      const data = await pedidosApi.listarActivos({ timeout: 10000 })
       const raw = data?.pedidos || []
       setOrdersList(raw.map(normalizarPedido))
     } catch (err) {
@@ -106,7 +106,7 @@ export function Pedidos() {
   useEffect(() => {
     let isMounted = true
     pedidosApi
-      .listarActivos()
+      .listarActivos({ timeout: 10000 })
       .then((data) => {
         if (!isMounted) return
         const raw = data?.pedidos || []
@@ -316,6 +316,12 @@ export function Pedidos() {
                 <RefreshCw size={14} />
                 <span>REINTENTAR</span>
               </button>
+            </div>
+          ) : ordersList.length === 0 ? (
+            <div className="sd-card sd-empty-box">
+              <ChefHat size={46} style={{ color: 'var(--sd-text-muted)', opacity: 0.7 }} />
+              <p>NO HAY PEDIDOS ACTIVOS</p>
+              <small>No hay pedidos activos en este momento.</small>
             </div>
           ) : filteredOrders.length === 0 ? (
             <div className="sd-card sd-empty-box">
