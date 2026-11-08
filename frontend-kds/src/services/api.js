@@ -161,7 +161,9 @@ export async function obtenerPlatos() {
 }
 
 /**
- * PATCH /api/platos/:id/disponible — agotar o reponer un plato (D-05/D-14).
+ * PATCH /api/platos/:id/disponible — agotar o reponer un plato (D-14).
+ *
+ * El endpoint lo entregó el PR #88; aquí solo se consume.
  *
  * Gemelo del de ingredientes, con las mismas reglas y los mismos permisos
  * (admin y cocina). Devuelve la fila del plato; el error llega tal cual lo
