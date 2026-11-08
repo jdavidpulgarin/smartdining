@@ -579,8 +579,23 @@ export function avisoPedidoGrupal({ cuenta, presencia, yo, modo } = {}) {
   return {
     tipo: 'general',
     nombres: [],
-    mensaje: '¿Pediste también para otros? Todo lo que pediste desde tu celular quedó a tu nombre.',
+    mensaje: '¿Pediste para otros? Usa DIVIDIR o TODA LA MESA.',
   };
+}
+
+export const TEXTO_SUGERENCIA_SIN_CELULAR =
+  '¿Alguien no tiene celular? Pídele al mesero que lo agregue a la mesa.';
+
+/**
+ * Determina si se debe mostrar la sugerencia para comensales sin celular (J-15).
+ * Se muestra mientras haya saldo pendiente en la mesa.
+ *
+ * @param {object} [cuenta] - Cuenta normalizada de la mesa
+ * @returns {boolean}
+ */
+export function debeMostrarSugerenciaSinCelular(cuenta) {
+  const saldoMesa = Math.max(0, Number(cuenta?.saldo ?? 0));
+  return saldoMesa > 0;
 }
 
 export default {
@@ -597,4 +612,6 @@ export default {
   estadoCuentaSolicitada,
   textoCajaSegunEstado,
   avisoPedidoGrupal,
+  TEXTO_SUGERENCIA_SIN_CELULAR,
+  debeMostrarSugerenciaSinCelular,
 };

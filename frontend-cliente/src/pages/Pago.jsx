@@ -11,6 +11,8 @@ import {
   estadoCuentaSolicitada,
   textoCajaSegunEstado,
   avisoPedidoGrupal,
+  TEXTO_SUGERENCIA_SIN_CELULAR,
+  debeMostrarSugerenciaSinCelular,
 } from '../utils/cuenta';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout } from '../services/wompiWidget';
@@ -153,6 +155,8 @@ function Pago() {
     yo: comensal,
     modo,
   });
+
+  const mostrarSinCelular = debeMostrarSugerenciaSinCelular(cuenta);
 
   const handlePedirCuenta = async () => {
     if (avisoCuenta.deshabilitado && avisoCuenta.estado !== 'inicial') return;
@@ -418,6 +422,12 @@ function Pago() {
               <p className="m-0 text-xs text-texto-suave">
                 {ayudas[modo]}
               </p>
+
+              {mostrarSinCelular && (
+                <p className="m-0 text-xs text-texto-tenue">
+                  {TEXTO_SUGERENCIA_SIN_CELULAR}
+                </p>
+              )}
 
               {/* Tarjeta de aviso si pidió para varios (J-15) */}
               {avisoGrupal && (

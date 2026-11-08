@@ -14,6 +14,8 @@ import {
   estadoCuentaSolicitada,
   textoCajaSegunEstado,
   avisoPedidoGrupal,
+  TEXTO_SUGERENCIA_SIN_CELULAR,
+  debeMostrarSugerenciaSinCelular,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -610,7 +612,7 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res.tipo).toBe('general');
       expect(res.nombres).toEqual([]);
       expect(res.mensaje).toBe(
-        '¿Pediste también para otros? Todo lo que pediste desde tu celular quedó a tu nombre.'
+        '¿Pediste para otros? Usa DIVIDIR o TODA LA MESA.'
       );
     });
 
@@ -659,7 +661,7 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res).not.toBeNull();
       expect(res.tipo).toBe('general');
       expect(res.mensaje).toBe(
-        '¿Pediste también para otros? Todo lo que pediste desde tu celular quedó a tu nombre.'
+        '¿Pediste para otros? Usa DIVIDIR o TODA LA MESA.'
       );
     });
 
@@ -686,6 +688,26 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res.tipo).toBe('especifico');
       expect(res.nombres).toEqual(['Carlos']);
       expect(res.mensaje).toContain('Carlos no tiene nada a su nombre');
+    });
+  });
+
+  describe('debeMostrarSugerenciaSinCelular (J-15)', () => {
+    it('muestra la sugerencia si hay saldo pendiente en la mesa', () => {
+      expect(debeMostrarSugerenciaSinCelular({ saldo: 46000 })).toBe(true);
+      expect(debeMostrarSugerenciaSinCelular({ saldo: 1 })).toBe(true);
+    });
+
+    it('no se muestra si el saldo de la mesa es 0 o negativo', () => {
+      expect(debeMostrarSugerenciaSinCelular({ saldo: 0, mia: { saldo: 0 } })).toBe(false);
+      expect(debeMostrarSugerenciaSinCelular({ saldo: -500 })).toBe(false);
+      expect(debeMostrarSugerenciaSinCelular(null)).toBe(false);
+      expect(debeMostrarSugerenciaSinCelular({})).toBe(false);
+    });
+
+    it('el texto exacto coincide con la especificación', () => {
+      expect(TEXTO_SUGERENCIA_SIN_CELULAR).toBe(
+        '¿Alguien no tiene celular? Pídele al mesero que lo agregue a la mesa.'
+      );
     });
   });
 });
