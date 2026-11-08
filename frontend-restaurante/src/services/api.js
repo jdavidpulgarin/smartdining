@@ -303,8 +303,8 @@ export const mesasApi = {
   /**
    * Obtiene la lista de mesas para el personal: GET /api/mesas
    */
-  async listar() {
-    return apiFetch('/mesas')
+  async listar(options = {}) {
+    return apiFetch('/mesas', options)
   },
 
   /**

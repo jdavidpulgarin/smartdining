@@ -31,7 +31,11 @@ describe('TablesContext: carga de mesas y sesión', () => {
   })
 
   it('carga las mesas al iniciar sesión, sin recargar la página', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url, config = {}) => {
+      // Como el backend real: sin "Authorization: Bearer <token>" es 401, y el
+      // 401 cierra la sesión (así se encontró el fallo en la prueba manual).
+      const conSesion = config.headers?.Authorization === 'Bearer token-de-prueba'
+      if (!url.includes('/auth/login') && !conSesion) return json({ error: 'Token requerido' }, 401)
       if (url.includes('/auth/login')) {
         return json({
           token: 'token-de-prueba',

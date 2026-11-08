@@ -321,7 +321,18 @@ export function Menu() {
         <div
           className={`table-toast-banner ${apiNoticeTipo}`}
           role={apiNoticeTipo === 'error' ? 'alert' : 'status'}
-          style={{ margin: '0 24px 1rem 24px' }}
+          // Fijo arriba de la pantalla: el interruptor que falló puede estar
+          // muy abajo en la carta, y un aviso al inicio de la página no se vería.
+          style={{
+            position: 'fixed',
+            top: 16,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            maxWidth: 'calc(100vw - 32px)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+            background: apiNoticeTipo === 'error' ? '#2a0d10' : undefined,
+          }}
         >
           <AlertCircle size={16} />
           <span>{apiNotice}</span>

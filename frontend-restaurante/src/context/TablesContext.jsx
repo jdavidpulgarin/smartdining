@@ -155,8 +155,11 @@ export function TablesProvider({ children }) {
     const fetchInitialData = async () => {
       try {
         const [mesasRes, pedidosRes] = await Promise.allSettled([
-          mesasApi.listar(),
-          pedidosApi.listarActivos(),
+          // El token va explícito: este efecto (hijo) corre ANTES que el de
+          // AuthProvider que lo guarda en sessionStorage, así que getAuthToken()
+          // todavía no lo tiene y la petición saldría sin sesión (401).
+          mesasApi.listar({ token }),
+          pedidosApi.listarActivos({ token }),
         ])
         if (!isSubscribed) return
 
