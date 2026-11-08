@@ -49,9 +49,6 @@ async function crear({ nombre, email, password_hash, rol }) {
  * mismos que ya usa el registro (ROLES_STAFF del middleware de auth).
  * ========================================================================== */
 
-/** SQLSTATE de unicidad: aquí solo puede ser el email, que es el único UNIQUE. */
-const PG_UNIQUE = '23505';
-
 /** Las columnas que el panel ve. Una sola definición para no desalinearlas. */
 const COLUMNAS_PUBLICAS = 'u.id_usuario, u.nombre, u.email, u.rol, u.activo, u.creado_en';
 
@@ -59,7 +56,6 @@ const MENSAJE_ULTIMO_ADMIN =
   'No se puede dejar el sistema sin ningún admin activo: asciende o activa a otro antes.';
 const MENSAJE_A_SI_MISMO =
   'No puedes desactivarte ni cambiarte el rol a ti mismo: pídeselo a otro admin.';
-const MENSAJE_EMAIL_EN_USO = 'Ese email ya está registrado';
 
 /** Error de negocio con status, que es la primera rama de errores.middleware. */
 function errorDeNegocio(status, message) {
@@ -188,7 +184,9 @@ async function actualizar(id, cambios, { idUsuarioQuePide } = {}) {
     } catch {
       // Ya estaba cerrada: no hay nada que deshacer.
     }
-    if (err && err.code === PG_UNIQUE) throw errorDeNegocio(409, MENSAJE_EMAIL_EN_USO);
+    // No se traduce ningún SQLSTATE aquí: de las tres columnas que este UPDATE
+    // toca (nombre, rol, activo) ninguna es UNIQUE, así que no hay choque de
+    // unicidad posible. Lo que quede lo traduce el manejador central.
     throw err;
   } finally {
     client.release();
@@ -226,5 +224,4 @@ module.exports = {
   cambiarClave,
   MENSAJE_ULTIMO_ADMIN,
   MENSAJE_A_SI_MISMO,
-  MENSAJE_EMAIL_EN_USO,
 };
