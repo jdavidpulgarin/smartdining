@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Flame,
   BellRing,
@@ -145,10 +145,23 @@ export function Pedidos() {
 
   // Comanda nueva: { eventId, pedido, emitidoEn } (EVENTS.md §5). Antes se
   // escuchaba 'order:new', que nadie emite, y la lista no se enteraba de nada.
-  // Un reintento del backend reenvía el mismo pedido: se reemplaza, no se duplica.
+  //
+  // Duplicados, como pide EVENTS.md ("deduplica por eventId"): un evento con
+  // un eventId ya visto se ignora entero, sin repetir el aviso. Y si el mismo
+  // pedido llega con otro eventId, su tarjeta se reemplaza en vez de duplicarse.
+  const eventosVistos = useRef(new Set())
+
   useSocketListener('order:created', (data) => {
     const pedido = data?.pedido
     if (!pedido?.id_pedido) return
+    if (data.eventId) {
+      if (eventosVistos.current.has(data.eventId)) return
+      eventosVistos.current.add(data.eventId)
+      // Ventana acotada: con los últimos 200 basta para los reintentos.
+      if (eventosVistos.current.size > 200) {
+        eventosVistos.current.delete(eventosVistos.current.values().next().value)
+      }
+    }
     const normalizado = normalizarPedido(pedido)
     setOrdersList((prev) =>
       prev.some((o) => o.rawId === normalizado.rawId)
