@@ -144,6 +144,17 @@ docker compose -f docker-compose.prod.yml exec -T postgres sh /smartdining-db/mi
 Usa el `psql` 16 del contenedor y se conecta por el socket local con `POSTGRES_USER` y
 `POSTGRES_DB`: no hace falta contraseña ni tener PostgreSQL instalado en el equipo.
 
+> **Git Bash en Windows:** Git Bash convierte las rutas que empiezan por `/` antes de
+> pasarlas a `docker`, y `/smartdining-db/migrar.sh` llega al contenedor como
+> `C:/Program Files/Git/smartdining-db/migrar.sh` (`sh: can't open ...`). Desactiva esa
+> conversión en la terminal antes de usar `docker compose exec`:
+>
+> ```bash
+> export MSYS_NO_PATHCONV=1
+> ```
+>
+> PowerShell, WSL, Linux y macOS no lo necesitan.
+
 **Git Bash en Windows**, contra un PostgreSQL instalado en el equipo:
 
 ```bash
