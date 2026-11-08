@@ -10,6 +10,7 @@ import {
 import { useSesion } from './SesionContext';
 import { crearClienteMesa, aliasDelToken } from '../services/clienteMesa';
 import { urlsServidor } from '../utils/urlsServidor';
+import { crearRegistroOyentes } from '../utils/registroOyentes';
 
 const MesaSocketContext = createContext(null);
 
@@ -76,6 +77,7 @@ export function MesaSocketProvider({ children }) {
   );
 
   const clienteRef = useRef(null);
+  const registro = useMemo(() => crearRegistroOyentes(), []);
   const [estado, setEstado] = useState(
     modo === 'compartido' ? 'conectando' : 'local'
   );
@@ -95,6 +97,7 @@ export function MesaSocketProvider({ children }) {
 
     const nuevoCliente = crearClienteMesa({ url: socketUrl, token });
     clienteRef.current = nuevoCliente;
+    registro.conectar(nuevoCliente);
 
     const bajaPresencia = nuevoCliente.on('mesa:presencia', (ev) => {
       const datos = validarPresencia(ev);
@@ -131,6 +134,7 @@ export function MesaSocketProvider({ children }) {
     return () => {
       socket.off('connect_error', manejarConnectError);
       bajas.forEach((baja) => baja());
+      registro.desconectar();
       nuevoCliente.cerrar();
       clienteRef.current = null;
       setEstado('local');
@@ -138,7 +142,7 @@ export function MesaSocketProvider({ children }) {
       setPresencia(null);
       setErrorMesaLlena(null);
     };
-  }, [modo, token, socketUrl]);
+  }, [modo, token, socketUrl, registro]);
 
   const enviar = useCallback(
     (evento, payload) => {
@@ -156,12 +160,8 @@ export function MesaSocketProvider({ children }) {
   );
 
   const on = useCallback(
-    (evento, fn) => {
-      const clienteActual = clienteRef.current;
-      if (modo !== 'compartido' || !clienteActual) return () => {};
-      return clienteActual.on(evento, fn);
-    },
-    [modo]
+    (evento, fn) => registro.agregar(evento, fn),
+    [registro]
   );
 
   const comensal = useMemo(() => {
