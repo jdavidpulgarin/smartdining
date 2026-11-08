@@ -182,9 +182,10 @@ export function CarritoProvider({ children }) {
   }, []);
 
   // Escuchar ingrediente:disponibilidad y plato:disponibilidad en tiempo real para actualizar el menú en memoria
+  const socketOn = mesaSocket?.on;
   useEffect(() => {
-    if (!mesaSocket?.on) return undefined;
-    const bajaIng = mesaSocket.on('ingrediente:disponibilidad', (data) => {
+    if (!socketOn) return undefined;
+    const bajaIng = socketOn('ingrediente:disponibilidad', (data) => {
       const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
       const disponible = Boolean(data?.disponible);
       if (!idIng) return;
@@ -196,7 +197,7 @@ export function CarritoProvider({ children }) {
       });
     });
 
-    const bajaPlato = mesaSocket.on('plato:disponibilidad', (data) => {
+    const bajaPlato = socketOn('plato:disponibilidad', (data) => {
       const idPlato = Number(data?.id_plato ?? data?.idPlato);
       const disponible = Boolean(data?.disponible);
       if (!idPlato) return;
@@ -212,7 +213,7 @@ export function CarritoProvider({ children }) {
       bajaIng?.();
       bajaPlato?.();
     };
-  }, [mesaSocket]);
+  }, [socketOn]);
 
   // Recargar menú al reconectar el socket (de reconectando a conectado)
   const estadoSocket = mesaSocket?.estado;
