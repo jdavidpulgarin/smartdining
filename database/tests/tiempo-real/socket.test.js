@@ -6,7 +6,12 @@ const { Pool } = require('pg');
 
 const API_URL = process.env.VITE_API_URL || 'http://localhost:4000';
 const SOCKET_URL = process.env.SOCKET_URL || 'http://localhost:4001';
-const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || 'super-clave-interna-de-prueba-para-test-smartdining';
+// La MISMA clave que tengan el backend y el socket-server de este entorno. Sin
+// valor por defecto: una clave interna no se escribe en el código.
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY;
+if (!INTERNAL_API_KEY) {
+  throw new Error('Define INTERNAL_API_KEY (la del socket-server de pruebas) para correr esta suite.');
+}
 
 const pgConfig = {
   host: process.env.PGHOST || '127.0.0.1',

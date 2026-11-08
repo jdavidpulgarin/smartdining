@@ -27,7 +27,12 @@ echo "  SmartDining: Levantando Entorno Real de Pruebas   "
 echo "====================================================="
 
 # 1. Levantar PostgreSQL con Docker
-if command -v docker >/dev/null 2>&1; then
+# Con Docker, docker-init.sh ya carga el esquema y el seed al crear el volumen
+# (y escucha en 5433); sin Docker se usa un PostgreSQL local en 5432 y se carga
+# aquí. Las credenciales "postgres" son solo de esta base de pruebas local.
+CON_DOCKER=0
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  CON_DOCKER=1
   echo "===> Levantando PostgreSQL 16 con Docker..."
   docker compose -f "$SCRIPT_DIR/docker-compose.test.yml" up -d
   echo "Esperando a que la base esté lista..."
@@ -36,22 +41,30 @@ if command -v docker >/dev/null 2>&1; then
   done
   echo "PostgreSQL 16 listo en puerto 5433."
 else
-  echo "Docker no detectado. Usando PostgreSQL local en puerto 5432..."
+  echo "Docker no disponible. Usando PostgreSQL local en puerto 5432..."
 fi
 
-# 2. Inicializar base smartdining_test desde scripts maestros si es necesario
-echo "===> Verificando esquema en smartdining_test..."
+# 2. Inicializar base smartdining_test (solo sin Docker)
 PGHOST="${PGHOST:-localhost}"
-PGPORT="${PGPORT:-5432}"
+if [ "$CON_DOCKER" = "1" ]; then
+  PGPORT="${PGPORT:-5433}"
+else
+  PGPORT="${PGPORT:-5432}"
+fi
 PGUSER="${PGUSER:-postgres}"
 PGDATABASE="${PGDATABASE:-smartdining_test}"
 export PGPASSWORD="${PGPASSWORD:-postgres}"
 
-if command -v psql >/dev/null 2>&1; then
-  psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -tc "SELECT 1 FROM pg_database WHERE datname = 'smartdining_test'" | grep -q 1 || \
-    psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -c "CREATE DATABASE smartdining_test;"
-  
-  (cd "$REPO_ROOT/database/scripts" && psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d smartdining_test -v ON_ERROR_STOP=1 -f 00_ejecutar_todo.sql)
+if [ "$CON_DOCKER" = "0" ] && command -v psql >/dev/null 2>&1; then
+  # Solo se carga en una base recién creada: 00_ejecutar_todo.sql no es
+  # idempotente (schema.sql hace CREATE TABLE sin IF NOT EXISTS).
+  if psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'smartdining_test'" | grep -q 1; then
+    echo "===> smartdining_test ya existe: se usa tal cual (bórrala para recargarla)."
+  else
+    echo "===> Creando y cargando smartdining_test..."
+    psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -c "CREATE DATABASE smartdining_test;"
+    (cd "$REPO_ROOT/database/scripts" && psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d smartdining_test -v ON_ERROR_STOP=1 -f 00_ejecutar_todo.sql)
+  fi
 fi
 
 echo "===> Entorno de base de datos listo para pruebas."

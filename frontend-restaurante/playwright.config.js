@@ -1,9 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const chromePath =
-  process.platform === 'win32'
-    ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-    : '/opt/pw-browsers/chromium';
+// Navegador: por defecto, el Chromium que instala Playwright
+// (`npx playwright install chromium`). Para usar otro ya instalado (por
+// ejemplo el Chrome del sistema), apúntalo con PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined;
 
 export default defineConfig({
   testDir: './e2e',
@@ -22,7 +22,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'off',
     launchOptions: {
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || chromePath,
+      executablePath,
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
     },
