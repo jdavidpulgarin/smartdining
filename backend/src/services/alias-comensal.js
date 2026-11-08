@@ -102,6 +102,56 @@ async function reservar(idMesa, { alias, clave }, { vigencia = '3h', ahora = Dat
 }
 
 /**
+ * Suelta UN alias de la mesa, por su clave (D-18).
+ *
+ * Es lo contrario de `reservar`, no de `olvidarMesa`: quitar a una persona sin
+ * celular de la mesa no puede llevarse por delante los alias de los demás
+ * comensales, que siguen sentados con su sesión abierta.
+ *
+ * Devuelve la misma forma que `reservar` —`{ok}` o `{noDisponible}`— y no un
+ * booleano, porque quien llama SÍ necesita distinguir "lo solté" de "no pude":
+ * si Redis no responde, la reserva sigue ahí y responder 204 sería mentir. Es la
+ * diferencia con `olvidarMesa`, que se llama después del commit y a la que da
+ * igual fallar porque la reserva vence sola.
+ *
+ * El respaldo en memoria se limpia siempre, como en `olvidarMesa`: si el proceso
+ * reservó sin Redis y luego se configuró REDIS_URL, la entrada vieja seguiría
+ * marcando el alias como ocupado hasta que venciera.
+ *
+ * @returns {Promise<{ok: true} | {noDisponible: true}>}
+ */
+async function liberar(idMesa, clave) {
+  const mesa = memoria.get(idMesa);
+  if (mesa) mesa.delete(clave);
+
+  let cliente;
+  try {
+    cliente = await clienteRedis();
+  } catch (err) {
+    console.error('[alias] Redis no está disponible:', err.message);
+    return { noDisponible: true };
+  }
+
+  if (!cliente) {
+    // Sin Redis, en producción no hay nada fiable que soltar: falla cerrada,
+    // igual que `reservar`.
+    if (process.env.NODE_ENV === 'production') return { noDisponible: true };
+    return { ok: true };
+  }
+
+  try {
+    await cliente.hDel(llave(idMesa), clave);
+    // hDel devuelve 0 si el campo no estaba. No es un error: quitar a alguien
+    // que ya no está es la misma situación final, y el contrato del socket
+    // también trata ese caso como "sin cambio" (EVENTS.md §6.4).
+    return { ok: true };
+  } catch (err) {
+    console.error('[alias] no se pudo soltar el alias:', err.message);
+    return { noDisponible: true };
+  }
+}
+
+/**
  * Olvida los alias de la mesa (sesión nueva o mesa liberada). Nunca lanza:
  * se llama después del commit y no debe deshacer nada. Si Redis falla, la
  * reserva vence sola con el JWT.
@@ -117,5 +167,5 @@ async function olvidarMesa(idMesa) {
 }
 
 module.exports = {
-  normalizarAlias, reservar, olvidarMesa, segundos, llave, MIN, MAX,
+  normalizarAlias, reservar, liberar, olvidarMesa, segundos, llave, MIN, MAX,
 };
