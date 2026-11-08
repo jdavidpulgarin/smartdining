@@ -460,19 +460,6 @@ async function eliminar(req, res, next) {
  * unicidad —que es lo que impide cobrarle los platos a otro— dejaría de valerlo.
  * -------------------------------------------------------------------------- */
 
-/**
- * Vigencia de la reserva de un comensal sin celular: 24 h, no las 3 h por
- * defecto de `reservar`.
- *
- * Las 3 h son la vida del JWT del comensal: cuando su token caduca, su reserva
- * puede caducar con él. Aquí no hay JWT que caduque —la persona no tiene
- * teléfono— y lo que manda es la lista `sd:mesa:{id}:sin_celular` del
- * socket-server, que vive 24 h igual que `pagaron` (EVENTS.md §6.4). Con 3 h, el
- * alias se liberaría a media tarde y otro comensal podría reservar el mismo
- * nombre mientras la abuela sigue sentada.
- */
-const VIGENCIA_SIN_CELULAR = '24h';
-
 /** Mensajes de los 409 del socket-server, traducidos para quien está en sala. */
 const MENSAJE_POR_CODIGO_SOCKET = {
   ALIAS_EN_USO: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
@@ -551,7 +538,13 @@ async function agregarComensal(req, res, next) {
     }
 
     const reserva = await aliasComensal.reservar(idMesa, alias, {
-      vigencia: VIGENCIA_SIN_CELULAR,
+      // La vigencia vive en alias-comensal.js, que es quien tiene que coincidir
+      // con el TTL del socket-server.
+      vigencia: aliasComensal.VIGENCIA_SIN_CELULAR,
+      // La MARCA: es lo que permite distinguir después a esta persona de alguien
+      // que entró con su celular por el QR. Sin ella, el DELETE del personal
+      // podría tirar la sesión de un comensal conectado.
+      extra: { [aliasComensal.MARCA_SIN_CELULAR]: true },
     });
     if (reserva.enUso) {
       return res.status(409).json({
@@ -599,9 +592,18 @@ async function agregarComensal(req, res, next) {
 /**
  * DELETE /api/mesas/:id/comensales/:alias — quitar a alguien sin celular.
  *
- * Solo si no tiene platos: si los tiene, quitarlo dejaría su consumo sin dueño
- * en el desglose por comensal, y además el alias podría volver a reservarlo otra
- * persona, que acabaría con los platos de la primera cargados a su nombre.
+ * Comprueba, EN ESTE ORDEN:
+ *   1. que la mesa exista (404);
+ *   2. que ese alias sea de un comensal SIN CELULAR (409 si es de alguien que
+ *      entró por QR). Va antes de todo lo demás porque es lo único que protege
+ *      la sesión de un comensal conectado: soltar su reserva dejaría su nombre
+ *      libre para otro, que heredaría sus platos;
+ *   3. que no tenga platos (409);
+ *   4. soltar la reserva (503 si Redis no responde).
+ *
+ * Un alias que NO está reservado se trata como un borrado idempotente: 204. No
+ * hay nada que soltar, y pedir dos veces que se quite a la misma persona no es
+ * un error (es también lo que hace §6.4 con un 'quitar' de quien no está).
  *
  * El aviso de 'quitar' NO se espera: aquí no hay nada que decidir con su
  * respuesta —el alias ya está suelto en el backend, que es la fuente de verdad—
@@ -619,6 +621,30 @@ async function quitarComensal(req, res, next) {
   try {
     const cuentaMesa = await mesasService.cuentaPorComensal(idMesa);
     if (!cuentaMesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+
+    const marca = await aliasComensal.esSinCelular(idMesa, alias.clave);
+    if (marca.noDisponible) {
+      return res.status(503).json({
+        error: 'No se pudo quitar al comensal, intenta de nuevo en unos segundos',
+        motivo: 'alias_no_disponible',
+      });
+    }
+    if (marca.sinCelular === false) {
+      // Reservado pero sin la marca: es la sesión de alguien que entró con su
+      // celular, o una reserva de antes de que la marca existiera. En los dos
+      // casos no se toca desde aquí.
+      return res.status(409).json({
+        error: 'Esa persona entró con su celular: su sesión no se puede quitar desde aquí',
+        motivo: 'comensal_con_sesion',
+      });
+    }
+
+    if (marca.noExiste) {
+      // Nada que soltar. Se avisa igual al socket-server, por si allí sí quedó
+      // en la lista (su TTL y el de aquí son dos relojes distintos).
+      socketNotifier.notificarMesaComensal(idMesa, alias.alias, 'quitar', alias.clave);
+      return res.status(204).send();
+    }
 
     if (tienePlatosEnLaCuenta(cuentaMesa, alias.clave)) {
       return res.status(409).json({
