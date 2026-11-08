@@ -950,6 +950,15 @@ Body: `{ "alias": "Abuela" }`
   por **clave** (sin tildes, en minúsculas, sin espacios ni `. _ ' -`), así que «Abuela»,
   «abuela» y «Abuéla» son la misma persona. Un alias inválido es **400** con
   `{ "error": …, "campo": "alias" }`.
+- **«General» está prohibido (D-18c).** Es el nombre que `obtener_cuenta_mesa` le pone al
+  cajón de los ítems **sin dueño** (`COALESCE(NULLIF(btrim(dp.comensal), ''), 'General')`),
+  no una persona. Registrar a alguien así mezclaría su consumo con lo que todavía no es de
+  nadie: su cuenta mostraría platos que no pidió y los platos sin dueño quedarían cobrados a
+  esa persona. Se rechaza con **400** como cualquier otro alias inválido.
+
+  Se compara por **clave**, igual que la unicidad, así que «General», « general », «GENERAL»
+  y «Géneral» quedan fuera. Un nombre que solo **contiene** la palabra —«General Pérez»,
+  «Generalísimo»— es válido: la clave tiene que ser **exactamente** la reservada.
 - `:id` tiene que ser un **entero positivo**, o **400**. Una mesa que no existe, **404**.
 - **201** devuelve `{ "id_mesa": 5, "alias": "Abuela" }` con el alias **tal como quedó
   reservado**: el escrito ya normalizado o, si esa persona ya tenía platos, el texto con el
@@ -1579,6 +1588,16 @@ Body:
 
 400: plato inexistente o no disponible, `id_mesa` faltante para staff · 403: rol no permitido
 
+**404 `Mesa no encontrada` (D-18c).** Si el pedido trae algún `comensal` y el `id_mesa` no
+existe, la respuesta es **404**, como en el resto de las rutas de mesa. Antes era un **409
+`comensal_no_registrado`**: la cuenta de una mesa inexistente viene vacía y el resolutor de
+alias lo leía como «esa persona no está sentada», así que el mesero veía un error sobre el
+**nombre del comensal** cuando lo que estaba mal era el **número de la mesa**.
+
+La comprobación es una sola consulta (`SELECT 1 FROM mesas`, la misma que ya hacían las dos
+cuentas) y corre **antes** de resolver alias: no se lee la cuenta ni Redis. Un pedido **sin
+alias** no la paga: sigue fallando contra la FK de `pedidos.id_mesa` (**409**) exactamente
+como antes.
 
 #### El alias del comensal cuando pide el personal (D-18b)
 
@@ -1630,6 +1649,13 @@ luego hay que arreglar a mano.
 clave vacía) es **400**, con el **mismo mensaje** y el mismo `campo: "comensal"` que las
 demás rutas de alias, y solo si el `comensal` viene informado.
 
+**Un ítem a nombre de «General» es 409 `comensal_no_registrado`, no 400 (D-18c).** El alta
+de comensales lo rechaza como alias inválido (ver R-18 arriba), pero aquí el significado es
+otro: «General» es el **cajón de los platos sin dueño**, así que no es un nombre mal escrito
+sino un nombre que **no corresponde a nadie**. Era ya la respuesta antes de que la regla
+existiera —no aparecía en las reservas ni como fila con platos propios— y se mantiene para
+no cambiarle el error a quien ya lo maneja. El `alias` del cuerpo trae el texto normalizado.
+
 **Lo que no cambia:**
 
 - **Un ítem sin `comensal`** sigue cayendo en «General», como siempre. No se consulta nada.
@@ -1646,7 +1672,9 @@ alguna reserva no apareció).
 que una persona no esté registrada cuando no se puede leer el registro, y una caché caída
 no puede impedir que una mesa coma. En ese caso se intenta **igual** con la cuenta (que vive
 en PostgreSQL) y, si tampoco aparece, se guarda el alias **recortado y normalizado**, que es
-exactamente lo que hacía el backend antes de D-18b. **Nunca sale el 409 sin Redis.** Queda
+exactamente lo que hacía el backend antes de D-18b. **Sin Redis el único 409 posible es el
+de «General»** (D-18c), que no necesita consultar nada: un ítem no se guarda a nombre del
+cajón de los platos sin dueño ni cuando no se puede verificar quién está sentado. Queda
 un aviso en el log del servidor **sin el alias** —es un dato de quién está sentado en una
 mesa, y estos logs acaban en archivos y en consolas ajenas—, solo con el `id_mesa` para
 poder investigar.
