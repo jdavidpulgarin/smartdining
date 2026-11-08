@@ -175,6 +175,47 @@ curl http://localhost:4000/api/health
 # { "status": "ok" }
 ```
 
+## Límite de peticiones (H-04, H-27 y D-21)
+
+Tres límites, todos por IP y todos con respuesta **429**, cabecera `Retry-After` y el
+cuerpo `{ "error": … }` de siempre. Los dos de ruta son la defensa de verdad; el global
+(D-21) es un techo de respaldo para que ninguna IP pueda inundar el resto de la API.
+
+| Qué limita | Defecto | Variables |
+|---|---|---|
+| `POST /api/auth/login` (solo los fallos, por IP + email) | **5 / minuto** | `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS` |
+| `POST /api/mesas/qr/:token/sesion` | **20 / minuto** | `RATE_LIMIT_QR_MAX`, `RATE_LIMIT_QR_VENTANA_MS` |
+| **Todo lo demás** (global, D-21) | **2000 / minuto** | `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS` |
+
+Las seis variables son **opcionales**: si falta, está vacía o no trae un entero positivo,
+se usa el valor por defecto. Los tres límites **se desactivan solos dentro de las
+pruebas**, o cualquier suite que haga unas cuantas llamadas empezaría a chocar con el techo
+según creciera.
+
+**El global no cuenta** `GET /api/health` —es la sonda de Docker: si contara, un límite
+agotado haría que el contenedor se declarara enfermo y se reiniciara solo— ni el canal
+interno con el socket-server (`POST /api/transacciones/internal`,
+`GET /api/mesas/:id/cuenta/interno`), que va por `x-internal-key`, sale todo con **una**
+IP y ya tiene su propia autenticación.
+
+**Por qué 2000 por minuto, que parece muchísimo.** Los comensales de un local comparten
+**una sola IP pública**, la del wifi: el cupo no es de una persona, es del restaurante
+entero. Con 20 mesas de 4 son 80 teléfonos y, en el pico, cada uno hace del orden de 15 a
+20 peticiones en ese minuto (80 × 20 = 1600), más las tablets del personal. 2000 deja pasar
+ese pico y aun así corta a una sola máquina que intente raspar la API: 33 por segundo
+sostenidos no los hace ningún comensal. Si el local es más grande, o si varios locales
+salen por la misma IP, sube `RATE_LIMIT_GLOBAL_MAX`.
+
+**Detrás de un proxy hace falta `TRUST_PROXY`.** Sin ella, `req.ip` es la IP de nginx y el
+límite global se convierte en un único cupo compartido por todo el mundo. Está apagada por
+defecto porque creerse `X-Forwarded-For` sin un proxy delante permite falsificar la IP; en
+`docker-compose.prod.yml` vale `172.31.250.10`, la IP fija de nginx, y de ningún otro
+contenedor se acepta la cabecera.
+
+**Limitación conocida:** el contador vive en memoria del proceso. Con N instancias del
+backend el techo real es 2000×N; para que fuera global de verdad haría falta un store
+compartido en Redis.
+
 ## Roles y sesiones
 
 | Rol | De dónde sale | Payload del JWT |
