@@ -1145,19 +1145,18 @@ para un comensal el alias sale **solo** del JWT, H-05). Queda en
 `detalles_pedido.comensal`, que es la columna por la que
 [`GET /mesas/:id/cuenta`](#mesas) agrupa el desglose por persona.
 
-> **Para el panel de «Tomar pedido»: manda en `POST /pedidos` el `alias` TAL COMO lo
-> devolvió el `201`.** No lo vuelvas a escribir ni lo pases por minúsculas.
+**Desde D-18b el backend canonicaliza ese alias**: si el mesero escribe «abuela» y la
+persona se registró como «Abuela», se guarda «Abuela». Ver
+[§`POST /pedidos` · el alias del comensal](#el-alias-del-comensal-cuando-pide-el-personal-d-18b).
+
+> **Para el panel de «Tomar pedido»: manda el `alias` TAL COMO lo devolvió el `201`.**
+> Aunque el backend ahora lo corrige, mandar el texto exacto evita el **409
+> `comensal_no_registrado`** cuando la persona no está registrada, y es lo único que funciona
+> igual si Redis está caído (ahí el backend se degrada y guarda lo que llegue).
 >
-> El `comensal` de `POST /pedidos` se valida con su propio esquema, que **solo recorta
-> espacios** (no aplica `normalizarAlias`), y la cuenta agrupa por el **texto exacto**
-> (`btrim(dp.comensal)`). Si se da de alta «Abuela» y luego se pide con `"abuela"`, la
-> cuenta mostrará **dos filas** —«Abuela» y «abuela»— y el desglose por persona deja de
-> cuadrar, aunque para el alta y para el `DELETE` sean la misma persona (los dos comparan
-> por clave).
->
-> Lo más seguro es guardar en el panel el `alias` que devolvió el alta y usar ese valor en
-> cada ítem. No se cambia el esquema de `POST /pedidos` en D-18: su contrato ya está
-> publicado y alinearlo es otra actividad.
+> Vale cualquiera de las tres fuentes: el `alias` del `201` de
+> `POST /mesas/:id/comensales`, el de `mesa:presencia` (campos `comensales` o
+> `sin_celular`) o el `comensal` de `GET /mesas/:id/cuenta`.
 
 ---
 
@@ -1518,6 +1517,65 @@ Body:
 ```
 
 400: plato inexistente o no disponible, `id_mesa` faltante para staff · 403: rol no permitido
+
+
+#### El alias del comensal cuando pide el personal (D-18b)
+
+La cuenta por persona agrupa por el **texto exacto** del alias (`btrim(dp.comensal)` en
+`obtener_cuenta_mesa`), mientras que la **unicidad** de los alias se mide por **clave** (sin
+tildes, en minúsculas, sin espacios ni `. _ ' -`). Si la abuela se registra como «Abuela» y
+el mesero escribe «abuela» al tomarle el pedido, la cuenta muestra **dos filas**, el
+desglose no cuadra y el cajero no sabe a quién cobrarle qué.
+
+Así que cuando pide el **personal** (`mesero` o `admin`) y el ítem trae `comensal` (o
+`apodo`), **no se guarda el texto que llegó, sino el alias CANÓNICO de esa persona en la
+mesa**. Se busca por clave en dos sitios, en este orden:
+
+1. **Las reservas de alias de la mesa** (`sd:mesa:{id}:alias`), que son la fuente de verdad
+   de quién está sentado, venga de una sesión de QR o del alta del personal. Se usa el campo
+   `alias` de la reserva. Da igual de qué tipo sea: aquí solo interesa **cómo se escribe**.
+2. **La cuenta de la mesa**, solo si la reserva no apareció. Cubre a quien ya tiene platos
+   pero cuya reserva venció (24 h para un sin celular, 3 h para una sesión de QR). Se exige
+   que esa fila tenga **platos** (`items_pedidos > 0`): una que solo existe por un pago no
+   dice cómo se escribe el nombre de quien está pidiendo ahora. Es la misma fuente que
+   `GET /mesas/:id/cuenta`.
+
+Si no aparece en ninguno de los dos, es un nombre que **nadie registró**:
+
+```json
+{ "error": "Esa persona no está registrada en la mesa: agrégala primero (POST /api/mesas/:id/comensales) o usa el nombre con el que ya aparece en la cuenta", "motivo": "comensal_no_registrado" }
+```
+
+**409 `comensal_no_registrado`**, y **el pedido NO se crea**: basta con que **uno** de los
+comensales del cuerpo no esté registrado para que se rechace el pedido entero, sin abrir
+siquiera la transacción. Es deliberado: un alias escrito a mano que no corresponde a nadie
+es casi siempre un error de tecleo, y guardarlo crea una persona fantasma en la cuenta que
+luego hay que arreglar a mano.
+
+**Un alias que no cumple la regla R-18** (menos de 2 caracteres, caracteres no permitidos,
+clave vacía) es **400**, con el **mismo mensaje** y el mismo `campo: "comensal"` que las
+demás rutas de alias, y solo si el `comensal` viene informado.
+
+**Lo que no cambia:**
+
+- **Un ítem sin `comensal`** sigue cayendo en «General», como siempre. No se consulta nada.
+- **El comensal con sesión de QR** no cambia: su alias sale **firmado del JWT** (H-05) y el
+  del cuerpo se ignora, así que no hay nada que canonicalizar.
+- `apodo` sigue valiendo como alias de compatibilidad, y se canonicaliza igual.
+
+**Cuándo se resuelve.** **Antes** de abrir la transacción del pedido y **una vez por alias
+distinto**, no una por ítem: un pedido con ocho platos de la abuela hace **una** lectura de
+la reserva, y la cuenta se consulta como mucho **una vez** para todo el pedido (y solo si
+alguna reserva no apareció).
+
+**Degradación si Redis no está disponible: el pedido NO se bloquea.** No se puede afirmar
+que una persona no esté registrada cuando no se puede leer el registro, y una caché caída
+no puede impedir que una mesa coma. En ese caso se intenta **igual** con la cuenta (que vive
+en PostgreSQL) y, si tampoco aparece, se guarda el alias **recortado y normalizado**, que es
+exactamente lo que hacía el backend antes de D-18b. **Nunca sale el 409 sin Redis.** Queda
+un aviso en el log del servidor **sin el alias** —es un dato de quién está sentado en una
+mesa, y estos logs acaban en archivos y en consolas ajenas—, solo con el `id_mesa` para
+poder investigar.
 
 ### GET /pedidos/activos — admin, cajero, mesero
 
