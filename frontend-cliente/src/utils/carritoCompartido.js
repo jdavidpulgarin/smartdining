@@ -48,7 +48,9 @@ export function enriquecerItems(items = [], menu = [], miAlias = '') {
     let calorias = plato?.calorias ?? null;
     let alergenos = Array.isArray(plato?.alergenos) ? [...plato.alergenos] : [];
     let detalle = [];
-    let disponible = plato ? plato.disponible !== false : false;
+    const platoAgotado = !plato || plato.disponible === false;
+    let ingredienteAgotado = false;
+    let disponible = !platoAgotado;
 
     if (plato && plato.personalizable && Array.isArray(item.ingredientes)) {
       const selecciones = {};
@@ -79,9 +81,11 @@ export function enriquecerItems(items = [], menu = [], miAlias = '') {
 
           if (ingEncontrado.disponible === false) {
             disponible = false;
+            ingredienteAgotado = true;
           }
         } else {
           disponible = false;
+          ingredienteAgotado = true;
         }
       }
 
@@ -110,6 +114,8 @@ export function enriquecerItems(items = [], menu = [], miAlias = '') {
       ingredientes: Array.isArray(item.ingredientes) ? item.ingredientes : [],
       esMia,
       disponible,
+      platoAgotado,
+      ingredienteAgotado,
     };
   });
 }
@@ -244,6 +250,15 @@ export function puedoEnviar(misLineas = []) {
   }
   if (misLineas.length > 50) {
     return { ok: false, motivo: 'No puedes enviar más de 50 ítems por pedido' };
+  }
+  const tienePlatosAgotados = misLineas.some(
+    (l) => l.disponible === false && l.platoAgotado === true
+  );
+  if (tienePlatosAgotados) {
+    return {
+      ok: false,
+      motivo: 'Tienes platos agotados: quítalos para enviar',
+    };
   }
   const tieneAgotados = misLineas.some((l) => l.disponible === false);
   if (tieneAgotados) {

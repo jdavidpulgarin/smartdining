@@ -113,49 +113,108 @@ export function normalizarCuenta(api = {}, miAlias = '') {
 }
 
 /**
+ * Entre cuántas personas se reparte el saldo en modo "igual": las presentes
+ * que todavía no han pagado en esta sesión de mesa, más quien paga.
+ * Mínimo 1. Quien se va sin pagar deja de contar.
+ *
+ * @param {object} [datos]
+ * @param {string[]} [datos.comensales] - Alias presentes (mesa:presencia.comensales)
+ * @param {string[]} [datos.pagaron] - Alias que ya pagaron (mesa:presencia.pagaron)
+ * @param {string} [datos.yo] - Alias de quien paga
+ * @returns {number}
+ */
+export function personasPorPagar({ comensales = [], pagaron = [], yo } = {}) {
+  const listaComensales = Array.isArray(comensales) ? comensales : [];
+  const yaPagaron = new Set(Array.isArray(pagaron) ? pagaron : []);
+  const pendientes = new Set(listaComensales.filter((a) => !yaPagaron.has(a)));
+  if (yo && typeof yo === 'string' && yo.trim()) {
+    pendientes.add(yo.trim());
+  }
+  return Math.max(1, pendientes.size);
+}
+
+/**
+ * Calcula la parte en centavos para modo "igual":
+ * n = max(1, personas); parte = Math.round(saldo / n / 100) * 100;
+ * si saldo <= 0 -> 0; si n === 1 || parte <= 0 || parte >= saldo -> saldo; si no -> parte.
+ *
+ * @param {number} saldoCentavos - Saldo restante en centavos
+ * @param {number} personas - Cantidad de personas
+ * @returns {number} Monto a pagar en centavos
+ */
+export function montoIgualCentavos(saldoCentavos, personas) {
+  const saldo = Math.round(Number(saldoCentavos) || 0);
+  if (saldo <= 0) return 0;
+  const n = Math.max(1, Math.round(Number(personas) || 1));
+  const parte = Math.round(saldo / n / 100) * 100;
+  if (n === 1 || parte <= 0 || parte >= saldo) {
+    return saldo;
+  }
+  return parte;
+}
+
+/**
+ * Determina el número de personas a usar para dividir en modo "igual".
+ * Con presencia -> personasPorPagar(presencia.comensales, presencia.pagaron, yo).
+ * Sin presencia (respaldo) -> comensales de la cuenta que no son "General" y tienen saldo > 0,
+ * con pagaron = [] y sumando yo.
+ *
+ * @param {object} cuenta - Cuenta normalizada
+ * @param {object} [opciones]
+ * @param {object} [opciones.presencia] - Estado de mesa:presencia
+ * @param {string} [opciones.yo] - Alias de quien paga
+ * @returns {number}
+ */
+export function personasDividir(cuenta, { presencia, yo } = {}) {
+  if (presencia && Array.isArray(presencia.comensales)) {
+    return personasPorPagar({
+      comensales: presencia.comensales,
+      pagaron: presencia.pagaron,
+      yo,
+    });
+  }
+
+  const rawComensales = Array.isArray(cuenta?.comensales) ? cuenta.comensales : [];
+  const comensalesConSaldo = rawComensales
+    .filter((c) => !c.esGeneral && Number(c.saldo) > 0)
+    .map((c) => c.nombre);
+
+  return personasPorPagar({
+    comensales: comensalesConSaldo,
+    pagaron: [],
+    yo,
+  });
+}
+
+/**
  * Calcula los montos a pagar según el modo seleccionado:
  * - propio: mi saldo (nunca más que el saldo de la mesa)
- * - igual: reparte el TOTAL de la mesa entre las personas presentes (n = personas),
- *   redondeado a pesos. El residuo del redondeo lo cubre quien paga de último.
- *   Fórmula idéntica a socket-server/src/cuenta.js (calcularMonto).
- *   Nota: cantPersonas usa comensales individuales como estimación en el cliente;
- *   el monto definitivo lo calcula el servidor en POST /pagos/intencion con presencia.total
- *   (sockets en sala) y se muestra en CONFIRMANDO TU PAGO.
+ * - igual: se reparte el saldo que falta entre quienes aún no han pagado
  * - total: todo lo que le falta a la mesa (saldo)
  *
+ * Nota: El monto definitivo siempre es el monto_en_centavos que devuelve POST /pagos/intencion.
+ *
  * @param {object} cuenta - Cuenta normalizada (cuenta.saldo es el saldo de la mesa)
- * @param {number} [personas] - Personas estimadas en la mesa (mínimo 1)
+ * @param {object|number} [opciones] - Opciones { presencia, yo } o cantidad de personas (respaldo)
  * @returns {{ propio: number, igual: number, total: number }}
  */
-export function montosPorModo(cuenta, personas = 1) {
-  // Saldo restante de la MESA (saldo_mesa normalizado)
+export function montosPorModo(cuenta, opciones = {}) {
   const saldo = Math.max(0, Number(cuenta?.saldo ?? 0));
-  const totalMesa = Math.max(0, Number(cuenta?.total ?? saldo));
-
-  // Estimación de personas en el cliente: comensales individuales (mínimo 1).
-  // El cliente no recibe eventos de presencia de sockets (emitidos solo a SALA_ADMIN).
-  // El monto definitivo es el monto_centavos que devuelve POST /pagos/intencion,
-  // el cual ya se muestra en la pantalla CONFIRMANDO TU PAGO.
-  const cantPersonas = Math.max(
-    1,
-    Number(personas) || (cuenta?.comensales ? cuenta.comensales.filter((c) => !c.esGeneral).length : 1) || 1
-  );
-
   const miSaldo = Math.max(0, Number(cuenta?.mia?.saldo ?? 0));
   const propio = Math.min(saldo, miSaldo);
-
-  // Fórmula idéntica a socket-server/src/cuenta.js:
-  // Se reparte el TOTAL de la cuenta (no el saldo que va quedando).
-  // Cada parte se redondea a pesos. Quien paga de último cubre el residuo y el saldo restante.
-  const n = Math.max(1, cantPersonas);
-  const parte = Math.round(totalMesa / n);
-  const residuo = Math.max(0, totalMesa - parte * n);
-  const igual = saldo <= 0
-    ? 0
-    : (parte <= 0 || saldo <= parte + residuo)
-      ? saldo
-      : parte;
   const total = saldo;
+
+  let cantPersonas;
+  if (typeof opciones === 'number') {
+    cantPersonas = Math.max(1, Math.round(opciones));
+  } else {
+    cantPersonas = personasDividir(cuenta, opciones);
+  }
+
+  // El monto definitivo siempre es el monto_en_centavos de POST /pagos/intencion
+  const saldoCentavos = Math.round(saldo * 100);
+  const igualCentavos = montoIgualCentavos(saldoCentavos, cantPersonas);
+  const igual = igualCentavos / 100;
 
   return {
     propio,
