@@ -68,6 +68,19 @@ function instalarFakeRedis(opciones = {}) {
       almacen.set(clave, { ...guardado, valor: JSON.stringify(hash) });
       return true;
     },
+    // hDel(clave, campo): borra UN campo del hash. Devuelve 1 si estaba, 0 si
+    // no, como el real; alias-comensal.liberar usa ese 0 como "sin cambio".
+    async hDel(clave, campo) {
+      operaciones.push({ op: 'hDel', clave, campo });
+      fallar('hDel');
+      const guardado = almacen.get(clave);
+      if (!guardado) return 0;
+      const hash = JSON.parse(guardado.valor);
+      if (!Object.prototype.hasOwnProperty.call(hash, campo)) return 0;
+      delete hash[campo];
+      almacen.set(clave, { ...guardado, valor: JSON.stringify(hash) });
+      return 1;
+    },
     async expire(clave, ttlSegundos) {
       operaciones.push({ op: 'expire', clave, ttl: ttlSegundos });
       fallar('expire');
