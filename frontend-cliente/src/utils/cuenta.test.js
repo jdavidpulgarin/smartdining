@@ -20,6 +20,7 @@ import {
   mensajePagoConfirmado,
   textoDetalleConfirmacion,
   eventIdParaIntento,
+  estadoSelectorPago,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -848,6 +849,58 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(
         eventIdParaIntento(previo, { modo: 'propio', saldo: 50000 }, generar)
       ).toBe('nuevo-uuid-456');
+    });
+  });
+
+  describe('estadoSelectorPago (J-15)', () => {
+    it('sin fila en la cuenta (nunca pedí nada): selector visible, lo mío deshabilitado, arranca en igual y no yaPague', () => {
+      const res = estadoSelectorPago({ saldoMesa: 50000, miSaldo: 0, miPagado: 0 });
+      expect(res).toEqual({
+        mostrarSelector: true,
+        loMioHabilitado: false,
+        modoInicial: 'igual',
+        yaPague: false,
+      });
+    });
+
+    it('saldo propio > 0: selector visible, lo mío habilitado, arranca en propio y no yaPague', () => {
+      const res = estadoSelectorPago({ saldoMesa: 50000, miSaldo: 20000, miPagado: 0 });
+      expect(res).toEqual({
+        mostrarSelector: true,
+        loMioHabilitado: true,
+        modoInicial: 'propio',
+        yaPague: false,
+      });
+    });
+
+    it('ya pagué lo mío con la mesa debiendo: selector visible para ayudar, lo mío deshabilitado, arranca en igual y yaPague true', () => {
+      const res = estadoSelectorPago({ saldoMesa: 30000, miSaldo: 0, miPagado: 20000 });
+      expect(res).toEqual({
+        mostrarSelector: true,
+        loMioHabilitado: false,
+        modoInicial: 'igual',
+        yaPague: true,
+      });
+    });
+
+    it('ya pagué lo mío con la mesa en 0: selector oculto, lo mío deshabilitado, yaPague true', () => {
+      const res = estadoSelectorPago({ saldoMesa: 0, miSaldo: 0, miPagado: 20000 });
+      expect(res).toEqual({
+        mostrarSelector: false,
+        loMioHabilitado: false,
+        modoInicial: 'igual',
+        yaPague: true,
+      });
+    });
+
+    it('mesa en 0 sin consumos ni pagos: selector oculto, lo mío deshabilitado, yaPague false', () => {
+      const res = estadoSelectorPago({ saldoMesa: 0, miSaldo: 0, miPagado: 0 });
+      expect(res).toEqual({
+        mostrarSelector: false,
+        loMioHabilitado: false,
+        modoInicial: 'igual',
+        yaPague: false,
+      });
     });
   });
 });

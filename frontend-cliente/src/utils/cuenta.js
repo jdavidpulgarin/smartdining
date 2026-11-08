@@ -705,6 +705,39 @@ export function eventIdParaIntento(previo, { modo, saldo } = {}, generar) {
   return typeof generar === 'function' ? generar() : null;
 }
 
+/**
+ * Determina el estado del selector de pago y de las opciones disponibles (J-15).
+ * Permite dividir o pagar toda la mesa a quien no tiene consumos propios.
+ *
+ * @param {object} [opciones]
+ * @param {number} [opciones.saldoMesa=0] - Saldo restante de la mesa
+ * @param {number} [opciones.miSaldo=0] - Saldo personal del comensal
+ * @param {number} [opciones.miPagado=0] - Monto ya pagado por el comensal
+ * @returns {{
+ *   mostrarSelector: boolean,
+ *   loMioHabilitado: boolean,
+ *   modoInicial: 'propio' | 'igual',
+ *   yaPague: boolean
+ * }}
+ */
+export function estadoSelectorPago({ saldoMesa = 0, miSaldo = 0, miPagado = 0 } = {}) {
+  const saldoM = Math.max(0, Number(saldoMesa) || 0);
+  const saldoP = Math.max(0, Number(miSaldo) || 0);
+  const pagadoP = Math.max(0, Number(miPagado) || 0);
+
+  const mostrarSelector = saldoM > 0;
+  const loMioHabilitado = saldoP > 0;
+  const modoInicial = saldoP > 0 ? 'propio' : 'igual';
+  const yaPague = pagadoP > 0 && saldoP <= 0;
+
+  return {
+    mostrarSelector,
+    loMioHabilitado,
+    modoInicial,
+    yaPague,
+  };
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -725,4 +758,5 @@ export default {
   mensajePagoConfirmado,
   textoDetalleConfirmacion,
   eventIdParaIntento,
+  estadoSelectorPago,
 };

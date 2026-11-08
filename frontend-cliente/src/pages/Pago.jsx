@@ -16,6 +16,7 @@ import {
   debeSalirDeEspera,
   mensajePagoConfirmado,
   eventIdParaIntento,
+  estadoSelectorPago,
 } from '../utils/cuenta';
 import { crearDeduplicador } from '../utils/deduplicador';
 import { crearIntencion } from '../services/pagoService';
@@ -165,6 +166,20 @@ function Pago() {
     }
   }, [cuenta, pantalla]);
 
+  const saldoMesa = cuenta?.saldo ?? 0;
+  const miSaldoCuenta = cuenta?.mia?.saldo ?? 0;
+  const loMioHabilitado = miSaldoCuenta > 0;
+
+  // Si la cuenta se actualiza y mi saldo pasa a 0 estando en 'propio', cambia a 'igual' solo si la mesa aún debe
+  useEffect(() => {
+    if (!cuenta) return;
+    if (modo === 'propio' && !loMioHabilitado && saldoMesa > 0) {
+      queueMicrotask(() => {
+        setModo('igual');
+      });
+    }
+  }, [cuenta, modo, loMioHabilitado, saldoMesa]);
+
   if (cargando && !cuenta) {
     return (
       <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
@@ -205,15 +220,19 @@ function Pago() {
   const saldo = cuenta?.saldo ?? 0;
   const miSaldo = cuenta?.mia?.saldo ?? 0;
   const miSubtotal = cuenta?.mia?.subtotal ?? 0;
+  const miPagado = cuenta?.mia?.pagado ?? 0;
+
+  const { mostrarSelector, yaPague } = estadoSelectorPago({
+    saldoMesa: saldo,
+    miSaldo,
+    miPagado,
+  });
 
   const comensales = cuenta?.comensales || [];
   const numPersonasDividir = personasDividir(cuenta, { presencia, yo: comensal });
 
   const montos = montosPorModo(cuenta, { presencia, yo: comensal });
   const montoModo = montos[modo] ?? miSaldo;
-
-  const puedoPagar = saldo > 0 && montoModo > 0;
-  const yaPague = miSaldo === 0 && saldo > 0;
   const progreso = total > 0 ? Math.min(100, Math.round((pagado / total) * 100)) : 0;
 
   const textoAyudaDividir = numPersonasDividir === 1
@@ -477,7 +496,7 @@ function Pago() {
           </section>
 
           {/* Opciones de pago si hay saldo pendiente */}
-          {puedoPagar && (
+          {mostrarSelector && (
             <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-3">
               <h2 className="m-0 font-etiqueta font-bold text-sm tracking-wider text-white uppercase">
                 ¿CÓMO QUIERES PAGAR?
@@ -490,20 +509,26 @@ function Pago() {
               >
                 {['propio', 'igual', 'total'].map((k) => {
                   const activo = modo === k;
+                  const deshabilitado = k === 'propio' && !loMioHabilitado;
                   return (
                     <button
                       key={k}
                       type="button"
                       role="radio"
                       aria-checked={activo}
+                      aria-disabled={deshabilitado || undefined}
+                      disabled={deshabilitado}
                       onClick={() => {
+                        if (deshabilitado) return;
                         setModo(k);
                         setErrorPago(null);
                       }}
-                      className={`min-h-[48px] rounded-lg cursor-pointer flex flex-col items-center justify-center gap-0.5 transition-colors ${
-                        activo
-                          ? 'bg-primario text-white shadow-sm'
-                          : 'bg-transparent text-texto-suave hover:text-white'
+                      className={`min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
+                        deshabilitado
+                          ? 'opacity-40 cursor-not-allowed bg-transparent text-texto-tenue'
+                          : activo
+                          ? 'bg-primario text-white shadow-sm cursor-pointer'
+                          : 'bg-transparent text-texto-suave hover:text-white cursor-pointer'
                       }`}
                     >
                       <span className="font-etiqueta font-bold text-sm tracking-wider uppercase">
@@ -595,9 +620,11 @@ function Pago() {
               <button
                 type="button"
                 onClick={handlePagarWompi}
-                disabled={iniciandoPago}
-                className={`min-h-[56px] rounded-2xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-[19px] tracking-wider cursor-pointer flex items-center justify-center gap-2.5 transition-colors shadow-sm ${
-                  iniciandoPago ? 'opacity-70 cursor-not-allowed' : ''
+                disabled={iniciandoPago || montoModo <= 0}
+                className={`min-h-[56px] rounded-2xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-[19px] tracking-wider flex items-center justify-center gap-2.5 transition-colors shadow-sm ${
+                  iniciandoPago || montoModo <= 0
+                    ? 'opacity-70 cursor-not-allowed'
+                    : 'cursor-pointer'
                 }`}
               >
                 {iniciandoPago ? (
@@ -626,7 +653,10 @@ function Pago() {
               <button
                 type="button"
                 onClick={handlePagarCaja}
-                className="min-h-[52px] rounded-xl border border-borde bg-superficie-2 hover:bg-[#252525] text-white font-etiqueta font-bold text-base tracking-wider cursor-pointer flex items-center justify-center gap-2 transition-colors"
+                disabled={montoModo <= 0}
+                className={`min-h-[52px] rounded-xl border border-borde bg-superficie-2 text-white font-etiqueta font-bold text-base tracking-wider flex items-center justify-center gap-2 transition-colors ${
+                  montoModo <= 0 ? 'opacity-70 cursor-not-allowed' : 'hover:bg-[#252525] cursor-pointer'
+                }`}
               >
                 <svg
                   width="18"
