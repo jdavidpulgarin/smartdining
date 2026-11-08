@@ -321,6 +321,23 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
 }
 
 /**
+ * ¿Existe esa mesa? Una sola consulta por clave primaria y sin traer la fila.
+ *
+ * Es la pregunta previa de todo lo que recibe un `id_mesa` de fuera: las dos
+ * cuentas ya la hacían (sin esto, `obtener_cuenta_mesa_json` lanza un RAISE que
+ * el manejador central daría como un 409 incomprensible) y desde D-18c también
+ * `POST /api/pedidos`, para que un id equivocado sea un 404 y no un 409 que
+ * culpa al nombre del comensal.
+ *
+ * `SELECT 1` y no `SELECT *`: solo interesa si hay fila, y traerla entera
+ * invitaría a usar este helper como un `obtenerPorId` barato, que no es.
+ */
+async function existe(idMesa) {
+  const result = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
+  return result.rows.length > 0;
+}
+
+/**
  * Cuenta de la mesa para el socket-server (EVENTS.md §8.2), en centavos.
  *
  * Los centavos se calculan EN SQL (`ROUND(x * 100)::bigint`) y no en
@@ -339,8 +356,7 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
  *          lanzaría un RAISE, que el manejador central traduciría a 409).
  */
 async function cuentaInterna(idMesa) {
-  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
-  if (existe.rows.length === 0) return null;
+  if (!(await existe(idMesa))) return null;
 
   const result = await pool.query(
     `WITH cuenta AS (SELECT obtener_cuenta_mesa_json($1) AS j)
@@ -392,8 +408,7 @@ async function cuentaInterna(idMesa) {
  *          SQL lanzaría un RAISE, que el manejador central daría como 409.
  */
 async function cuentaPorComensal(idMesa) {
-  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
-  if (existe.rows.length === 0) return null;
+  if (!(await existe(idMesa))) return null;
 
   const result = await pool.query('SELECT obtener_cuenta_mesa_json($1) AS cuenta', [idMesa]);
   return result.rows[0].cuenta;
@@ -583,6 +598,7 @@ module.exports = {
   rotarQr,
   liberarSesion,
   liberarSiNoQuedanPedidosAbiertos,
+  existe,
   cuentaInterna,
   cuentaPorComensal,
   tokenQrDeMesa,
