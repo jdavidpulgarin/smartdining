@@ -2237,9 +2237,12 @@ necesita **tres** ajustes (son de Jarrison; aquí solo quedan anotados):
 ya se tratan como números. Y mientras no se cambie, su *fallback* sigue funcionando: solo se
 activa cuando la ruta da 404 o falla la red.
 
-> El panel hoy **no pinta** `ocupacionMesas` ni `kdsAlertsCount`, y de `topPlatos` solo usa
-> `unidades` y `porcentaje` (los nombres los tiene fijos). Se devuelven igual, porque el
-> contrato los pide y son datos legítimos del reporte.
+> El panel hoy **no pinta** `ocupacionMesas` ni `kdsAlertsCount`. De `topPlatos` pinta los
+> tres primeros con `nombre`, `unidades` y `total`, y de `topIngredientes` los seis primeros
+> con `nombre_ingrediente`, `nombre_plato` y `veces_solicitado`; si una lista llega vacía, la
+> muestra vacía. No hay ventas por día en este contrato, así que ese panel lo dice en vez de
+> dibujar barras. Los campos que no se pintan se devuelven igual, porque el contrato los pide
+> y son datos legítimos del reporte.
 
 ---
 

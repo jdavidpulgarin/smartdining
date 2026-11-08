@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   Printer,
   AlertTriangle,
-  ArrowUpRight,
   RefreshCw,
   FileCode,
 } from 'lucide-react'
@@ -45,27 +44,26 @@ const obtenerRangoFechasTexto = (rango) => {
     return `${hace7Str} al ${hoyStr}`
   }
   if (rango === 'mes') {
-    const mesNombre = hoy.toLocaleDateString('es-CO', { month: 'long' })
-    const anio = hoy.getFullYear()
-    return `1 al ${hoy.getDate()} de ${mesNombre} de ${anio}`
+    // GET /reportes?rango=mes cubre los 30 últimos días (hoy incluido), no el mes calendario.
+    const hace30 = new Date()
+    hace30.setDate(hoy.getDate() - 29)
+    return `${hace30.toLocaleDateString('es-CO', opciones)} al ${hoyStr}`
   }
   return hoyStr
 }
 
-const defaultTopPlatos = [
-  { nombreCorto: 'BOWL', name: 'Bowl Personalizado', qty: 212, percentage: 43 },
-  { nombreCorto: 'AREPA RELLENA', name: 'Arepa Rellena', qty: 164, percentage: 32 },
-  { nombreCorto: 'WRAP', name: 'Wrap Personalizado', qty: 98, percentage: 19 },
-]
+/** Cuántos elementos pinta cada lista del panel (el backend manda hasta 5 platos y 6 ingredientes). */
+const TOPE_PLATOS_PANEL = 3
+const TOPE_INGREDIENTES_PANEL = 6
 
-const defaultTopIngredientes = [
-  { nombre: 'Arroz Integral', veces: 142 },
-  { nombre: 'Pollo a la Plancha', veces: 118 },
-  { nombre: 'Carne Desmechada', veces: 89 },
-  { nombre: 'Aguacate', veces: 84 },
-  { nombre: 'Maíz Tierno', veces: 76 },
-  { nombre: 'Salsa de Ajo', veces: 65 },
-]
+/** Mensaje de lista vacía: sin datos se dice, no se rellena. */
+function SinDatos({ children }) {
+  return (
+    <p className="sd-reportes-vacio" style={{ color: 'var(--sd-text-muted)', margin: '8px 0' }}>
+      {children}
+    </p>
+  )
+}
 
 export function Reportes() {
   const [timeRange, setTimeRange] = useState('hoy') // 'hoy' | 'semana' | 'mes'
@@ -110,75 +108,30 @@ export function Reportes() {
 
   const currentData = reportData
 
-  // Ventas por día (últimos 7 días)
-  const diasVentas = useMemo(() => {
-    return [
-      { dia: 'MIÉ', monto: 1120000, label: '$1,12 M' },
-      { dia: 'JUE', monto: 1240000, label: '$1,24 M' },
-      { dia: 'VIE', monto: 1480000, label: '$1,48 M' },
-      { dia: 'SÁB', monto: 1620000, label: '$1,62 M' },
-      { dia: 'DOM', monto: 1350000, label: '$1,35 M' },
-      { dia: 'LUN', monto: 950000, label: '$0,95 M' },
-      { dia: 'HOY', monto: 1280000, label: '$1,28 M', esHoy: true },
-    ]
-  }, [])
-
-  const diaMax = useMemo(() => {
-    return diasVentas.reduce((prev, curr) => (curr.monto > prev.monto ? curr : prev), diasVentas[0])
-  }, [diasVentas])
-
-  const diaMin = useMemo(() => {
-    return diasVentas.reduce((prev, curr) => (curr.monto < prev.monto ? curr : prev), diasVentas[0])
-  }, [diasVentas])
-
-  const maxVentaDia = diaMax.monto
-
-  // Top 3 platos del menú seed
-  const top3Platos = useMemo(() => {
-    if (!currentData?.topPlatos || currentData.topPlatos.length === 0) {
-      return defaultTopPlatos
-    }
-    const seedDishes = [
-      { nombreCorto: 'BOWL', name: 'Bowl Personalizado' },
-      { nombreCorto: 'AREPA RELLENA', name: 'Arepa Rellena' },
-      { nombreCorto: 'WRAP', name: 'Wrap Personalizado' },
-    ]
-    return seedDishes.map((seed, idx) => {
-      const platoData = currentData.topPlatos[idx] || {}
-      return {
-        nombreCorto: seed.nombreCorto,
-        name: seed.name,
-        qty: platoData.qty || defaultTopPlatos[idx].qty,
-        percentage: platoData.percentage || defaultTopPlatos[idx].percentage,
-      }
-    })
+  // Platos más pedidos: tal cual los manda GET /reportes (topPlatos), sin nombres fijos.
+  const topPlatos = useMemo(() => {
+    return (currentData?.topPlatos || []).slice(0, TOPE_PLATOS_PANEL).map((p) => ({
+      id: p.id_plato,
+      nombre: p.nombre,
+      unidades: Number(p.unidades) || 0,
+      total: Number(p.total) || 0,
+    }))
   }, [currentData])
 
-  // Top 6 ingredientes del menú seed
-  const top6Ingredientes = useMemo(() => {
-    const seedNames = [
-      'Arroz Integral',
-      'Pollo a la Plancha',
-      'Carne Desmechada',
-      'Aguacate',
-      'Maíz Tierno',
-      'Salsa de Ajo',
-    ]
-    if (!currentData?.topIngredientes || currentData.topIngredientes.length === 0) {
-      return defaultTopIngredientes
-    }
-    return seedNames.map((nombre, idx) => {
-      const item = currentData.topIngredientes[idx]
-      return {
-        nombre,
-        veces: item?.veces_solicitado || defaultTopIngredientes[idx].veces,
-      }
-    })
+  // Ingredientes más pedidos (topIngredientes). Puede haber nombres repetidos en
+  // platos distintos, así que se muestra también el plato.
+  const topIngredientes = useMemo(() => {
+    return (currentData?.topIngredientes || []).slice(0, TOPE_INGREDIENTES_PANEL).map((i) => ({
+      id: i.id_ingrediente,
+      nombre: i.nombre_ingrediente,
+      plato: i.nombre_plato,
+      veces: Number(i.veces_solicitado) || 0,
+    }))
   }, [currentData])
 
   const maxIngVeces = useMemo(() => {
-    return Math.max(...top6Ingredientes.map((i) => i.veces), 1)
-  }, [top6Ingredientes])
+    return Math.max(...topIngredientes.map((i) => i.veces), 1)
+  }, [topIngredientes])
 
   return (
     <div className="sd-page-wrapper sd-reportes-page">
@@ -208,8 +161,9 @@ export function Reportes() {
               type="button"
               className={`sd-red-band-btn ${timeRange === 'mes' ? 'active' : ''}`}
               onClick={() => handleSelectRange('mes')}
+              aria-label="Últimos 30 días"
             >
-              <span>ESTE MES</span>
+              <span>ÚLTIMOS 30 DÍAS</span>
             </button>
           </div>
 
@@ -241,7 +195,7 @@ export function Reportes() {
               )}
               {timeRange === 'mes' && (
                 <>
-                  ASÍ VA<br />EL MES
+                  ASÍ VAN<br />LOS 30 DÍAS
                 </>
               )}
             </h1>
@@ -293,8 +247,7 @@ export function Reportes() {
                   {formatoCOP(currentData.totalVentas)}
                 </strong>
                 <span className="sd-indicator-sub is-white">
-                  <ArrowUpRight size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />
-                  +12.4% vs periodo previo
+                  Pagos completados en el periodo
                 </span>
               </div>
 
@@ -305,18 +258,18 @@ export function Reportes() {
                   {currentData.totalPedidos}
                 </strong>
                 <span className="sd-indicator-sub">
-                  {currentData.pedidosLiquidados || currentData.totalPedidos} liquidados en sala
+                  {currentData.pedidosLiquidados ?? 0} liquidados
                 </span>
               </div>
 
-              {/* Tarjeta: TICKET POR COMENSAL */}
+              {/* Tarjeta: TICKET PROMEDIO (ticketPromedio = ventas / pedidos liquidados) */}
               <div className="sd-indicator-card">
-                <span className="sd-indicator-label">TICKET POR COMENSAL</span>
+                <span className="sd-indicator-label">TICKET PROMEDIO</span>
                 <strong className="sd-indicator-value">
                   {formatoCOP(calcularTicketComensal(currentData))}
                 </strong>
                 <span className="sd-indicator-sub">
-                  Promedio estimado por comensal
+                  Por pedido liquidado
                 </span>
               </div>
 
@@ -339,46 +292,28 @@ export function Reportes() {
               {/* Panel 1: VENTAS POR DÍA (Ancho grande) */}
               <div className="sd-reportes-panel">
                 <h3 className="sd-reportes-panel-title">VENTAS POR DÍA</h3>
-                <div
-                  role="img"
-                  aria-label={`Ventas por día: día más alto ${diaMax.dia} con ${diaMax.label}, día más bajo ${diaMin.dia} con ${diaMin.label}`}
-                  className="sd-daily-sales-chart"
-                >
-                  <div className="sd-daily-bars-container">
-                    {diasVentas.map((d, idx) => {
-                      const barHeight = Math.max(12, Math.round((d.monto / maxVentaDia) * 100))
-                      return (
-                        <div key={idx} className="sd-daily-bar-col">
-                          <span className={`sd-daily-bar-val ${d.esHoy ? 'is-today' : ''}`}>
-                            {d.label}
-                          </span>
-                          <div className="sd-daily-bar-track">
-                            <div
-                              className={`sd-daily-bar-fill ${d.esHoy ? 'is-today' : ''}`}
-                              style={{ height: `${barHeight}%` }}
-                            />
-                          </div>
-                          <div className="sd-daily-bar-baseline" />
-                          <span className={`sd-daily-bar-day ${d.esHoy ? 'is-today' : ''}`}>
-                            {d.dia}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
+                {/* GET /reportes no trae ventas por día: no se dibujan barras inventadas. */}
+                <SinDatos>El reporte todavía no incluye las ventas por día.</SinDatos>
               </div>
 
-              {/* Panel 2: INGREDIENTES MÁS PEDIDOS (Top 6) */}
+              {/* Panel 2: INGREDIENTES MÁS PEDIDOS */}
               <div className="sd-reportes-panel">
                 <h3 className="sd-reportes-panel-title">INGREDIENTES MÁS PEDIDOS</h3>
                 <div className="sd-ingredients-list">
-                  {top6Ingredientes.map((ing, idx) => {
+                  {topIngredientes.length === 0 && (
+                    <SinDatos>Sin ingredientes pedidos en este periodo.</SinDatos>
+                  )}
+                  {topIngredientes.map((ing) => {
                     const percent = Math.round((ing.veces / maxIngVeces) * 100)
                     return (
-                      <div key={idx} className="sd-ingredient-row">
+                      <div key={ing.id} className="sd-ingredient-row">
                         <div className="sd-ingredient-meta">
-                          <span className="sd-ingredient-name">{ing.nombre}</span>
+                          <span className="sd-ingredient-name">
+                            {ing.nombre}
+                            {ing.plato && (
+                              <span style={{ color: 'var(--sd-text-muted)', fontWeight: 400 }}> · {ing.plato}</span>
+                            )}
+                          </span>
                           <span className="sd-ingredient-count">{ing.veces} veces</span>
                         </div>
                         <div className="sd-ingredient-rail">
@@ -394,24 +329,28 @@ export function Reportes() {
               </div>
             </div>
 
-            {/* 5. PLATOS MÁS PEDIDOS (Top 3) */}
+            {/* 5. PLATOS MÁS PEDIDOS */}
             <div className="sd-reportes-panel" style={{ marginBottom: 24 }}>
               <h3 className="sd-reportes-panel-title">PLATOS MÁS PEDIDOS</h3>
-              <div className="sd-top3-dishes-grid">
-                {top3Platos.map((plato, idx) => {
-                  const borderClass = idx === 0 ? 'border-red' : idx === 1 ? 'border-white' : 'border-gold'
-                  return (
-                    <div key={idx} className={`sd-top3-card ${borderClass}`}>
-                      <h4 className="sd-top3-dish-name">
-                        {idx + 1}. {plato.nombreCorto || plato.name.toUpperCase()}
-                      </h4>
-                      <span className="sd-top3-dish-meta">
-                        {plato.qty} vendidos · {plato.percentage} %
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
+              {topPlatos.length === 0 ? (
+                <SinDatos>Sin platos vendidos en este periodo.</SinDatos>
+              ) : (
+                <div className="sd-top3-dishes-grid">
+                  {topPlatos.map((plato, idx) => {
+                    const borderClass = idx === 0 ? 'border-red' : idx === 1 ? 'border-white' : 'border-gold'
+                    return (
+                      <div key={plato.id} className={`sd-top3-card ${borderClass}`}>
+                        <h4 className="sd-top3-dish-name">
+                          {idx + 1}. {String(plato.nombre || '').toUpperCase()}
+                        </h4>
+                        <span className="sd-top3-dish-meta">
+                          {plato.unidades} vendidos · {formatoCOP(plato.total)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {/* 6. Debajo (Secundario): Métodos de Pago y Horas Pico */}
@@ -419,6 +358,9 @@ export function Reportes() {
               {/* Métodos de Pago */}
               <div className="sd-reportes-panel">
                 <h3 className="sd-reportes-panel-title">DISTRIBUCIÓN POR MÉTODO DE PAGO</h3>
+                {(currentData.metodosPago || []).length === 0 && (
+                  <SinDatos>Sin pagos completados en este periodo.</SinDatos>
+                )}
                 <div className="sd-payment-methods-block">
                   <div className="sd-payment-bar-track">
                     {(currentData.metodosPago || []).map((mp, i) => (
@@ -460,6 +402,9 @@ export function Reportes() {
               {/* Horas Pico */}
               <div className="sd-reportes-panel">
                 <h3 className="sd-reportes-panel-title">AFLUENCIA POR HORARIO (HORAS PICO)</h3>
+                {(currentData.horasPico || []).length === 0 && (
+                  <SinDatos>Sin pedidos en este periodo.</SinDatos>
+                )}
                 <div
                   role="img"
                   aria-label="Gráfica de afluencia por horario"
@@ -507,6 +452,13 @@ export function Reportes() {
                     </tr>
                   </thead>
                   <tbody>
+                    {(currentData.tiemposKds || []).length === 0 && (
+                      <tr>
+                        <td colSpan={5} style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>
+                          Sin comandas registradas por el KDS en este periodo.
+                        </td>
+                      </tr>
+                    )}
                     {(currentData.tiemposKds || []).map((t, idx) => (
                       <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
                         <td style={{ padding: '12px 14px', fontWeight: 700, color: 'var(--sd-text)', fontFamily: 'var(--sd-font-heading)', fontSize: 15 }}>
