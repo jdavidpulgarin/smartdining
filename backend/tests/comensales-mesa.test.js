@@ -6,6 +6,7 @@ const { instalarFakeDb, tokenStaff, tokenComensal } = require('./helpers/fake-db
 const { instalarFakeSocket, socketCaido, ES_UUID } = require('./helpers/fake-socket');
 const { instalarFakeRedis } = require('./helpers/fake-redis');
 const alias = require('../src/services/alias-comensal');
+const { VIGENCIA_SIN_CELULAR: VIGENCIA } = alias;
 const socketNotifier = require('../src/services/socket.notifier');
 
 // D-18: comensales SIN CELULAR de la mesa.
@@ -72,8 +73,8 @@ test('d-18: liberar borra SOLO ese alias del hash de la mesa', async () => {
   try {
     const ana = alias.normalizarAlias('Ana');
     const beto = alias.normalizarAlias('Beto');
-    await alias.reservar(MESA, ana, { vigencia: '24h' });
-    await alias.reservar(MESA, beto, { vigencia: '24h' });
+    await alias.reservar(MESA, ana, { vigencia: VIGENCIA });
+    await alias.reservar(MESA, beto, { vigencia: VIGENCIA });
 
     const suelta = await alias.liberar(MESA, ana.clave);
 
@@ -90,7 +91,7 @@ test('d-18: liberar borra SOLO ese alias del hash de la mesa', async () => {
 test('d-18: liberar NO usa del, que borraria los alias de todos', async () => {
   const redis = instalarFakeRedis();
   try {
-    await alias.reservar(MESA, alias.normalizarAlias('Ana'), { vigencia: '24h' });
+    await alias.reservar(MESA, alias.normalizarAlias('Ana'), { vigencia: VIGENCIA });
     await alias.liberar(MESA, 'ana');
     assert.deepStrictEqual(redis.todas('del'), [], 'olvidarMesa es otra cosa');
   } finally {
@@ -102,11 +103,11 @@ test('d-18: tras liberar, ese nombre se puede volver a reservar', async () => {
   const redis = instalarFakeRedis();
   try {
     const ana = alias.normalizarAlias('Ana');
-    assert.deepStrictEqual(await alias.reservar(MESA, ana, { vigencia: '24h' }), { ok: true });
-    assert.deepStrictEqual(await alias.reservar(MESA, ana, { vigencia: '24h' }), { enUso: true });
+    assert.deepStrictEqual(await alias.reservar(MESA, ana, { vigencia: VIGENCIA }), { ok: true });
+    assert.deepStrictEqual(await alias.reservar(MESA, ana, { vigencia: VIGENCIA }), { enUso: true });
 
     await alias.liberar(MESA, ana.clave);
-    assert.deepStrictEqual(await alias.reservar(MESA, ana, { vigencia: '24h' }), { ok: true });
+    assert.deepStrictEqual(await alias.reservar(MESA, ana, { vigencia: VIGENCIA }), { ok: true });
   } finally {
     redis.restaurar();
   }
@@ -145,23 +146,23 @@ test('d-18: sin Redis (desarrollo) liberar borra del respaldo en memoria', async
   // Sin REDIS_URL no hay cliente: alias-comensal usa el Map en memoria.
   const mesa = mesaNueva();
   const ana = alias.normalizarAlias('Ana');
-  assert.deepStrictEqual(await alias.reservar(mesa, ana, { vigencia: '24h' }), { ok: true });
-  assert.deepStrictEqual(await alias.reservar(mesa, ana, { vigencia: '24h' }), { enUso: true });
+  assert.deepStrictEqual(await alias.reservar(mesa, ana, { vigencia: VIGENCIA }), { ok: true });
+  assert.deepStrictEqual(await alias.reservar(mesa, ana, { vigencia: VIGENCIA }), { enUso: true });
 
   assert.deepStrictEqual(await alias.liberar(mesa, ana.clave), { ok: true });
-  assert.deepStrictEqual(await alias.reservar(mesa, ana, { vigencia: '24h' }), { ok: true });
+  assert.deepStrictEqual(await alias.reservar(mesa, ana, { vigencia: VIGENCIA }), { ok: true });
 });
 
 test('d-18: en memoria, liberar no toca a los demas comensales', async () => {
   const mesa = mesaNueva();
   const ana = alias.normalizarAlias('Ana');
   const beto = alias.normalizarAlias('Beto');
-  await alias.reservar(mesa, ana, { vigencia: '24h' });
-  await alias.reservar(mesa, beto, { vigencia: '24h' });
+  await alias.reservar(mesa, ana, { vigencia: VIGENCIA });
+  await alias.reservar(mesa, beto, { vigencia: VIGENCIA });
 
   await alias.liberar(mesa, ana.clave);
 
-  assert.deepStrictEqual(await alias.reservar(mesa, beto, { vigencia: '24h' }), { enUso: true });
+  assert.deepStrictEqual(await alias.reservar(mesa, beto, { vigencia: VIGENCIA }), { enUso: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -296,7 +297,10 @@ test('d-18: la reserva dura 24 h, no las 3 h del JWT del comensal', async () => 
     // Es la vigencia de sd:mesa:{id}:sin_celular (EVENTS.md §6.4). Con 3 h el
     // alias se liberaria a media tarde con la persona todavia sentada.
     assert.strictEqual(redis.ttlDe(alias.llave(MESA)), 24 * 60 * 60);
-    assert.strictEqual(alias.segundos('24h'), 86400);
+    assert.strictEqual(alias.segundos(VIGENCIA), 86400);
+    // La constante vive en un solo sitio y tiene que coincidir con el TTL de
+    // sd:mesa:{id}:sin_celular del socket-server (EVENTS.md §6.4).
+    assert.strictEqual(VIGENCIA, '24h');
   } finally {
     socket.restaurar();
     redis.restaurar();
@@ -816,10 +820,37 @@ test('d-18: los platos se buscan por CLAVE del alias, no por el texto', async ()
     },
   });
   const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
   try {
+    // Se da de alta con tilde y se quita sin ella: misma clave, misma persona.
+    assert.strictEqual((await agregar(mesero(), { alias: 'Abuéla' })).status, 201);
+
     const res = await quitar(mesero(), 'abuela');
     assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, 'comensal_con_platos');
   } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18: quitar a alguien que no esta reservado es 204 idempotente', async () => {
+  // Criterio de siempre: no hay nada que soltar y pedirlo dos veces no es un
+  // error. Es lo mismo que hace §6.4 con un 'quitar' de quien no esta.
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await quitar(mesero(), 'Nadie');
+    assert.strictEqual(res.status, 204);
+
+    await socketNotifier.esperarAvisos();
+    // Se avisa igual: el TTL de aqui y el del socket-server son dos relojes
+    // distintos y alla puede seguir en la lista.
+    assert.strictEqual(socket.buscar('/internal/mesa-comensal').cuerpo.accion, 'quitar');
+  } finally {
+    socket.restaurar();
     redis.restaurar();
     db.restaurar();
   }
@@ -855,6 +886,7 @@ test('d-18: un comensal con 0 items si se puede quitar', async () => {
   const redis = instalarFakeRedis();
   const socket = instalarFakeSocket(() => ({ ok: true }));
   try {
+    await agregar(mesero(), { alias: 'Abuela' });
     assert.strictEqual((await quitar(mesero(), 'Abuela')).status, 204);
   } finally {
     socket.restaurar();
@@ -896,6 +928,236 @@ test('d-18: con Redis caido, quitar responde 503 y no avisa', async () => {
   } finally {
     socket.restaurar();
     redis.restaurar();
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// La marca sin_celular: quien entro por QR no se puede quitar desde aqui
+// ---------------------------------------------------------------------------
+
+test('d-18: el alta MARCA el alias como sin celular', async () => {
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    await agregar(mesero(), { alias: 'Abuela' });
+
+    const guardado = JSON.parse(redis.valorDe(alias.llave(MESA)).abuela);
+    assert.strictEqual(guardado.alias, 'Abuela');
+    assert.strictEqual(guardado[alias.MARCA_SIN_CELULAR], true);
+    // Y el resto del valor sigue igual que siempre.
+    assert.ok(guardado.en, 'conserva la marca de tiempo');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18: la sesion por QR NO lleva la marca', async () => {
+  const redis = instalarFakeRedis();
+  try {
+    // El flujo del QR llama a reservar sin `extra`: el valor guardado no cambia.
+    await alias.reservar(MESA, alias.normalizarAlias('Ana'), { vigencia: '3h' });
+
+    const guardado = JSON.parse(redis.valorDe(alias.llave(MESA)).ana);
+    assert.deepStrictEqual(Object.keys(guardado).sort(), ['alias', 'en']);
+    assert.strictEqual(guardado[alias.MARCA_SIN_CELULAR], undefined);
+  } finally {
+    redis.restaurar();
+  }
+});
+
+test('d-18: esSinCelular distingue los tres casos', async () => {
+  const redis = instalarFakeRedis();
+  try {
+    // No existe.
+    assert.deepStrictEqual(await alias.esSinCelular(MESA, 'nadie'), { noExiste: true });
+
+    // Existe, pero es de QR (sin marca).
+    await alias.reservar(MESA, alias.normalizarAlias('Ana'), { vigencia: '3h' });
+    assert.deepStrictEqual(await alias.esSinCelular(MESA, 'ana'), { sinCelular: false });
+
+    // Existe y es sin celular.
+    await alias.reservar(MESA, alias.normalizarAlias('Abuela'), {
+      vigencia: VIGENCIA,
+      extra: { [alias.MARCA_SIN_CELULAR]: true },
+    });
+    assert.deepStrictEqual(await alias.esSinCelular(MESA, 'abuela'), { sinCelular: true });
+  } finally {
+    redis.restaurar();
+  }
+});
+
+test('d-18: esSinCelular con Redis caido no adivina', async () => {
+  const redis = instalarFakeRedis({ caido: true });
+  try {
+    assert.deepStrictEqual(await alias.esSinCelular(MESA, 'abuela'), { noDisponible: true });
+  } finally {
+    redis.restaurar();
+  }
+});
+
+test('d-18: si falla el hGet, tampoco adivina', async () => {
+  const redis = instalarFakeRedis({ falloEn: ['hGet'] });
+  try {
+    assert.deepStrictEqual(await alias.esSinCelular(MESA, 'abuela'), { noDisponible: true });
+  } finally {
+    redis.restaurar();
+  }
+});
+
+test('d-18: un valor guardado ilegible se trata como de QR', async () => {
+  // Ante la duda no se suelta la reserva de nadie: solo cuesta un 409.
+  const redis = instalarFakeRedis({ inicial: {} });
+  try {
+    await alias.reservar(MESA, alias.normalizarAlias('Ana'), { vigencia: '3h' });
+    // Se corrompe el valor a mano, como si lo hubiera escrito otra version.
+    const hash = redis.valorDe(alias.llave(MESA));
+    hash.ana = 'esto-no-es-json';
+    redis.poner(alias.llave(MESA), hash);
+
+    assert.deepStrictEqual(await alias.esSinCelular(MESA, 'ana'), { sinCelular: false });
+  } finally {
+    redis.restaurar();
+  }
+});
+
+test('d-18: esSinCelular funciona con el respaldo en memoria', async () => {
+  // Sin REDIS_URL: la marca se guarda y se lee del Map en memoria.
+  const mesa = mesaNueva();
+  assert.deepStrictEqual(await alias.esSinCelular(mesa, 'abuela'), { noExiste: true });
+
+  await alias.reservar(mesa, alias.normalizarAlias('Ana'), { vigencia: '3h' });
+  assert.deepStrictEqual(await alias.esSinCelular(mesa, 'ana'), { sinCelular: false });
+
+  await alias.reservar(mesa, alias.normalizarAlias('Abuela'), {
+    vigencia: VIGENCIA,
+    extra: { [alias.MARCA_SIN_CELULAR]: true },
+  });
+  assert.deepStrictEqual(await alias.esSinCelular(mesa, 'abuela'), { sinCelular: true });
+});
+
+test('d-18: en memoria, una reserva vencida cuenta como que no existe', async () => {
+  const mesa = mesaNueva();
+  const reloj = { t: 1_000_000 };
+  await alias.reservar(mesa, alias.normalizarAlias('Abuela'), {
+    vigencia: '1s',
+    ahora: () => reloj.t,
+    extra: { [alias.MARCA_SIN_CELULAR]: true },
+  });
+  assert.deepStrictEqual(await alias.esSinCelular(mesa, 'abuela', { ahora: () => reloj.t }), {
+    sinCelular: true,
+  });
+
+  reloj.t += 2000;
+  assert.deepStrictEqual(await alias.esSinCelular(mesa, 'abuela', { ahora: () => reloj.t }), {
+    noExiste: true,
+  });
+});
+
+test('d-18: NO se puede quitar a alguien que entro por QR: 409', async () => {
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    // Ana abrio su sesion escaneando el QR: su reserva no lleva la marca.
+    await alias.reservar(MESA, alias.normalizarAlias('Ana'), { vigencia: '3h' });
+
+    const res = await quitar(mesero(), 'Ana');
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, 'comensal_con_sesion');
+    assert.match(res.body.error, /con su celular/i);
+
+    // Y lo importante: su reserva sigue intacta y no se avisó nada.
+    assert.ok(redis.valorDe(alias.llave(MESA)).ana, 'la reserva de Ana sigue ahi');
+    assert.deepStrictEqual(redis.todas('hDel'), [], 'no se llamo a liberar');
+    assert.deepStrictEqual(socket.avisos, [], 'ni se aviso al socket');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18: una reserva VIEJA sin marca tampoco se puede quitar', async () => {
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    // Como la escribiria una version anterior a este cambio: { alias, en } y
+    // nada mas. No se puede saber de donde salio, asi que falla cerrada.
+    redis.poner(alias.llave(MESA), {
+      abuela: JSON.stringify({ alias: 'Abuela', en: '2026-11-08T10:00:00.000Z' }),
+    });
+
+    const res = await quitar(mesero(), 'Abuela');
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, 'comensal_con_sesion');
+    assert.deepStrictEqual(socket.avisos, []);
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18: la marca se comprueba ANTES de los platos', async () => {
+  // Si se mirara primero la cuenta, alguien con sesion de QR y sin platos se
+  // podria quitar, y su nombre quedaria libre para otro comensal.
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    await alias.reservar(MESA, alias.normalizarAlias('Ana'), { vigencia: '3h' });
+
+    const res = await quitar(mesero(), 'Ana');
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, 'comensal_con_sesion', 'no el de los platos');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18: con Redis caido no se decide nada: 503 antes de tocar la reserva', async () => {
+  const db = fakeMesa();
+  const redis = instalarFakeRedis({ caido: true });
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await quitar(mesero(), 'Abuela');
+
+    assert.strictEqual(res.status, 503);
+    assert.strictEqual(res.body.motivo, 'alias_no_disponible');
+    assert.deepStrictEqual(socket.avisos, []);
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18: con el respaldo en memoria, el de QR tampoco se quita', async () => {
+  const mesa = mesaNueva();
+  const db = fakeMesa({ mesa: mesaOcupada(mesa), cuenta: { id_mesa: mesa, comensales: [] } });
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    // Sin fake-redis: alias-comensal usa el Map en memoria.
+    await alias.reservar(mesa, alias.normalizarAlias('Ana'), { vigencia: '3h' });
+
+    const deQr = await quitar(mesero(), 'Ana', mesa);
+    assert.strictEqual(deQr.status, 409);
+    assert.strictEqual(deQr.body.motivo, 'comensal_con_sesion');
+
+    // Y el sin celular de la misma mesa sí.
+    assert.strictEqual((await agregar(mesero(), { alias: 'Abuela' }, mesa)).status, 201);
+    assert.strictEqual((await quitar(mesero(), 'Abuela', mesa)).status, 204);
+  } finally {
+    socket.restaurar();
     db.restaurar();
   }
 });
