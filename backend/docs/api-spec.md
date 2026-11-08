@@ -193,6 +193,114 @@ acertar una sola contraseña. Ahora:
 
 ---
 
+## Usuarios del personal (D-16)
+
+Administración de las cuentas del personal. **Todo es solo de `admin`**, sin excepciones:
+aquí se reparte quién entra y con qué permisos, así que no hay ninguna lectura
+"inofensiva" que abrir a otro rol.
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| GET | /usuarios | **admin** | Lista el personal |
+| PATCH | /usuarios/:id | **admin** | Cambia `nombre`, `rol` y `activo` |
+| POST | /usuarios/:id/clave | **admin** | Guarda una clave nueva |
+
+El **alta** sigue en [`POST /auth/register`](#post-authregister--solo-admin), que ya es de
+admin: no se duplica aquí. **No hay baja**: `usuarios` está referenciada por pedidos y
+pagos, así que borrar una fila sería perder quién cobró qué. Lo que se hace es desactivar
+(`activo: false`), que es lo que el middleware comprueba en cada petición (H-09).
+
+**El hash de la clave no sale de ninguna de las tres rutas.** Las lecturas piden las
+columnas una por una (`id_usuario`, `nombre`, `email`, `rol`, `activo`, `creado_en`), nunca
+`SELECT *`, para que agregar una columna sensible a la tabla no la publique sola.
+
+### GET /usuarios
+
+200:
+
+```json
+{ "usuarios": [
+  { "id_usuario": 1, "nombre": "Carlos Ospino", "email": "admin@mail.com",
+    "rol": "admin", "activo": true, "creado_en": "2026-01-01T00:00:00.000Z" }
+] }
+```
+
+Ordenada por `id_usuario`: es el orden de alta, que es estable (dos personas pueden
+llamarse igual) y el que espera quien acaba de crear una cuenta y la busca al final.
+
+### PATCH /usuarios/:id
+
+Body, **todos los campos opcionales** pero al menos uno:
+
+```json
+{ "nombre": "Ana María Ríos", "rol": "cajero", "activo": false }
+```
+
+- El cuerpo es `.strict()`: una clave de más es **400**. El **`email` queda fuera a
+  propósito**: es la credencial de entrada y la clave de unicidad de la tabla, así que
+  cambiarlo es dar de alta otra identidad, no editar un perfil. Sin `.strict()`, un panel
+  que reenviara la fila entera colaría `email` o `password_hash` y el `COALESCE` los
+  ignoraría en silencio: quien llama creería haber cambiado algo que no cambió.
+- Un cuerpo vacío `{}` es **400**: no es una edición.
+- `rol` solo acepta `admin`, `mesero`, `cajero`, `cocina` — los del CHECK de la tabla.
+  `comensal` **no** está: no es una fila de `usuarios`, es un rol que solo existe dentro
+  del JWT de una mesa.
+- `:id` tiene que ser un **entero positivo**, o **400**. Un usuario que no existe, **404**.
+- Lo que no se manda **no se toca** (`COALESCE`), así que el panel puede enviar solo lo que
+  cambió.
+- 200 devuelve `{ "usuario": { … } }` con la fila actualizada, sin el hash.
+
+#### Los dos 409
+
+```json
+{ "error": "No se puede dejar el sistema sin ningún admin activo: asciende o activa a otro antes." }
+{ "error": "No puedes desactivarte ni cambiarte el rol a ti mismo: pídeselo a otro admin." }
+```
+
+- **Siempre tiene que quedar al menos un admin activo.** Sin esta regla, el último admin
+  puede desactivarse o quitarse el rol y no queda nadie que pueda volver a repartir
+  permisos: habría que entrar a la base a mano. Se comprueba **dentro de la transacción y
+  con la fila bloqueada** (`SELECT … FOR UPDATE`), porque si no dos admins podrían
+  desactivarse a la vez, cada uno viendo al otro como activo.
+- **Un admin no puede desactivarse ni cambiarse el rol a sí mismo.** No es paternalismo: es
+  el error que deja a alguien fuera de su propio panel, con la sesión abierta y sin forma
+  de deshacerlo. **Otro** admin sí puede hacerlo, y cambiarse el **nombre** a sí mismo
+  también se puede. Reafirmar el rol que ya se tiene no cuenta como cambio, para que un
+  panel que reenvía el rol sin tocarlo no choque.
+- Reactivar a alguien o devolverle el rol de admin **nunca** se bloquea: esas operaciones
+  suman admins, no los quitan.
+
+### POST /usuarios/:id/clave
+
+Body: `{ "password": "clave-nueva-larga" }`, `.strict()`.
+
+- **Mínimo 8 caracteres** (400 si no). Más que los 6 de `/auth/register`, cuyo mínimo ya
+  está publicado en este contrato: bajarlo aquí para igualarlo sería empeorar a propósito.
+- **Máximo 72 caracteres**: son los bytes que bcrypt mira. A partir de ahí trunca en
+  silencio, y una contraseña que se corta sin avisar es peor que una rechazada.
+- Se guarda con el **mismo bcrypt y el mismo costo** que `/auth/register` (`COSTO_BCRYPT`,
+  importado y no copiado): dos costos distintos en el proyecto producen hashes que el login
+  reconoce pero que cuestan tiempos distintos, y eso es justo lo que evita H-12.
+- 200 devuelve `{ "usuario": { … } }` **sin la clave ni el hash**: la respuesta de un cambio
+  de clave no tiene ninguna razón para llevar la clave. **404** si el usuario no existe.
+
+### La caché de usuario activo se invalida (H-09)
+
+Al **desactivar**, **cambiar el rol** o **cambiar la clave** se borra la llave
+`sd:usuario:{id}:activo`. Sin eso, el cambio tardaría hasta el TTL (60 s por defecto) en
+surtir efecto, porque `estaActivo` contesta desde Redis sin preguntarle a la base: el token
+de alguien recién desactivado seguiría abriendo la API hasta un minuto.
+
+Se invalida **después del COMMIT**, no antes: hacerlo antes sería peor que no hacerlo, ya
+que una petición en vuelo podría volver a cachear el valor viejo justo antes de que el
+cambio se guarde. Cambiar **solo el nombre** no toca la caché: el middleware solo mira
+`activo`, y tirar la llave por un nombre sería perder caché sin ninguna razón.
+
+**Si Redis no responde, la operación NO falla**: el cambio ya está guardado en PostgreSQL,
+que es quien manda, y lo único que se pierde es que tarde el TTL en verse.
+
+---
+
 ## Seguridad del transporte y del acceso
 
 ### Cabeceras y CORS (H-10)
@@ -681,7 +789,8 @@ devuelve `false` y no lanza. **No se avisa al socket-server:** no existe un even
 | GET | /mesas/:id | No | Obtiene una |
 | POST | /mesas | admin | Crea |
 | PATCH | /mesas/:id/estado | admin, cajero, mesero | Cambia estado (`disponible`, `ocupada`, `reservada`, `mantenimiento`) |
-| DELETE | /mesas/:id | admin | Elimina |
+| **PATCH** | **/mesas/:id** | **admin** | **Edita `numero`, `capacidad` y `ubicacion` (D-16, ver abajo)** |
+| DELETE | /mesas/:id | admin | Elimina. **409 si está ocupada o tiene pedidos** (ver abajo) |
 
 ```json
 { "id_mesa": 5, "numero": 5, "capacidad": 4, "ubicacion": "Terraza", "estado": "ocupada" }
@@ -707,6 +816,72 @@ está restringido a mesero/admin.
 READMEs, ni el socket-server, ni las pruebas), el camino del comensal es
 `POST /mesas/qr/:token/sesion`, y al responder 200 con la mesa servía de oráculo para
 adivinar tokens válidos sin abrir sesión.
+
+### PATCH /mesas/:id — editar el mobiliario (D-16), solo `admin`
+
+Body, **todos opcionales** pero al menos uno:
+
+```json
+{ "numero": 12, "capacidad": 6, "ubicacion": "Terraza" }
+```
+
+- `.strict()`: una clave de más es **400**. **`estado` y `token_qr` no se aceptan aquí.** El
+  estado tiene su propia ruta (`PATCH /mesas/:id/estado`, con otros permisos: también
+  mesero y cajero) porque moverlo es la operación del salón, con su propia lógica de
+  `sesion_iniciada_en`; y el `token_qr` es una credencial que solo escribe el flujo de
+  apertura. Esto es el alta/baja del mobiliario, que es de admin.
+- Un cuerpo vacío es **400**. `numero` y `capacidad` son **enteros positivos**; `ubicacion`
+  no puede ir vacía (máx. 50, como la columna).
+- Una mesa que no existe, **404**. Lo que no se manda **no se toca** (`COALESCE`).
+- 200 devuelve la **vista del personal**: `id_mesa`, `numero`, `capacidad`, `ubicacion`,
+  `estado` y `sesion_abierta`. Nunca el `token_qr`.
+- `actualizado_en` y `version_control` los pone el trigger
+  `tr_control_concurrencia_mesa`: el backend no los escribe.
+
+#### Los dos 409
+
+```json
+{ "error": "Ya hay otra mesa con ese número" }
+{ "error": "Esa mesa está ocupada: no se puede cambiar su número mientras haya gente sentada. Libérala primero." }
+```
+
+- **Número repetido**: lo impone el `UNIQUE` de `mesas.numero`. El 23505 se traduce aquí con
+  un mensaje que dice **qué** choca, en vez del "Ya existe un registro con esos datos"
+  genérico del manejador central.
+- **Una mesa ocupada no se renumera.** El número es lo que la gente ve en el QR impreso, lo
+  que grita el mesero y lo que el comensal confirma al escanear: cambiárselo con gente
+  sentada y pedidos en marcha deja los tiquetes de cocina apuntando a una mesa que ya no
+  existe con ese nombre. **Capacidad y ubicación sí** se pueden corregir con la mesa
+  ocupada, porque no identifican nada. Mandar el **mismo** número que ya tiene no cuenta
+  como renumerar.
+
+Todo va en una transacción con la fila **bloqueada** (`FOR UPDATE`): sin el bloqueo, el
+estado podría cambiar entre la comprobación y el `UPDATE`.
+
+### DELETE /mesas/:id — por qué puede responder 409
+
+Cuando **sí** se puede borrar, el comportamiento es el de siempre: **204** sin cuerpo, y
+**404** si la mesa no existe. Lo que cambia (D-16) es que las dos razones por las que no se
+puede se comprueban **antes** y se explican:
+
+```json
+{ "error": "Esa mesa está ocupada: libérala antes de borrarla." }
+{ "error": "Esa mesa tiene pedidos registrados: no se puede borrar sin perder el historial. Déjala en mantenimiento si ya no se usa." }
+```
+
+- **Mesa `ocupada`**: antes se borraba con **204** si todavía no tenía pedidos (recién
+  abierta), y dejaba una sesión de QR viva apuntando a una mesa que ya no existe.
+- **Mesa con pedidos**: el `ON DELETE RESTRICT` de `fk_pedidos_mesa` ya lo impedía, pero el
+  error llegaba al manejador central y salía como el **409 genérico** ("La operación choca
+  con otro registro relacionado"), que no dice ni cuál es el problema ni qué hacer.
+- Se cuentan **todos** los pedidos, no solo los abiertos: el `RESTRICT` no distingue
+  estados, así que uno pagado de hace un mes impide el borrado igual que uno en curso. Y
+  con razón: borrar la mesa dejaría el histórico sin a qué mesa pertenecía.
+- Si el conteo no se puede leer, **no se borra**: es más seguro negar el borrado que
+  llevarse por delante el historial de una mesa.
+
+Las dos comprobaciones van dentro de la transacción y con la fila bloqueada, para que no se
+cuele un pedido entre el conteo y el `DELETE`.
 
 ---
 
