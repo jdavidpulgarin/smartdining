@@ -22,6 +22,7 @@ import {
   eventIdParaIntento,
   estadoSelectorPago,
   infoTuParte,
+  montoTuParte,
   transicionPantallaPago,
   decidirSalidaEspera,
 } from './cuenta';
@@ -948,6 +949,32 @@ describe('utils/cuenta.js (J-08)', () => {
         esVerde: false,
         mensaje: 'Consumiste $ 18.000',
       });
+    });
+  });
+
+  describe('montoTuParte (J-15)', () => {
+    it('otro pagó con DIVIDIR y la mesa debe menos que mi saldo → TU PARTE = saldo de la mesa', () => {
+      expect(montoTuParte({ saldoMesa: 20000, miSaldo: 46000 })).toBe(20000);
+      expect(montoTuParte({ saldoMesa: 15000, miSaldo: 30000 })).toBe(15000);
+    });
+
+    it('caso normal (la mesa debe más o igual que mi saldo) → TU PARTE = mi saldo', () => {
+      expect(montoTuParte({ saldoMesa: 70000, miSaldo: 46000 })).toBe(46000);
+      expect(montoTuParte({ saldoMesa: 46000, miSaldo: 46000 })).toBe(46000);
+    });
+
+    it('saldo de la mesa en 0 → 0', () => {
+      expect(montoTuParte({ saldoMesa: 0, miSaldo: 46000 })).toBe(0);
+    });
+
+    it('comensal sin saldo propio → 0', () => {
+      expect(montoTuParte({ saldoMesa: 50000, miSaldo: 0 })).toBe(0);
+    });
+
+    it('valores nulos o no numéricos → 0', () => {
+      expect(montoTuParte(null)).toBe(0);
+      expect(montoTuParte({})).toBe(0);
+      expect(montoTuParte({ saldoMesa: 'abc', miSaldo: null })).toBe(0);
     });
   });
 

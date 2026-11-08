@@ -847,6 +847,23 @@ export function infoTuParte({
 }
 
 /**
+ * Calcula el monto a mostrar en la tarjeta "TU PARTE" (J-15).
+ * Muestra el saldo personal del comensal con tope en el saldo pendiente de la mesa,
+ * reflejando adecuadamente si otro comensal pagó con DIVIDIR o TODA LA MESA.
+ *
+ * @param {object} [opciones]
+ * @param {number} [opciones.saldoMesa=0] - Saldo restante de la mesa
+ * @param {number} [opciones.miSaldo=0] - Saldo personal del comensal
+ * @returns {number}
+ */
+export function montoTuParte(opciones = {}) {
+  const opts = opciones || {};
+  const saldoM = Math.max(0, Number(opts.saldoMesa) || 0);
+  const saldoP = Math.max(0, Number(opts.miSaldo) || 0);
+  return Math.min(saldoM, saldoP);
+}
+
+/**
  * Determina la siguiente pantalla y acciones de limpieza tras eventos de pago (J-15).
  * Apaga el estado de espera, el overlay y el spinner al confirmar o cancelar un pago.
  *
@@ -979,6 +996,7 @@ export default {
   eventIdParaIntento,
   estadoSelectorPago,
   infoTuParte,
+  montoTuParte,
   transicionPantallaPago,
   decidirSalidaEspera,
 };

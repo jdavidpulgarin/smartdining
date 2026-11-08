@@ -17,6 +17,7 @@ import {
   eventIdParaIntento,
   estadoSelectorPago,
   infoTuParte,
+  montoTuParte,
   transicionPantallaPago,
   decidirSalidaEspera,
 } from '../utils/cuenta';
@@ -350,6 +351,8 @@ function Pago() {
     yaPague,
   });
 
+  const tuParteMonto = montoTuParte({ saldoMesa: saldo, miSaldo });
+
   const comensales = cuenta?.comensales || [];
   const numPersonasDividir = personasDividir(cuenta, { presencia, yo: comensal });
 
@@ -566,7 +569,7 @@ function Pago() {
                 className="font-titulo text-[64px] tracking-wider leading-[0.95]"
                 style={{ color: tuParte.color }}
               >
-                {formatoPesos(miSaldo)}
+                {formatoPesos(tuParteMonto)}
               </span>
               <span className="text-xs text-texto-suave">
                 {tuParte.mensaje}
