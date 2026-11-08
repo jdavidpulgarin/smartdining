@@ -172,8 +172,8 @@ function Pago() {
     );
   }
 
-  const mesaNumero = cuenta?.numero || idMesa || 5;
-  const ubicacion = cuenta?.ubicacion || 'Terraza';
+  const mesaNumero = cuenta?.numero || idMesa || null;
+  const ubicacion = cuenta?.ubicacion || null;
   const total = cuenta?.total ?? 0;
   const pagado = cuenta?.pagado ?? 0;
   const saldo = cuenta?.saldo ?? 0;
@@ -341,9 +341,11 @@ function Pago() {
               <h1 className="m-0 font-titulo text-[40px] tracking-wider leading-none text-white">
                 LA CUENTA
               </h1>
-              <span className="text-xs text-texto-suave">
-                Mesa {mesaNumero} · {ubicacion}
-              </span>
+              {(mesaNumero || ubicacion) && (
+                <span className="text-xs text-texto-suave">
+                  {[mesaNumero ? `Mesa ${mesaNumero}` : null, ubicacion].filter(Boolean).join(' · ')}
+                </span>
+              )}
             </div>
 
             <div className="flex flex-col gap-1">
@@ -760,7 +762,7 @@ function Pago() {
               <path d="M8 10V7a4 4 0 0 1 8 0v3" />
             </svg>
             <span className="truncate">
-              Ref. {intencionActual?.referencia || `SD-${mesaNumero}-PENDIENTE`} · expira en 30 min
+              Ref. {intencionActual?.referencia || (mesaNumero ? `SD-${mesaNumero}-PENDIENTE` : 'SD-PENDIENTE')} · expira en 30 min
             </span>
           </div>
 
@@ -880,7 +882,7 @@ function Pago() {
               DILE AL CAJERO
             </span>
             <span className="font-titulo text-[34px] tracking-wider text-white">
-              MESA {mesaNumero} · {(comensal || 'MESA').toUpperCase()}
+              {mesaNumero ? `MESA ${mesaNumero}` : 'MESA'} · {(comensal || 'MESA').toUpperCase()}
             </span>
             <span className="text-[15px] text-acento font-semibold">
               {formatoPesos(montoModo)}

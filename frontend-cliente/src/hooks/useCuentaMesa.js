@@ -23,7 +23,7 @@ export function useCuentaMesa() {
   const { sesion } = useSesion();
   const { on: socketOn, estado: estadoSocket } = useMesaSocket();
 
-  const idMesa = sesion?.idMesa ?? 5;
+  const idMesa = sesion?.idMesa ?? null;
   const comensal = sesion?.comensal || '';
 
   const [cuenta, setCuenta] = useState(null);
