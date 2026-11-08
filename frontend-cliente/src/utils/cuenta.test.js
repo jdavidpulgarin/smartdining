@@ -16,6 +16,7 @@ import {
   avisoPedidoGrupal,
   TEXTO_SUGERENCIA_SIN_CELULAR,
   debeMostrarSugerenciaSinCelular,
+  debeSalirDeEspera,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -708,6 +709,33 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(TEXTO_SUGERENCIA_SIN_CELULAR).toBe(
         '¿Alguien no tiene celular? Pídele al mesero que lo agregue a la mesa.'
       );
+    });
+  });
+
+  describe('debeSalirDeEspera (J-15)', () => {
+    it('bajó el saldo → true', () => {
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: 30000 })).toBe(true);
+      expect(debeSalirDeEspera({ saldoAntes: 10000, saldoAhora: 0 })).toBe(true);
+    });
+
+    it('saldo igual → false', () => {
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: 50000 })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: 0, saldoAhora: 0 })).toBe(false);
+    });
+
+    it('saldo subió → false', () => {
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: 60000 })).toBe(false);
+    });
+
+    it('datos faltantes o inválidos → false', () => {
+      expect(debeSalirDeEspera({ saldoAntes: null, saldoAhora: 30000 })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: null })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: undefined, saldoAhora: 30000 })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: undefined })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: NaN, saldoAhora: 30000 })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: '50000', saldoAhora: 30000 })).toBe(false);
+      expect(debeSalirDeEspera({})).toBe(false);
+      expect(debeSalirDeEspera()).toBe(false);
     });
   });
 });

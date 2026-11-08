@@ -598,6 +598,30 @@ export function debeMostrarSugerenciaSinCelular(cuenta) {
   return saldoMesa > 0;
 }
 
+/**
+ * Determina si se debe salir de la pantalla de espera tras un intento de pago (J-15).
+ * Si el saldo actual bajó respecto al saldo que había antes de iniciar el pago,
+ * significa que el pago ya fue confirmado e impactado en la cuenta.
+ *
+ * @param {object} [opciones]
+ * @param {number} [opciones.saldoAntes]
+ * @param {number} [opciones.saldoAhora]
+ * @returns {boolean}
+ */
+export function debeSalirDeEspera({ saldoAntes, saldoAhora } = {}) {
+  if (
+    saldoAntes == null ||
+    saldoAhora == null ||
+    typeof saldoAntes !== 'number' ||
+    typeof saldoAhora !== 'number' ||
+    !Number.isFinite(saldoAntes) ||
+    !Number.isFinite(saldoAhora)
+  ) {
+    return false;
+  }
+  return saldoAhora < saldoAntes;
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -614,4 +638,5 @@ export default {
   avisoPedidoGrupal,
   TEXTO_SUGERENCIA_SIN_CELULAR,
   debeMostrarSugerenciaSinCelular,
+  debeSalirDeEspera,
 };

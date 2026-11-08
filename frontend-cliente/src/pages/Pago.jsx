@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useCuentaMesa } from '../hooks/useCuentaMesa';
 import { useMesaSocket } from '../context/MesaSocketContext';
 import {
@@ -13,6 +13,7 @@ import {
   avisoPedidoGrupal,
   TEXTO_SUGERENCIA_SIN_CELULAR,
   debeMostrarSugerenciaSinCelular,
+  debeSalirDeEspera,
 } from '../utils/cuenta';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout } from '../services/wompiWidget';
@@ -27,7 +28,7 @@ import { uuidV4 } from '../services/clienteMesa';
  */
 function Pago() {
   const { cuenta, cargando, error, recargar, idMesa, comensal } = useCuentaMesa();
-  const { on: socketOn, enviar, presencia } = useMesaSocket();
+  const { on: socketOn, enviar, presencia, estado: estadoSocket } = useMesaSocket();
 
   const [pantalla, setPantalla] = useState(() => {
     if (typeof window !== 'undefined' && window.location.search) {
@@ -87,6 +88,41 @@ function Pago() {
       }
     }
   }, []);
+
+  // Al montar Pago o reconectar el socket mientras está en espera, recargar la cuenta
+  const estadoSocketAnteriorRef = useRef(estadoSocket);
+  useEffect(() => {
+    if (pantalla === 'espera') {
+      recargar?.();
+    }
+  }, [pantalla, recargar]);
+
+  useEffect(() => {
+    if (
+      estadoSocketAnteriorRef.current !== 'conectado' &&
+      estadoSocket === 'conectado' &&
+      pantalla === 'espera'
+    ) {
+      recargar?.();
+    }
+    estadoSocketAnteriorRef.current = estadoSocket;
+  }, [estadoSocket, pantalla, recargar]);
+
+  // Si el saldo de la mesa bajó respecto al que había antes del pago, salir de espera
+  useEffect(() => {
+    if (pantalla !== 'espera' || !cuenta) return;
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    const saldoAntesRaw = sessionStorage.getItem('smartdining_saldo_antes_pago');
+    if (saldoAntesRaw != null) {
+      const saldoAntes = Number(saldoAntesRaw);
+      if (debeSalirDeEspera({ saldoAntes, saldoAhora: cuenta.saldo })) {
+        sessionStorage.removeItem('smartdining_saldo_antes_pago');
+        queueMicrotask(() => {
+          setPantalla('cuenta');
+        });
+      }
+    }
+  }, [pantalla, cuenta]);
 
   if (cargando && !cuenta) {
     return (
@@ -197,6 +233,9 @@ function Pago() {
     setErrorPago(null);
 
     try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.setItem('smartdining_saldo_antes_pago', String(cuenta?.saldo ?? 0));
+      }
       const intencion = await crearIntencion(modo, null, {
         presenciaSim: presencia,
         yoSim: comensal,
@@ -219,6 +258,9 @@ function Pago() {
   };
 
   const handleVolverCuenta = () => {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      sessionStorage.removeItem('smartdining_saldo_antes_pago');
+    }
     setPantalla('cuenta');
     setErrorPago(null);
   };
