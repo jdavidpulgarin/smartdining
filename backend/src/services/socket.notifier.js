@@ -546,11 +546,23 @@ function esReintentable(resultado) {
   return Boolean(resultado.respuesta && resultado.respuesta.codigo === CODIGO_ERROR_INTERNO);
 }
 
-/** Espera `ms`. El temporizador no retiene el proceso. */
+/**
+ * Espera `ms` entre dos intentos.
+ *
+ * El temporizador **SÍ retiene el proceso**, a propósito: son 150 ms, y es
+ * trabajo pendiente de verdad —hay un reintento que todavía no se ha mandado—,
+ * no un temporizador de fondo que se pueda abandonar.
+ *
+ * Con `unref()` el proceso podía terminar en medio de la espera si no quedaba
+ * nada más pendiente: en Linux eso dejaba 27 pruebas CANCELADAS a partir de la
+ * primera que espera un reintento ("Promise resolution is still pending but the
+ * event loop has already resolved"), porque el runner veía el event loop vacío
+ * y cerraba el archivo. Y fuera de las pruebas significaba lo mismo: un reintento
+ * perdido si el proceso se estaba cerrando justo en esos 150 ms.
+ */
 function esperar(ms) {
   return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    if (t.unref) t.unref();
+    setTimeout(resolve, ms);
   });
 }
 
