@@ -69,7 +69,7 @@ Los scripts SQL están versionados secuencialmente en `database/scripts/`:
 
 ```
 database/scripts/
-├── 00_ejecutar_todo.sql                # Orquestador maestro (schema.sql, scripts 01 a 24 y seed.sql)
+├── 00_ejecutar_todo.sql                # Línea base CONGELADA (schema.sql, 01 a 25 y seed.sql)
 ├── 01_tablas_complementarias.sql       # Tablas de soporte, kds y auditoria
 ├── 02_funciones_pagos.sql              # Logica transaccional de cobros y validaciones
 ├── 03_funciones_pedidos.sql            # Creacion y actualizacion de pedidos
@@ -93,23 +93,74 @@ database/scripts/
 ├── 21_fix_h06_limites_pedido.sql       # Limites cuantitativos de pedidos
 ├── 22_fix_h03_estado_pago.sql          # Consistencia de estado_pago
 ├── 23_fix_h08_intentos_pago_fallidos.sql # Registro y deteccion de fuerza bruta
-└── 24_vistas_reportes.sql              # Vistas analiticas para modulo de BI
+├── 24_vistas_reportes.sql              # Vistas analiticas para modulo de BI
+└── 25_schema_migraciones.sql          # Registro de scripts aplicados (P-17); fin de la línea base
 ```
 
-### Ejecución en PostgreSQL Local / Docker
-Para crear la base de datos completa con todas las migraciones y datos iniciales (usuarios, mesas y platos):
+### ⚠️ Regla: un script aplicado NUNCA se edita
+
+Desde P-17, cada base guarda en `schema_migraciones` qué scripts tiene aplicados y el
+checksum (sha256) de cada uno. Si un script ya aplicado cambia, `migrar.sh` se detiene
+con error y no aplica nada.
+
+- **Un cambio de esquema o de función va siempre en un script NUEVO**, con el siguiente
+  número libre: `26_...sql`, `27_...sql`. Para corregir una función, el script nuevo
+  hace `CREATE OR REPLACE`; para cambiar una tabla, `ALTER TABLE`.
+- **`00_ejecutar_todo.sql` quedó congelado** como línea base (schema, 01 a 25 y seed).
+  Los scripts 26 en adelante **no** se agregan ahí: los aplica `migrar.sh`.
+- Un script nuevo no lleva `BEGIN`/`COMMIT` propios: `migrar.sh` lo envuelve en una
+  transacción junto con su registro. Tampoco puede usar comandos que no corren dentro de
+  una transacción (`CREATE INDEX CONCURRENTLY`, `VACUUM`).
+- Hazlo idempotente cuando sea razonable (`IF NOT EXISTS`, `CREATE OR REPLACE`,
+  `ON CONFLICT DO NOTHING`).
+
+### Migraciones con `migrar.sh`
+
+`database/migrar.sh` aplica en orden los scripts de `database/scripts/` que la base aún
+no tiene registrados, cada uno en **una transacción** junto con su registro: o queda
+aplicado y registrado, o no queda nada. Antes de aplicar, revisa los checksums de los
+que ya están aplicados.
+
+| Situación | Qué hace |
+|---|---|
+| Base vacía | Corre `00_ejecutar_todo.sql` (línea base) y luego los scripts nuevos |
+| Base cargada antes de P-17 (sin `schema_migraciones`) | Corre solo `25_schema_migraciones.sql`, que registra 00 a 25, y luego los nuevos |
+| Base al día | Aplica solo lo que falte; si no falta nada, dice `nada que hacer` |
+| Un script aplicado cambió | Error (exit 1) y **no aplica nada** |
+| Un script nuevo falla | Se deshace completo, no se registra, exit 1 |
+
+Correrlo dos veces seguidas es seguro: la segunda vez no cambia nada.
+
+**Dentro del contenedor de Docker (recomendado, igual que en producción):**
 
 ```bash
-# 1. Crear base de datos
-psql -U postgres -c "CREATE DATABASE smartdining;"
-
-# 2. Ejecutar bootstrap completo (esquema, scripts y datos semilla)
-cd database/scripts
-psql -U postgres -d smartdining -f 00_ejecutar_todo.sql
+docker compose exec -T postgres sh /smartdining-db/migrar.sh
+# producción:
+docker compose -f docker-compose.prod.yml exec -T postgres sh /smartdining-db/migrar.sh
 ```
+
+Usa el `psql` 16 del contenedor y se conecta por el socket local con `POSTGRES_USER` y
+`POSTGRES_DB`: no hace falta contraseña ni tener PostgreSQL instalado en el equipo.
+
+**Git Bash en Windows**, contra un PostgreSQL instalado en el equipo:
+
+```bash
+PSQL="/c/Program Files/PostgreSQL/18/bin/psql.exe" PGUSER=postgres PGDATABASE=smartdining \
+  PGPASSWORD=<tu clave local> sh database/migrar.sh
+```
+
+No hace falta WSL. `migrar.sh` es POSIX `sh` (la imagen `postgres:16-alpine` no trae
+bash) y lee la conexión de las variables estándar `PGHOST`, `PGPORT`, `PGUSER`,
+`PGPASSWORD` y `PGDATABASE`. Quita los `\r` antes de calcular el checksum, así que un
+checkout con CRLF no cuenta como cambio. Con `MIGRAR_SCRIPTS_DIR` se puede apuntar a otra
+carpeta de scripts (solo para pruebas).
+
+**No corras dos migraciones a la vez** sobre la misma base.
 
 ### Ejecución con Docker Compose
 ```bash
 docker compose up -d postgres
-# La inicialización automática corre via database/docker-init.sh montado en /docker-entrypoint-initdb.d
+# Con el volumen vacío, database/docker-init.sh (montado en /docker-entrypoint-initdb.d)
+# corre migrar.sh: línea base + scripts nuevos, todo registrado en schema_migraciones.
+# Con un volumen que ya tiene datos, docker-init.sh NO corre: usa migrar.sh (arriba).
 ```
