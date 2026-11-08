@@ -140,7 +140,13 @@ function manejadorErrores(err, req, res, next) {
   if (res.headersSent) return next(err);
 
   if (err && typeof err.status === 'number') {
-    return res.status(err.status).json({ error: err.message });
+    // `motivo` es el codigo estable que el cliente puede comparar, al lado del
+    // `error` que es texto para leer: es la convencion de los 409 de mesas y de
+    // pedidos ({ error, motivo }). Solo viaja si el service lo puso, asi que
+    // ningun error de negocio anterior cambia de forma.
+    const cuerpo = { error: err.message };
+    if (typeof err.motivo === 'string' && err.motivo) cuerpo.motivo = err.motivo;
+    return res.status(err.status).json(cuerpo);
   }
 
   if (err && err.code === PG_RAISE_EXCEPTION) {
