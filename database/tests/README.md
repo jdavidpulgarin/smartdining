@@ -29,8 +29,8 @@ completa está en [`REPORTE-PRUEBAS.md`](REPORTE-PRUEBAS.md).
 
 ```bash
 # 1. Base de pruebas smartdining_test.
-#    Con Docker: PostgreSQL 16 en el puerto 5433, cargado por docker-init.sh.
-#    Sin Docker: usa el PostgreSQL local (5432) y la carga si no existe.
+#    Con Docker: PostgreSQL 16 en el puerto 5433; docker-init.sh -> migrar.sh la carga.
+#    Sin Docker: usa el PostgreSQL local (5432), la crea si no existe y corre migrar.sh.
 bash database/tests/levantar-entorno.sh
 
 # 2. Backend y socket-server apuntando a esa base (cada uno en su terminal), con

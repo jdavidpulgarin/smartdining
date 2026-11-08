@@ -16,8 +16,8 @@ if [ "$accion" = "down" ]; then
     docker compose -f "$SCRIPT_DIR/docker-compose.test.yml" down -v || true
   fi
   # Matar procesos locales si existen
-  pkill -f "smartdining.*4000" || true
-  pkill -f "smartdining.*4001" || true
+  pkill -f "smartdining.*4000" 2>/dev/null || true
+  pkill -f "smartdining.*4001" 2>/dev/null || true
   echo "Entorno apagado y limpio."
   exit 0
 fi
@@ -36,7 +36,10 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   echo "===> Levantando PostgreSQL 16 con Docker..."
   docker compose -f "$SCRIPT_DIR/docker-compose.test.yml" up -d
   echo "Esperando a que la base esté lista..."
-  until docker compose -f "$SCRIPT_DIR/docker-compose.test.yml" exec -T postgres-test pg_isready -U postgres -d smartdining_test; do
+  # Por TCP (-h 127.0.0.1): durante la primera inicialización el servidor
+  # temporal solo escucha en el socket, así que no responde hasta que
+  # docker-init.sh -> migrar.sh termina y arranca el servidor definitivo.
+  until docker compose -f "$SCRIPT_DIR/docker-compose.test.yml" exec -T postgres-test pg_isready -h 127.0.0.1 -U postgres -d smartdining_test; do
     sleep 1
   done
   echo "PostgreSQL 16 listo en puerto 5433."
@@ -56,15 +59,16 @@ PGDATABASE="${PGDATABASE:-smartdining_test}"
 export PGPASSWORD="${PGPASSWORD:-postgres}"
 
 if [ "$CON_DOCKER" = "0" ] && command -v psql >/dev/null 2>&1; then
-  # Solo se carga en una base recién creada: 00_ejecutar_todo.sql no es
-  # idempotente (schema.sql hace CREATE TABLE sin IF NOT EXISTS).
-  if psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'smartdining_test'" | grep -q 1; then
-    echo "===> smartdining_test ya existe: se usa tal cual (bórrala para recargarla)."
-  else
-    echo "===> Creando y cargando smartdining_test..."
+  if ! psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'smartdining_test'" | grep -q 1; then
+    echo "===> Creando smartdining_test..."
     psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -c "CREATE DATABASE smartdining_test;"
-    (cd "$REPO_ROOT/database/scripts" && psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d smartdining_test -v ON_ERROR_STOP=1 -f 00_ejecutar_todo.sql)
   fi
+  # migrar.sh (P-17), el mismo camino que Docker y producción: con la base
+  # vacía carga la línea base y los scripts nuevos (26 en adelante); con una
+  # base ya cargada aplica solo lo que falte.
+  echo "===> Migrando smartdining_test con migrar.sh..."
+  PGHOST="$PGHOST" PGPORT="$PGPORT" PGUSER="$PGUSER" PGDATABASE="$PGDATABASE" \
+    sh "$REPO_ROOT/database/migrar.sh"
 fi
 
 echo "===> Entorno de base de datos listo para pruebas."
