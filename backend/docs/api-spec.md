@@ -2163,6 +2163,40 @@ es el único sitio donde se decide el status. Traduce lo que lanza PostgreSQL as
 | **57014** `query_canceled` — venció `statement_timeout` | **503** | `La operación tardó demasiado y se canceló, vuelve a intentarlo en un momento` |
 | Cualquier otro error de PostgreSQL (23502 NOT NULL, 23P01 exclusión…) o inesperado | **500** | `Error interno del servidor` |
 
+### Inventario: SD001 y SD002 (P-19 · los traduce D-17)
+
+> **Pendiente de D-17.** La base ya los lanza (`database/scripts/27_inventario.sql`); hasta
+> que D-17 agregue la traducción, caen en la fila de "cualquier otro error" (500).
+
+Dos SQLSTATE propios del inventario. Los dos traen en el **DETAIL** un JSON (en `pg`:
+`err.detail`), que el backend parsea:
+
+| SQLSTATE | Cuándo | Status | Cuerpo |
+|---|---|---|---|
+| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "codigo": "SIN_STOCK", "error": "...", "faltantes": [...] }` |
+| **SD002** "stock negativo" | `registrar_movimiento_inventario` (merma o ajuste) dejaría el stock bajo 0 | **400** | `{ "error": "...", "stock_actual": 450 }` |
+
+**SD001**: `DETAIL = {"faltantes":[{ "tipo", "id", "nombre", "id_insumo", "insumo", "necesita", "hay" }]}`.
+
+- `tipo` es `"plato"` o `"ingrediente"`, e `id`/`nombre` dicen **qué quitar del carrito**.
+  `id_insumo`, `insumo`, `necesita` y `hay` explican por qué; pueden venir en `null` cuando
+  lo que falta son las opciones de un paso obligatorio del constructor.
+- **Puede llegar en el `COMMIT`**, no en el `INSERT`: la reserva es un trigger diferido
+  (`tr_reservar_inventario`) que corre al confirmar, para ver el pedido entero con sus
+  ingredientes. El `catch` que traduce el error tiene que envolver también el `COMMIT`.
+  Si el plato ya se sabía sin stock, llega antes, en el `INSERT` del detalle, con el mismo
+  formato.
+- Se revierte el **pedido entero**: no queda ningún detalle ni ninguna reserva.
+- Reintentar no sirve; el cliente quita lo agotado y reenvía.
+
+**SD002**: `DETAIL = {"id_insumo", "insumo", "stock_actual", "cantidad"}` (`cantidad` con
+signo: lo que se intentó mover). El `MESSAGE` ya trae el stock actual, en lenguaje para el
+usuario: `El movimiento dejaría "Queso" en negativo: hay 450.00 g`.
+
+Los números del DETAIL son números JSON; los `NUMERIC` que devuelve una consulta con `pg`
+llegan como **texto** y hay que convertirlos antes de reenviarlos (p. ej. a
+`/internal/inventario-alerta`).
+
 ### La frontera entre 400 y 422 (H-11)
 
 Los dos significan "esto no se va a arreglar reintentando", pero **no son lo mismo** y el
