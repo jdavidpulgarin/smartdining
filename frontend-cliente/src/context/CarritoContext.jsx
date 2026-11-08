@@ -424,7 +424,9 @@ export function CarritoProvider({ children }) {
       const plato = buscarPlatoEnMenu(menuRaw, idPlato);
       if (!plato) return linea;
 
-      let disponible = plato.disponible !== false;
+      const platoAgotado = plato.disponible === false;
+      let ingredienteAgotado = false;
+      let disponible = !platoAgotado;
       if (disponible && Array.isArray(linea.ingredientes) && Array.isArray(plato.pasos)) {
         for (const ingItem of linea.ingredientes) {
           const idIngNum = Number(ingItem.id_ingrediente ?? ingItem.idIngrediente);
@@ -434,6 +436,7 @@ export function CarritoProvider({ children }) {
             );
             if (ingObj && ingObj.disponible === false) {
               disponible = false;
+              ingredienteAgotado = true;
               break;
             }
           }
@@ -444,6 +447,8 @@ export function CarritoProvider({ children }) {
       return {
         ...linea,
         disponible,
+        platoAgotado,
+        ingredienteAgotado,
       };
     });
   }, [modo, state.lineas, menuRaw]);

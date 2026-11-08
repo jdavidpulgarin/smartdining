@@ -391,6 +391,28 @@ describe('carritoCompartido utils', () => {
       expect(res.motivo).toBe('No puedes enviar más de 50 ítems por pedido');
     });
 
+    it('falla si algún plato completo está agotado', () => {
+      const lineas = [
+        { disponible: true },
+        { disponible: false, platoAgotado: true },
+      ];
+      const res = puedoEnviar(lineas);
+      expect(res.ok).toBe(false);
+      expect(res.motivo).toBe('Tienes platos agotados: quítalos para enviar');
+    });
+
+    it('falla si solo se agotó un ingrediente', () => {
+      const lineas = [
+        { disponible: true },
+        { disponible: false, platoAgotado: false, ingredienteAgotado: true },
+      ];
+      const res = puedoEnviar(lineas);
+      expect(res.ok).toBe(false);
+      expect(res.motivo).toBe(
+        'Tienes platos con ingredientes agotados: quítalos para enviar'
+      );
+    });
+
     it('falla si algun plato tiene ingredientes agotados', () => {
       const lineas = [{ disponible: true }, { disponible: false }];
       const res = puedoEnviar(lineas);

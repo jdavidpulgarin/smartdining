@@ -117,7 +117,7 @@ function LineaCarrito({
               onClick={() =>
                 onActualizarCantidad?.(linea.id_linea, linea.cantidad + 1)
               }
-              disabled={linea.cantidad >= 20}
+              disabled={linea.cantidad >= 20 || linea.disponible === false}
               aria-label={`Aumentar cantidad de ${linea.nombre}`}
               className="w-8 h-8 flex items-center justify-center rounded-lg text-texto hover:text-primario hover:bg-superficie active:bg-superficie/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer font-bold text-base"
             >
