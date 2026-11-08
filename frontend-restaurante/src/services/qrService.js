@@ -14,29 +14,13 @@ import { mesasApi } from './api'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
 
-// Utilidad base64url para codificar/decodificar payloads sin dependencias externas
-function toBase64Url(str) {
-  return btoa(unescape(encodeURIComponent(str)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
-}
-
+// Decodifica base64url sin dependencias externas
 function fromBase64Url(str) {
   let base64 = str.replace(/-/g, '+').replace(/_/g, '/')
   while (base64.length % 4) {
     base64 += '='
   }
   return decodeURIComponent(escape(atob(base64)))
-}
-
-function generarCadenaAleatoria(longitud = 12) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
-  let result = ''
-  for (let i = 0; i < longitud; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return result
 }
 
 /**
@@ -108,113 +92,46 @@ export function decodificarTokenQr(token) {
 export async function generarTokenQrMesa(idMesa, ttlMinutos = 240) {
   const numId = Number(idMesa)
 
-  // 1. Intento principal contra el Backend oficial (POST /api/mesas/:id/abrir)
-  try {
-    const data = await mesasApi.abrir(numId)
-    if (data?.token) {
-      const decodificado = decodificarTokenQr(data.token)
-      return {
-        token: data.token,
-        url: data.url,
-        id_mesa: numId,
-        reutilizado: Boolean(data.reutilizado),
-        emitido_en: decodificado.emitido_en || Date.now(),
-        expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
-        sid: decodificado.sid,
-        servidor: 'backend-api',
-      }
-    }
-  } catch (err) {
-    console.warn('Aviso: backend mesas/:id/abrir falló o está offline:', err.message)
-    // Si el error es 401, 403 o 409 (reglas de negocio), relanzar para que la UI informe
-    if (err.status && err.status < 500) {
-      throw err
-    }
+  // Sin respaldo (P-13): si el backend falla, el error sube a la pantalla. Un
+  // QR inventado aquí no tendría una firma válida y el comensal no podría
+  // entrar, aunque el panel mostrara la mesa como abierta.
+  const data = await mesasApi.abrir(numId)
+  if (!data?.token) {
+    throw new Error('El servidor no devolvió el código QR de la mesa')
   }
-
-  // 2. Fallback sintético local en caso de entorno de desarrollo sin backend levantado
-  const iat = Date.now()
-  const exp = iat + ttlMinutos * 60 * 1000
-  const sid = generarCadenaAleatoria(12)
-  const payload = {
-    m: numId,
-    iat,
-    exp,
-    sid,
-  }
-
-  const cuerpo = `v1.${toBase64Url(JSON.stringify(payload))}`
-  const firmaMock = toBase64Url(`sig_${sid}_${iat}`).slice(0, 43)
-  const token = `${cuerpo}.${firmaMock}`
-
+  const decodificado = decodificarTokenQr(data.token)
   return {
-    token,
-    url: `http://localhost:5173/?token=${encodeURIComponent(token)}`,
+    token: data.token,
+    url: data.url,
     id_mesa: numId,
-    emitido_en: iat,
-    expira_en: exp,
-    sid,
-    servidor: 'local-fallback',
+    reutilizado: Boolean(data.reutilizado),
+    emitido_en: decodificado.emitido_en || Date.now(),
+    expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
+    sid: decodificado.sid,
+    servidor: 'backend-api',
   }
 }
 
 /**
- * Rota el token QR de una mesa en curso:
- * Intenta POST /api/mesas/:id/rotar-qr en el backend oficial.
- * Si el backend está desconectado o no implementa la ruta, genera un nuevo sid firmado
- * y notifica /internal/qr-rotado al socket-server.
+ * Rota el token QR de una mesa en curso: POST /api/mesas/:id/rotar-qr.
+ * Sin respaldo (P-13): si el backend falla, el error sube a la pantalla.
  */
 export async function rotarTokenQrMesa(idMesa, ttlMinutos = 240) {
   const numId = Number(idMesa)
 
-  // 1. Intento contra el Backend oficial (POST /api/mesas/:id/rotar-qr)
-  try {
-    const data = await mesasApi.rotarQr(numId)
-    if (data?.token) {
-      const decodificado = decodificarTokenQr(data.token)
-      return {
-        token: data.token,
-        url: data.url,
-        id_mesa: numId,
-        emitido_en: decodificado.emitido_en || Date.now(),
-        expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
-        sid: decodificado.sid,
-        servidor: 'backend-api',
-      }
-    }
-  } catch (err) {
-    console.warn('Aviso: endpoint rotarQr no disponible o falló:', err.message)
-    if (err.status && err.status === 409) {
-      throw err
-    }
+  const data = await mesasApi.rotarQr(numId)
+  if (!data?.token) {
+    throw new Error('El servidor no devolvió el nuevo código QR de la mesa')
   }
-
-  // 2. Fallback sintético local: genera nuevo sid firmado y avisa al socket-server
-  const iat = Date.now()
-  const exp = iat + ttlMinutos * 60 * 1000
-  const sid = generarCadenaAleatoria(12)
-  const payload = {
-    m: numId,
-    iat,
-    exp,
-    sid,
-  }
-
-  const cuerpo = `v1.${toBase64Url(JSON.stringify(payload))}`
-  const firmaMock = toBase64Url(`sig_${sid}_${iat}`).slice(0, 43)
-  const nuevoToken = `${cuerpo}.${firmaMock}`
-
-  // Notificar al socket-server para que tablets físicas reciban 'qr:actualizado'
-  await notificarQrRotado(numId, nuevoToken)
-
+  const decodificado = decodificarTokenQr(data.token)
   return {
-    token: nuevoToken,
-    url: `http://localhost:5173/?token=${encodeURIComponent(nuevoToken)}&mesa=${numId}`,
+    token: data.token,
+    url: data.url,
     id_mesa: numId,
-    emitido_en: iat,
-    expira_en: exp,
-    sid,
-    servidor: 'local-fallback-rotado',
+    emitido_en: decodificado.emitido_en || Date.now(),
+    expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
+    sid: decodificado.sid,
+    servidor: 'backend-api',
   }
 }
 

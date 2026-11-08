@@ -9,7 +9,12 @@ import {
   navegarALogin,
   EVENT_UNAUTHORIZED,
   EVENT_RATE_LIMITED,
+  mensajeNoGuardado,
+  usarMocks,
+  constructorApi,
+  platosApi,
 } from '../api'
+import { generarTokenQrMesa, rotarTokenQrMesa } from '../qrService'
 
 describe('Interceptor y cliente HTTP (apiFetch)', () => {
   const originalLocation = window.location
@@ -269,6 +274,56 @@ describe('Interceptor y cliente HTTP (apiFetch)', () => {
       controller.abort()
       await promesa
       expect(resuelta).toBe(true)
+    })
+  })
+
+  describe('P-13: sin respaldos falsos', () => {
+    it('un fallo de red se marca como sinConexion', async () => {
+      vi.spyOn(global, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+
+      const err = await apiFetch('/platos/1/disponible', { method: 'PATCH' }).catch((e) => e)
+      expect(err.sinConexion).toBe(true)
+      expect(err.message).toBe('Sin conexión con el servidor')
+      expect(mensajeNoGuardado(err)).toBe('Sin conexión, no se guardó')
+    })
+
+    it('mensajeNoGuardado muestra el error real cuando el servidor sí respondió', () => {
+      const err = Object.assign(new Error('Ese plato no existe'), { status: 404 })
+      expect(mensajeNoGuardado(err)).toBe('No se guardó: Ese plato no existe')
+    })
+
+    it('el constructor no guarda en localStorage si el backend no responde', async () => {
+      vi.spyOn(global, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+      const setItem = vi.spyOn(Storage.prototype, 'setItem')
+
+      await expect(constructorApi.guardarPaso(1, { nombre: 'Base' })).rejects.toMatchObject({ sinConexion: true })
+      await expect(constructorApi.eliminarIngrediente(5)).rejects.toMatchObject({ sinConexion: true })
+      await expect(constructorApi.obtenerPasos(1)).rejects.toMatchObject({ sinConexion: true })
+      expect(setItem.mock.calls.filter(([clave]) => String(clave).includes('constructor'))).toHaveLength(0)
+    })
+
+    it('marcarPersonalizable ya no finge éxito si el backend lo rechaza', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 400,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ error: 'Required' }),
+      })
+      await expect(platosApi.marcarPersonalizable(1, { personalizable: true })).rejects.toThrow('Required')
+    })
+
+    it('abrir o rotar el QR sin conexión falla en vez de fabricar un token con firma falsa', async () => {
+      vi.spyOn(global, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+
+      await expect(generarTokenQrMesa(3)).rejects.toMatchObject({ sinConexion: true })
+      await expect(rotarTokenQrMesa(3)).rejects.toMatchObject({ sinConexion: true })
+    })
+
+    it('usarMocks solo es verdadero en desarrollo y con VITE_USE_MOCKS=true', () => {
+      expect(usarMocks({ DEV: true, VITE_USE_MOCKS: 'true' })).toBe(true)
+      expect(usarMocks({ DEV: false, VITE_USE_MOCKS: 'true' })).toBe(false)
+      expect(usarMocks({ DEV: true, VITE_USE_MOCKS: 'false' })).toBe(false)
+      expect(usarMocks({ DEV: true })).toBe(false)
     })
   })
 
