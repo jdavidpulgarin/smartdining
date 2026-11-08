@@ -111,9 +111,10 @@ async function reservar(idMesa, { alias, clave }, { vigencia = '3h', ahora = Dat
     memoria.set(idMesa, mesa);
     const guardado = mesa.get(clave);
     if (guardado && guardado.vence > ahora()) return { enUso: true };
-    // El respaldo guarda lo mismo que Redis (vencimiento + los campos extra),
-    // para que `esSinCelular` conteste igual con Redis y sin él.
-    mesa.set(clave, { vence: ahora() + ttl * 1000, extra: extra || null });
+    // El respaldo guarda lo mismo que Redis (el texto del alias, el vencimiento
+    // y los campos extra), para que `esSinCelular` y `aliasReservado` contesten
+    // igual con Redis y sin él.
+    mesa.set(clave, { alias, vence: ahora() + ttl * 1000, extra: extra || null });
     return { ok: true };
   }
 
@@ -126,6 +127,70 @@ async function reservar(idMesa, { alias, clave }, { vigencia = '3h', ahora = Dat
     return { ok: true };
   } catch (err) {
     console.error('[alias] no se pudo reservar el alias:', err.message);
+    return { noDisponible: true };
+  }
+}
+
+/**
+ * Lee la reserva de un alias UNA sola vez y devuelve todo lo que se sabe de
+ * ella: de qué TIPO es y CÓMO se escribe.
+ *
+ * Es la pieza común de `esSinCelular` y `aliasReservado`, que antes hacían la
+ * misma lectura cada una. Quien necesita las dos cosas —el `DELETE` de
+ * comensales, que decide con el tipo y avisa al socket-server con el texto— la
+ * llama directamente y paga un solo viaje a Redis.
+ *
+ * Cuatro resultados, y cada uno significa algo distinto para quien llama:
+ *   - `{noDisponible: true}` Redis no responde: no se sabe nada.
+ *   - `{noExiste: true}`     nadie tiene esa clave reservada (o ya venció).
+ *   - `{ilegible: true}`     hay algo guardado, pero no se puede leer.
+ *   - `{alias, sinCelular}`  el texto con el que se registró, y si la agregó el
+ *     personal (`true`) o entró por QR / es una reserva anterior a la marca
+ *     (`false`).
+ *
+ * @returns {Promise<{noDisponible: true} | {noExiste: true} | {ilegible: true}
+ *   | {alias: string, sinCelular: boolean}>}
+ */
+async function leerReserva(idMesa, clave, { ahora = Date.now } = {}) {
+  let cliente;
+  try {
+    cliente = await clienteRedis();
+  } catch (err) {
+    console.error('[alias] Redis no está disponible:', err.message);
+    return { noDisponible: true };
+  }
+
+  if (!cliente) {
+    if (process.env.NODE_ENV === 'production') return { noDisponible: true };
+    const mesa = memoria.get(idMesa);
+    const guardado = mesa && mesa.get(clave);
+    if (!guardado || guardado.vence <= ahora()) return { noExiste: true };
+    // Una entrada del respaldo anterior a D-18b puede no traer el texto: no se
+    // puede saber cómo se escribe, así que cuenta como ilegible.
+    if (!guardado.alias) return { ilegible: true };
+    return {
+      alias: guardado.alias,
+      sinCelular: Boolean(guardado.extra && guardado.extra[MARCA_SIN_CELULAR] === true),
+    };
+  }
+
+  try {
+    const crudo = await cliente.hGet(llave(idMesa), clave);
+    if (crudo === null || crudo === undefined) return { noExiste: true };
+
+    let valor;
+    try {
+      valor = JSON.parse(crudo);
+    } catch {
+      console.error(`[alias] el alias guardado de la mesa ${idMesa} no se pudo leer`);
+      return { ilegible: true };
+    }
+
+    if (!valor || typeof valor.alias !== 'string' || !valor.alias) return { ilegible: true };
+
+    return { alias: valor.alias, sinCelular: valor[MARCA_SIN_CELULAR] === true };
+  } catch (err) {
+    console.error('[alias] no se pudo leer el alias:', err.message);
     return { noDisponible: true };
   }
 }
@@ -152,42 +217,38 @@ async function reservar(idMesa, { alias, clave }, { vigencia = '3h', ahora = Dat
  *
  * @returns {Promise<{sinCelular: boolean} | {noExiste: true} | {noDisponible: true}>}
  */
-async function esSinCelular(idMesa, clave, { ahora = Date.now } = {}) {
-  let cliente;
-  try {
-    cliente = await clienteRedis();
-  } catch (err) {
-    console.error('[alias] Redis no está disponible:', err.message);
-    return { noDisponible: true };
-  }
+async function esSinCelular(idMesa, clave, opciones = {}) {
+  const reserva = await leerReserva(idMesa, clave, opciones);
+  if (reserva.noDisponible || reserva.noExiste) return reserva;
+  // Un valor ilegible se trata como de QR, por lo mismo: ante la duda no se
+  // suelta la reserva de nadie.
+  if (reserva.ilegible) return { sinCelular: false };
+  return { sinCelular: reserva.sinCelular };
+}
 
-  if (!cliente) {
-    if (process.env.NODE_ENV === 'production') return { noDisponible: true };
-    const mesa = memoria.get(idMesa);
-    const guardado = mesa && mesa.get(clave);
-    if (!guardado || guardado.vence <= ahora()) return { noExiste: true };
-    return { sinCelular: Boolean(guardado.extra && guardado.extra[MARCA_SIN_CELULAR] === true) };
-  }
-
-  try {
-    const crudo = await cliente.hGet(llave(idMesa), clave);
-    if (crudo === null || crudo === undefined) return { noExiste: true };
-
-    let valor;
-    try {
-      valor = JSON.parse(crudo);
-    } catch {
-      // Un valor que no se puede leer se trata como de QR, por lo mismo: ante
-      // la duda no se suelta la reserva de nadie.
-      console.error(`[alias] el alias guardado de la mesa ${idMesa} no se pudo leer`);
-      return { sinCelular: false };
-    }
-
-    return { sinCelular: valor && valor[MARCA_SIN_CELULAR] === true };
-  } catch (err) {
-    console.error('[alias] no se pudo leer el alias:', err.message);
-    return { noDisponible: true };
-  }
+/**
+ * El TEXTO canónico del alias reservado con esa clave (D-18b).
+ *
+ * `esSinCelular` contesta de qué TIPO es la reserva; esto contesta CÓMO se
+ * escribe. Son dos preguntas distintas y quien pide pedidos solo necesita la
+ * segunda: le da igual si la persona entró por QR o la agregó el mesero, lo que
+ * necesita es guardar el alias con la misma capitalización y las mismas tildes
+ * con las que se registró, porque la cuenta agrupa por el texto exacto
+ * (`btrim(dp.comensal)`) y «Abuela» y «abuela» saldrían en dos filas.
+ *
+ *   - `{alias: 'Abuela'}`    hay una reserva con esa clave; ese es su texto.
+ *   - `{noExiste: true}`     nadie tiene esa clave reservada (o ya venció).
+ *   - `{noDisponible: true}` Redis no responde: no se sabe.
+ *
+ * @returns {Promise<{alias: string} | {noExiste: true} | {noDisponible: true}>}
+ */
+async function aliasReservado(idMesa, clave, opciones = {}) {
+  const reserva = await leerReserva(idMesa, clave, opciones);
+  if (reserva.noDisponible) return reserva;
+  // Sin texto utilizable no hay nada que canonicalizar, y quien llama sigue con
+  // su propio camino (la cuenta, en el caso de los pedidos).
+  if (reserva.noExiste || reserva.ilegible) return { noExiste: true };
+  return { alias: reserva.alias };
 }
 
 /**
@@ -256,6 +317,6 @@ async function olvidarMesa(idMesa) {
 }
 
 module.exports = {
-  normalizarAlias, reservar, esSinCelular, liberar, olvidarMesa, segundos, llave,
-  MIN, MAX, VIGENCIA_SIN_CELULAR, MARCA_SIN_CELULAR,
+  normalizarAlias, reservar, leerReserva, esSinCelular, aliasReservado, liberar,
+  olvidarMesa, segundos, llave, MIN, MAX, VIGENCIA_SIN_CELULAR, MARCA_SIN_CELULAR,
 };
