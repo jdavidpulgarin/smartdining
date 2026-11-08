@@ -111,9 +111,10 @@ async function reservar(idMesa, { alias, clave }, { vigencia = '3h', ahora = Dat
     memoria.set(idMesa, mesa);
     const guardado = mesa.get(clave);
     if (guardado && guardado.vence > ahora()) return { enUso: true };
-    // El respaldo guarda lo mismo que Redis (vencimiento + los campos extra),
-    // para que `esSinCelular` conteste igual con Redis y sin él.
-    mesa.set(clave, { vence: ahora() + ttl * 1000, extra: extra || null });
+    // El respaldo guarda lo mismo que Redis (el texto del alias, el vencimiento
+    // y los campos extra), para que `esSinCelular` y `aliasReservado` contesten
+    // igual con Redis y sin él.
+    mesa.set(clave, { alias, vence: ahora() + ttl * 1000, extra: extra || null });
     return { ok: true };
   }
 
@@ -191,6 +192,62 @@ async function esSinCelular(idMesa, clave, { ahora = Date.now } = {}) {
 }
 
 /**
+ * El TEXTO canónico del alias reservado con esa clave (D-18b).
+ *
+ * `esSinCelular` contesta de qué TIPO es la reserva; esto contesta CÓMO se
+ * escribe. Son dos preguntas distintas y quien pide pedidos solo necesita la
+ * segunda: le da igual si la persona entró por QR o la agregó el mesero, lo que
+ * necesita es guardar el alias con la misma capitalización y las mismas tildes
+ * con las que se registró, porque la cuenta agrupa por el texto exacto
+ * (`btrim(dp.comensal)`) y «Abuela» y «abuela» saldrían en dos filas.
+ *
+ *   - `{alias: 'Abuela'}`    hay una reserva con esa clave; ese es su texto.
+ *   - `{noExiste: true}`     nadie tiene esa clave reservada (o ya venció).
+ *   - `{noDisponible: true}` Redis no responde: no se sabe.
+ *
+ * @returns {Promise<{alias: string} | {noExiste: true} | {noDisponible: true}>}
+ */
+async function aliasReservado(idMesa, clave, { ahora = Date.now } = {}) {
+  let cliente;
+  try {
+    cliente = await clienteRedis();
+  } catch (err) {
+    console.error('[alias] Redis no está disponible:', err.message);
+    return { noDisponible: true };
+  }
+
+  if (!cliente) {
+    if (process.env.NODE_ENV === 'production') return { noDisponible: true };
+    const mesa = memoria.get(idMesa);
+    const guardado = mesa && mesa.get(clave);
+    if (!guardado || guardado.vence <= ahora()) return { noExiste: true };
+    // Una reserva del respaldo anterior a D-18b puede no traer el texto; se
+    // trata como si no existiera y quien llama sigue con su propio camino.
+    return guardado.alias ? { alias: guardado.alias } : { noExiste: true };
+  }
+
+  try {
+    const crudo = await cliente.hGet(llave(idMesa), clave);
+    if (crudo === null || crudo === undefined) return { noExiste: true };
+
+    let valor;
+    try {
+      valor = JSON.parse(crudo);
+    } catch {
+      console.error(`[alias] el alias guardado de la mesa ${idMesa} no se pudo leer`);
+      return { noExiste: true };
+    }
+
+    return valor && typeof valor.alias === 'string' && valor.alias
+      ? { alias: valor.alias }
+      : { noExiste: true };
+  } catch (err) {
+    console.error('[alias] no se pudo leer el alias:', err.message);
+    return { noDisponible: true };
+  }
+}
+
+/**
  * Suelta UN alias de la mesa, por su clave (D-18).
  *
  * Es lo contrario de `reservar`, no de `olvidarMesa`: quitar a una persona sin
@@ -256,6 +313,6 @@ async function olvidarMesa(idMesa) {
 }
 
 module.exports = {
-  normalizarAlias, reservar, esSinCelular, liberar, olvidarMesa, segundos, llave,
-  MIN, MAX, VIGENCIA_SIN_CELULAR, MARCA_SIN_CELULAR,
+  normalizarAlias, reservar, esSinCelular, aliasReservado, liberar, olvidarMesa,
+  segundos, llave, MIN, MAX, VIGENCIA_SIN_CELULAR, MARCA_SIN_CELULAR,
 };
