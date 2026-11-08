@@ -853,7 +853,7 @@ Respuestas (`{ ok: false, codigo, mensaje }` en los errores; **en ningún error 
 
 | Status · `codigo` | Cuándo |
 |---|---|
-| `200 { "ok": true, "duplicado": false }` | Cambio aplicado, o sin cambio: `agregar` un alias idéntico que ya está en `sin_celular`, o `quitar` uno que no está. Sin cambio **no** se emite `mesa:presencia` |
+| `200 { "ok": true, "duplicado": false }` | Cambio aplicado, o sin cambio: `agregar` un alias idéntico que ya está en `sin_celular`, o `quitar` cuando ningún alias guardado tiene esa clave. Sin cambio **no** se emite `mesa:presencia` |
 | `200 { "ok": true, "duplicado": true }` | Ese `eventId` ya se procesó; no reemite |
 | `400 PAYLOAD_INVALIDO` | Algún campo no cumple la tabla o la regla del alias |
 | `400 JSON_INVALIDO` | El cuerpo no es un objeto JSON |
@@ -864,7 +864,16 @@ Respuestas (`{ ok: false, codigo, mensaje }` en los errores; **en ningún error 
 | `500/502/503 ERROR_INTERNO` | Fallo propio o de Redis, o reinicio en curso; reintentar |
 | `503 NO_CONFIGURADO` | El socket-server no tiene `INTERNAL_API_KEY` |
 
-«Idéntico» significa el mismo texto ya normalizado. `quitar` compara así, no por clave.
+**`quitar` compara por clave**, igual que el backend (`normalizarAlias`): busca en `sin_celular`
+el alias guardado cuya clave coincida con la del alias recibido y elimina **ese** alias guardado.
+Si ninguno coincide, responde `200 { "ok": true, "duplicado": false }` sin emitir
+`mesa:presencia`.
+
+Ejemplo: la reservada es «Abuela»; el panel llama `DELETE /api/mesas/5/comensales/abuela`; el
+backend libera por clave; el socket recibe `{ "accion": "quitar", "alias": "abuela" }` y quita
+«Abuela».
+
+Defensa doble: además, el backend envía el alias guardado en la reserva (D-18b).
 
 **Las guardias no reemplazan al backend:**
 
@@ -902,8 +911,8 @@ Respuestas (`{ ok: false, codigo, mensaje }` en los errores; **en ningún error 
 
 **Notas para la implementación (R-19.2):**
 
-- Usar los mismos casos de prueba del alias que el backend, para que las dos validaciones no se
-  separen.
+- La clave del socket-server debe ser la **misma función** que la del backend, con casos de prueba
+  compartidos para que no se separen. Deben incluir `Abuela`/`abuela` y `Ána`/`ana`.
 - Llevar a Redis la marca de mesa liberada (hoy `mesasLiberadas`, en memoria) para que sobreviva
   a los reinicios.
 
