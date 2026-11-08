@@ -827,6 +827,8 @@ devuelve `false` y no lanza. **No se avisa al socket-server:** no existe un even
 | PATCH | /mesas/:id/estado | admin, cajero, mesero | Cambia estado (`disponible`, `ocupada`, `reservada`, `mantenimiento`) |
 | **PATCH** | **/mesas/:id** | **admin** | **Edita `numero`, `capacidad` y `ubicacion` (D-16, ver abajo)** |
 | DELETE | /mesas/:id | admin | Elimina. **409 si está ocupada o tiene pedidos** (ver abajo) |
+| **POST** | **/mesas/:id/comensales** | **mesero, admin** | **Da de alta a alguien sin celular (D-18, ver abajo)** |
+| **DELETE** | **/mesas/:id/comensales/:alias** | **mesero, admin** | **Lo quita de la mesa (D-18, ver abajo)** |
 
 ```json
 { "id_mesa": 5, "numero": 5, "capacidad": 4, "ubicacion": "Terraza", "estado": "ocupada" }
@@ -918,6 +920,168 @@ puede se comprueban **antes** y se explican:
 
 Las dos comprobaciones van dentro de la transacción y con la fila bloqueada, para que no se
 cuele un pedido entre el conteo y el `DELETE`.
+
+### Comensales sin celular (D-18) — `mesero`, `admin`
+
+Alguien se sienta en la mesa **sin teléfono**: no puede escanear el QR, así que no tiene
+sesión ni alias propio. El personal de sala lo da de alta con su alias y pide por esa
+persona. A partir de ahí cuenta como una persona más de la mesa, su consumo sale aparte en
+la cuenta por comensal y puede pagar en caja con su alias.
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| **POST** | **/mesas/:id/comensales** | **mesero, admin** | Da de alta a alguien sin celular |
+| **DELETE** | **/mesas/:id/comensales/:alias** | **mesero, admin** | Lo quita de la mesa |
+
+**No hay tabla nueva ni cambios en `database/`.** La persona sin celular vive en la **misma
+reserva de alias** que las sesiones de QR (`sd:mesa:{id}:alias` en Redis, ver
+[§`POST /mesas/qr/:token/sesion`](#post-mesasqrtokensesion--punto-de-entrada-del-comensal)),
+con **la misma función de validación** (`normalizarAlias` de
+`src/services/alias-comensal.js`, regla R-18). Dos formas de validar el alias en el mismo
+proyecto acabarían aceptando en una lo que la otra rechaza, y entonces la unicidad —que es
+lo que impide cargarle los platos a otro— dejaría de valer.
+
+#### POST /mesas/:id/comensales
+
+Body: `{ "alias": "Abuela" }`
+
+- El alias sigue la **regla R-18**: NFC, sin espacios a los lados y sin dobles espacios, de
+  2 a 40 caracteres, solo letras, marcas, números, espacio y `. _ ' -`. La unicidad se mide
+  por **clave** (sin tildes, en minúsculas, sin espacios ni `. _ ' -`), así que «Abuela»,
+  «abuela» y «Abuéla» son la misma persona. Un alias inválido es **400** con
+  `{ "error": …, "campo": "alias" }`.
+- `:id` tiene que ser un **entero positivo**, o **400**. Una mesa que no existe, **404**.
+- **201** devuelve `{ "id_mesa": 5, "alias": "Abuela" }`, con el alias **ya normalizado**:
+  es el texto con el que habrá que quitarlo después.
+
+**El orden de las comprobaciones es parte del contrato:**
+
+1. alias válido → **400**
+2. la mesa existe → **404**
+3. la mesa tiene **sesión abierta** (`estado = 'ocupada'`) → **409**
+4. reservar el alias → **409** si ya está en uso, **503** si no hay Redis
+5. avisar al socket-server
+
+El paso 3 va **antes** del 4 a propósito: al revés quedaría un alias reservado en una mesa
+que nadie va a usar, y ese nombre no se podría volver a dar de alta hasta que venciera.
+
+```json
+{ "error": "Esa mesa no tiene una sesión abierta: ábrela antes de agregar comensales", "motivo": "mesa_sin_sesion" }
+{ "error": "Ese nombre ya lo usa otra persona en la mesa, elige otro", "motivo": "alias_en_uso" }
+{ "error": "No se pudo agregar al comensal, intenta de nuevo en unos segundos", "motivo": "alias_no_disponible" }
+```
+
+El **503 `alias_no_disponible`** es el mismo comportamiento que las sesiones de QR: sin
+Redis no hay unicidad garantizada, y una mesa sin unicidad de alias permite cargarle los
+platos a otra persona, así que **falla cerrada** y no se da de alta a nadie.
+
+**La reserva dura 24 h**, no las 3 h por defecto de `reservar`. Las 3 h son la vida del JWT
+del comensal: cuando su token caduca, su reserva puede caducar con él. Aquí no hay JWT que
+caduque —la persona no tiene teléfono— y lo que manda es la lista
+`sd:mesa:{id}:sin_celular` del socket-server, que vive 24 h igual que `pagaron`. Con 3 h el
+alias se liberaría a media tarde y otro comensal podría reservar el mismo nombre mientras
+la persona sigue sentada.
+
+#### DELETE /mesas/:id/comensales/:alias
+
+El alias va en la URL (porcentaje-codificado) y se **normaliza igual** que al agregar, así
+que `/comensales/abuela` quita a «Abuela».
+
+- **204** sin cuerpo cuando se quita. Mesa inexistente, **404**; alias inválido, **400**.
+- **409** si esa persona **ya tiene platos** en la cuenta de la mesa:
+
+```json
+{ "error": "Esa persona ya tiene platos en la cuenta: no se puede quitar de la mesa", "motivo": "comensal_con_platos" }
+```
+
+  Quitarla dejaría su consumo **sin dueño** en el desglose por comensal, y además el alias
+  volvería a estar libre: otra persona podría reservar ese nombre y heredar sus platos.
+- Se comparan los platos **por clave del alias**, no por el texto. La cuenta agrupa por
+  `btrim(dp.comensal)` (función `obtener_cuenta_mesa`), que distingue mayúsculas y tildes:
+  comparando el texto, quitar a «abuela» pasaría aunque hubiera platos cargados a «Abuela»,
+  que es la misma persona.
+- Se cuentan los **platos** (`items_pedidos > 0`), no el saldo: alguien que ya pagó lo suyo
+  sigue teniendo sus platos en la cuenta. Un comensal que sale con 0 ítems (puede aparecer
+  por un pago sin consumo) **sí** se puede quitar.
+- **503 `alias_no_disponible`** si Redis no responde: la reserva sigue ahí, y responder 204
+  sería mentir.
+
+#### El aviso interno `POST /internal/mesa-comensal`
+
+> **Depende de R-19 y del PR #99, que todavía es una PROPUESTA.** El contrato está en
+> `socket-server/EVENTS.md` §6.4 de la rama `docs/socket-contratos-v11`, **sin fusionar**, y
+> la ruta puede **no existir aún** en el socket-server. Nada de la API REST depende de que
+> funcione.
+
+Tras reservar o soltar el alias, el backend manda:
+
+```json
+{ "id_mesa": 5, "alias": "Abuela", "accion": "agregar", "eventId": "<uuid v4>" }
+```
+
+El socket-server lo suma a `sd:mesa:{id}:sin_celular` y lo incluye en `mesa:presencia`
+(§6.4 y §5.2), así cuenta para «igual» y puede pagar en caja con su alias.
+
+- **`accion`** es `"agregar"` o `"quitar"`.
+- **El `alias` que viaja es SIEMPRE el normalizado que se reservó**, en las dos acciones:
+  §6.4 compara **texto idéntico** para quitar, así que mandar lo que escribió el mesero
+  —con otra capitalización o un espacio doble— dejaría a la persona sentada para siempre.
+- **`eventId` UUID v4, uno por acción.** Es lo que hace seguro reintentar: el socket-server
+  deduplica por `backend:mesa-comensal:{eventId}`.
+
+**Reintentos.** `enviar` del notificador sigue **sin reintentar** y los avisos que ya
+existían no cambian de comportamiento; el reintento es una capa aparte que solo usa este
+aviso:
+
+- Se reintenta **solo** ante **500/502/503 con `codigo: "ERROR_INTERNO"`**, con el **mismo
+  `eventId`**. Hasta 3 intentos, 150 ms entre ellos, y el **timeout es por intento** (el de
+  `enviar`, `SOCKET_TIMEOUT_MS`, 1500 ms por defecto).
+- **Nunca** ante **503 `NO_CONFIGURADO`** (al socket-server le falta `INTERNAL_API_KEY`: no
+  se arregla repitiendo) ni ante un **4xx** (400 es un cuerpo mal armado, 401 una clave que
+  no coincide, 409 una regla de negocio que hay que atender, no repetir).
+- Tampoco ante un **TIMEOUT** o un **INALCANZABLE**: el contrato nombra solo esos tres
+  status y, con la ruta aún sin implementar, lo más probable es que no haya nadie al otro
+  lado; reintentar alargaría cada petición del mesero por un aviso que no va a llegar.
+- **Un `agregar` viejo no se reintenta** si ya se pidió `quitar` a esa misma persona en esa
+  mesa: insistir volvería a sentar a alguien que el mesero acaba de quitar. Un `quitar` sí
+  se reintenta siempre, porque es el estado final.
+
+**Orden.** Los avisos de **una misma mesa van en serie** (una cadena de promesas por
+`id_mesa`), así un `quitar` nunca se adelanta al `agregar` anterior. Es por mesa y no
+global: la mesa 5 no espera a la 9, y menos con reintentos de por medio. Con **una**
+instancia del backend basta; con varias, cada proceso ordenaría solo sus propios avisos y
+lo que impide aplicar dos veces un reintento seguiría siendo el `eventId`.
+
+**Qué pasa si el aviso falla.** La reserva **ya está hecha** y el backend es la **fuente de
+verdad**: un 404 (R-19 todavía no existe), un socket-server caído, un timeout o un
+`ERROR_INTERNO` que agota los reintentos **no cambian la respuesta HTTP** —el alta sigue
+siendo **201** y la baja **204**— y se registran en el log del servidor sin datos
+sensibles.
+
+**La excepción es el 409**, y es la única: este aviso **sí se espera** en el `POST`, al
+contrario que el resto de los avisos de la API. Si el socket-server responde **409**
+(`MESA_LIBERADA`, `ALIAS_EN_USO`, `LIMITE_COMENSALES`), el backend **suelta el alias que
+acaba de reservar** —si no, quedaría una reserva sin presencia: nadie podría volver a usar
+ese nombre y la persona no aparecería en la mesa— y devuelve **409** con el motivo
+traducido. El `DELETE` **no** espera su aviso: no hay nada que decidir con la respuesta y el
+alias ya está suelto.
+
+Los 409 del socket-server son **guardias, no la autoridad**: el backend valida la sesión de
+la mesa y reserva el alias él mismo (§6.4, "Las guardias no reemplazan al backend").
+
+#### Pedir por esa persona y verla en la cuenta
+
+No hace falta nada nuevo: `POST /pedidos` del **mesero** o del **admin** ya acepta
+`comensal` por ítem (el alias del body vale para el personal, que pide de parte de alguien;
+para un comensal el alias sale **solo** del JWT, H-05). Queda en
+`detalles_pedido.comensal`, que es la columna por la que
+[`GET /mesas/:id/cuenta`](#mesas) agrupa el desglose por persona.
+
+> **Ojo con la capitalización al pedir.** El `comensal` de `POST /pedidos` se valida con su
+> propio esquema, que solo recorta espacios (no aplica `normalizarAlias`), y la cuenta
+> agrupa por el texto. Si se da de alta «Abuela» y luego se pide con `"abuela"`, la cuenta
+> mostrará **dos filas**. Lo recomendable es mandar el `alias` tal como lo devolvió el
+> `201`. No se cambia el esquema de `POST /pedidos` en D-18: su contrato ya está publicado.
 
 ---
 
