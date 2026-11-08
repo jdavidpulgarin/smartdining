@@ -71,7 +71,10 @@ Token QR de la mesa 1 recién sembrada: `qr-token-mesa-01-a1b2c3d4`.
 
 ## Requisitos previos
 
-- Node.js 18+
+- **Node.js 22+**. Es la versión del CI (`.github/workflows/ci.yml`) y la que hace falta de
+  verdad: `npm test` y `npm run test:cobertura` usan banderas del runner de pruebas que no
+  existen en 18 (`--test-coverage-exclude`, el resumen `# cancelled` que vigila el script
+  del CI).
 - PostgreSQL corriendo localmente, con `database/schema.sql` y `database/seed.sql` de Jarrison ya ejecutados
 - Redis **opcional en desarrollo**: sin él todo funciona, solo sin caché (ver [Redis en desarrollo](#redis-en-desarrollo-es-opcional))
 
@@ -84,12 +87,24 @@ cp .env.example .env
 # Edita .env con tus credenciales locales de PostgreSQL/Redis y un JWT_SECRET propio
 ```
 
+**El `JWT_SECRET` no es opcional: sin uno válido el backend no arranca.** Al iniciar,
+`exigirEntornoValido()` corta con código 1 y explica el problema si falta, está vacío, trae
+alguno de los valores de ejemplo del `.env.example` (quien haya visto el repositorio podría
+firmar tokens válidos) o tiene **menos de 16 caracteres**. Ese mismo valor tiene que estar
+también en `socket-server/.env`, o los dos servicios no se reconocerán los tokens.
+
 ## Ejecución
 
 ```bash
 npm run dev     # con nodemon, recarga automática
 npm start       # modo normal
 ```
+
+**Para desarrollar, `npm run dev`, no `node server.js`.** Ejecutar
+`node server.js` (o `npm start`, que es lo mismo) **NO activa el modo red local**: ese modo
+se enciende solo con `NODE_ENV=development`, y es `npm run dev` quien la fija —la pone
+`nodemon.json`, no el código—. Arrancado a mano, el enlace del QR sale con `localhost` y
+desde un celular no abre nada (ver [Modo red local](#modo-red-local-probar-el-cliente-desde-un-celular-desarrollo)).
 
 ### Redis en desarrollo (es opcional)
 
@@ -174,6 +189,47 @@ Docker corta el cierre antes de que termine y el pool puede quedar sin cerrar.
 curl http://localhost:4000/api/health
 # { "status": "ok" }
 ```
+
+## Límite de peticiones (H-04, H-27 y D-21)
+
+Tres límites, todos por IP y todos con respuesta **429**, cabecera `Retry-After` y el
+cuerpo `{ "error": … }` de siempre. Los dos de ruta son la defensa de verdad; el global
+(D-21) es un techo de respaldo para que ninguna IP pueda inundar el resto de la API.
+
+| Qué limita | Defecto | Variables |
+|---|---|---|
+| `POST /api/auth/login` (solo los fallos, por IP + email) | **5 / minuto** | `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS` |
+| `POST /api/mesas/qr/:token/sesion` | **20 / minuto** | `RATE_LIMIT_QR_MAX`, `RATE_LIMIT_QR_VENTANA_MS` |
+| **Todo lo demás** (global, D-21) | **2000 / minuto** | `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS` |
+
+Las seis variables son **opcionales**: si falta, está vacía o no trae un entero positivo,
+se usa el valor por defecto. Los tres límites **se desactivan solos dentro de las
+pruebas**, o cualquier suite que haga unas cuantas llamadas empezaría a chocar con el techo
+según creciera.
+
+**El global no cuenta** `GET /api/health` —es la sonda de Docker: si contara, un límite
+agotado haría que el contenedor se declarara enfermo y se reiniciara solo— ni el canal
+interno con el socket-server (`POST /api/transacciones/internal`,
+`GET /api/mesas/:id/cuenta/interno`), que va por `x-internal-key`, sale todo con **una**
+IP y ya tiene su propia autenticación.
+
+**Por qué 2000 por minuto, que parece muchísimo.** Los comensales de un local comparten
+**una sola IP pública**, la del wifi: el cupo no es de una persona, es del restaurante
+entero. Con 20 mesas de 4 son 80 teléfonos y, en el pico, cada uno hace del orden de 15 a
+20 peticiones en ese minuto (80 × 20 = 1600), más las tablets del personal. 2000 deja pasar
+ese pico y aun así corta a una sola máquina que intente raspar la API: 33 por segundo
+sostenidos no los hace ningún comensal. Si el local es más grande, o si varios locales
+salen por la misma IP, sube `RATE_LIMIT_GLOBAL_MAX`.
+
+**Detrás de un proxy hace falta `TRUST_PROXY`.** Sin ella, `req.ip` es la IP de nginx y el
+límite global se convierte en un único cupo compartido por todo el mundo. Está apagada por
+defecto porque creerse `X-Forwarded-For` sin un proxy delante permite falsificar la IP; en
+`docker-compose.prod.yml` vale `172.31.250.10`, la IP fija de nginx, y de ningún otro
+contenedor se acepta la cabecera.
+
+**Limitación conocida:** el contador vive en memoria del proceso. Con N instancias del
+backend el techo real es 2000×N; para que fuera global de verdad haría falta un store
+compartido en Redis.
 
 ## Roles y sesiones
 
@@ -324,10 +380,65 @@ en `socket-server/EVENTS.md` §5.3 y §5.4.
 npm test
 ```
 
-119 pruebas con `node --test` + `supertest`. No hacen falta PostgreSQL ni Redis:
-`tests/helpers/fake-db.js` reemplaza `pool.query`/`pool.connect` por dobles en memoria
-y registra las queries ejecutadas, así que las pruebas también verifican con qué
-valores llega cada `INSERT`.
+Más de **1.200** pruebas con `node --test` + `supertest`. **La cifra exacta no se fija
+aquí a propósito**: cada PR suma pruebas y un número escrito en el README queda obsoleto a
+la semana siguiente (este decía "119" cuando ya iban más de mil). El número real lo dice el
+resumen de `npm test`:
+
+```
+ℹ tests 1222
+ℹ pass 1222
+ℹ fail 0
+ℹ cancelled 0
+```
+
+No hacen falta PostgreSQL ni Redis: `tests/helpers/fake-db.js` reemplaza
+`pool.query`/`pool.connect` por dobles en memoria y registra las queries ejecutadas, así
+que las pruebas también verifican con qué valores llega cada `INSERT`.
+
+**`cancelled` tiene que ser 0, no solo `fail`.** Una prueba cancelada **no se ejecutó**:
+`node --test` cancela las que siguen en un archivo que deja el event loop colgado, y el
+proceso puede terminar con código 0 sin haber probado nada. En el CI eso lo vigila
+[`.github/scripts/npm-test-sin-canceladas.sh`](../.github/scripts/npm-test-sin-canceladas.sh),
+que corre `npm test` y falla si el resumen trae canceladas. Para reproducir el conteo
+oficial, lo mismo que hace el CI:
+
+```bash
+cd backend && bash ../.github/scripts/npm-test-sin-canceladas.sh
+```
+
+`npm test` solo corre `tests/*.test.js`. Las de `tests/integracion/` **no** entran en ese
+glob porque necesitan PostgreSQL de verdad; van aparte:
+
+```bash
+npm run test:integracion
+```
+
+### Cobertura
+
+```bash
+npm run test:cobertura
+```
+
+Es `npm test` con `--experimental-test-coverage` y **el mismo glob**
+(`tests/*.test.js`, sin `tests/integracion/`) y el mismo `--require` del entorno de
+pruebas, para que la cobertura sea la de la batería que de verdad corre en el CI. Los
+propios archivos de prueba se excluyen del informe (`--test-coverage-exclude`): lo que
+interesa es cuánto de `src/` se ejercita, y contar las pruebas a sí mismas infla el
+porcentaje sin decir nada.
+
+Medido hoy (noviembre de 2026, `develop` en `067d0d0`, 1222 pruebas):
+
+| | Líneas | Ramas | Funciones |
+|---|---|---|---|
+| **`src/services/`** | **98,80 %** | 89,66 % | 98,35 % |
+| Todo el backend | 98,84 % | 93,03 % | 97,70 % |
+
+En `services/` son 3.386 de 3.427 líneas. Lo que queda sin cubrir son sobre todo ramas de
+Redis caído y de errores de red del aviso al socket-server (`socket.notifier.js` es el más
+bajo en ramas, 77 %). `server.js` baja al 85,93 % porque el bloque de `require.main`
+—`listen` y los manejadores de señal— no se ejecuta cuando las pruebas importan la app con
+supertest, que es justamente lo que se quiere.
 
 ## Estructura
 

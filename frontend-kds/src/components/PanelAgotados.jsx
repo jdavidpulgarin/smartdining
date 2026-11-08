@@ -1,25 +1,55 @@
 import { AlertCircle, RefreshCw, Search, WifiOff, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { avisoDelPanel, filtrar, motivoListaVacia } from '../lib/agotados'
+import {
+  avisoDelPanel,
+  avisoDelPanelPlatos,
+  contarPlatosAgotados,
+  filtrar,
+  filtrarPlatos,
+  motivoListaVacia,
+  motivoListaVaciaPlatos,
+} from '../lib/agotados'
 import FilaIngrediente from './FilaIngrediente'
+import FilaPlato from './FilaPlato'
 
 /**
- * Panel de ingredientes agotados (D-10): cajon lateral sobre el tablero.
+ * Panel de agotados: ingredientes (D-10) y platos (D-14). Cajon lateral sobre
+ * el tablero.
  *
  * Cajon y no pagina aparte: agotar algo pasa EN MEDIO del servicio, mirando las
  * comandas. Sacar al cocinero del tablero para apagar un ingrediente seria
  * perder de vista justo lo que esta cocinando.
  *
+ * Las dos listas van en SECCIONES con un selector, no una debajo de la otra:
+ * son casi 40 ingredientes y la carta entera de platos, y apiladas obligarian a
+ * desplazarse media pantalla para llegar a los platos. Cada seccion mantiene su
+ * propio aviso (puede fallar una y no la otra) y comparte el buscador y el
+ * filtro, que es lo que el cocinero acaba de escribir.
+ *
  * Accesibilidad: role="dialog" con aria-modal, el foco entra al buscador al
  * abrir, Esc cierra, el tabulador no se escapa del cajon y al cerrar el foco
  * VUELVE al boton que lo abrio (si no, quien navega con teclado queda perdido
- * al principio de la pagina).
+ * al principio de la pagina). El selector es un tablist de verdad, para que un
+ * lector de pantalla anuncie cuantas secciones hay y en cual esta.
  */
 
 const MENSAJES_VACIO = {
-  vacio: 'Ningún plato de la carta tiene ingredientes configurados.',
-  'sin-agotados': 'No hay ningún ingrediente agotado. Todo disponible.',
+  ingredientes: {
+    vacio: 'Ningún plato de la carta tiene ingredientes configurados.',
+    'sin-agotados': 'No hay ningún ingrediente agotado. Todo disponible.',
+    'sin-resultados': (texto) => `Ningún ingrediente coincide con «${texto}».`,
+  },
+  platos: {
+    vacio: 'La carta no tiene platos.',
+    'sin-agotados': 'No hay ningún plato agotado. Toda la carta disponible.',
+    'sin-resultados': (texto) => `Ningún plato coincide con «${texto}».`,
+  },
 }
+
+const SECCIONES = [
+  { id: 'ingredientes', rotulo: 'Ingredientes' },
+  { id: 'platos', rotulo: 'Platos' },
+]
 
 export default function PanelAgotados({
   abierto,
@@ -29,12 +59,17 @@ export default function PanelAgotados({
   onConmutar,
   onRecargar,
   onDescartarError,
+  onConmutarPlato,
+  onDescartarErrorPlato,
 }) {
   const [texto, setTexto] = useState('')
   const [soloAgotados, setSoloAgotados] = useState(false)
+  const [seccion, setSeccion] = useState('ingredientes')
 
   const cajon = useRef(null)
   const buscador = useRef(null)
+
+  const enPlatos = seccion === 'platos'
 
   // Al abrir, el foco va al buscador. Con 39 ingredientes y un teclado, buscar
   // es mas rapido que tabular hasta la fila.
@@ -75,12 +110,26 @@ export default function PanelAgotados({
     return () => document.removeEventListener('keydown', alPulsar)
   }, [abierto, onCerrar])
 
-  const grupos = useMemo(() => filtrar(estado, { texto, soloAgotados }), [estado, texto, soloAgotados])
-  const motivoVacio = useMemo(
-    () => motivoListaVacia(estado, { texto, soloAgotados }),
-    [estado, texto, soloAgotados]
+  const grupos = useMemo(
+    () => (enPlatos ? [] : filtrar(estado, { texto, soloAgotados })),
+    [enPlatos, estado, texto, soloAgotados]
   )
-  const aviso = avisoDelPanel(estado)
+  const platos = useMemo(
+    () => (enPlatos ? filtrarPlatos(estado, { texto, soloAgotados }) : []),
+    [enPlatos, estado, texto, soloAgotados]
+  )
+  const motivoVacio = useMemo(
+    () =>
+      enPlatos
+        ? motivoListaVaciaPlatos(estado, { texto, soloAgotados })
+        : motivoListaVacia(estado, { texto, soloAgotados }),
+    [enPlatos, estado, texto, soloAgotados]
+  )
+
+  const aviso = enPlatos ? avisoDelPanelPlatos(estado) : avisoDelPanel(estado)
+  const errorDeLaSeccion = enPlatos ? estado.platos?.error : estado.error
+  const mensajes = MENSAJES_VACIO[seccion]
+  const platosAgotados = contarPlatosAgotados(estado)
 
   if (!abierto) return null
 
@@ -99,7 +148,7 @@ export default function PanelAgotados({
         ref={cajon}
         role="dialog"
         aria-modal="true"
-        aria-label="Ingredientes agotados"
+        aria-label="Ingredientes y platos agotados"
         className={[
           'relative flex h-full w-full max-w-md flex-col border-l border-[color:var(--color-borde)]',
           // bg opaco, no translucido: detras puede haber la foto de fondo de la
@@ -109,20 +158,22 @@ export default function PanelAgotados({
         ].join(' ')}
       >
         <header className="flex items-center justify-between gap-3 border-b border-[color:var(--color-borde)] px-4 py-3">
-          <h2 className="display text-2xl font-bold text-[color:var(--color-texto)]">
-            Ingredientes
-          </h2>
+          <h2 className="display text-2xl font-bold text-[color:var(--color-texto)]">Agotados</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onRecargar}
               className="grid h-12 w-12 place-items-center rounded-xl border border-[color:var(--color-borde)] text-[color:var(--color-texto)]"
-              aria-label="Actualizar la lista de ingredientes"
-              title="Actualizar la lista de ingredientes"
+              aria-label="Actualizar las listas"
+              title="Actualizar las listas"
             >
               <RefreshCw
                 size={20}
-                className={estado.cargando ? 'animate-spin motion-reduce:animate-none' : undefined}
+                className={
+                  estado.cargando || estado.platos?.cargando
+                    ? 'animate-spin motion-reduce:animate-none'
+                    : undefined
+                }
                 aria-hidden="true"
               />
             </button>
@@ -138,6 +189,38 @@ export default function PanelAgotados({
           </div>
         </header>
 
+        {/* Que se apaga: un ingrediente de un paso, o el plato entero. */}
+        <div
+          role="tablist"
+          aria-label="Qué se agota"
+          className="flex gap-2 border-b border-[color:var(--color-borde)] px-4 py-3"
+        >
+          {SECCIONES.map(({ id, rotulo }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={seccion === id}
+              onClick={() => setSeccion(id)}
+              className={[
+                'min-h-12 flex-1 rounded-xl border px-3 text-base font-bold uppercase tracking-wide',
+                seccion === id
+                  ? 'border-[color:var(--color-texto)] bg-[color:var(--color-panel-alto)] text-[color:var(--color-texto)]'
+                  : 'border-[color:var(--color-borde)] text-[color:var(--color-texto-suave)]',
+              ].join(' ')}
+            >
+              {rotulo}
+              {/* Solo en Platos y solo si hay alguno agotado: asi el cocinero ve
+                  que hay algo que atender en la otra seccion sin entrar. */}
+              {id === 'platos' && platosAgotados > 0 && (
+                <span className="ml-2 rounded-full bg-[color:var(--color-alerta)] px-2 text-sm text-white">
+                  {platosAgotados}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
         {/* Sin socket el PATCH sigue funcionando (va por HTTP): lo que se pierde
             es ver lo que cambien OTRAS pantallas. Se dice sin alarmar. */}
         {!conectado && (
@@ -149,7 +232,7 @@ export default function PanelAgotados({
 
         <div className="flex flex-col gap-2 border-b border-[color:var(--color-borde)] px-4 py-3">
           <label className="relative block">
-            <span className="sr-only">Buscar ingrediente</span>
+            <span className="sr-only">{enPlatos ? 'Buscar plato' : 'Buscar ingrediente'}</span>
             <Search
               size={18}
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--color-texto-suave)]"
@@ -160,7 +243,7 @@ export default function PanelAgotados({
               type="search"
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
-              placeholder="Buscar ingrediente"
+              placeholder={enPlatos ? 'Buscar plato' : 'Buscar ingrediente'}
               className="min-h-12 w-full rounded-xl border border-[color:var(--color-borde)] bg-[color:var(--color-panel-alto)] pl-10 pr-3 text-lg text-[color:var(--color-texto)] placeholder:text-[color:var(--color-texto-suave)]"
             />
           </label>
@@ -182,7 +265,11 @@ export default function PanelAgotados({
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {aviso === 'cargando' && (
-            <ul className="flex flex-col gap-2" aria-busy="true" aria-label="Cargando ingredientes">
+            <ul
+              className="flex flex-col gap-2"
+              aria-busy="true"
+              aria-label={enPlatos ? 'Cargando platos' : 'Cargando ingredientes'}
+            >
               {[0, 1, 2, 3, 4].map((i) => (
                 <li
                   key={i}
@@ -203,7 +290,7 @@ export default function PanelAgotados({
             <div className="rounded-xl border border-[color:var(--color-alerta)] px-4 py-3">
               <p className="flex items-start gap-2 text-[color:var(--color-alerta)]">
                 <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
-                {estado.error}
+                {errorDeLaSeccion}
               </p>
               <button
                 type="button"
@@ -218,7 +305,9 @@ export default function PanelAgotados({
           {!aviso && motivoVacio && (
             <div className="py-6 text-center text-[color:var(--color-texto-suave)]">
               <p>
-                {MENSAJES_VACIO[motivoVacio] || `Ningún ingrediente coincide con «${texto}».`}
+                {motivoVacio === 'sin-resultados'
+                  ? mensajes['sin-resultados'](texto)
+                  : mensajes[motivoVacio]}
               </p>
               {motivoVacio === 'sin-resultados' && (
                 <button
@@ -236,7 +325,23 @@ export default function PanelAgotados({
             </div>
           )}
 
-          {!aviso && !motivoVacio && (
+          {!aviso && !motivoVacio && enPlatos && (
+            <ul className="flex flex-col gap-2">
+              {platos.map((plato) => (
+                <FilaPlato
+                  // Por id_plato, nunca por nombre.
+                  key={plato.id_plato}
+                  plato={plato}
+                  enVuelo={Object.hasOwn(estado.platos.enVuelo, String(plato.id_plato))}
+                  error={estado.platos.errores[String(plato.id_plato)]}
+                  onConmutar={onConmutarPlato}
+                  onDescartarError={onDescartarErrorPlato}
+                />
+              ))}
+            </ul>
+          )}
+
+          {!aviso && !motivoVacio && !enPlatos && (
             <div className="flex flex-col gap-5">
               {grupos.map((grupo) => (
                 <section key={grupo.id_plato}>

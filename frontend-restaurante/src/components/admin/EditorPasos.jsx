@@ -12,7 +12,7 @@ import {
   ToggleRight,
   Flame,
 } from 'lucide-react'
-import { constructorApi, platosApi } from '../../services/api'
+import { constructorApi, platosApi, mensajeNoGuardado } from '../../services/api'
 
 export function EditorPasos({ dish, onClose, onDishUpdated }) {
   const [loading, setLoading] = useState(true)
@@ -120,7 +120,7 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
         })
       }
     } catch (err) {
-      showToast(err.message || 'Error al actualizar configuración base', true)
+      showToast(mensajeNoGuardado(err), true)
     } finally {
       setSavingBaseConfig(false)
     }
@@ -173,7 +173,7 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
       setIsPasoModalOpen(false)
       recargarPasos()
     } catch (err) {
-      showToast(err.message || 'Error al guardar el paso', true)
+      showToast(mensajeNoGuardado(err), true)
     }
   }
 
@@ -185,7 +185,7 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
       showToast('Paso eliminado')
       recargarPasos()
     } catch (err) {
-      showToast(err.message || 'Error al eliminar el paso', true)
+      showToast(mensajeNoGuardado(err), true)
     }
   }
 
@@ -248,7 +248,7 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
       setIsIngModalOpen(false)
       recargarPasos()
     } catch (err) {
-      showToast(err.message || 'Error al guardar el ingrediente', true)
+      showToast(mensajeNoGuardado(err), true)
     }
   }
 
@@ -260,7 +260,7 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
       showToast('Ingrediente eliminado')
       recargarPasos()
     } catch (err) {
-      showToast(err.message || 'Error al eliminar el ingrediente', true)
+      showToast(mensajeNoGuardado(err), true)
     }
   }
 
@@ -271,7 +271,7 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
       await constructorApi.actualizarIngrediente(ing.id_ingrediente, { disponible: nuevoEstado })
       recargarPasos()
     } catch (err) {
-      showToast(err.message || 'Error al cambiar disponibilidad', true)
+      showToast(mensajeNoGuardado(err), true)
     }
   }
 
