@@ -1,6 +1,6 @@
-export const API_URL = (
-  import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
-).replace(/\/+$/, '');
+import { urlsServidor } from '../utils/urlsServidor';
+
+export const API_URL = urlsServidor().api;
 
 let manejadorSesionInvalida = null;
 

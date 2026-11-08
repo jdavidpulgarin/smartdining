@@ -405,12 +405,174 @@ async function tokenQrDeMesa(idMesa) {
   return (result.rows[0] && result.rows[0].token_qr) || null;
 }
 
+/* ========================================================================== *
+ * Edición y borrado de una mesa (D-16, parte A)
+ * ========================================================================== */
+
+/** SQLSTATE de unicidad. En mesas solo puede ser `numero` o `token_qr`. */
+const PG_UNIQUE = '23505';
+
+const MENSAJE_NUMERO_EN_USO = 'Ya hay otra mesa con ese número';
+const MENSAJE_OCUPADA_NO_SE_RENUMERA =
+  'Esa mesa está ocupada: no se puede cambiar su número mientras haya gente sentada. '
+  + 'Libérala primero.';
+const MENSAJE_OCUPADA_NO_SE_BORRA =
+  'Esa mesa está ocupada: libérala antes de borrarla.';
+const MENSAJE_CON_PEDIDOS =
+  'Esa mesa tiene pedidos registrados: no se puede borrar sin perder el historial. '
+  + 'Déjala en mantenimiento si ya no se usa.';
+
+/** Error de negocio con status, que es la primera rama de errores.middleware. */
+function errorDeMesa(status, message) {
+  return { status, message };
+}
+
+/**
+ * PATCH /api/mesas/:id — numero, capacidad y ubicacion.
+ *
+ * `estado` NO se toca aquí: ya tiene su propia ruta
+ * (`PATCH /api/mesas/:id/estado`, de admin, cajero y mesero) porque mover el
+ * estado es la operación del salón, con su propia lógica de `sesion_iniciada_en`
+ * y sus propios permisos. Esto es el alta/baja del mobiliario, que es de admin.
+ *
+ * Reglas, con la fila bloqueada:
+ *   - 404 si la mesa no existe.
+ *   - una mesa OCUPADA no se renumera (409). El número es lo que la gente ve en
+ *     el QR impreso, lo que grita el mesero y lo que el comensal confirma al
+ *     escanear: cambiárselo con gente sentada y pedidos en marcha deja los
+ *     tiquetes de cocina apuntando a una mesa que ya no existe con ese nombre.
+ *     Capacidad y ubicación sí se pueden corregir, porque no identifican nada.
+ *   - un número repetido es 409 con un mensaje que lo dice (el UNIQUE de la base
+ *     daría un 23505, que el manejador central traduce a un "Ya existe un
+ *     registro con esos datos" genérico).
+ *
+ * Los campos que no vienen no se tocan (`COALESCE`).
+ *
+ * `actualizado_en` y `version_control` los pone el trigger
+ * tr_control_concurrencia_mesa: aquí no se escriben a mano.
+ *
+ * @param {number|string} id
+ * @param {{numero?: number, capacidad?: number, ubicacion?: string}} cambios
+ * @returns {Promise<object|null>} la mesa actualizada, o null si no existe.
+ */
+async function actualizarDatos(id, cambios) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const actual = await client.query(
+      'SELECT m.id_mesa, m.numero, m.estado FROM mesas m WHERE m.id_mesa = $1 FOR UPDATE',
+      [id]
+    );
+    const mesa = actual.rows[0];
+    if (!mesa) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    const cambiaElNumero = cambios.numero !== undefined && Number(cambios.numero) !== Number(mesa.numero);
+    if (cambiaElNumero && mesa.estado === ESTADO_MESA_OCUPADA) {
+      await client.query('ROLLBACK');
+      throw errorDeMesa(409, MENSAJE_OCUPADA_NO_SE_RENUMERA);
+    }
+
+    const result = await client.query(
+      `UPDATE mesas
+          SET numero    = COALESCE($2, numero),
+              capacidad = COALESCE($3, capacidad),
+              ubicacion = COALESCE($4, ubicacion)
+        WHERE id_mesa = $1
+        RETURNING *`,
+      [id, cambios.numero ?? null, cambios.capacidad ?? null, cambios.ubicacion ?? null]
+    );
+
+    await client.query('COMMIT');
+    return result.rows[0] || null;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Ya estaba cerrada.
+    }
+    // Solo `numero` puede chocar por aquí: `token_qr` no se toca en este UPDATE.
+    if (err && err.code === PG_UNIQUE) throw errorDeMesa(409, MENSAJE_NUMERO_EN_USO);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * DELETE /api/mesas/:id, comprobando ANTES por qué no se puede borrar.
+ *
+ * Sin esto, una mesa con pedidos chocaba con el `ON DELETE RESTRICT` de
+ * `fk_pedidos_mesa` y el manejador central devolvía un 409 genérico ("La
+ * operación choca con otro registro relacionado"), que no le dice al admin ni
+ * qué mesa ni qué hacer. Y una mesa OCUPADA sin pedidos todavía (recién abierta)
+ * se borraba con un 204, dejando una sesión de QR viva apuntando a una mesa que
+ * ya no existe.
+ *
+ * Las dos comprobaciones van dentro de la transacción y con la fila bloqueada,
+ * para que no se cuele un pedido entre el conteo y el DELETE.
+ *
+ * Cuando SÍ se puede borrar, el comportamiento es el de antes: devuelve la fila
+ * borrada, y null si la mesa no existía (el controller responde 404).
+ *
+ * @returns {Promise<{id_mesa: number}|null>}
+ */
 async function eliminar(id) {
-  const result = await pool.query(
-    'DELETE FROM mesas WHERE id_mesa = $1 RETURNING id_mesa',
-    [id]
-  );
-  return result.rows[0] || null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const actual = await client.query(
+      'SELECT m.id_mesa, m.estado FROM mesas m WHERE m.id_mesa = $1 FOR UPDATE',
+      [id]
+    );
+    const mesa = actual.rows[0];
+    if (!mesa) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    if (mesa.estado === ESTADO_MESA_OCUPADA) {
+      await client.query('ROLLBACK');
+      throw errorDeMesa(409, MENSAJE_OCUPADA_NO_SE_BORRA);
+    }
+
+    // TODOS los pedidos, no solo los abiertos: el RESTRICT de la FK no
+    // distingue estados, así que uno pagado de hace un mes impide el borrado
+    // igual que uno en curso. Y con razón: borrar la mesa dejaría el histórico
+    // de pedidos sin a qué mesa pertenecía.
+    const conteo = await client.query(
+      'SELECT count(*)::int AS pedidos FROM pedidos WHERE id_mesa = $1',
+      [id]
+    );
+    const pedidos = conteo.rows[0] ? conteo.rows[0].pedidos : null;
+    // Si el conteo no se puede leer NO se borra: es más seguro negar el borrado
+    // que llevarse por delante el historial de una mesa.
+    if (typeof pedidos !== 'number' || pedidos > 0) {
+      await client.query('ROLLBACK');
+      throw errorDeMesa(409, MENSAJE_CON_PEDIDOS);
+    }
+
+    const result = await client.query(
+      'DELETE FROM mesas WHERE id_mesa = $1 RETURNING id_mesa',
+      [id]
+    );
+
+    await client.query('COMMIT');
+    return result.rows[0] || null;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Ya estaba cerrada.
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {
@@ -429,5 +591,10 @@ module.exports = {
   obtenerPorId,
   crear,
   actualizarEstado,
+  actualizarDatos,
   eliminar,
+  MENSAJE_NUMERO_EN_USO,
+  MENSAJE_OCUPADA_NO_SE_RENUMERA,
+  MENSAJE_OCUPADA_NO_SE_BORRA,
+  MENSAJE_CON_PEDIDOS,
 };

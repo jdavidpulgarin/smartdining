@@ -1,6 +1,6 @@
 import './App.css'
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
-import { Topbar, Sidebar } from './components'
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
+import { Topbar } from './components'
 import {
   Home,
   Mesas,
@@ -11,12 +11,13 @@ import {
   Login,
   PantallaMesa,
 } from './pages'
-import { useSocket } from './hooks'
+import { useSocket, useAuth } from './hooks'
 import { AuthProvider } from './context/AuthContext'
 import { TablesProvider } from './context/TablesContext'
 
 function AppContent() {
   useSocket()
+  const { user } = useAuth()
   const location = useLocation()
   const isLoginPage = location.pathname === '/login'
   const isPantallaPage = location.pathname.startsWith('/pantalla')
@@ -38,22 +39,27 @@ function AppContent() {
     )
   }
 
+  if (!user) {
+    return <Navigate to="/login" replace />
+  }
+
   return (
     <div className="app-shell">
       <Topbar />
-      <Sidebar />
 
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/mesas" element={<Mesas />} />
-        <Route path="/pedidos" element={<Pedidos />} />
-        <Route path="/menu" element={<Menu />} />
-        <Route path="/caja" element={<Caja />} />
-        <Route path="/reportes" element={<Reportes />} />
-        <Route path="/pantalla/mesa/:id" element={<PantallaMesa />} />
-        <Route path="/pantalla/:id" element={<PantallaMesa />} />
-        <Route path="/login" element={<Login />} />
-      </Routes>
+      <main className="sd-page-wrapper">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/mesas" element={<Mesas />} />
+          <Route path="/pedidos" element={<Pedidos />} />
+          <Route path="/menu" element={<Menu />} />
+          <Route path="/caja" element={<Caja />} />
+          <Route path="/reportes" element={<Reportes />} />
+          <Route path="/pantalla/mesa/:id" element={<PantallaMesa />} />
+          <Route path="/pantalla/:id" element={<PantallaMesa />} />
+          <Route path="/login" element={<Login />} />
+        </Routes>
+      </main>
     </div>
   )
 }

@@ -17,6 +17,23 @@ const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina'];
 const ROL_COMENSAL = 'comensal';
 
 /**
+ * Único algoritmo con el que este backend firma y acepta sus JWT.
+ *
+ * Se declara en `jwt.verify` en vez de dejar que la librería acepte cualquiera
+ * de la familia HS: sin la lista, un token firmado con HS384 o HS512 y el MISMO
+ * secreto se daba por bueno. Hoy eso no es escalable a un ataque —hace falta el
+ * secreto, y con el secreto ya se puede firmar un HS256— pero el día que se
+ * introduzca una clave asimétrica, no fijar el algoritmo es la puerta de la
+ * confusión de algoritmo clásica: un token `alg: RS256` verificado con la clave
+ * PÚBLICA usada como secreto HMAC.
+ *
+ * Es el mismo criterio que ya aplica el socket-server en src/auth.js, que sí
+ * pasa `{ algorithms: ['HS256'] }`. Este backend era el único de los dos que no
+ * lo hacía.
+ */
+const ALGORITMO_JWT = 'HS256';
+
+/**
  * Verifica el JWT enviado en el header Authorization: Bearer <token>.
  * Si es válido, adjunta el payload decodificado en req.user:
  *   - staff:    { id_usuario, rol }
@@ -37,7 +54,7 @@ async function requireAuth(req, res, next) {
 
   let payload;
   try {
-    payload = jwt.verify(token, process.env.JWT_SECRET);
+    payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: [ALGORITMO_JWT] });
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido o expirado' });
   }
@@ -119,6 +136,7 @@ module.exports = {
   requireRole,
   esComensal,
   sesionDeMesaVigente,
+  ALGORITMO_JWT,
   ROLES_STAFF,
   ROL_COMENSAL,
   MENSAJE_SESION_CERRADA,

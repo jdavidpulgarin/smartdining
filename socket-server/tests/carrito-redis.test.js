@@ -58,6 +58,31 @@ test('el mismo evento enviado dos veces en paralelo se aplica una sola vez', asy
   assert.strictEqual((await carritos.snapshot(5)).version, 1);
 });
 
+test('remove_de (order:created) es atómico: un cart:update que se cuela no se pierde', async () => {
+  const falso = crearRedisFalso();
+  const carritos = crearAlmacenCarritosRedis({ cliente: falso.cliente });
+  const otro = crearAlmacenCarritosRedis({ cliente: falso.cliente });
+  await carritos.aplicarUnaVez(5, linea('Ana'), null);
+  await carritos.aplicarUnaVez(5, linea('Beto'), null);
+  // Entre el WATCH y el EXEC del pedido de Ana, Beto agrega otra línea.
+  falso.interferir(() => otro.aplicarUnaVez(5, linea('Beto'), 'kb2'));
+  const r = await carritos.aplicarUnaVez(5, { accion: 'remove_de', comensales: ['Ana'] }, 'sistema:cart:5:e1');
+  assert.deepStrictEqual(r.snapshot.items.map((i) => i.comensal), ['Beto', 'Beto']);
+  assert.strictEqual(r.snapshot.version, 4);
+  assert.deepStrictEqual(await carritos.snapshot(5), r.snapshot);
+});
+
+test('remove_de sin líneas que quitar: no sube la versión ni reescribe, pero marca el eventId', async () => {
+  const falso = crearRedisFalso();
+  const carritos = crearAlmacenCarritosRedis({ cliente: falso.cliente });
+  await carritos.aplicarUnaVez(5, linea('Beto'), null);
+  const r = await carritos.aplicarUnaVez(5, { accion: 'remove_de', comensales: ['Ana'] }, 'sistema:cart:5:e2');
+  assert.deepStrictEqual([r.duplicado, r.sinCambios, r.snapshot.version], [false, true, 1]);
+  assert.ok(falso.llaves().includes(llaveIdem('sistema:cart:5:e2')));
+  const dup = await carritos.aplicarUnaVez(5, { accion: 'remove_de', comensales: ['Ana'] }, 'sistema:cart:5:e2');
+  assert.strictEqual(dup.duplicado, true);
+});
+
 test('un conflicto que no cesa termina en error (ERROR_INTERNO para el cliente)', async () => {
   const falso = crearRedisFalso();
   const carritos = crearAlmacenCarritosRedis({ cliente: falso.cliente });

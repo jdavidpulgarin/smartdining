@@ -1,61 +1,154 @@
-import { categorias } from '../mocks/categorias';
-import { platos } from '../mocks/platos';
-import menuEjemplo from '../mocks/ejemplo-menu.json';
+import { pedirJson } from './api';
 
-export const obtenerCategorias = () => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve(categorias);
-    }, 300);
-  });
-};
+let cacheMenuPromise = null;
 
-export const obtenerPlatos = () => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve(platos);
-    }, 300);
-  });
-};
+export function recargarMenu() {
+  cacheMenuPromise = null;
+}
 
-export const obtenerPlatosArmables = () => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const armables = (menuEjemplo || [])
-        .flatMap((cat) => cat.platos || [])
-        .filter((plato) => plato.personalizable === true);
-      resolve(armables);
-    }, 300);
-  });
-};
+async function fetchMenuRaw() {
+  if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+    const modulo = await import('../mocks/menu-simulado.json');
+    return modulo.default || modulo;
+  }
+  return pedirJson('/menu');
+}
 
-export const obtenerPlatoArmable = (idPlato) => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const idNumerico = Number(idPlato);
-      const encontrado = (menuEjemplo || [])
-        .flatMap((cat) => cat.platos || [])
-        .find(
-          (plato) =>
-            Number(plato.id_plato) === idNumerico &&
-            plato.personalizable === true
-        );
+export function obtenerMenuRaw() {
+  if (!cacheMenuPromise) {
+    cacheMenuPromise = fetchMenuRaw().catch((err) => {
+      cacheMenuPromise = null;
+      throw err;
+    });
+  }
+  return cacheMenuPromise;
+}
 
-      if (!encontrado) {
-        resolve(null);
-        return;
-      }
+export function aplicarDisponibilidad(menu, idIngrediente, disponible) {
+  if (!menu) return menu;
+  const idNum = Number(idIngrediente);
+  const esArray = Array.isArray(menu);
+  const categorias = esArray ? menu : menu.categorias;
+  if (!Array.isArray(categorias)) return menu;
 
-      const pasosOrdenados = [...(encontrado.pasos || [])].sort(
-        (a, b) => (a.orden ?? 0) - (b.orden ?? 0)
-      );
-
-      resolve({
-        ...encontrado,
-        pasos: pasosOrdenados,
+  const nuevasCategorias = categorias.map((cat) => {
+    if (!Array.isArray(cat.platos)) return cat;
+    const nuevosPlatos = cat.platos.map((plato) => {
+      if (!Array.isArray(plato.pasos)) return plato;
+      const nuevosPasos = plato.pasos.map((paso) => {
+        if (!Array.isArray(paso.ingredientes)) return paso;
+        const nuevosIngredientes = paso.ingredientes.map((ing) => {
+          if (Number(ing.id_ingrediente) === idNum) {
+            return { ...ing, disponible: Boolean(disponible) };
+          }
+          return ing;
+        });
+        return { ...paso, ingredientes: nuevosIngredientes };
       });
-    }, 300);
+      return { ...plato, pasos: nuevosPasos };
+    });
+    return { ...cat, platos: nuevosPlatos };
   });
+
+  return esArray ? nuevasCategorias : { ...menu, categorias: nuevasCategorias };
+}
+
+export function actualizarDisponibilidadEnCache(idIngrediente, disponible) {
+  if (!cacheMenuPromise) return;
+  cacheMenuPromise = cacheMenuPromise.then((raw) =>
+    aplicarDisponibilidad(raw, idIngrediente, disponible)
+  );
+}
+
+export function normalizarCategorias(rawMenu) {
+  if (Array.isArray(rawMenu)) return rawMenu;
+  if (Array.isArray(rawMenu?.categorias)) return rawMenu.categorias;
+  return [];
+}
+
+export function adaptarPlato(plato, id_categoria) {
+  return {
+    id: plato.id_plato,
+    nombre: plato.nombre,
+    descripcion: plato.descripcion || '',
+    precio: Number(plato.precio),
+    categoriaId: id_categoria,
+    imagen: plato.url_imagen || null,
+    alergenos: Array.isArray(plato.alergenos) ? plato.alergenos : [],
+    etiquetas: Array.isArray(plato.etiquetas) ? plato.etiquetas : [],
+    disponible: plato.disponible !== false,
+    personalizaciones: [],
+    tiempo_estimado: plato.tiempo_estimado ?? null,
+    calorias: plato.calorias ?? null,
+  };
+}
+
+export function adaptarCategorias(rawMenu) {
+  const cats = normalizarCategorias(rawMenu);
+  return cats
+    .filter((cat) => (cat.platos || []).some((p) => p.personalizable !== true))
+    .map((cat) => ({
+      id: cat.id_categoria,
+      nombre: cat.categoria,
+      orden: cat.orden ?? 0,
+    }))
+    .sort((a, b) => a.orden - b.orden);
+}
+
+export function adaptarPlatos(rawMenu) {
+  const cats = normalizarCategorias(rawMenu);
+  const resultado = [];
+  for (const cat of cats) {
+    for (const plato of cat.platos || []) {
+      if (plato.personalizable !== true) {
+        resultado.push(adaptarPlato(plato, cat.id_categoria));
+      }
+    }
+  }
+  return resultado;
+}
+
+export function adaptarPlatosArmables(rawMenu) {
+  const cats = normalizarCategorias(rawMenu);
+  return cats
+    .flatMap((cat) => cat.platos || [])
+    .filter((plato) => plato.personalizable === true);
+}
+
+export function adaptarPlatoArmable(rawMenu, idPlato) {
+  const armables = adaptarPlatosArmables(rawMenu);
+  const idNum = Number(idPlato);
+  const encontrado = armables.find((p) => Number(p.id_plato) === idNum);
+  if (!encontrado) return null;
+
+  const pasosOrdenados = [...(encontrado.pasos || [])].sort(
+    (a, b) => (a.orden ?? 0) - (b.orden ?? 0)
+  );
+
+  return {
+    ...encontrado,
+    pasos: pasosOrdenados,
+  };
+}
+
+export const obtenerCategorias = async () => {
+  const raw = await obtenerMenuRaw();
+  return adaptarCategorias(raw);
+};
+
+export const obtenerPlatos = async () => {
+  const raw = await obtenerMenuRaw();
+  return adaptarPlatos(raw);
+};
+
+export const obtenerPlatosArmables = async () => {
+  const raw = await obtenerMenuRaw();
+  return adaptarPlatosArmables(raw);
+};
+
+export const obtenerPlatoArmable = async (idPlato) => {
+  const raw = await obtenerMenuRaw();
+  return adaptarPlatoArmable(raw, idPlato);
 };
 
 export default {
@@ -63,4 +156,14 @@ export default {
   obtenerPlatos,
   obtenerPlatosArmables,
   obtenerPlatoArmable,
+  recargarMenu,
+  obtenerMenuRaw,
+  normalizarCategorias,
+  adaptarPlato,
+  adaptarCategorias,
+  adaptarPlatos,
+  adaptarPlatosArmables,
+  adaptarPlatoArmable,
+  aplicarDisponibilidad,
+  actualizarDisponibilidadEnCache,
 };

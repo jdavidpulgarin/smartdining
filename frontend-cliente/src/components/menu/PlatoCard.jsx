@@ -18,21 +18,27 @@ function PlatoCard({ plato, onSeleccionar }) {
       aria-haspopup="dialog"
       onClick={() => onSeleccionar?.(plato)}
       onKeyDown={handleKeyDown}
-      className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex gap-3 p-3 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-        !disponible ? 'opacity-65 grayscale-[25%]' : 'hover:shadow-md'
+      className={`bg-superficie rounded-2xl border border-borde overflow-hidden flex gap-3 p-3 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto ${
+        !disponible ? 'opacity-40 grayscale-[25%]' : 'hover:border-primario/40'
       }`}
     >
-      {/* Contenedor de Imagen con overlay de Agotado */}
-      <div className="relative w-24 h-24 shrink-0 rounded-lg overflow-hidden bg-gray-100">
-        <img
-          src={imagen}
-          alt={nombre}
-          className="w-full h-full object-cover"
-          loading="lazy"
-        />
+      {/* Contenedor de Imagen con overlay si está agotado */}
+      <div className="relative w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-superficie-2 border border-borde">
+        {imagen ? (
+          <img
+            src={imagen}
+            alt={nombre}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-texto-tenue font-etiqueta text-xs uppercase">
+            Sin foto
+          </div>
+        )}
         {!disponible && (
-          <span className="absolute inset-0 bg-black/50 backdrop-blur-[1px] flex items-center justify-center text-white text-[11px] font-extrabold uppercase tracking-wider text-center px-1">
-            Agotado
+          <span className="absolute inset-0 bg-black/70 backdrop-blur-[1px] flex items-center justify-center text-primario-texto text-xs font-etiqueta font-bold uppercase tracking-wider text-center px-1">
+            AGOTADO
           </span>
         )}
       </div>
@@ -41,31 +47,31 @@ function PlatoCard({ plato, onSeleccionar }) {
       <div className="flex flex-col justify-between flex-1 min-w-0">
         <div>
           <div className="flex items-start justify-between gap-1">
-            <h3 className="font-bold text-cafe text-base leading-snug truncate">
+            <h3 className="font-etiqueta font-bold text-texto text-lg leading-snug uppercase tracking-wide truncate">
               {nombre}
             </h3>
             {!disponible && (
-              <span className="shrink-0 text-[10px] font-bold text-primary bg-primary/10 border border-primary/30 px-1.5 py-0.5 rounded">
-                Agotado
+              <span className="shrink-0 text-[10px] font-etiqueta font-bold uppercase text-primario-texto bg-primario/15 border border-primario/30 px-1.5 py-0.5 rounded">
+                AGOTADO
               </span>
             )}
           </div>
-          <p className="text-xs text-gray-600 line-clamp-2 mt-1">
+          <p className="text-xs text-texto-suave font-cuerpo line-clamp-2 mt-0.5">
             {descripcion}
           </p>
 
           {/* Badges de etiquetas */}
           {etiquetas && etiquetas.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-2">
+            <div className="flex flex-wrap gap-1 mt-1.5">
               {etiquetas.map((tag) => {
                 const conf = ETIQUETAS_MAP[tag] || {
                   label: tag.replace('_', ' '),
-                  style: 'bg-gray-50 text-gray-600 border-gray-200',
+                  style: 'bg-superficie-2 text-texto-suave border border-borde font-etiqueta text-[10px] uppercase font-semibold',
                 };
                 return (
                   <span
                     key={tag}
-                    className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border capitalize ${conf.style}`}
+                    className={`px-1.5 py-0.5 rounded ${conf.style}`}
                   >
                     {conf.label}
                   </span>
@@ -75,9 +81,9 @@ function PlatoCard({ plato, onSeleccionar }) {
           )}
         </div>
 
-        {/* Precio */}
-        <div className="mt-2.5 flex items-center justify-between">
-          <span className="font-extrabold text-primary text-sm">
+        {/* Precio en blanco Barlow Condensed */}
+        <div className="mt-2 flex items-center justify-between">
+          <span className="font-etiqueta font-bold text-texto text-xl tracking-wide">
             {formatearPrecio(precio)}
           </span>
         </div>

@@ -1,13 +1,11 @@
 import { useMemo } from 'react'
 import {
   X,
-  Users,
   CheckCircle2,
   Receipt,
   Utensils,
   QrCode,
   LogOut,
-  MapPin,
   ArrowRight,
   UserCheck,
 } from 'lucide-react'
@@ -99,91 +97,63 @@ export function TableDetailModal({
         style={{ maxWidth: '680px', width: '92%' }}
       >
         {/* Encabezado */}
-        <div className="qr-modal-header">
-          <div className="table-modal-title-row">
-            <div className="table-badge-large">#{idMesa}</div>
-            <div>
-              <div className="modal-title-with-pill">
-                <h2 className="qr-modal-title">{tableName}</h2>
-                <StatusBadge status={table?.status || table?.estado} />
-              </div>
-              <span className="qr-modal-subtitle">
-                <MapPin size={12} className="inline-icon" /> Zona {table?.location || table?.ubicacion || 'Principal'} ·{' '}
-                <Users size={12} className="inline-icon" /> Capacidad {table?.seats || table?.capacidad || 4} comensales
-                {sid && (
-                  <span style={{ marginLeft: '8px', color: 'var(--emerald-400, #34d399)' }}>
-                    · sid: {sid}
-                  </span>
-                )}
+        <div className="table-detail-header">
+          <div className="table-detail-header-left">
+            <div className="table-detail-title-row">
+              <div className="table-badge-large">#{idMesa}</div>
+              <h2 className="table-detail-title">{tableName}</h2>
+            </div>
+            <div className="table-detail-subtitle-row">
+              <StatusBadge status={table?.status || table?.estado || 'Disponible'} />
+              <span className="table-detail-meta">
+                Zona {table?.location || table?.ubicacion || 'Principal'} · Capacidad {table?.seats || table?.capacidad || 4}
               </span>
-
+              {sid && (
+                <span className="table-detail-sid">
+                  · sid: {sid}
+                </span>
+              )}
             </div>
           </div>
 
           <button
             type="button"
-            className="qr-modal-close-btn"
+            className="table-detail-close-btn"
             onClick={onClose}
             aria-label="Cerrar modal"
           >
-            <X size={18} />
+            <X size={20} />
           </button>
         </div>
 
         {/* Tarjetas de Métricas de Mesa */}
-        <div className="table-detail-metrics-grid" style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '12px',
-          margin: '16px 0',
-        }}>
-          <div className="metric-glass-card" style={{
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '12px',
-            padding: '12px 14px',
-          }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>
-              Consumo Mesa
-            </span>
-            <strong style={{ fontSize: '1.25rem', color: '#f8fafc', display: 'block', marginTop: '4px' }}>
+        <div className="table-detail-metrics-grid">
+          <div className="table-metric-card">
+            <span className="table-metric-caption">Consumo Mesa</span>
+            <strong className="table-metric-value">
               {formatearDinero(resumenFinanciero.totalConsumido)}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--emerald-400, #34d399)' }}>
+            <span className="table-metric-subtext">
               {resumenFinanciero.totalItems} ítems ordenados
             </span>
           </div>
 
-          <div className="metric-glass-card" style={{
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '12px',
-            padding: '12px 14px',
-          }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>
-              Comensales
-            </span>
-            <strong style={{ fontSize: '1.25rem', color: '#f8fafc', display: 'block', marginTop: '4px' }}>
+          <div className="table-metric-card">
+            <span className="table-metric-caption">Comensales</span>
+            <strong className="table-metric-value">
               {resumenFinanciero.comensales.length > 0 ? resumenFinanciero.comensales.length : (isOcupada ? '1+' : '0')}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>
+            <span className="table-metric-subtext">
               {isOcupada ? 'Grupo activo' : 'Mesa libre'}
             </span>
           </div>
 
-          <div className="metric-glass-card" style={{
-            background: 'rgba(16, 185, 129, 0.08)',
-            border: '1px solid rgba(16, 185, 129, 0.25)',
-            borderRadius: '12px',
-            padding: '12px 14px',
-          }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--emerald-400, #34d399)', display: 'block' }}>
-              Saldo Pendiente
-            </span>
-            <strong style={{ fontSize: '1.25rem', color: 'var(--emerald-300, #6ee7b7)', display: 'block', marginTop: '4px' }}>
+          <div className="table-metric-card table-metric-card-saldo">
+            <span className="table-metric-caption-saldo">Saldo Pendiente</span>
+            <strong className="table-metric-value">
               {formatearDinero(resumenFinanciero.saldo)}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>
+            <span className="table-metric-subtext">
               Por liquidar en caja
             </span>
           </div>
@@ -193,7 +163,7 @@ export function TableDetailModal({
         {resumenFinanciero.comensales.length > 0 && (
           <div className="detail-section-block" style={{ marginBottom: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <UserCheck size={16} className="text-emerald" />
+              <UserCheck size={16} style={{ color: 'var(--sd-red)' }} />
               <h3 style={{ fontSize: '0.9rem', color: '#f1f5f9', margin: 0 }}>
                 Cuenta Dividida por Comensal
               </h3>
@@ -220,11 +190,11 @@ export function TableDetailModal({
                 >
                   <div>
                     <strong style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>{c.nombre}</strong>
-                    <span style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.75rem', marginLeft: '8px' }}>
+                    <span style={{ color: 'var(--sd-text-muted)', fontSize: '0.75rem', marginLeft: '8px' }}>
                       ({c.itemsCount} {c.itemsCount === 1 ? 'ítem' : 'ítems'})
                     </span>
                   </div>
-                  <strong style={{ color: 'var(--emerald-400, #34d399)', fontSize: '0.9rem' }}>
+                  <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
                     {formatearDinero(c.subtotal)}
                   </strong>
                 </div>
@@ -237,7 +207,7 @@ export function TableDetailModal({
         <div className="detail-section-block" style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Utensils size={16} className="text-emerald" />
+              <Utensils size={16} style={{ color: 'var(--sd-red)' }} />
               <h3 style={{ fontSize: '0.9rem', color: '#f1f5f9', margin: 0 }}>
                 Comandas en Curso ({pedidosMesa.length})
               </h3>
@@ -262,7 +232,7 @@ export function TableDetailModal({
                       borderRadius: '10px',
                       background: 'rgba(255, 255, 255, 0.03)',
                       border: isListo
-                        ? '1px solid rgba(16, 185, 129, 0.5)'
+                        ? '1px solid var(--sd-gold)'
                         : '1px solid rgba(255, 255, 255, 0.08)',
                       display: 'flex',
                       flexDirection: 'column',
@@ -276,13 +246,13 @@ export function TableDetailModal({
                         </strong>
                         <StateBadge state={ped.estado} />
                       </div>
-                      <strong style={{ color: 'var(--emerald-400, #34d399)', fontSize: '0.9rem' }}>
+                      <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
                         {formatearDinero(ped.total)}
                       </strong>
                     </div>
 
                     {/* Platos del pedido */}
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)' }}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--sd-text-muted)' }}>
                       {(ped.detalles || ped.items || []).map((it, idx) => (
                         <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
                           <span>
@@ -302,7 +272,7 @@ export function TableDetailModal({
                           className="primary-button small"
                           onClick={() => onDeliverOrder(ped.id_pedido)}
                           style={{
-                            background: 'var(--emerald-600, #059669)',
+                            background: 'var(--sd-red)',
                             padding: '6px 12px',
                             fontSize: '0.75rem',
                           }}
@@ -317,14 +287,7 @@ export function TableDetailModal({
               })}
             </div>
           ) : (
-            <div style={{
-              textAlign: 'center',
-              padding: '18px',
-              borderRadius: '8px',
-              background: 'rgba(255, 255, 255, 0.02)',
-              color: 'var(--text-muted, #94a3b8)',
-              fontSize: '0.85rem',
-            }}>
+            <div className="table-detail-empty-box">
               {isOcupada
                 ? 'Sesión abierta esperando comandas de los comensales.'
                 : 'Mesa libre. No hay pedidos registrados.'}
@@ -333,22 +296,17 @@ export function TableDetailModal({
         </div>
 
         {/* Barra de Acciones de Mesa */}
-        <div className="table-detail-modal-footer" style={{
-          display: 'flex',
-          gap: '10px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          paddingTop: '16px',
-        }}>
+        <div className="table-detail-modal-footer">
           {onOpenQR && (
             <button
               type="button"
-              className="ghost-button small flex-1"
+              className="table-btn-secondary"
               onClick={() => {
                 onClose()
                 onOpenQR(table)
               }}
             >
-              <QrCode size={15} />
+              <QrCode size={18} />
               <span>{isOcupada ? 'Ver / Rotar QR' : 'Abrir Mesa'}</span>
             </button>
           )}
@@ -356,23 +314,22 @@ export function TableDetailModal({
           {isOcupada && (
             <button
               type="button"
-              className="primary-button small flex-1"
+              className="table-btn-primary"
               onClick={() => {
                 onClose()
                 navigate(`/caja?mesa=${idMesa}`)
               }}
             >
-              <Receipt size={15} />
+              <Receipt size={18} />
               <span>Cobrar en Caja</span>
-              <ArrowRight size={13} />
+              <ArrowRight size={16} />
             </button>
           )}
 
           {isOcupada && onFreeTable && (
             <button
               type="button"
-              className="ghost-button small"
-              style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+              className="table-btn-danger"
               onClick={() => {
                 if (window.confirm(`¿Liberar ${tableName}? Se revocará el QR de la sesión.`)) {
                   onFreeTable(idMesa)
@@ -380,7 +337,7 @@ export function TableDetailModal({
                 }
               }}
             >
-              <LogOut size={14} />
+              <LogOut size={16} />
               <span>Liberar</span>
             </button>
           )}

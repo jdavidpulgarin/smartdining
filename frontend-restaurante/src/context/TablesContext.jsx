@@ -97,7 +97,13 @@ export function TablesProvider({ children }) {
    */
   const cargarMesas = useCallback(async () => {
     const token = getAuthToken()
-    if (!token) return
+    if (!token) {
+      setNotification({
+        type: 'warning',
+        message: 'Inicia sesión para ver las mesas',
+      })
+      return
+    }
 
     setLoading(true)
     try {

@@ -206,6 +206,14 @@ async function crear(req, res, next) {
   }
 }
 
+/**
+ * GET /api/pedidos/activos — panel del restaurante (admin, cajero, mesero).
+ *
+ * Devuelve `{ pedidos }` con cada pedido en el mismo formato que
+ * GET /pedidos/:id: sus `detalles`, cada uno con el nombre del plato y los
+ * ingredientes elegidos, más `mesa_numero`. El servicio decide qué estados
+ * cuentan como activos y agrupa los detalles.
+ */
 async function listarActivos(req, res, next) {
   try {
     const pedidos = await pedidosService.listarActivos();
@@ -275,8 +283,17 @@ async function actualizarEstado(req, res, next) {
 
     // El cierre del pedido pudo liberar la mesa (ya ocurrió en la transacción):
     // se avisa para que el socket-server cierre la sesión de esa mesa.
+    //
+    // H-22: el motivo sale del estado en el que quedó el pedido. Marcarlo
+    // 'entregado' cuando ya estaba pagado, o 'pagado' a mano, libera la mesa
+    // por un PAGO ('pagada'); cancelarlo la libera sin cobrar ('liberada').
+    // Aquí NO se avisa payment-confirmed: no entró dinero nuevo, el pago ya se
+    // había registrado antes y anunciarlo otra vez sería un pago fantasma.
     if (pedido.mesaLiberada) {
-      socketNotifier.notificarMesaLiberada(pedido.id_mesa);
+      socketNotifier.notificarMesaLiberada(
+        pedido.id_mesa,
+        socketNotifier.motivoPorEstadoFinal(pedido.estado)
+      );
       aliasComensal.olvidarMesa(pedido.id_mesa);
     }
 

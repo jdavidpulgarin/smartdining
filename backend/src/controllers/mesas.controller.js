@@ -1,10 +1,13 @@
 const jwt = require('jsonwebtoken');
 const { z } = require('zod');
 const mesasService = require('../services/mesas.service');
-const { ROL_COMENSAL } = require('../middleware/auth.middleware');
+const { ALGORITMO_JWT, ROL_COMENSAL } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
 const { extraerSid } = require('../services/qr.token');
 const aliasComensal = require('../services/alias-comensal');
+// El enlace del QR se arma aparte: en desarrollo lleva la IP de la LAN para que
+// el celular del comensal pueda abrirlo (ver src/utils/url-comensal.js).
+const { urlDelComensal } = require('../utils/url-comensal');
 
 // Vigencia de la sesión del comensal: una estadía en la mesa (3 h por defecto).
 const COMENSAL_EXPIRES_IN = process.env.JWT_COMENSAL_EXPIRES_IN || '3h';
@@ -46,11 +49,28 @@ function vistaMesaPersonal(mesa) {
   return { ...vistaMesa(mesa), sesion_abierta: Boolean(mesa.token_qr) };
 }
 
-/** URL que se codifica en el QR impreso de la mesa. */
-function urlDelComensal(token) {
-  const base = (process.env.FRONTEND_CLIENTE_URL || 'http://localhost:5173').replace(/\/+$/, '');
-  return `${base}/?token=${encodeURIComponent(token)}`;
-}
+/**
+ * Cuerpo de PATCH /mesas/:id (D-16): los datos del mobiliario.
+ *
+ * Es un esquema aparte de mesaSchema y no su `.partial()`: aqui `estado` y
+ * `token_qr` NO se aceptan. El estado tiene su propia ruta (y sus propios
+ * permisos, que incluyen a mesero y cajero) y el token_qr es una credencial que
+ * solo escribe el flujo de apertura de sesion. Con `.strict()`, mandarlos es
+ * 400 y no un cambio que se ignora en silencio.
+ *
+ * `.refine`: un cuerpo vacio no es una edicion.
+ */
+const mesaDatosSchema = z
+  .object({
+    numero: z.number().int().positive(),
+    capacidad: z.number().int().positive(),
+    ubicacion: z.string().min(1).max(50),
+  })
+  .partial()
+  .strict()
+  .refine((datos) => Object.keys(datos).length > 0, {
+    message: 'Indica al menos un campo: numero, capacidad o ubicacion',
+  });
 
 const mesaSchema = z.object({
   numero: z.number().int().positive(),
@@ -349,7 +369,8 @@ async function crearSesionPorToken(req, res, next) {
     const token = jwt.sign(
       { id_mesa: mesa.id_mesa, sid, rol: ROL_COMENSAL, comensal: alias.alias },
       process.env.JWT_SECRET,
-      { expiresIn: COMENSAL_EXPIRES_IN }
+      // Algoritmo explícito, el mismo que exige requireAuth (ver ALGORITMO_JWT).
+      { algorithm: ALGORITMO_JWT, expiresIn: COMENSAL_EXPIRES_IN }
     );
 
     return res.status(201).json({
@@ -395,6 +416,26 @@ async function actualizarEstado(req, res, next) {
   }
 }
 
+/**
+ * PATCH /api/mesas/:id — numero, capacidad y ubicacion (D-16). Solo admin.
+ *
+ * Los 409 (numero repetido, mesa ocupada que no se renumera) los decide el
+ * service y llegan aqui como { status, message }, que el manejador central ya
+ * sabe responder: por eso solo se hace next(err).
+ */
+async function actualizarDatos(req, res, next) {
+  const parsed = mesaDatosSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
+
+  try {
+    const mesa = await mesasService.actualizarDatos(req.params.id, parsed.data);
+    if (!mesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+    return res.json(vistaMesaPersonal(mesa));
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function eliminar(req, res, next) {
   try {
     const eliminada = await mesasService.eliminar(req.params.id);
@@ -406,6 +447,7 @@ async function eliminar(req, res, next) {
 }
 
 module.exports = {
+  actualizarDatos,
   listar,
   obtener,
   abrir,

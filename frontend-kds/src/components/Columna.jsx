@@ -1,11 +1,13 @@
+import { ChefHat } from 'lucide-react'
 import ComandaCard from './ComandaCard'
 
 /**
  * Una columna del tablero, con su contador y su estado vacio.
  *
- * El color es solo del encabezado: las tarjetas se quedan neutras para que lo
- * que resalte sea el contenido, y porque el semaforo de tiempos (que si pinta
- * tarjetas) es D-09.
+ * El color va en una regla arriba del encabezado y en el titulo; el contador
+ * es neutro en las tres para que la cifra se lea igual de lejos sin que el
+ * color le cambie el peso. Las tarjetas no se tinen de color de columna: lo
+ * que las pinta es el semaforo de tiempos, y son dos cosas distintas.
  */
 
 const COLOR = {
@@ -14,39 +16,53 @@ const COLOR = {
   listo: 'var(--color-listas)',
 }
 
-export default function Columna({ estado, titulo, comandas, ahora, nota, onAvanzar }) {
+export default function Columna({ estado, titulo, comandas, ahora, vacio, conectado, onAvanzar }) {
   const color = COLOR[estado] || 'var(--color-texto-suave)'
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col rounded-xl bg-[color:var(--color-panel)]">
+    <section className="flex min-h-0 flex-1 flex-col">
       <header
-        className="flex items-center justify-between gap-2 rounded-t-xl border-b-4 px-4 py-3"
+        className="flex items-center justify-between gap-2 rounded-xl border-t-4 bg-[color:var(--color-panel)] px-4 py-3"
         style={{ borderColor: color }}
       >
-        <h2 className="text-2xl font-bold uppercase tracking-wide" style={{ color }}>
-          {titulo}
-        </h2>
+        {/* El titulo va en blanco y no en el color de la columna: tres titulos
+            de colores distintos compiten entre si, y el color ya lo lleva la
+            regla de arriba, que es donde se distingue sin leer. */}
+        <h2 className="display text-3xl font-bold">{titulo}</h2>
         <span
-          className="min-w-10 rounded-full px-3 py-0.5 text-center text-xl font-bold tabular-nums text-[color:var(--color-fondo)]"
-          style={{ backgroundColor: color }}
+          className="display min-w-11 rounded-lg bg-[color:var(--color-contador)] px-3 py-1 text-center text-2xl font-bold tabular-nums text-[color:var(--color-contador-texto)]"
           aria-label={`${comandas.length} comandas`}
         >
           {comandas.length}
         </span>
       </header>
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-3">
+      <div className="flex-1 space-y-3 overflow-y-auto pt-3">
         {comandas.length === 0 ? (
-          <p className="mt-6 text-center text-lg text-[color:var(--color-texto-suave)]">
-            Sin comandas
-            {nota && <span className="mt-2 block text-base">{nota}</span>}
-          </p>
+          // Caja punteada, no un parrafo suelto: deja claro que el hueco es el
+          // sitio donde van a aparecer las comandas, y no un fallo de carga.
+          //
+          // Lleva fondo solido porque es el unico texto del tablero que caeria
+          // sobre la foto: ahi el texto suave se queda en 1,6:1 (oscuro) y
+          // 2,5:1 (claro); sobre el panel sube a 6,6:1.
+          <div className="rounded-xl border-2 border-dashed border-[color:var(--color-borde)] bg-[color:var(--color-panel)] px-5 py-10 text-center">
+            <ChefHat
+              size={34}
+              className="mx-auto mb-3 text-[color:var(--color-texto-suave)]"
+              aria-hidden="true"
+            />
+            <p className="display text-xl font-bold">{vacio?.titulo || 'Sin comandas'}</p>
+            {vacio?.nota && (
+              <p className="mt-2 text-base text-[color:var(--color-texto-suave)]">{vacio.nota}</p>
+            )}
+          </div>
         ) : (
           comandas.map((comanda) => (
             <ComandaCard
               key={comanda.id_pedido}
               comanda={comanda}
               ahora={ahora}
+              conectado={conectado}
               onAvanzar={onAvanzar}
             />
           ))

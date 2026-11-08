@@ -13,13 +13,13 @@ function CategoriaFiltro({
         <button
           type="button"
           onClick={() => onSeleccionar && onSeleccionar(null)}
-          className={`min-h-12 px-4 py-2 rounded-full text-sm inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+          className={`min-h-10 px-4 py-1.5 rounded-full text-sm font-etiqueta uppercase tracking-wider inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto ${
             esTodasSeleccionada
-              ? 'bg-primary text-white font-semibold shadow-sm'
-              : 'bg-white text-cafe border border-gray-200 hover:bg-primary/10 font-medium'
+              ? 'bg-primario text-white font-bold shadow-sm border border-primario'
+              : 'bg-superficie-2 text-texto-suave border border-borde hover:text-texto hover:bg-superficie font-semibold'
           }`}
         >
-          Todas
+          TODAS
         </button>
 
         {/* Chips de Categorías */}
@@ -30,10 +30,10 @@ function CategoriaFiltro({
               key={cat.id}
               type="button"
               onClick={() => onSeleccionar && onSeleccionar(cat.id)}
-              className={`min-h-12 px-4 py-2 rounded-full text-sm inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+              className={`min-h-10 px-4 py-1.5 rounded-full text-sm font-etiqueta uppercase tracking-wider inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto ${
                 esActiva
-                  ? 'bg-primary text-white font-semibold shadow-sm'
-                  : 'bg-white text-cafe border border-gray-200 hover:bg-primary/10 font-medium'
+                  ? 'bg-primario text-white font-bold shadow-sm border border-primario'
+                  : 'bg-superficie-2 text-texto-suave border border-borde hover:text-texto hover:bg-superficie font-semibold'
               }`}
             >
               {cat.nombre}

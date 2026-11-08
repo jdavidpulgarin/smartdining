@@ -20,12 +20,14 @@ const PREFIJO_SALA_MESA = 'room:mesa-';
  * - comensales: alias distintos de los comensales conectados, ordenados.
  * - total: personas en la mesa = alias distintos + sockets de comensal sin
  *   alias (dos pestañas de "Ana" cuentan como una persona).
+ * - pagaron: alias que ya pagaron algo en esta sesión de mesa (estén o no
+ *   sentados), ordenados. Con esto la PWA calcula "igual" como el servidor.
  *
- * `programar(idMesa)` emite `mesa:presencia` a room:admin al instante si no
- * hubo aviso reciente; si lo hubo, deja uno pendiente para el final de la
- * ventana, así el último estado siempre llega.
+ * `programar(idMesa)` emite `mesa:presencia` a room:admin y a la sala de esa
+ * mesa al instante si no hubo aviso reciente; si lo hubo, deja uno pendiente
+ * para el final de la ventana, así el último estado siempre llega.
  */
-function crearPresencia({ io, ventanaMs = VENTANA_PRESENCIA_MS }) {
+function crearPresencia({ io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS }) {
   const ventanas = new Map(); // idMesa -> { pendiente: boolean, temporizador }
 
   async function calcular(idMesa) {
@@ -38,12 +40,17 @@ function crearPresencia({ io, ventanaMs = VENTANA_PRESENCIA_MS }) {
       else anonimos += 1;
     }
     const comensales = [...alias].sort((a, b) => a.localeCompare(b));
-    return { id_mesa: idMesa, comensales, total: comensales.length + anonimos };
+    const pagaron = await estadoMesas.pagaron(idMesa);
+    return {
+      id_mesa: idMesa, comensales, total: comensales.length + anonimos, pagaron,
+    };
   }
 
+  // A la mesa también: sus comensales necesitan quién está y quién pagó para
+  // mostrar cuánto es "igual". Solo llevan datos de esa misma mesa.
   async function emitir(idMesa) {
     const presencia = await calcular(idMesa);
-    io.to(SALA_ADMIN).emit('mesa:presencia', presencia);
+    io.to(SALA_ADMIN).to(salaMesa(idMesa)).emit('mesa:presencia', presencia);
   }
 
   function abrirVentana(idMesa) {
@@ -77,13 +84,20 @@ const LIMITE_LLAMADA_SEG = 60;
 function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
   const llamadas = new Map(); // idMesa -> ms en que vence el bloqueo
   const cuentas = new Set(); // mesas que pidieron la cuenta
+  const pagos = new Map(); // idMesa -> Set de alias que ya pagaron
   return {
     marcarCuenta(idMesa) { cuentas.add(idMesa); },
     cuentaSolicitada(idMesa) { return cuentas.has(idMesa); },
     limpiarMesa(idMesa) {
       cuentas.delete(idMesa);
       llamadas.delete(idMesa);
+      pagos.delete(idMesa);
     },
+    marcarPago(idMesa, alias) {
+      if (!pagos.has(idMesa)) pagos.set(idMesa, new Set());
+      pagos.get(idMesa).add(alias);
+    },
+    pagaron(idMesa) { return [...(pagos.get(idMesa) || [])].sort((a, b) => a.localeCompare(b)); },
     reservarLlamada(idMesa, segundos) {
       if ((llamadas.get(idMesa) || 0) > ahora()) return false;
       llamadas.set(idMesa, ahora() + segundos * 1000);
@@ -182,19 +196,21 @@ function registrarSala(socket, ctx) {
 }
 
 /**
- * Rutas internas de sala (solo backend, con x-internal-key).
+ * Ruta interna "algo del menú se agotó o volvió" (solo backend, con
+ * x-internal-key). Se difunde a TODOS los sockets: es información pública del
+ * menú y le sirve a cada mesa, a la cocina y al panel. Solo se reenvían el id
+ * y `disponible` validados; cualquier otro campo del cuerpo se descarta.
  *
- * POST /internal/ingrediente-disponibilidad — un ingrediente se agotó o volvió.
- * Se difunde a TODOS los sockets: es información pública del menú y le sirve
- * a cada mesa (el constructor deshabilita la opción en vivo), a la cocina y al
- * panel. Solo se reenvían los dos campos validados.
+ * - campoId: nombre del id en el cuerpo y en el evento (id_ingrediente, id_plato).
+ * - evento: evento de socket que se emite.
+ * - prefijo: clave de idempotencia por eventId (backend:{prefijo}:{eventId}).
  */
-const rutasSala = {
-  'POST /internal/ingrediente-disponibilidad': async (req, res, ctx) => {
+function rutaDisponibilidad({ campoId, evento, prefijo }) {
+  return async (req, res, ctx) => {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    if (!Number.isSafeInteger(cuerpo.id_ingrediente) || cuerpo.id_ingrediente <= 0) {
-      throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'id_ingrediente debe ser un entero positivo');
+    if (!Number.isSafeInteger(cuerpo[campoId]) || cuerpo[campoId] <= 0) {
+      throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', `${campoId} debe ser un entero positivo`);
     }
     if (typeof cuerpo.disponible !== 'boolean') {
       throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'disponible debe ser true o false');
@@ -202,17 +218,34 @@ const rutasSala = {
     // eventId opcional: si el backend reintenta el mismo aviso, no se repite.
     if (cuerpo.eventId !== undefined) {
       if (!esEventIdValido(cuerpo.eventId)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
-      if (!(await ctx.registro.reservar(`backend:ingrediente:${cuerpo.eventId}`))) {
+      if (!(await ctx.registro.reservar(`backend:${prefijo}:${cuerpo.eventId}`))) {
         return enviarJson(res, 200, { ok: true, duplicado: true });
       }
     }
-    ctx.io.emit('ingrediente:disponibilidad', {
-      id_ingrediente: cuerpo.id_ingrediente,
+    ctx.io.emit(evento, {
+      [campoId]: cuerpo[campoId],
       disponible: cuerpo.disponible,
       emitidoEn: new Date().toISOString(),
     });
     return enviarJson(res, 200, { ok: true, duplicado: false });
-  },
+  };
+}
+
+/**
+ * Rutas internas de sala (solo backend, con x-internal-key).
+ *
+ * POST /internal/ingrediente-disponibilidad — un ingrediente se agotó o volvió
+ * (el constructor de la PWA deshabilita la opción en vivo).
+ * POST /internal/plato-disponibilidad — un plato se agotó o volvió (lo llama el
+ * backend después del COMMIT de PATCH /api/platos/:id/disponible).
+ */
+const rutasSala = {
+  'POST /internal/ingrediente-disponibilidad': rutaDisponibilidad({
+    campoId: 'id_ingrediente', evento: 'ingrediente:disponibilidad', prefijo: 'ingrediente',
+  }),
+  'POST /internal/plato-disponibilidad': rutaDisponibilidad({
+    campoId: 'id_plato', evento: 'plato:disponibilidad', prefijo: 'plato',
+  }),
 };
 
 module.exports = {

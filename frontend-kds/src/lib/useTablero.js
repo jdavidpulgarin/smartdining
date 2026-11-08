@@ -38,7 +38,13 @@ function reducer(estado, accion) {
 /** Cada cuanto se repinta el cronometro de las tarjetas, sin pedir nada. */
 const REFRESCO_RELOJ_MS = 30_000
 
-export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
+export function useTablero({
+  token,
+  alCaducarSesion,
+  alLlegarComandaNueva,
+  alCambiarDisponibilidad,
+  alCambiarDisponibilidadPlato,
+}) {
   const [estado, despachar] = useReducer(reducer, undefined, estadoInicial)
   const [conectado, setConectado] = useState(false)
 
@@ -57,6 +63,25 @@ export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
   useEffect(() => {
     alLlegarRef.current = alLlegarComandaNueva
   }, [alLlegarComandaNueva])
+
+  // D-10: el panel de agotados necesita `ingrediente:disponibilidad`, y el
+  // socket del KDS ya esta abierto aqui. Se reenvia por callback (con ref, como
+  // los de arriba) en vez de abrir una segunda conexion para lo mismo: el rol
+  // `cocina` ya recibe el evento, porque el socket-server lo difunde a TODOS
+  // los sockets (EVENTS.md §5.3). Quien no pase el callback no nota nada.
+  const alCambiarDisponibilidadRef = useRef(alCambiarDisponibilidad)
+  useEffect(() => {
+    alCambiarDisponibilidadRef.current = alCambiarDisponibilidad
+  }, [alCambiarDisponibilidad])
+
+  // D-14: y lo mismo con los PLATOS. Es otro evento (`plato:disponibilidad`,
+  // EVENTS.md 5.4) con otro id en el cuerpo, asi que va por su propio callback
+  // en vez de mezclar los dos en uno: quien reciba el de platos no tiene que
+  // adivinar de que lista hablan.
+  const alCambiarDisponibilidadPlatoRef = useRef(alCambiarDisponibilidadPlato)
+  useEffect(() => {
+    alCambiarDisponibilidadPlatoRef.current = alCambiarDisponibilidadPlato
+  }, [alCambiarDisponibilidadPlato])
 
   // El aviso sonoro solo debe sonar por una comanda que ENTRA por el socket, no
   // al recargar ni al reconectar. Para saber si el evento aporta algo nuevo hay
@@ -138,6 +163,14 @@ export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
       if (vivo) despachar({ tipo: 'estado', datos: evento })
     })
 
+    socket.on('ingrediente:disponibilidad', (evento) => {
+      if (vivo) alCambiarDisponibilidadRef.current?.(evento)
+    })
+
+    socket.on('plato:disponibilidad', (evento) => {
+      if (vivo) alCambiarDisponibilidadPlatoRef.current?.(evento)
+    })
+
     return () => {
       vivo = false
       socket.removeAllListeners()
@@ -171,7 +204,14 @@ export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
         // 401 ya cerro la sesion en el servicio. Para el resto, el tablero se
         // vuelve a leer porque puede estar desincronizado.
         if (error.status !== 401) recargar()
-        return { ok: false, mensaje: error.message || 'No se pudo cambiar el estado' }
+        // Sin status no hubo respuesta: el fetch ni siquiera llego (red caida,
+        // backend apagado). Es distinto de un 409 del trigger, y la tarjeta
+        // decide cosas distintas con cada uno.
+        return {
+          ok: false,
+          mensaje: error.message || 'No se pudo cambiar el estado',
+          sinRespuesta: !error.status,
+        }
       }
     },
     [token, recargar]

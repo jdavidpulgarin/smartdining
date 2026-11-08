@@ -55,6 +55,47 @@ async function actualizar(id, datos) {
   return result.rows[0] || null;
 }
 
+/**
+ * Agota (`false`) o repone (`true`) un plato — D-05, PATCH /platos/:id/disponible.
+ *
+ * Igual que actualizarIngrediente del constructor: una transacción con la fila
+ * BLOQUEADA (`FOR UPDATE`), para que dos pulsaciones a la vez desde el panel y
+ * desde el KDS no se pisen y el valor anterior que se devuelve sea el de verdad.
+ * El UPDATE toca SOLO `disponible`: a diferencia de actualizar(), aquí no se
+ * reescribe la fila entera, así que agotar un plato no puede perder por el
+ * camino un precio o una descripción que otro acabara de guardar.
+ *
+ * @returns {Promise<{plato: object, anterior: object}|null>} null si no existe.
+ */
+async function cambiarDisponibilidad(id, disponible) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const actual = await client.query(
+      'SELECT * FROM platos WHERE id_plato = $1 FOR UPDATE',
+      [id]
+    );
+    if (actual.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    const r = await client.query(
+      'UPDATE platos SET disponible = $1 WHERE id_plato = $2 RETURNING *',
+      [disponible, id]
+    );
+
+    await client.query('COMMIT');
+    return { plato: r.rows[0], anterior: actual.rows[0] };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 async function eliminar(id) {
   const result = await pool.query(
     'DELETE FROM platos WHERE id_plato = $1 RETURNING id_plato',
@@ -63,4 +104,4 @@ async function eliminar(id) {
   return result.rows[0] || null;
 }
 
-module.exports = { listar, obtenerPorId, crear, actualizar, eliminar };
+module.exports = { listar, obtenerPorId, crear, actualizar, cambiarDisponibilidad, eliminar };

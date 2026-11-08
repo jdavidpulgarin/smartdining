@@ -580,3 +580,151 @@ test('un monto_centavos no entero se rechaza con 400', async () => {
     clave.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// D-11: el middleware, en las TRES rutas internas
+//
+// Arriba se prueba a fondo contra GET /mesas/:id/cuenta/interno. Pero el canal
+// interno tiene tres puertas, y las otras dos son las que mueven dinero:
+// POST /transacciones/internal registra un pago y POST
+// /pagos/intentos-fallidos/interno escribe la bitacora. Una de las tres mal
+// montada es una de las tres abierta, asi que se recorren las tres con los
+// mismos casos.
+// ---------------------------------------------------------------------------
+
+const { VALORES_DE_EJEMPLO } = require('../src/middleware/interno.middleware');
+
+/** Las tres rutas internas, con un cuerpo cualquiera donde hace falta. */
+const RUTAS_INTERNAS = [
+  { nombre: 'GET /api/mesas/:id/cuenta/interno', metodo: 'get', url: RUTA_CUENTA },
+  { nombre: 'POST /api/transacciones/internal', metodo: 'post', url: '/api/transacciones/internal', cuerpo: {} },
+  { nombre: 'POST /api/pagos/intentos-fallidos/interno', metodo: 'post', url: RUTA_INTENTOS, cuerpo: {} },
+];
+
+/** Lanza la peticion a una ruta interna con las cabeceras dadas. */
+async function pedirInterna(ruta, cabeceras = {}) {
+  const db = instalarFakeDb(responderCuenta);
+  try {
+    let peticion = request(app)[ruta.metodo](ruta.url);
+    for (const [nombre, valor] of Object.entries(cabeceras)) peticion = peticion.set(nombre, valor);
+    if (ruta.cuerpo) peticion = peticion.send(ruta.cuerpo);
+    return await peticion;
+  } finally {
+    db.restaurar();
+  }
+}
+
+for (const ruta of RUTAS_INTERNAS) {
+  test(`d-11: ${ruta.nombre} sin la clave responde 401`, async () => {
+    const clave = conClaveInterna(CLAVE_FALSA);
+    try {
+      const res = await pedirInterna(ruta);
+
+      assert.strictEqual(res.status, 401);
+      assert.strictEqual(res.body.error, 'Clave interna inválida');
+    } finally {
+      clave.restaurar();
+    }
+  });
+
+  test(`d-11: ${ruta.nombre} con una clave equivocada responde 401`, async () => {
+    const clave = conClaveInterna(CLAVE_FALSA);
+    try {
+      // Nada de claves con espacios alrededor: HTTP los recorta al transmitir
+      // la cabecera, así que llegarían como la clave buena y el caso no existe.
+      const intentos = [
+        'otra-clave',
+        CLAVE_FALSA.toUpperCase(),
+        CLAVE_FALSA.slice(0, -1),
+        `${CLAVE_FALSA}x`,
+        CLAVE_FALSA.split('').reverse().join(''),
+        // Mismo largo, distinto contenido: lo que la comparación en tiempo
+        // constante tiene que rechazar sin delatar cuántos bytes acertó.
+        'x'.repeat(CLAVE_FALSA.length),
+      ];
+      for (const intento of intentos) {
+        const res = await pedirInterna(ruta, { 'x-internal-key': intento });
+
+        assert.strictEqual(res.status, 401, `"${intento}" entró en ${ruta.nombre}`);
+        assert.strictEqual(res.body.error, 'Clave interna inválida');
+      }
+    } finally {
+      clave.restaurar();
+    }
+  });
+
+  test(`d-11: ${ruta.nombre} falla cerrada sin INTERNAL_API_KEY`, async () => {
+    // 503 y no 401: el problema es del servidor, no de quien llama. Y desde
+    // luego no un 200, que es lo que pasaría si se dejara abierta.
+    const clave = conClaveInterna(undefined);
+    try {
+      const res = await pedirInterna(ruta, { 'x-internal-key': CLAVE_FALSA });
+
+      assert.strictEqual(res.status, 503);
+      assert.strictEqual(res.body.error, 'El canal interno no está configurado en este servidor');
+    } finally {
+      clave.restaurar();
+    }
+  });
+
+  test(`d-11: ${ruta.nombre} falla cerrada con el valor de ejemplo`, async () => {
+    // Arrancar con el placeholder del .env.example es arrancar sin clave, y
+    // estas rutas mueven dinero.
+    for (const ejemplo of VALORES_DE_EJEMPLO) {
+      const clave = conClaveInterna(ejemplo);
+      try {
+        const res = await pedirInterna(ruta, { 'x-internal-key': ejemplo });
+
+        assert.strictEqual(res.status, 503, `con "${ejemplo}" respondió ${res.status}`);
+      } finally {
+        clave.restaurar();
+      }
+    }
+  });
+
+  test(`d-11: ${ruta.nombre} no se abre con un JWT, por bueno que sea`, async () => {
+    const { tokenStaff } = require('./helpers/fake-db');
+    const clave = conClaveInterna(CLAVE_FALSA);
+    try {
+      for (const rol of ['admin', 'cajero', 'mesero', 'cocina']) {
+        const res = await pedirInterna(ruta, { Authorization: `Bearer ${tokenStaff(1, rol)}` });
+
+        assert.strictEqual(res.status, 401, `el JWT de ${rol} entró en ${ruta.nombre}`);
+        assert.strictEqual(res.body.error, 'Clave interna inválida');
+      }
+    } finally {
+      clave.restaurar();
+    }
+  });
+
+  test(`d-11: ${ruta.nombre} acepta la clave correcta`, async () => {
+    // Control: sin esto, un middleware que respondiera 401 siempre pasaría
+    // todas las pruebas de arriba.
+    const clave = conClaveInterna(CLAVE_FALSA);
+    try {
+      const res = await pedirInterna(ruta, { 'x-internal-key': CLAVE_FALSA });
+
+      assert.notStrictEqual(res.status, 401, `${ruta.nombre} rechazó la clave buena`);
+      assert.notStrictEqual(res.status, 503);
+    } finally {
+      clave.restaurar();
+    }
+  });
+}
+
+test('d-11: la clave interna no se filtra en ninguna respuesta', async () => {
+  const clave = conClaveInterna(CLAVE_FALSA);
+  try {
+    for (const ruta of RUTAS_INTERNAS) {
+      for (const cabeceras of [{}, { 'x-internal-key': 'equivocada' }, { 'x-internal-key': CLAVE_FALSA }]) {
+        const res = await pedirInterna(ruta, cabeceras);
+        const cuerpo = JSON.stringify(res.body || {});
+
+        assert.ok(!cuerpo.includes(CLAVE_FALSA), `${ruta.nombre} devolvió la clave interna`);
+        assert.ok(!String(res.text || '').includes(CLAVE_FALSA), `${ruta.nombre} devolvió la clave interna`);
+      }
+    }
+  } finally {
+    clave.restaurar();
+  }
+});

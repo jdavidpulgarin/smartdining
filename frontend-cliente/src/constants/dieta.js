@@ -1,7 +1,16 @@
 export const ETIQUETAS_MAP = {
-  vegetariano: { label: 'Vegetariano', style: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  vegano: { label: 'Vegano', style: 'bg-green-50 text-green-700 border-green-200' },
-  sin_gluten: { label: 'Sin gluten', style: 'bg-amber-50 text-amber-700 border-amber-200' },
+  vegetariano: {
+    label: 'Vegetariano',
+    style: 'bg-superficie-2 text-texto-suave border border-borde font-etiqueta uppercase tracking-wider text-[11px] font-semibold',
+  },
+  vegano: {
+    label: 'Vegano',
+    style: 'bg-superficie-2 text-texto-suave border border-borde font-etiqueta uppercase tracking-wider text-[11px] font-semibold',
+  },
+  sin_gluten: {
+    label: 'Sin gluten',
+    style: 'bg-superficie-2 text-texto-suave border border-borde font-etiqueta uppercase tracking-wider text-[11px] font-semibold',
+  },
 };
 
 export const ALERGENOS_MAP = {

@@ -79,6 +79,11 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    # Margen para el cierre ordenado (backend/server.js): tras SIGTERM fuerza la
+    # salida a los APAGADO_TIMEOUT_MS (10 s por defecto). Debe ser MAYOR que eso:
+    # con los 10 s por defecto de Docker, el SIGKILL llegaría a la vez. Si subes
+    # APAGADO_TIMEOUT_MS, sube también este valor.
+    stop_grace_period: 15s
     networks: [datos, web]
 
   socket-server:
@@ -110,8 +115,10 @@ services:
     depends_on:
       redis: { condition: service_healthy }
       backend: { condition: service_started }
-    # Margen para el cierre ordenado (espera hasta 10 s los acks en curso).
-    stop_grace_period: 15s
+    # Margen para el cierre ordenado: espera hasta 10 s los acks en curso
+    # (src/cierre.js) y fuerza la salida a los 15 s (server.js). Debe ser MAYOR
+    # que esos 15 s para que el SIGKILL de Docker no llegue antes.
+    stop_grace_period: 20s
     networks: [datos, web]
 
   nginx:

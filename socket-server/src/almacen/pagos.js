@@ -9,9 +9,15 @@ const { PREFIJO } = require('./redis');
  * Ambas con TTL = PAGOS_TTL_MINUTOS: una intención que nadie pagó caduca sola.
  * La referencia es la llave con la que el webhook encuentra qué se esperaba
  * cobrar; por eso el monto esperado vive aquí y no en el cliente.
+ *
+ * Una intención pendiente que ya no sirve (otro modo u otro monto) no se
+ * borra: queda `reemplazada` con `reemplazada_por`, porque el comensal pudo
+ * haberla pagado en otra pestaña y su webhook todavía tiene que registrarse.
  */
 const llaveRef = (ref) => `${PREFIJO}pago:ref:${ref}`;
 const llavePendiente = (idMesa, comensal) => `${PREFIJO}pago:pendiente:${idMesa}:${comensal}`;
+const esConflicto = (err) => err && err.name === 'WatchError';
+const MAX_REINTENTOS = 5;
 
 function crearAlmacenPagosMemoria({ ahora = Date.now } = {}) {
   const datos = new Map(); // llave -> { valor, expira }
@@ -39,9 +45,46 @@ function crearAlmacenPagosMemoria({ ahora = Date.now } = {}) {
       escribir(k, ref, ttlSeg);
       return ref;
     },
+    /**
+     * Cambia la pendiente de `vieja` a `nueva` solo si todavía apunta a `vieja`
+     * (si ya no hay ninguna, reserva `nueva`). Devuelve la referencia ganadora.
+     */
+    async reemplazarPendiente(idMesa, comensal, vieja, nueva, ttlSeg) {
+      const k = llavePendiente(idMesa, comensal);
+      const actual = leer(k);
+      if (actual && actual !== vieja) return actual;
+      escribir(k, nueva, ttlSeg);
+      return nueva;
+    },
+    /** Marca `ref` como reemplazada por `por`, solo si seguía pendiente. */
+    async marcarReemplazada(ref, por, ttlSeg) {
+      const actual = leer(llaveRef(ref));
+      if (!actual || actual.estado !== 'pendiente') return false;
+      escribir(llaveRef(ref), { ...actual, estado: 'reemplazada', reemplazada_por: por }, ttlSeg);
+      return true;
+    },
     async obtenerPendiente(idMesa, comensal) { return leer(llavePendiente(idMesa, comensal)); },
-    async liberarPendiente(idMesa, comensal) { datos.delete(llavePendiente(idMesa, comensal)); },
+    /** Borra la marca de pendiente solo si apunta a `ref` (no la de una intención más nueva). */
+    async liberarPendiente(idMesa, comensal, ref) {
+      const k = llavePendiente(idMesa, comensal);
+      if (leer(k) === ref) datos.delete(k);
+    },
   };
+}
+
+/** Compara y cambia una llave en Redis con WATCH/MULTI; reintenta si otro proceso la tocó. */
+async function compararYCambiar(cliente, llaves, fn) {
+  for (let i = 0; i < MAX_REINTENTOS; i += 1) {
+    try {
+      return await cliente.executeIsolated(async (iso) => {
+        await iso.watch(llaves);
+        return fn(iso);
+      });
+    } catch (err) {
+      if (!esConflicto(err)) throw err;
+    }
+  }
+  throw new Error(`Conflicto persistente en ${[].concat(llaves).join(', ')}`);
 }
 
 function crearAlmacenPagosRedis({ cliente }) {
@@ -65,8 +108,42 @@ function crearAlmacenPagosRedis({ cliente }) {
       if ((await cliente.set(k, ref, { NX: true, EX: ttlSeg })) === 'OK') return ref;
       return (await cliente.get(k)) || ref;
     },
+    async reemplazarPendiente(idMesa, comensal, vieja, nueva, ttlSeg) {
+      const k = llavePendiente(idMesa, comensal);
+      return compararYCambiar(cliente, k, async (iso) => {
+        const actual = await iso.get(k);
+        if (actual && actual !== vieja) {
+          await iso.unwatch();
+          return actual;
+        }
+        await iso.multi().set(k, nueva, { EX: ttlSeg }).exec();
+        return nueva;
+      });
+    },
+    async marcarReemplazada(ref, por, ttlSeg) {
+      const k = llaveRef(ref);
+      return compararYCambiar(cliente, k, async (iso) => {
+        const v = await iso.get(k);
+        const actual = v ? JSON.parse(v) : null;
+        if (!actual || actual.estado !== 'pendiente') {
+          await iso.unwatch();
+          return false;
+        }
+        await iso.multi().set(k, JSON.stringify({ ...actual, estado: 'reemplazada', reemplazada_por: por }), { EX: ttlSeg }).exec();
+        return true;
+      });
+    },
     async obtenerPendiente(idMesa, comensal) { return cliente.get(llavePendiente(idMesa, comensal)); },
-    async liberarPendiente(idMesa, comensal) { await cliente.del(llavePendiente(idMesa, comensal)); },
+    async liberarPendiente(idMesa, comensal, ref) {
+      const k = llavePendiente(idMesa, comensal);
+      await compararYCambiar(cliente, k, async (iso) => {
+        if ((await iso.get(k)) !== ref) {
+          await iso.unwatch();
+          return;
+        }
+        await iso.multi().del(k).exec();
+      });
+    },
   };
 }
 

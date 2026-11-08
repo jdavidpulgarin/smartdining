@@ -138,6 +138,34 @@ export function constructorReducer(estado, accion) {
       };
     }
 
+    case 'QUITAR_NO_DISPONIBLE': {
+      const idIngrediente = Number(
+        accion.id_ingrediente ?? accion.idIngrediente
+      );
+      if (!idIngrediente) return estado;
+
+      let huboCambio = false;
+      const nuevasSelecciones = {};
+
+      for (const [idPaso, ingsDelPaso] of Object.entries(estado.selecciones)) {
+        if (Object.prototype.hasOwnProperty.call(ingsDelPaso, idIngrediente)) {
+          huboCambio = true;
+          const copiaPaso = { ...ingsDelPaso };
+          delete copiaPaso[idIngrediente];
+          nuevasSelecciones[idPaso] = copiaPaso;
+        } else {
+          nuevasSelecciones[idPaso] = ingsDelPaso;
+        }
+      }
+
+      if (!huboCambio) return estado;
+
+      return {
+        ...estado,
+        selecciones: nuevasSelecciones,
+      };
+    }
+
     default:
       return estado;
   }

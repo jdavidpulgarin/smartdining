@@ -41,15 +41,15 @@ function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) {
         <div>
           <h2
             id={`paso-titulo-${paso.id_paso}`}
-            className="font-titulo text-xl font-bold text-cafe"
+            className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto"
           >
             {paso.nombre}
           </h2>
-          <p className="text-xs text-gray-600 font-medium mt-0.5">
+          <p className="text-xs text-texto-suave font-medium mt-0.5">
             {obtenerTextoRegla(paso)}
           </p>
           {maxAlcanzado && (
-            <p className="text-xs text-primary font-medium mt-0.5">
+            <p className="text-xs text-primario-texto font-medium mt-0.5">
               Máximo alcanzado: quita uno para cambiarlo
             </p>
           )}

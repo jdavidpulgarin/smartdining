@@ -71,9 +71,12 @@ Token QR de la mesa 1 recién sembrada: `qr-token-mesa-01-a1b2c3d4`.
 
 ## Requisitos previos
 
-- Node.js 18+
+- **Node.js 22+**. Es la versión del CI (`.github/workflows/ci.yml`) y la que hace falta de
+  verdad: `npm test` y `npm run test:cobertura` usan banderas del runner de pruebas que no
+  existen en 18 (`--test-coverage-exclude`, el resumen `# cancelled` que vigila el script
+  del CI).
 - PostgreSQL corriendo localmente, con `database/schema.sql` y `database/seed.sql` de Jarrison ya ejecutados
-- Redis (o Memurai en Windows) corriendo localmente
+- Redis **opcional en desarrollo**: sin él todo funciona, solo sin caché (ver [Redis en desarrollo](#redis-en-desarrollo-es-opcional))
 
 ## Instalación
 
@@ -84,6 +87,12 @@ cp .env.example .env
 # Edita .env con tus credenciales locales de PostgreSQL/Redis y un JWT_SECRET propio
 ```
 
+**El `JWT_SECRET` no es opcional: sin uno válido el backend no arranca.** Al iniciar,
+`exigirEntornoValido()` corta con código 1 y explica el problema si falta, está vacío, trae
+alguno de los valores de ejemplo del `.env.example` (quien haya visto el repositorio podría
+firmar tokens válidos) o tiene **menos de 16 caracteres**. Ese mismo valor tiene que estar
+también en `socket-server/.env`, o los dos servicios no se reconocerán los tokens.
+
 ## Ejecución
 
 ```bash
@@ -91,10 +100,136 @@ npm run dev     # con nodemon, recarga automática
 npm start       # modo normal
 ```
 
+**Para desarrollar, `npm run dev`, no `node server.js`.** Ejecutar
+`node server.js` (o `npm start`, que es lo mismo) **NO activa el modo red local**: ese modo
+se enciende solo con `NODE_ENV=development`, y es `npm run dev` quien la fija —la pone
+`nodemon.json`, no el código—. Arrancado a mano, el enlace del QR sale con `localhost` y
+desde un celular no abre nada (ver [Modo red local](#modo-red-local-probar-el-cliente-desde-un-celular-desarrollo)).
+
+### Redis en desarrollo (es opcional)
+
+**Con Redis apagado el backend funciona igual, sin caché.** No hay que levantarlo para
+trabajar: las rutas responden consultando PostgreSQL y en el log queda un aviso corto.
+
+Redis aquí es solo caché —la comprobación de cuenta activa (H-09) y el menú— y **nunca
+puede tumbar una petición**. Quien decide es PostgreSQL: si la base falla, el error sube
+(falla cerrada). La única pieza que cambia de comportamiento sin Redis es la reserva de
+alias del comensal, que fuera de producción usa un respaldo en memoria.
+
+Si Redis no responde, `connectRedis()` **rechaza rápido** (no se queda esperando) y entra
+en un **enfriamiento**: durante unos segundos ni se intenta, para que cada petición no
+pague el intento otra vez. Cuando Redis vuelve, la caché se reactiva sola en la siguiente
+petición, **sin reiniciar el backend**.
+
+Dos variables **opcionales** (si faltan o traen algo que no es un entero positivo, se usa
+el valor por defecto):
+
+| Variable | Defecto | Para qué |
+|---|---|---|
+| `REDIS_CONNECT_TIMEOUT_MS` | `1500` | espera máxima al conectar, para que un Redis que no contesta no retenga la petición |
+| `REDIS_ENFRIAMIENTO_MS` | `15000` | cuánto se deja de intentar tras un fallo |
+
+#### Levantarlo, si quieres caché
+
+1. **Docker** (lo que usa `docker-compose.yml`):
+
+   ```bash
+   docker compose up -d redis     # desde la raíz del repo
+   ```
+
+2. **Windows sin Docker ni WSL**: el Redis portable de
+   [tporadowski](https://github.com/tporadowski/redis/releases) —
+   `Redis-x64-5.0.14.1.zip`—: descomprimir y ejecutar `redis-server.exe`, que queda
+   escuchando en el `6379`. Es la alternativa que usa el equipo en Windows; su versión 5
+   es antigua y **no se ha comprobado** contra ella la caché del backend.
+3. **Un servicio nativo equivalente**, como Memurai, también en el `6379`.
+
+El backend solo usa `GET`, `SET` con `EX`, `DEL`, `HSETNX` y `EXPIRE`, y se ha
+comprobado contra el Redis **7.4.9** de desarrollo. Con cualquiera de las tres opciones,
+`REDIS_URL=redis://localhost:6379` en el `.env` y listo.
+
+### Límites del pool y cierre ordenado (H-25)
+
+Cinco variables **opcionales**, todas en milisegundos salvo `PG_POOL_MAX`. Si falta, está
+vacía o trae algo que no es un entero positivo, se usa el valor por defecto y queda un
+aviso en el log: **una errata en el `.env` no impide arrancar**.
+
+| Variable | Defecto | Para qué |
+|---|---|---|
+| `PG_POOL_MAX` | `10` | Conexiones simultáneas máximas del pool |
+| `PG_IDLE_TIMEOUT_MS` | `10000` | Cuánto vive una conexión inactiva antes de devolverse |
+| `PG_CONNECTION_TIMEOUT_MS` | `5000` | Cuánto se espera una conexión libre antes de fallar |
+| `PG_STATEMENT_TIMEOUT_MS` | `10000` | Cuánto puede tardar una consulta antes de que PostgreSQL la aborte |
+| `APAGADO_TIMEOUT_MS` | `10000` | Margen para el cierre ordenado antes de forzar la salida. En producción debe ser menor que `stop_grace_period` (ver abajo) |
+
+Por qué importan las dos del medio:
+
+- **`PG_CONNECTION_TIMEOUT_MS`** tapa el default de `pg`, que es `0`: esperar *para
+  siempre*. Con PostgreSQL caído la petición se cuelga y el cliente con ella, porque
+  Express no tiene timeout propio.
+- **`PG_STATEMENT_TIMEOUT_MS`** pone `statement_timeout` (no `query_timeout`, que corta
+  solo del lado del cliente y deja la consulta corriendo en el servidor). Sin él, una
+  query trabada retiene su conexión indefinidamente: con `max: 10`, diez de esas dejan el
+  backend muerto sin un solo error. Al vencer, PostgreSQL devuelve `57014` y la API
+  responde **503** (ver [`docs/api-spec.md`](docs/api-spec.md)).
+
+**Cierre ordenado.** Ante `SIGTERM` (lo que manda `docker stop`) o `SIGINT` (Ctrl+C), el
+backend cierra en este orden: servidor HTTP → Redis → pool de PostgreSQL. El HTTP primero
+para no cerrarle la base a una petición en vuelo, y el pool de último porque es el que
+puede tener transacciones a medias. Si algo no cierra en `APAGADO_TIMEOUT_MS`, se fuerza la
+salida: un apagado colgado es peor que uno brusco. `SIGUSR2` **no** se intercepta, porque
+es con la que nodemon reinicia en `npm run dev`.
+
+En producción, `docker-compose.prod.yml` le da al backend `stop_grace_period: 15s`: es lo que
+Docker espera tras el `SIGTERM` antes de mandar `SIGKILL`. Ese margen debe ser **mayor** que
+`APAGADO_TIMEOUT_MS`; si subes la variable, sube también `stop_grace_period`, porque si no
+Docker corta el cierre antes de que termine y el pool puede quedar sin cerrar.
+
 ```bash
 curl http://localhost:4000/api/health
 # { "status": "ok" }
 ```
+
+## Límite de peticiones (H-04, H-27 y D-21)
+
+Tres límites, todos por IP y todos con respuesta **429**, cabecera `Retry-After` y el
+cuerpo `{ "error": … }` de siempre. Los dos de ruta son la defensa de verdad; el global
+(D-21) es un techo de respaldo para que ninguna IP pueda inundar el resto de la API.
+
+| Qué limita | Defecto | Variables |
+|---|---|---|
+| `POST /api/auth/login` (solo los fallos, por IP + email) | **5 / minuto** | `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS` |
+| `POST /api/mesas/qr/:token/sesion` | **20 / minuto** | `RATE_LIMIT_QR_MAX`, `RATE_LIMIT_QR_VENTANA_MS` |
+| **Todo lo demás** (global, D-21) | **2000 / minuto** | `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS` |
+
+Las seis variables son **opcionales**: si falta, está vacía o no trae un entero positivo,
+se usa el valor por defecto. Los tres límites **se desactivan solos dentro de las
+pruebas**, o cualquier suite que haga unas cuantas llamadas empezaría a chocar con el techo
+según creciera.
+
+**El global no cuenta** `GET /api/health` —es la sonda de Docker: si contara, un límite
+agotado haría que el contenedor se declarara enfermo y se reiniciara solo— ni el canal
+interno con el socket-server (`POST /api/transacciones/internal`,
+`GET /api/mesas/:id/cuenta/interno`), que va por `x-internal-key`, sale todo con **una**
+IP y ya tiene su propia autenticación.
+
+**Por qué 2000 por minuto, que parece muchísimo.** Los comensales de un local comparten
+**una sola IP pública**, la del wifi: el cupo no es de una persona, es del restaurante
+entero. Con 20 mesas de 4 son 80 teléfonos y, en el pico, cada uno hace del orden de 15 a
+20 peticiones en ese minuto (80 × 20 = 1600), más las tablets del personal. 2000 deja pasar
+ese pico y aun así corta a una sola máquina que intente raspar la API: 33 por segundo
+sostenidos no los hace ningún comensal. Si el local es más grande, o si varios locales
+salen por la misma IP, sube `RATE_LIMIT_GLOBAL_MAX`.
+
+**Detrás de un proxy hace falta `TRUST_PROXY`.** Sin ella, `req.ip` es la IP de nginx y el
+límite global se convierte en un único cupo compartido por todo el mundo. Está apagada por
+defecto porque creerse `X-Forwarded-For` sin un proxy delante permite falsificar la IP; en
+`docker-compose.prod.yml` vale `172.31.250.10`, la IP fija de nginx, y de ningún otro
+contenedor se acepta la cabecera.
+
+**Limitación conocida:** el contador vive en memoria del proceso. Con N instancias del
+backend el techo real es 2000×N; para que fuera global de verdad haría falta un store
+compartido en Redis.
 
 ## Roles y sesiones
 
@@ -140,16 +275,104 @@ JWT contra el del token que la mesa tiene ahora. El QR impreso es fijo mientras 
 dure; Jarrison retiró el trigger `tr_regenerar_token_qr`, así que ese ciclo de vida lo
 maneja el backend.
 
+## Puertos
+
+| Pieza | Puerto | Nota |
+|---|---|---|
+| Panel del restaurante | **5173** | `frontend-restaurante` |
+| Cliente del comensal | **5174** | `frontend-cliente`, puerto fijo (`strictPort`) |
+| KDS de cocina | **5175** | `frontend-kds` |
+| Backend (esta API) | **4000** | `PORT` |
+| socket-server | **4001** | `SOCKET_URL` |
+
+El enlace del QR apunta al **cliente (5174)**. Antes el valor por defecto de
+`FRONTEND_CLIENTE_URL` era `http://localhost:5173`, que es el puerto del panel: el QR
+llevaba al comensal a la pantalla de administración.
+
+## Modo red local: probar el cliente desde un celular (desarrollo)
+
+El comensal entra escaneando el QR con su teléfono, y para un teléfono `localhost` es él
+mismo. Para que funcione sin configurar nada, el backend tiene un **modo red local**.
+
+**Se activa solo con `NODE_ENV=development`**, escrito así, exacto. Es la misma regla que
+el socket-server. Con `production`, `test`, vacío o ausente **no cambia nada**, ni el
+enlace del QR ni el CORS.
+
+`npm run dev` ya lo fija: `nodemon.json` pone `NODE_ENV=development` en el proceso, así
+que funciona igual en Windows, macOS y Linux sin `cross-env` ni variables a mano.
+`npm start` (producción) **no** lo fija.
+
+Qué cambia estando activo:
+
+- **Enlace del QR.** Se detecta la IPv4 privada de la LAN (`src/utils/ip-local.js`:
+  descarta adaptadores virtuales —WSL, Docker, VirtualBox, VMware, Hyper-V, Tailscale,
+  ZeroTier, VPN— y prefiere `192.168` sobre `10` sobre `172.16-31`) y:
+  - si `FRONTEND_CLIENTE_URL` apunta a `localhost` o `127.0.0.1`, se sustituye **solo el
+    host** por esa IP (protocolo, puerto y path se conservan);
+  - si **no está definida**, el enlace se arma con `http://<IP>:5174`;
+  - si no se detecta ninguna IP, queda como siempre.
+
+  **Un dominio real nunca se sustituye**, ni en desarrollo. La detección se cachea 30 s,
+  así que cambiar de Wi-Fi no obliga a reiniciar el backend.
+- **CORS.** Además de la lista que haya —los tres `localhost` por omisión, o tu
+  `CORS_ORIGINS` si la configuraste— se acepta **siempre** esta regla exacta:
+
+  ```
+  http://  +  IPv4 privada (10/8, 172.16/12, 192.168/16)  +  :5173 | :5174 | :5175
+  ```
+
+  Nada más: ni `https`, ni otros puertos, ni dominios, ni rutas, ni octetos con ceros a
+  la izquierda o mayores que 255. Es la misma regla que `socket-server/src/origenes.js`.
+
+**En desarrollo ya no hace falta definir `FRONTEND_CLIENTE_URL`.** En producción sí, con
+el dominio real.
+
+`HOST_LAN_IP` (opcional, solo desarrollo) fuerza la IP del enlace cuando la máquina tiene
+varias tarjetas y la heurística elige la que no es. Si no es una IPv4 válida se ignora con
+un aviso en el log.
+
+Lo que **no** cambia: la firma del token QR, su vigencia y lo que valida el socket-server
+en `/qr/validar`. El token no lleva dentro el host del enlace, así que cambiar el host no
+afecta a ninguna validación.
+
 ## Tiempo real
 
 El backend avisa al socket-server de Roberto por HTTP interno
 (`/internal/order-created`, `/internal/order-status`, `/internal/qr-rotado`,
-`/internal/mesa-liberada`) desde
+`/internal/mesa-liberada`, `/internal/ingrediente-disponibilidad`,
+`/internal/plato-disponibilidad`) desde
 `src/services/socket.notifier.js`, con `x-internal-key` y un `eventId` por acción.
 
 Ese cliente **nunca lanza**: con timeout corto, registra el fallo y sigue, así que un
 socket-server caído no rompe un pedido ni un cobro. La excepción son `/qr/generar` y
 `/qr/validar`: ahí sin respuesta no se puede abrir la mesa ni la sesión, y se responde 503.
+
+## Agotados: agotar o reponer en vivo (D-05)
+
+Dos rutas gemelas, las únicas escrituras del catálogo que no son **solo de admin**:
+también las puede llamar `cocina`, porque agotar algo no es editar la carta, es reportar
+lo que pasa en la cocina. Es lo que usa el panel de agotados.
+
+| Ruta | Roles | Cuerpo | Respuesta |
+|---|---|---|---|
+| `PATCH /api/platos/:id/disponible` | `admin`, `cocina` | `{ "disponible": false }` | 200, la fila del plato |
+| `PATCH /api/ingredientes/:id/disponible` | `admin`, `cocina` | `{ "disponible": false }` | 200, la fila del ingrediente |
+
+- `disponible` es **booleano estricto** y el cuerpo es `.strict()`: `"false"`, `0`, `null`
+  o una clave de más responden **400**. Un `:id` que no es entero positivo, **400**; algo
+  que no existe, **404**.
+- **Idempotentes**: ponerlo al valor que ya tenía responde **200**, no 409.
+- El orden es parte del contrato: **COMMIT → invalidar `cache:menu` → avisar al
+  socket-server**. Al revés, un cliente que reaccione al evento pidiendo `GET /menu`
+  recibiría la copia vieja de la caché y seguiría mostrando el plato como disponible.
+- El aviso (`/internal/plato-disponibilidad`, `/internal/ingrediente-disponibilidad`) es
+  un **extra**: si el socket-server está caído la respuesta sigue siendo 200, porque el
+  cambio ya está guardado. Tampoco se espera para responder.
+- La bitácora del cambio la escribe la base (trigger `tr_auditar_cambios` sobre `platos`),
+  no el backend.
+
+El detalle completo está en `docs/api-spec.md`; los eventos que emite el socket-server,
+en `socket-server/EVENTS.md` §5.3 y §5.4.
 
 ## Pruebas
 
@@ -157,10 +380,65 @@ socket-server caído no rompe un pedido ni un cobro. La excepción son `/qr/gene
 npm test
 ```
 
-119 pruebas con `node --test` + `supertest`. No hacen falta PostgreSQL ni Redis:
-`tests/helpers/fake-db.js` reemplaza `pool.query`/`pool.connect` por dobles en memoria
-y registra las queries ejecutadas, así que las pruebas también verifican con qué
-valores llega cada `INSERT`.
+Más de **1.200** pruebas con `node --test` + `supertest`. **La cifra exacta no se fija
+aquí a propósito**: cada PR suma pruebas y un número escrito en el README queda obsoleto a
+la semana siguiente (este decía "119" cuando ya iban más de mil). El número real lo dice el
+resumen de `npm test`:
+
+```
+ℹ tests 1222
+ℹ pass 1222
+ℹ fail 0
+ℹ cancelled 0
+```
+
+No hacen falta PostgreSQL ni Redis: `tests/helpers/fake-db.js` reemplaza
+`pool.query`/`pool.connect` por dobles en memoria y registra las queries ejecutadas, así
+que las pruebas también verifican con qué valores llega cada `INSERT`.
+
+**`cancelled` tiene que ser 0, no solo `fail`.** Una prueba cancelada **no se ejecutó**:
+`node --test` cancela las que siguen en un archivo que deja el event loop colgado, y el
+proceso puede terminar con código 0 sin haber probado nada. En el CI eso lo vigila
+[`.github/scripts/npm-test-sin-canceladas.sh`](../.github/scripts/npm-test-sin-canceladas.sh),
+que corre `npm test` y falla si el resumen trae canceladas. Para reproducir el conteo
+oficial, lo mismo que hace el CI:
+
+```bash
+cd backend && bash ../.github/scripts/npm-test-sin-canceladas.sh
+```
+
+`npm test` solo corre `tests/*.test.js`. Las de `tests/integracion/` **no** entran en ese
+glob porque necesitan PostgreSQL de verdad; van aparte:
+
+```bash
+npm run test:integracion
+```
+
+### Cobertura
+
+```bash
+npm run test:cobertura
+```
+
+Es `npm test` con `--experimental-test-coverage` y **el mismo glob**
+(`tests/*.test.js`, sin `tests/integracion/`) y el mismo `--require` del entorno de
+pruebas, para que la cobertura sea la de la batería que de verdad corre en el CI. Los
+propios archivos de prueba se excluyen del informe (`--test-coverage-exclude`): lo que
+interesa es cuánto de `src/` se ejercita, y contar las pruebas a sí mismas infla el
+porcentaje sin decir nada.
+
+Medido hoy (noviembre de 2026, `develop` en `067d0d0`, 1222 pruebas):
+
+| | Líneas | Ramas | Funciones |
+|---|---|---|---|
+| **`src/services/`** | **98,80 %** | 89,66 % | 98,35 % |
+| Todo el backend | 98,84 % | 93,03 % | 97,70 % |
+
+En `services/` son 3.386 de 3.427 líneas. Lo que queda sin cubrir son sobre todo ramas de
+Redis caído y de errores de red del aviso al socket-server (`socket.notifier.js` es el más
+bajo en ramas, 77 %). `server.js` baja al 85,93 % porque el bloque de `require.main`
+—`listen` y los manejadores de señal— no se ejecuta cuando las pruebas importan la app con
+supertest, que es justamente lo que se quiere.
 
 ## Estructura
 
@@ -173,6 +451,7 @@ valores llega cada `INSERT`.
     /controllers               → lógica HTTP de cada endpoint
     /services                  → consultas SQL y lógica de negocio
     /routes                    → definición de endpoints
+    /utils                     → IP de la LAN y enlace del QR (modo red local)
   /docs
     modelo-er.md               → modelo ER oficial de Jarrison (fuente de verdad)
     api-spec.md                → contrato formal de la API (compartir con Juan y Jarrison)

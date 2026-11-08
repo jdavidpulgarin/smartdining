@@ -21,11 +21,15 @@ export function Home() {
         if (!isMounted) return
         const cats = data?.categorias || []
         const platos = cats.flatMap((cat) =>
-          (cat.platos || []).map((p) => ({
-            name: p.nombre,
-            price: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
-            tag: cat.nombre || 'Menú',
-          }))
+          (cat.platos || []).map((p) => {
+            const isArepa = p.nombre?.toLowerCase().includes('arepa rellena')
+            return {
+              name: p.nombre,
+              price: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
+              tag: cat.nombre || 'Menú',
+              imageUrl: isArepa ? '/img/arepa-rellena.png' : p.url_imagen,
+            }
+          })
         )
         setMenuItems(platos.slice(0, 4))
       })

@@ -1,13 +1,6 @@
-import { TablesPanel } from '../components'
-import { useTables } from '../hooks'
+import { Home } from './Home'
 
 export function Mesas() {
-  const { tables } = useTables()
-
-  return (
-    <main className="main-panel">
-      <TablesPanel tables={tables} />
-    </main>
-  )
+  return <Home />
 }
 
