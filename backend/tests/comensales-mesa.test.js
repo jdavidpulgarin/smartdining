@@ -1163,6 +1163,289 @@ test('d-18: con el respaldo en memoria, el de QR tampoco se quita', async () => 
 });
 
 // ---------------------------------------------------------------------------
+// El alta reserva el texto que YA esta en la cuenta (D-18b)
+//
+// Otro hueco que encontro Jarrinson: si «Abuela» ya tiene platos, su reserva
+// vence y el mesero la registra de nuevo escribiendo «abuela», la reserva nueva
+// quedaria como «abuela» y sus platos viejos siguen como «Abuela». La cuenta
+// agrupa por texto exacto, asi que se partiria otra vez en dos filas.
+// ---------------------------------------------------------------------------
+
+/** Una fila de la cuenta, como la devuelve obtener_cuenta_mesa_json. */
+const filaCuenta = (comensal, items = 1) => ({
+  comensal,
+  items_pedidos: items,
+  subtotal: '20000',
+  pagado: '0',
+  saldo: '20000',
+});
+
+/** El alias que viajo en el aviso de 'agregar'. */
+function aliasDelAgregar(socket) {
+  const aviso = socket.todos('/internal/mesa-comensal').find((a) => a.cuerpo.accion === 'agregar');
+  return aviso ? aviso.cuerpo.alias : undefined;
+}
+
+test('d-18b: al registrar se reserva el texto que ya tiene platos', async () => {
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('Abuela', 2)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await agregar(mesero(), { alias: 'abuela' });
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 201);
+    // El 201 devuelve el texto de la cuenta: es el que el panel tiene que
+    // mandar despues en POST /api/pedidos.
+    assert.deepStrictEqual(res.body, { id_mesa: MESA, alias: 'Abuela' });
+    // Y la reserva y el aviso llevan ese mismo texto.
+    assert.strictEqual(JSON.parse(redis.valorDe(alias.llave(MESA)).abuela).alias, 'Abuela');
+    assert.strictEqual(aliasDelAgregar(socket), 'Abuela');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: tambien con tildes', async () => {
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('Abuéla', 3)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await agregar(mesero(), { alias: 'abuela' });
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.alias, 'Abuéla', 'con su tilde, como en la cuenta');
+    assert.strictEqual(aliasDelAgregar(socket), 'Abuéla');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: entre varios textos con la misma clave gana el de MAS platos', async () => {
+  const db = fakeMesa({
+    cuenta: { id_mesa: MESA, comensales: [filaCuenta('abuela', 1), filaCuenta('Abuela', 5)] },
+  });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await agregar(mesero(), { alias: 'ABUELA' });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.alias, 'Abuela', 'el de 5 platos');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: con empate gana el primero de la cuenta', async () => {
+  const db = fakeMesa({
+    cuenta: { id_mesa: MESA, comensales: [filaCuenta('abuela', 2), filaCuenta('Abuela', 2)] },
+  });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await agregar(mesero(), { alias: 'ABUELA' });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.alias, 'abuela', 'determinista: el primero');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: la fila General de la cuenta se ignora', async () => {
+  // No es una persona: la pone la funcion SQL para los items sin comensal.
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('General', 9)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await agregar(mesero(), { alias: 'General' });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.alias, 'General', 'el escrito, no la fila de la cuenta');
+    // Y lo que se reserva es el alias escrito, no el cajon.
+    assert.ok(redis.valorDe(alias.llave(MESA)).general);
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: una fila de la cuenta SIN platos no sirve', async () => {
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('Abuela', 0)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await agregar(mesero(), { alias: 'abuela' });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.alias, 'abuela', 'el escrito');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: un texto de la cuenta que ya no es alias valido se ignora', async () => {
+  // Dato viejo escrito a mano, de antes de que la regla R-18 se aplicara.
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('A', 4)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await agregar(mesero(), { alias: 'Ana' });
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.alias, 'Ana', 'el escrito');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: sin nadie con esa clave en la cuenta, todo igual que antes', async () => {
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('Ana', 3)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await agregar(mesero(), { alias: '  La   Abuela ' });
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.alias, 'La Abuela', 'el normalizado de lo escrito');
+    assert.strictEqual(aliasDelAgregar(socket), 'La Abuela');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: si la cuenta no se puede leer, el alta NO se bloquea', async () => {
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('FROM mesas WHERE id_mesa')) return { rows: [mesaOcupada()] };
+    if (sql.includes('SELECT 1 FROM mesas')) return { rows: [{ existe: 1 }] };
+    if (sql.includes('obtener_cuenta_mesa_json')) throw new Error('la base no responde');
+    return undefined;
+  });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  const errorOriginal = console.error;
+  const lineas = [];
+  console.error = (...args) => lineas.push(args.join(' '));
+  try {
+    const res = await agregar(mesero(), { alias: 'Abuela' });
+
+    // Lo peor que pasa es que la cuenta quede partida, y eso se arregla; no
+    // poder sentar a una persona, no.
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.alias, 'Abuela');
+
+    const aviso = lineas.find((l) => l.includes('[mesas]'));
+    assert.ok(aviso, `no se registro el aviso: ${JSON.stringify(lineas)}`);
+    assert.ok(!aviso.includes('Abuela'), `el aviso no debe llevar el alias: ${aviso}`);
+    assert.ok(aviso.includes(String(MESA)), 'pero si la mesa, para poder investigar');
+  } finally {
+    console.error = errorOriginal;
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: el 409 alias_en_uso sigue funcionando con la clave ya reservada', async () => {
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('Abuela', 2)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    assert.strictEqual((await agregar(mesero(), { alias: 'abuela' })).status, 201);
+
+    // Segunda vez: la clave ya esta reservada, da igual como se escriba.
+    const repetido = await agregar(mesero(), { alias: 'ABUÉLA' });
+    assert.strictEqual(repetido.status, 409);
+    assert.strictEqual(repetido.body.motivo, 'alias_en_uso');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: la cuenta se lee ANTES de reservar', async () => {
+  // Al reves habria que deshacer la reserva, y eso es justo lo que no se
+  // quiere: una reserva a medio hacer deja el nombre bloqueado.
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('Abuela', 2)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    await agregar(mesero(), { alias: 'abuela' });
+
+    const cuenta = db.ejecutadas.findIndex((q) => q.sql.includes('obtener_cuenta_mesa_json'));
+    assert.ok(cuenta >= 0, 'se leyo la cuenta');
+    // El hSetNX de la reserva va despues, y con el texto de la cuenta.
+    const reserva = redis.todas('hSetNX');
+    assert.strictEqual(reserva.length, 1);
+    assert.strictEqual(reserva[0].campo, 'abuela', 'la clave es la misma');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: una mesa sin sesion no llega ni a leer la cuenta', async () => {
+  // El orden del contrato: sesion (409) antes que todo lo demas.
+  const db = fakeMesa({ mesa: { ...mesaOcupada(), estado: 'disponible' } });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await agregar(mesero(), { alias: 'Abuela' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, 'mesa_sin_sesion');
+    assert.ok(!db.buscar('obtener_cuenta_mesa_json'), 'ni se leyo la cuenta');
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: quitar al que se registro con el texto de la cuenta funciona', async () => {
+  // El ciclo completo: se registra «abuela» con «Abuela» en la cuenta, y al
+  // quitarla el aviso lleva «Abuela», que es lo que el socket-server tiene.
+  const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('Abuela', 0)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    // Con 0 platos no se canonicaliza por la cuenta, asi que se registra tal
+    // cual y luego se puede quitar.
+    assert.strictEqual((await agregar(mesero(), { alias: 'Abuela' })).status, 201);
+
+    const res = await quitar(mesero(), 'abuela');
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 204);
+    const avisos = socket.todos('/internal/mesa-comensal');
+    assert.strictEqual(avisos.find((a) => a.cuerpo.accion === 'agregar').cuerpo.alias, 'Abuela');
+    assert.strictEqual(avisos.find((a) => a.cuerpo.accion === 'quitar').cuerpo.alias, 'Abuela');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // El aviso de 'quitar' lleva el alias GUARDADO, no el de la URL (D-18b)
 //
 // Lo encontro Jarrinson revisando el #106: la reserva se libera por CLAVE, pero

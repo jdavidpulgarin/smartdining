@@ -292,19 +292,183 @@ test('d-18b: basta que UNO de los comensales no este registrado', async () => {
   }
 });
 
-test('d-18b: el 409 trae el formato de error del backend', async () => {
+test('d-18b: el 409 trae el formato de error del backend, con el alias', async () => {
   const db = fakeDb();
   const redis = instalarFakeRedis();
   try {
     const res = await pedir(mesero(), [{ id_plato: 12, cantidad: 1, comensal: 'Nadie' }]);
 
-    assert.deepStrictEqual(Object.keys(res.body).sort(), ['error', 'motivo']);
+    assert.deepStrictEqual(Object.keys(res.body).sort(), ['alias', 'error', 'motivo']);
     assert.strictEqual(typeof res.body.error, 'string');
+    assert.strictEqual(res.body.alias, 'Nadie');
   } finally {
     redis.restaurar();
     db.restaurar();
   }
 });
+
+test('d-18b: el 409 dice QUE alias no se pudo resolver, normalizado', async () => {
+  const db = fakeDb();
+  const redis = instalarFakeRedis();
+  try {
+    const res = await pedir(mesero(), [{ id_plato: 12, cantidad: 1, comensal: '  la   Nadie ' }]);
+
+    assert.strictEqual(res.status, 409);
+    // El texto normalizado que se intento usar, no el crudo del cuerpo.
+    assert.strictEqual(res.body.alias, 'la Nadie');
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: con varios sin registrar, el 409 informa el PRIMERO del pedido', async () => {
+  const db = fakeDb();
+  const redis = instalarFakeRedis();
+  try {
+    const res = await pedir(mesero(), [
+      { id_plato: 12, cantidad: 1, comensal: 'Primera' },
+      { id_plato: 13, cantidad: 1, comensal: 'Segunda' },
+    ]);
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.alias, 'Primera', 'en el orden de los items');
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: el 409 no filtra los alias de los demas comensales', async () => {
+  // Solo el que mando quien llama: la cuenta de la mesa no se le devuelve.
+  const db = fakeDb({
+    cuenta: { id_mesa: MESA, comensales: [enLaCuenta('Ana'), enLaCuenta('Beto')] },
+  });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await pedir(mesero(), [{ id_plato: 12, cantidad: 1, comensal: 'Nadie' }]);
+
+    assert.strictEqual(res.status, 409);
+    const cuerpo = JSON.stringify(res.body);
+    assert.ok(!cuerpo.includes('Ana'), cuerpo);
+    assert.ok(!cuerpo.includes('Beto'), cuerpo);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: el que ya resolvio no sale en el alias del 409', async () => {
+  const db = fakeDb({ cuenta: { id_mesa: MESA, comensales: [enLaCuenta('Ana')] } });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await pedir(mesero(), [
+      { id_plato: 12, cantidad: 1, comensal: 'ana' },
+      { id_plato: 13, cantidad: 1, comensal: 'Nadie' },
+    ]);
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.alias, 'Nadie');
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// La busqueda en la cuenta, compartida (services/alias-en-cuenta.js)
+// ---------------------------------------------------------------------------
+
+test('d-18b: entre varios textos con la misma clave gana el de MAS platos', async () => {
+  // Pasa con datos de antes de D-18b: la misma persona escrita de dos formas.
+  const db = fakeDb({
+    cuenta: {
+      id_mesa: MESA,
+      comensales: [enLaCuenta('abuela', 1), enLaCuenta('Abuela', 5)],
+    },
+  });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await pedir(mesero(), [{ id_plato: 12, cantidad: 1, comensal: 'ABUELA' }]);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(aliasGuardado(db), 'Abuela', 'el de 5 platos');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: con empate gana el primero de la cuenta', async () => {
+  const db = fakeDb({
+    cuenta: {
+      id_mesa: MESA,
+      comensales: [enLaCuenta('abuela', 2), enLaCuenta('Abuela', 2)],
+    },
+  });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await pedir(mesero(), [{ id_plato: 12, cantidad: 1, comensal: 'ABUELA' }]);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(aliasGuardado(db), 'abuela', 'el primero, y de forma determinista');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: la fila General de la cuenta no es una persona', async () => {
+  // La pone la propia funcion SQL para los items sin comensal: cargarle platos
+  // seria apropiarse de todo lo que aun no tiene dueno.
+  const db = fakeDb({ cuenta: { id_mesa: MESA, comensales: [enLaCuenta('General', 9)] } });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await pedir(mesero(), [{ id_plato: 12, cantidad: 1, comensal: 'General' }]);
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, pedidosCtrl.MOTIVO_NO_REGISTRADO);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: un texto de la cuenta que ya no es un alias valido se ignora', async () => {
+  // Dato viejo escrito a mano, de antes de que la regla R-18 se aplicara.
+  const db = fakeDb({ cuenta: { id_mesa: MESA, comensales: [enLaCuenta('A', 3)] } });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await pedir(mesero(), [{ id_plato: 12, cantidad: 1, comensal: 'Ana' }]);
+    assert.strictEqual(res.status, 409, 'no se canonicaliza contra un texto invalido');
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: se guarda el texto EXACTO de la cuenta, no su forma normalizada', async () => {
+  // La cuenta agrupa por btrim(dp.comensal): un texto con doble espacio agrupa
+  // asi, y guardar su forma colapsada crearia una TERCERA fila.
+  const db = fakeDb({ cuenta: { id_mesa: MESA, comensales: [enLaCuenta('Ab  uela', 2)] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await pedir(mesero(), [{ id_plato: 12, cantidad: 1, comensal: 'abuela' }]);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(aliasGuardado(db), 'Ab  uela');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
 
 // ---------------------------------------------------------------------------
 // Alias invalido: 400, con el mensaje de las otras rutas de alias
