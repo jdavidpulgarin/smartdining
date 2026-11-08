@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useCuentaMesa } from '../hooks/useCuentaMesa';
 import { useMesaSocket } from '../context/MesaSocketContext';
 import {
@@ -16,6 +16,7 @@ import {
   debeSalirDeEspera,
   mensajePagoConfirmado,
 } from '../utils/cuenta';
+import { crearDeduplicador } from '../utils/deduplicador';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout } from '../services/wompiWidget';
 import { uuidV4 } from '../services/clienteMesa';
@@ -49,12 +50,17 @@ function Pago() {
   const [ultimoPago, setUltimoPago] = useState(0);
   const [tipoConfirmado, setTipoConfirmado] = useState('propio');
 
+  const deduplicador = useMemo(
+    () => crearDeduplicador({ capacidad: 200 }),
+    []
+  );
+
   // Escuchar eventos de socket (payment:confirmed y cuenta:solicitada)
   useEffect(() => {
     if (!socketOn) return undefined;
 
     const bajaPayment = socketOn('payment:confirmed', (evento) => {
-      if (!evento) return;
+      if (!evento || deduplicador.visto(evento.eventId)) return;
       const tipo = mensajePagoConfirmado({ comensal: evento.comensal, yo: comensal });
 
       if (tipo === 'propio' || tipo === 'mesa') {
@@ -78,7 +84,7 @@ function Pago() {
       bajaPayment?.();
       bajaCuenta?.();
     };
-  }, [socketOn, comensal]);
+  }, [socketOn, comensal, deduplicador]);
 
   // Limpiar parámetros de retorno de Wompi de la URL sin recargar
   useEffect(() => {
