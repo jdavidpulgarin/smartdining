@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Navigate } from 'react-router-dom';
 import Header from './Header';
 import { useMesaSession } from '../../hooks/useMesaSession';
@@ -7,6 +7,7 @@ import { useMesaSocketContext } from '../../context/MesaSocketContext';
 import { formatearMensajePedidoCreado } from '../../utils/notificacionesMesa';
 import { esPedidoMio } from '../../utils/seguimiento';
 import { textoPagoConfirmado } from '../../utils/cuenta';
+import { crearDeduplicador } from '../../utils/deduplicador';
 
 function Layout({ children }) {
   const { mesa, comensal, valida, cargando, motivoCierre } = useMesaSession();
@@ -15,6 +16,10 @@ function Layout({ children }) {
 
   const [toastPedido, setToastPedido] = useState(null);
   const timerRef = useRef(null);
+  const deduplicador = useMemo(
+    () => crearDeduplicador({ capacidad: 200 }),
+    []
+  );
 
   useEffect(() => {
     return () => {
@@ -26,6 +31,7 @@ function Layout({ children }) {
     if (!socketOn) return undefined;
 
     const bajaCreated = socketOn('order:created', (data) => {
+      if (!data || deduplicador.visto(data.eventId)) return;
       const mensaje = formatearMensajePedidoCreado(data, comensal);
       if (mensaje) {
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -37,7 +43,7 @@ function Layout({ children }) {
     });
 
     const bajaStatus = socketOn('order:status', (data) => {
-      if (!data) return;
+      if (!data || deduplicador.visto(data.eventId)) return;
       const estadoNorm = String(data.estado || '').toLowerCase();
       if (estadoNorm === 'listo' && esPedidoMio(data.id_pedido, comensal)) {
         const codigoRaw =
@@ -59,7 +65,7 @@ function Layout({ children }) {
     });
 
     const bajaPayment = socketOn('payment:confirmed', (data) => {
-      if (!data) return;
+      if (!data || deduplicador.visto(data.eventId)) return;
       const mensaje = textoPagoConfirmado(data, comensal);
       if (mensaje) {
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -75,7 +81,7 @@ function Layout({ children }) {
       bajaStatus?.();
       bajaPayment?.();
     };
-  }, [socketOn, comensal]);
+  }, [socketOn, comensal, deduplicador]);
 
   if (cargando) {
     return null;

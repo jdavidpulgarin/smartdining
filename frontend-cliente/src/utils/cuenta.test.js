@@ -3,6 +3,9 @@ import {
   formatoPesos,
   normalizarCuenta,
   montosPorModo,
+  personasPorPagar,
+  montoIgualCentavos,
+  personasDividir,
   aplicarPagoConfirmado,
   textoPagoConfirmado,
   traducirErrorPago,
@@ -112,27 +115,136 @@ describe('utils/cuenta.js (J-08)', () => {
     });
   });
 
-  describe('montosPorModo', () => {
-    it('calcula propio, igual y total correctamente', () => {
-      const cuenta = {
-        total: 60000,
-        pagado: 0,
-        saldo: 60000,
-        mia: { saldo: 25000 },
-        comensales: [
-          { nombre: 'Beto', esGeneral: false },
-          { nombre: 'Ana', esGeneral: false },
-          { nombre: 'Carla', esGeneral: false },
-        ],
-      };
-
-      const montos = montosPorModo(cuenta, 3);
-      expect(montos.propio).toBe(25000);
-      expect(montos.igual).toBe(20000); // 60000 / 3
-      expect(montos.total).toBe(60000);
+  describe('personasPorPagar', () => {
+    it('yo no está en comensales → igual cuenta', () => {
+      const n = personasPorPagar({
+        comensales: ['Ana'],
+        pagaron: [],
+        yo: 'Beto',
+      });
+      expect(n).toBe(2);
     });
 
-    it('calcula total 62.000 entre 3 sin pagos → 20.667', () => {
+    it('yo ya está en pagaron → igual cuenta', () => {
+      const n = personasPorPagar({
+        comensales: ['Ana', 'Beto'],
+        pagaron: ['Ana', 'Beto'],
+        yo: 'Ana',
+      });
+      expect(n).toBe(1);
+    });
+
+    it('devuelve mínimo 1 aunque comensales y pagaron estén vacíos', () => {
+      expect(personasPorPagar()).toBe(1);
+    });
+  });
+
+  describe('personasDividir', () => {
+    it('con presencia usa personasPorPagar', () => {
+      const cuenta = { comensales: [] };
+      const presencia = { comensales: ['Ana', 'Beto'], pagaron: ['Ana'] };
+      expect(personasDividir(cuenta, { presencia, yo: 'Beto' })).toBe(1);
+      expect(personasDividir(cuenta, { presencia, yo: 'Carlos' })).toBe(2);
+    });
+
+    it('respaldo sin presencia: cuenta comensales con saldo > 0 y no General, sumando yo', () => {
+      const cuenta = {
+        saldo: 50000,
+        comensales: [
+          { nombre: 'Ana', saldo: 20000, esGeneral: false },
+          { nombre: 'Beto', saldo: 0, esGeneral: false },
+          { nombre: 'General', saldo: 10000, esGeneral: true },
+        ],
+      };
+      expect(personasDividir(cuenta, { yo: 'Carlos' })).toBe(2);
+      expect(personasDividir(cuenta, { yo: 'Ana' })).toBe(1);
+    });
+  });
+
+  describe('montoIgualCentavos y 5 filas de EVENTS.md §8.1 (en centavos)', () => {
+    it('2 personas, $85.000: Ana propio $20.000 → Beto igual $65.000', () => {
+      const montoBeto = montoIgualCentavos(6500000, 1);
+      expect(montoBeto).toBe(6500000); // $65.000
+    });
+
+    it('3 personas, $100.000: Ana propio $30.000 → Beto $35.000 → Carlos $35.000', () => {
+      const montoBeto = montoIgualCentavos(7000000, 2);
+      expect(montoBeto).toBe(3500000); // $35.000
+
+      const montoCarlos = montoIgualCentavos(3500000, 1);
+      expect(montoCarlos).toBe(3500000); // $35.000
+    });
+
+    it('4 personas, $120.000: Ana propio $45.000 → Beto, Carlos y Dani $25.000 c/u', () => {
+      const montoBeto = montoIgualCentavos(7500000, 3);
+      expect(montoBeto).toBe(2500000); // $25.000
+
+      const montoCarlos = montoIgualCentavos(5000000, 2);
+      expect(montoCarlos).toBe(2500000); // $25.000
+
+      const montoDani = montoIgualCentavos(2500000, 1);
+      expect(montoDani).toBe(2500000); // $25.000
+    });
+
+    it('4 personas, $120.000: Ana propio $10.000 → Beto $36.667 → Carlos $36.667 → Dani $36.666', () => {
+      const montoBeto = montoIgualCentavos(11000000, 3);
+      expect(montoBeto).toBe(3666700); // $36.667
+
+      const montoCarlos = montoIgualCentavos(7333300, 2);
+      expect(montoCarlos).toBe(3666700); // $36.667
+
+      const montoDani = montoIgualCentavos(3666600, 1);
+      expect(montoDani).toBe(3666600); // $36.666
+    });
+
+    it('3 personas, $100.000, todos igual: $33.333 → $33.334 → $33.333', () => {
+      const montoAna = montoIgualCentavos(10000000, 3);
+      expect(montoAna).toBe(3333300); // $33.333
+
+      const montoBeto = montoIgualCentavos(6666700, 2);
+      expect(montoBeto).toBe(3333400); // $33.334
+
+      const montoCarlos = montoIgualCentavos(3333300, 1);
+      expect(montoCarlos).toBe(3333300); // $33.333
+    });
+
+    it('saldo 0 → 0', () => {
+      expect(montoIgualCentavos(0, 3)).toBe(0);
+      expect(montoIgualCentavos(-500, 3)).toBe(0);
+    });
+
+    it('queda uno solo → paga el saldo exacto (con centavos)', () => {
+      expect(montoIgualCentavos(2066650, 1)).toBe(2066650);
+      expect(montoIgualCentavos(12345, 1)).toBe(12345);
+    });
+  });
+
+  describe('montosPorModo', () => {
+    it('calcula propio, igual y total usando { presencia, yo }', () => {
+      const cuenta = {
+        total: 100000,
+        pagado: 30000,
+        saldo: 70000,
+        mia: { saldo: 35000 },
+        comensales: [
+          { nombre: 'Ana', esGeneral: false },
+          { nombre: 'Beto', esGeneral: false },
+          { nombre: 'Carlos', esGeneral: false },
+        ],
+      };
+      const presencia = {
+        comensales: ['Ana', 'Beto', 'Carlos'],
+        pagaron: ['Ana'],
+        total: 3,
+      };
+
+      const montos = montosPorModo(cuenta, { presencia, yo: 'Beto' });
+      expect(montos.propio).toBe(35000);
+      expect(montos.igual).toBe(35000); // 70000 / 2
+      expect(montos.total).toBe(70000);
+    });
+
+    it('calcula con número de personas directo (compatibilidad)', () => {
       const cuenta = {
         total: 62000,
         pagado: 0,
@@ -145,86 +257,6 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(montos.total).toBe(62000);
     });
 
-    it('calcula total 62.000, ya pagaron 20.000, saldo 42.000 → 20.667 (no 42.000)', () => {
-      const cuenta = {
-        total: 62000,
-        pagado: 20000,
-        saldo: 42000,
-        mia: { saldo: 20000 },
-      };
-
-      const montos = montosPorModo(cuenta, 3);
-      expect(montos.igual).toBe(20667);
-      expect(montos.total).toBe(42000);
-    });
-
-    it('calcula total 62.000, saldo 20.666 → 20.666 (último paga el saldo)', () => {
-      const cuenta = {
-        total: 62000,
-        pagado: 41334,
-        saldo: 20666,
-        mia: { saldo: 20666 },
-      };
-
-      const montos = montosPorModo(cuenta, 3);
-      expect(montos.igual).toBe(20666);
-      expect(montos.total).toBe(20666);
-    });
-
-    it('calcula total 50.000 entre 2 sin pagos → 25.000', () => {
-      const cuenta = {
-        total: 50000,
-        pagado: 0,
-        saldo: 50000,
-        mia: { saldo: 25000 },
-      };
-
-      const montos = montosPorModo(cuenta, 2);
-      expect(montos.igual).toBe(25000);
-      expect(montos.total).toBe(50000);
-    });
-
-    it('calcula total 50.000 entre 2, un comensal ya pagó y solo queda uno (saldo 25.000) → 25.000', () => {
-      const cuenta = {
-        total: 50000,
-        pagado: 25000,
-        saldo: 25000,
-        mia: { saldo: 25000 },
-      };
-
-      const montos = montosPorModo(cuenta, 2);
-      expect(montos.igual).toBe(25000);
-      expect(montos.total).toBe(25000);
-    });
-
-    it('cubre el residuo de redondeo cuando el último comensal paga', () => {
-      const cuenta = {
-        total: 100,
-        pagado: 66,
-        saldo: 34,
-        mia: { saldo: 34 },
-      };
-
-      const montos = montosPorModo(cuenta, 3);
-      // parte = Math.round(100/3) = 33; residuo = 1; saldo 34 <= 33+1 -> 34
-      expect(montos.igual).toBe(34);
-      expect(montos.total).toBe(34);
-    });
-
-    it('el modo igual nunca excede el saldo restante de la mesa', () => {
-      const cuenta = {
-        total: 90000,
-        pagado: 80000,
-        saldo: 10000, // solo faltan 10000
-        mia: { saldo: 10000 },
-        comensales: [{ nombre: 'Beto' }, { nombre: 'Ana' }],
-      };
-
-      const montos = montosPorModo(cuenta, 2);
-      expect(montos.igual).toBe(10000);
-      expect(montos.total).toBe(10000);
-    });
-
     it('si el saldo de la mesa es 0, todos los modos devuelven 0', () => {
       const cuenta = {
         total: 50000,
@@ -233,7 +265,7 @@ describe('utils/cuenta.js (J-08)', () => {
         mia: { saldo: 0 },
       };
 
-      const montos = montosPorModo(cuenta, 2);
+      const montos = montosPorModo(cuenta, { yo: 'Ana' });
       expect(montos.propio).toBe(0);
       expect(montos.igual).toBe(0);
       expect(montos.total).toBe(0);

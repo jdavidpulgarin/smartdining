@@ -10,10 +10,48 @@ import {
 import { useSesion } from './SesionContext';
 import { crearClienteMesa, aliasDelToken } from '../services/clienteMesa';
 import { urlsServidor } from '../utils/urlsServidor';
+import { crearRegistroOyentes } from '../utils/registroOyentes';
 
 const MesaSocketContext = createContext(null);
 
 const CARRITO_VACIO = { version: 0, items: [] };
+
+// oxlint-disable-next-line react/only-export-components
+export function validarPresencia(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  if (
+    !Array.isArray(payload.comensales) ||
+    !payload.comensales.every((x) => typeof x === 'string')
+  ) {
+    return null;
+  }
+  if (
+    !Array.isArray(payload.pagaron) ||
+    !payload.pagaron.every((x) => typeof x === 'string')
+  ) {
+    return null;
+  }
+  if (typeof payload.total !== 'number' || !Number.isFinite(payload.total)) {
+    return null;
+  }
+  let sin_celular = [];
+  if (payload.sin_celular !== undefined) {
+    if (
+      !Array.isArray(payload.sin_celular) ||
+      !payload.sin_celular.every((x) => typeof x === 'string')
+    ) {
+      return null;
+    }
+    sin_celular = payload.sin_celular;
+  }
+
+  return {
+    comensales: payload.comensales,
+    pagaron: payload.pagaron,
+    total: payload.total,
+    sin_celular,
+  };
+}
 
 // oxlint-disable-next-line react/only-export-components
 export function esModoCompartido(token, socketUrl) {
@@ -38,11 +76,13 @@ export function MesaSocketProvider({ children }) {
     [token, socketUrl]
   );
 
-  const [cliente, setCliente] = useState(null);
+  const clienteRef = useRef(null);
+  const registro = useMemo(() => crearRegistroOyentes(), []);
   const [estado, setEstado] = useState(
     modo === 'compartido' ? 'conectando' : 'local'
   );
   const [carrito, setCarrito] = useState(CARRITO_VACIO);
+  const [presencia, setPresencia] = useState(null);
   const [errorMesaLlena, setErrorMesaLlena] = useState(null);
 
   const despedirRef = useRef(despedir);
@@ -52,20 +92,22 @@ export function MesaSocketProvider({ children }) {
 
   useEffect(() => {
     if (modo !== 'compartido' || !token || !socketUrl) {
-      setCliente(null);
-      setEstado('local');
-      setCarrito(CARRITO_VACIO);
-      setErrorMesaLlena(null);
       return undefined;
     }
 
     const nuevoCliente = crearClienteMesa({ url: socketUrl, token });
-    setCliente(nuevoCliente);
-    setEstado(nuevoCliente.estado);
-    setCarrito(nuevoCliente.carrito);
-    setErrorMesaLlena(null);
+    clienteRef.current = nuevoCliente;
+    registro.conectar(nuevoCliente);
+
+    const bajaPresencia = nuevoCliente.on('mesa:presencia', (ev) => {
+      const datos = validarPresencia(ev);
+      if (datos) {
+        setPresencia(datos);
+      }
+    });
 
     const bajas = [
+      bajaPresencia,
       nuevoCliente.on('estado', (nuevoEstado) => {
         setEstado(nuevoEstado);
       }),
@@ -92,32 +134,34 @@ export function MesaSocketProvider({ children }) {
     return () => {
       socket.off('connect_error', manejarConnectError);
       bajas.forEach((baja) => baja());
+      registro.desconectar();
       nuevoCliente.cerrar();
-      setCliente(null);
+      clienteRef.current = null;
+      setEstado('local');
       setCarrito(CARRITO_VACIO);
+      setPresencia(null);
+      setErrorMesaLlena(null);
     };
-  }, [modo, token, socketUrl]);
+  }, [modo, token, socketUrl, registro]);
 
   const enviar = useCallback(
     (evento, payload) => {
-      if (modo !== 'compartido' || !cliente) {
+      const clienteActual = clienteRef.current;
+      if (modo !== 'compartido' || !clienteActual) {
         return Promise.reject(
           Object.assign(new Error('Sin conexión compartida a la mesa'), {
             codigo: 'MODO_LOCAL',
           })
         );
       }
-      return cliente.enviar(evento, payload);
+      return clienteActual.enviar(evento, payload);
     },
-    [modo, cliente]
+    [modo]
   );
 
   const on = useCallback(
-    (evento, fn) => {
-      if (modo !== 'compartido' || !cliente) return () => {};
-      return cliente.on(evento, fn);
-    },
-    [modo, cliente]
+    (evento, fn) => registro.agregar(evento, fn),
+    [registro]
   );
 
   const comensal = useMemo(() => {
@@ -132,13 +176,14 @@ export function MesaSocketProvider({ children }) {
     () => ({
       estado,
       carrito,
+      presencia,
       comensal,
       enviar,
       on,
       modo,
       errorMesaLlena,
     }),
-    [estado, carrito, comensal, enviar, on, modo, errorMesaLlena]
+    [estado, carrito, presencia, comensal, enviar, on, modo, errorMesaLlena]
   );
 
   return (

@@ -173,6 +173,33 @@ describe('carritoCompartido utils', () => {
       expect(item.disponible).toBe(false);
     });
 
+    it('marca disponible: false cuando el plato esta agotado en el menu', () => {
+      const menuConPlatoAgotado = [
+        {
+          id_categoria: 1,
+          platos: [
+            {
+              id_plato: 101,
+              nombre: 'Guacamole',
+              precio: 15000,
+              disponible: false,
+            },
+          ],
+        },
+      ];
+      const items = [
+        {
+          id_linea: 'linea-agotada',
+          comensal: 'Juan',
+          id_plato: 101,
+          cantidad: 1,
+        },
+      ];
+
+      const [enriquecido] = enriquecerItems(items, menuConPlatoAgotado, 'Juan');
+      expect(enriquecido.disponible).toBe(false);
+    });
+
     it('enriquece plato armable calculando precio con extras', () => {
       const items = [
         {
@@ -362,6 +389,28 @@ describe('carritoCompartido utils', () => {
       const res = puedoEnviar(muchas);
       expect(res.ok).toBe(false);
       expect(res.motivo).toBe('No puedes enviar más de 50 ítems por pedido');
+    });
+
+    it('falla si algún plato completo está agotado', () => {
+      const lineas = [
+        { disponible: true },
+        { disponible: false, platoAgotado: true },
+      ];
+      const res = puedoEnviar(lineas);
+      expect(res.ok).toBe(false);
+      expect(res.motivo).toBe('Tienes platos agotados: quítalos para enviar');
+    });
+
+    it('falla si solo se agotó un ingrediente', () => {
+      const lineas = [
+        { disponible: true },
+        { disponible: false, platoAgotado: false, ingredienteAgotado: true },
+      ];
+      const res = puedoEnviar(lineas);
+      expect(res.ok).toBe(false);
+      expect(res.motivo).toBe(
+        'Tienes platos con ingredientes agotados: quítalos para enviar'
+      );
     });
 
     it('falla si algun plato tiene ingredientes agotados', () => {

@@ -1,0 +1,20 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: smartdining-postgres-test
+    environment:
+      POSTGRES_DB: smartdining_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      # La carpeta database/ entera, igual que docker-compose.yml: docker-init.sh
+      # usa scripts/, schema.sql, seed.sql y (desde P-17) migrar.sh.
+      - ..:/smartdining-db:ro
+      - ../docker-init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d smartdining_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 10

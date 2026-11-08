@@ -4,6 +4,7 @@ import { useMesaSocket } from '../context/MesaSocketContext';
 import {
   formatoPesos,
   montosPorModo,
+  personasDividir,
   TITULOS_MODO,
   ESTADO_CUENTA_INICIAL,
   ESTADO_CUENTA_ENVIANDO,
@@ -23,7 +24,7 @@ import { uuidV4 } from '../services/clienteMesa';
  */
 function Pago() {
   const { cuenta, cargando, error, recargar, idMesa, comensal } = useCuentaMesa();
-  const { on: socketOn, enviar } = useMesaSocket();
+  const { on: socketOn, enviar, presencia } = useMesaSocket();
 
   const [pantalla, setPantalla] = useState(() => {
     if (typeof window !== 'undefined' && window.location.search) {
@@ -126,18 +127,22 @@ function Pago() {
   const miSubtotal = cuenta?.mia?.subtotal ?? 0;
 
   const comensales = cuenta?.comensales || [];
-  const personas = Math.max(1, comensales.filter((c) => !c.esGeneral).length || 1);
+  const numPersonasDividir = personasDividir(cuenta, { presencia, yo: comensal });
 
-  const montos = montosPorModo(cuenta, personas);
+  const montos = montosPorModo(cuenta, { presencia, yo: comensal });
   const montoModo = montos[modo] ?? miSaldo;
 
   const puedoPagar = saldo > 0 && montoModo > 0;
   const yaPague = miSaldo === 0 && saldo > 0;
   const progreso = total > 0 ? Math.min(100, Math.round((pagado / total) * 100)) : 0;
 
+  const textoAyudaDividir = numPersonasDividir === 1
+    ? 'Eres el último: pagas lo que falta.'
+    : `El saldo que falta, dividido entre las ${numPersonasDividir} personas que aún no han pagado (contándote).`;
+
   const ayudas = {
     propio: 'Pagas solo lo que tú pediste.',
-    igual: `La cuenta total dividida entre las ${personas} personas de la mesa.`,
+    igual: textoAyudaDividir,
     total: 'Pagas todo lo que le falta a la mesa (invitas tú).',
   };
 
@@ -180,7 +185,10 @@ function Pago() {
     setErrorPago(null);
 
     try {
-      const intencion = await crearIntencion(modo);
+      const intencion = await crearIntencion(modo, null, {
+        presenciaSim: presencia,
+        yoSim: comensal,
+      });
       setIntencionActual(intencion);
       setPantalla('espera');
 

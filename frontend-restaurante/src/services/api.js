@@ -170,12 +170,47 @@ export async function apiFetch(endpoint, options = {}) {
     }
   }
 
+  const timeoutMs = options.timeout !== undefined ? options.timeout : 10000
+  let controller = null
+  let timeoutId = null
+
+  if (timeoutMs && timeoutMs > 0 && !options.signal) {
+    controller = new AbortController()
+    timeoutId = setTimeout(() => {
+      controller.abort()
+    }, timeoutMs)
+  }
+
   const config = {
     ...options,
     headers,
+    signal: options.signal || (controller ? controller.signal : undefined),
   }
 
-  const response = await fetch(url, config)
+  let response
+  try {
+    response = await fetch(url, config)
+  } catch (fetchErr) {
+    // Si quien llama abortó con su propia señal, no es un problema de conexión.
+    if (fetchErr.name === 'AbortError' && !(controller && controller.signal.aborted)) {
+      throw fetchErr
+    }
+    // Sin respuesta del servidor (caído, sin red o tiempo agotado). Se marca con
+    // sinConexion para que la pantalla diga "Sin conexión, no se guardó" y no
+    // dé nada por guardado (P-13).
+    const error = new Error(
+      controller && controller.signal.aborted
+        ? `Tiempo de espera agotado al conectar con el servidor (${(timeoutMs || 10000) / 1000}s)`
+        : 'Sin conexión con el servidor'
+    )
+    error.sinConexion = true
+    error.cause = fetchErr
+    throw error
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
+  }
 
   // Extraer cabecera Retry-After (en segundos según draft-7 de RFC)
   const retryHeader = response.headers?.get
@@ -235,6 +270,18 @@ export async function apiFetch(endpoint, options = {}) {
   return data
 }
 
+export const MENSAJE_SIN_CONEXION_NO_GUARDADO = 'Sin conexión, no se guardó'
+
+/**
+ * Mensaje para una escritura que falló (guardar, borrar, agotar...). Si no hubo
+ * respuesta del servidor, "Sin conexión, no se guardó"; si el servidor la
+ * rechazó, su error real. Nunca da el cambio por guardado.
+ */
+export function mensajeNoGuardado(err) {
+  if (err?.sinConexion) return MENSAJE_SIN_CONEXION_NO_GUARDADO
+  return err?.message ? `No se guardó: ${err.message}` : 'No se guardó'
+}
+
 // Submódulo de Autenticación
 export const authApi = {
   /**
@@ -256,8 +303,8 @@ export const mesasApi = {
   /**
    * Obtiene la lista de mesas para el personal: GET /api/mesas
    */
-  async listar() {
-    return apiFetch('/mesas')
+  async listar(options = {}) {
+    return apiFetch('/mesas', options)
   },
 
   /**
@@ -318,8 +365,8 @@ export const pedidosApi = {
   /**
    * Obtiene la lista de pedidos activos para sala/cocina: GET /api/pedidos/activos
    */
-  async listarActivos() {
-    return apiFetch('/pedidos/activos')
+  async listarActivos(options = {}) {
+    return apiFetch('/pedidos/activos', { timeout: 10000, ...options })
   },
 
   /**
@@ -447,320 +494,86 @@ export const platosApi = {
     })
   },
   async marcarPersonalizable(id, { personalizable = true, calorias = null }) {
-    try {
-      return await apiFetch(`/platos/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ personalizable: Boolean(personalizable), calorias: calorias ? Number(calorias) : null }),
-      })
-    } catch {
-      // Fallback si PATCH/PUT parcial de personalizable aun no esta en backend
-      return { ok: true, id, personalizable, calorias }
-    }
+    // Sin respaldo: si el backend lo rechaza, el error sube a la pantalla.
+    return apiFetch(`/platos/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ personalizable: Boolean(personalizable), calorias: calorias ? Number(calorias) : null }),
+    })
   },
 }
 
 /**
- * SUBMÓDULO DEL CONSTRUCTOR DE PLATOS (D-04):
- * CRUD de pasos e ingredientes. Dado que D-04 está pendiente de implementación
- * en backend por Daniel, este cliente implementa el contrato esperado con
- * fallback local/mock activable por VITE_USE_MOCKS o ante respuesta 404 del backend.
+ * Constructor de platos (D-04): pasos e ingredientes de un plato personalizable.
+ * Todo va contra el backend; si falla, el error sube a la pantalla (P-13). No
+ * hay copia local: un cambio que no llegó al servidor no se muestra como hecho.
  */
-const STORAGE_KEY_PASOS = 'smartdining_constructor_pasos_mock'
-
-function getMockPasosStorage() {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY_PASOS)
-    return data ? JSON.parse(data) : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveMockPasosStorage(data) {
-  try {
-    localStorage.setItem(STORAGE_KEY_PASOS, JSON.stringify(data))
-  } catch (err) {
-    console.warn('No se pudo guardar constructor en localStorage:', err)
-  }
-}
-
 export const constructorApi = {
-  /**
-   * Obtiene los pasos e ingredientes de un plato personalizable
-   * GET /api/platos/:id/pasos
-   */
+  /** GET /api/platos/:id/pasos */
   async obtenerPasos(idPlato) {
-    if (import.meta.env.VITE_USE_MOCKS === 'true') {
-      const storage = getMockPasosStorage()
-      return storage[idPlato] || []
-    }
-    try {
-      return await apiFetch(`/platos/${idPlato}/pasos`)
-    } catch (err) {
-      if (err?.status) {
-        throw err
-      }
-      // Fallback a almacenamiento local solo ante fallo de red (sin respuesta de servidor)
-      const storage = getMockPasosStorage()
-      return storage[idPlato] || []
-    }
+    return apiFetch(`/platos/${idPlato}/pasos`)
   },
 
-  /**
-   * Crea un paso para un plato personalizable
-   * POST /api/platos/:id/pasos
-   */
+  /** POST /api/platos/:id/pasos */
   async guardarPaso(idPlato, { nombre, orden = 1, min_sel = 0, max_sel = 1, obligatorio = false }) {
-    const pasoPayload = {
-      id_plato: Number(idPlato),
-      nombre,
-      orden: Number(orden),
-      min_sel: Number(min_sel),
-      max_sel: Number(max_sel),
-      obligatorio: Boolean(obligatorio),
-    }
-
-    if (import.meta.env.VITE_USE_MOCKS === 'true') {
-      const storage = getMockPasosStorage()
-      const pasosPlato = storage[idPlato] || []
-      const nuevoPaso = {
-        id_paso: Date.now(),
-        ...pasoPayload,
-        ingredientes: [],
-      }
-      storage[idPlato] = [...pasosPlato, nuevoPaso]
-      saveMockPasosStorage(storage)
-      return nuevoPaso
-    }
-
-    try {
-      return await apiFetch(`/platos/${idPlato}/pasos`, {
-        method: 'POST',
-        body: JSON.stringify(pasoPayload),
-      })
-    } catch (err) {
-      if (err?.status) {
-        throw err
-      }
-      const storage = getMockPasosStorage()
-      const pasosPlato = storage[idPlato] || []
-      const nuevoPaso = {
-        id_paso: Date.now(),
-        ...pasoPayload,
-        ingredientes: [],
-      }
-      storage[idPlato] = [...pasosPlato, nuevoPaso]
-      saveMockPasosStorage(storage)
-      return nuevoPaso
-    }
+    return apiFetch(`/platos/${idPlato}/pasos`, {
+      method: 'POST',
+      body: JSON.stringify({
+        id_plato: Number(idPlato),
+        nombre,
+        orden: Number(orden),
+        min_sel: Number(min_sel),
+        max_sel: Number(max_sel),
+        obligatorio: Boolean(obligatorio),
+      }),
+    })
   },
 
-  /**
-   * Actualiza un paso existente
-   * PUT /api/pasos/:id
-   */
+  /** PUT /api/pasos/:id */
   async actualizarPaso(idPaso, datos) {
-    if (import.meta.env.VITE_USE_MOCKS === 'true') {
-      const storage = getMockPasosStorage()
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].map((p) =>
-          p.id_paso === idPaso ? { ...p, ...datos } : p
-        )
-      }
-      saveMockPasosStorage(storage)
-      return { id_paso: idPaso, ...datos }
-    }
-
-    try {
-      return await apiFetch(`/pasos/${idPaso}`, {
-        method: 'PUT',
-        body: JSON.stringify(datos),
-      })
-    } catch (err) {
-      if (err?.status) {
-        throw err
-      }
-      const storage = getMockPasosStorage()
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].map((p) =>
-          p.id_paso === idPaso ? { ...p, ...datos } : p
-        )
-      }
-      saveMockPasosStorage(storage)
-      return { id_paso: idPaso, ...datos }
-    }
+    return apiFetch(`/pasos/${idPaso}`, {
+      method: 'PUT',
+      body: JSON.stringify(datos),
+    })
   },
 
-  /**
-   * Elimina un paso
-   * DELETE /api/pasos/:id
-   */
+  /** DELETE /api/pasos/:id */
   async eliminarPaso(idPaso) {
-    if (import.meta.env.VITE_USE_MOCKS === 'true') {
-      const storage = getMockPasosStorage()
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].filter((p) => p.id_paso !== idPaso)
-      }
-      saveMockPasosStorage(storage)
-      return { ok: true }
-    }
-
-    try {
-      return await apiFetch(`/pasos/${idPaso}`, { method: 'DELETE' })
-    } catch (err) {
-      if (err?.status) {
-        throw err
-      }
-      const storage = getMockPasosStorage()
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].filter((p) => p.id_paso !== idPaso)
-      }
-      saveMockPasosStorage(storage)
-      return { ok: true }
-    }
+    return apiFetch(`/pasos/${idPaso}`, { method: 'DELETE' })
   },
 
-  /**
-   * Agrega un ingrediente a un paso
-   * POST /api/pasos/:id/ingredientes
-   */
+  /** POST /api/pasos/:id/ingredientes */
   async guardarIngrediente(idPaso, { nombre, precio_extra = 0, calorias = null, alergenos = [], url_imagen = '', disponible = true }) {
-    const ingPayload = {
-      id_paso: Number(idPaso),
-      nombre,
-      precio_extra: Number(precio_extra) || 0,
-      calorias: calorias ? Number(calorias) : null,
-      alergenos: Array.isArray(alergenos) ? alergenos : [],
-      url_imagen,
-      disponible: Boolean(disponible),
-    }
-
-    if (import.meta.env.VITE_USE_MOCKS === 'true') {
-      const storage = getMockPasosStorage()
-      const nuevoIng = { id_ingrediente: Date.now(), ...ingPayload }
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].map((p) => {
-          if (p.id_paso === idPaso) {
-            return { ...p, ingredientes: [...(p.ingredientes || []), nuevoIng] }
-          }
-          return p
-        })
-      }
-      saveMockPasosStorage(storage)
-      return nuevoIng
-    }
-
-    try {
-      return await apiFetch(`/pasos/${idPaso}/ingredientes`, {
-        method: 'POST',
-        body: JSON.stringify(ingPayload),
-      })
-    } catch (err) {
-      if (err?.status) {
-        throw err
-      }
-      const storage = getMockPasosStorage()
-      const nuevoIng = { id_ingrediente: Date.now(), ...ingPayload }
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].map((p) => {
-          if (p.id_paso === idPaso) {
-            return { ...p, ingredientes: [...(p.ingredientes || []), nuevoIng] }
-          }
-          return p
-        })
-      }
-      saveMockPasosStorage(storage)
-      return nuevoIng
-    }
+    return apiFetch(`/pasos/${idPaso}/ingredientes`, {
+      method: 'POST',
+      body: JSON.stringify({
+        id_paso: Number(idPaso),
+        nombre,
+        precio_extra: Number(precio_extra) || 0,
+        calorias: calorias ? Number(calorias) : null,
+        alergenos: Array.isArray(alergenos) ? alergenos : [],
+        url_imagen,
+        disponible: Boolean(disponible),
+      }),
+    })
   },
 
-  /**
-   * Actualiza un ingrediente existente
-   * PUT /api/ingredientes/:id
-   */
+  /** PUT /api/ingredientes/:id */
   async actualizarIngrediente(idIngrediente, datos) {
-    if (import.meta.env.VITE_USE_MOCKS === 'true') {
-      const storage = getMockPasosStorage()
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].map((p) => ({
-          ...p,
-          ingredientes: (p.ingredientes || []).map((ing) =>
-            ing.id_ingrediente === idIngrediente ? { ...ing, ...datos } : ing
-          ),
-        }))
-      }
-      saveMockPasosStorage(storage)
-      return { id_ingrediente: idIngrediente, ...datos }
-    }
-
-    try {
-      return await apiFetch(`/ingredientes/${idIngrediente}`, {
-        method: 'PUT',
-        body: JSON.stringify(datos),
-      })
-    } catch (err) {
-      if (err?.status) {
-        throw err
-      }
-      const storage = getMockPasosStorage()
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].map((p) => ({
-          ...p,
-          ingredientes: (p.ingredientes || []).map((ing) =>
-            ing.id_ingrediente === idIngrediente ? { ...ing, ...datos } : ing
-          ),
-        }))
-      }
-      saveMockPasosStorage(storage)
-      return { id_ingrediente: idIngrediente, ...datos }
-    }
+    return apiFetch(`/ingredientes/${idIngrediente}`, {
+      method: 'PUT',
+      body: JSON.stringify(datos),
+    })
   },
 
-  /**
-   * Elimina un ingrediente
-   * DELETE /api/ingredientes/:id
-   */
+  /** DELETE /api/ingredientes/:id */
   async eliminarIngrediente(idIngrediente) {
-    if (import.meta.env.VITE_USE_MOCKS === 'true') {
-      const storage = getMockPasosStorage()
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].map((p) => ({
-          ...p,
-          ingredientes: (p.ingredientes || []).filter((ing) => ing.id_ingrediente !== idIngrediente),
-        }))
-      }
-      saveMockPasosStorage(storage)
-      return { ok: true }
-    }
-
-    try {
-      return await apiFetch(`/ingredientes/${idIngrediente}`, { method: 'DELETE' })
-    } catch (err) {
-      if (err?.status) {
-        throw err
-      }
-      const storage = getMockPasosStorage()
-      for (const pId of Object.keys(storage)) {
-        storage[pId] = storage[pId].map((p) => ({
-          ...p,
-          ingredientes: (p.ingredientes || []).filter((ing) => ing.id_ingrediente !== idIngrediente),
-        }))
-      }
-      saveMockPasosStorage(storage)
-      return { ok: true }
-    }
+    return apiFetch(`/ingredientes/${idIngrediente}`, { method: 'DELETE' })
   },
 }
 
 /**
- * CONTRATOS PENDIENTES PARA DANIEL (Rutas que no existen aún en backend):
- * 
- * 1. RF-21 (Reportes):
- *    GET /api/reportes?rango=hoy|semana|mes
- *    Rol requerido: admin
- *    Respuesta esperada: { totalVentas, totalPedidos, tiempoCocinaPromedio, ocupacionMesas, ticketPromedio, topPlatos, metodosPago }
- *    Vistas SQL implementadas en database/scripts/24_vistas_reportes.sql:
- *    - v_ventas_diarias, v_ingredientes_top, v_platos_top, v_tiempos_kds
+ * Datos de DEMOSTRACIÓN para Reportes. Solo se usan en desarrollo explícito
+ * (usarMocks): nunca por un 404 ni por un fallo de red en producción.
  */
 function generarReporteFallback(rango = 'hoy') {
   if (rango === 'semana') {
@@ -771,15 +584,15 @@ function generarReporteFallback(rango = 'hoy') {
       totalPedidos: 242,
       pedidosLiquidados: 236,
       tiempoCocinaPromedio: 13.1,
-      ocupacionMesas: '76%',
+      ocupacionMesas: 76,
       ticketPromedio: 36940,
       kdsAlertsCount: 8,
       topPlatos: [
-        { name: 'Hamburguesa Smart Angus', category: 'Hamburguesas', qty: 114, total: '$2,622.00', percentage: 95 },
-        { name: 'Bowl Personalizado', category: 'Arma tu plato', qty: 86, total: '$1,806.00', percentage: 75 },
-        { name: 'Pizza Margherita Smart', category: 'Pizzas', qty: 72, total: '$1,296.00', percentage: 60 },
-        { name: 'Papas Rústicas Trufadas', category: 'Acompañamientos', qty: 65, total: '$552.50', percentage: 52 },
-        { name: 'Limonada de Coco', category: 'Bebidas', qty: 58, total: '$406.00', percentage: 46 },
+        { id_plato: 1001, nombre: 'Hamburguesa Smart Angus', categoria: 'Hamburguesas', unidades: 114, total: 3876000, porcentaje: 95 },
+        { id_plato: 1002, nombre: 'Bowl Personalizado', categoria: 'Arma tu plato', unidades: 86, total: 2408000, porcentaje: 75 },
+        { id_plato: 1003, nombre: 'Pizza Margherita Smart', categoria: 'Pizzas', unidades: 72, total: 2304000, porcentaje: 60 },
+        { id_plato: 1004, nombre: 'Papas Rústicas Trufadas', categoria: 'Acompañamientos', unidades: 65, total: 910000, porcentaje: 52 },
+        { id_plato: 1005, nombre: 'Limonada de Coco', categoria: 'Bebidas', unidades: 58, total: 522000, porcentaje: 46 },
       ],
       metodosPago: [
         { metodo: 'Tarjeta', porcentaje: 54, monto: 4827600, color: '#10b981' },
@@ -794,11 +607,11 @@ function generarReporteFallback(rango = 'hoy') {
         { hora: '20:00 - 21:00', volumen: 90 },
       ],
       topIngredientes: [
-        { id_ingrediente: 1, nombre_ingrediente: 'Carne Angus 150g', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 142, porciones_extra: 34, porciones_normal: 108, ingresos_extras_recaudados: '$102.00' },
-        { id_ingrediente: 4, nombre_ingrediente: 'Queso Cheddar Fundido', nombre_paso: 'Queso y Salsas', nombre_plato: 'Bowl Personalizado', veces_solicitado: 118, porciones_extra: 28, porciones_normal: 90, ingresos_extras_recaudados: '$56.00' },
-        { id_ingrediente: 2, nombre_ingrediente: 'Pollo Crispy Apanado', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 89, porciones_extra: 12, porciones_normal: 77, ingresos_extras_recaudados: '$30.00' },
-        { id_ingrediente: 7, nombre_ingrediente: 'Tocineta Ahumada Crispy', nombre_paso: 'Toppings & Crunch', nombre_plato: 'Bowl Personalizado', veces_solicitado: 84, porciones_extra: 42, porciones_normal: 42, ingresos_extras_recaudados: '$84.00' },
-        { id_ingrediente: 9, nombre_ingrediente: 'Aguacate Hass Laminado', nombre_paso: 'Vegetales & Frescura', nombre_plato: 'Bowl Personalizado', veces_solicitado: 76, porciones_extra: 22, porciones_normal: 54, ingresos_extras_recaudados: '$44.00' },
+        { id_ingrediente: 1, nombre_ingrediente: 'Carne Angus 150g', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 142, porciones_extra: 34, porciones_normal: 108, ingresos_extras: 102000 },
+        { id_ingrediente: 4, nombre_ingrediente: 'Queso Cheddar Fundido', nombre_paso: 'Queso y Salsas', nombre_plato: 'Bowl Personalizado', veces_solicitado: 118, porciones_extra: 28, porciones_normal: 90, ingresos_extras: 56000 },
+        { id_ingrediente: 2, nombre_ingrediente: 'Pollo Crispy Apanado', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 89, porciones_extra: 12, porciones_normal: 77, ingresos_extras: 30000 },
+        { id_ingrediente: 7, nombre_ingrediente: 'Tocineta Ahumada Crispy', nombre_paso: 'Toppings & Crunch', nombre_plato: 'Bowl Personalizado', veces_solicitado: 84, porciones_extra: 42, porciones_normal: 42, ingresos_extras: 84000 },
+        { id_ingrediente: 9, nombre_ingrediente: 'Aguacate Hass Laminado', nombre_paso: 'Vegetales & Frescura', nombre_plato: 'Bowl Personalizado', veces_solicitado: 76, porciones_extra: 22, porciones_normal: 54, ingresos_extras: 44000 },
       ],
       tiemposKds: [
         { fecha: 'Últimos 7 días', platos_preparados: 256, tiempo_estimado_promedio_min: 15.0, tiempo_real_promedio_min: 13.1, variacion_promedio_porcentaje: -12.7 },
@@ -815,15 +628,15 @@ function generarReporteFallback(rango = 'hoy') {
       totalPedidos: 1045,
       pedidosLiquidados: 1022,
       tiempoCocinaPromedio: 13.5,
-      ocupacionMesas: '81%',
+      ocupacionMesas: 81,
       ticketPromedio: 36760,
       kdsAlertsCount: 26,
       topPlatos: [
-        { name: 'Hamburguesa Smart Angus', category: 'Hamburguesas', qty: 480, total: '$11,040.00', percentage: 98 },
-        { name: 'Bowl Personalizado', category: 'Arma tu plato', qty: 375, total: '$7,875.00', percentage: 80 },
-        { name: 'Pizza Margherita Smart', category: 'Pizzas', qty: 310, total: '$5,580.00', percentage: 65 },
-        { name: 'Papas Rústicas Trufadas', category: 'Acompañamientos', qty: 280, total: '$2,380.00', percentage: 55 },
-        { name: 'Limonada de Coco', category: 'Bebidas', qty: 250, total: '$1,750.00', percentage: 48 },
+        { id_plato: 1001, nombre: 'Hamburguesa Smart Angus', categoria: 'Hamburguesas', unidades: 480, total: 16320000, porcentaje: 98 },
+        { id_plato: 1002, nombre: 'Bowl Personalizado', categoria: 'Arma tu plato', unidades: 375, total: 10500000, porcentaje: 80 },
+        { id_plato: 1003, nombre: 'Pizza Margherita Smart', categoria: 'Pizzas', unidades: 310, total: 9920000, porcentaje: 65 },
+        { id_plato: 1004, nombre: 'Papas Rústicas Trufadas', categoria: 'Acompañamientos', unidades: 280, total: 3920000, porcentaje: 55 },
+        { id_plato: 1005, nombre: 'Limonada de Coco', categoria: 'Bebidas', unidades: 250, total: 2250000, porcentaje: 48 },
       ],
       metodosPago: [
         { metodo: 'Tarjeta', porcentaje: 56, monto: 21515200, color: '#10b981' },
@@ -838,11 +651,11 @@ function generarReporteFallback(rango = 'hoy') {
         { hora: '20:00 - 21:00', volumen: 92 },
       ],
       topIngredientes: [
-        { id_ingrediente: 1, nombre_ingrediente: 'Carne Angus 150g', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 590, porciones_extra: 140, porciones_normal: 450, ingresos_extras_recaudados: '$420.00' },
-        { id_ingrediente: 4, nombre_ingrediente: 'Queso Cheddar Fundido', nombre_paso: 'Queso y Salsas', nombre_plato: 'Bowl Personalizado', veces_solicitado: 480, porciones_extra: 110, porciones_normal: 370, ingresos_extras_recaudados: '$220.00' },
-        { id_ingrediente: 2, nombre_ingrediente: 'Pollo Crispy Apanado', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 380, porciones_extra: 50, porciones_normal: 330, ingresos_extras_recaudados: '$125.00' },
-        { id_ingrediente: 7, nombre_ingrediente: 'Tocineta Ahumada Crispy', nombre_paso: 'Toppings & Crunch', nombre_plato: 'Bowl Personalizado', veces_solicitado: 360, porciones_extra: 180, porciones_normal: 180, ingresos_extras_recaudados: '$360.00' },
-        { id_ingrediente: 9, nombre_ingrediente: 'Aguacate Hass Laminado', nombre_paso: 'Vegetales & Frescura', nombre_plato: 'Bowl Personalizado', veces_solicitado: 320, porciones_extra: 95, porciones_normal: 225, ingresos_extras_recaudados: '$190.00' },
+        { id_ingrediente: 1, nombre_ingrediente: 'Carne Angus 150g', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 590, porciones_extra: 140, porciones_normal: 450, ingresos_extras: 420000 },
+        { id_ingrediente: 4, nombre_ingrediente: 'Queso Cheddar Fundido', nombre_paso: 'Queso y Salsas', nombre_plato: 'Bowl Personalizado', veces_solicitado: 480, porciones_extra: 110, porciones_normal: 370, ingresos_extras: 220000 },
+        { id_ingrediente: 2, nombre_ingrediente: 'Pollo Crispy Apanado', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 380, porciones_extra: 50, porciones_normal: 330, ingresos_extras: 125000 },
+        { id_ingrediente: 7, nombre_ingrediente: 'Tocineta Ahumada Crispy', nombre_paso: 'Toppings & Crunch', nombre_plato: 'Bowl Personalizado', veces_solicitado: 360, porciones_extra: 180, porciones_normal: 180, ingresos_extras: 360000 },
+        { id_ingrediente: 9, nombre_ingrediente: 'Aguacate Hass Laminado', nombre_paso: 'Vegetales & Frescura', nombre_plato: 'Bowl Personalizado', veces_solicitado: 320, porciones_extra: 95, porciones_normal: 225, ingresos_extras: 190000 },
       ],
       tiemposKds: [
         { fecha: 'Mes Corriente', platos_preparados: 1120, tiempo_estimado_promedio_min: 15.0, tiempo_real_promedio_min: 13.5, variacion_promedio_porcentaje: -10.0 },
@@ -859,15 +672,15 @@ function generarReporteFallback(rango = 'hoy') {
     totalPedidos: 34,
     pedidosLiquidados: 32,
     tiempoCocinaPromedio: 12.4,
-    ocupacionMesas: '72%',
+    ocupacionMesas: 72,
     ticketPromedio: 37640,
     kdsAlertsCount: 2,
     topPlatos: [
-      { name: 'Hamburguesa Smart Angus', category: 'Hamburguesas', qty: 18, total: '$414.00', percentage: 90 },
-      { name: 'Bowl Personalizado', category: 'Arma tu plato', qty: 14, total: '$294.00', percentage: 70 },
-      { name: 'Pizza Margherita Smart', category: 'Pizzas', qty: 11, total: '$198.00', percentage: 55 },
-      { name: 'Papas Rústicas Trufadas', category: 'Acompañamientos', qty: 10, total: '$85.00', percentage: 50 },
-      { name: 'Limonada de Coco', category: 'Bebidas', qty: 9, total: '$63.00', percentage: 45 },
+      { id_plato: 1001, nombre: 'Hamburguesa Smart Angus', categoria: 'Hamburguesas', unidades: 18, total: 612000, porcentaje: 90 },
+      { id_plato: 1002, nombre: 'Bowl Personalizado', categoria: 'Arma tu plato', unidades: 14, total: 392000, porcentaje: 70 },
+      { id_plato: 1003, nombre: 'Pizza Margherita Smart', categoria: 'Pizzas', unidades: 11, total: 352000, porcentaje: 55 },
+      { id_plato: 1004, nombre: 'Papas Rústicas Trufadas', categoria: 'Acompañamientos', unidades: 10, total: 140000, porcentaje: 50 },
+      { id_plato: 1005, nombre: 'Limonada de Coco', categoria: 'Bebidas', unidades: 9, total: 81000, porcentaje: 45 },
     ],
     metodosPago: [
       { metodo: 'Tarjeta', porcentaje: 52, monto: 665600, color: '#10b981' },
@@ -882,11 +695,11 @@ function generarReporteFallback(rango = 'hoy') {
       { hora: '20:00 - 21:00', volumen: 85 },
     ],
     topIngredientes: [
-      { id_ingrediente: 1, nombre_ingrediente: 'Carne Angus 150g', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 28, porciones_extra: 6, porciones_normal: 22, ingresos_extras_recaudados: '$18.00' },
-      { id_ingrediente: 4, nombre_ingrediente: 'Queso Cheddar Fundido', nombre_paso: 'Queso y Salsas', nombre_plato: 'Bowl Personalizado', veces_solicitado: 24, porciones_extra: 5, porciones_normal: 19, ingresos_extras_recaudados: '$10.00' },
-      { id_ingrediente: 2, nombre_ingrediente: 'Pollo Crispy Apanado', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 19, porciones_extra: 3, porciones_normal: 16, ingresos_extras_recaudados: '$7.50' },
-      { id_ingrediente: 7, nombre_ingrediente: 'Tocineta Ahumada Crispy', nombre_paso: 'Toppings & Crunch', nombre_plato: 'Bowl Personalizado', veces_solicitado: 16, porciones_extra: 8, porciones_normal: 8, ingresos_extras_recaudados: '$16.00' },
-      { id_ingrediente: 9, nombre_ingrediente: 'Aguacate Hass Laminado', nombre_paso: 'Vegetales & Frescura', nombre_plato: 'Bowl Personalizado', veces_solicitado: 15, porciones_extra: 4, porciones_normal: 11, ingresos_extras_recaudados: '$8.00' },
+      { id_ingrediente: 1, nombre_ingrediente: 'Carne Angus 150g', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 28, porciones_extra: 6, porciones_normal: 22, ingresos_extras: 18000 },
+      { id_ingrediente: 4, nombre_ingrediente: 'Queso Cheddar Fundido', nombre_paso: 'Queso y Salsas', nombre_plato: 'Bowl Personalizado', veces_solicitado: 24, porciones_extra: 5, porciones_normal: 19, ingresos_extras: 10000 },
+      { id_ingrediente: 2, nombre_ingrediente: 'Pollo Crispy Apanado', nombre_paso: 'Proteína Principal', nombre_plato: 'Bowl Personalizado', veces_solicitado: 19, porciones_extra: 3, porciones_normal: 16, ingresos_extras: 7000 },
+      { id_ingrediente: 7, nombre_ingrediente: 'Tocineta Ahumada Crispy', nombre_paso: 'Toppings & Crunch', nombre_plato: 'Bowl Personalizado', veces_solicitado: 16, porciones_extra: 8, porciones_normal: 8, ingresos_extras: 16000 },
+      { id_ingrediente: 9, nombre_ingrediente: 'Aguacate Hass Laminado', nombre_paso: 'Vegetales & Frescura', nombre_plato: 'Bowl Personalizado', veces_solicitado: 15, porciones_extra: 4, porciones_normal: 11, ingresos_extras: 8000 },
     ],
     tiemposKds: [
       { fecha: 'Hoy (Servicio Activo)', platos_preparados: 38, tiempo_estimado_promedio_min: 15.0, tiempo_real_promedio_min: 12.4, variacion_promedio_porcentaje: -17.3 },
@@ -895,27 +708,23 @@ function generarReporteFallback(rango = 'hoy') {
   }
 }
 
+/**
+ * Mocks SOLO en desarrollo explícito: `npm run dev` con VITE_USE_MOCKS=true.
+ * En un build de producción import.meta.env.DEV es false y esto nunca aplica.
+ */
+export function usarMocks(env = import.meta.env) {
+  return Boolean(env?.DEV) && env?.VITE_USE_MOCKS === 'true'
+}
+
 export const reportesApi = {
   /**
-   * Obtiene métricas y analíticas del restaurante: GET /api/reportes?rango=hoy|semana|mes
-   * D-07: Si el backend aún no expone la ruta (404/red) o VITE_USE_MOCKS es true,
-   * se retorna fallback estructurado basado en las vistas SQL de 24_vistas_reportes.sql
+   * Métricas del restaurante: GET /api/reportes?rango=hoy|semana|mes (admin).
+   * Si falla, el error sube a la pantalla: no se inventan cifras (P-13).
    */
   async obtenerReporte(rango = 'hoy') {
-    const useMocks = import.meta.env?.VITE_USE_MOCKS === 'true'
-    if (!useMocks) {
-      try {
-        const data = await apiFetch(`/reportes?rango=${encodeURIComponent(rango)}`)
-        return { ...data, isFallback: false }
-      } catch (err) {
-        // Si es 401 o 429, dejamos que apiFetch gestione la sesión/rate limit
-        if (err.status === 401 || err.status === 429) {
-          throw err
-        }
-        // En caso de 404 (endpoint aún no desplegado en backend) o error de conexión, usamos fallback controlado
-      }
-    }
-    return generarReporteFallback(rango)
+    if (usarMocks()) return generarReporteFallback(rango)
+    const data = await apiFetch(`/reportes?rango=${encodeURIComponent(rango)}`)
+    return { ...data, isFallback: false }
   },
 }
 

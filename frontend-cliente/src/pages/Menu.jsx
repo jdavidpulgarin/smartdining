@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   obtenerCategorias,
   obtenerPlatos,
   obtenerPlatosArmables,
   recargarMenu,
+  actualizarDisponibilidadPlatoEnCache,
 } from '../services/menuService';
 import CategoriaFiltro from '../components/menu/CategoriaFiltro';
 import PlatoCard from '../components/menu/PlatoCard';
@@ -13,6 +14,7 @@ import Card from '../components/ui/Card';
 import Imagen from '../components/ui/Imagen';
 import Button from '../components/ui/Button';
 import { useCarrito } from '../context/CarritoContext';
+import { useMesaSocket } from '../context/MesaSocketContext';
 import { obtenerApodo } from '../utils/apodo';
 import { generarIdLinea } from '../utils/id';
 import { formatearPrecio } from '../utils/formato';
@@ -23,13 +25,43 @@ function Menu() {
   const [platos, setPlatos] = useState([]);
   const [platosArmables, setPlatosArmables] = useState([]);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState(null);
-  const [platoSeleccionado, setPlatoSeleccionado] = useState(null);
+  const [idPlatoSeleccionado, setIdPlatoSeleccionado] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [errorMenu, setErrorMenu] = useState(null);
   const [toastMensaje, setToastMensaje] = useState(null);
   const toastTimeoutRef = useRef(null);
 
   const { agregarLinea } = useCarrito();
+  const { on: socketOn, estado: estadoSocket } = useMesaSocket();
+
+  const platoSeleccionado = useMemo(
+    () =>
+      idPlatoSeleccionado
+        ? platos.find((p) => p.id === idPlatoSeleccionado) || null
+        : null,
+    [idPlatoSeleccionado, platos]
+  );
+
+  useEffect(() => {
+    if (!socketOn) return undefined;
+    const baja = socketOn('plato:disponibilidad', (data) => {
+      const idPlato = Number(data?.id_plato ?? data?.idPlato);
+      const disponible = Boolean(data?.disponible);
+      if (!idPlato) return;
+
+      actualizarDisponibilidadPlatoEnCache(idPlato, disponible);
+
+      setPlatos((prev) =>
+        prev.map((p) => (p.id === idPlato ? { ...p, disponible } : p))
+      );
+      setPlatosArmables((prev) =>
+        prev.map((p) =>
+          Number(p.id_plato) === idPlato ? { ...p, disponible } : p
+        )
+      );
+    });
+    return baja;
+  }, [socketOn]);
 
   useEffect(() => {
     return () => {
@@ -59,9 +91,48 @@ function Menu() {
     }
   }, []);
 
+  // Carga inicial al montar el componente
   useEffect(() => {
-    cargarDatos();
-  }, [cargarDatos]);
+    let activo = true;
+    (async () => {
+      try {
+        const [cats, plats, armables] = await Promise.all([
+          obtenerCategorias(),
+          obtenerPlatos(),
+          obtenerPlatosArmables(),
+        ]);
+        if (!activo) return;
+        setErrorMenu(null);
+        setCategorias(cats);
+        setPlatos(plats);
+        setPlatosArmables(Array.isArray(armables) ? armables : []);
+      } catch (error) {
+        console.error('Error al cargar datos del menú:', error);
+        if (activo) {
+          setErrorMenu(error?.mensaje || 'No se pudo cargar el menú. Intenta de nuevo.');
+        }
+      } finally {
+        if (activo) setCargando(false);
+      }
+    })();
+
+    return () => {
+      activo = false;
+    };
+  }, []);
+
+  const estadoAnteriorSocketRef = useRef(estadoSocket);
+  useEffect(() => {
+    if (
+      estadoAnteriorSocketRef.current === 'reconectando' &&
+      estadoSocket === 'conectado'
+    ) {
+      recargarMenu();
+      setCargando(true);
+      cargarDatos();
+    }
+    estadoAnteriorSocketRef.current = estadoSocket;
+  }, [estadoSocket, cargarDatos]);
 
   const platosFiltrados = categoriaSeleccionada
     ? platos.filter((p) => p.categoriaId === categoriaSeleccionada)
@@ -82,7 +153,7 @@ function Menu() {
     };
 
     agregarLinea(linea);
-    setPlatoSeleccionado(null);
+    setIdPlatoSeleccionado(null);
 
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
@@ -281,7 +352,7 @@ function Menu() {
             <PlatoCard
               key={plato.id}
               plato={plato}
-              onSeleccionar={setPlatoSeleccionado}
+              onSeleccionar={(p) => setIdPlatoSeleccionado(p.id)}
             />
           ))}
         </div>
@@ -289,10 +360,10 @@ function Menu() {
 
       {/* Modal de detalle del plato */}
       <PlatoDetalleModal
-        key={platoSeleccionado?.id ?? 'ninguno'}
+        key={idPlatoSeleccionado ?? 'ninguno'}
         plato={platoSeleccionado}
-        abierto={platoSeleccionado !== null}
-        onCerrar={() => setPlatoSeleccionado(null)}
+        abierto={idPlatoSeleccionado !== null && platoSeleccionado !== null}
+        onCerrar={() => setIdPlatoSeleccionado(null)}
         onAgregar={manejarAgregar}
       />
 

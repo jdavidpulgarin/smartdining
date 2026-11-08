@@ -21,7 +21,11 @@ import { uuidV4 } from './clienteMesa';
  * @param {string} [eventIdReintento] - Opcional, para reintentar el mismo intento
  * @returns {Promise<object>} Intención de pago generada
  */
-export async function crearIntencion(modo = 'propio', eventIdReintento = null) {
+export async function crearIntencion(
+  modo = 'propio',
+  eventIdReintento = null,
+  opcionesSim = null
+) {
   const eventId = eventIdReintento || uuidV4();
 
   if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
@@ -87,7 +91,10 @@ export async function crearIntencion(modo = 'propio', eventIdReintento = null) {
         }
         const { normalizarCuenta, montosPorModo } = await import('../utils/cuenta');
         const cuentaNorm = normalizarCuenta(cuentaRaw, sesion?.comensal);
-        const montos = montosPorModo(cuentaNorm);
+        const montos = montosPorModo(cuentaNorm, {
+          presencia: opcionesSim?.presenciaSim,
+          yo: opcionesSim?.yoSim ?? sesion?.comensal,
+        });
         const estimado = montos[modo];
         if (typeof estimado !== 'number' || !Number.isFinite(estimado)) {
           throw new ErrorApi({

@@ -185,23 +185,38 @@ se hace con él.
 
 ---
 
-## 8. Avisar que se acabó un ingrediente
+## 8. Avisar que se acabó algo
 
 Cuando se te acaba algo, lo marcas aquí y deja de poderse pedir al instante.
 Así nadie pide algo que no tienes.
 
+Puedes apagar **dos cosas**: un **ingrediente** suelto (se cae esa opción, pero
+el plato se sigue pudiendo pedir sin ella) o un **plato entero** (desaparece de
+la carta del cliente). Las dos están en el mismo panel, en dos secciones.
+
 ### 8.1 Abrir el panel
 
-![Panel de ingredientes](capturas-cocina/07_agotados_oscuro_1280x800.png)
+![Panel de agotados](capturas-cocina/07_agotados_oscuro_1280x800.png)
 
 Arriba, a la izquierda del botón Salir, hay un botón con un icono de caja
-tachada. Tócalo y se abre un panel lateral llamado **Ingredientes**.
+tachada. Tócalo y se abre un panel lateral llamado **Agotados**.
 
-Dentro está la carta entera, agrupada por plato y por paso. Cada fila es un
-ingrediente con su estado al lado: **Disponible** o **Agotado**.
+Justo debajo del título hay dos botones: **Ingredientes** y **Platos**. Tócalos
+para cambiar de lista.
 
-Si hay algo agotado, el botón de la cabecera lleva un número en rojo. Así sabes
-si falta algo sin tener que abrir el panel.
+- En **Ingredientes** está la carta entera, agrupada por plato y por paso. Cada
+  fila es un ingrediente con su estado al lado: **Disponible** o **Agotado**.
+- En **Platos** está la lista de platos de la carta, también con **Disponible**
+  o **Agotado** en cada fila.
+
+Si hay algo agotado, el botón de la cabecera lleva un número en rojo: es la suma
+de los ingredientes y los platos apagados. Así sabes si falta algo sin tener que
+abrir el panel. El botón **Platos** lleva además su propio número, para que veas
+que hay algo que atender en la otra lista sin entrar.
+
+> Las fotos de este capítulo son de antes de que hubiera sección de Platos, así
+> que en ellas el panel se llama "Ingredientes" y no se ven los dos botones. Lo
+> demás funciona igual.
 
 ### 8.2 Marcar algo como agotado
 
@@ -217,31 +232,37 @@ todos modos se deshace con otro toque.
 En la foto está puesto además el filtro **Solo agotados**, por eso en la lista
 solo se ve esa fila.
 
+Un **plato** se apaga igual: te pasas a la sección **Platos** y tocas su fila.
+
 ### 8.3 Reponerlo cuando vuelva
 
 Toca otra vez la misma fila. Vuelve a **Disponible** y se puede pedir de nuevo.
+Vale igual para un ingrediente y para un plato.
 
 ### 8.4 Buscar un ingrediente
 
-Arriba del panel hay una caja que dice **Buscar ingrediente**. Escribe parte del
-nombre y la lista se reduce.
+Arriba del panel hay una caja para buscar. Escribe parte del nombre y la lista se
+reduce. Busca en la lista en la que estés: si estás en **Platos**, busca platos.
 
 No hace falta poner tildes: escribiendo `jalapeno` encuentra `Jalapeño`.
 
 ### 8.5 Ver solo lo agotado
 
 El botón **Solo agotados** deja en la lista únicamente lo que está apagado.
+También funciona en las dos secciones.
 
 Es la vista para empezar el turno: abres, miras lo que quedó agotado ayer y
-repones lo que ya tienes.
+repones lo que ya tienes. Acuérdate de mirar **las dos** listas.
 
 ### 8.6 Qué pasa cuando marcas algo agotado
 
 - Deja de poderse pedir de inmediato. Si alguien intenta pedirlo, el sistema no
   lo deja.
 - El cliente lo ve al instante en su teléfono: el ingrediente deja de aparecer
-  entre las opciones y, si ya lo tenía elegido, se le quita del pedido.
-- Si hay otra pantalla de cocina abierta, también se actualiza sola.
+  entre las opciones y, si ya lo tenía elegido, se le quita del pedido. Si lo que
+  apagaste fue un **plato**, le desaparece de la carta.
+- Si hay otra pantalla de cocina abierta, también se actualiza sola. Vale para
+  ingredientes y para platos.
 - El panel del restaurante no se entera en el momento: lo verá la próxima vez
   que cargue la carta. Si necesitas que el mesero lo sepa ya, díselo.
 
@@ -251,13 +272,16 @@ fila. Si ves ese mensaje, vuelve a tocar.
 
 ### 8.7 Lo que NO se marca aquí
 
-- **Platos enteros, no.** Aquí solo se apagan ingredientes. Apagar un plato
-  completo lo hace administración.
-- **Si un plato está apagado, sus ingredientes no salen en el panel.** Esto
-  importa: si no encuentras un ingrediente que juras que existe, puede ser que
-  el plato entero esté apagado. Entonces no puedes reponerlo desde aquí y hay
-  que pedírselo a administración.
-- **Los pasos tampoco.** Lo que se apaga son las opciones, no la pregunta.
+- **Los pasos, no.** Lo que se apaga son las opciones, no la pregunta.
+- **Nada de precios, nombres ni fotos.** Eso es de administración. Desde aquí
+  solo dices qué hay y qué no hay.
+
+Y una cosa que conviene saber:
+
+- **Si un plato está apagado, sus ingredientes no salen en la lista de
+  Ingredientes.** Si no encuentras un ingrediente que juras que existe, mira en
+  **Platos** si el plato entero está agotado. Si lo está, **enciéndelo ahí
+  mismo** y sus ingredientes vuelven a aparecer.
 
 ---
 

@@ -12,11 +12,17 @@ const { esEventIdValido } = require('./idempotencia');
 const {
   calcularMonto, personasPorPagar, validarCuenta, MODOS,
 } = require('./cuenta');
+const { ttlIntencionRegistroSeg } = require('./pasarelas/wompi');
 
 // 5 intenciones por minuto por comensal: de sobra para reintentar un pago
 // fallido y corta a quien intenta martillar al backend o a la pasarela.
 const LIMITE_INTENCIONES = 5;
 const VENTANA_LIMITE_SEG = 60;
+// Wompi rechaza el pago después de expiration-time, que va en la firma. Pagar
+// con tarjeta, Nequi o 3DS toma varios minutos: con este margen no se entrega
+// una intención que vencería a mitad del pago.
+const MARGEN_REUTILIZAR_MS = 5 * 60 * 1000;
+const sigueVigente = (expiraEn) => Date.parse(expiraEn) > Date.now() + MARGEN_REUTILIZAR_MS;
 
 /** Referencia única e impredecible: SD-{mesa}-{timestamp}-{12 bytes aleatorios}. */
 function generarReferencia(idMesa, ahora = Date.now) {
@@ -68,16 +74,18 @@ async function crearIntencionPago(req, res, ctx) {
   // han pagado (más quien paga).
   const presencia = await ctx.presencia.calcular(idMesa);
 
-  // Reintento del mismo eventId: misma respuesta, sin otra intención.
+  // Reintento del mismo eventId: misma respuesta, sin otra intención. Si ya
+  // venció, se trata como una petición nueva.
   const claveEvento = `comensal:pago:intencion:${idMesa}:${cuerpo.eventId}`;
   const previa = await ctx.registro.obtener(claveEvento);
-  if (previa) return enviarJson(res, 200, previa);
+  if (previa && sigueVigente(previa.expira_en)) return enviarJson(res, 200, previa);
 
   if (!(await ctx.limites.consumir(`pago:${idMesa}:${comensal}`, LIMITE_INTENCIONES, VENTANA_LIMITE_SEG))) {
     throw new ErrorHttp(429, 'RATE_LIMIT', 'Demasiados intentos de pago; espera un minuto');
   }
 
   const ttlSeg = ctx.config.wompi.ttlMinutos * 60;
+  const ttlRegistroSeg = ttlIntencionRegistroSeg(ctx.config.wompi);
   const responder = async (intencion, status) => {
     const respuesta = ctx.pasarela.crearIntencion({
       referencia: intencion.referencia,
@@ -118,12 +126,13 @@ async function crearIntencionPago(req, res, ctx) {
   if (monto.error) throw new ErrorHttp(409, 'SIN_SALDO', 'No hay saldo por pagar en ese modo');
 
   // Una sola intención pendiente por comensal. Se reutiliza solo si es del
-  // mismo modo y por el mismo monto recalculado; si no (cambió de modo, llegó
-  // un pedido o cambió la presencia), se reemplaza por una nueva.
+  // mismo modo y por el mismo monto recalculado, y si no está por vencer; si
+  // no (cambió de modo, llegó un pedido o cambió la presencia), se reemplaza
+  // por una nueva.
   const pendiente = await ctx.almacenPagos.obtenerPendiente(idMesa, comensal);
   if (pendiente) {
     const vigente = await ctx.almacenPagos.obtener(pendiente);
-    if (vigente && vigente.estado === 'pendiente'
+    if (vigente && vigente.estado === 'pendiente' && sigueVigente(vigente.expira_en)
       && vigente.modo === cuerpo.modo && vigente.monto_centavos === monto.montoCentavos) {
       return responder({ ...vigente, referencia: pendiente }, 200);
     }
@@ -142,8 +151,9 @@ async function crearIntencionPago(req, res, ctx) {
   };
   // Primero la intención y luego la marca de pendiente (SET NX, o cambio
   // atómico si reemplaza a otra): si otra petición del mismo comensal ganó la
-  // carrera, se descarta la nuestra.
-  await ctx.almacenPagos.guardarIntencion(referencia, intencion, ttlSeg);
+  // carrera, se descarta la nuestra. Los plazos son distintos a propósito: la
+  // marca deja reintentar al comensal; el registro espera al webhook tardío.
+  await ctx.almacenPagos.guardarIntencion(referencia, intencion, ttlRegistroSeg);
   const ganadora = pendiente
     ? await ctx.almacenPagos.reemplazarPendiente(idMesa, comensal, pendiente, referencia, ttlSeg)
     : await ctx.almacenPagos.reservarPendiente(idMesa, comensal, referencia, ttlSeg);

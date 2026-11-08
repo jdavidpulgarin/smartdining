@@ -5,6 +5,7 @@ const { ALGORITMO_JWT, ROL_COMENSAL } = require('../middleware/auth.middleware')
 const socketNotifier = require('../services/socket.notifier');
 const { extraerSid } = require('../services/qr.token');
 const aliasComensal = require('../services/alias-comensal');
+const aliasEnCuenta = require('../services/alias-en-cuenta');
 // El enlace del QR se arma aparte: en desarrollo lleva la IP de la LAN para que
 // el celular del comensal pueda abrirlo (ver src/utils/url-comensal.js).
 const { urlDelComensal } = require('../utils/url-comensal');
@@ -48,6 +49,29 @@ function vistaMesa(mesa) {
 function vistaMesaPersonal(mesa) {
   return { ...vistaMesa(mesa), sesion_abierta: Boolean(mesa.token_qr) };
 }
+
+/**
+ * Cuerpo de PATCH /mesas/:id (D-16): los datos del mobiliario.
+ *
+ * Es un esquema aparte de mesaSchema y no su `.partial()`: aqui `estado` y
+ * `token_qr` NO se aceptan. El estado tiene su propia ruta (y sus propios
+ * permisos, que incluyen a mesero y cajero) y el token_qr es una credencial que
+ * solo escribe el flujo de apertura de sesion. Con `.strict()`, mandarlos es
+ * 400 y no un cambio que se ignora en silencio.
+ *
+ * `.refine`: un cuerpo vacio no es una edicion.
+ */
+const mesaDatosSchema = z
+  .object({
+    numero: z.number().int().positive(),
+    capacidad: z.number().int().positive(),
+    ubicacion: z.string().min(1).max(50),
+  })
+  .partial()
+  .strict()
+  .refine((datos) => Object.keys(datos).length > 0, {
+    message: 'Indica al menos un campo: numero, capacidad o ubicacion',
+  });
 
 const mesaSchema = z.object({
   numero: z.number().int().positive(),
@@ -393,6 +417,26 @@ async function actualizarEstado(req, res, next) {
   }
 }
 
+/**
+ * PATCH /api/mesas/:id — numero, capacidad y ubicacion (D-16). Solo admin.
+ *
+ * Los 409 (numero repetido, mesa ocupada que no se renumera) los decide el
+ * service y llegan aqui como { status, message }, que el manejador central ya
+ * sabe responder: por eso solo se hace next(err).
+ */
+async function actualizarDatos(req, res, next) {
+  const parsed = mesaDatosSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
+
+  try {
+    const mesa = await mesasService.actualizarDatos(req.params.id, parsed.data);
+    if (!mesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+    return res.json(vistaMesaPersonal(mesa));
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function eliminar(req, res, next) {
   try {
     const eliminada = await mesasService.eliminar(req.params.id);
@@ -403,7 +447,265 @@ async function eliminar(req, res, next) {
   }
 }
 
+/* -------------------------------------------------------------------------- *
+ * Comensales sin celular (D-18)
+ *
+ * Alguien de la mesa no tiene teléfono: el mesero (o el admin) lo da de alta con
+ * su alias y pide por esa persona. A partir de ahí cuenta como persona para la
+ * presencia y para "igual", y puede pagar en caja con su alias.
+ *
+ * NO hay tabla nueva ni cambios en database/: la persona sin celular vive en la
+ * MISMA reserva de alias que usan las sesiones de QR (`sd:mesa:{id}:alias`), con
+ * la misma función de validación. Dos formas de validar el alias en el mismo
+ * proyecto acabarían aceptando en una lo que la otra rechaza, y entonces la
+ * unicidad —que es lo que impide cobrarle los platos a otro— dejaría de valerlo.
+ * -------------------------------------------------------------------------- */
+
+/** Mensajes de los 409 del socket-server, traducidos para quien está en sala. */
+const MENSAJE_POR_CODIGO_SOCKET = {
+  ALIAS_EN_USO: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
+  MESA_LIBERADA: 'Esa mesa ya no tiene una sesión abierta, vuelve a abrirla',
+  LIMITE_COMENSALES: 'Esa mesa ya tiene el máximo de personas sin celular',
+};
+
+/** Entero positivo de la URL, o null. Mismo criterio que el resto de la API. */
+function idMesaDeLaUrl(valor) {
+  const n = Number(valor);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * El alias con el que esa persona ya aparece en la cuenta, si aparece (D-18b).
+ *
+ * La búsqueda vive en `services/alias-en-cuenta.js` porque la misma pregunta se
+ * hace al dar de alta, al crear un pedido y al quitar a alguien, y tres copias
+ * acabarían contestando cosas distintas.
+ *
+ * Se compara por CLAVE y no por el texto: la cuenta agrupa por
+ * `btrim(dp.comensal)`, que distingue mayúsculas y tildes, así que «Ana» y «ana»
+ * salen como dos filas siendo la misma persona.
+ *
+ * Y se cuentan los PLATOS, no el saldo: quien ya pagó lo suyo sigue teniendo sus
+ * platos en la cuenta, y quitarla del listado desarmaría el desglose que el
+ * cajero tiene delante.
+ */
+function aliasEnLaCuenta(cuentaMesa, clave) {
+  return aliasEnCuenta.aliasConPlatos(cuentaMesa, clave);
+}
+
+/**
+ * POST /api/mesas/:id/comensales — dar de alta a alguien sin celular (D-18).
+ *
+ * Orden de las comprobaciones, que es parte del contrato:
+ *   1. alias válido (400)
+ *   2. la mesa existe (404)
+ *   3. la mesa tiene sesión viva (409) — ANTES de reservar, para no dejar un
+ *      alias reservado en una mesa que nadie va a usar
+ *   4. si esa persona YA tiene platos en la cuenta, se reserva el texto con el
+ *      que aparece ahí y no el que escribió el mesero (D-18b, ver abajo)
+ *   5. reservar el alias (409 si ya está en uso, 503 si no hay Redis)
+ *   6. avisar al socket-server
+ *
+ * El aviso SÍ se espera aquí, al contrario que el resto de los avisos de este
+ * controlador, y es a propósito: el contrato (§6.4) pide que un 409 del
+ * socket-server suelte el alias que se acaba de reservar, y eso no se puede
+ * decidir sin mirar la respuesta. No rompe el aislamiento del tiempo real: si el
+ * socket-server no está, tarda o devuelve cualquier otra cosa, el alta sigue
+ * siendo un 201, porque la reserva ya está hecha y el backend es la fuente de
+ * verdad. Lo único que cambia la respuesta es un 409, que es una regla de
+ * negocio, no una falla de transporte.
+ */
+async function agregarComensal(req, res, next) {
+  const idMesa = idMesaDeLaUrl(req.params.id);
+  if (idMesa === null) return res.status(400).json({ error: 'id de mesa inválido' });
+
+  const alias = aliasComensal.normalizarAlias(req.body && req.body.alias);
+  if (alias.error) return res.status(400).json({ error: alias.error, campo: 'alias' });
+
+  try {
+    const mesa = await mesasService.obtenerPorId(idMesa);
+    if (!mesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+
+    // Equivale al 409 MESA_LIBERADA del socket (§6.4), pero lo decide el
+    // backend: sin sesión abierta no hay mesa a la que sentar a nadie, y el
+    // alias se borra al liberar, así que la reserva se perdería igual.
+    if (mesa.estado !== mesasService.ESTADO_MESA_OCUPADA) {
+      return res.status(409).json({
+        error: 'Esa mesa no tiene una sesión abierta: ábrela antes de agregar comensales',
+        motivo: 'mesa_sin_sesion',
+      });
+    }
+
+    // D-18b: si esa persona ya tiene platos en la cuenta, se reserva EL TEXTO
+    // DE LA CUENTA, no el que escribió el mesero. Si no, al volver a
+    // registrarla tras vencer su reserva —«abuela» donde antes decía
+    // «Abuela»— la cuenta se partiría otra vez en dos filas, porque agrupa por
+    // texto exacto. Va antes de reservar: después ya habría que deshacerlo.
+    let aRegistrar = alias;
+    try {
+      const cuentaMesa = await mesasService.cuentaPorComensal(idMesa);
+      const enLaCuenta = aliasEnLaCuenta(cuentaMesa, alias.clave);
+      if (enLaCuenta) aRegistrar = { alias: enLaCuenta, clave: alias.clave };
+    } catch (err) {
+      // No se bloquea el alta por no poder leer la cuenta: lo peor que pasa es
+      // que la cuenta quede partida, y eso se arregla; no poder sentar a una
+      // persona, no. El aviso NO lleva el alias (es un dato de quién está
+      // sentado y estos logs acaban en archivos y consolas ajenas).
+      console.error(
+        `[mesas] no se pudo leer la cuenta de la mesa ${idMesa} al registrar un comensal:`,
+        err && err.message
+      );
+    }
+
+    const reserva = await aliasComensal.reservar(idMesa, aRegistrar, {
+      // La vigencia vive en alias-comensal.js, que es quien tiene que coincidir
+      // con el TTL del socket-server.
+      vigencia: aliasComensal.VIGENCIA_SIN_CELULAR,
+      // La MARCA: es lo que permite distinguir después a esta persona de alguien
+      // que entró con su celular por el QR. Sin ella, el DELETE del personal
+      // podría tirar la sesión de un comensal conectado.
+      extra: { [aliasComensal.MARCA_SIN_CELULAR]: true },
+    });
+    if (reserva.enUso) {
+      return res.status(409).json({
+        error: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
+        motivo: 'alias_en_uso',
+      });
+    }
+    if (reserva.noDisponible) {
+      // Mismo comportamiento que las sesiones de QR: sin reserva fiable no se
+      // da de alta a nadie, porque una mesa sin unicidad de alias permite
+      // cargarle los platos a otra persona.
+      return res.status(503).json({
+        error: 'No se pudo agregar al comensal, intenta de nuevo en unos segundos',
+        motivo: 'alias_no_disponible',
+      });
+    }
+
+    const aviso = await socketNotifier.notificarMesaComensal(
+      idMesa,
+      // El alias RESERVADO, no lo que escribió el mesero: es el texto con el que
+      // habrá que quitarlo después (§6.4 compara idéntico) y, si venía de la
+      // cuenta, el que ya tienen sus platos.
+      aRegistrar.alias,
+      'agregar',
+      aRegistrar.clave
+    );
+
+    const codigo = aviso && aviso.respuesta && aviso.respuesta.codigo;
+    if (aviso && aviso.motivo === 'HTTP_409') {
+      // Guardia del socket-server: suelta el alias para no dejar una reserva sin
+      // presencia (nadie podría volver a usar ese nombre y la persona no
+      // aparecería en la mesa).
+      await aliasComensal.liberar(idMesa, aRegistrar.clave);
+      return res.status(409).json({
+        error: MENSAJE_POR_CODIGO_SOCKET[codigo] || 'No se pudo agregar al comensal en esa mesa',
+        motivo: codigo || 'rechazado_por_el_socket',
+      });
+    }
+
+    // El alias que se devuelve es el que quedó RESERVADO: es el que el panel
+    // tiene que mandar después en POST /api/pedidos.
+    return res.status(201).json({ id_mesa: idMesa, alias: aRegistrar.alias });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
+ * DELETE /api/mesas/:id/comensales/:alias — quitar a alguien sin celular.
+ *
+ * Comprueba, EN ESTE ORDEN:
+ *   1. que la mesa exista (404);
+ *   2. que ese alias sea de un comensal SIN CELULAR (409 si es de alguien que
+ *      entró por QR). Va antes de todo lo demás porque es lo único que protege
+ *      la sesión de un comensal conectado: soltar su reserva dejaría su nombre
+ *      libre para otro, que heredaría sus platos;
+ *   3. que no tenga platos (409);
+ *   4. soltar la reserva (503 si Redis no responde).
+ *
+ * Un alias que NO está reservado se trata como un borrado idempotente: 204. No
+ * hay nada que soltar, y pedir dos veces que se quite a la misma persona no es
+ * un error (es también lo que hace §6.4 con un 'quitar' de quien no está). En
+ * ese caso el aviso va con el alias normalizado de la URL, que es el único texto
+ * que hay; cuando SÍ había reserva, va con el texto que ella guardaba.
+ *
+ * El aviso de 'quitar' NO se espera: aquí no hay nada que decidir con su
+ * respuesta —el alias ya está suelto en el backend, que es la fuente de verdad—
+ * y esperar un socket-server caído retrasaría la respuesta del mesero 1,5 s por
+ * nada. Va por la cadena de la mesa, así que nunca se adelanta a un 'agregar'
+ * anterior de esa misma mesa.
+ */
+async function quitarComensal(req, res, next) {
+  const idMesa = idMesaDeLaUrl(req.params.id);
+  if (idMesa === null) return res.status(400).json({ error: 'id de mesa inválido' });
+
+  const alias = aliasComensal.normalizarAlias(req.params.alias);
+  if (alias.error) return res.status(400).json({ error: alias.error, campo: 'alias' });
+
+  try {
+    const cuentaMesa = await mesasService.cuentaPorComensal(idMesa);
+    if (!cuentaMesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+
+    // UNA sola lectura de la reserva, que da las dos cosas que hacen falta: de
+    // qué tipo es (para decidir) y con qué texto se registró (para el aviso).
+    const reserva = await aliasComensal.leerReserva(idMesa, alias.clave);
+    if (reserva.noDisponible) {
+      return res.status(503).json({
+        error: 'No se pudo quitar al comensal, intenta de nuevo en unos segundos',
+        motivo: 'alias_no_disponible',
+      });
+    }
+    if (reserva.ilegible || reserva.sinCelular === false) {
+      // Reservado pero sin la marca: es la sesión de alguien que entró con su
+      // celular, o una reserva de antes de que la marca existiera. Y un valor
+      // que no se puede leer cuenta igual: ante la duda no se toca.
+      return res.status(409).json({
+        error: 'Esa persona entró con su celular: su sesión no se puede quitar desde aquí',
+        motivo: 'comensal_con_sesion',
+      });
+    }
+
+    if (reserva.noExiste) {
+      // Nada que soltar. Se avisa igual al socket-server, por si allí sí quedó
+      // en la lista (su TTL y el de aquí son dos relojes distintos), con el
+      // único texto que hay: el normalizado de la URL.
+      socketNotifier.notificarMesaComensal(idMesa, alias.alias, 'quitar', alias.clave);
+      return res.status(204).send();
+    }
+
+    if (aliasEnCuenta.tienePlatos(cuentaMesa, alias.clave)) {
+      return res.status(409).json({
+        error: 'Esa persona ya tiene platos en la cuenta: no se puede quitar de la mesa',
+        motivo: 'comensal_con_platos',
+      });
+    }
+
+    const suelta = await aliasComensal.liberar(idMesa, alias.clave);
+    if (suelta.noDisponible) {
+      return res.status(503).json({
+        error: 'No se pudo quitar al comensal, intenta de nuevo en unos segundos',
+        motivo: 'alias_no_disponible',
+      });
+    }
+
+    // EL ALIAS GUARDADO, no el de la URL: la reserva se libera por clave, pero
+    // el socket-server compara 'quitar' por TEXTO IDÉNTICO (EVENTS.md §6.4). Si
+    // se mandara lo que escribió el mesero, un DELETE de «abuela» sobre la
+    // reserva de «Abuela» respondería 204 y soltaría la reserva, pero la
+    // persona se quedaría 24 h en la presencia de la mesa.
+    socketNotifier.notificarMesaComensal(idMesa, reserva.alias, 'quitar', alias.clave);
+
+    return res.status(204).send();
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
+  agregarComensal,
+  quitarComensal,
+  actualizarDatos,
   listar,
   obtener,
   abrir,

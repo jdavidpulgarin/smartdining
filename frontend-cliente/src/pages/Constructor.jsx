@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useReducer, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   actualizarDisponibilidadEnCache,
+  actualizarDisponibilidadPlatoEnCache,
   obtenerPlatoArmable,
   recargarMenu,
 } from '../services/menuService';
@@ -79,7 +80,7 @@ function Constructor() {
 
   useEffect(() => {
     if (!socketOn) return undefined;
-    const baja = socketOn('ingrediente:disponibilidad', (data) => {
+    const bajaIng = socketOn('ingrediente:disponibilidad', (data) => {
       const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
       const disponible = Boolean(data?.disponible);
       if (!idIng) return;
@@ -106,7 +107,27 @@ function Constructor() {
         };
       });
     });
-    return baja;
+
+    const bajaPlato = socketOn('plato:disponibilidad', (data) => {
+      const idPlatoEv = Number(data?.id_plato ?? data?.idPlato);
+      const disponible = Boolean(data?.disponible);
+      if (!idPlatoEv) return;
+
+      actualizarDisponibilidadPlatoEnCache(idPlatoEv, disponible);
+
+      setEstadoCarga((prev) => {
+        if (!prev.plato || Number(prev.plato.id_plato) !== idPlatoEv) return prev;
+        return {
+          ...prev,
+          plato: { ...prev.plato, disponible },
+        };
+      });
+    });
+
+    return () => {
+      bajaIng?.();
+      bajaPlato?.();
+    };
   }, [socketOn]);
 
   const manejarReintentar = async () => {
@@ -164,7 +185,7 @@ function Constructor() {
     );
   }
 
-  if (!plato) {
+  if (!plato || plato.disponible === false) {
     return (
       <Card className="text-center space-y-4 py-8">
         <p className="text-texto font-semibold text-base">
@@ -202,7 +223,7 @@ function Constructor() {
   };
 
   const manejarAgregarAMesa = () => {
-    if (pendientes.length > 0) return;
+    if (!plato || plato.disponible === false || pendientes.length > 0) return;
 
     const notasLimpias = estado.notas.trim();
     const linea = {

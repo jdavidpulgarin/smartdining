@@ -7,6 +7,7 @@ pnpm-debug.log*
 
 # Variables de entorno y secretos
 .env
+.env.test
 .env.local
 .env.development.local
 .env.test.local
@@ -39,3 +40,5 @@ Thumbs.db
 **/dev-dist/
 **/dist/
 **/node_modules/
+**/playwright-report/
+**/test-results/
