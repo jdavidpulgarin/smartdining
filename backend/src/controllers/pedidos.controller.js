@@ -4,6 +4,7 @@ const mesasService = require('../services/mesas.service');
 const { esComensal } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
 const aliasComensal = require('../services/alias-comensal');
+const aliasEnCuenta = require('../services/alias-en-cuenta');
 
 // El trigger tr_validar_disponibilidad_plato de Jarrison deja comandar un plato
 // agotado si notas_especiales contiene 'OVERRIDE_ADMIN' (bypass administrativo).
@@ -204,25 +205,6 @@ function aliasEnBruto(items) {
   return [...vistos];
 }
 
-/**
- * Busca en la cuenta de la mesa un alias que ya tenga platos y cuya clave
- * coincida. Devuelve su texto exacto, o null.
- *
- * Es la MISMA fuente que `GET /api/mesas/:id/cuenta` y que la guarda del
- * `DELETE` de comensales: los pedidos no cancelados de la mesa. Se exige
- * `items_pedidos > 0` porque lo que se busca es alguien que ya consumió: una
- * fila que solo existe por un pago no dice cómo se escribe el nombre de quien
- * está pidiendo ahora.
- */
-function aliasConPlatosEnLaCuenta(cuentaMesa, clave) {
-  const filas = (cuentaMesa && cuentaMesa.comensales) || [];
-  for (const fila of filas) {
-    if (!fila || Number(fila.items_pedidos) <= 0) continue;
-    const normalizado = aliasComensal.normalizarAlias(fila.comensal);
-    if (!normalizado.error && normalizado.clave === clave) return normalizado.alias;
-  }
-  return null;
-}
 
 /**
  * Resuelve el alias canónico de cada clave distinta del pedido.
@@ -277,7 +259,11 @@ async function resolverAliasCanonicos(idMesa, items) {
   const cuentaMesa = await mesasService.cuentaPorComensal(idMesa);
 
   for (const [clave, normalizado] of sinReserva) {
-    const enLaCuenta = aliasConPlatosEnLaCuenta(cuentaMesa, clave);
+    // La búsqueda vive en services/alias-en-cuenta.js: la misma pregunta se
+    // hace al dar de alta a alguien y al quitarlo, y tres copias acabarían
+    // contestando cosas distintas. Devuelve el texto TAL COMO está en la
+    // cuenta, que es el valor por el que la base agrupa.
+    const enLaCuenta = aliasEnCuenta.aliasConPlatos(cuentaMesa, clave);
     if (enLaCuenta) {
       porClave.set(clave, enLaCuenta);
       continue;
@@ -294,10 +280,18 @@ async function resolverAliasCanonicos(idMesa, items) {
       continue;
     }
 
+    // El 409 dice CUÁL de los alias no se pudo resolver: con un pedido de
+    // varias personas, "no está registrada" sin decir quién obliga a adivinar.
+    // Va el PRIMERO que falla en el orden de los ítems, y solo ese: el texto lo
+    // mandó quien llama, así que no se le devuelve nada de nadie más.
     return {
       error: {
         status: 409,
-        body: { error: MENSAJE_NO_REGISTRADO, motivo: MOTIVO_NO_REGISTRADO },
+        body: {
+          error: MENSAJE_NO_REGISTRADO,
+          motivo: MOTIVO_NO_REGISTRADO,
+          alias: normalizado,
+        },
       },
     };
   }
