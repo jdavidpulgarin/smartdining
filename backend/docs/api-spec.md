@@ -216,15 +216,20 @@ Una petición **sin** cabecera `Origin` (curl, el socket-server, una prueba) se 
 CORS protege al navegador y esas peticiones no vienen de uno. Lo que decide el acceso ahí
 es el JWT o la clave interna.
 
-### Límite de intentos (H-04 y H-27)
+### Límite de peticiones (H-04, H-27 y D-21)
 
-Las dos rutas públicas —las que no piden sesión previa— están limitadas y responden **429**
-con `Retry-After`:
+Hay **tres** límites. Los dos de ruta cubren las públicas —las que no piden sesión
+previa— y el global es un techo de respaldo para todo lo demás. Todos responden **429**
+con `Retry-After` y el mismo cuerpo `{ "error": … }` que el resto de la API:
 
 | Ruta | Límite por defecto | Clave del contador | Qué cuenta |
 |---|---|---|---|
 | `POST /auth/login` | **5 / minuto** | IP **+ email** | Solo los intentos **fallidos** |
 | `POST /mesas/qr/:token/sesion` | **20 / minuto** | IP | Todos los intentos |
+| **todas las demás** (D-21) | **2000 / minuto** | IP | Todas las peticiones |
+
+Los contadores son **independientes**: una petición al login gasta cupo del límite de
+login **y** del global, pero agotar uno no agota el otro.
 
 ```json
 { "error": "Demasiados intentos de inicio de sesión. Espera un momento y vuelve a intentarlo." }
@@ -237,8 +242,30 @@ va más holgado porque una mesa entera escanea desde la misma IP del local, y ah
 cuentan los aciertos: reusar un token válido muchas veces por segundo tampoco debería
 pasar.
 
+#### El límite global (D-21)
+
+```json
+{ "error": "Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo." }
+```
+
+**No cuenta** dos cosas:
+
+- **`GET /api/health`**: es la sonda de Docker y del balanceador. Si contara, un límite
+  agotado haría que el contenedor se declarara enfermo y se reiniciara solo.
+- **El canal interno**: `POST /api/transacciones/internal` y
+  `GET /api/mesas/:id/cuenta/interno`. Los llama el socket-server con `x-internal-key`,
+  toda esa máquina sale con **una** IP, y ya tienen su propia autenticación.
+
+**Por qué 2000 por minuto, que parece muchísimo:** los comensales de un local comparten
+**una sola IP pública**, la del wifi, así que el cupo no es de una persona sino del
+restaurante entero. Con 20 mesas de 4 son 80 teléfonos y, en el pico, cada uno hace del
+orden de 15 a 20 peticiones en ese minuto (80 × 20 = 1600), más las tablets del personal.
+2000 deja pasar ese pico y aun así corta a una sola máquina que intente raspar la API: 33
+por segundo sostenidos no los hace ningún comensal.
+
 **Variables:** `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS`, `RATE_LIMIT_QR_MAX`,
-`RATE_LIMIT_QR_VENTANA_MS`. Los límites se desactivan solos dentro de las pruebas.
+`RATE_LIMIT_QR_VENTANA_MS`, `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS`. Los
+tres límites se desactivan solos dentro de las pruebas.
 
 > **Detrás de un proxy** (nginx, Docker), `req.ip` es la IP del proxy y el límite contaría
 > a todo el mundo como un solo visitante. Hay que poner **`TRUST_PROXY`** (`true`, un
@@ -246,8 +273,8 @@ pasar.
 > `X-Forwarded-For` sin un proxy delante permite falsificar la IP.
 >
 > **Limitación:** el contador vive en memoria del proceso. Con varias instancias el límite
-> es por instancia (con N instancias, el techo real es 5×N). Para hacerlo global haría
-> falta un store compartido en Redis.
+> es por instancia (con N instancias, el techo real es 5×N, o 2000×N en el global). Para
+> hacerlo global de verdad haría falta un store compartido en Redis.
 
 ### Cuenta desactivada (H-09)
 
