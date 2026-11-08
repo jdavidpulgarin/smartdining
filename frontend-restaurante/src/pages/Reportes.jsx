@@ -71,8 +71,9 @@ export function Reportes() {
   const [timeRange, setTimeRange] = useState('hoy') // 'hoy' | 'semana' | 'mes'
   const [loading, setLoading] = useState(true)
   const [reportData, setReportData] = useState(null)
+  // true solo con datos de demostración (VITE_USE_MOCKS en desarrollo, P-13)
   const [contractPending, setContractPending] = useState(false)
-  const [showContractDetails, setShowContractDetails] = useState(false)
+  const [errorCarga, setErrorCarga] = useState(null)
 
   const handleSelectRange = (range) => {
     if (range === timeRange) return
@@ -89,11 +90,14 @@ export function Reportes() {
         if (!isMounted) return
         setReportData(data)
         setContractPending(Boolean(data?.isFallback))
+        setErrorCarga(null)
       })
-      .catch(() => {
+      .catch((err) => {
         if (!isMounted) return
+        // Sin cifras inventadas: se muestra el error real (P-13).
         setReportData(null)
-        setContractPending(true)
+        setContractPending(false)
+        setErrorCarga(err?.sinConexion ? 'Sin conexión con el servidor' : err?.message || null)
       })
       .finally(() => {
         if (isMounted) setLoading(false)
@@ -246,15 +250,8 @@ export function Reportes() {
               <div className="sd-reportes-sim-notice">
                 <AlertTriangle size={14} style={{ color: 'var(--sd-gold)', flexShrink: 0 }} />
                 <span>
-                  Modo simulación analítica: esperando despliegue de <code>GET /api/reportes</code> (D-07 en backend).
+                  Datos de demostración: <code>VITE_USE_MOCKS</code> activo en desarrollo. No son ventas reales.
                 </span>
-                <button
-                  type="button"
-                  className="sd-reportes-contract-toggle"
-                  onClick={() => setShowContractDetails((prev) => !prev)}
-                >
-                  {showContractDetails ? '(ocultar contrato)' : '(ver contrato D-07)'}
-                </button>
               </div>
             )}
           </div>
@@ -266,21 +263,6 @@ export function Reportes() {
             </span>
           </div>
         </div>
-
-        {/* Detalle técnico del contrato REST si se expande */}
-        {showContractDetails && (
-          <div className="sd-reportes-panel" style={{ marginBottom: 24 }}>
-            <h4 style={{ fontSize: 16, marginBottom: 8, color: '#fff', fontFamily: 'var(--sd-font-heading)' }}>
-              Contrato REST esperado para Daniel (D-07):
-            </h4>
-            <div style={{ background: 'var(--sd-bg)', border: '1px solid var(--sd-border)', borderRadius: 8, padding: 14, fontSize: 13, fontFamily: 'monospace', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div><strong>Método:</strong> GET</div>
-              <div><strong>Path:</strong> /api/reportes?rango={timeRange}</div>
-              <div><strong>Rol:</strong> admin</div>
-              <div><strong>Vistas SQL disponibles:</strong> v_ventas_diarias, v_ingredientes_top, v_platos_top, v_tiempos_kds</div>
-            </div>
-          </div>
-        )}
 
         {loading ? (
           <div className="sd-reportes-panel" style={{ padding: 48, textAlign: 'center' }}>
@@ -296,8 +278,8 @@ export function Reportes() {
             <h3 style={{ color: 'var(--sd-text)', fontFamily: 'var(--sd-font-heading)', fontSize: 22, margin: '0 0 8px 0' }}>
               No se pudieron cargar los datos de reporte
             </h3>
-            <p style={{ color: 'var(--sd-text-muted)', margin: 0 }}>
-              Intenta recargar o verificar la conexión con el servidor.
+            <p style={{ color: 'var(--sd-text-muted)', margin: 0 }} role="alert">
+              {errorCarga ? `${errorCarga}. ` : ''}Intenta recargar o verificar la conexión con el servidor.
             </p>
           </div>
         ) : (

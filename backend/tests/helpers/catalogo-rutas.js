@@ -203,6 +203,20 @@ const TABLA = [
     cuerpo: { numero: 9, capacidad: 4 },
   },
   { metodo: 'DELETE', patron: '/api/mesas/:id', url: `/api/mesas/${MESA}`, roles: ['admin'] },
+  // D-18: comensales sin celular, los da de alta el personal de sala.
+  {
+    metodo: 'POST',
+    patron: '/api/mesas/:id/comensales',
+    url: `/api/mesas/${MESA}/comensales`,
+    roles: ['mesero', 'admin'],
+    cuerpo: { alias: 'Abuela' },
+  },
+  {
+    metodo: 'DELETE',
+    patron: '/api/mesas/:id/comensales/:alias',
+    url: `/api/mesas/${MESA}/comensales/Abuela`,
+    roles: ['mesero', 'admin'],
+  },
   // D-16: editar los datos del mobiliario. El estado va por /:id/estado.
   {
     metodo: 'PATCH',
