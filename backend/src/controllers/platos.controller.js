@@ -13,6 +13,14 @@ const platoSchema = z.object({
   id_categoria: z.number().int(),
   disponible: z.boolean().optional(),
   tiempo_preparacion_estimado: z.number().int().positive().optional(),
+  // D-16 parte B: las dos columnas existen desde 13_constructor.sql, pero este
+  // esquema no las aceptaba, así que un POST o un PUT que las mandara las
+  // perdía en silencio. OPCIONALES: si no vienen, nada cambia.
+  //
+  // `personalizable` decide si el plato se arma por pasos en el constructor;
+  // `calorias` admite null ("no se sabe"), que es distinto de 0.
+  personalizable: z.boolean().optional(),
+  calorias: z.number().int().min(0).nullable().optional(),
 });
 
 /**
@@ -73,7 +81,13 @@ async function actualizar(req, res, next) {
     const actual = await platosService.obtenerPorId(req.params.id);
     if (!actual) return res.status(404).json({ error: 'Plato no encontrado' });
 
-    const plato = await platosService.actualizar(req.params.id, { ...actual, ...parsed.data });
+    // El autor del cambio de precio sale del JWT (req.user), nunca del cuerpo:
+    // es lo que el trigger del historial guarda en historial_precios.id_usuario.
+    const plato = await platosService.actualizar(
+      req.params.id,
+      { ...actual, ...parsed.data },
+      { idUsuario: req.user?.id_usuario ?? null }
+    );
     await menuService.invalidarMenu();
     return res.json(plato);
   } catch (err) {
