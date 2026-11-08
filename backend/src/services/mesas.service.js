@@ -434,7 +434,7 @@ const MOTIVO_MESA_OCUPADA = 'mesa_ocupada';
 const MOTIVO_MESA_INACTIVA = 'mesa_inactiva';
 
 const MENSAJE_OCUPADA_NO_SE_DESACTIVA =
-  'Esa mesa está en uso (ocupada o con una sesión de QR abierta): libérala antes de desactivarla.';
+  'Esa mesa está ocupada: libérala antes de desactivarla.';
 const MENSAJE_INACTIVA =
   'Esa mesa está inactiva: actívala antes de abrirla o de generarle un QR.';
 
@@ -529,21 +529,30 @@ async function actualizarDatos(id, cambios) {
       throw errorDeMesa(409, MENSAJE_OCUPADA_NO_SE_RENUMERA);
     }
 
-    // Desactivar es retirar la mesa del servicio (ADR-06): con gente sentada o
-    // con un QR vivo, los comensales que ya escanearon se quedarían con una
-    // sesión que no se puede cerrar por el camino normal.
+    // Desactivar es retirar la mesa del servicio (ADR-06). Lo único que lo
+    // impide es que haya gente sentada: con la mesa ocupada, desactivarla deja
+    // una sesión que no se puede cerrar por el camino normal.
+    //
+    // Un `token_qr` en una mesa 'disponible' NO bloquea: es el resto de una
+    // sesión que ya terminó (el cierre deja el token hasta la próxima rotación),
+    // así que no hay nadie a quien dejar colgado.
     const seDesactiva = cambios.activa === false && mesa.activa === true;
-    if (seDesactiva && (mesa.estado === ESTADO_MESA_OCUPADA || mesa.token_qr !== null)) {
+    if (seDesactiva && mesa.estado === ESTADO_MESA_OCUPADA) {
       await client.query('ROLLBACK');
       throw errorDeMesa(409, MENSAJE_OCUPADA_NO_SE_DESACTIVA, MOTIVO_MESA_OCUPADA);
     }
 
+    // Al desactivar se borra el token en la MISMA sentencia: una mesa inactiva
+    // no conserva un QR, o quedaría un código que escanea a una mesa fuera de
+    // servicio. `$5 IS FALSE` solo es cierto cuando `activa` llega en `false`:
+    // con `null` (el campo no viene) o con `true`, el token no se toca.
     const result = await client.query(
       `UPDATE mesas
           SET numero    = COALESCE($2, numero),
               capacidad = COALESCE($3, capacidad),
               ubicacion = COALESCE($4, ubicacion),
-              activa    = COALESCE($5, activa)
+              activa    = COALESCE($5, activa),
+              token_qr  = CASE WHEN $5 IS FALSE THEN NULL ELSE token_qr END
         WHERE id_mesa = $1
         RETURNING *`,
       [
@@ -563,7 +572,8 @@ async function actualizarDatos(id, cambios) {
     } catch {
       // Ya estaba cerrada.
     }
-    // Solo `numero` puede chocar por aquí: `token_qr` no se toca en este UPDATE.
+    // Solo `numero` puede chocar por aquí: a `token_qr` este UPDATE solo le
+    // escribe NULL, y el índice único no cuenta los NULL.
     if (err && err.code === PG_UNIQUE) throw errorDeMesa(409, MENSAJE_NUMERO_EN_USO);
     // Red de seguridad: si el trigger rechaza el cambio de `activa` por un
     // camino que la guarda de arriba no vio, sale 409 y no un 422 genérico.
