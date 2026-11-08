@@ -1163,6 +1163,249 @@ test('d-18: con el respaldo en memoria, el de QR tampoco se quita', async () => 
 });
 
 // ---------------------------------------------------------------------------
+// El aviso de 'quitar' lleva el alias GUARDADO, no el de la URL (D-18b)
+//
+// Lo encontro Jarrinson revisando el #106: la reserva se libera por CLAVE, pero
+// el socket-server compara 'quitar' por TEXTO IDENTICO (EVENTS.md §6.4). Un
+// DELETE de "abuela" sobre la reserva de "Abuela" respondia 204 y soltaba la
+// reserva, pero la persona se quedaba 24 h en la presencia de la mesa.
+// ---------------------------------------------------------------------------
+
+/** El alias que viajo en el aviso de 'quitar'. */
+function aliasDelAviso(socket) {
+  const aviso = socket.todos('/internal/mesa-comensal').find((a) => a.cuerpo.accion === 'quitar');
+  return aviso ? aviso.cuerpo.alias : undefined;
+}
+
+test('d-18b: quitar con otra capitalizacion avisa con el alias guardado', async () => {
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    assert.strictEqual((await agregar(mesero(), { alias: 'Abuela' })).status, 201);
+
+    const res = await quitar(mesero(), 'abuela');
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 204);
+    // "Abuela", no "abuela": es el texto con el que el socket-server la tiene
+    // en sd:mesa:{id}:sin_celular.
+    assert.strictEqual(aliasDelAviso(socket), 'Abuela');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: y con " ABUELA " tambien', async () => {
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    await agregar(mesero(), { alias: 'Abuela' });
+
+    const res = await quitar(mesero(), '  ABUELA  ');
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(aliasDelAviso(socket), 'Abuela');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: con tildes: registrada "Abuéla" y quitada como "Abuela"', async () => {
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    await agregar(mesero(), { alias: 'Abuéla' });
+
+    const res = await quitar(mesero(), 'Abuela');
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(aliasDelAviso(socket), 'Abuéla', 'con su tilde, como se registro');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: y al contrario: registrada "Abuela" y quitada como "Abuéla"', async () => {
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    await agregar(mesero(), { alias: 'Abuela' });
+
+    const res = await quitar(mesero(), 'Abuéla');
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(aliasDelAviso(socket), 'Abuela', 'sin tilde, como se registro');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: agregar y quitar a la misma persona usan el MISMO texto', async () => {
+  // Es lo que de verdad importa: el socket-server empareja los dos avisos por
+  // texto identico, asi que el par tiene que coincidir letra por letra.
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    await agregar(mesero(), { alias: '  La   Abuela ' });
+    await quitar(mesero(), 'la abuela');
+    await socketNotifier.esperarAvisos();
+
+    const avisos = socket.todos('/internal/mesa-comensal');
+    const agregado = avisos.find((a) => a.cuerpo.accion === 'agregar');
+    const quitado = avisos.find((a) => a.cuerpo.accion === 'quitar');
+
+    assert.strictEqual(agregado.cuerpo.alias, 'La Abuela');
+    assert.strictEqual(quitado.cuerpo.alias, 'La Abuela');
+    assert.strictEqual(agregado.cuerpo.alias, quitado.cuerpo.alias, 'texto identico');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: un alias no reservado avisa con el normalizado de la URL', async () => {
+  // Sigue siendo 204 idempotente, y no hay otro texto que mandar.
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    const res = await quitar(mesero(), '  la   ABUELA ');
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 204);
+    // Normalizado (espacios recortados y colapsados), pero sin canonicalizar:
+    // no hay reserva de donde sacar el texto.
+    assert.strictEqual(aliasDelAviso(socket), 'la ABUELA');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: con el respaldo en memoria se avisa igual con el guardado', async () => {
+  const mesa = mesaNueva();
+  const db = fakeMesa({ mesa: mesaOcupada(mesa), cuenta: { id_mesa: mesa, comensales: [] } });
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    // Sin fake-redis: alias-comensal usa el Map en memoria.
+    assert.strictEqual((await agregar(mesero(), { alias: 'Abuela' }, mesa)).status, 201);
+
+    const res = await quitar(mesero(), 'abuela', mesa);
+    await socketNotifier.esperarAvisos();
+
+    assert.strictEqual(res.status, 204);
+    assert.strictEqual(aliasDelAviso(socket), 'Abuela');
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: la reserva se lee UNA sola vez en el DELETE', async () => {
+  // El tipo (para decidir) y el texto (para el aviso) salen de la misma
+  // lectura: no se pagan dos viajes a Redis por lo mismo.
+  const db = fakeMesa();
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    await agregar(mesero(), { alias: 'Abuela' });
+    const lecturasDelAlta = redis.todas('hGet').length;
+
+    await quitar(mesero(), 'abuela');
+
+    const lecturas = redis.todas('hGet').length - lecturasDelAlta;
+    assert.strictEqual(lecturas, 1, `el DELETE leyo ${lecturas} veces`);
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('d-18b: leerReserva da el tipo y el texto a la vez', async () => {
+  const redis = instalarFakeRedis();
+  try {
+    assert.deepStrictEqual(await alias.leerReserva(MESA, 'nadie'), { noExiste: true });
+
+    // Sin celular: la agrego el personal.
+    await alias.reservar(MESA, alias.normalizarAlias('Abuela'), {
+      vigencia: alias.VIGENCIA_SIN_CELULAR,
+      extra: { [alias.MARCA_SIN_CELULAR]: true },
+    });
+    assert.deepStrictEqual(await alias.leerReserva(MESA, 'abuela'), {
+      alias: 'Abuela',
+      sinCelular: true,
+    });
+
+    // Sesion de QR: sin la marca, pero con su texto.
+    await alias.reservar(MESA, alias.normalizarAlias('Ana María'), { vigencia: '3h' });
+    assert.deepStrictEqual(await alias.leerReserva(MESA, 'anamaria'), {
+      alias: 'Ana María',
+      sinCelular: false,
+    });
+  } finally {
+    redis.restaurar();
+  }
+});
+
+test('d-18b: leerReserva distingue ilegible de no existe', async () => {
+  const redis = instalarFakeRedis();
+  try {
+    redis.poner(alias.llave(MESA), { ana: 'esto-no-es-json' });
+    assert.deepStrictEqual(await alias.leerReserva(MESA, 'ana'), { ilegible: true });
+    assert.deepStrictEqual(await alias.leerReserva(MESA, 'beto'), { noExiste: true });
+  } finally {
+    redis.restaurar();
+  }
+});
+
+test('d-18b: leerReserva con Redis caido no adivina', async () => {
+  const redis = instalarFakeRedis({ caido: true });
+  try {
+    assert.deepStrictEqual(await alias.leerReserva(MESA, 'abuela'), { noDisponible: true });
+  } finally {
+    redis.restaurar();
+  }
+});
+
+test('d-18b: esSinCelular y aliasReservado siguen contestando lo mismo', async () => {
+  // Las dos son ahora vistas de leerReserva; su forma de respuesta no cambio
+  // para los demas llamadores.
+  const redis = instalarFakeRedis();
+  try {
+    await alias.reservar(MESA, alias.normalizarAlias('Ana'), { vigencia: '3h' });
+    assert.deepStrictEqual(await alias.esSinCelular(MESA, 'ana'), { sinCelular: false });
+    assert.deepStrictEqual(await alias.aliasReservado(MESA, 'ana'), { alias: 'Ana' });
+
+    // Un valor ilegible: esSinCelular lo trata como de QR (no se toca) y
+    // aliasReservado como si no hubiera texto.
+    redis.poner(alias.llave(MESA), { beto: 'roto' });
+    assert.deepStrictEqual(await alias.esSinCelular(MESA, 'beto'), { sinCelular: false });
+    assert.deepStrictEqual(await alias.aliasReservado(MESA, 'beto'), { noExiste: true });
+  } finally {
+    redis.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // El pedido del mesero y la cuenta (punto 4: verificar, no cambiar)
 // ---------------------------------------------------------------------------
 
