@@ -789,6 +789,117 @@ export function infoTuParte({
   };
 }
 
+/**
+ * Determina la siguiente pantalla y acciones de limpieza tras eventos de pago (J-15).
+ * Apaga el estado de espera, el overlay y el spinner al confirmar o cancelar un pago.
+ *
+ * @param {object} [opciones]
+ * @param {'pago_confirmado'|'saldo_cero'|'salida_espera'|'widget_resultado'|'volver_cuenta'} [opciones.tipo]
+ * @param {'propio'|'mesa'|'otro'} [opciones.tipoConfirmado]
+ * @param {number} [opciones.saldoMesa]
+ * @param {object|null} [opciones.resultadoWidget]
+ * @param {string} [opciones.pantallaActual='cuenta']
+ * @returns {{
+ *   pantalla: 'cuenta' | 'espera' | 'confirmado' | 'caja',
+ *   apagarEspera: boolean,
+ *   limpiarAlmacenamiento: boolean,
+ *   cerrarWidget: boolean,
+ *   errorPago: string | null
+ * }}
+ */
+export function transicionPantallaPago({
+  tipo,
+  tipoConfirmado,
+  saldoMesa = 0,
+  resultadoWidget = null,
+  pantallaActual = 'cuenta',
+} = {}) {
+  switch (tipo) {
+    case 'pago_confirmado': {
+      if (tipoConfirmado === 'propio' || tipoConfirmado === 'mesa') {
+        return {
+          pantalla: 'confirmado',
+          apagarEspera: true,
+          limpiarAlmacenamiento: true,
+          cerrarWidget: true,
+          errorPago: null,
+        };
+      }
+      return {
+        pantalla: pantallaActual,
+        apagarEspera: false,
+        limpiarAlmacenamiento: false,
+        cerrarWidget: false,
+        errorPago: null,
+      };
+    }
+
+    case 'saldo_cero': {
+      return {
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      };
+    }
+
+    case 'salida_espera': {
+      const saldo = Math.max(0, Number(saldoMesa) || 0);
+      return {
+        pantalla: saldo === 0 ? 'confirmado' : 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      };
+    }
+
+    case 'widget_resultado': {
+      const status = resultadoWidget?.transaction?.status;
+      if (status === 'APPROVED') {
+        return {
+          pantalla: 'espera',
+          apagarEspera: false,
+          limpiarAlmacenamiento: false,
+          cerrarWidget: false,
+          errorPago: null,
+        };
+      }
+
+      const esRechazado = status === 'DECLINED' || status === 'ERROR';
+      return {
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: esRechazado
+          ? 'El pago no fue aprobado. Puedes intentar nuevamente.'
+          : null,
+      };
+    }
+
+    case 'volver_cuenta': {
+      return {
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      };
+    }
+
+    default:
+      return {
+        pantalla: pantallaActual,
+        apagarEspera: false,
+        limpiarAlmacenamiento: false,
+        cerrarWidget: false,
+        errorPago: null,
+      };
+  }
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -811,4 +922,5 @@ export default {
   eventIdParaIntento,
   estadoSelectorPago,
   infoTuParte,
+  transicionPantallaPago,
 };

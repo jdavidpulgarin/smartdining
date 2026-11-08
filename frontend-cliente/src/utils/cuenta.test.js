@@ -22,6 +22,7 @@ import {
   eventIdParaIntento,
   estadoSelectorPago,
   infoTuParte,
+  transicionPantallaPago,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -945,6 +946,150 @@ describe('utils/cuenta.js (J-08)', () => {
         color: '#FFFFFF',
         esVerde: false,
         mensaje: 'Consumiste $ 18.000',
+      });
+    });
+  });
+
+  describe('transicionPantallaPago (J-15)', () => {
+    it('pago_confirmado propio → pantalla confirmado, apaga espera, limpia y cierra widget', () => {
+      const res = transicionPantallaPago({
+        tipo: 'pago_confirmado',
+        tipoConfirmado: 'propio',
+        saldoMesa: 0,
+      });
+      expect(res).toEqual({
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('pago_confirmado mesa → pantalla confirmado, apaga espera, limpia y cierra widget', () => {
+      const res = transicionPantallaPago({
+        tipo: 'pago_confirmado',
+        tipoConfirmado: 'mesa',
+        saldoMesa: 0,
+      });
+      expect(res).toEqual({
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('pago_confirmado de otro con saldo pendiente → conserva pantalla sin cerrar ni limpiar', () => {
+      const res = transicionPantallaPago({
+        tipo: 'pago_confirmado',
+        tipoConfirmado: 'otro',
+        saldoMesa: 20000,
+        pantallaActual: 'cuenta',
+      });
+      expect(res).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: false,
+        limpiarAlmacenamiento: false,
+        cerrarWidget: false,
+        errorPago: null,
+      });
+    });
+
+    it('saldo_cero → pantalla confirmado y apaga espera', () => {
+      const res = transicionPantallaPago({ tipo: 'saldo_cero' });
+      expect(res).toEqual({
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('salida_espera con saldo 0 → confirmado; con saldo > 0 → cuenta', () => {
+      const saldoCero = transicionPantallaPago({ tipo: 'salida_espera', saldoMesa: 0 });
+      expect(saldoCero).toEqual({
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+
+      const saldoPendiente = transicionPantallaPago({ tipo: 'salida_espera', saldoMesa: 24000 });
+      expect(saldoPendiente).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('widget_resultado aprobado → espera continua sin cerrar widget', () => {
+      const res = transicionPantallaPago({
+        tipo: 'widget_resultado',
+        resultadoWidget: { transaction: { status: 'APPROVED' } },
+      });
+      expect(res).toEqual({
+        pantalla: 'espera',
+        apagarEspera: false,
+        limpiarAlmacenamiento: false,
+        cerrarWidget: false,
+        errorPago: null,
+      });
+    });
+
+    it('widget_resultado rechazado (DECLINED/ERROR) → vuelve a cuenta con mensaje de error', () => {
+      const decl = transicionPantallaPago({
+        tipo: 'widget_resultado',
+        resultadoWidget: { transaction: { status: 'DECLINED' } },
+      });
+      expect(decl).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: 'El pago no fue aprobado. Puedes intentar nuevamente.',
+      });
+
+      const err = transicionPantallaPago({
+        tipo: 'widget_resultado',
+        resultadoWidget: { transaction: { status: 'ERROR' } },
+      });
+      expect(err).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: 'El pago no fue aprobado. Puedes intentar nuevamente.',
+      });
+    });
+
+    it('widget_resultado cerrado sin pagar (null o sin transaccion) → vuelve a cuenta sin error', () => {
+      const sinPago = transicionPantallaPago({
+        tipo: 'widget_resultado',
+        resultadoWidget: null,
+      });
+      expect(sinPago).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('volver_cuenta → vuelve a cuenta y apaga espera', () => {
+      const res = transicionPantallaPago({ tipo: 'volver_cuenta' });
+      expect(res).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
       });
     });
   });

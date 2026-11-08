@@ -18,10 +18,11 @@ import {
   eventIdParaIntento,
   estadoSelectorPago,
   infoTuParte,
+  transicionPantallaPago,
 } from '../utils/cuenta';
 import { crearDeduplicador } from '../utils/deduplicador';
 import { crearIntencion } from '../services/pagoService';
-import { abrirCheckout } from '../services/wompiWidget';
+import { abrirCheckout, cerrarWidget } from '../services/wompiWidget';
 import { uuidV4 } from '../services/clienteMesa';
 
 /**
@@ -59,6 +60,13 @@ function Pago() {
     []
   );
 
+  // Cleanup al desmontar: cerrar cualquier widget remanente
+  useEffect(() => {
+    return () => {
+      cerrarWidget();
+    };
+  }, []);
+
   // Escuchar eventos de socket (payment:confirmed y cuenta:solicitada)
   useEffect(() => {
     if (!socketOn) return undefined;
@@ -76,6 +84,22 @@ function Pago() {
         saldoRestante,
       });
 
+      const trans = transicionPantallaPago({
+        tipo: 'pago_confirmado',
+        tipoConfirmado: tipo,
+        saldoMesa: saldoRestante,
+      });
+
+      if (trans.cerrarWidget) {
+        cerrarWidget();
+      }
+      if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.removeItem('smartdining_saldo_antes_pago');
+      }
+      if (trans.apagarEspera) {
+        setIniciandoPago(false);
+      }
+
       if (tipo === 'propio' || tipo === 'mesa') {
         if (intentoPrevioRef.current) {
           intentoPrevioRef.current.confirmado = true;
@@ -85,7 +109,7 @@ function Pago() {
           : (evento.monto_centavos != null ? Number(evento.monto_centavos) / 100 : 0);
         setUltimoPago(monto);
         setTipoConfirmado(tipo);
-        setPantalla('confirmado');
+        setPantalla(trans.pantalla);
       }
       // 'otro' con saldo restante > 0: solo el aviso "X pagó", sin cambiar de pantalla
     });
@@ -140,17 +164,29 @@ function Pago() {
     if (saldoAntesRaw != null) {
       const saldoAntes = Number(saldoAntesRaw);
       if (debeSalirDeEspera({ saldoAntes, saldoAhora: cuenta.saldo })) {
-        sessionStorage.removeItem('smartdining_saldo_antes_pago');
+        const trans = transicionPantallaPago({
+          tipo: 'salida_espera',
+          saldoMesa: cuenta.saldo,
+          pantallaActual: pantalla,
+        });
+
+        if (trans.cerrarWidget) {
+          cerrarWidget();
+        }
+        if (trans.limpiarAlmacenamiento) {
+          sessionStorage.removeItem('smartdining_saldo_antes_pago');
+        }
         if (intentoPrevioRef.current) {
           intentoPrevioRef.current.confirmado = true;
         }
         queueMicrotask(() => {
-          if (cuenta.saldo === 0) {
-            setTipoConfirmado((prev) => (prev === 'propio' ? 'propio' : 'mesa'));
-            setPantalla('confirmado');
-          } else {
-            setPantalla('cuenta');
+          if (trans.apagarEspera) {
+            setIniciandoPago(false);
           }
+          if (trans.pantalla === 'confirmado') {
+            setTipoConfirmado((prev) => (prev === 'propio' ? 'propio' : 'mesa'));
+          }
+          setPantalla(trans.pantalla);
         });
       }
     }
@@ -160,9 +196,24 @@ function Pago() {
   useEffect(() => {
     if (!cuenta) return;
     if (cuenta.saldo === 0 && (cuenta.total ?? 0) > 0 && pantalla !== 'confirmado') {
+      const trans = transicionPantallaPago({
+        tipo: 'saldo_cero',
+        saldoMesa: 0,
+        pantallaActual: pantalla,
+      });
+
+      if (trans.cerrarWidget) {
+        cerrarWidget();
+      }
+      if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.removeItem('smartdining_saldo_antes_pago');
+      }
       queueMicrotask(() => {
+        if (trans.apagarEspera) {
+          setIniciandoPago(false);
+        }
         setTipoConfirmado((prev) => (prev === 'propio' ? 'propio' : 'mesa'));
-        setPantalla('confirmado');
+        setPantalla(trans.pantalla);
       });
     }
   }, [cuenta, pantalla]);
@@ -325,8 +376,35 @@ function Pago() {
 
       // En modo real, abrir el widget emergente de Wompi
       if (!(import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true')) {
-        abrirCheckout(intencion).catch((err) => {
-          // Si falla el script de checkout, se informa pero se conserva la pantalla de espera
+        abrirCheckout(intencion, (resultado) => {
+          const trans = transicionPantallaPago({
+            tipo: 'widget_resultado',
+            resultadoWidget: resultado,
+            pantallaActual: pantalla,
+          });
+
+          if (trans.cerrarWidget) {
+            cerrarWidget();
+          }
+          if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
+            sessionStorage.removeItem('smartdining_saldo_antes_pago');
+          }
+          if (trans.apagarEspera) {
+            setIniciandoPago(false);
+          }
+          if (trans.errorPago) {
+            setErrorPago(trans.errorPago);
+          }
+          if (trans.pantalla !== 'espera') {
+            setPantalla(trans.pantalla);
+          }
+        }).catch((err) => {
+          cerrarWidget();
+          if (typeof window !== 'undefined' && window.sessionStorage) {
+            sessionStorage.removeItem('smartdining_saldo_antes_pago');
+          }
+          setIniciandoPago(false);
+          setPantalla('cuenta');
           setErrorPago(err.message || 'No se pudo abrir la ventana de Wompi');
         });
       }
@@ -338,10 +416,15 @@ function Pago() {
   };
 
   const handleVolverCuenta = () => {
-    if (typeof window !== 'undefined' && window.sessionStorage) {
+    const trans = transicionPantallaPago({ tipo: 'volver_cuenta' });
+    if (trans.cerrarWidget) {
+      cerrarWidget();
+    }
+    if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
       sessionStorage.removeItem('smartdining_saldo_antes_pago');
     }
-    setPantalla('cuenta');
+    setIniciandoPago(false);
+    setPantalla(trans.pantalla);
     setErrorPago(null);
     setTipoConfirmado('mesa');
   };

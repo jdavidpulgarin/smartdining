@@ -126,8 +126,40 @@ export async function abrirCheckout(intencion, onResultado = null) {
   return checkout;
 }
 
+/**
+ * Remueve cualquier overlay, modal o iframe inyectado en el DOM por el widget de Wompi (J-15).
+ */
+export function cerrarWidget() {
+  if (typeof document === 'undefined') return;
+  const selectores = [
+    '.waybox-backdrop',
+    '.waybox-modal',
+    'iframe[src*="wompi"]',
+    'iframe[name*="wompi"]',
+    '#smartdining-wompi-widget-container',
+  ];
+  selectores.forEach((sel) => {
+    try {
+      const elementos = document.querySelectorAll(sel);
+      elementos.forEach((el) => {
+        try {
+          el.remove();
+        } catch {
+          // Elemento ya removido
+        }
+      });
+    } catch {
+      // Ignorar selector no soportado
+    }
+  });
+  if (document.body?.classList) {
+    document.body.classList.remove('no-scroll');
+  }
+}
+
 export default {
   cargarWidget,
   abrirCheckout,
   urlRedireccionWompi,
+  cerrarWidget,
 };
