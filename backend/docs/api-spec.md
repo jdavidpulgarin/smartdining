@@ -978,17 +978,26 @@ trata; `estado` sigue teniendo la suya (`PATCH /mesas/:id/estado`).
 `activa` es **booleano estricto**: `"false"`, `0` o `null` son **400**. Se puede mandar junto
 con `numero`, `capacidad` y `ubicacion`.
 
-### 409 `mesa_ocupada` — una mesa en uso no se desactiva
+### 409 `mesa_ocupada` — una mesa ocupada no se desactiva
 
 ```json
-{ "error": "Esa mesa está en uso (ocupada o con una sesión de QR abierta): libérala antes de desactivarla.", "motivo": "mesa_ocupada" }
+{ "error": "Esa mesa está ocupada: libérala antes de desactivarla.", "motivo": "mesa_ocupada" }
 ```
 
-Se comprueba **en el backend, con la fila bloqueada, antes de tocar la base**: así el mensaje
-dice qué pasa y qué hacer, y no se gasta un viaje para que el trigger lo rechace. Cuenta como
-«en uso» tanto `estado = 'ocupada'` como tener un `token_qr` vivo: si se desactiva con
-comensales que ya escanearon, su sesión queda abierta y sin forma de cerrarla por el camino
-normal.
+Lo único que impide desactivar es que **haya gente sentada** (`estado = 'ocupada'`): si se
+desactiva con comensales dentro, su sesión queda abierta y sin forma de cerrarla por el camino
+normal. Se comprueba **en el backend, con la fila bloqueada, antes de tocar la base**: así el
+mensaje dice qué pasa y qué hacer, y no se gasta un viaje para que el trigger lo rechace.
+
+Un `token_qr` en una mesa **`disponible` no bloquea**: es el resto de una sesión que ya
+terminó —el cierre deja el token hasta la próxima rotación—, así que no hay nadie a quien
+dejar colgado.
+
+**Al desactivar se borra el token**, en la **misma sentencia** del `UPDATE`
+(`token_qr = CASE WHEN $5 IS FALSE THEN NULL ELSE token_qr END`): una mesa inactiva no
+conserva un QR, o quedaría un código impreso que escanea a una mesa fuera de servicio. El
+`CASE` solo dispara cuando `activa` llega en `false`: si el campo no viene, o viene en `true`,
+**el token no se toca**.
 
 **Reactivar nunca se bloquea**, ni con la mesa ocupada: activar no quita nada a nadie. Y
 reafirmar `activa: false` en una mesa que ya lo está tampoco choca con la guarda.
