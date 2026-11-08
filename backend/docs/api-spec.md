@@ -1765,8 +1765,13 @@ cuenta dividida por persona).
 
 **Solo la visita actual** (`creado_en >= mesas.sesion_iniciada_en`): sin ese filtro el
 grupo que se acaba de sentar vería lo que pidió el anterior, con sus alias y sus platos.
-Un pedido creado en el instante exacto de la apertura **sí** entra. Con
-`sesion_iniciada_en` en `null` se devuelven todos, como antes del script 17.
+Un pedido creado en el instante exacto de la apertura **sí** entra.
+
+Con `sesion_iniciada_en` en `null` esta lista devuelve **todos** los pedidos: la consulta
+es del backend y mantiene el criterio del script 17. Ojo, porque **la cuenta hace lo
+contrario**: `obtener_cuenta_mesa` devuelve una cuenta **vacía** cuando no hay sesión
+(regla H-02, script 20). Son dos respuestas distintas a propósito —ver una comanda vieja
+no cobra nada; sumarla en la cuenta, sí—, pero conviene no leer una por la otra.
 
 La misma regla se aplica a **`GET /pedidos/:id` cuando quien pregunta es un comensal**:
 un pedido de su mesa pero de otra visita responde **403**. El personal sí ve el histórico
@@ -1906,9 +1911,14 @@ y 17) y se devuelve tal cual: sus campos son el contrato.
 **Es la cuenta de la VISITA ACTUAL, no el histórico de la mesa.** `mesas.sesion_iniciada_en`
 marca cuándo se sentó el grupo que está ahora, y solo cuentan los pedidos creados desde
 entonces: si el grupo anterior dejó algo sin pagar, no se le cobra a este. La respuesta
-incluye ese `sesion_iniciada_en` para que el cliente sepa de qué visita habla (es `null`
-en una mesa que nunca se ha abierto desde el script 17, y entonces entran todos los
-pedidos no cancelados).
+incluye ese `sesion_iniciada_en` para que el cliente sepa de qué visita habla.
+
+**Sin sesión abierta, la cuenta sale VACÍA**, no completa: con `sesion_iniciada_en` en
+`null` la función devuelve totales en `0.00` y `pedidos`/`comensales` vacíos (regla H-02,
+`database/scripts/20_fix_h02_sesion_mesa_cuenta.sql`). Es lo contrario de lo que hacía el
+script 17, donde un `null` sumaba todo el histórico y la cuenta del grupo nuevo arrastraba
+lo del anterior. Así que una mesa con pedidos pero sin abrir no muestra `$0` por error:
+muestra que no hay ninguna visita a la que cobrarle.
 
 El backend fija `sesion_iniciada_en = NOW()` **solo cuando la mesa pasa de no ocupada a
 `ocupada`**, en la misma sentencia que el estado y el token:
@@ -2407,10 +2417,12 @@ Todos los montos de estas rutas viajan en **centavos enteros** (`monto_centavos`
 - **404** si la mesa no existe (se comprueba antes de llamar a la función, que
   lanzaría un `RAISE` y saldría como 409). **400** si el id no es un entero.
 
-> ⚠️ **Limitación conocida (no es de este endpoint):** `obtener_cuenta_mesa` toma todos
-> los pedidos de la mesa con `estado != 'cancelado'`, **sin distinguir la sesión**, así
-> que un pedido ya pagado de un grupo anterior sigue sumando en `total_centavos` y
-> descuadra `por_comensal`. Ver *Pendiente por acordar con el equipo*.
+- **Es la cuenta de la VISITA ACTUAL.** `obtener_cuenta_mesa` filtra por
+  `creado_en >= mesas.sesion_iniciada_en`, así que los pedidos de un grupo anterior **no**
+  suman en `total_centavos`. Y si la mesa no tiene sesión abierta
+  (`sesion_iniciada_en IS NULL`), la cuenta sale **vacía**: totales en `0` y
+  `por_comensal` en `[]` (scripts 17 y 20). Lo de que mezclaba sesiones era cierto hasta
+  el script 15 y ya no lo es.
 
 ### POST /transacciones/internal
 
@@ -2689,14 +2701,11 @@ Sigue abierto:
 - `suscripciones_push` está en el modelo ER pero todavía no la consume ningún endpoint
   de este backend (las notificaciones Web Push son módulo de Roberto).
 - ¿Debe el comensal poder cancelar su propio pedido? Hoy cancelar es solo de staff.
-- **`obtener_cuenta_mesa` mezcla sesiones de la misma mesa.** Filtra por
-  `estado != 'cancelado'`, así que los pedidos ya pagados del grupo anterior siguen
-  contando. Con un pedido viejo de $10.000 pagado (ítem de 'Ana', pago sin alias) y uno
-  nuevo de $30.000 de 'Beto': `total_mesa` = 40.000 en vez de 30.000, y por comensal sale
-  Ana debiendo 10.000 que ya pagó, mientras el pago aparece bajo 'General'. La suma de
-  los saldos por comensal (40.000) no cuadra con `saldo_mesa` (30.000). Hace falta
-  delimitar la sesión: una columna de apertura en `mesas` o un `id_sesion` en
-  `pedidos` (hoy `mesas` no tiene ninguna columna que sirva).
+- ~~**`obtener_cuenta_mesa` mezcla sesiones de la misma mesa.**~~ **RESUELTO** por
+  `mesas.sesion_iniciada_en` (script 17) y la regla H-02 (script 20): la cuenta filtra por
+  `creado_en >= sesion_iniciada_en` y, sin sesión abierta, sale vacía en vez de arrastrar
+  el histórico. El backend fija el timestamp al pasar la mesa a `ocupada`; ver
+  *GET /mesas/:id/cuenta*.
 - **`registrarPago` marca el pedido `pagado` con cualquier cobro `completada`, aunque
   sea parcial.** El trigger solo rechaza el exceso, no el pago de menos, así que abonar
   $1 de una cuenta de $56.000 la deja como cobrada y libera la mesa. `POST
