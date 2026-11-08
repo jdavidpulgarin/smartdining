@@ -26,6 +26,7 @@ import {
   actualizarDisponibilidadEnCache,
   aplicarDisponibilidadPlato,
   actualizarDisponibilidadPlatoEnCache,
+  recargarMenu,
 } from '../services/menuService';
 
 const CarritoContext = createContext(null);
@@ -212,6 +213,26 @@ export function CarritoProvider({ children }) {
       bajaPlato?.();
     };
   }, [mesaSocket]);
+
+  // Recargar menú al reconectar el socket (de reconectando a conectado)
+  const estadoSocket = mesaSocket?.estado;
+  const estadoAnteriorSocketRef = useRef(estadoSocket);
+  useEffect(() => {
+    if (
+      estadoAnteriorSocketRef.current === 'reconectando' &&
+      estadoSocket === 'conectado'
+    ) {
+      recargarMenu();
+      obtenerMenuRaw()
+        .then((menu) => {
+          setMenuRaw(menu);
+        })
+        .catch((err) => {
+          console.error('Error al recargar menú tras reconexión:', err);
+        });
+    }
+    estadoAnteriorSocketRef.current = estadoSocket;
+  }, [estadoSocket]);
 
   // Sincronizar estado cuando la mesa cambia (modo local)
   useEffect(() => {

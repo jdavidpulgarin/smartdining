@@ -32,7 +32,7 @@ function Menu() {
   const toastTimeoutRef = useRef(null);
 
   const { agregarLinea } = useCarrito();
-  const { on: socketOn } = useMesaSocket();
+  const { on: socketOn, estado: estadoSocket } = useMesaSocket();
 
   const platoSeleccionado = useMemo(
     () =>
@@ -62,6 +62,18 @@ function Menu() {
     });
     return baja;
   }, [socketOn]);
+
+  const estadoAnteriorSocketRef = useRef(estadoSocket);
+  useEffect(() => {
+    if (
+      estadoAnteriorSocketRef.current === 'reconectando' &&
+      estadoSocket === 'conectado'
+    ) {
+      recargarMenu();
+      cargarDatos();
+    }
+    estadoAnteriorSocketRef.current = estadoSocket;
+  }, [estadoSocket, cargarDatos]);
 
   useEffect(() => {
     return () => {
