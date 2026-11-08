@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Search,
   Plus,
@@ -191,13 +191,12 @@ export function Menu() {
   // otro admin o la cocina agotó o repuso un plato. Se aplica en vivo, sin
   // recargar. No trae eventId (es estado completo): solo se descarta un aviso
   // más viejo que el último aplicado para ese plato.
-  const platoViejo = useRef(null)
-  if (!platoViejo.current) platoViejo.current = crearUltimoPorId()
+  const [platoViejo] = useState(() => crearUltimoPorId())
 
   useSocketListener('plato:disponibilidad', (data) => {
     const idPlato = Number(data?.id_plato)
     if (!Number.isInteger(idPlato) || typeof data?.disponible !== 'boolean') return
-    if (platoViejo.current(idPlato, data.emitidoEn)) return
+    if (platoViejo(idPlato, data.emitidoEn)) return
     setDishesList((prev) =>
       prev.map((d) => (d.id === idPlato ? { ...d, available: data.disponible } : d))
     )

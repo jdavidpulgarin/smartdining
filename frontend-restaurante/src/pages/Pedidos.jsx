@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Flame,
   BellRing,
@@ -133,14 +133,12 @@ export function Pedidos() {
   // Duplicados, como pide EVENTS.md ("deduplica por eventId"): un evento con
   // un eventId ya visto se ignora entero, sin repetir el aviso. Una ventana de
   // los últimos 200 por tipo de evento.
-  const createdVisto = useRef(null)
-  if (!createdVisto.current) createdVisto.current = crearVentanaEventos()
-  const statusVisto = useRef(null)
-  if (!statusVisto.current) statusVisto.current = crearVentanaEventos()
+  const [createdVisto] = useState(() => crearVentanaEventos())
+  const [statusVisto] = useState(() => crearVentanaEventos())
 
   // Escuchar eventos en vivo desde el socket-server / backend
   useSocketListener('order:status', (data) => {
-    if (statusVisto.current(data?.eventId)) return
+    if (statusVisto(data?.eventId)) return
     if (data?.id_pedido) {
       setOrdersList((prev) =>
         prev.map((ord) =>
@@ -161,7 +159,7 @@ export function Pedidos() {
   useSocketListener('order:created', (data) => {
     const pedido = data?.pedido
     if (!pedido?.id_pedido) return
-    if (createdVisto.current(data.eventId)) return
+    if (createdVisto(data.eventId)) return
     const normalizado = normalizarPedido(pedido)
     setOrdersList((prev) =>
       prev.some((o) => o.rawId === normalizado.rawId)

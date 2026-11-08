@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   X,
   Plus,
@@ -69,13 +69,12 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
   // (EVENTS.md §5.3): el editor es el único lugar del panel que muestra
   // ingredientes, así que el oyente vive aquí. useSocketListener lo quita al
   // cerrar el modal. Sin eventId: solo se descarta un aviso más viejo.
-  const ingredienteViejo = useRef(null)
-  if (!ingredienteViejo.current) ingredienteViejo.current = crearUltimoPorId()
+  const [ingredienteViejo] = useState(() => crearUltimoPorId())
 
   useSocketListener('ingrediente:disponibilidad', (data) => {
     const idIng = Number(data?.id_ingrediente)
     if (!Number.isInteger(idIng) || typeof data?.disponible !== 'boolean') return
-    if (ingredienteViejo.current(idIng, data.emitidoEn)) return
+    if (ingredienteViejo(idIng, data.emitidoEn)) return
     setPasos((prev) =>
       prev.map((paso) =>
         (paso.ingredientes || []).some((i) => Number(i.id_ingrediente) === idIng)

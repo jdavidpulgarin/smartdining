@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useContext, useRef } from 'react'
+import { useState, useEffect, useCallback, useContext } from 'react'
 import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
@@ -191,14 +191,12 @@ export function TablesProvider({ children }) {
   // order:created y order:status pueden llegar repetidos si el servidor
   // reintenta (EVENTS.md §5): un eventId ya visto se ignora entero, sin repetir
   // la notificación ni el sonido. Una ventana por tipo, de los últimos 200.
-  const createdVisto = useRef(null)
-  if (!createdVisto.current) createdVisto.current = crearVentanaEventos()
-  const statusVisto = useRef(null)
-  if (!statusVisto.current) statusVisto.current = crearVentanaEventos()
+  const [createdVisto] = useState(() => crearVentanaEventos())
+  const [statusVisto] = useState(() => crearVentanaEventos())
 
   // Escuchar cuando entra un pedido nuevo (order:created)
   useSocketListener('order:created', (data) => {
-    if (createdVisto.current(data?.eventId)) return
+    if (createdVisto(data?.eventId)) return
     if (data?.pedido) {
       const p = data.pedido
       const idMesa = Number(p.id_mesa)
@@ -230,7 +228,7 @@ export function TablesProvider({ children }) {
 
   // Escuchar cambio de estado de pedido (order:status)
   useSocketListener('order:status', (data) => {
-    if (statusVisto.current(data?.eventId)) return
+    if (statusVisto(data?.eventId)) return
     if (data?.id_pedido) {
       const idPedido = Number(data.id_pedido)
       const nuevoEstado = data.estado
