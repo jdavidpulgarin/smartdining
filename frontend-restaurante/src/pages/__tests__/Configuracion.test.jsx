@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from '../../context/AuthContext'
 import { Configuracion } from '../Configuracion'
-import { errorDeClave } from '../../components/configuracion/personal'
+import { errorDeClave } from '../../utils/configuracion'
 
 const json = (body, status = 200) => ({
   ok: status >= 200 && status < 300,
@@ -152,6 +152,21 @@ describe('P-21 · Configuración', () => {
       expect(escriturasDe(spy)).toEqual([{ url: expect.stringMatching(/\/mesas\/1$/), metodo: 'PATCH', cuerpo: { activa: false } }])
     })
 
+    it('desactivar una mesa ocupada muestra el 409 del backend y la deja como estaba', async () => {
+      sesionComo('admin')
+      const mensaje = 'Esa mesa está ocupada: libérala antes de desactivarla.'
+      backend({
+        mesas: mesasBase.map((m) => ({ ...m, activa: true })),
+        escrituras: () => json({ error: mensaje, motivo: 'mesa_ocupada' }, 409),
+      })
+      montar()
+      await screen.findByTestId('mesa-3')
+
+      fireEvent.click(screen.getByTitle('Desactivar mesa 3'))
+      expect(await screen.findByRole('alert')).toHaveTextContent(`No se guardó: ${mensaje}`)
+      expect(within(screen.getByTestId('mesa-3')).getByText('Sí')).toBeInTheDocument()
+    })
+
     it('borrar pide confirmación y muestra el 409 si la mesa tiene pedidos', async () => {
       sesionComo('admin')
       const mensaje = 'Esa mesa tiene pedidos registrados: no se puede borrar sin perder el historial.'
@@ -248,6 +263,17 @@ describe('P-21 · Configuración', () => {
       ])
       await waitFor(() => expect(screen.queryByLabelText('Clave nueva de Luis Pardo')).toBeNull())
     })
+  })
+
+  it('pestaña Restaurante: avisa que el formulario está pendiente, sin datos de ejemplo', async () => {
+    sesionComo('admin')
+    const spy = backend({ mesas: mesasBase })
+    montar()
+    fireEvent.click(await screen.findByRole('tab', { name: 'RESTAURANTE' }))
+    expect(screen.getByText('Datos del restaurante: pendiente')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).toBeNull()
+    // No pide nada a /configuracion: no hay formulario todavía.
+    expect(spy.mock.calls.some(([url]) => url.includes('/configuracion'))).toBe(false)
   })
 
   it('errorDeClave: mínimo 8 caracteres y máximo 72 bytes (las tildes cuentan doble)', () => {

@@ -1,13 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, Pencil, Trash2, Power, RefreshCw } from 'lucide-react'
 import { mesasApi, mensajeNoGuardado } from '../../services/api'
-import { mensajeDeCarga } from './personal'
-
-/** GET /mesas → lista ordenada por número. */
-function ordenar(data) {
-  const lista = Array.isArray(data) ? data : data?.mesas || []
-  return [...lista].sort((a, b) => Number(a.numero) - Number(b.numero))
-}
+import { ordenarMesas, validarMesa, cambiosDeMesa, mensajeDeCarga } from '../../utils/configuracion'
 
 /**
  * Pestaña Mesas de Configuración (P-21): el mobiliario, no la operación del
@@ -24,23 +18,6 @@ function ordenar(data) {
 
 const FORM_VACIO = { numero: '', capacidad: '4', ubicacion: '' }
 
-function enteroPositivo(valor) {
-  const n = Number(valor)
-  return Number.isInteger(n) && n > 0 ? n : null
-}
-
-/** Valida el formulario y devuelve { datos } o { error }. */
-function leerFormulario(form) {
-  const numero = enteroPositivo(form.numero)
-  if (!numero) return { error: 'El número de mesa debe ser un entero mayor que 0.' }
-  const capacidad = enteroPositivo(form.capacidad)
-  if (!capacidad) return { error: 'La capacidad debe ser un entero mayor que 0.' }
-  const ubicacion = form.ubicacion.trim()
-  if (!ubicacion) return { error: 'Escribe la ubicación (por ejemplo, Terraza).' }
-  if (ubicacion.length > 50) return { error: 'La ubicación admite hasta 50 caracteres.' }
-  return { datos: { numero, capacidad, ubicacion } }
-}
-
 export function TabMesas() {
   const [mesas, setMesas] = useState([])
   const [loading, setLoading] = useState(true)
@@ -52,7 +29,7 @@ export function TabMesas() {
 
   const cargar = useCallback(async () => {
     try {
-      setMesas(ordenar(await mesasApi.listar()))
+      setMesas(ordenarMesas(await mesasApi.listar()))
       setErrorCarga(null)
     } catch (err) {
       setErrorCarga(mensajeDeCarga(err, 'No se pudieron cargar las mesas'))
@@ -68,7 +45,7 @@ export function TabMesas() {
     mesasApi
       .listar()
       .then((data) => {
-        if (vivo) setMesas(ordenar(data))
+        if (vivo) setMesas(ordenarMesas(data))
       })
       .catch((err) => {
         if (vivo) setErrorCarga(mensajeDeCarga(err, 'No se pudieron cargar las mesas'))
@@ -99,20 +76,16 @@ export function TabMesas() {
 
   const crear = async (e) => {
     e.preventDefault()
-    const { datos, error } = leerFormulario(nueva)
+    const { datos, error } = validarMesa(nueva)
     if (error) return setAviso({ tipo: 'error', texto: error })
     const ok = await ejecutar(() => mesasApi.crear(datos), `Mesa ${datos.numero} creada.`)
     if (ok) setNueva(FORM_VACIO)
   }
 
   const guardarEdicion = async (mesa) => {
-    const { datos, error } = leerFormulario(editando.form)
+    const { datos, error } = validarMesa(editando.form)
     if (error) return setAviso({ tipo: 'error', texto: error })
-    // Solo lo que cambió: lo que no viene no se toca (COALESCE en el backend).
-    const cambios = {}
-    if (datos.numero !== Number(mesa.numero)) cambios.numero = datos.numero
-    if (datos.capacidad !== Number(mesa.capacidad)) cambios.capacidad = datos.capacidad
-    if (datos.ubicacion !== (mesa.ubicacion || '')) cambios.ubicacion = datos.ubicacion
+    const cambios = cambiosDeMesa(mesa, datos)
     if (Object.keys(cambios).length === 0) {
       setEditando(null)
       return

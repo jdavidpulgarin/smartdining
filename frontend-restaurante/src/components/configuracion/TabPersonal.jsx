@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { UserPlus, KeyRound, RefreshCw } from 'lucide-react'
 import { usuariosApi, mensajeNoGuardado } from '../../services/api'
 import { useAuth } from '../../hooks'
-import { ROLES, errorDeClave, mensajeDeCarga } from './personal'
+import { ROLES, etiquetaDeRol, errorDeClave, validarNuevoUsuario, mensajeDeCarga } from '../../utils/configuracion'
 
 /**
  * Pestaña Personal de Configuración (P-21), contra D-16 parte A:
@@ -80,23 +80,15 @@ export function TabPersonal() {
 
   const crear = async (e) => {
     e.preventDefault()
-    const nombre = nuevo.nombre.trim()
-    const email = nuevo.email.trim()
-    if (nombre.length < 2) return setAviso({ tipo: 'error', texto: 'El nombre debe tener al menos 2 caracteres.' })
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setAviso({ tipo: 'error', texto: 'Escribe un email válido.' })
-    const errClave = errorDeClave(nuevo.password)
-    if (errClave) return setAviso({ tipo: 'error', texto: errClave })
-    const ok = await ejecutar(
-      () => usuariosApi.crear({ nombre, email, password: nuevo.password, rol: nuevo.rol }),
-      `${nombre} ya puede entrar al panel.`
-    )
+    const { datos, error } = validarNuevoUsuario(nuevo)
+    if (error) return setAviso({ tipo: 'error', texto: error })
+    const ok = await ejecutar(() => usuariosApi.crear(datos), `${datos.nombre} ya puede entrar al panel.`)
     if (ok) setNuevo(FORM_VACIO)
   }
 
   const cambiarRol = (u, rol) => {
     if (rol === u.rol) return
-    const etiqueta = ROLES.find((r) => r.valor === rol)?.etiqueta || rol
-    ejecutar(() => usuariosApi.actualizar(u.id_usuario, { rol }), `${u.nombre} ahora es ${etiqueta}.`)
+    ejecutar(() => usuariosApi.actualizar(u.id_usuario, { rol }), `${u.nombre} ahora es ${etiquetaDeRol(rol)}.`)
   }
 
   const alternarActivo = (u) => {
@@ -190,7 +182,7 @@ export function TabPersonal() {
                     <td>{u.email}</td>
                     <td>
                       {soyYo ? (
-                        ROLES.find((r) => r.valor === u.rol)?.etiqueta || u.rol
+                        etiquetaDeRol(u.rol)
                       ) : (
                         <select className="sd-input" aria-label={`Rol de ${u.nombre}`} value={u.rol} disabled={ocupado} onChange={(e) => cambiarRol(u, e.target.value)}>
                           {ROLES.map((r) => (
