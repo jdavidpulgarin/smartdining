@@ -135,15 +135,174 @@ const crearPedidoSchema = z.object({
  *
  * Para mesero y admin el body sigue valiendo: ellos piden de parte de alguien y
  * su JWT no lleva alias, sino `id_usuario`.
+ *
+ * D-18b: para el personal ya no se guarda el texto del body tal cual, sino el
+ * alias CANÓNICO que resolvió `resolverAliasCanonicos` para esa clave, para que
+ * la cuenta no acabe con «Abuela» y «abuela» en dos filas. `porClave` llega
+ * vacío cuando el pedido no trae ningún alias.
  */
-function aliasDelComensal(req, item) {
+function aliasDelComensal(req, item, porClave = new Map()) {
   const firmado = req.user?.comensal;
   if (typeof firmado === 'string' && firmado.trim()) return firmado.trim();
 
   // Un comensal sin alias firmado se queda sin alias: el body no es autoridad.
   if (esComensal(req)) return null;
 
-  return item.comensal ?? item.apodo ?? null;
+  const bruto = item.comensal ?? item.apodo;
+  if (typeof bruto !== 'string' || !bruto.trim()) return null;
+
+  const normalizado = aliasComensal.normalizarAlias(bruto);
+  // Si no se pudo normalizar, `resolverAliasCanonicos` ya respondió 400; este
+  // respaldo solo existe para no devolver undefined si alguien llama suelto.
+  if (normalizado.error) return bruto.trim();
+
+  return porClave.get(normalizado.clave) ?? normalizado.alias;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Alias canónico del comensal cuando pide el PERSONAL (D-18b)
+ *
+ * El problema: la cuenta por persona agrupa por el TEXTO EXACTO del alias
+ * (`btrim(dp.comensal)` en obtener_cuenta_mesa), mientras que la unicidad de los
+ * alias se mide por CLAVE (sin tildes, minúsculas, sin separadores). Así que si
+ * la abuela se registra como «Abuela» y el mesero escribe «abuela» al tomarle el
+ * pedido, la cuenta muestra DOS filas, el desglose no cuadra y el cajero no sabe
+ * a quién cobrarle qué.
+ *
+ * La regla: cuando pide el personal, el alias que se guarda no es el texto que
+ * llegó, sino el CANÓNICO de esa persona en la mesa. Se busca en dos sitios, en
+ * este orden:
+ *   1. las reservas de alias de la mesa (`sd:mesa:{id}:alias`), que es la fuente
+ *      de verdad de quién está sentado, venga de un QR o del alta del personal;
+ *   2. la cuenta de la mesa, para cubrir a quien ya tiene platos pero cuya
+ *      reserva venció (24 h para un sin celular, 3 h para una sesión de QR).
+ * Si no está en ninguno, es un nombre que nadie registró: 409.
+ *
+ * Esto NO toca al comensal: su alias sale firmado del JWT (H-05) y nunca del
+ * cuerpo. Y un ítem sin alias sigue cayendo en «General», como siempre.
+ * -------------------------------------------------------------------------- */
+
+/** Motivo del 409 cuando el nombre no corresponde a nadie de la mesa. */
+const MOTIVO_NO_REGISTRADO = 'comensal_no_registrado';
+
+const MENSAJE_NO_REGISTRADO =
+  'Esa persona no está registrada en la mesa: agrégala primero '
+  + '(POST /api/mesas/:id/comensales) o usa el nombre con el que ya aparece en la cuenta';
+
+/**
+ * Los alias en bruto que trae el pedido, sin repetir.
+ *
+ * `comensal` manda sobre `apodo`, igual que en `aliasDelComensal`. Un ítem sin
+ * alias no aporta nada aquí: su `null` se resuelve solo.
+ */
+function aliasEnBruto(items) {
+  const vistos = new Set();
+  for (const item of items) {
+    const bruto = item.comensal ?? item.apodo;
+    if (typeof bruto === 'string' && bruto.trim()) vistos.add(bruto);
+  }
+  return [...vistos];
+}
+
+/**
+ * Busca en la cuenta de la mesa un alias que ya tenga platos y cuya clave
+ * coincida. Devuelve su texto exacto, o null.
+ *
+ * Es la MISMA fuente que `GET /api/mesas/:id/cuenta` y que la guarda del
+ * `DELETE` de comensales: los pedidos no cancelados de la mesa. Se exige
+ * `items_pedidos > 0` porque lo que se busca es alguien que ya consumió: una
+ * fila que solo existe por un pago no dice cómo se escribe el nombre de quien
+ * está pidiendo ahora.
+ */
+function aliasConPlatosEnLaCuenta(cuentaMesa, clave) {
+  const filas = (cuentaMesa && cuentaMesa.comensales) || [];
+  for (const fila of filas) {
+    if (!fila || Number(fila.items_pedidos) <= 0) continue;
+    const normalizado = aliasComensal.normalizarAlias(fila.comensal);
+    if (!normalizado.error && normalizado.clave === clave) return normalizado.alias;
+  }
+  return null;
+}
+
+/**
+ * Resuelve el alias canónico de cada clave distinta del pedido.
+ *
+ * UNA resolución por alias distinto, no una por ítem: un pedido con ocho platos
+ * de la abuela hace una sola lectura de la reserva, y la cuenta se consulta como
+ * mucho UNA vez para todo el pedido (y solo si alguna reserva no apareció).
+ * Todo esto pasa ANTES de abrir la transacción del pedido.
+ *
+ * DEGRADACIÓN SIN REDIS: si no se puede leer la reserva, el pedido NO se
+ * bloquea. Se intenta igual con la cuenta (que vive en PostgreSQL) y, si
+ * tampoco, se guarda el texto recortado, que es exactamente lo que hacía el
+ * backend antes de D-18b. Un servicio de caché caído no puede impedir que una
+ * mesa coma; lo único que se pierde es la canonicalización.
+ *
+ * @returns {Promise<{porClave: Map<string, string>}|{error: {status: number, body: object}}>}
+ */
+async function resolverAliasCanonicos(idMesa, items) {
+  const brutos = aliasEnBruto(items);
+  if (brutos.length === 0) return { porClave: new Map() };
+
+  // 1. Validación: la MISMA regla que las rutas de alias (R-18). Un nombre que
+  //    no pasa aquí no se puede registrar ni comparar, así que es un 400.
+  const claves = new Map();
+  for (const bruto of brutos) {
+    const normalizado = aliasComensal.normalizarAlias(bruto);
+    if (normalizado.error) {
+      return { error: { status: 400, body: { error: normalizado.error, campo: 'comensal' } } };
+    }
+    if (!claves.has(normalizado.clave)) claves.set(normalizado.clave, normalizado.alias);
+  }
+
+  const porClave = new Map();
+  const sinReserva = [];
+  let redisCaido = false;
+
+  // 2. Las reservas de la mesa: la fuente de verdad de quién está sentado.
+  for (const [clave, normalizado] of claves) {
+    const reservado = await aliasComensal.aliasReservado(idMesa, clave);
+    if (reservado.alias) {
+      porClave.set(clave, reservado.alias);
+    } else {
+      if (reservado.noDisponible) redisCaido = true;
+      sinReserva.push([clave, normalizado]);
+    }
+  }
+
+  if (sinReserva.length === 0) return { porClave };
+
+  // 3. La cuenta, una sola vez: cubre a quien ya tiene platos y cuya reserva
+  //    venció. Si la base falla, el error sube como cualquier otro del pedido.
+  const cuentaMesa = await mesasService.cuentaPorComensal(idMesa);
+
+  for (const [clave, normalizado] of sinReserva) {
+    const enLaCuenta = aliasConPlatosEnLaCuenta(cuentaMesa, clave);
+    if (enLaCuenta) {
+      porClave.set(clave, enLaCuenta);
+      continue;
+    }
+
+    if (redisCaido) {
+      // Sin Redis no se puede afirmar que no esté registrada: se sigue con el
+      // texto normalizado, como antes de D-18b. El log no lleva el alias: es un
+      // dato de la mesa y estos avisos acaban en archivos y en consolas ajenas.
+      console.error(
+        `[pedidos] no se pudo verificar el comensal de la mesa ${idMesa}: se guarda el alias tal como llegó`
+      );
+      porClave.set(clave, normalizado);
+      continue;
+    }
+
+    return {
+      error: {
+        status: 409,
+        body: { error: MENSAJE_NO_REGISTRADO, motivo: MOTIVO_NO_REGISTRADO },
+      },
+    };
+  }
+
+  return { porClave };
 }
 
 /**
@@ -170,12 +329,23 @@ async function crear(req, res, next) {
   }
 
   try {
+    // D-18b: el alias canónico de cada persona del pedido se resuelve ANTES de
+    // abrir la transacción y una sola vez por alias distinto. Solo para el
+    // personal: el alias de un comensal sale de su JWT y no hay nada que
+    // resolver.
+    let porClave = new Map();
+    if (!comensal) {
+      const resuelto = await resolverAliasCanonicos(id_mesa, parsed.data.items);
+      if (resuelto.error) return res.status(resuelto.error.status).json(resuelto.error.body);
+      porClave = resuelto.porClave;
+    }
+
     // El alias se resuelve aquí (es una decisión sobre quién pide, propia del
     // controller) y el service recibe los ítems ya normalizados.
     const items = parsed.data.items.map((item) => ({
       id_plato: item.id_plato,
       cantidad: item.cantidad,
-      comensal: aliasDelComensal(req, item),
+      comensal: aliasDelComensal(req, item, porClave),
       notas: item.notas ?? null,
       ingredientes: (item.ingredientes ?? []).map((i) => ({
         id_ingrediente: i.id_ingrediente,
@@ -350,6 +520,8 @@ async function cuentaDeMiMesa(req, res, next) {
 }
 
 module.exports = {
+  MOTIVO_NO_REGISTRADO,
+  MENSAJE_NO_REGISTRADO,
   crear,
   listarActivos,
   obtener,
