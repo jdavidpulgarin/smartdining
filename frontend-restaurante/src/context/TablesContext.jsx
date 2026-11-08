@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useContext } from 'react'
 import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
 import { TablesContext } from './tablesContextDef'
+import { AuthContext } from './authContextDef'
 
 function normalizarMesa(backendMesa, prev = {}) {
   const id = backendMesa.id_mesa || backendMesa.numero
@@ -39,6 +40,9 @@ function normalizarMesa(backendMesa, prev = {}) {
 }
 
 export function TablesProvider({ children }) {
+  // Sesión del personal. Tolerante a no tener AuthProvider (pruebas que montan
+  // solo este contexto): en ese caso se usa el token guardado.
+  const tokenSesion = useContext(AuthContext)?.user?.token || null
   const [tables, setTables] = useState(() => {
     try {
       const stored = sessionStorage.getItem('smartdining_tables_state')
@@ -140,10 +144,12 @@ export function TablesProvider({ children }) {
     }
   }, [])
 
-  // Cargar mesas y pedidos al montar de forma asíncrona si hay sesión activa
+  // Cargar mesas y pedidos al montar y CADA VEZ que cambia la sesión. Este
+  // proveedor se monta también en /login, sin token: si solo cargara al montar,
+  // tras iniciar sesión el salón quedaría vacío hasta recargar la página.
   useEffect(() => {
     let isSubscribed = true
-    const token = getAuthToken()
+    const token = tokenSesion || getAuthToken()
     if (!token) return
 
     const fetchInitialData = async () => {
@@ -175,7 +181,7 @@ export function TablesProvider({ children }) {
     return () => {
       isSubscribed = false
     }
-  }, [])
+  }, [tokenSesion])
 
 
   // Escuchar cuando entra un pedido nuevo (order:created)
