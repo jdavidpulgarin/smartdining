@@ -90,6 +90,14 @@ const TABLA = [
     cuerpo: { nombre: 'Ana Ríos', email: 'ana@mail.com', password: 'secreta123', rol: 'mesero' },
   },
 
+  // D-16 parte B (P2): el historial de precios de un plato.
+  {
+    metodo: 'GET',
+    patron: '/api/platos/:id/historial-precios',
+    url: '/api/platos/7/historial-precios',
+    roles: ['admin'],
+  },
+
   // --- D-16 parte B: configuración del restaurante (solo admin) -------------
   { metodo: 'GET', patron: '/api/configuracion/completa', url: '/api/configuracion/completa', roles: ['admin'] },
   {

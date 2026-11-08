@@ -157,4 +157,37 @@ async function eliminar(req, res, next) {
   }
 }
 
-module.exports = { listar, obtener, crear, actualizar, cambiarDisponibilidad, eliminar };
+/**
+ * GET /api/platos/:id/historial-precios — solo admin (D-16 parte B, P2).
+ *
+ * Quién cambió el precio y cuándo. Es de admin porque dice qué decisiones de
+ * precio tomó el negocio y quién las tomó: no es información de sala.
+ *
+ * Se comprueba que el plato exista para distinguir «no hay cambios» (lista
+ * vacía) de «ese plato no existe» (404): con una lista vacía en los dos casos,
+ * un id mal escrito parecería un plato sin historia.
+ */
+async function historialPrecios(req, res, next) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'El id debe ser un entero positivo' });
+  }
+
+  const limite = req.query.limite === undefined ? undefined : Number(req.query.limite);
+  if (limite !== undefined && (!Number.isInteger(limite) || limite <= 0)) {
+    return res.status(400).json({ error: 'limite debe ser un entero positivo' });
+  }
+
+  try {
+    const plato = await platosService.obtenerPorId(id);
+    if (!plato) return res.status(404).json({ error: 'Plato no encontrado' });
+
+    const historial = await platosService.historialPrecios(id, limite === undefined ? {} : { limite });
+    return res.json({ historial });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = {
+  historialPrecios, listar, obtener, crear, actualizar, cambiarDisponibilidad, eliminar };

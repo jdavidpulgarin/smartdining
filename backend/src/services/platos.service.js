@@ -151,4 +151,44 @@ async function eliminar(id) {
   return result.rows[0] || null;
 }
 
-module.exports = { listar, obtenerPorId, crear, actualizar, cambiarDisponibilidad, eliminar };
+/**
+ * Tope de filas del historial. Es defensivo, no una regla de negocio: un plato
+ * con miles de cambios de precio no debería devolver una respuesta de megas.
+ */
+const MAX_HISTORIAL = 500;
+
+/**
+ * Cambios de precio de un plato, los más recientes primero (D-16 B, P2).
+ *
+ * Sale de `historial_precios`, que llenan los triggers. El índice
+ * `idx_historial_precios_referencia` es exactamente `(tipo, id_referencia,
+ * cambiado_en DESC)`, así que este orden no cuesta un sort.
+ *
+ * `id_usuario` puede ser NULL: un cambio hecho antes de D-16 B, por una
+ * consulta a mano, o por un usuario que después se borró (la FK es
+ * `ON DELETE SET NULL`). Se devuelve tal cual; quien lo muestre decide qué
+ * poner.
+ */
+async function historialPrecios(id, { limite = 100 } = {}) {
+  const tope = Math.min(Math.max(Number(limite) || 100, 1), MAX_HISTORIAL);
+  const result = await pool.query(
+    `SELECT id, tipo, id_referencia, precio_anterior, precio_nuevo, id_usuario, cambiado_en
+       FROM historial_precios
+      WHERE tipo = 'plato' AND id_referencia = $1
+      ORDER BY cambiado_en DESC, id DESC
+      LIMIT $2`,
+    [id, tope]
+  );
+  return result.rows;
+}
+
+module.exports = {
+  listar,
+  obtenerPorId,
+  crear,
+  actualizar,
+  cambiarDisponibilidad,
+  eliminar,
+  historialPrecios,
+  MAX_HISTORIAL,
+};

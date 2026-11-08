@@ -1107,6 +1107,7 @@ Si no se env√≠an, **el comportamiento no cambia**: el plato conserva lo que ten√
 | PUT | /platos/:id | admin | Actualiza |
 | DELETE | /platos/:id | admin | Elimina |
 | PATCH | /platos/:id/disponible | **admin, cocina** | Agota o repone (D-05, ver abajo) |
+| **GET** | **/platos/:id/historial-precios** | **admin** | **Cambios de precio, el mas reciente primero (D-16 B)** |
 
 ```json
 {
