@@ -12,9 +12,10 @@ const mesasService = require('../src/services/mesas.service');
 // DELETE da 409), asi que retirarla del servicio es la unica salida real.
 //
 // Lo que se vigila aqui:
-//   - desactivar una mesa EN USO (ocupada o con sesion de QR abierta) es 409
-//     con motivo mesa_ocupada, y se corta en el servicio ANTES de llegar al
-//     trigger: asi el mensaje dice que pasa y no se gasta un viaje a la base;
+//   - desactivar una mesa OCUPADA es 409 con motivo mesa_ocupada, y se corta
+//     en el servicio ANTES de llegar al trigger: asi el mensaje dice que pasa
+//     y no se gasta un viaje a la base. Un token en una mesa 'disponible' no
+//     bloquea: es resto de una sesion terminada, y al desactivar se borra;
 //   - si el trigger igual lanza su 23514 (por un camino que la guarda no ve),
 //     sale 409 y no el 422 generico del manejador central;
 //   - una mesa inactiva no se abre ni recibe QR: tambien 409.
@@ -64,6 +65,8 @@ function fakeMesas({ mesa = filaMesa(), errorUpdate = null } = {}) {
             capacidad: params[2] ?? mesa.capacidad,
             ubicacion: params[3] ?? mesa.ubicacion,
             activa: params[4] ?? mesa.activa,
+            // El CASE del UPDATE: solo al desactivar se borra el token.
+            token_qr: params[4] === false ? null : mesa.token_qr,
           }),
         ],
       };
@@ -195,7 +198,7 @@ test('d-16b: una mesa que no existe es 404', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// La regla: una mesa en uso no se desactiva
+// La regla: una mesa ocupada no se desactiva
 // ---------------------------------------------------------------------------
 
 test('d-16b: desactivar una mesa OCUPADA es 409 con motivo mesa_ocupada', async () => {
@@ -214,16 +217,61 @@ test('d-16b: desactivar una mesa OCUPADA es 409 con motivo mesa_ocupada', async 
   }
 });
 
-test('d-16b: tampoco con una SESION DE QR abierta, aunque este disponible', async () => {
-  // token_qr no nulo = hay comensales que ya escanearon. Si se desactiva, su
-  // sesion queda viva y sin forma de cerrarla por el camino normal.
-  const db = fakeMesas({ mesa: filaMesa({ estado: 'disponible', token_qr: 'tok-vivo' }) });
+test('d-16b: una mesa DISPONIBLE con token si se desactiva', async () => {
+  // Un token en una mesa 'disponible' es el resto de una sesion que ya
+  // termino: no hay nadie sentado, asi que no bloquea (ajuste de Jarrison).
+  const db = fakeMesas({ mesa: filaMesa({ estado: 'disponible', token_qr: 'tok-viejo' }) });
   try {
     const res = await patch({ activa: false });
 
-    assert.strictEqual(res.status, 409);
-    assert.strictEqual(res.body.motivo, 'mesa_ocupada');
-    assert.ok(!db.buscar('UPDATE mesas'));
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.activa, false);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-16b: al desactivar, el token queda en NULL', async () => {
+  // Una mesa inactiva no conserva un QR: quedaria un codigo que escanea a una
+  // mesa fuera de servicio. Se borra en la MISMA sentencia del UPDATE.
+  const db = fakeMesas({ mesa: filaMesa({ estado: 'disponible', token_qr: 'tok-viejo' }) });
+  try {
+    const mesa = await mesasService.actualizarDatos(MESA, { activa: false });
+
+    assert.strictEqual(mesa.token_qr, null);
+
+    const update = db.buscar('UPDATE mesas');
+    assert.ok(update, 'se escribio');
+    assert.ok(
+      update.sql.includes('token_qr  = CASE WHEN $5 IS FALSE THEN NULL ELSE token_qr END'),
+      'el token se borra en el mismo UPDATE, no en una segunda sentencia'
+    );
+    assert.strictEqual(update.params[4], false);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-16b: cambiar otros campos NO toca el token', async () => {
+  // Sin `activa` en el cuerpo, el parametro va en null y el CASE no dispara.
+  const db = fakeMesas({ mesa: filaMesa({ token_qr: 'tok-viejo' }) });
+  try {
+    const mesa = await mesasService.actualizarDatos(MESA, { ubicacion: 'Salon' });
+
+    assert.strictEqual(mesa.token_qr, 'tok-viejo');
+    assert.strictEqual(db.buscar('UPDATE mesas').params[4], null);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-16b: activar una mesa tampoco toca el token', async () => {
+  const db = fakeMesas({ mesa: filaMesa({ activa: false, token_qr: 'tok-viejo' }) });
+  try {
+    const mesa = await mesasService.actualizarDatos(MESA, { activa: true });
+
+    assert.strictEqual(mesa.token_qr, 'tok-viejo');
+    assert.strictEqual(db.buscar('UPDATE mesas').params[4], true);
   } finally {
     db.restaurar();
   }
