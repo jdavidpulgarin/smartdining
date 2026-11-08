@@ -23,6 +23,7 @@ import {
   estadoSelectorPago,
   infoTuParte,
   transicionPantallaPago,
+  decidirSalidaEspera,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -1091,6 +1092,94 @@ describe('utils/cuenta.js (J-08)', () => {
         cerrarWidget: true,
         errorPago: null,
       });
+    });
+  });
+
+  describe('decidirSalidaEspera (J-15)', () => {
+    it('otro paga con mi widget abierto → mantener', () => {
+      const res = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: true,
+        saldoAntes: 70000,
+        saldoAhora: 46000,
+        tipoEvento: 'pago_otro',
+      });
+      expect(res).toBe('mantener');
+    });
+
+    it('pago propio con widget abierto → confirmado_propio', () => {
+      const res = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: true,
+        saldoAntes: 70000,
+        saldoAhora: 24000,
+        tipoEvento: 'pago_propio',
+      });
+      expect(res).toBe('confirmado_propio');
+    });
+
+    it('vuelvo de redirección y el saldo bajó a mayor que 0 → salir_a_cuenta', () => {
+      const res = decidirSalidaEspera({
+        origen: 'redireccion',
+        widgetAbierto: false,
+        saldoAntes: 70000,
+        saldoAhora: 46000,
+        tipoEvento: 'salida_espera',
+      });
+      expect(res).toBe('salir_a_cuenta');
+    });
+
+    it('vuelvo de redirección y el saldo bajó a 0 → confirmado_mesa', () => {
+      const res = decidirSalidaEspera({
+        origen: 'redireccion',
+        widgetAbierto: false,
+        saldoAntes: 70000,
+        saldoAhora: 0,
+        tipoEvento: 'salida_espera',
+      });
+      expect(res).toBe('confirmado_mesa');
+    });
+
+    it('vuelvo de redirección y el saldo es igual → mantener', () => {
+      const res = decidirSalidaEspera({
+        origen: 'redireccion',
+        widgetAbierto: false,
+        saldoAntes: 70000,
+        saldoAhora: 70000,
+        tipoEvento: 'salida_espera',
+      });
+      expect(res).toBe('mantener');
+    });
+
+    it('mesa en 0 por otro con mi widget abierto → mantener', () => {
+      const porSaldoCero = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: true,
+        saldoAntes: 70000,
+        saldoAhora: 0,
+        tipoEvento: 'saldo_cero',
+      });
+      expect(porSaldoCero).toBe('mantener');
+
+      const porPagoMesa = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: true,
+        saldoAntes: 70000,
+        saldoAhora: 0,
+        tipoEvento: 'pago_mesa',
+      });
+      expect(porPagoMesa).toBe('mantener');
+    });
+
+    it('en modo simulado (origen widget) otro paga → mantener', () => {
+      const res = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: false,
+        saldoAntes: 70000,
+        saldoAhora: 24000,
+        tipoEvento: 'pago_otro',
+      });
+      expect(res).toBe('mantener');
     });
   });
 });

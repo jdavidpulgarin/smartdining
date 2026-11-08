@@ -13,12 +13,12 @@ import {
   avisoPedidoGrupal,
   TEXTO_SUGERENCIA_SIN_CELULAR,
   debeMostrarSugerenciaSinCelular,
-  debeSalirDeEspera,
   mensajePagoConfirmado,
   eventIdParaIntento,
   estadoSelectorPago,
   infoTuParte,
   transicionPantallaPago,
+  decidirSalidaEspera,
 } from '../utils/cuenta';
 import { crearDeduplicador } from '../utils/deduplicador';
 import { crearIntencion } from '../services/pagoService';
@@ -45,6 +45,16 @@ function Pago() {
     }
     return 'cuenta';
   });
+  const [origenEspera, setOrigenEspera] = useState(() => {
+    if (typeof window !== 'undefined' && window.location.search) {
+      const search = window.location.search;
+      if (search.includes('id=') || search.includes('env=')) {
+        return 'redireccion';
+      }
+    }
+    return null;
+  });
+  const [widgetAbierto, setWidgetAbierto] = useState(false);
   const [modo, setModo] = useState('propio');
   const [avisoCuenta, setAvisoCuenta] = useState(ESTADO_CUENTA_INICIAL);
   const [avisoMesero, setAvisoMesero] = useState(null);
@@ -54,6 +64,11 @@ function Pago() {
   const [ultimoPago, setUltimoPago] = useState(0);
   const [tipoConfirmado, setTipoConfirmado] = useState('mesa');
   const intentoPrevioRef = useRef(null);
+
+  const estadoEsperaRef = useRef({ pantalla, origenEspera, widgetAbierto, intencionActual });
+  useEffect(() => {
+    estadoEsperaRef.current = { pantalla, origenEspera, widgetAbierto, intencionActual };
+  }, [pantalla, origenEspera, widgetAbierto, intencionActual]);
 
   const deduplicador = useMemo(
     () => crearDeduplicador({ capacidad: 200 }),
@@ -84,6 +99,26 @@ function Pago() {
         saldoRestante,
       });
 
+      // Si estoy en espera, consultar decidirSalidaEspera
+      const { pantalla: pActual, origenEspera: oEspera, widgetAbierto: wAbierto, intencionActual: iActual } =
+        estadoEsperaRef.current;
+
+      if (pActual === 'espera') {
+        const tipoEvt = tipo === 'propio' ? 'pago_propio' : (tipo === 'mesa' ? 'pago_mesa' : 'pago_otro');
+        const decision = decidirSalidaEspera({
+          origen: oEspera,
+          widgetAbierto: wAbierto || Boolean(iActual),
+          saldoAntes: intentoPrevioRef.current?.saldo,
+          saldoAhora: saldoRestante,
+          tipoEvento: tipoEvt,
+        });
+
+        if (decision === 'mantener') {
+          // No cerrar widget ni salir de la pantalla de espera
+          return;
+        }
+      }
+
       const trans = transicionPantallaPago({
         tipo: 'pago_confirmado',
         tipoConfirmado: tipo,
@@ -91,6 +126,8 @@ function Pago() {
       });
 
       if (trans.cerrarWidget) {
+        setWidgetAbierto(false);
+        setOrigenEspera(null);
         cerrarWidget();
       }
       if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
@@ -163,43 +200,67 @@ function Pago() {
     const saldoAntesRaw = sessionStorage.getItem('smartdining_saldo_antes_pago');
     if (saldoAntesRaw != null) {
       const saldoAntes = Number(saldoAntesRaw);
-      if (debeSalirDeEspera({ saldoAntes, saldoAhora: cuenta.saldo })) {
-        const trans = transicionPantallaPago({
-          tipo: 'salida_espera',
-          saldoMesa: cuenta.saldo,
-          pantallaActual: pantalla,
-        });
+      const decision = decidirSalidaEspera({
+        origen: origenEspera,
+        widgetAbierto: widgetAbierto || Boolean(intencionActual),
+        saldoAntes,
+        saldoAhora: cuenta.saldo,
+        tipoEvento: 'salida_espera',
+      });
 
-        if (trans.cerrarWidget) {
-          cerrarWidget();
-        }
-        if (trans.limpiarAlmacenamiento) {
-          sessionStorage.removeItem('smartdining_saldo_antes_pago');
-        }
-        if (intentoPrevioRef.current) {
-          intentoPrevioRef.current.confirmado = true;
-        }
-        queueMicrotask(() => {
-          if (trans.apagarEspera) {
-            setIniciandoPago(false);
-          }
-          if (trans.pantalla === 'confirmado') {
-            setTipoConfirmado((prev) => (prev === 'propio' ? 'propio' : 'mesa'));
-          }
-          setPantalla(trans.pantalla);
-        });
+      if (decision === 'mantener') {
+        return;
       }
+
+      const trans = transicionPantallaPago({
+        tipo: 'salida_espera',
+        saldoMesa: cuenta.saldo,
+      });
+
+      if (trans.cerrarWidget) {
+        cerrarWidget();
+      }
+      if (trans.limpiarAlmacenamiento) {
+        sessionStorage.removeItem('smartdining_saldo_antes_pago');
+      }
+      if (intentoPrevioRef.current) {
+        intentoPrevioRef.current.confirmado = true;
+      }
+      queueMicrotask(() => {
+        setWidgetAbierto(false);
+        setOrigenEspera(null);
+        if (trans.apagarEspera) {
+          setIniciandoPago(false);
+        }
+        if (decision === 'confirmado_mesa' || trans.pantalla === 'confirmado') {
+          setTipoConfirmado((prev) => (prev === 'propio' ? 'propio' : 'mesa'));
+          setPantalla('confirmado');
+        } else {
+          setPantalla('cuenta');
+        }
+      });
     }
-  }, [pantalla, cuenta]);
+  }, [pantalla, cuenta, origenEspera, widgetAbierto, intencionActual]);
 
   // Si la cuenta tiene saldo 0 (y total > 0) al montar o recargar sin un evento propio, mostrar pantalla de mesa pagada
   useEffect(() => {
     if (!cuenta) return;
     if (cuenta.saldo === 0 && (cuenta.total ?? 0) > 0 && pantalla !== 'confirmado') {
+      if (pantalla === 'espera') {
+        const decision = decidirSalidaEspera({
+          origen: origenEspera,
+          widgetAbierto: widgetAbierto || Boolean(intencionActual),
+          saldoAhora: 0,
+          tipoEvento: 'saldo_cero',
+        });
+        if (decision === 'mantener') {
+          return;
+        }
+      }
+
       const trans = transicionPantallaPago({
         tipo: 'saldo_cero',
         saldoMesa: 0,
-        pantallaActual: pantalla,
       });
 
       if (trans.cerrarWidget) {
@@ -209,6 +270,8 @@ function Pago() {
         sessionStorage.removeItem('smartdining_saldo_antes_pago');
       }
       queueMicrotask(() => {
+        setWidgetAbierto(false);
+        setOrigenEspera(null);
         if (trans.apagarEspera) {
           setIniciandoPago(false);
         }
@@ -216,7 +279,7 @@ function Pago() {
         setPantalla(trans.pantalla);
       });
     }
-  }, [cuenta, pantalla]);
+  }, [cuenta, pantalla, origenEspera, widgetAbierto, intencionActual]);
 
   const saldoMesa = cuenta?.saldo ?? 0;
   const miSaldoCuenta = cuenta?.mia?.saldo ?? 0;
@@ -372,15 +435,20 @@ function Pago() {
         yoSim: comensal,
       });
       setIntencionActual(intencion);
+      setOrigenEspera('widget');
+      setWidgetAbierto(true);
       setPantalla('espera');
 
       // En modo real, abrir el widget emergente de Wompi
       if (!(import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true')) {
         abrirCheckout(intencion, (resultado) => {
+          setWidgetAbierto(false);
+          setOrigenEspera(null);
+          setIntencionActual(null);
+
           const trans = transicionPantallaPago({
             tipo: 'widget_resultado',
             resultadoWidget: resultado,
-            pantallaActual: pantalla,
           });
 
           if (trans.cerrarWidget) {
@@ -399,6 +467,9 @@ function Pago() {
             setPantalla(trans.pantalla);
           }
         }).catch((err) => {
+          setWidgetAbierto(false);
+          setOrigenEspera(null);
+          setIntencionActual(null);
           cerrarWidget();
           if (typeof window !== 'undefined' && window.sessionStorage) {
             sessionStorage.removeItem('smartdining_saldo_antes_pago');
@@ -416,6 +487,9 @@ function Pago() {
   };
 
   const handleVolverCuenta = () => {
+    setWidgetAbierto(false);
+    setOrigenEspera(null);
+    setIntencionActual(null);
     const trans = transicionPantallaPago({ tipo: 'volver_cuenta' });
     if (trans.cerrarWidget) {
       cerrarWidget();

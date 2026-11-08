@@ -623,6 +623,63 @@ export function debeSalirDeEspera({ saldoAntes, saldoAhora } = {}) {
 }
 
 /**
+ * Decide si se debe salir de la pantalla de espera o mantenerla (J-15).
+ * Con el widget abierto (o origen 'widget'), NUNCA se cierra el widget ni se
+ * sale de la espera por pagos de terceros o por bajas de saldo. Solo se sale
+ * ante un pago confirmado propio, o por cierre/rechazo del propio widget.
+ *
+ * @param {object} [opciones]
+ * @param {'widget'|'redireccion'} [opciones.origen='redireccion'] - Origen del estado de espera
+ * @param {boolean} [opciones.widgetAbierto=false] - Si el modal del widget de Wompi está abierto
+ * @param {number|null} [opciones.saldoAntes] - Saldo antes de iniciar el pago
+ * @param {number|null} [opciones.saldoAhora] - Saldo actual tras la actualización
+ * @param {'pago_propio'|'pago_mesa'|'pago_otro'|'salida_espera'|'saldo_cero'|string} [opciones.tipoEvento]
+ * @returns {'mantener' | 'confirmado_propio' | 'confirmado_mesa' | 'salir_a_cuenta'}
+ */
+export function decidirSalidaEspera({
+  origen = 'redireccion',
+  widgetAbierto = false,
+  saldoAntes = null,
+  saldoAhora = null,
+  tipoEvento = 'salida_espera',
+} = {}) {
+  const tieneWidget = Boolean(widgetAbierto || origen === 'widget');
+
+  // Si mi widget está abierto (o el origen de la espera es el widget):
+  if (tieneWidget) {
+    if (tipoEvento === 'pago_propio') {
+      return 'confirmado_propio';
+    }
+    // Cualquier otro evento (pago de otro, mesa en 0 por otro, baja de saldo) se mantiene
+    return 'mantener';
+  }
+
+  // Sin widget abierto (origen 'redireccion'):
+  if (tipoEvento === 'pago_propio') {
+    return 'confirmado_propio';
+  }
+
+  if (tipoEvento === 'pago_mesa' || tipoEvento === 'saldo_cero') {
+    return 'confirmado_mesa';
+  }
+
+  // Salida por baja de saldo (debeSalirDeEspera / salida_espera):
+  if (
+    saldoAntes != null &&
+    saldoAhora != null &&
+    typeof saldoAntes === 'number' &&
+    typeof saldoAhora === 'number' &&
+    Number.isFinite(saldoAntes) &&
+    Number.isFinite(saldoAhora) &&
+    saldoAhora < saldoAntes
+  ) {
+    return saldoAhora === 0 ? 'confirmado_mesa' : 'salir_a_cuenta';
+  }
+
+  return 'mantener';
+}
+
+/**
  * Clasifica un evento payment:confirmed o el estado de confirmación (J-15).
  * - 'propio': el comensal coincide con el usuario actual ('yo').
  * - 'mesa': cobro de toda la mesa en caja (comensal null/vacío), pago de otro
@@ -923,4 +980,5 @@ export default {
   estadoSelectorPago,
   infoTuParte,
   transicionPantallaPago,
+  decidirSalidaEspera,
 };
