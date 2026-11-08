@@ -33,6 +33,9 @@ router.get('/:id/cuenta', requireAuth, requireRole('admin', 'cajero', 'mesero'),
 router.get('/:id', ctrl.obtener);
 router.post('/', requireAuth, requireRole('admin'), ctrl.crear);
 router.patch('/:id/estado', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.actualizarEstado);
+// D-16: editar los datos del mobiliario (numero, capacidad, ubicacion). Solo
+// admin, y va DESPUES de /:id/estado para no capturar esa ruta.
+router.patch('/:id', requireAuth, requireRole('admin'), ctrl.actualizarDatos);
 router.delete('/:id', requireAuth, requireRole('admin'), ctrl.eliminar);
 
 module.exports = router;
