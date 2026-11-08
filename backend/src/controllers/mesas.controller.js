@@ -49,6 +49,29 @@ function vistaMesaPersonal(mesa) {
   return { ...vistaMesa(mesa), sesion_abierta: Boolean(mesa.token_qr) };
 }
 
+/**
+ * Cuerpo de PATCH /mesas/:id (D-16): los datos del mobiliario.
+ *
+ * Es un esquema aparte de mesaSchema y no su `.partial()`: aqui `estado` y
+ * `token_qr` NO se aceptan. El estado tiene su propia ruta (y sus propios
+ * permisos, que incluyen a mesero y cajero) y el token_qr es una credencial que
+ * solo escribe el flujo de apertura de sesion. Con `.strict()`, mandarlos es
+ * 400 y no un cambio que se ignora en silencio.
+ *
+ * `.refine`: un cuerpo vacio no es una edicion.
+ */
+const mesaDatosSchema = z
+  .object({
+    numero: z.number().int().positive(),
+    capacidad: z.number().int().positive(),
+    ubicacion: z.string().min(1).max(50),
+  })
+  .partial()
+  .strict()
+  .refine((datos) => Object.keys(datos).length > 0, {
+    message: 'Indica al menos un campo: numero, capacidad o ubicacion',
+  });
+
 const mesaSchema = z.object({
   numero: z.number().int().positive(),
   capacidad: z.number().int().positive().optional(),
@@ -393,6 +416,26 @@ async function actualizarEstado(req, res, next) {
   }
 }
 
+/**
+ * PATCH /api/mesas/:id — numero, capacidad y ubicacion (D-16). Solo admin.
+ *
+ * Los 409 (numero repetido, mesa ocupada que no se renumera) los decide el
+ * service y llegan aqui como { status, message }, que el manejador central ya
+ * sabe responder: por eso solo se hace next(err).
+ */
+async function actualizarDatos(req, res, next) {
+  const parsed = mesaDatosSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
+
+  try {
+    const mesa = await mesasService.actualizarDatos(req.params.id, parsed.data);
+    if (!mesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+    return res.json(vistaMesaPersonal(mesa));
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function eliminar(req, res, next) {
   try {
     const eliminada = await mesasService.eliminar(req.params.id);
@@ -404,6 +447,7 @@ async function eliminar(req, res, next) {
 }
 
 module.exports = {
+  actualizarDatos,
   listar,
   obtener,
   abrir,

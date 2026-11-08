@@ -86,6 +86,23 @@ const TABLA = [
     cuerpo: { nombre: 'Ana Ríos', email: 'ana@mail.com', password: 'secreta123', rol: 'mesero' },
   },
 
+  // --- D-16: administración de usuarios del personal (solo admin) -----------
+  { metodo: 'GET', patron: '/api/usuarios', url: '/api/usuarios', roles: ['admin'] },
+  {
+    metodo: 'PATCH',
+    patron: '/api/usuarios/:id',
+    url: '/api/usuarios/9',
+    roles: ['admin'],
+    cuerpo: { nombre: 'Ana Ríos' },
+  },
+  {
+    metodo: 'POST',
+    patron: '/api/usuarios/:id/clave',
+    url: '/api/usuarios/9/clave',
+    roles: ['admin'],
+    cuerpo: { password: 'clave-nueva-larga' },
+  },
+
   // --- Catálogo: categorías (escribir es solo de admin) ---------------------
   {
     metodo: 'POST',
@@ -186,6 +203,14 @@ const TABLA = [
     cuerpo: { numero: 9, capacidad: 4 },
   },
   { metodo: 'DELETE', patron: '/api/mesas/:id', url: `/api/mesas/${MESA}`, roles: ['admin'] },
+  // D-16: editar los datos del mobiliario. El estado va por /:id/estado.
+  {
+    metodo: 'PATCH',
+    patron: '/api/mesas/:id',
+    url: `/api/mesas/${MESA}`,
+    roles: ['admin'],
+    cuerpo: { capacidad: 6 },
+  },
   {
     metodo: 'PATCH',
     patron: '/api/mesas/:id/estado',
