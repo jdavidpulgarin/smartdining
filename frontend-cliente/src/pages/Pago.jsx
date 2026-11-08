@@ -15,6 +15,7 @@ import {
   debeMostrarSugerenciaSinCelular,
   debeSalirDeEspera,
   mensajePagoConfirmado,
+  eventIdParaIntento,
 } from '../utils/cuenta';
 import { crearDeduplicador } from '../utils/deduplicador';
 import { crearIntencion } from '../services/pagoService';
@@ -49,6 +50,7 @@ function Pago() {
   const [intencionActual, setIntencionActual] = useState(null);
   const [ultimoPago, setUltimoPago] = useState(0);
   const [tipoConfirmado, setTipoConfirmado] = useState('propio');
+  const intentoPrevioRef = useRef(null);
 
   const deduplicador = useMemo(
     () => crearDeduplicador({ capacidad: 200 }),
@@ -64,6 +66,9 @@ function Pago() {
       const tipo = mensajePagoConfirmado({ comensal: evento.comensal, yo: comensal });
 
       if (tipo === 'propio' || tipo === 'mesa') {
+        if (intentoPrevioRef.current) {
+          intentoPrevioRef.current.confirmado = true;
+        }
         const monto = evento.monto != null
           ? Number(evento.monto)
           : (evento.monto_centavos != null ? Number(evento.monto_centavos) / 100 : 0);
@@ -124,6 +129,9 @@ function Pago() {
       const saldoAntes = Number(saldoAntesRaw);
       if (debeSalirDeEspera({ saldoAntes, saldoAhora: cuenta.saldo })) {
         sessionStorage.removeItem('smartdining_saldo_antes_pago');
+        if (intentoPrevioRef.current) {
+          intentoPrevioRef.current.confirmado = true;
+        }
         queueMicrotask(() => {
           setPantalla('cuenta');
         });
@@ -243,7 +251,19 @@ function Pago() {
       if (typeof window !== 'undefined' && window.sessionStorage) {
         sessionStorage.setItem('smartdining_saldo_antes_pago', String(cuenta?.saldo ?? 0));
       }
-      const intencion = await crearIntencion(modo, null, {
+      const eventId = eventIdParaIntento(
+        intentoPrevioRef.current,
+        { modo, saldo: cuenta?.saldo },
+        uuidV4
+      );
+      intentoPrevioRef.current = {
+        eventId,
+        modo,
+        saldo: cuenta?.saldo,
+        confirmado: false,
+      };
+
+      const intencion = await crearIntencion(modo, eventId, {
         presenciaSim: presencia,
         yoSim: comensal,
       });

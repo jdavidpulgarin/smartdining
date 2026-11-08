@@ -648,6 +648,29 @@ export function mensajePagoConfirmado({ comensal, yo } = {}) {
   return 'otro';
 }
 
+/**
+ * Determina qué eventId usar al crear una intención de pago (J-15).
+ * Reutiliza el eventId previo si se reintenta el mismo modo con el mismo saldo
+ * y no se ha confirmado un pago previo, evitando agotar la cuota de rate limit.
+ *
+ * @param {object|null} previo - Intento previo { eventId, modo, saldo, confirmado }
+ * @param {object} [actual] - Estado actual { modo, saldo }
+ * @param {function} [generar] - Función que genera un nuevo eventId
+ * @returns {string|null}
+ */
+export function eventIdParaIntento(previo, { modo, saldo } = {}, generar) {
+  if (
+    previo &&
+    previo.eventId &&
+    !previo.confirmado &&
+    previo.modo === modo &&
+    previo.saldo === saldo
+  ) {
+    return previo.eventId;
+  }
+  return typeof generar === 'function' ? generar() : null;
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -666,4 +689,5 @@ export default {
   debeMostrarSugerenciaSinCelular,
   debeSalirDeEspera,
   mensajePagoConfirmado,
+  eventIdParaIntento,
 };

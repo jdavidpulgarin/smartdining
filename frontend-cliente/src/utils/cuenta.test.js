@@ -18,6 +18,7 @@ import {
   debeMostrarSugerenciaSinCelular,
   debeSalirDeEspera,
   mensajePagoConfirmado,
+  eventIdParaIntento,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -760,6 +761,47 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(mensajePagoConfirmado({ comensal: 'Beto', yo: 'Ana' })).toBe('otro');
       expect(mensajePagoConfirmado({ comensal: 'Carlos', yo: 'Beto' })).toBe('otro');
       expect(mensajePagoConfirmado({ comensal: 'Beto', yo: null })).toBe('otro');
+    });
+  });
+
+  describe('eventIdParaIntento (J-15)', () => {
+    const generar = () => 'nuevo-uuid-456';
+
+    it('mismo modo y saldo → reutiliza', () => {
+      const previo = { eventId: 'previo-uuid-123', modo: 'propio', saldo: 50000 };
+      expect(
+        eventIdParaIntento(previo, { modo: 'propio', saldo: 50000 }, generar)
+      ).toBe('previo-uuid-123');
+    });
+
+    it('cambia modo → nuevo', () => {
+      const previo = { eventId: 'previo-uuid-123', modo: 'propio', saldo: 50000 };
+      expect(
+        eventIdParaIntento(previo, { modo: 'igual', saldo: 50000 }, generar)
+      ).toBe('nuevo-uuid-456');
+    });
+
+    it('cambia saldo → nuevo', () => {
+      const previo = { eventId: 'previo-uuid-123', modo: 'propio', saldo: 50000 };
+      expect(
+        eventIdParaIntento(previo, { modo: 'propio', saldo: 35000 }, generar)
+      ).toBe('nuevo-uuid-456');
+    });
+
+    it('sin previo → nuevo', () => {
+      expect(
+        eventIdParaIntento(null, { modo: 'propio', saldo: 50000 }, generar)
+      ).toBe('nuevo-uuid-456');
+      expect(
+        eventIdParaIntento(undefined, { modo: 'propio', saldo: 50000 }, generar)
+      ).toBe('nuevo-uuid-456');
+    });
+
+    it('pago anterior confirmado → nuevo', () => {
+      const previo = { eventId: 'previo-uuid-123', modo: 'propio', saldo: 50000, confirmado: true };
+      expect(
+        eventIdParaIntento(previo, { modo: 'propio', saldo: 50000 }, generar)
+      ).toBe('nuevo-uuid-456');
     });
   });
 });
