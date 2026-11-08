@@ -448,6 +448,141 @@ export function textoCajaSegunEstado(avisoCuenta) {
   }
 }
 
+/**
+ * Aviso en la pantalla de pago para quien pidió para varios comensales (J-15).
+ * Decisión del equipo: Opción A, "quien pide, paga".
+ *
+ * @param {object} opciones
+ * @param {object} [opciones.cuenta] - Cuenta normalizada de la mesa
+ * @param {object} [opciones.presencia] - Estado de mesa:presencia ({ comensales, sin_celular, pagaron })
+ * @param {string} [opciones.yo] - Alias de quien paga
+ * @param {string} [opciones.modo] - Modo de pago ('propio' | 'igual' | 'total')
+ * @returns {{ tipo: 'especifico' | 'general', nombres: string[], mensaje: string } | null}
+ */
+export function avisoPedidoGrupal({ cuenta, presencia, yo, modo } = {}) {
+  // Solo aplica si modo === 'propio' y mi saldo (cuenta.mia.saldo) > 0. Si no, null.
+  if (modo !== 'propio') return null;
+  const miSaldo = Number(cuenta?.mia?.saldo ?? 0);
+  if (miSaldo <= 0) return null;
+
+  const miAlias = typeof yo === 'string' ? yo.trim() : '';
+
+  function esGeneral(alias) {
+    return String(alias || '').trim().toLowerCase() === 'general';
+  }
+
+  function esYo(alias) {
+    if (!miAlias) return false;
+    return String(alias || '').trim() === miAlias;
+  }
+
+  // Personas de la mesa: unión de presencia.comensales y presencia.sin_celular (si hay presencia)
+  // con los comensales de la cuenta que no son "General". Sin repetidos y sin incluirme a mí (compara con el alias tal cual).
+  const personasMesaSet = new Set();
+
+  if (presencia) {
+    if (Array.isArray(presencia.comensales)) {
+      for (const a of presencia.comensales) {
+        const str = typeof a === 'string' ? a.trim() : '';
+        if (str && !esGeneral(str) && !esYo(str)) {
+          personasMesaSet.add(str);
+        }
+      }
+    }
+    if (Array.isArray(presencia.sin_celular)) {
+      for (const a of presencia.sin_celular) {
+        const str = typeof a === 'string' ? a.trim() : '';
+        if (str && !esGeneral(str) && !esYo(str)) {
+          personasMesaSet.add(str);
+        }
+      }
+    }
+  }
+
+  const comensalesCuenta = Array.isArray(cuenta?.comensales) ? cuenta.comensales : [];
+  for (const c of comensalesCuenta) {
+    const nombre = typeof c === 'string' ? c.trim() : (c?.nombre || c?.comensal || '').trim();
+    if (nombre && !esGeneral(nombre) && !esYo(nombre)) {
+      personasMesaSet.add(nombre);
+    }
+  }
+
+  // Si no hay nadie más en la mesa → null.
+  if (personasMesaSet.size === 0) return null;
+
+  // "sinPedidos": personas de la presencia que NO aparecen en la cuenta o aparecen con subtotal 0 (sin "General" y sin mí).
+  const sinPedidos = [];
+  if (presencia) {
+    const personasPresenciaSet = new Set();
+    if (Array.isArray(presencia.comensales)) {
+      for (const a of presencia.comensales) {
+        const str = typeof a === 'string' ? a.trim() : '';
+        if (str && !esGeneral(str) && !esYo(str)) {
+          personasPresenciaSet.add(str);
+        }
+      }
+    }
+    if (Array.isArray(presencia.sin_celular)) {
+      for (const a of presencia.sin_celular) {
+        const str = typeof a === 'string' ? a.trim() : '';
+        if (str && !esGeneral(str) && !esYo(str)) {
+          personasPresenciaSet.add(str);
+        }
+      }
+    }
+
+    for (const p of personasPresenciaSet) {
+      const registro = comensalesCuenta.find((c) => {
+        const nombre = typeof c === 'string' ? c.trim() : (c?.nombre || c?.comensal || '').trim();
+        return nombre === p;
+      });
+
+      if (!registro || Number(registro.subtotal ?? 0) <= 0) {
+        sinPedidos.push(p);
+      }
+    }
+  }
+
+  // Si hay sinPedidos → tipo 'especifico'
+  if (sinPedidos.length > 0) {
+    let nombres;
+    let textoSujetos;
+    const esPlural = sinPedidos.length > 1;
+
+    if (sinPedidos.length === 1) {
+      nombres = [sinPedidos[0]];
+      textoSujetos = sinPedidos[0];
+    } else if (sinPedidos.length === 2) {
+      nombres = [sinPedidos[0], sinPedidos[1]];
+      textoSujetos = `${sinPedidos[0]} y ${sinPedidos[1]}`;
+    } else if (sinPedidos.length === 3) {
+      nombres = [sinPedidos[0], sinPedidos[1], sinPedidos[2]];
+      textoSujetos = `${sinPedidos[0]}, ${sinPedidos[1]} y ${sinPedidos[2]}`;
+    } else {
+      const restantes = sinPedidos.length - 3;
+      nombres = [sinPedidos[0], sinPedidos[1], sinPedidos[2], `y ${restantes} más`];
+      textoSujetos = `${sinPedidos.slice(0, 3).join(', ')} y ${restantes} más`;
+    }
+
+    const mensaje = esPlural
+      ? `${textoSujetos} no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes dividir o pagar toda la mesa.`
+      : `${textoSujetos} no tiene nada a su nombre. Si tú pediste por él o ella, puedes dividir o pagar toda la mesa.`;
+
+    return {
+      tipo: 'especifico',
+      nombres,
+      mensaje,
+    };
+  }
+
+  // Si no → tipo 'general'
+  return {
+    tipo: 'general',
+    nombres: [],
+    mensaje: '¿Pediste también para otros? Todo lo que pediste desde tu celular quedó a tu nombre.',
+  };
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -461,4 +596,5 @@ export default {
   ESTADO_CUENTA_ENVIANDO,
   estadoCuentaSolicitada,
   textoCajaSegunEstado,
+  avisoPedidoGrupal,
 };

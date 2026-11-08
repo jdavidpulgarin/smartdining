@@ -13,6 +13,7 @@ import {
   ESTADO_CUENTA_ENVIANDO,
   estadoCuentaSolicitada,
   textoCajaSegunEstado,
+  avisoPedidoGrupal,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -463,6 +464,228 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(textoCajaSegunEstado(null)).toBe(
         'Puedes acercarte a la caja a pagar o esperar al mesero en la mesa.'
       );
+    });
+  });
+
+  describe('avisoPedidoGrupal (J-15)', () => {
+    const cuentaBase = {
+      mia: { saldo: 46000, subtotal: 46000 },
+      saldo: 46000,
+      comensales: [
+        { nombre: 'Ana', subtotal: 46000, saldo: 46000 },
+      ],
+    };
+
+    it('modo distinto de propio → null', () => {
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      expect(
+        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'igual' })
+      ).toBeNull();
+      expect(
+        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'total' })
+      ).toBeNull();
+    });
+
+    it('mi saldo 0 → null', () => {
+      const cuentaSinSaldo = {
+        mia: { saldo: 0, subtotal: 20000 },
+        saldo: 30000,
+        comensales: [{ nombre: 'Ana', subtotal: 20000, saldo: 0 }],
+      };
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      expect(
+        avisoPedidoGrupal({ cuenta: cuentaSinSaldo, presencia, yo: 'Ana', modo: 'propio' })
+      ).toBeNull();
+    });
+
+    it('solo yo en la mesa → null', () => {
+      const presencia = { comensales: ['Ana'], sin_celular: [] };
+      expect(
+        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'propio' })
+      ).toBeNull();
+    });
+
+    it('alguien presente sin platos → específico con su nombre', () => {
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+
+      expect(res).not.toBeNull();
+      expect(res.tipo).toBe('especifico');
+      expect(res.nombres).toEqual(['Beto']);
+      expect(res.mensaje).toBe(
+        'Beto no tiene nada a su nombre. Si tú pediste por él o ella, puedes dividir o pagar toda la mesa.'
+      );
+    });
+
+    it('alguien con subtotal 0 → específico', () => {
+      const cuentaConBetoCero = {
+        mia: { saldo: 46000, subtotal: 46000 },
+        comensales: [
+          { nombre: 'Ana', subtotal: 46000, saldo: 46000 },
+          { nombre: 'Beto', subtotal: 0, saldo: 0 },
+        ],
+      };
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaConBetoCero,
+        presencia,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+
+      expect(res).not.toBeNull();
+      expect(res.tipo).toBe('especifico');
+      expect(res.nombres).toEqual(['Beto']);
+      expect(res.mensaje).toContain('Beto no tiene nada a su nombre');
+    });
+
+    it('varios sin pedidos (plural y "y N más")', () => {
+      // 2 sin pedidos
+      const presencia2 = { comensales: ['Ana', 'Beto', 'Carla'], sin_celular: [] };
+      const res2 = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia: presencia2,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res2.tipo).toBe('especifico');
+      expect(res2.nombres).toEqual(['Beto', 'Carla']);
+      expect(res2.mensaje).toBe(
+        'Beto y Carla no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes dividir o pagar toda la mesa.'
+      );
+
+      // 4 sin pedidos: máximo 3 y "y 1 más"
+      const presencia4 = {
+        comensales: ['Ana', 'Beto', 'Carla', 'Dani', 'Elena'],
+        sin_celular: [],
+      };
+      const res4 = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia: presencia4,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res4.tipo).toBe('especifico');
+      expect(res4.nombres).toEqual(['Beto', 'Carla', 'Dani', 'y 1 más']);
+      expect(res4.mensaje).toBe(
+        'Beto, Carla, Dani y 1 más no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes dividir o pagar toda la mesa.'
+      );
+
+      // 5 sin pedidos: "y 2 más"
+      const presencia5 = {
+        comensales: ['Ana', 'Beto', 'Carla', 'Dani', 'Elena', 'Fabi'],
+        sin_celular: [],
+      };
+      const res5 = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia: presencia5,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res5.nombres).toEqual(['Beto', 'Carla', 'Dani', 'y 2 más']);
+      expect(res5.mensaje).toContain('y 2 más no tienen nada a su nombre');
+    });
+
+    it('todos con platos → general', () => {
+      const cuentaTodos = {
+        mia: { saldo: 20000, subtotal: 20000 },
+        comensales: [
+          { nombre: 'Ana', subtotal: 20000, saldo: 20000 },
+          { nombre: 'Beto', subtotal: 26000, saldo: 26000 },
+        ],
+      };
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaTodos,
+        presencia,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res).not.toBeNull();
+      expect(res.tipo).toBe('general');
+      expect(res.nombres).toEqual([]);
+      expect(res.mensaje).toBe(
+        '¿Pediste también para otros? Todo lo que pediste desde tu celular quedó a tu nombre.'
+      );
+    });
+
+    it('"General" nunca cuenta como persona', () => {
+      const cuentaConGeneral = {
+        mia: { saldo: 20000, subtotal: 20000 },
+        comensales: [
+          { nombre: 'Ana', subtotal: 20000, saldo: 20000 },
+          { nombre: 'General', subtotal: 10000, saldo: 10000 },
+        ],
+      };
+      // Sin nadie más que Ana y General
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaConGeneral,
+        presencia: null,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res).toBeNull();
+
+      // En presencia tampoco cuenta si viniera "General"
+      const presenciaGeneral = { comensales: ['Ana', 'General'], sin_celular: [] };
+      const resPresencia = avisoPedidoGrupal({
+        cuenta: cuentaConGeneral,
+        presencia: presenciaGeneral,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(resPresencia).toBeNull();
+    });
+
+    it('sin presencia → usa solo la cuenta y da general', () => {
+      const cuentaConBeto = {
+        mia: { saldo: 20000, subtotal: 20000 },
+        comensales: [
+          { nombre: 'Ana', subtotal: 20000, saldo: 20000 },
+          { nombre: 'Beto', subtotal: 26000, saldo: 26000 },
+        ],
+      };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaConBeto,
+        presencia: null,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res).not.toBeNull();
+      expect(res.tipo).toBe('general');
+      expect(res.mensaje).toBe(
+        '¿Pediste también para otros? Todo lo que pediste desde tu celular quedó a tu nombre.'
+      );
+    });
+
+    it('yo nunca aparezco en nombres', () => {
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res.nombres).not.toContain('Ana');
+      expect(res.mensaje).not.toContain('Ana');
+    });
+
+    it('incluye personas en sin_celular de la presencia', () => {
+      const presenciaSinCel = { comensales: ['Ana'], sin_celular: ['Carlos'] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia: presenciaSinCel,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res.tipo).toBe('especifico');
+      expect(res.nombres).toEqual(['Carlos']);
+      expect(res.mensaje).toContain('Carlos no tiene nada a su nombre');
     });
   });
 });

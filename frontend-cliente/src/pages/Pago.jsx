@@ -10,6 +10,7 @@ import {
   ESTADO_CUENTA_ENVIANDO,
   estadoCuentaSolicitada,
   textoCajaSegunEstado,
+  avisoPedidoGrupal,
 } from '../utils/cuenta';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout } from '../services/wompiWidget';
@@ -145,6 +146,13 @@ function Pago() {
     igual: textoAyudaDividir,
     total: 'Pagas todo lo que le falta a la mesa (invitas tú).',
   };
+
+  const avisoGrupal = avisoPedidoGrupal({
+    cuenta,
+    presencia,
+    yo: comensal,
+    modo,
+  });
 
   const handlePedirCuenta = async () => {
     if (avisoCuenta.deshabilitado && avisoCuenta.estado !== 'inicial') return;
@@ -410,6 +418,59 @@ function Pago() {
               <p className="m-0 text-xs text-texto-suave">
                 {ayudas[modo]}
               </p>
+
+              {/* Tarjeta de aviso si pidió para varios (J-15) */}
+              {avisoGrupal && (
+                <div
+                  role="note"
+                  className="min-h-[44px] bg-[#1F1F1F] border border-[#2A2A2A] rounded-xl p-3 flex flex-col gap-2.5 text-[#FFFFFF]"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#F2B705"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="shrink-0 mt-0.5"
+                      aria-hidden="true"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <p className="m-0 text-xs text-[#FFFFFF] leading-relaxed">
+                      {avisoGrupal.mensaje}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1 border-t border-[#2A2A2A]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModo('igual');
+                        setErrorPago(null);
+                      }}
+                      className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#2A2A2A] hover:bg-[#333333] active:bg-[#3a3a3a] text-white font-etiqueta font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer border border-[#3A3A3A] flex items-center justify-center"
+                    >
+                      Dividir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModo('total');
+                        setErrorPago(null);
+                      }}
+                      className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#2A2A2A] hover:bg-[#333333] active:bg-[#3a3a3a] text-white font-etiqueta font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer border border-[#3A3A3A] flex items-center justify-center"
+                    >
+                      Toda la mesa
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Aviso de error de pago junto al botón */}
               {errorPago && (
