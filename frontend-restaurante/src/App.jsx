@@ -10,6 +10,7 @@ import {
   Reportes,
   Login,
   PantallaMesa,
+  Configuracion,
 } from './pages'
 import { useSocket, useAuth } from './hooks'
 import { AuthProvider } from './context/AuthContext'
@@ -55,6 +56,7 @@ function AppContent() {
           <Route path="/menu" element={<Menu />} />
           <Route path="/caja" element={<Caja />} />
           <Route path="/reportes" element={<Reportes />} />
+          <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/pantalla/mesa/:id" element={<PantallaMesa />} />
           <Route path="/pantalla/:id" element={<PantallaMesa />} />
           <Route path="/login" element={<Login />} />

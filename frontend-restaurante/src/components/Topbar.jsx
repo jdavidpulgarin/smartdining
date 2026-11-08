@@ -9,6 +9,8 @@ const navLinks = [
   { label: 'CAJA', path: '/caja' },
   { label: 'MENÚ', path: '/menu' },
   { label: 'REPORTES', path: '/reportes' },
+  // P-21: solo para admin (el backend también lo exige).
+  { label: 'CONFIGURACIÓN', path: '/configuracion', soloAdmin: true },
 ]
 
 export function Topbar() {
@@ -46,7 +48,7 @@ export function Topbar() {
 
       {/* 2. Menú de navegación principal en el centro */}
       <nav className="sd-topbar-nav" aria-label="Navegación principal del restaurante">
-        {navLinks.map((item) => {
+        {navLinks.filter((item) => !item.soloAdmin || user?.rol === 'admin').map((item) => {
           const isActive =
             location.pathname === item.path ||
             (item.path === '/mesas' && location.pathname === '/')
