@@ -369,6 +369,32 @@ export const inventarioApi = {
   async movimientos(id, { limite = 50 } = {}) {
     return apiFetch(`/inventario/insumos/${id}/movimientos?limite=${limite}`)
   },
+
+  /** GET /api/inventario/insumos/:id/usos → { id_insumo, nombre, platos, ingredientes } (D-17 PR 3) */
+  async usos(id) {
+    return apiFetch(`/inventario/insumos/${id}/usos`)
+  },
+
+  /** GET /api/inventario/carta → { platos, ingredientes } con disponibilidad y tiene_receta (D-17 PR 3) */
+  async carta() {
+    return apiFetch('/inventario/carta')
+  },
+
+  /**
+   * GET /api/platos/:id/receta o /api/ingredientes/:id/receta
+   * → { id_plato | id_ingrediente, receta: [{ id_insumo, nombre, unidad, cantidad, stock_actual, activo }] }
+   */
+  async receta(tipo, id) {
+    return apiFetch(`${tipo === 'plato' ? '/platos' : '/ingredientes'}/${id}/receta`)
+  },
+
+  /** PUT /api/platos/:id/receta o /api/ingredientes/:id/receta { insumos } → la receta guardada (reemplazo completo) */
+  async guardarReceta(tipo, id, insumos) {
+    return apiFetch(`${tipo === 'plato' ? '/platos' : '/ingredientes'}/${id}/receta`, {
+      method: 'PUT',
+      body: JSON.stringify({ insumos }),
+    })
+  },
 }
 
 // Datos del restaurante (D-16 parte B): una sola fila, solo leer y actualizar.

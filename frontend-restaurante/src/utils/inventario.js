@@ -244,3 +244,126 @@ export function textoDeAlerta(alerta) {
   if (alerta?.agotado || Number(alerta?.stock_actual) === 0) return `${nombre}: AGOTADO`
   return `${nombre}: bajo el mínimo (${formatoCantidad(alerta?.stock_actual, alerta?.unidad)} de ${formatoCantidad(alerta?.stock_minimo, alerta?.unidad)})`
 }
+
+/* -------------------------------------------------------------------------- *
+ * Pestaña Recetas (GET /inventario/carta, D-17 PR 3) y recetas (D-17 PR 2)
+ * -------------------------------------------------------------------------- */
+
+/** Máximo de insumos por receta (MAX_ENTRADAS_RECETA del backend). */
+export const MAX_INSUMOS_RECETA = 50
+
+/** Cómo está en la carta: disponible, apagado a mano por la cocina o sin stock. */
+export function disponibilidadEnCarta(item) {
+  if (item.disponible_efectivo) return { texto: 'DISPONIBLE', clase: 'sd-badge-light' }
+  if (item.motivo === 'manual') return { texto: 'APAGADO A MANO', clase: 'sd-badge-dark' }
+  return { texto: 'SIN STOCK', clase: 'sd-badge-red' }
+}
+
+/**
+ * Estado de la receta. Un plato personalizable (Bowl, Wrap, Arepa Rellena) sin
+ * receta propia NO es un olvido: consume por sus opciones, cada una con la suya.
+ */
+export function estadoDeReceta(item, tipo) {
+  if (item.tiene_receta) return { texto: 'CON RECETA', clase: 'sd-badge-light', falta: false }
+  if (tipo === 'plato' && item.personalizable) return { texto: 'CONSUME POR SUS OPCIONES', clase: 'sd-badge-dark', falta: false }
+  return { texto: 'SIN RECETA', clase: 'sd-badge-gold', falta: true }
+}
+
+/** Lo que falta configurar: platos (no personalizables) y opciones sin receta. */
+export function resumenCarta(carta) {
+  return {
+    platos: (carta?.platos || []).filter((p) => estadoDeReceta(p, 'plato').falta).length,
+    opciones: (carta?.ingredientes || []).filter((i) => estadoDeReceta(i, 'ingrediente').falta).length,
+  }
+}
+
+/**
+ * Filtro de la carta: `soloFaltantes` deja lo que no tiene receta (sin los
+ * personalizables, que están bien así) y `busqueda` filtra por nombre del plato,
+ * de la opción, de la categoría o del paso, sin distinguir mayúsculas ni tildes.
+ */
+export function filtrarCarta(carta, { soloFaltantes = false, busqueda = '' } = {}) {
+  const q = sinTildes(busqueda).trim()
+  const coincide = (...textos) => !q || textos.some((t) => sinTildes(t).includes(q))
+  return {
+    platos: (carta?.platos || []).filter(
+      (p) => (!soloFaltantes || estadoDeReceta(p, 'plato').falta) && coincide(p.nombre, p.categoria)
+    ),
+    ingredientes: (carta?.ingredientes || []).filter(
+      (i) => (!soloFaltantes || estadoDeReceta(i, 'ingrediente').falta) && coincide(i.nombre, i.plato, i.paso)
+    ),
+  }
+}
+
+/** Platos agrupados por categoría, respetando el orden que manda el servidor. */
+export function agruparPorCategoria(platos) {
+  const grupos = []
+  for (const plato of platos || []) {
+    const nombre = plato.categoria || 'Sin categoría'
+    let grupo = grupos.find((g) => g.categoria === nombre)
+    if (!grupo) grupos.push((grupo = { categoria: nombre, platos: [] }))
+    grupo.platos.push(plato)
+  }
+  return grupos
+}
+
+/**
+ * Opciones agrupadas por plato y por paso (por `id_paso`: el nombre del paso se
+ * repite entre platos), con los pasos en su `paso_orden`.
+ */
+export function agruparOpciones(ingredientes) {
+  const platos = []
+  for (const op of ingredientes || []) {
+    let plato = platos.find((p) => p.id_plato === op.id_plato)
+    if (!plato) platos.push((plato = { id_plato: op.id_plato, plato: op.plato, pasos: [] }))
+    let paso = plato.pasos.find((p) => p.id_paso === op.id_paso)
+    if (!paso) plato.pasos.push((paso = { id_paso: op.id_paso, paso: op.paso, paso_orden: op.paso_orden, opciones: [] }))
+    paso.opciones.push(op)
+  }
+  for (const plato of platos) plato.pasos.sort((a, b) => Number(a.paso_orden) - Number(b.paso_orden))
+  return platos
+}
+
+/** Receta del GET → filas del editor (texto, como los inputs). */
+export function filasDeReceta(receta) {
+  return (receta || []).map((r) => ({ id_insumo: String(r.id_insumo), cantidad: String(Number(r.cantidad)) }))
+}
+
+/**
+ * Filas del editor → { datos: { insumos } } para el PUT, o { error }.
+ * El PUT REEMPLAZA la receta completa; una lista vacía la quita (el plato deja
+ * de controlar inventario). Cada fila: un insumo elegido y una cantidad > 0 con
+ * hasta 2 decimales; sin insumos repetidos (la tabla tiene PK plato+insumo).
+ */
+export function validarReceta(filas, insumos = []) {
+  const usadas = new Set()
+  const salida = []
+  for (const [i, fila] of (filas || []).entries()) {
+    const n = i + 1
+    if (!fila.id_insumo) return { error: `Fila ${n}: elige el insumo.` }
+    const id = Number(fila.id_insumo)
+    const nombre = insumos.find((s) => s.id_insumo === id)?.nombre || `el insumo ${id}`
+    if (usadas.has(id)) return { error: `${nombre} está dos veces: deja una sola fila por insumo.` }
+    const cantidad = leerNumero(fila.cantidad)
+    if (cantidad === null || cantidad <= 0) return { error: `Fila ${n} (${nombre}): la cantidad es un número mayor que 0, con hasta 2 decimales.` }
+    usadas.add(id)
+    salida.push({ id_insumo: id, cantidad })
+  }
+  if (salida.length > MAX_INSUMOS_RECETA) return { error: `Una receta admite hasta ${MAX_INSUMOS_RECETA} insumos.` }
+  return { datos: { insumos: salida } }
+}
+
+/**
+ * Texto de la confirmación al desactivar un insumo, con lo que se apagaría
+ * (GET /inventario/insumos/:id/usos). Sin `usos` (no cargó), el aviso genérico.
+ */
+export function textoDeDesactivar(nombre, usos) {
+  const base = `¿Desactivar "${nombre}"?`
+  if (!usos) return `${base} Los platos y opciones que lo usan se marcarán como no disponibles hasta que lo vuelvas a activar.`
+  const lista = [
+    ...(usos.platos || []).map((p) => p.nombre),
+    ...(usos.ingredientes || []).map((o) => `${o.plato} · ${o.paso} · ${o.nombre}`),
+  ]
+  if (lista.length === 0) return `${base} No lo usa ninguna receta: la carta no cambia.`
+  return `${base} Se marcarán como no disponibles hasta que lo vuelvas a activar:\n- ${lista.join('\n- ')}`
+}

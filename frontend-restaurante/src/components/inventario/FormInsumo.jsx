@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { inventarioApi, mensajeNoGuardado } from '../../services/api'
-import { UNIDADES, NOMBRE_MAX, formDeInsumo, validarInsumo, cambiosDeInsumo } from '../../utils/inventario'
+import { UNIDADES, NOMBRE_MAX, formDeInsumo, validarInsumo, cambiosDeInsumo, textoDeDesactivar } from '../../utils/inventario'
 import { Ventana } from './Ventana'
 
 /**
@@ -12,6 +12,7 @@ import { Ventana } from './Ventana'
  *   no se edita aquí: para eso están los movimientos.
  * - Desactivar pide confirmación: para la base, un insumo inactivo cuenta como
  *   "no hay", así que los platos y opciones que lo usan quedan no disponibles.
+ *   La confirmación los nombra (GET /inventario/insumos/:id/usos).
  */
 export function FormInsumo({ insumo = null, onGuardado, onClose }) {
   const nuevo = !insumo
@@ -33,9 +34,17 @@ export function FormInsumo({ insumo = null, onGuardado, onClose }) {
     } else {
       const cambios = cambiosDeInsumo(insumo, datos)
       if (Object.keys(cambios).length === 0) return onClose()
-      if (cambios.activo === false && !window.confirm(
-        `¿Desactivar "${insumo.nombre}"? Los platos y opciones que lo usan se marcarán como no disponibles hasta que lo vuelvas a activar.`
-      )) return
+      if (cambios.activo === false) {
+        // Qué se apaga (GET /inventario/insumos/:id/usos). Si no responde, se
+        // confirma con el aviso genérico: no saber la lista no impide desactivar.
+        let usos = null
+        try {
+          usos = await inventarioApi.usos(insumo.id_insumo)
+        } catch {
+          usos = null
+        }
+        if (!window.confirm(textoDeDesactivar(insumo.nombre, usos))) return
+      }
       llamada = () => inventarioApi.actualizar(insumo.id_insumo, cambios)
     }
 

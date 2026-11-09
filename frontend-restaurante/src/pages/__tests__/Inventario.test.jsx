@@ -46,12 +46,31 @@ const insumosBase = () => [
 const personal = [{ id_usuario: 1, nombre: 'Ana Ríos', email: 'ana@mail.com', rol: 'admin', activo: true }]
 
 /** Backend simulado. `escrituras(url, metodo, cuerpo)` decide cada POST/PUT. */
-function backend({ insumos = insumosBase(), movimientos = [], escrituras = () => json({}) } = {}) {
+// Forma real de GET /inventario/carta (api-spec, D-17 PR 3), ya en el orden del
+// servidor: platos por categoría y nombre; opciones por plato, paso y nombre.
+const cartaBase = () => ({
+  platos: [
+    { id: 1003, nombre: 'Arepa Rellena', categoria: 'Arma tu plato', personalizable: true, disponible: true, stock_suficiente: true, disponible_efectivo: true, motivo: null, tiene_receta: false },
+    { id: 7, nombre: 'Hamburguesa Smart Angus', categoria: 'Hamburguesas & Fuertes', personalizable: false, disponible: true, stock_suficiente: false, disponible_efectivo: false, motivo: 'stock', tiene_receta: true },
+    { id: 8, nombre: 'Costillas BBQ St. Louis', categoria: 'Hamburguesas & Fuertes', personalizable: false, disponible: true, stock_suficiente: true, disponible_efectivo: true, motivo: null, tiene_receta: false },
+  ],
+  ingredientes: [
+    { id: 31, nombre: 'Arepa de Chócolo', id_plato: 1003, plato: 'Arepa Rellena', id_paso: 301, paso: 'Tipo de Arepa', paso_orden: 1, disponible: true, stock_suficiente: true, disponible_efectivo: true, motivo: null, tiene_receta: true },
+    { id: 32, nombre: 'Panceta Crujiente', id_plato: 1003, plato: 'Arepa Rellena', id_paso: 302, paso: 'Elige tu Relleno', paso_orden: 2, disponible: false, stock_suficiente: true, disponible_efectivo: false, motivo: 'manual', tiene_receta: false },
+  ],
+})
+
+/** Backend simulado. `escrituras(url, metodo, cuerpo)` decide cada POST/PUT. */
+function backend({ insumos = insumosBase(), movimientos = [], carta = cartaBase(), recetas = {}, usos = null, escrituras = () => json({}) } = {}) {
   const estado = { insumos }
   const spy = vi.spyOn(global, 'fetch').mockImplementation(async (url, config = {}) => {
     const metodo = config.method || 'GET'
     if (metodo !== 'GET') return escrituras(url, metodo, config.body ? JSON.parse(config.body) : undefined, estado)
     if (/\/inventario\/insumos\/\d+\/movimientos/.test(url)) return json({ movimientos })
+    if (/\/inventario\/insumos\/\d+\/usos/.test(url)) return usos ? json(usos) : json({ error: 'Error interno del servidor' }, 500)
+    if (url.includes('/inventario/carta')) return json(carta)
+    const receta = url.match(/\/(platos|ingredientes)\/(\d+)\/receta$/)
+    if (receta) return json({ [receta[1] === 'platos' ? 'id_plato' : 'id_ingrediente']: Number(receta[2]), receta: recetas[`${receta[1]}-${receta[2]}`] || [] })
     if (url.includes('/inventario/insumos')) return json({ insumos: estado.insumos })
     if (url.includes('/usuarios')) return json({ usuarios: personal })
     return json({})
@@ -146,10 +165,18 @@ describe('P-22 · Inventario (pestaña Insumos)', () => {
     expect(escriturasDe(spy)[0]).toMatchObject({ url: expect.stringMatching(/\/inventario\/insumos$/), metodo: 'POST' })
   })
 
-  it('editar: solo lo que cambió, nunca el stock; desactivar pide confirmación', async () => {
+  it('editar: solo lo que cambió, nunca el stock; desactivar nombra lo que se apaga (/usos)', async () => {
     sesionComo('admin')
     const confirmar = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const { spy } = backend({ escrituras: (url, metodo, cuerpo) => json({ insumo: { ...insumo(1, 'Queso cheddar', 'g', 3000, 500), ...cuerpo } }) })
+    const { spy } = backend({
+      usos: {
+        id_insumo: 1,
+        nombre: 'Queso cheddar',
+        platos: [{ id: 7, nombre: 'Hamburguesa Smart Angus', cantidad: 40 }, { id: 2, nombre: 'Nachos Supremos', cantidad: 60 }],
+        ingredientes: [{ id: 40, nombre: 'Queso Rallado', id_plato: 1001, plato: 'Bowl Personalizado', id_paso: 103, paso: 'Añade Toppings', paso_orden: 3, cantidad: 40 }],
+      },
+      escrituras: (url, metodo, cuerpo) => json({ insumo: { ...insumo(1, 'Queso cheddar', 'g', 3000, 500), ...cuerpo } }),
+    })
     montar()
     fireEvent.click(await screen.findByRole('button', { name: 'Editar Queso cheddar' }))
     const form = screen.getByRole('form', { name: 'Editar insumo' })
@@ -158,10 +185,28 @@ describe('P-22 · Inventario (pestaña Insumos)', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'GUARDAR' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('Queso cheddar quedó actualizado.')
-    expect(confirmar).toHaveBeenCalledWith(expect.stringMatching(/se marcarán como no disponibles/))
+    expect(confirmar).toHaveBeenCalledWith(
+      '¿Desactivar "Queso cheddar"? Se marcarán como no disponibles hasta que lo vuelvas a activar:\n' +
+        '- Hamburguesa Smart Angus\n- Nachos Supremos\n- Bowl Personalizado · Añade Toppings · Queso Rallado'
+    )
     expect(escriturasDe(spy)).toEqual([
       { url: expect.stringMatching(/\/inventario\/insumos\/1$/), metodo: 'PUT', cuerpo: { stock_minimo: 800, activo: false } },
     ])
+  })
+
+  it('desactivar: si /usos no responde, confirma con el aviso genérico y no se queda trabado', async () => {
+    sesionComo('admin')
+    const confirmar = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { spy } = backend() // /usos responde 500
+    montar()
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar Queso cheddar' }))
+    const form = screen.getByRole('form', { name: 'Editar insumo' })
+    fireEvent.click(within(form).getByLabelText(/Activo/))
+    fireEvent.click(within(form).getByRole('button', { name: 'GUARDAR' }))
+
+    await waitFor(() => expect(confirmar).toHaveBeenCalledWith(expect.stringMatching(/Los platos y opciones que lo usan se marcarán como no disponibles/)))
+    // Dijo que no: no se guarda nada.
+    expect(escriturasDe(spy)).toEqual([])
   })
 
   it('entrada: manda tipo y cantidad, muestra en cuánto quedó y recarga la lista', async () => {
@@ -286,5 +331,136 @@ describe('P-22 · Inventario (pestaña Insumos)', () => {
     expect(screen.queryByTestId(/^insumo-/)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /REINTENTAR/ }))
     expect(await screen.findByTestId('insumo-1')).toBeInTheDocument()
+  })
+})
+
+describe('P-22 · Inventario (pestaña Recetas)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.clear()
+  })
+
+  async function abrirRecetas() {
+    fireEvent.click(await screen.findByRole('tab', { name: 'RECETAS' }))
+    return screen.findByTestId('resumen-recetas')
+  }
+
+  it('muestra platos por categoría y opciones por plato y paso, con su estado en la carta y su receta', async () => {
+    sesionComo('admin')
+    backend()
+    montar()
+    const resumen = await abrirRecetas()
+
+    // Sin receta: Costillas (la Arepa Rellena es personalizable, no cuenta) y la Panceta.
+    expect(resumen).toHaveTextContent('Sin receta: 1 plato · 1 opción')
+    expect(within(screen.getByTestId('plato-1003')).getByText('CONSUME POR SUS OPCIONES')).toBeInTheDocument()
+    expect(within(screen.getByTestId('plato-7')).getByText('SIN STOCK')).toBeInTheDocument()
+    expect(within(screen.getByTestId('plato-7')).getByText('CON RECETA')).toBeInTheDocument()
+    expect(within(screen.getByTestId('plato-8')).getByText('SIN RECETA')).toBeInTheDocument()
+    expect(within(screen.getByTestId('ingrediente-32')).getByText('APAGADO A MANO')).toBeInTheDocument()
+    expect(screen.getByTestId('ingrediente-31')).toHaveTextContent('1. Tipo de Arepa · Arepa de Chócolo')
+
+    // "Solo lo que falta": quedan Costillas y la Panceta; la Arepa Rellena no (está bien así).
+    fireEvent.click(screen.getByRole('button', { name: 'Solo lo que falta' }))
+    expect(screen.getAllByTestId(/^(plato|ingrediente)-/).map((f) => f.dataset.testid)).toEqual(['plato-8', 'ingrediente-32'])
+
+    // Búsqueda sin tildes.
+    fireEvent.click(screen.getByRole('button', { name: 'Solo lo que falta' }))
+    fireEvent.change(screen.getByLabelText('Buscar en la carta'), { target: { value: 'chocolo' } })
+    expect(screen.getAllByTestId(/^(plato|ingrediente)-/).map((f) => f.dataset.testid)).toEqual(['ingrediente-31'])
+  })
+
+  it('editar la receta de un plato: carga la actual, agrega un insumo y manda la receta COMPLETA', async () => {
+    sesionComo('admin')
+    const { spy } = backend({
+      recetas: { 'platos-7': [{ id_insumo: 3, nombre: 'Carne Angus 200 g', unidad: 'porcion', cantidad: 1, stock_actual: 0, activo: true }] },
+      escrituras: (url, metodo, cuerpo) => json({
+        id_plato: 7,
+        receta: cuerpo.insumos.map((r) => ({
+          ...r,
+          nombre: r.id_insumo === 3 ? 'Carne Angus 200 g' : 'Queso cheddar',
+          unidad: r.id_insumo === 3 ? 'porcion' : 'g',
+          stock_actual: r.id_insumo === 3 ? 0 : 3000,
+          activo: true,
+        })),
+      }),
+    })
+    montar()
+    await abrirRecetas()
+    fireEvent.click(screen.getByRole('button', { name: 'Receta de Hamburguesa Smart Angus' }))
+    const form = await screen.findByRole('form', { name: 'Editar receta' })
+    expect(within(form).getByLabelText('Insumo de la fila 1')).toHaveValue('3')
+    expect(within(form).getByLabelText('Cantidad de la fila 1')).toHaveValue('1')
+
+    fireEvent.click(within(form).getByRole('button', { name: /AGREGAR INSUMO/ }))
+    fireEvent.change(within(form).getByLabelText('Insumo de la fila 2'), { target: { value: '1' } })
+    fireEvent.change(within(form).getByLabelText('Cantidad de la fila 2'), { target: { value: '40' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'GUARDAR RECETA' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Receta de Hamburguesa Smart Angus guardada (2 insumos). Ojo: con el stock actual queda SIN STOCK por Carne Angus 200 g.'
+    )
+    expect(escriturasDe(spy)).toEqual([
+      { url: expect.stringMatching(/\/platos\/7\/receta$/), metodo: 'PUT', cuerpo: { insumos: [{ id_insumo: 3, cantidad: 1 }, { id_insumo: 1, cantidad: 40 }] } },
+    ])
+  })
+
+  it('valida antes de mandar: cantidad inválida o insumo repetido no llegan al servidor', async () => {
+    sesionComo('admin')
+    const { spy } = backend()
+    montar()
+    await abrirRecetas()
+    fireEvent.click(screen.getByRole('button', { name: 'Receta de Arepa Rellena · Elige tu Relleno · Panceta Crujiente' }))
+    const form = await screen.findByRole('form', { name: 'Editar receta' })
+    expect(within(form).getByText(/porción NORMAL/)).toBeInTheDocument()
+
+    fireEvent.click(within(form).getByRole('button', { name: /AGREGAR INSUMO/ }))
+    fireEvent.change(within(form).getByLabelText('Insumo de la fila 1'), { target: { value: '1' } })
+    fireEvent.change(within(form).getByLabelText('Cantidad de la fila 1'), { target: { value: '0' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'GUARDAR RECETA' }))
+    expect(await within(form).findByRole('alert')).toHaveTextContent('Fila 1 (Queso cheddar): la cantidad es un número mayor que 0')
+
+    fireEvent.change(within(form).getByLabelText('Cantidad de la fila 1'), { target: { value: '30' } })
+    fireEvent.click(within(form).getByRole('button', { name: /AGREGAR INSUMO/ }))
+    fireEvent.change(within(form).getByLabelText('Insumo de la fila 2'), { target: { value: '1' } })
+    fireEvent.change(within(form).getByLabelText('Cantidad de la fila 2'), { target: { value: '10' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'GUARDAR RECETA' }))
+    expect(await within(form).findByText('Queso cheddar está dos veces: deja una sola fila por insumo.')).toBeInTheDocument()
+    expect(escriturasDe(spy)).toEqual([])
+  })
+
+  it('quitar la receta pide confirmación y manda la lista vacía', async () => {
+    sesionComo('admin')
+    const confirmar = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { spy } = backend({
+      recetas: { 'ingredientes-31': [{ id_insumo: 2, nombre: 'Arepa de chócolo', unidad: 'unidad', cantidad: 1, stock_actual: 2, activo: true }] },
+      escrituras: () => json({ id_ingrediente: 31, receta: [] }),
+    })
+    montar()
+    await abrirRecetas()
+    fireEvent.click(screen.getByRole('button', { name: 'Receta de Arepa Rellena · Tipo de Arepa · Arepa de Chócolo' }))
+    const form = await screen.findByRole('form', { name: 'Editar receta' })
+    fireEvent.click(within(form).getByRole('button', { name: 'Quitar la fila 1' }))
+    fireEvent.click(within(form).getByRole('button', { name: 'GUARDAR RECETA' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Arepa de Chócolo quedó sin receta: ya no controla inventario.')
+    expect(confirmar).toHaveBeenCalledWith(expect.stringMatching(/Dejará de controlar inventario/))
+    expect(escriturasDe(spy)).toEqual([
+      { url: expect.stringMatching(/\/ingredientes\/31\/receta$/), metodo: 'PUT', cuerpo: { insumos: [] } },
+    ])
+  })
+
+  it('un error del servidor al guardar se muestra con su texto (409 insumo_inexistente)', async () => {
+    sesionComo('admin')
+    backend({ escrituras: () => json({ error: 'Alguno de los insumos de la receta no existe', motivo: 'insumo_inexistente' }, 409) })
+    montar()
+    await abrirRecetas()
+    fireEvent.click(screen.getByRole('button', { name: 'Receta de Costillas BBQ St. Louis' }))
+    const form = await screen.findByRole('form', { name: 'Editar receta' })
+    fireEvent.click(within(form).getByRole('button', { name: /AGREGAR INSUMO/ }))
+    fireEvent.change(within(form).getByLabelText('Insumo de la fila 1'), { target: { value: '1' } })
+    fireEvent.change(within(form).getByLabelText('Cantidad de la fila 1'), { target: { value: '200' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'GUARDAR RECETA' }))
+    expect(await within(form).findByRole('alert')).toHaveTextContent('No se guardó: Alguno de los insumos de la receta no existe')
   })
 })
