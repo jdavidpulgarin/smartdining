@@ -173,7 +173,7 @@ async function main() {
     api('/platos', {
       method: 'POST',
       // tiempo_preparacion_estimado va explícito: sin él, POST /platos responde
-      // 500 (inserta NULL en una columna NOT NULL en vez de dejar el DEFAULT).
+      // 500 (el esquema lo deja opcional, la columna es NOT NULL sin DEFAULT: #132).
       body: {
         id_categoria: idCategoria,
         nombre: `${PREFIJO} Hamburguesa`,

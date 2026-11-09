@@ -23,7 +23,8 @@ completa está en [`REPORTE-PRUEBAS.md`](REPORTE-PRUEBAS.md).
 | Base de datos | `db.test.js` | PostgreSQL |
 | Integración API + BD | `integracion/api.test.js` | PostgreSQL y backend (`:4000`) |
 | Tiempo real | `tiempo-real/socket.test.js` | PostgreSQL, backend y socket-server (`:4001`) |
-| Concurrencia por la API | `integracion/concurrencia-pedidos.js` | PostgreSQL, Redis, backend y socket-server (ver abajo) |
+| Concurrencia por la API | `integracion/concurrencia-pedidos.js` | PostgreSQL, Redis, backend y socket-server (ver §3) |
+| Guion E2E de la demo (G-08) | `frontend-restaurante/e2e/demo.spec.js` | Todo lo anterior, el panel, el cliente y el KDS (ver §4) |
 | E2E del panel (Playwright) | `frontend-restaurante/e2e/panel.spec.js` | Todo lo anterior y el cliente (`:5174`) |
 
 ### Paso a paso
@@ -127,6 +128,62 @@ arranca). Sale con código 0 si todo pasa.
 
 Con `PEDIDOS=100 PORCIONES=7` también pasa (7 creados, 93 `sin_stock`).
 
-> `POST /api/platos` sin `tiempo_preparacion_estimado` responde **500** (inserta `NULL` en
-> una columna `NOT NULL` en vez de dejar el `DEFAULT`). El script lo manda explícito; el
-> arreglo es del backend.
+> `POST /api/platos` sin `tiempo_preparacion_estimado` responde **500**: el esquema lo deja
+> opcional y el backend inserta `NULL`, pero la columna es `NOT NULL` **sin `DEFAULT`**. El
+> script lo manda explícito; el arreglo es del backend (issue #132).
+
+## 4. Guion E2E de la demo (G-08): agotar la Hamburguesa y reponerla
+
+`frontend-restaurante/e2e/demo.spec.js` recorre la demo en navegadores reales: el panel, el
+KDS y dos "celulares" con la PWA. Sin dobles: backend, socket-server, PostgreSQL 16 y Redis
+de verdad. Los 11 pasos están en la cabecera del archivo; en resumen:
+
+1. el admin entra al panel y abre la mesa 1 desde Mesas (URL del QR tomada del modal);
+2. «Ana» entra con ese QR; el KDS abre con la sesión de cocina;
+3. pedidos 1.º a 3.º de la Hamburguesa por la API (con la sesión de Ana), y el **4.º desde la
+   interfaz** del cliente; el panel (Pedidos) y el KDS lo ven sin recargar;
+4. sin recargar, la Hamburguesa sale **agotada** en el panel (Menú), en el KDS (agotados) y en
+   el celular de Ana; «Beto», que entra después, no la puede pedir (409 `sin_stock`);
+5. en Inventario el admin registra una **entrada** de 10 de Carne Angus; sin recargar, la
+   Hamburguesa **vuelve** en las tres pantallas y Ana la pide otra vez (201);
+6. ninguna pantalla se recargó (marca en `window`), y la limpieza deja **todo como estaba**: se
+   comprueba stock 4, plato disponible, mesa libre, 0 pedidos abiertos y el libro cuadrado.
+
+**Datos:** `seed.sql` + `seed_inventario_demo.sql` (G-07: la Carne Angus con 4 porciones). Si
+la carne no está en 4, la prueba la deja en 4 con un `ajuste` por la API. Los pedidos de la
+prueba se **cancelan** (la base devuelve las porciones) y quedan en el historial como
+cancelados, igual que en un restaurante; no se borra nada a mano.
+
+```bash
+# 1. PostgreSQL 16 + Redis aparte, con las claves de §3 pasos 1 y 2, y luego:
+docker compose exec -T postgres psql -q -U postgres -d smartdining < database/seed_inventario_demo.sql
+
+# 2. Cada uno en su terminal (además de backend y socket-server como en §3 paso 3)
+(cd frontend-restaurante && VITE_API_URL=http://localhost:4100/api VITE_SOCKET_URL=http://localhost:4101 npx vite --port 5173)
+(cd frontend-cliente && VITE_API_URL=http://localhost:4100/api VITE_SOCKET_URL=http://localhost:4101 VITE_MODO_SIMULADO=false npx vite --port 5174)
+(cd frontend-kds && VITE_API_URL=http://localhost:4100/api VITE_SOCKET_URL=http://localhost:4101 npx vite --port 5175)
+
+# 3. La prueba (con el Chrome del sistema, o el Chromium de `npx playwright install chromium`)
+cd frontend-restaurante
+API_URL=http://localhost:4100/api PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="<ruta a chrome>" \
+  npx playwright test e2e/demo.spec.js
+```
+
+Variables: `API_URL`, `CLIENTE_URL` (5174), `KDS_URL` (5175), `DEMO_PASSWORD`, `MESA_DEMO` (1;
+si esa mesa tiene pedidos abiertos, la prueba no arranca). Usa 3 inicios de sesión por corrida
+(el límite es 5 por minuto). Tarda unos 25 s.
+
+> **Problema conocido (backend, #135, bloqueante para la demo):** `GET /menu` se guarda 60 s
+> en Redis (`cache:menu`) y **agotar o reponer por inventario no lo invalida**. En ese minuto,
+> quien abre el menú ve la carta vieja:
+>
+> - Beto ve la Hamburguesa agotada como disponible. Si la pide, recibe 409 y la PWA se lo dice;
+>   la prueba lo comprueba y lo anota.
+> - Tras reponer, un menú recién abierto puede seguir ocultándola. Si una corrida (o un ensayo)
+>   leyó `/menu` con la Hamburguesa agotada, la siguiente que empiece antes de 60 s la encuentra
+>   escondida. Por eso la prueba **espera al empezar** (hasta 75 s, con el `beforeAll` en 135 s:
+>   los hooks no heredan el tope del `describe` y se quedaban en 30 s). Si tuvo que esperar, lo
+>   anota con los segundos (`AVISO #135: …`); pasado el límite, falla diciendo que ya no es solo
+>   la caché. Para ver cada intento: `E2E_TRAZA=1`.
+>
+> Cuando se cierre #135, la espera debería quedar siempre en 0 s.
