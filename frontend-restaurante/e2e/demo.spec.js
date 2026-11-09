@@ -18,6 +18,8 @@
 //       Angus vuelve a su stock inicial. Se comprueba que todo quedó como estaba.
 //
 // "Sin recargar" se comprueba con una marca en `window` que tiene que seguir ahí al final.
+// La carta pública (GET /menu) se comprueba al empezar, al agotarse y al reponer, con
+// 5 s de margen: si vuelve #135 (cache:menu sin invalidar), la prueba falla.
 //
 // Necesita los datos de la demo: seed.sql + seed_inventario_demo.sql (G-07), con la
 // Carne Angus en 4 porciones (si no está en 4, la prueba la deja en 4 con un ajuste
@@ -54,34 +56,30 @@ async function api(token, ruta, { method = 'GET', body } = {}) {
   return { status: res.status, data: await res.json().catch(() => null) }
 }
 
-const LIMITE_ESPERA_MENU_MS = 75_000 // TTL de cache:menu (60 s) + margen
-
 /**
- * Espera a que la carta pública (GET /menu) muestre la Hamburguesa. Hace falta
- * por #135: cache:menu vive 60 s en Redis y el inventario no lo invalida, así
- * que si la Hamburguesa estuvo agotada hace menos de un minuto (una corrida
- * anterior, un ensayo) la carta todavía la esconde. No se esconde el bug: si
- * hubo que esperar se anota en el reporte con el tiempo, y pasado el límite la
- * prueba falla diciendo por qué.
+ * Margen para que GET /menu refleje un cambio de stock. Desde #138 (issue #135)
+ * el backend invalida cache:menu con cada aviso de disponibilidad del canal
+ * `inventario`, así que llega en milisegundos; el margen solo cubre el viaje del
+ * NOTIFY. Si vuelve #135, la carta tarda hasta 60 s (el TTL) y la prueba FALLA:
+ * ya no se espera a que caduque la caché.
  */
-async function esperarMenuConPlato() {
-  const inicio = Date.now()
-  const intentos = []
-  for (;;) {
-    const r = await api(null, '/menu')
-    const esta = JSON.stringify(r.data || {}).includes(PLATO)
-    const seg = Math.round((Date.now() - inicio) / 1000)
-    intentos.push(`${seg}s:${r.status}:${esta ? 'sí' : 'no'}`)
-    if (process.env.E2E_TRAZA) console.warn(`[menu] ${intentos.at(-1)}`)
-    if (esta) return { esperaSeg: seg, intentos }
-    if (Date.now() - inicio > LIMITE_ESPERA_MENU_MS) {
-      throw new Error(
-        `GET /menu no mostró "${PLATO}" en ${LIMITE_ESPERA_MENU_MS / 1000} s, más que el TTL de cache:menu (60 s): ` +
-          `ya no es solo #135. Intentos: ${intentos.join(' ')}`
-      )
-    }
-    await new Promise((res) => setTimeout(res, 2_000))
-  }
+const MARGEN_MENU_MS = 5_000
+
+/** ¿La carta pública (GET /menu) ofrece la Hamburguesa ahora mismo? */
+async function menuOfrecePlato() {
+  const r = await api(null, '/menu')
+  if (r.status !== 200) throw new Error(`GET /menu: ${r.status}`)
+  return JSON.stringify(r.data || {}).includes(PLATO)
+}
+
+/** Falla si GET /menu no dice `ofrece` dentro del margen: sería #135 otra vez. */
+async function esperarMenu(ofrece, cuando) {
+  await expect
+    .poll(menuOfrecePlato, {
+      message: `GET /menu ${ofrece ? 'no ofrece' : 'sigue ofreciendo'} "${PLATO}" ${cuando} tras ${MARGEN_MENU_MS / 1000} s: ¿cache:menu sin invalidar otra vez (#135)?`,
+      timeout: MARGEN_MENU_MS,
+    })
+    .toBe(ofrece)
 }
 
 async function login(email) {
@@ -180,9 +178,6 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
   const creados = [] // id_pedido de todo lo que crea la prueba
 
   test.beforeAll(async () => {
-    // Los hooks NO heredan el setTimeout del describe (usan los 30 s de
-    // playwright.config.js): sin esto, la espera de #135 se cortaba a los 30 s.
-    test.setTimeout(LIMITE_ESPERA_MENU_MS + 60_000)
     admin = await login('admin@smartdining.com')
     const insumos = (await api(admin, '/inventario/insumos?limite=500')).data?.insumos || []
     const carne = insumos.find((i) => i.nombre === INSUMO)
@@ -201,12 +196,10 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
         body: { tipo: 'ajuste', cantidad: STOCK_DEMO - Number(carne.stock_actual), motivo: 'E2E demo: dejar la carne en 4' },
       })
     }
-    const { esperaSeg, intentos } = await esperarMenuConPlato()
-    if (esperaSeg > 0) {
-      const aviso = `#135: GET /menu escondió la Hamburguesa ${esperaSeg} s al empezar (caché de una corrida anterior)`
-      test.info().annotations.push({ type: 'problema conocido', description: `${aviso}. Intentos: ${intentos.join(' ')}` })
-      console.warn(`AVISO ${aviso}`)
-    }
+    // Aunque la corrida anterior terminara hace un segundo con la Hamburguesa
+    // agotada, la carta ya tiene que ofrecerla (antes de #138 había que esperar
+    // hasta 60 s a que caducara la caché).
+    await esperarMenu(true, 'al empezar, con la carne en 4,')
     antes = await fotografiar(admin, ids)
     expect(antes).toEqual({ stock: STOCK_DEMO, platoDisponible: true, mesa: 'disponible', pedidosAbiertos: 0, libroCuadra: true })
   })
@@ -341,30 +334,13 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
     })
 
     await test.step('8. Beto entra después y no puede pedirla', async () => {
+      // La carta ya no la ofrece: agotarla por inventario invalida cache:menu (#135).
+      await esperarMenu(false, 'agotada')
       beto = await sentarComensal(browser, url, 'Beto')
-      // Lo correcto: GET /menu la oculta, o la PWA la marca AGOTADO. Pero el
-      // caché de /menu (60 s en Redis) no se invalida cuando el inventario agota
-      // un plato, así que en ese minuto Beto puede verla como disponible. En ese
-      // caso se intenta pedirla por la interfaz: la base tiene que rechazarla
-      // (409 sin_stock) y la PWA, decírselo. Eso es lo que la demo necesita.
+      // En la PWA de Beto no sale, o sale marcada AGOTADO; nunca como disponible.
       const tarjeta = tarjetaCliente(beto.page)
-      const visible = (await tarjeta.count()) > 0
-      if (visible && !(await tarjeta.innerText()).includes('AGOTADO')) {
-        const aviso = 'GET /menu en caché: Beto ve la Hamburguesa agotada como disponible hasta 60 s (falta invalidarMenu al agotar por inventario)'
-        test.info().annotations.push({ type: 'problema conocido', description: aviso })
-        console.warn(`AVISO ${aviso}; se comprueba que pedirla da 409 y la PWA lo dice`)
-        await tarjeta.click()
-        await beto.page.getByRole('button', { name: /^AÑADIR 1/ }).click()
-        await beto.page.getByRole('link', { name: /^Carrito, 1 producto/ }).click()
-        await beto.page.getByRole('button', { name: /Enviar mi pedido a cocina/ }).click()
-        const intento = beto.page.waitForResponse((r) => r.url().endsWith('/pedidos') && r.request().method() === 'POST')
-        await beto.page.getByRole('button', { name: /Confirmar y enviar/ }).click()
-        const res = await intento
-        expect(res.status()).toBe(409)
-        // «El plato "Hamburguesa Smart Angus" no tiene stock suficiente · Revisa tu pedido: algo se agotó en cocina»
-        await expect(beto.page.getByRole('alert').filter({ hasText: PLATO }).first()).toContainText(/stock|agot/i)
-        expect(beto.page.url()).not.toMatch(/\/seguimiento/)
-      }
+      if ((await tarjeta.count()) > 0) await expect(tarjeta).toContainText('AGOTADO')
+      // Y aunque alguien la pida a mano, la base la rechaza.
       const r = await api(beto.token, '/pedidos', { method: 'POST', body: { items: [{ id_plato: ids.plato, cantidad: 1 }] } })
       expect(r.status).toBe(409)
       expect(r.data?.motivo).toBe('sin_stock')
@@ -391,6 +367,7 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
     })
 
     await test.step('10. Sin recargar, la Hamburguesa vuelve en el panel, el KDS y el cliente; Ana la pide', async () => {
+      await esperarMenu(true, 'repuesta')
       await expect(interruptorMenu(menuPanel)).toHaveText(/DISPONIBLE/, { timeout: 10_000 })
       const cajon = kds.getByRole('dialog', { name: 'Ingredientes y platos agotados' })
       await expect(cajon.locator('li, tr, [role="listitem"]', { hasText: PLATO }).first()).not.toContainText(/agotad/i, { timeout: 10_000 })
