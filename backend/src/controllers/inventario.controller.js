@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const inventarioService = require('../services/inventario.service');
+const menuService = require('../services/menu.service');
 
 /**
  * Inventario del panel (D-17 PR 2): insumos, movimientos y recetas.
@@ -127,6 +128,31 @@ const recetaSchema = z
       ),
   })
   .strict();
+
+/**
+ * Invalida la cache del menu despues de una escritura de inventario (ISSUE #135).
+ *
+ * Los cambios de disponibilidad por stock YA llegan por el canal `inventario`
+ * (ver services/inventario-avisos.js), que es el camino que cubre todo —tambien
+ * lo que cambia por un pedido—. Esto es el cinturon de seguridad del admin que
+ * edita y recarga en el mismo segundo: no depende del orden de llegada del
+ * NOTIFY ni de que el aviso llegue. Cuesta un DEL en Redis.
+ *
+ * Va SIEMPRE despues del COMMIT: invalidar antes dejaria la ventana para que una
+ * lectura volviera a cachear lo viejo (y la version del menu la cierra, pero el
+ * orden correcto es este).
+ *
+ * No se invalida por cada PEDIDO a proposito: la cache dejaria de servir para
+ * nada en hora punta, y el stock que consume un pedido ya avisa por el canal.
+ */
+async function invalidarMenuTrasEscribir() {
+  try {
+    await menuService.invalidarMenu();
+  } catch (err) {
+    // No puede tumbar una escritura que ya se confirmo en la base.
+    console.error('[inventario] no se pudo invalidar la cache del menu:', err && err.message);
+  }
+}
 
 /** Un id de la URL: entero positivo, o null. */
 function idDeLaUrl(valor) {
@@ -276,6 +302,9 @@ async function crearInsumo(req, res, next) {
     const { insumo, movimiento } = await inventarioService.crearInsumo(parsed.data, {
       idUsuario: req.user?.id_usuario ?? null,
     });
+    // Un insumo nuevo con stock inicial puede volver disponible un plato cuya
+    // receta lo esperaba.
+    await invalidarMenuTrasEscribir();
     return res.status(201).json({ insumo, movimiento });
   } catch (err) {
     return next(err);
@@ -301,6 +330,8 @@ async function actualizarInsumo(req, res, next) {
       idUsuario: req.user?.id_usuario ?? null,
     });
     if (!insumo) return res.status(404).json({ error: MENSAJE_INSUMO_NO_ENCONTRADO });
+    // Desactivar un insumo deja sin stock a todo lo que lo usa.
+    await invalidarMenuTrasEscribir();
     return res.json({ insumo });
   } catch (err) {
     return next(err);
@@ -325,6 +356,7 @@ async function registrarMovimiento(req, res, next) {
       idUsuario: req.user?.id_usuario ?? null,
     });
     if (!hecho) return res.status(404).json({ error: MENSAJE_INSUMO_NO_ENCONTRADO });
+    await invalidarMenuTrasEscribir();
     return res.status(201).json(hecho);
   } catch (err) {
     return next(err);
@@ -435,6 +467,8 @@ function handlersDeReceta(receta, clave, mensajeNoEncontrado) {
           idUsuario: req.user?.id_usuario ?? null,
         });
         if (!guardada) return res.status(404).json({ error: mensajeNoEncontrado });
+        // Una receta nueva puede dejar el plato sin stock en este mismo PUT.
+        await invalidarMenuTrasEscribir();
         return res.json({ [clave]: id, receta: guardada });
       } catch (err) {
         return next(err);
