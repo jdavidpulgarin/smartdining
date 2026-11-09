@@ -9,6 +9,7 @@ const { opcionesCors } = require('./src/config/cors');
 const { crearLimitadorGlobal } = require('./src/middleware/limites.middleware');
 const pool = require('./src/config/db');
 const { redisClient } = require('./src/config/redis');
+const inventarioAvisos = require('./src/services/inventario-avisos');
 
 const app = express();
 
@@ -114,10 +115,15 @@ function apagadoOrdenado(servidor, { log = console.log, salir = process.exit } =
 
       if (redisClient.isOpen) await redisClient.quit();
 
+      // El oyente del canal 'inventario' (D-17) tiene su propia conexion, que
+      // no sale del pool: se cierra aparte y ANTES que el pool, y con el se
+      // cancela cualquier reconexion pendiente.
+      await inventarioAvisos.detener();
+
       await pool.end();
 
       clearTimeout(rendirse);
-      log('Cerrado: servidor HTTP, Redis y pool de PostgreSQL.');
+      log('Cerrado: servidor HTTP, Redis, canal de inventario y pool de PostgreSQL.');
       salir(0);
     } catch (err) {
       clearTimeout(rendirse);
@@ -139,6 +145,14 @@ if (require.main === module) {
   // SIGUSR2 queda fuera a propósito: es la señal con la que nodemon reinicia, y
   // quien debe atenderla es nodemon. Si la interceptáramos aquí para apagar
   // ordenadamente, el reinicio en desarrollo se convertiría en una salida.
+  // D-17: avisos de inventario en vivo. Va aqui y no al cargar el modulo para
+  // que una prueba que importa `app` con supertest no abra una conexion a
+  // PostgreSQL ni se quede con un temporizador de reconexion puesto.
+  //
+  // Sin await a proposito: el backend ya esta sirviendo peticiones. Si el canal
+  // no se puede abrir, el oyente reintenta solo y nada mas se entera.
+  inventarioAvisos.iniciar();
+
   const alApagar = apagadoOrdenado(servidor);
   process.on('SIGTERM', () => alApagar('SIGTERM'));
   process.on('SIGINT', () => alApagar('SIGINT'));

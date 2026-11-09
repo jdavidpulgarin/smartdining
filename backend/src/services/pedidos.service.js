@@ -165,10 +165,24 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     // la misma transacción, sin una consulta extra después del COMMIT.
     const detalles = await detallesDePedidos([pedido.id_pedido], client);
 
+    // El COMMIT va DENTRO del try a propósito (D-17): la reserva de inventario
+    // es un trigger DIFERIDO (`tr_reservar_inventario`), así que el SD001 "sin
+    // stock" del pedido completo se lanza AQUÍ y no en el INSERT del detalle.
+    // Fuera del try, ese error subiría sin pasar por el catch y el manejador
+    // central lo vería igual, pero sin la garantía de que la transacción quedó
+    // cerrada.
     await client.query('COMMIT');
     return { ...conTotal.rows[0], detalles };
   } catch (err) {
-    await client.query('ROLLBACK');
+    // El ROLLBACK no puede tapar el error de verdad. Cuando el que falla es el
+    // COMMIT, PostgreSQL ya deshizo la transacción y este ROLLBACK solo avisa
+    // "no hay transacción en curso"; si por lo que sea lanzara, el SD001 se
+    // perdería y el cliente recibiría un 500 en vez de la lista de faltantes.
+    try {
+      await client.query('ROLLBACK');
+    } catch (errRollback) {
+      console.error('[pedidos] el ROLLBACK fallo tras un error:', errRollback && errRollback.message);
+    }
     throw err;
   } finally {
     client.release();
