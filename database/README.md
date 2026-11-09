@@ -96,7 +96,8 @@ database/scripts/
 ├── 24_vistas_reportes.sql              # Vistas analiticas para modulo de BI
 ├── 25_schema_migraciones.sql          # Registro de scripts aplicados (P-17); fin de la línea base
 ├── 26_configuracion.sql                # Configuración del local, mesas.activa e historial de precios (P-18; lo aplica migrar.sh)
-└── 27_inventario.sql                   # Inventario real: insumos, recetas, reserva al pedir, devoluciones y avisos (P-19)
+├── 27_inventario.sql                   # Inventario real: insumos, recetas, reserva al pedir, devoluciones y avisos (P-19)
+└── 28_aviso_insumo_agotado.sql         # Aviso stock_bajo también al llegar a 0 aunque ya estuviera bajo (G-06)
 ```
 
 ### ⚠️ Regla: un script aplicado NUNCA se edita
@@ -195,6 +196,14 @@ aparte que crea y borra sus propios datos:
 sh database/tests/test_p19_concurrencia.sh          # misma conexión que migrar.sh (PG*)
 PEDIDOS=50 PORCIONES=10 sh database/tests/test_p19_concurrencia.sh
 docker compose exec -T postgres sh /smartdining-db/tests/test_p19_concurrencia.sh
+```
+
+Aviso de insumo agotado (script 28, G-06): también necesita `COMMIT` (escucha `LISTEN
+inventario`), crea y borra sus propios datos (prefijo `G06A`):
+
+```bash
+sh database/tests/test_g06_aviso_agotado.sh
+docker compose exec -T postgres sh /smartdining-db/tests/test_g06_aviso_agotado.sh
 ```
 
 ### Datos de inventario para la demo (G-07)

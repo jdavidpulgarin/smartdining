@@ -3399,14 +3399,19 @@ mira `stock_actual` y `activo`, así que subir el mínimo de un insumo que ya es
 pendiente del PR 2). `inventario:alerta` es solo para los avisos en vivo, y el propio contrato
 de Roberto dice que no se guardan.
 
-> ⚠️ **Hallazgo para G-06 (no se inventa nada aquí).** EVENTS.md §5.5 dice que el backend avisa
-> "cuando el insumo **pasa** de estar sobre el mínimo a estar en o bajo el mínimo (**o llega a
-> 0**)". El SQL solo avisa el **cruce hacia abajo** del mínimo
-> (`NEW.stock_actual <= NEW.stock_minimo AND (OLD.stock_actual > OLD.stock_minimo OR NOT OLD.activo)`):
-> un insumo que ya estaba bajo el mínimo y se **agota del todo** NO genera `pg_notify`, así que
-> el panel no recibe el aviso de "agotado". Si ese segundo cruce hace falta, el cambio es del
-> script 27 (de Jarrison), no del backend: inventarlo aquí —avisando en cada movimiento— sería
-> justo lo que el SQL evita.
+**Cuándo sale `stock_bajo` (script 28, G-06).** La base avisa en dos casos, con el **mismo**
+payload, y nunca en cada movimiento:
+
+1. el insumo **cruza su mínimo hacia abajo** (estaba sobre el mínimo, o inactivo, y queda en o
+   bajo él), o
+2. el insumo **llega a 0** desde más de 0, **aunque ya estuviera bajo el mínimo**. Es lo que
+   pide EVENTS.md §5.5 ("o llega a 0"); hasta el script 27 este caso no avisaba.
+
+Un mismo cambio de stock avisa una sola vez aunque cumpla los dos (p. ej. mínimo 0 y llega a
+0). Un pedido que en la **misma transacción** cruza el mínimo y luego llega a 0 (dos detalles
+del mismo insumo) deja **dos** avisos, uno con el stock que quedó bajo y otro con `0`: el
+socket-server marca el segundo con `agotado: true`. Lo prueba
+`database/tests/test_g06_aviso_agotado.sh`.
 
 ### La frontera entre 400 y 422 (H-11)
 
