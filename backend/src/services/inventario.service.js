@@ -388,6 +388,130 @@ async function reemplazarReceta(receta, id, insumos, { idUsuario = null } = {}) 
 }
 
 /* -------------------------------------------------------------------------- *
+ * La carta con su disponibilidad (D-17 PR 3)
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Qué decide qué: la vista `v_carta_disponible` (script 27) ya resuelve
+ * `disponible_efectivo`, `motivo` y `tiene_receta`, así que aquí NO se recalcula
+ * nada. Lo único que se añade con un JOIN son los datos que el panel necesita
+ * para agrupar y que la vista no trae: la categoría del plato, y de qué plato y
+ * de qué paso es cada opción del constructor.
+ *
+ * Las dos consultas están escritas completas y los filtros van como parámetros
+ * ($1, $2): ninguna sentencia de este repo se arma pegando texto, y los
+ * identificadores nunca son dinámicos (lo vigila `tests/inyeccion-sql.test.js`).
+ * `q` entra por `ILIKE`, con los comodines puestos en SQL.
+ */
+const SQL_CARTA_PLATOS = `
+  SELECT v.id, v.nombre, c.nombre AS categoria, p.personalizable,
+         v.disponible, v.stock_suficiente, v.disponible_efectivo, v.motivo, v.tiene_receta
+    FROM v_carta_disponible v
+    JOIN platos p ON p.id_plato = v.id
+    LEFT JOIN categorias c ON c.id_categoria = p.id_categoria
+   WHERE v.tipo = 'plato'
+     AND ($1::BOOLEAN IS NULL OR v.tiene_receta = $1)
+     AND ($2::TEXT IS NULL OR v.nombre ILIKE '%' || $2 || '%')
+   ORDER BY c.nombre ASC NULLS FIRST, v.nombre ASC`;
+
+const SQL_CARTA_INGREDIENTES = `
+  SELECT v.id, v.nombre,
+         pc.id_plato, pl.nombre AS plato, pc.id_paso, pc.nombre AS paso, pc.orden AS paso_orden,
+         v.disponible, v.stock_suficiente, v.disponible_efectivo, v.motivo, v.tiene_receta
+    FROM v_carta_disponible v
+    JOIN ingredientes i ON i.id_ingrediente = v.id
+    JOIN pasos_constructor pc ON pc.id_paso = i.id_paso
+    JOIN platos pl ON pl.id_plato = pc.id_plato
+   WHERE v.tipo = 'ingrediente'
+     AND ($1::BOOLEAN IS NULL OR v.tiene_receta = $1)
+     AND ($2::TEXT IS NULL OR v.nombre ILIKE '%' || $2 || '%')
+   ORDER BY pl.nombre ASC, pc.orden ASC, v.nombre ASC`;
+
+/** Los ids pueden llegar como texto según el tipo de la columna: a número. */
+function aEntero(valor) {
+  if (valor === null || valor === undefined) return null;
+  const numero = Number(valor);
+  return Number.isInteger(numero) ? numero : null;
+}
+
+/**
+ * Una fila de plato, con los ids ya como números.
+ *
+ * `personalizable` va porque explica un `tiene_receta: false` que NO es un
+ * olvido: un Bowl o una Arepa Rellena consumen por sus OPCIONES, cada una con
+ * su propia receta, así que el plato no tiene receta propia y está bien así.
+ * Sin ese campo, el panel los pintaría como "falta configurar".
+ */
+const filaPlato = (f) => ({
+  id: aEntero(f.id),
+  nombre: f.nombre,
+  categoria: f.categoria ?? null,
+  personalizable: f.personalizable,
+  disponible: f.disponible,
+  stock_suficiente: f.stock_suficiente,
+  disponible_efectivo: f.disponible_efectivo,
+  motivo: f.motivo ?? null,
+  tiene_receta: f.tiene_receta,
+});
+
+/**
+ * Una fila de opción del constructor, con su plato y su paso.
+ *
+ * `paso_orden` es el orden del paso DENTRO de su plato, y hace falta porque el
+ * nombre del paso se repite entre platos ("Elige tu Salsa" está en varios): sin
+ * él, el panel no puede ordenar los pasos como los ve el comensal ni distinguir
+ * dos pasos homónimos de platos distintos.
+ */
+const filaIngrediente = (f) => ({
+  id: aEntero(f.id),
+  nombre: f.nombre,
+  id_plato: aEntero(f.id_plato),
+  plato: f.plato,
+  id_paso: aEntero(f.id_paso),
+  paso: f.paso,
+  paso_orden: aEntero(f.paso_orden),
+  disponible: f.disponible,
+  stock_suficiente: f.stock_suficiente,
+  disponible_efectivo: f.disponible_efectivo,
+  motivo: f.motivo ?? null,
+  tiene_receta: f.tiene_receta,
+});
+
+/**
+ * La carta para la pestaña de Recetas: `{ platos, ingredientes }`.
+ *
+ * Dos listas y no una con un `tipo`, aunque la vista las devuelva juntas: un
+ * plato y una opción no se pintan igual (la opción cuelga de un paso de su
+ * plato) y el panel las muestra en dos tablas.
+ *
+ * Con `tipo` se pide solo una, pero la otra viaja **vacía** y no se omite: así
+ * el cliente no tiene que comprobar si la clave existe.
+ *
+ * ORDEN FIJO, que es parte del contrato: los platos por categoría y luego
+ * nombre; las opciones por plato, luego `paso_orden` y luego nombre. Es el
+ * orden en que el panel las pinta, así que no tiene que reordenar nada.
+ *
+ * @param {{tipo?: 'plato'|'ingrediente', sinReceta?: boolean, q?: string}} filtros
+ */
+async function obtenerCarta({ tipo, sinReceta, q } = {}) {
+  // `sin_receta=true` busca `tiene_receta = false`: es la lista de "falta
+  // configurar" de la pestaña. Sin el filtro, null, que la consulta lee como
+  // "no filtres".
+  const tieneReceta = sinReceta === undefined ? null : !sinReceta;
+  const parametros = [tieneReceta, q || null];
+
+  const platos = tipo === 'ingrediente'
+    ? []
+    : (await pool.query(SQL_CARTA_PLATOS, parametros)).rows.map(filaPlato);
+
+  const ingredientes = tipo === 'plato'
+    ? []
+    : (await pool.query(SQL_CARTA_INGREDIENTES, parametros)).rows.map(filaIngrediente);
+
+  return { platos, ingredientes };
+}
+
+/* -------------------------------------------------------------------------- *
  * Auxiliares
  * -------------------------------------------------------------------------- */
 
@@ -434,6 +558,8 @@ module.exports = {
   obtenerReceta,
   reemplazarReceta,
   existeDueno,
+  obtenerCarta,
+  aEntero,
   RECETA_PLATO,
   RECETA_INGREDIENTE,
   UNIDADES,
