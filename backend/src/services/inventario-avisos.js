@@ -1,5 +1,6 @@
 const { Client } = require('pg');
 const socketNotifier = require('./socket.notifier');
+const menuService = require('./menu.service');
 
 /**
  * Avisos de inventario en vivo (D-17, P-19).
@@ -101,6 +102,24 @@ function aNumero(valor) {
   return null;
 }
 
+/**
+ * Invalida la cache del menu sin que un fallo pueda cortar el oyente.
+ *
+ * `invalidarMenu` no lanza (con Redis caido devuelve false), pero esto corre en
+ * el manejador de un evento del canal: si algun dia lanzara, el 'notification'
+ * se quedaria con un rechazo sin dueno y el aviso no se reenviaria. El coste de
+ * envolverlo es cero y lo que protege es que la carta siga llegando.
+ */
+async function invalidarCacheDelMenu() {
+  try {
+    await menuService.invalidarMenu();
+    return true;
+  } catch (err) {
+    console.error('[inventario] no se pudo invalidar la cache del menu:', err && err.message);
+    return false;
+  }
+}
+
 /** ¿Es un id de verdad? */
 function esId(valor) {
   const numero = aNumero(valor);
@@ -135,18 +154,32 @@ async function manejarAviso(payload, { notifier = socketNotifier } = {}) {
       console.error(`[inventario] aviso de disponibilidad incompleto (entidad ${aviso.entidad})`);
       return { ignorado: 'datos' };
     }
+    if (aviso.entidad !== 'plato' && aviso.entidad !== 'ingrediente') {
+      console.error(`[inventario] entidad desconocida en el aviso: ${aviso.entidad}`);
+      return { ignorado: 'datos' };
+    }
     const id = aNumero(aviso.id);
+
+    // ISSUE #135: la cache del menu se invalida ANTES de reenviar el aviso, y
+    // pase lo que pase con el reenvio.
+    //
+    // GET /api/menu se cachea 60 s, y hasta ahora solo lo invalidaban las rutas
+    // REST que editan la carta. La disponibilidad por STOCK cambia DENTRO de la
+    // base (un pedido que consume, un movimiento, una receta, un insumo
+    // desactivado) y solo avisa por este canal: durante hasta un minuto la carta
+    // mostraba como disponible un plato ya agotado.
+    //
+    // Va antes del reenvio porque es lo que de verdad no puede esperar: si el
+    // socket-server esta caido, el aviso en vivo se pierde pero la proxima
+    // peticion del comensal tiene que ver la carta real.
+    await invalidarCacheDelMenu();
 
     if (aviso.entidad === 'plato') {
       await notifier.notificarPlatoDisponibilidad(id, aviso.disponible, { conReintento: true });
-      return { reenviado: TIPO_DISPONIBILIDAD };
-    }
-    if (aviso.entidad === 'ingrediente') {
+    } else {
       await notifier.notificarIngredienteDisponibilidad(id, aviso.disponible, { conReintento: true });
-      return { reenviado: TIPO_DISPONIBILIDAD };
     }
-    console.error(`[inventario] entidad desconocida en el aviso: ${aviso.entidad}`);
-    return { ignorado: 'datos' };
+    return { reenviado: TIPO_DISPONIBILIDAD };
   }
 
   if (aviso.tipo === TIPO_STOCK_BAJO) {
@@ -188,7 +221,7 @@ async function manejarAviso(payload, { notifier = socketNotifier } = {}) {
  * pruebas revisan.
  */
 async function ponerLaCartaAlDia(conexion, { notifier = socketNotifier } = {}) {
-  const resumen = { recalculados: null, emitidos: 0, fallidos: 0, abortado: false };
+  const resumen = { recalculados: null, emitidos: 0, fallidos: 0, abortado: false, cacheInvalidada: false };
 
   try {
     const recalculo = await conexion.query('SELECT fn_recalcular_toda_la_carta() AS cambios');
@@ -197,6 +230,12 @@ async function ponerLaCartaAlDia(conexion, { notifier = socketNotifier } = {}) {
   } catch (err) {
     console.error('[inventario] no se pudo recalcular la carta:', err && err.message);
   }
+
+  // ISSUE #135: tras el recalculo, la cache del menu puede tener una carta de
+  // antes de que el backend se cayera. Se invalida en el arranque y en CADA
+  // reconexion del canal, que es justo cuando no se sabe que paso mientras no
+  // habia nadie escuchando.
+  resumen.cacheInvalidada = await invalidarCacheDelMenu();
 
   let filas = [];
   try {
