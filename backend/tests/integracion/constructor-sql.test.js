@@ -1,0 +1,122 @@
+const test = require('node:test');
+const assert = require('node:assert');
+
+/**
+ * El 23503 del AUTOR al editar una opción del constructor, contra PostgreSQL
+ * real (review de #144).
+ *
+ * Cambiar el `precio_extra` de un ingrediente dispara
+ * `tr_historial_precio_ingrediente` (database/scripts/26_configuracion.sql),
+ * que escribe en `historial_precios` con el autor que sale de
+ * `app.id_usuario`. Esa tabla tiene su propia `fk_historial_precios_usuario`
+ * contra `usuarios`: con un id que no existe, el UPDATE falla con 23503 y antes
+ * salía como el **409 genérico** de clave ajena, sin decir que el problema era
+ * la sesión de quien editaba.
+ *
+ * Es el gemelo de la prueba de `platos-sql.test.js`, sobre la otra tabla que
+ * escribe el mismo trigger. Se SALTA sola si no hay base:
+ *
+ *   npm run test:integracion
+ */
+
+const B = require('path').resolve(__dirname, '../..');
+require('dotenv').config({ path: `${B}/.env` });
+
+const { Pool } = require('pg');
+const pool = require('../../src/config/db');
+const constructorService = require('../../src/services/constructor.service');
+const autorInexistente = require('../../src/services/autor-inexistente');
+
+let sonda = null;
+let hayBase = false;
+let opcion = null;
+
+test.before(async () => {
+  try {
+    sonda = new Pool({ connectionTimeoutMillis: 2000 });
+    await sonda.query('SELECT 1');
+    const r = await sonda.query(
+      'SELECT id_ingrediente, nombre, precio_extra FROM ingredientes ORDER BY id_ingrediente LIMIT 1'
+    );
+    opcion = r.rows[0] || null;
+    hayBase = opcion !== null;
+  } catch {
+    hayBase = false;
+  }
+});
+
+test.after(async () => {
+  // Se deja el precio_extra como estaba: la prueba del caso bueno lo cambia.
+  if (hayBase && opcion) {
+    await sonda.query('UPDATE ingredientes SET precio_extra = $1 WHERE id_ingrediente = $2', [
+      opcion.precio_extra,
+      opcion.id_ingrediente,
+    ]);
+  }
+  if (sonda) await sonda.end();
+  await pool.end();
+});
+
+/** Un id de usuario que seguro no existe. */
+async function idFantasma() {
+  const { rows } = await sonda.query(
+    'SELECT COALESCE(MAX(id_usuario), 0) + 1000 AS inexistente FROM usuarios'
+  );
+  return Number(rows[0].inexistente);
+}
+
+test('review-144: cambiar el precio de una opcion con un autor inexistente da 409 autor_inexistente', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const nuevo = Number(opcion.precio_extra) + 500;
+  // El await va FUERA de la funcion que recibe assert.rejects, que no es async.
+  const fantasma = await idFantasma();
+
+  await assert.rejects(
+    () => constructorService.actualizarIngrediente(
+      opcion.id_ingrediente,
+      { nombre: opcion.nombre, precio_extra: nuevo },
+      undefined,
+      { idUsuario: fantasma }
+    ),
+    (err) => {
+      assert.strictEqual(err.status, 409, 'traducido, no el 500 ni el generico');
+      assert.strictEqual(err.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+      assert.strictEqual(err.message, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+      return true;
+    }
+  );
+
+  // Y la opcion se quedo como estaba: la transaccion se deshizo.
+  const { rows } = await sonda.query(
+    'SELECT precio_extra FROM ingredientes WHERE id_ingrediente = $1',
+    [opcion.id_ingrediente]
+  );
+  assert.strictEqual(Number(rows[0].precio_extra), Number(opcion.precio_extra));
+});
+
+test('review-144: con un usuario que existe, el cambio entra y queda en el historial', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const { rows: usuarios } = await sonda.query(
+    'SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1'
+  );
+  const nuevo = Number(opcion.precio_extra) + 700;
+
+  const { ingrediente } = await constructorService.actualizarIngrediente(
+    opcion.id_ingrediente,
+    { nombre: opcion.nombre, precio_extra: nuevo },
+    undefined,
+    { idUsuario: usuarios[0].id_usuario }
+  );
+
+  assert.strictEqual(Number(ingrediente.precio_extra), nuevo);
+
+  const { rows: historial } = await sonda.query(
+    `SELECT id_usuario, precio_anterior, precio_nuevo FROM historial_precios
+      WHERE tipo = 'ingrediente' AND id_referencia = $1 ORDER BY id DESC LIMIT 1`,
+    [opcion.id_ingrediente]
+  );
+  assert.strictEqual(historial[0].id_usuario, usuarios[0].id_usuario);
+  assert.strictEqual(Number(historial[0].precio_nuevo), nuevo);
+});
