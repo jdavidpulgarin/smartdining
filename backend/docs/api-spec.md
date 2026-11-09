@@ -3034,9 +3034,13 @@ El único camino para mover el stock.
   opaco ("un dato está fuera del rango permitido"), y aquí sí se puede decir qué campo falla.
 - Un movimiento sobre un insumo **desactivado** se acepta: hay que poder cuadrar el libro de
   algo que ya no se usa. Lo que no cambia es la disponibilidad, que sigue en "no hay".
-- Si el movimiento **cruza el mínimo hacia abajo**, la base publica `stock_bajo` y el panel
-  recibe `inventario:alerta` en vivo. Si deja un plato sin stock, llega además su
-  `plato:disponibilidad`.
+- La base publica `stock_bajo` —y el panel recibe `inventario:alerta` en vivo— si el
+  movimiento **cruza el mínimo hacia abajo** o si **deja el insumo en 0** viniendo de más de 0,
+  **aunque ya estuviera bajo el mínimo** (script 28, G-06). Nunca en cada movimiento: un
+  insumo que sigue bajando por debajo del mínimo sin llegar a 0 no vuelve a avisar. El detalle
+  de los dos casos está en
+  [Cuándo sale `stock_bajo`](#avisos-de-inventario-en-vivo-d-17). Si el movimiento deja un
+  plato sin stock, llega además su `plato:disponibilidad`.
 
 ### GET /inventario/insumos/:id/movimientos — admin
 
@@ -3410,9 +3414,10 @@ backend arranca y sirve igual sin Redis, sin socket-server y con el canal cerrad
 
 **`stock_minimo` no dispara ningún aviso al cambiarlo.** El trigger `tr_insumo_recalcular` solo
 mira `stock_actual` y `activo`, así que subir el mínimo de un insumo que ya está por debajo
-**no** avisa: el panel ve esa lista al abrir, leyendo la vista `v_stock_bajo` (ruta REST
-pendiente del PR 2). `inventario:alerta` es solo para los avisos en vivo, y el propio contrato
-de Roberto dice que no se guardan.
+**no** avisa: el panel ve esa lista al abrir, con
+[`GET /inventario/insumos?estado=bajo`](#get-inventarioinsumos--admin), que lee esa misma
+vista. `inventario:alerta` es solo para los avisos en vivo, y el propio contrato de Roberto
+dice que no se guardan.
 
 **Cuándo sale `stock_bajo` (script 28, G-06).** La base avisa en dos casos, con el **mismo**
 payload, y nunca en cada movimiento:
