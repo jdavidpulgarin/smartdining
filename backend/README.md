@@ -31,39 +31,75 @@ exponer el detalle. Todo eso se decide en un único lugar:
 
 ## Recrear la base de datos local
 
-El `database/README.md` de Jarrison no documenta el orden de ejecución. Desde el commit
-`7556518` el bootstrap es **el runner y después el seed**: `00_ejecutar_todo.sql` ejecuta
-`../schema.sql` él mismo como paso `[0/13]`, y ese schema arranca con `DROP TABLE` de las
-15 tablas — por eso el seed va al final, o se borraría. Además el seed ahora inserta
-`transiciones_validas`, que existe recién después del paso 0.
+**Lo carga todo `database/migrar.sh`**, que vive en este repositorio: no hay que traer
+`database/` de ninguna otra rama. El script aplica, en orden, los scripts de
+`database/scripts/` que la base todavía no tenga registrados en `schema_migraciones`, y
+cada uno corre en **una transacción junto con su registro**: o queda aplicado y
+registrado, o no queda nada.
 
-> Antes del `7556518` el orden era el inverso (`schema.sql` → `seed.sql` → runner).
-> Conviene volver a mirar el runner cada vez que Jarrison actualice la rama.
+Sabe arreglárselas con tres situaciones:
+
+| Situación | Qué hace |
+|---|---|
+| Base **vacía** | Carga la línea base con `00_ejecutar_todo.sql` —el `schema.sql` como paso `[0/26]`, los scripts 01 a 25 y el `seed.sql` como `[26/26]`— y después los scripts nuevos, del 26 en adelante (hoy son **tres**: `26_configuracion.sql`, `27_inventario.sql` y `28_aviso_insumo_agotado.sql`) |
+| Base cargada **antes de P-17** (sin `schema_migraciones`) | Corre solo el 25, que registra 00 a 25 como aplicados, y después los nuevos |
+| Base **al día** | Aplica solo lo que falte; si no falta nada, no cambia nada |
+
+> **`00_ejecutar_todo.sql` por sí solo NO alcanza.** Está congelado en la línea base (00 a
+> 25) y **no incluye los scripts 26 en adelante** —la configuración del restaurante, el
+> inventario y el aviso de agotado—, así que una base cargada solo con el runner deja
+> cinco rutas del backend respondiendo 500. Para eso está `migrar.sh`, que corre el runner
+> y luego los scripts nuevos.
 
 ```bash
-# 1. Traer la version mas reciente de la rama de Jarrison, sin mezclarla:
-#    (se extrae a una carpeta aparte; no se commitea en feature/backend)
-git fetch origin
-git archive origin/feature/base-datos database/ | tar -x -C /ruta/temporal
-
+# El nombre de la base va en una variable: cambialo y todo el bloque apunta ahi.
+export PGDATABASE=smartdining
+export PGUSER=postgres
 export PGPASSWORD=...            # el de backend/.env
 
-# 2. Recrear la base vacia
-psql -h localhost -U postgres -d postgres -c "DROP DATABASE IF EXISTS smartdining;"
-psql -h localhost -U postgres -d postgres -c "CREATE DATABASE smartdining ENCODING 'UTF8';"
+# 1. Recrear la base vacia (si solo quieres aplicar lo que falte, salta al paso 2)
+psql -h localhost -U "$PGUSER" -d postgres -c "DROP DATABASE IF EXISTS $PGDATABASE;"
+psql -h localhost -U "$PGUSER" -d postgres -c "CREATE DATABASE $PGDATABASE ENCODING 'UTF8';"
 
-# 3. El runner (incluye schema.sql). OJO: usa "\i" con rutas relativas,
-#    hay que ejecutarlo con el cwd en scripts/
-cd /ruta/temporal/database/scripts
-psql -h localhost -U postgres -d smartdining -v ON_ERROR_STOP=1 -f 00_ejecutar_todo.sql
+# 2. Cargar todo: linea base + scripts nuevos. Desde la RAIZ del repositorio.
+sh database/migrar.sh
 
-# 4. El seed, DESPUES del runner
-psql -h localhost -U postgres -d smartdining -v ON_ERROR_STOP=1 -f ../seed.sql
-
-# 5. Solo si el hash del seed no corresponde a Admin123! (el seed nuevo ya lo trae):
+# 3. Solo si el hash del seed no corresponde a la clave demo (el seed ya la trae):
 #    desde backend/
-psql -h localhost -U postgres -d smartdining -f scripts/fijar-password-demo.sql
+psql -h localhost -U "$PGUSER" -d "$PGDATABASE" -f scripts/fijar-password-demo.sql
 ```
+
+> **Para probar sin tocar tu base, usa otro nombre.** El paso 1 hace `DROP DATABASE`: con
+> `export PGDATABASE=smartdining_pruebas` el bloque entero —borrado, creación y
+> `migrar.sh`— trabaja sobre esa y tu base de desarrollo no se entera. **Nunca corras
+> `migrar.sh` sin tener `PGDATABASE` puesta a lo que quieres**, porque su valor por
+> omisión es `smartdining`.
+
+**En Windows**, `migrar.sh` es POSIX `sh` (la imagen `postgres:16-alpine` no trae bash), así
+que va con **Git Bash** o equivalente, y conviene indicarle dónde está `psql`:
+
+```bash
+PSQL="/c/Program Files/PostgreSQL/18/bin/psql.exe" PGUSER=postgres \
+  PGDATABASE=smartdining sh database/migrar.sh
+```
+
+Con Docker, que es como corre en producción:
+
+```bash
+docker compose exec -T postgres sh /smartdining-db/migrar.sh
+```
+
+La conexión sale de las variables estándar de PostgreSQL (`PGHOST`, `PGPORT`, `PGUSER`,
+`PGPASSWORD`, `PGDATABASE`); dentro del contenedor caen en `POSTGRES_USER` y `POSTGRES_DB`
+por el socket local, sin contraseña. Dos variables opcionales: **`PSQL`** (ruta de `psql`,
+por omisión el del `PATH`) y **`MIGRAR_SCRIPTS_DIR`** (carpeta de scripts, por omisión
+`database/scripts`).
+
+Dos cosas que el script vigila y conviene saber: **un script ya aplicado no se edita nunca**
+—si cambia su checksum, `migrar.sh` se detiene con error y el cambio tiene que ir en un
+script nuevo— y **no se corren dos migraciones a la vez** sobre la misma base.
+
+**El `seed.sql` no se ejecuta aparte**: la línea base ya lo incluye como su último paso.
 
 Usuarios demo (todos con `Admin123!`): `admin@smartdining.com`,
 `cocina@smartdining.com`, `mesero@smartdining.com`, `caja@smartdining.com`.
