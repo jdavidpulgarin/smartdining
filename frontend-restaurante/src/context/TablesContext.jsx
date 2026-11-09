@@ -54,6 +54,7 @@ export function TablesProvider({ children }) {
   })
 
   const [pedidosActivos, setPedidosActivos] = useState([])
+  const [presenciaPorMesa, setPresenciaPorMesa] = useState({})
   const [alertas, setAlertas] = useState([])
   const [loading, setLoading] = useState(false)
   const [notification, setNotification] = useState(null)
@@ -313,10 +314,29 @@ export function TablesProvider({ children }) {
 
 
 
+  // Escuchar presencia de comensales en vivo (room:admin recibe cambios de todas las mesas).
+  // Guardarla en el contexto evita perderla al cerrar y volver a abrir "Tomar pedido",
+  // ya que en EVENTS.md no existe un evento para consultar la presencia actual bajo demanda.
+  useSocketListener('mesa:presencia', (data) => {
+    if (data && data.id_mesa != null) {
+      const numId = Number(data.id_mesa)
+      setPresenciaPorMesa((prev) => ({
+        ...prev,
+        [numId]: data,
+      }))
+    }
+  })
+
   // Escuchar si el backend o socket-server avisa de una mesa liberada (evento canónico mesa:liberada)
   const onMesaLiberada = (data) => {
     if (data?.id_mesa) {
       const numId = Number(data.id_mesa)
+      setPresenciaPorMesa((prev) => {
+        if (!prev[numId]) return prev
+        const copia = { ...prev }
+        delete copia[numId]
+        return copia
+      })
       setTables((prev) =>
         prev.map((t) =>
           t.id === numId || t.number === numId
@@ -416,6 +436,13 @@ export function TablesProvider({ children }) {
     try {
       await liberarMesaRemota(numId)
 
+      setPresenciaPorMesa((prev) => {
+        if (!prev[numId]) return prev
+        const copia = { ...prev }
+        delete copia[numId]
+        return copia
+      })
+
       setTables((prev) =>
         prev.map((t) => {
           if (t.id === numId || t.number === numId) {
@@ -502,6 +529,7 @@ export function TablesProvider({ children }) {
       value={{
         tables,
         pedidosActivos,
+        presenciaPorMesa,
         alertas,
         loading,
         notification,

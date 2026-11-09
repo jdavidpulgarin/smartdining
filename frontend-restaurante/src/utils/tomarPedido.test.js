@@ -4,6 +4,7 @@ import {
   unirComensales,
   buscarPorClave,
   accionError409,
+  opcionPedirExistente,
   reemplazarAlias,
   armarPedido,
 } from './tomarPedido'
@@ -76,6 +77,16 @@ describe('tomarPedido - lógica pura (J-16)', () => {
       const lista = unirComensales({ cuenta })
       expect(lista).toContain('Señora sin Celular')
       expect(lista).toContain('Doña Rosa')
+    })
+
+    it('no duplica a quien venga tanto en presencia.comensales como en presencia.sin_celular (EVENTS.md §5.2)', () => {
+      const presencia = {
+        comensales: ['Ana', 'Abuela', 'Carlos'],
+        sin_celular: ['Abuela', 'abuela'],
+      }
+      const lista = unirComensales({ presencia })
+      expect(lista).toEqual(['Abuela', 'Ana', 'Carlos'])
+      expect(lista.filter((c) => claveAlias(c) === 'abuela')).toHaveLength(1)
     })
 
     it('maneja arrays simples y valores nulos/vacíos', () => {
@@ -175,6 +186,91 @@ describe('tomarPedido - lógica pura (J-16)', () => {
       expect(accion.mensaje).toBe('Conflicto no categorizado')
     })
   })
+
+  describe('opcionPedirExistente', () => {
+    it('devuelve el alias del cuerpo del error si viene en el 409 alias_en_uso', () => {
+      const error = {
+        status: 409,
+        data: {
+          error: 'Ese nombre ya está en la mesa',
+          motivo: 'alias_en_uso',
+          alias: 'Doña Rosa',
+        },
+      }
+      expect(
+        opcionPedirExistente({
+          error,
+          lista: [],
+          texto: 'dona rosa',
+          backendCanoniza: true,
+        })
+      ).toBe('Doña Rosa')
+    })
+
+    it('si el error no trae alias, busca por clave en la lista recargada', () => {
+      const error = {
+        status: 409,
+        data: {
+          error: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
+          motivo: 'alias_en_uso',
+        },
+      }
+      expect(
+        opcionPedirExistente({
+          error,
+          lista: ['Abuela', 'Carlos'],
+          texto: '  ábuela ',
+          backendCanoniza: true,
+        })
+      ).toBe('Abuela')
+    })
+
+    it('si tampoco aparece en la cuenta (registrado sin platos aún), ofrece el texto recortado solo cuando backendCanoniza es true', () => {
+      const error = {
+        status: 409,
+        data: {
+          error: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
+          motivo: 'ALIAS_EN_USO',
+        },
+      }
+      expect(
+        opcionPedirExistente({
+          error,
+          lista: [],
+          texto: '   Tío   Carlos  ',
+          backendCanoniza: true,
+        })
+      ).toBe('Tío Carlos')
+
+      expect(
+        opcionPedirExistente({
+          error,
+          lista: [],
+          texto: '   Tío   Carlos  ',
+          backendCanoniza: false,
+        })
+      ).toBeNull()
+    })
+
+    it('devuelve null si el error no es alias_en_uso', () => {
+      const error = {
+        status: 409,
+        data: {
+          error: 'Mesa sin sesión',
+          motivo: 'mesa_sin_sesion',
+        },
+      }
+      expect(
+        opcionPedirExistente({
+          error,
+          lista: ['Abuela'],
+          texto: 'Abuela',
+          backendCanoniza: true,
+        })
+      ).toBeNull()
+    })
+  })
+
 
   describe('reemplazarAlias', () => {
     it('reemplaza el alias por clave en los ítems coincidentes y preserva los demás', () => {

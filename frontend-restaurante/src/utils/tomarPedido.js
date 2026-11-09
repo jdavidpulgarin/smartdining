@@ -151,6 +151,48 @@ export function accionError409(error) {
 }
 
 /**
+ * Determina qué alias ofrecer en "Pedir para «alias»" cuando POST /api/mesas/:id/comensales
+ * responde 409 alias_en_uso (D-18b):
+ * 1. Si el cuerpo del error trae el alias existente, ofrece ese alias.
+ * 2. Si no lo trae, busca por clave en la lista de comensales (tras recargar la cuenta).
+ * 3. Si aun así no aparece (ej. registrado sin platos todavía y sin evento de presencia previo),
+ *    ofrece el texto escrito recortado SOLO si backendCanoniza es true (confirmado en
+ *    backend/src/controllers/pedidos.controller.js).
+ *
+ * @param {{ error?: any, lista?: Array<string|{ comensal?: string, nombre?: string }>, texto?: string, backendCanoniza?: boolean }} params
+ * @returns {string|null}
+ */
+export function opcionPedirExistente({
+  error,
+  lista = [],
+  texto = '',
+  backendCanoniza = true,
+} = {}) {
+  const accion = accionError409(error)
+  if (accion.tipo !== 'alias_en_uso') return null
+
+  if (typeof accion.alias === 'string' && accion.alias.trim()) {
+    return accion.alias.trim()
+  }
+
+  const encontrado = buscarPorClave(lista, texto)
+  if (encontrado) {
+    return encontrado
+  }
+
+  if (backendCanoniza && typeof texto === 'string') {
+    const recortado = texto.normalize('NFC').trim().replace(/\s+/g, ' ')
+    const clave = claveAlias(recortado)
+    if (recortado && clave && clave !== 'general') {
+      return recortado
+    }
+  }
+
+  return null
+}
+
+
+/**
  * Reemplaza de forma inmutable el comensal de los ítems donde coincida la clave con aliasViejo.
  *
  * @param {Array<object>} items

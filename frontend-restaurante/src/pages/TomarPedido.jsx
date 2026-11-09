@@ -13,8 +13,8 @@ import { useAuth, useTables, useSocketListener } from '../hooks'
 import { obtenerCuenta, registrarComensal } from '../services/api'
 import {
   unirComensales,
-  buscarPorClave,
   accionError409,
+  opcionPedirExistente,
 } from '../utils/tomarPedido'
 import { MenuCatalogo } from '../components/tomar-pedido/MenuCatalogo'
 import { ResumenPedido } from '../components/tomar-pedido/ResumenPedido'
@@ -24,7 +24,7 @@ export function TomarPedido() {
   const navigate = useNavigate()
   const idMesa = Number(id)
   const { user } = useAuth()
-  const { tables } = useTables()
+  const { tables, presenciaPorMesa } = useTables()
 
   const userRole = (user?.rol || user?.role || '').toLowerCase()
   const esPersonalAutorizado = userRole === 'mesero' || userRole === 'admin'
@@ -34,10 +34,13 @@ export function TomarPedido() {
   }, [tables, idMesa])
 
   // Estado de comensales y datos de mesa
-  const [presencia, setPresencia] = useState(null)
+  const [presenciaLocal, setPresenciaLocal] = useState(null)
   const [cuenta, setCuenta] = useState(null)
+  const [comensalesSesion, setComensalesSesion] = useState([])
   const [cargando, setCargando] = useState(true)
   const [errorCarga, setErrorCarga] = useState(null)
+
+  const presencia = presenciaLocal || presenciaPorMesa?.[idMesa] || null
 
   // Estado del flujo
   const [paso, setPaso] = useState(1) // 1: elegir comensal, 2: menu/constructor, 3: resumen/envio
@@ -156,18 +159,34 @@ export function TomarPedido() {
   // Escuchar eventos en vivo de presencia si el socket está disponible
   useSocketListener('mesa:presencia', (data) => {
     if (data && Number(data.id_mesa) === idMesa) {
-      setPresencia(data)
+      setPresenciaLocal(data)
+    }
+  })
+
+  // Si entra un pedido nuevo para esta mesa, recargar la cuenta para reflejar sus comensales
+  useSocketListener('order:created', (data) => {
+    if (data?.pedido && Number(data.pedido.id_mesa) === idMesa) {
+      cargarDatosMesa()
     }
   })
 
   // Lista unificada y deduplicada de comensales según el contrato
   const comensales = useMemo(() => {
-    return unirComensales({ presencia, cuenta })
-  }, [presencia, cuenta])
+    const basePresencia = presencia
+      ? {
+          ...presencia,
+          comensales: [...(presencia.comensales || []), ...comensalesSesion],
+        }
+      : comensalesSesion.length > 0
+        ? { comensales: comensalesSesion }
+        : null
+    return unirComensales({ presencia: basePresencia, cuenta })
+  }, [presencia, cuenta, comensalesSesion])
 
   // Manejar selección de comensal existente
   const handleSeleccionarComensal = (alias) => {
     setComensalActivo(alias)
+    setComensalesSesion((prev) => (prev.includes(alias) ? prev : [...prev, alias]))
     setErrorRegistro(null)
     setAliasSugerido(null)
     setPaso(2)
@@ -192,6 +211,9 @@ export function TomarPedido() {
 
       setExitoRegistro(`Comensal "${aliasNormalizado}" registrado`)
       setNuevoAlias('')
+      setComensalesSesion((prev) =>
+        prev.includes(aliasNormalizado) ? prev : [...prev, aliasNormalizado]
+      )
       // Recargar cuenta para actualizar lista de la mesa
       await cargarDatosMesa()
 
@@ -203,7 +225,27 @@ export function TomarPedido() {
 
       if (accion.tipo === 'alias_en_uso') {
         setErrorRegistro('Ese nombre ya está en la mesa')
-        const existente = buscarPorClave(comensales, aliasTipeado)
+        let listaParaBuscar = comensales
+        if (!accion.alias) {
+          try {
+            const cuentaActualizada = await obtenerCuenta(idMesa)
+            setCuenta(cuentaActualizada)
+            listaParaBuscar = unirComensales({
+              presencia,
+              cuenta: cuentaActualizada,
+            })
+          } catch {
+            // Si falla la recarga de cuenta, se busca en la lista disponible
+          }
+        }
+        // backendCanoniza = true: confirmado en backend/src/controllers/pedidos.controller.js
+        // (resolverAliasCanonicos líneas 225-300, aliasDelComensal líneas 145-161 y crear líneas 330-348)
+        const existente = opcionPedirExistente({
+          error: err,
+          lista: listaParaBuscar,
+          texto: aliasTipeado,
+          backendCanoniza: true,
+        })
         if (existente) {
           setAliasSugerido(existente)
         }
