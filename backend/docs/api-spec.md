@@ -2841,6 +2841,7 @@ constructor. Las tablas, la función y las vistas son de `database/scripts/27_in
 | PUT | `/inventario/insumos/:id` | **admin** | Nombre, unidad, mínimo y alta/baja. **No** el stock |
 | POST | `/inventario/insumos/:id/movimientos` | **admin** | Entrada, ajuste o merma |
 | GET | `/inventario/insumos/:id/movimientos` | **admin** | Historial del insumo, lo más nuevo primero |
+| GET | `/inventario/carta` | **admin** | Platos y opciones con su disponibilidad y si tienen receta (D-17 PR 3) |
 | GET | `/platos/:id/receta` | **admin** | Receta del plato |
 | PUT | `/platos/:id/receta` | **admin** | Reemplaza la receta completa |
 | GET | `/ingredientes/:id/receta` | **admin** | Receta de una opción del constructor |
@@ -3064,6 +3065,117 @@ El libro del insumo, **lo más reciente primero**.
   publicaría datos del personal en una lista que el panel ya sabe resolver.
 - **400** si `limite` o `desde` no son válidos · **404** si el insumo no existe (para no
   confundir "sin movimientos" con "ese id no existe").
+
+### GET /inventario/carta — admin (D-17 PR 3)
+
+La carta entera con **su disponibilidad y si tiene receta**: es lo que necesita la pestaña de
+**Recetas** del panel (P-22) para listar de una sola llamada qué hay que configurar y qué está
+agotado, sin pedir plato por plato.
+
+Sale de la vista **`v_carta_disponible`** (`database/scripts/27_inventario.sql`), que es quien
+decide qué es "disponible": el backend no recalcula nada. A la vista se le añaden, con un JOIN,
+los datos que el panel necesita para agrupar las filas —la categoría del plato, y de qué plato
+y de qué paso es cada opción del constructor—, que la vista no trae.
+
+```http
+GET /api/inventario/carta
+Authorization: Bearer <token de admin>
+```
+
+```json
+{
+  "platos": [
+    {
+      "id": 12,
+      "nombre": "Arepa de Huevo",
+      "categoria": "Entradas",
+      "disponible": true,
+      "stock_suficiente": false,
+      "disponible_efectivo": false,
+      "motivo": "stock",
+      "tiene_receta": true
+    },
+    {
+      "id": 1001,
+      "nombre": "Bowl Personalizado",
+      "categoria": "Bowls",
+      "disponible": true,
+      "stock_suficiente": true,
+      "disponible_efectivo": true,
+      "motivo": null,
+      "tiene_receta": false
+    }
+  ],
+  "ingredientes": [
+    {
+      "id": 7,
+      "nombre": "Panceta Crujiente",
+      "id_plato": 1001,
+      "plato": "Bowl Personalizado",
+      "id_paso": 4,
+      "paso": "Proteína",
+      "disponible": false,
+      "stock_suficiente": true,
+      "disponible_efectivo": false,
+      "motivo": "manual",
+      "tiene_receta": true
+    }
+  ]
+}
+```
+
+**Dos listas y no una**, aunque la vista las devuelva juntas con un `tipo`: un plato y una
+opción no se pintan igual (la opción cuelga de un paso de su plato) y el panel las muestra en
+dos tablas. Separarlas aquí le ahorra filtrar por `tipo` en el cliente, y el `tipo` deja de
+hacer falta en cada fila.
+
+| Campo | Qué es |
+|---|---|
+| `id` | `id_plato` o `id_ingrediente`, según la lista |
+| `nombre` | El del plato o de la opción |
+| `categoria` | Solo en `platos`: el nombre de su categoría (`null` si no tiene) |
+| `id_plato`, `plato` | Solo en `ingredientes`: a qué plato pertenece la opción |
+| `id_paso`, `paso` | Solo en `ingredientes`: de qué paso del constructor es |
+| `disponible` | El **interruptor manual** de la cocina |
+| `stock_suficiente` | Lo que **calcula la base** a partir del stock de la receta |
+| `disponible_efectivo` | `disponible AND stock_suficiente`: lo que ve el comensal |
+| `motivo` | `null` si está disponible · `"manual"` si lo apagó la cocina · `"stock"` si no alcanza el inventario. El manual **gana**: un plato apagado a mano y además sin stock dice `"manual"` |
+| `tiene_receta` | Si tiene receta en insumos. En `false` **no controla inventario**: se puede pedir siempre |
+
+- Los `id` llegan como **números JSON**, no como texto.
+- Orden: los platos por **categoría y nombre**; las opciones por **plato, paso y nombre**. Es
+  el orden en que el panel las pinta, así que no tiene que reordenar nada.
+- Salen **todos** los platos y todas las opciones, también los agotados y los apagados a mano:
+  es una pantalla de administración, no el menú del comensal (ese es `GET /menu`, que solo
+  muestra lo disponible).
+
+**Filtros opcionales** (`.strict()`: un parámetro que no esté aquí es **400**):
+
+| Parámetro | Valores | Qué hace |
+|---|---|---|
+| `tipo` | `plato`, `ingrediente` | Devuelve solo esa lista; la otra viaja **vacía**, no se omite |
+| `sin_receta` | `true`, `false` | Con `true`, solo lo que **no tiene receta**: es la lista de "falta configurar" de la pestaña |
+| `q` | Texto, hasta 80 | Busca por **nombre**, sin distinguir mayúsculas. Va parametrizado (`ILIKE $1`), nunca pegado al SQL |
+
+```http
+GET /api/inventario/carta?sin_receta=true&tipo=plato
+GET /api/inventario/carta?q=arepa
+```
+
+- Un valor fuera de la lista es **400** y no se ignora: un `?tipo=platos` que devolviera todo
+  haría creer al panel que no hay nada pendiente de configurar.
+- `q` filtra por el nombre del plato o de la opción, no por el del plato padre: buscar "bowl"
+  no trae todas sus opciones.
+- Con `tipo=ingrediente`, la respuesta sigue trayendo `"platos": []`, para que el cliente no
+  tenga que comprobar si la clave existe.
+
+**Qué cambia la disponibilidad.** Nada de esta ruta: es de solo lectura. La cambian un
+movimiento de inventario, activar o desactivar un insumo, editar una receta
+(`PUT /platos/:id/receta`) o el interruptor manual (`PATCH /platos/:id/disponible`). La base
+recalcula y publica el aviso por el canal `inventario`, y el panel lo recibe en vivo como
+`plato:disponibilidad` o `ingrediente:disponibilidad` (ver
+[Avisos de inventario en vivo](#avisos-de-inventario-en-vivo-d-17)): esta llamada es para
+**cargar la pantalla**, no para refrescarla en bucle.
 
 ### GET /platos/:id/receta y GET /ingredientes/:id/receta — admin
 
