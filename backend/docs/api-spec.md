@@ -712,6 +712,46 @@ Si no se envían, **el comportamiento no cambia**: el plato conserva lo que ten�
 > Lo que agregó el constructor (`personalizable`, `calorias` en `platos`;
 > `alergenos` en `ingredientes`) sale por `GET /menu`, no por estas rutas.
 
+#### `disponible`, `stock_suficiente` y el efectivo
+
+`GET /platos` y `GET /platos/:id` devuelven la fila de la base, así que traen **las dos
+columnas** de disponibilidad por separado. Son cosas distintas y el panel necesita las dos:
+
+| Campo | Quién lo mueve | Qué significa |
+|---|---|---|
+| `disponible` | **La cocina**, con `PATCH /platos/:id/disponible` (y el admin con el `PUT`) | El **interruptor manual**: "se acabó" / "volvió". Es una decisión de una persona |
+| `stock_suficiente` | **La base**, sola (P-19, `database/scripts/27_inventario.sql`) | Si el **inventario** alcanza para una unidad del plato. El backend **nunca** lo escribe. Un plato **sin receta** lo tiene en `true`: no controla inventario |
+| *efectivo* | — | `disponible AND stock_suficiente`: **lo que ve el comensal**. No es una columna; lo publica `v_carta_disponible` como `disponible_efectivo` |
+
+```json
+{ "id_plato": 12, "nombre": "Arepa de Huevo", "disponible": true, "stock_suficiente": false }
+```
+
+Ese plato **no se puede pedir** (da **409 `sin_stock`**) aunque `disponible` sea `true`: la
+cocina lo dio por repuesto, pero falta un insumo de su receta. Quien pinta una carta tiene que
+mirar **las dos**, nunca `disponible` a secas:
+
+- `GET /menu` ya hace la cuenta y **solo trae lo pedible**, así que la PWA del comensal no
+  necesita estos campos.
+- Un panel de administración (KDS de agotados, pestaña de Menú del restaurante) sí los
+  necesita, porque tiene que **distinguir por qué** está agotado: el interruptor se puede
+  cambiar con un botón, el stock no. Con solo `disponible`, un plato agotado por inventario
+  se ve "DISPONIBLE" al recargar (issue #137).
+- `motivo` de `GET /inventario/carta` dice lo mismo ya resuelto: `"manual"` o `"stock"`,
+  y el manual gana cuando los dos están apagados.
+
+**Los avisos en vivo llevan el EFECTIVO, en los tres caminos** (issue #136). El payload de
+`plato:disponibilidad` e `ingrediente:disponibilidad` tiene **un solo** booleano, y es el AND:
+
+| Camino | Quién avisa |
+|---|---|
+| `PATCH /platos/:id/disponible` y `PATCH /ingredientes/:id/disponible` | El controlador, con `disponible AND stock_suficiente` de la fila que acaba de guardar |
+| Canal `inventario` de PostgreSQL | El oyente, con el `disponible` del payload, que la base ya calcula como el efectivo |
+| Arranque y reconexión del canal | El oyente, con `disponible_efectivo` de `v_carta_disponible` |
+
+Un solo booleano porque el evento va **a todos los sockets**, incluidas las mesas: a un
+comensal le da igual por qué no hay arepa. Quien necesita el detalle lo pide por REST.
+
 ### PATCH /platos/:id/disponible — agotar o reponer (D-05)
 
 El interruptor de "se acabó" / "volvió" del plato, **gemelo del de ingredientes**
@@ -749,6 +789,18 @@ reciben 403.
 El paso 2 va antes del 3 y no al revés: si se avisara primero, un cliente que reaccione al
 evento pidiendo `GET /menu` podría recibir la copia vieja de la caché (TTL 60 s) y seguir
 mostrando el plato como disponible.
+
+> **El `disponible` del aviso es el EFECTIVO, no el interruptor (issue #136).** Lo que viaja
+> es `disponible AND stock_suficiente`, igual que en los otros dos caminos. Así que **encender
+> a mano un plato sin stock responde 200 y deja el interruptor en `true`, pero avisa
+> `disponible: false`**: la cocina queda apuntada como "este plato sí se puede hacer", y el
+> plato volverá solo cuando haya inventario. Antes se mandaba el interruptor a secas, y la PWA
+> y el KDS lo mostraban disponible mientras pedirlo daba **409 `sin_stock`**.
+>
+> La cuenta vive en un solo sitio (`src/services/disponibilidad-efectiva.js`) para que los
+> tres caminos no puedan discrepar otra vez. El **cuerpo de la respuesta** sigue siendo la
+> fila de la base, con sus dos columnas por separado: el panel necesita saber cuál de las dos
+> apagó el plato.
 
 **El aviso es un extra, no parte de la operación.** Se manda
 `POST /internal/plato-disponibilidad` con `{ id_plato, disponible, eventId }`, y el
@@ -925,6 +977,13 @@ El interruptor de "se acabó" / "volvió". Cuerpo con **un solo campo**:
 El paso 2 va antes del 3 y no al revés: si se avisara primero, un cliente que reaccione al
 evento pidiendo `GET /menu` podría recibir la copia vieja de la caché (TTL 60 s) y seguir
 mostrando el ingrediente como disponible. Es una carrera real.
+
+> **El `disponible` del aviso es el EFECTIVO (issue #136)**, igual que en platos:
+> `disponible AND stock_suficiente`. Reponer a mano una opción cuyo insumo se agotó responde
+> 200 y deja el interruptor encendido, pero avisa `disponible: false`, así que el constructor
+> no la ofrece hasta que haya inventario. La respuesta incluye **`stock_suficiente`** junto a
+> `disponible`, para que el panel vea cuál de las dos la apagó (ver
+> [la tabla de los tres campos](#disponible-stock_suficiente-y-el-efectivo)).
 
 **El aviso es un extra, no parte de la operación.** Se manda
 `POST /internal/ingrediente-disponibilidad` con `{ id_ingrediente, disponible, eventId }`, y
