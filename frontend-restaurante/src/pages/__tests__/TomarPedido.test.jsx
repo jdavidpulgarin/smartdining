@@ -5,6 +5,7 @@ import { TomarPedido } from '../TomarPedido'
 import { AuthProvider } from '../../context/AuthContext'
 import { TablesProvider } from '../../context/TablesContext'
 import { TableDetailModal } from '../../components/TableDetailModal'
+import { MENU_REAL_FIXTURE, clonarMenuReal } from '../../test/fixtures/menuReal'
 
 describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
   beforeEach(() => {
@@ -258,56 +259,12 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
   })
 
   describe('Paso 2: Menú y constructor para tomar pedido (J-16)', () => {
-    const mockMenu = {
-      categorias: [
-        {
-          id_categoria: 1,
-          nombre: 'Hamburguesas',
-          platos: [
-            {
-              id_plato: 10,
-              nombre: 'Hamburguesa Smart Angus',
-              precio: 34000,
-              disponible: true,
-              personalizable: false,
-              descripcion: 'Carne angus jugosa',
-            },
-            {
-              id_plato: 11,
-              nombre: 'Costillas BBQ',
-              precio: 42000,
-              disponible: false,
-              personalizable: false,
-              descripcion: 'Costillas tiernas',
-            },
-            {
-              id_plato: 12,
-              nombre: 'Bowl Personalizado',
-              precio: 28000,
-              disponible: true,
-              personalizable: true,
-              descripcion: 'Arma tu bowl a tu gusto',
-              pasos: [
-                {
-                  id_paso: 1,
-                  nombre: 'Elige tu Base',
-                  orden: 1,
-                  min_sel: 1,
-                  max_sel: 1,
-                  obligatorio: true,
-                  ingredientes: [
-                    { id_ingrediente: 101, nombre: 'Arroz Integral', precio_extra: 0, disponible: true },
-                    { id_ingrediente: 102, nombre: 'Quinua Orgánica', precio_extra: 3000, disponible: true },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    }
+    it('agrega un plato estándar que NO trae campo disponible en GET /api/menu', async () => {
+      const menuReal = clonarMenuReal()
+      // Verificación explícita de que el fixture real no tiene "disponible" ni "nombre" en categorías
+      expect('disponible' in menuReal.categorias[0].platos[0]).toBe(false)
+      expect('nombre' in menuReal.categorias[0]).toBe(false)
 
-    it('lista los platos del menú y permite agregar un plato estándar al carrito', async () => {
       vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
         if (url.includes('/api/mesas/5/cuenta')) {
           return {
@@ -320,7 +277,7 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
           return {
             ok: true,
             headers: new Headers({ 'content-type': 'application/json' }),
-            json: async () => mockMenu,
+            json: async () => menuReal,
           }
         }
         return { ok: true, json: async () => ({}) }
@@ -336,7 +293,7 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
       await screen.findByText('Hamburguesa Smart Angus')
       expect(screen.getAllByText(/Pidiendo para:/i).length).toBeGreaterThan(0)
 
-      // Agregar la hamburguesa
+      // Agregar la hamburguesa (sin campo disponible en el objeto plato)
       const btnAgregar = screen.getAllByRole('button', { name: /agregar/i })[0]
       fireEvent.click(btnAgregar)
 
@@ -346,7 +303,60 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
       })
     })
 
-    it('muestra plato agotado deshabilitado e impide agregarlo', async () => {
+    it('muestra los botones de categoría usando el campo real "categoria" y permite cambiar de categoría', async () => {
+      vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+        if (url.includes('/api/mesas/5/cuenta')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id_mesa: 5, comensales: [{ comensal: 'Beto' }] }),
+          }
+        }
+        if (url.includes('/api/menu')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => MENU_REAL_FIXTURE,
+          }
+        }
+        return { ok: true, json: async () => ({}) }
+      })
+
+      renderTomarPedido('mesero', 5)
+
+      fireEvent.click(await screen.findByText('Beto'))
+
+      // Los botones de categoría deben mostrar el texto de "categoria" ("Hamburguesas", "Bebidas")
+      const btnHamburguesas = await screen.findByRole('button', { name: 'Hamburguesas' })
+      const btnBebidas = screen.getByRole('button', { name: 'Bebidas' })
+      expect(btnHamburguesas).toBeInTheDocument()
+      expect(btnBebidas).toBeInTheDocument()
+
+      // Cambiar a la categoría "Bebidas" y agregar Limonada Natural (sin campo disponible)
+      fireEvent.click(btnBebidas)
+      await screen.findByText('Limonada Natural')
+      fireEvent.click(screen.getByRole('button', { name: /agregar/i }))
+
+      await waitFor(() => {
+        expect(screen.getByText(/Ver comanda \(1\)/i)).toBeInTheDocument()
+      })
+    })
+
+    it('muestra plato con disponible === false como agotado e impide agregarlo', async () => {
+      const menuConAgotado = clonarMenuReal()
+      menuConAgotado.categorias[0].platos.push({
+        id_plato: 11,
+        nombre: 'Costillas BBQ',
+        descripcion: 'Costillas tiernas',
+        precio: 42000,
+        url_imagen: null,
+        tiempo_estimado: 20,
+        personalizable: false,
+        calorias: 750,
+        disponible: false,
+        pasos: [],
+      })
+
       vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
         if (url.includes('/api/mesas/5/cuenta')) {
           return {
@@ -359,7 +369,7 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
           return {
             ok: true,
             headers: new Headers({ 'content-type': 'application/json' }),
-            json: async () => mockMenu,
+            json: async () => menuConAgotado,
           }
         }
         return { ok: true, json: async () => ({}) }
@@ -373,10 +383,12 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
       await screen.findByText('Costillas BBQ')
       expect(screen.getByText(/Agotado/i)).toBeInTheDocument()
 
-      // El botón de agregar de las Costillas debe estar deshabilitado
+      // El botón de agregar de las Costillas debe estar deshabilitado y no agregar al carrito
       const botonesAgregar = screen.getAllByRole('button', { name: /agregar/i })
       const btnAgotado = botonesAgregar.find((b) => b.disabled)
       expect(btnAgotado).toBeDefined()
+      fireEvent.click(btnAgotado)
+      expect(screen.queryByText(/Ver comanda/i)).not.toBeInTheDocument()
     })
 
     it('permite personalizar plato en ConstructorModal y agregar con ingredientes y recargo', async () => {
@@ -392,7 +404,7 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
           return {
             ok: true,
             headers: new Headers({ 'content-type': 'application/json' }),
-            json: async () => mockMenu,
+            json: async () => MENU_REAL_FIXTURE,
           }
         }
         return { ok: true, json: async () => ({}) }
@@ -441,7 +453,7 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
           return {
             ok: true,
             headers: new Headers({ 'content-type': 'application/json' }),
-            json: async () => mockMenu,
+            json: async () => MENU_REAL_FIXTURE,
           }
         }
         return { ok: true, json: async () => ({}) }
@@ -484,30 +496,7 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
   })
 
   describe('Paso 3: Resumen y envío del pedido del mesero (J-16)', () => {
-    const mockMenu = {
-      categorias: [
-        {
-          id_categoria: 1,
-          nombre: 'Hamburguesas',
-          platos: [
-            {
-              id_plato: 10,
-              nombre: 'Hamburguesa Smart Angus',
-              precio: 34000,
-              disponible: true,
-              personalizable: false,
-            },
-            {
-              id_plato: 20,
-              nombre: 'Papas Rústicas',
-              precio: 14000,
-              disponible: true,
-              personalizable: false,
-            },
-          ],
-        },
-      ],
-    }
+    const mockMenu = MENU_REAL_FIXTURE
 
     it('muestra el resumen agrupado por comensal con total y permite enviar el pedido exitosamente (201)', async () => {
       let pedidoEnviado = null

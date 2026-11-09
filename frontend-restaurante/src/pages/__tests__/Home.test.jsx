@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Home } from '../Home'
 import { TablesProvider } from '../../context/TablesContext'
+import { MENU_REAL_FIXTURE } from '../../test/fixtures/menuReal'
 
 describe('Flujo de Listado de Mesas en Home', () => {
   beforeEach(() => {
@@ -16,16 +17,6 @@ describe('Flujo de Listado de Mesas en Home', () => {
       { id_mesa: 2, numero: 2, capacidad: 2, ubicacion: 'Salón', estado: 'ocupada' },
       { id_mesa: 3, numero: 3, capacidad: 6, ubicacion: 'VIP', estado: 'cuenta_pedida' },
     ]
-
-    const mockMenu = {
-      categorias: [
-        {
-          id_categoria: 1,
-          nombre: 'Especiales',
-          platos: [{ id_plato: 10, nombre: 'Burger Gourmet', precio: 32000 }],
-        },
-      ],
-    }
 
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
       if (url.includes('/api/mesas') && !url.includes('/cuenta')) {
@@ -43,7 +34,7 @@ describe('Flujo de Listado de Mesas en Home', () => {
       if (url.includes('/api/menu')) {
         return {
           ok: true,
-          json: async () => mockMenu,
+          json: async () => MENU_REAL_FIXTURE,
         }
       }
       return {
