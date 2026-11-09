@@ -86,8 +86,18 @@ test('carga los platos conservando el orden de la base', () => {
 })
 
 test('se queda solo con los campos que el panel usa', () => {
+  // ISSUE #137: son cinco, no tres. `disponible` es el EFECTIVO (lo que se
+  // muestra), `disponible_manual` es el interruptor que mueve el boton y
+  // `stock_suficiente` es lo que calcula la base. El precio y lo demas de la
+  // fila se descartan igual que antes.
   const estado = conPlatos({ id_plato: 1, nombre: 'Sancocho', precio: 32000 })
-  assert.deepEqual(Object.keys(platosDe(estado)[0]).sort(), ['disponible', 'id_plato', 'nombre'])
+  assert.deepEqual(Object.keys(platosDe(estado)[0]).sort(), [
+    'disponible',
+    'disponible_manual',
+    'id_plato',
+    'nombre',
+    'stock_suficiente',
+  ])
 })
 
 test('una fila sin id usable se descarta', () => {

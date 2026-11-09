@@ -161,6 +161,17 @@ export async function obtenerPlatos() {
 }
 
 /**
+ * GET /api/platos/:id — un plato suelto (ISSUE #137).
+ *
+ * SIN token, como la lista: es publica. Se usa al llegar
+ * `plato:disponibilidad`, porque el evento trae UN booleano (el efectivo) y no
+ * dice si lo apago la cocina o el inventario; la fila si trae las dos columnas.
+ */
+export function obtenerPlato(idPlato) {
+  return pedir(`/platos/${idPlato}`)
+}
+
+/**
  * PATCH /api/platos/:id/disponible — agotar o reponer un plato (D-14).
  *
  * El endpoint lo entregó el PR #88; aquí solo se consume.

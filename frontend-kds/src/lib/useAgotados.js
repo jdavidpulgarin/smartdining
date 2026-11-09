@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useReducer } from 'react'
+import { useCallback, useEffect, useReducer, useRef } from 'react'
 import {
   cambiarDisponibilidadIngrediente,
   cambiarDisponibilidadPlato,
   obtenerMenu,
+  obtenerPlato,
   obtenerPlatos,
 } from '../services/api'
 import {
   aplicarEvento,
   aplicarEventoPlato,
+  aplicarPlatoReleido,
   cargarMenu,
   cargarPlatos,
   confirmarCambio,
@@ -57,6 +59,7 @@ const ACCIONES = {
   revertirPlato: (estado, { id, mensaje }) => revertirCambioPlato(estado, id, mensaje),
   limpiarErrorPlato: (estado, { id }) => limpiarErrorPlato(estado, id),
   eventoPlato: aplicarEventoPlato,
+  platoReleido: aplicarPlatoReleido,
 }
 
 function reducer(estado, accion) {
@@ -163,10 +166,17 @@ export function useAgotados({ token }) {
           tipo: 'confirmarPlato',
           datos: {
             id: idPlato,
-            // Manda el servidor, no lo que se pidio.
+            // Manda el servidor, no lo que se pidio. `disponible` de la fila es
+            // el interruptor MANUAL; el efectivo lo recalcula el estado con
+            // stock_suficiente, que la misma respuesta trae (ISSUE #136/#137).
             disponible: typeof plato?.disponible === 'boolean' ? plato.disponible : disponible,
           },
         })
+        // La fila completa, para no perder el stock que acaba de decir el
+        // servidor (un plato repuesto a mano puede seguir sin inventario).
+        if (plato && typeof plato === 'object') {
+          despachar({ tipo: 'platoReleido', datos: { id: idPlato, fila: plato } })
+        }
         return { ok: true }
       } catch (error) {
         despachar({ tipo: 'revertirPlato', datos: { id: idPlato, mensaje: error.message } })
@@ -180,8 +190,37 @@ export function useAgotados({ token }) {
     despachar({ tipo: 'evento', datos: evento })
   }, [])
 
-  const alLlegarEventoPlato = useCallback((evento) => {
+  /**
+   * plato:disponibilidad (EVENTS.md §5.4). ISSUE #137.
+   *
+   * El evento trae UN booleano, el EFECTIVO, y no dice si lo apago la cocina o
+   * el inventario. Se aplica primero —asi la fila cambia al instante, y el orden
+   * por `emitidoEn` lo decide el estado— y despues se RELEE el plato
+   * (GET /platos/:id, publica) para quedarse con las dos columnas de verdad,
+   * igual que hace el panel del restaurante (#133).
+   *
+   * Si la relectura falla, no se rompe nada: queda lo que aplico el evento. De
+   * varias relecturas del mismo plato solo vale la ultima que se pidio, para que
+   * una lenta no pise a una nueva.
+   */
+  const relecturas = useRef(new Map())
+
+  const alLlegarEventoPlato = useCallback(async (evento) => {
     despachar({ tipo: 'eventoPlato', datos: evento })
+
+    const id = Number(evento?.id_plato)
+    if (!Number.isInteger(id) || id <= 0) return
+
+    const turno = (relecturas.current.get(id) || 0) + 1
+    relecturas.current.set(id, turno)
+    try {
+      const fila = await obtenerPlato(id)
+      if (relecturas.current.get(id) !== turno) return
+      despachar({ tipo: 'platoReleido', datos: { id, fila } })
+    } catch {
+      // Se queda el valor del evento: es lo mejor que se sabe, y la proxima
+      // recarga del panel lo pone al dia.
+    }
   }, [])
 
   const descartarError = useCallback((idIngrediente) => {
