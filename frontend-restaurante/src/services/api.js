@@ -333,6 +333,44 @@ export const usuariosApi = {
   },
 }
 
+// Inventario (D-17 PR 2): insumos y su libro de movimientos. Todo solo admin.
+// `stock_actual` no se edita por ninguna ruta: lo mueven los movimientos.
+export const inventarioApi = {
+  /** GET /api/inventario/insumos?limite=… → { insumos: [...] } con bajo y agotado calculados */
+  async listar({ limite = 200 } = {}) {
+    return apiFetch(`/inventario/insumos?limite=${limite}`)
+  },
+
+  /** POST /api/inventario/insumos → { insumo, movimiento } (movimiento null sin stock_inicial) */
+  async crear(datos) {
+    return apiFetch('/inventario/insumos', {
+      method: 'POST',
+      body: JSON.stringify(datos),
+    })
+  },
+
+  /** PUT /api/inventario/insumos/:id (parcial: nombre, unidad, stock_minimo, activo) → { insumo } */
+  async actualizar(id, cambios) {
+    return apiFetch(`/inventario/insumos/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(cambios),
+    })
+  },
+
+  /** POST /api/inventario/insumos/:id/movimientos { tipo, cantidad, motivo? } → { movimiento, stock_actual } */
+  async registrarMovimiento(id, datos) {
+    return apiFetch(`/inventario/insumos/${id}/movimientos`, {
+      method: 'POST',
+      body: JSON.stringify(datos),
+    })
+  },
+
+  /** GET /api/inventario/insumos/:id/movimientos?limite=… → { movimientos } (lo más nuevo primero) */
+  async movimientos(id, { limite = 50 } = {}) {
+    return apiFetch(`/inventario/insumos/${id}/movimientos?limite=${limite}`)
+  },
+}
+
 // Datos del restaurante (D-16 parte B): una sola fila, solo leer y actualizar.
 export const configuracionApi = {
   /** GET /api/configuracion/completa (admin) → la fila con id, actualizado_en y actualizado_por */

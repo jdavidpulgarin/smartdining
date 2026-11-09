@@ -10,6 +10,7 @@ const navLinks = [
   { label: 'MENÚ', path: '/menu' },
   { label: 'REPORTES', path: '/reportes' },
   // P-21: solo para admin (el backend también lo exige).
+  { label: 'INVENTARIO', path: '/inventario', soloAdmin: true },
   { label: 'CONFIGURACIÓN', path: '/configuracion', soloAdmin: true },
 ]
 
