@@ -43,50 +43,122 @@ const t = (s) => `2026-11-08T18:00:0${s}Z`
 
 describe('P-14: disponibilidad en vivo, sin recargar', () => {
   let fetchSpy
+  let enBase
 
   beforeEach(() => {
+    enBase = { disponible: true, stock_suficiente: true }
     vi.restoreAllMocks()
     for (const e of Object.keys(oyentes)) delete oyentes[e]
     sessionStorage.setItem('smartdining_token', 'test-token')
     fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
       if (url.includes('/pasos')) return json(pasos)
       if (url.includes('/categorias')) return json({ categorias })
+      if (/\/platos\/101$/.test(url)) return json({ ...platos[0], ...enBase })
       if (url.includes('/platos')) return json({ platos })
       return json({})
     })
   })
 
-  it('Menú: plato:disponibilidad agota y repone el plato sin pedir la carta otra vez', async () => {
+  // La relectura GET /platos/101 devuelve lo que diga `enBase` en ese momento.
+  const ponerEnBase = (campos) => Object.assign(enBase, campos)
+
+  it('Menú: plato:disponibilidad relee SOLO ese plato (no la carta) y aplica lo que dice la base', async () => {
     render(<MemoryRouter><Menu /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
     const llamadas = fetchSpy.mock.calls.length
 
-    act(() => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: false, emitidoEn: t(1) }))
-    expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('AGOTADO')).toBeInTheDocument()
+    ponerEnBase({ disponible: true, stock_suficiente: false })
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: false, emitidoEn: t(1) }))
+    expect(await within(tarjetaDe('Hamburguesa Doble Queso')).findByText('AGOTADO · SIN STOCK')).toBeInTheDocument()
 
-    act(() => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: true, emitidoEn: t(2) }))
-    expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('DISPONIBLE')).toBeInTheDocument()
+    ponerEnBase({ disponible: true, stock_suficiente: true })
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: true, emitidoEn: t(2) }))
+    expect(await within(tarjetaDe('Hamburguesa Doble Queso')).findByText('DISPONIBLE')).toBeInTheDocument()
 
-    expect(fetchSpy.mock.calls.length).toBe(llamadas)
+    const nuevas = fetchSpy.mock.calls.slice(llamadas).map(([url]) => url)
+    expect(nuevas).toHaveLength(2)
+    expect(nuevas.every((u) => /\/platos\/101$/.test(u))).toBe(true)
   })
 
-  it('Menú: un aviso más viejo que el último aplicado se descarta', async () => {
+  it('Menú: un aviso de apagado MANUAL se muestra como AGOTADO, no como sin stock', async () => {
     render(<MemoryRouter><Menu /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
 
-    act(() => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: false, emitidoEn: t(5) }))
-    act(() => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: true, emitidoEn: t(3) }))
+    ponerEnBase({ disponible: false, stock_suficiente: true })
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: false, emitidoEn: t(1) }))
+    const tarjeta = tarjetaDe('Hamburguesa Doble Queso')
+    await waitFor(() => expect(within(tarjeta).getByText('AGOTADO')).toBeInTheDocument())
+    expect(within(tarjeta).queryByText('AGOTADO · SIN STOCK')).not.toBeInTheDocument()
+  })
 
+  it('Menú: si la cocina enciende a mano un plato sin stock, el panel no se cree el "true" del aviso', async () => {
+    // El PATCH manual avisa con el interruptor (true) aunque no haya stock: la
+    // relectura dice la verdad.
+    render(<MemoryRouter><Menu /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+
+    ponerEnBase({ disponible: true, stock_suficiente: false })
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: true, emitidoEn: t(1) }))
+    expect(await within(tarjetaDe('Hamburguesa Doble Queso')).findByText('AGOTADO · SIN STOCK')).toBeInTheDocument()
+  })
+
+  it('Menú: de dos relecturas del mismo plato vale la última que se pidió, aunque llegue primero', async () => {
+    render(<MemoryRouter><Menu /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+
+    let soltarPrimera
+    const respuestas = [
+      new Promise((r) => { soltarPrimera = () => r(json({ ...platos[0], disponible: true, stock_suficiente: false })) }),
+      Promise.resolve(json({ ...platos[0], disponible: true, stock_suficiente: true })),
+    ]
+    fetchSpy.mockImplementation(async (url) => (/\/platos\/101$/.test(url) ? respuestas.shift() : json({})))
+
+    // Sin await: la primera relectura queda colgada hasta soltarPrimera().
+    let primera
+    act(() => { primera = oyentes['plato:disponibilidad']({ id_plato: 101, disponible: false, emitidoEn: t(1) }) })
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: true, emitidoEn: t(2) }))
+    await act(async () => {
+      soltarPrimera()
+      await primera
+    })
+
+    expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('DISPONIBLE')).toBeInTheDocument()
+  })
+
+  it('Menú: sin poder releer, un false con el interruptor encendido se muestra como sin stock', async () => {
+    render(<MemoryRouter><Menu /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+    fetchSpy.mockImplementation(async () => { throw new TypeError('Failed to fetch') })
+
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: false, emitidoEn: t(1) }))
+    expect(await within(tarjetaDe('Hamburguesa Doble Queso')).findByText('AGOTADO · SIN STOCK')).toBeInTheDocument()
+
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: true, emitidoEn: t(2) }))
+    expect(await within(tarjetaDe('Hamburguesa Doble Queso')).findByText('DISPONIBLE')).toBeInTheDocument()
+  })
+
+  it('Menú: un aviso más viejo que el último aplicado se descarta (ni siquiera se relee)', async () => {
+    render(<MemoryRouter><Menu /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+
+    ponerEnBase({ disponible: false, stock_suficiente: true })
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: false, emitidoEn: t(5) }))
+    const llamadas = fetchSpy.mock.calls.length
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: true, emitidoEn: t(3) }))
+
+    expect(fetchSpy.mock.calls.length).toBe(llamadas)
     expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('AGOTADO')).toBeInTheDocument()
   })
 
   it('Menú: ignora un aviso mal formado', async () => {
     render(<MemoryRouter><Menu /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+    const llamadas = fetchSpy.mock.calls.length
 
-    act(() => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: 'no' }))
-    act(() => oyentes['plato:disponibilidad'](null))
+    await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: 'no' }))
+    await act(async () => oyentes['plato:disponibilidad'](null))
 
+    expect(fetchSpy.mock.calls.length).toBe(llamadas)
     expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('DISPONIBLE')).toBeInTheDocument()
   })
 
