@@ -13,6 +13,8 @@ import {
   Flame,
 } from 'lucide-react'
 import { constructorApi, platosApi, mensajeNoGuardado } from '../../services/api'
+import { useSocketListener } from '../../hooks'
+import { crearUltimoPorId } from '../../utils/dedupeEventos'
 
 export function EditorPasos({ dish, onClose, onDishUpdated }) {
   const [loading, setLoading] = useState(true)
@@ -62,6 +64,30 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
       setError(null)
     }, 4000)
   }
+
+  // ingrediente:disponibilidad { id_ingrediente, disponible, emitidoEn }
+  // (EVENTS.md §5.3): el editor es el único lugar del panel que muestra
+  // ingredientes, así que el oyente vive aquí. useSocketListener lo quita al
+  // cerrar el modal. Sin eventId: solo se descarta un aviso más viejo.
+  const [ingredienteViejo] = useState(() => crearUltimoPorId())
+
+  useSocketListener('ingrediente:disponibilidad', (data) => {
+    const idIng = Number(data?.id_ingrediente)
+    if (!Number.isInteger(idIng) || typeof data?.disponible !== 'boolean') return
+    if (ingredienteViejo(idIng, data.emitidoEn)) return
+    setPasos((prev) =>
+      prev.map((paso) =>
+        (paso.ingredientes || []).some((i) => Number(i.id_ingrediente) === idIng)
+          ? {
+              ...paso,
+              ingredientes: paso.ingredientes.map((i) =>
+                Number(i.id_ingrediente) === idIng ? { ...i, disponible: data.disponible } : i
+              ),
+            }
+          : paso
+      )
+    )
+  })
 
   // Recargar pasos del plato
   const recargarPasos = useCallback(async () => {
