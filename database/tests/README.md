@@ -23,6 +23,7 @@ completa está en [`REPORTE-PRUEBAS.md`](REPORTE-PRUEBAS.md).
 | Base de datos | `db.test.js` | PostgreSQL |
 | Integración API + BD | `integracion/api.test.js` | PostgreSQL y backend (`:4000`) |
 | Tiempo real | `tiempo-real/socket.test.js` | PostgreSQL, backend y socket-server (`:4001`) |
+| Concurrencia por la API | `integracion/concurrencia-pedidos.js` | PostgreSQL, Redis, backend y socket-server (ver abajo) |
 | E2E del panel (Playwright) | `frontend-restaurante/e2e/panel.spec.js` | Todo lo anterior y el cliente (`:5174`) |
 
 ### Paso a paso
@@ -61,3 +62,71 @@ defecto son **solo** de la base de pruebas local que crea `docker-compose.test.y
 
 Para usar un Chrome ya instalado en lugar del Chromium de Playwright:
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="<ruta a chrome>" npm run test:e2e`.
+
+## 3. Concurrencia de `POST /api/pedidos` (50 pedidos por las últimas 10 porciones)
+
+Es el caso B de `test_p19_concurrencia.sh`, pero **por la API**: 50 `POST /api/pedidos` a la
+vez contra un plato al que le quedan 10 porciones. Debe salir:
+
+```
+OK    preparado por la API: plato …, insumo … con 10 porciones, mesa 901 abierta y "Ana Prueba" en Redis
+OK    50 POST /api/pedidos simultáneos (… ms): 10 creados (201), 40 con 409 sin_stock, 0 otros
+OK    cada 409 trae faltantes = [el plato], solo con tipo, id y nombre (sin cantidades de bodega)
+OK    los pedidos creados tienen código único, estado recibido y total 9000
+OK    GET /inventario/insumos/:id → stock_actual 0 y agotado
+OK    en la base: stock 0 y nunca negativo (mínimo del libro: 0)
+OK    el libro cuadra: SUM(movimientos) = stock_actual, con 10 reservas
+OK    en la base: 10 pedidos, 10 detalles, todos a nombre de "Ana Prueba"; ningún rechazado quedó a medias
+OK    GET /inventario/carta: el plato quedó agotado por stock (disponible_efectivo false, motivo "stock"; …)
+OK    un pedido más con el plato agotado → 409 (sin_stock)
+=== CONCURRENCIA POR LA API PASADA ===
+```
+
+Cualquier `500`, `503 reintentar` (deadlock) u otro código cuenta como falla y sale en el resumen.
+
+**Qué usa de verdad.** Los datos se crean por la API (categoría, plato, insumo con
+`stock_inicial`, receta, mesa 901): no hay `INSERT` a mano. Abrir la mesa necesita el
+**socket-server** (le pide el QR), y cada pedido lleva el comensal «Ana Prueba», registrado
+con `POST /mesas/:id/comensales`, que responde **503 sin Redis**: así **Redis** también entra
+en cada pedido (el backend resuelve el alias ahí). Al final todo se borra (pedidos y datos por
+SQL, el alias de Redis por la API). Si una corrida se corta, la siguiente limpia lo que quedó.
+
+**Paso a paso.** Un proyecto de compose **aparte** (no toca el `pgdata` de desarrollo); el
+backend y el socket-server corren en tu máquina y comparten `JWT_SECRET` e `INTERNAL_API_KEY`.
+
+```bash
+# 1. PostgreSQL 16 + Redis en un proyecto aparte (puertos 5434 y 6380)
+export COMPOSE_PROJECT_NAME=sdconcurrencia POSTGRES_PORT=5434 REDIS_PORT=6380
+docker compose up -d
+until docker compose exec -T postgres pg_isready -h 127.0.0.1 -U postgres -d smartdining; do sleep 2; done
+docker compose exec -T postgres psql -q -U postgres -d smartdining < backend/scripts/fijar-password-demo.sql
+
+# 2. Claves de prueba, las mismas para los dos servicios (no se imprimen)
+export JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+export INTERNAL_API_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+export QR_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+export REDIS_URL=redis://localhost:6380
+
+# 3. Cada uno en su terminal, con las variables del paso 2 (las de la línea pisan el .env)
+(cd socket-server && PORT=4101 BACKEND_URL=http://localhost:4100 node server.js)
+(cd backend && PORT=4100 PGPORT=5434 PGDATABASE=smartdining SOCKET_URL=http://localhost:4101 node server.js)
+
+# 4. La prueba
+cd database && npm install
+API_URL=http://localhost:4100 PGPORT=5434 PGDATABASE=smartdining npm run test:concurrencia
+
+# 5. Apagar y borrar SOLO el proyecto de prueba
+docker compose down -v
+unset COMPOSE_PROJECT_NAME POSTGRES_PORT REDIS_PORT JWT_SECRET INTERNAL_API_KEY QR_SECRET REDIS_URL
+```
+
+Variables: `API_URL` (sin `/api`, por defecto `http://localhost:4000`), `PG*` (la **misma** base
+del backend), `ADMIN_EMAIL`/`ADMIN_PASSWORD` (por defecto el admin de demo), `PEDIDOS` (50),
+`PORCIONES` (10) y `MESA_NUMERO` (901; si esa mesa existe con pedidos ajenos, la prueba no
+arranca). Sale con código 0 si todo pasa.
+
+Con `PEDIDOS=100 PORCIONES=7` también pasa (7 creados, 93 `sin_stock`).
+
+> `POST /api/platos` sin `tiempo_preparacion_estimado` responde **500** (inserta `NULL` en
+> una columna `NOT NULL` en vez de dejar el `DEFAULT`). El script lo manda explícito; el
+> arreglo es del backend.
