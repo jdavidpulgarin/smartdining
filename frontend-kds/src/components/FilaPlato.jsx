@@ -18,19 +18,25 @@ export default function FilaPlato({ plato, enVuelo, error, onConmutar, onDescart
   const { id_plato: id, nombre, disponible } = plato
   const rotulo = rotuloDisponibilidad(disponible)
 
-  // Hoy siempre null: el backend todavia no dice POR QUE esta agotado. Cuando
-  // lo diga, la etiqueta aparece aqui sola (ver motivoAgotado en lib/agotados).
+  // El motivo: 'stock' cuando lo agoto el inventario con el interruptor
+  // encendido, null si lo apago la cocina (ver motivoAgotado en lib/agotados).
   const motivo = motivoAgotado(plato)
+
+  // ISSUE #137: el boton conmuta SOLO el interruptor MANUAL, nunca el stock.
+  // `disponible` es el efectivo (manual Y stock), asi que usarlo aqui mandaria
+  // el valor equivocado en un plato encendido a mano y sin inventario: pediria
+  // `true` cuando ya estaba en `true`, y el agotado no se podria reportar.
+  const manual = plato.disponible_manual ?? disponible
 
   return (
     <li>
       <button
         type="button"
-        onClick={() => onConmutar(id, !disponible)}
+        onClick={() => onConmutar(id, !manual)}
         disabled={enVuelo}
         aria-pressed={!disponible}
-        aria-label={`${nombre}: ${rotulo}. Toca para marcar como ${
-          disponible ? 'agotado' : 'disponible'
+        aria-label={`${nombre}: ${rotulo}${motivo === 'stock' ? ' por falta de inventario' : ''}. Toca para marcar como ${
+          manual ? 'agotado' : 'disponible'
         }`}
         className={[
           'flex min-h-14 w-full items-center justify-between gap-3 rounded-xl border px-4 py-2 text-left',
