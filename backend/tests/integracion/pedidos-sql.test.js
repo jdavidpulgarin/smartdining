@@ -27,6 +27,7 @@ const { Pool } = require('pg');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const kdsService = require('../../src/services/kds.service');
+const transaccionesService = require('../../src/services/transacciones.service');
 const autorInexistente = require('../../src/services/autor-inexistente');
 
 let sonda = null;
@@ -222,3 +223,47 @@ test('El tablero del KDS pasa por el mismo servicio, y traduce igual', async (t)
   );
 });
 
+test('El cobro que liquida la cuenta tambien escribe historial, y traduce igual', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const fantasma = await idFantasma();
+  const pedido = await pedidosService.crearConDetalles({
+    id_mesa: mesa.id_mesa,
+    id_usuario: usuarioReal.id_usuario,
+    items: unItem(),
+  });
+  // Solo un cobro que liquida Y con el pedido ENTREGADO escribe historial: es
+  // la unica transicion legal hacia 'pagado'.
+  for (const estado of ['en_preparacion', 'listo', 'entregado']) {
+    await pedidosService.actualizarEstado(pedido.id_pedido, estado, null, usuarioReal.id_usuario);
+  }
+  const { rows: saldo } = await sonda.query('SELECT obtener_saldo_pendiente($1) AS s', [
+    pedido.id_pedido,
+  ]);
+
+  await assert.rejects(
+    () => transaccionesService.registrarPago({
+      id_pedido: pedido.id_pedido,
+      metodo_pago: 'efectivo',
+      monto: Number(saldo[0].s),
+      estado: 'completada',
+      id_usuario: fantasma,
+    }),
+    (err) => {
+      assert.strictEqual(err.status, 409);
+      assert.strictEqual(err.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+      return true;
+    }
+  );
+
+  // Y el pago no quedo a medias: ni transaccion, ni pedido en 'pagado'.
+  const transacciones = await cuantas(
+    'SELECT COUNT(*) AS n FROM transacciones WHERE id_pedido = $1',
+    [pedido.id_pedido]
+  );
+  assert.strictEqual(transacciones, 0, 'la transaccion se deshizo con el resto');
+  const { rows } = await sonda.query('SELECT estado FROM pedidos WHERE id_pedido = $1', [
+    pedido.id_pedido,
+  ]);
+  assert.strictEqual(rows[0].estado, 'entregado', 'el pedido sigue sin cobrar');
+});

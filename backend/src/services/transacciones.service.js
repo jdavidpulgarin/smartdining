@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const mesasService = require('./mesas.service');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 // Tabla transacciones (docs/modelo-er.md): id_transaccion, id_pedido,
 // metodo_pago, monto, estado_transaccion, referencia_externa, creado_en.
@@ -181,7 +182,13 @@ async function registrarPago({
     };
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    // El AUTOR, otra vez por la misma clave ajena: cuando el cobro liquida la
+    // cuenta de un pedido ya entregado, este servicio escribe la linea de
+    // historial_estados del paso a 'pagado' con el id del cajero. Si ese
+    // usuario ya se borro, el 23503 de fk_historial_usuario salia como el 409
+    // generico. Lo demas no cambia: el P0001 de tr_validar_transaccion_financiera
+    // -pagar de mas- sigue llegando con el mensaje del trigger.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }

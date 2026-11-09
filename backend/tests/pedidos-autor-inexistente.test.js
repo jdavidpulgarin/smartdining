@@ -285,3 +285,90 @@ test('Un cambio de estado: el P0001 del trigger de transiciones no se disfraza',
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// POST /transacciones: el cobro que liquida la cuenta
+//
+// La misma clave ajena por un tercer camino. Un cobro solo escribe
+// historial_estados cuando liquida la cuenta de un pedido YA ENTREGADO: es la
+// unica transicion legal hacia 'pagado' (tr_validar_transicion_estado). Un
+// abono parcial, o un cobro con la comida aun en cocina, no pasan por ahi, y
+// por eso el caso no se veia en una prueba de cobro cualquiera.
+// ---------------------------------------------------------------------------
+
+const TOTAL_COBRO = 24000;
+
+/** Doble de un cobro que liquida un pedido entregado. */
+function fakeCobro({ error = null } = {}) {
+  return instalarFakeDb((sql) => {
+    if (error && sql.includes('INSERT INTO historial_estados')) throw error;
+    if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) {
+      return {
+        rows: [{
+          id_pedido: PEDIDO.id_pedido,
+          id_mesa: PEDIDO.id_mesa,
+          estado: 'entregado',
+          total: String(TOTAL_COBRO),
+        }],
+      };
+    }
+    if (sql.includes('INSERT INTO transacciones')) {
+      return {
+        rows: [{
+          id_transaccion: 1,
+          id_pedido: PEDIDO.id_pedido,
+          monto: String(TOTAL_COBRO),
+          estado_transaccion: 'completada',
+        }],
+      };
+    }
+    if (sql.includes('obtener_saldo_pendiente($1) <= 0')) return { rows: [{ liquidado: true }] };
+    if (sql.includes("UPDATE pedidos SET estado = 'pagado'")) {
+      return { rows: [{ id_pedido: PEDIDO.id_pedido, estado: 'pagado' }] };
+    }
+    return { rows: [] };
+  });
+}
+
+const cobrar = () => request(app)
+  .post('/api/transacciones')
+  .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
+  .send({ id_pedido: PEDIDO.id_pedido, monto: TOTAL_COBRO, metodo_pago: 'efectivo' });
+
+test('POST /transacciones: el cajero borrado tambien recibe 409 autor_inexistente', async () => {
+  const db = fakeCobro({ error: errorDeAutor() });
+  try {
+    const res = await cobrar();
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /transacciones: el pago no queda a medias, se deshace con el resto', async () => {
+  const db = fakeCobro({ error: errorDeAutor() });
+  try {
+    await cobrar();
+
+    assert.ok(db.buscar('INSERT INTO transacciones'), 'se intento registrar');
+    assert.ok(db.buscar('ROLLBACK'), 'y se deshizo entero');
+    assert.strictEqual(db.todas('COMMIT').length, 0, 'sin COMMIT: no entro el pago a medias');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /transacciones: un cobro normal no se ve afectado', async () => {
+  const db = fakeCobro({});
+  try {
+    const res = await cobrar();
+
+    assert.strictEqual(res.status, 201);
+    assert.ok(db.buscar('COMMIT'), 'el pago entra como siempre');
+  } finally {
+    db.restaurar();
+  }
+});
