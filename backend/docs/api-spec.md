@@ -2812,6 +2812,330 @@ forma (p. ej. `moneda` de más de 3 caracteres, `monto_centavos` no entero).
 
 ---
 
+## Inventario: insumos, movimientos y recetas (D-17 PR 2)
+
+Lo que hay en bodega, cómo entra y sale, y cuánto consume cada plato y cada opción del
+constructor. Las tablas, la función y las vistas son de `database/scripts/27_inventario.sql`
+(P-19, Jarrison); este backend solo expone el CRUD y traduce sus errores.
+
+**La base es la fuente de verdad, y aquí más que en ningún otro módulo:**
+
+- `insumos.stock_actual` **no se edita nunca a mano**. Lo mueven la reserva de los pedidos y
+  `registrar_movimiento_inventario`, y la regla del libro es
+  `SUM(movimientos_inventario.cantidad) = insumos.stock_actual`. Por eso no hay ningún `PUT`
+  ni `PATCH` que escriba el stock: un UPDATE directo descuadraría el libro para siempre.
+- La **disponibilidad se recalcula sola**. Al cambiar el stock, al activar o desactivar un
+  insumo y al tocar una receta, los triggers del script 27 recalculan
+  `platos.stock_suficiente` e `ingredientes.stock_suficiente`, y lo que cambie sale por el
+  canal `inventario` de PostgreSQL. El backend ya lo escucha y lo reenvía al socket-server
+  (ver [Avisos de inventario en vivo](#avisos-de-inventario-en-vivo-d-17), D-17 PR 1): el
+  panel y las mesas se enteran sin pedir nada.
+- Lo que ve el comensal es `disponible AND stock_suficiente`: el **interruptor manual** de la
+  cocina sigue siendo `disponible`, y el stock es lo calculado.
+
+| Método | Ruta | Roles | Descripción |
+|---|---|---|---|
+| GET | `/inventario/insumos` | **admin** | Lista de insumos; `?estado=bajo` lee `v_stock_bajo` |
+| GET | `/inventario/insumos/:id` | **admin** | Un insumo |
+| POST | `/inventario/insumos` | **admin** | Crea el insumo; `stock_inicial` entra como movimiento |
+| PUT | `/inventario/insumos/:id` | **admin** | Nombre, unidad, mínimo y alta/baja. **No** el stock |
+| POST | `/inventario/insumos/:id/movimientos` | **admin** | Entrada, ajuste o merma |
+| GET | `/inventario/insumos/:id/movimientos` | **admin** | Historial del insumo, lo más nuevo primero |
+| GET | `/platos/:id/receta` | **admin** | Receta del plato |
+| PUT | `/platos/:id/receta` | **admin** | Reemplaza la receta completa |
+| GET | `/ingredientes/:id/receta` | **admin** | Receta de una opción del constructor |
+| PUT | `/ingredientes/:id/receta` | **admin** | Reemplaza la receta completa |
+
+> **Todo es solo `admin`, también las lecturas.** El inventario dice cuánto cuesta y cuánto
+> queda de cada cosa: es información del negocio, no de sala. El `mesero` y el `cajero` sí
+> reciben en vivo el aviso `inventario:alerta` de lo que se está agotando (EVENTS.md §5.5,
+> `room:admin`), que es lo que necesitan para no ofrecer lo que no hay. **Propuesta para
+> G-06:** si el panel quiere además una lectura REST de `?estado=bajo` para esos dos roles, es
+> un cambio de una línea en la ruta; no lo abro por mi cuenta.
+
+### GET /inventario/insumos — admin
+
+| Parámetro | Valores | Por omisión |
+|---|---|---|
+| `estado` | `todos`, `bajo` | `todos` |
+| `activo` | `true`, `false` (sin él, todos) | — |
+| `q` | Texto, busca por nombre sin distinguir mayúsculas ni acentos | — |
+| `limite` | 1–200 | 100 |
+
+`?estado=bajo` lee la vista **`v_stock_bajo`** (`activo AND stock_actual <= stock_minimo`), que
+trae su propio `agotado`:
+
+```json
+{
+  "insumos": [
+    { "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "stock_actual": 450, "stock_minimo": 500, "agotado": false },
+    { "id_insumo": 3, "nombre": "Masa", "unidad": "porcion", "stock_actual": 0, "stock_minimo": 10, "agotado": true }
+  ]
+}
+```
+
+Sin `estado=bajo` (o con `estado=todos`) sale la tabla `insumos`, con `activo` y
+`actualizado_en`, y además `bajo` y `agotado` calculados, para que el panel pinte la misma
+señal en las dos vistas sin tener que comparar a mano:
+
+```json
+{
+  "insumos": [
+    {
+      "id_insumo": 12,
+      "nombre": "Queso costeño",
+      "unidad": "g",
+      "stock_actual": 450,
+      "stock_minimo": 500,
+      "activo": true,
+      "bajo": true,
+      "agotado": false,
+      "actualizado_en": "2026-11-08T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+- **Los `NUMERIC` salen como números JSON** (`450`, `0.5`), no como texto: el backend registra
+  un parser para el OID 1700 (`src/config/db.js`). Es la misma regla que ya cumplen `total` y
+  `precio`.
+- `estado` y `activo` con un valor que no está en la lista son **400**, no se ignoran en
+  silencio: un `?estado=bajos` que devolviera todo haría creer al panel que no hay faltantes.
+- Orden: por `nombre`. Con `estado=bajo`, primero lo **agotado** y luego por nombre.
+
+### GET /inventario/insumos/:id — admin
+
+```json
+{
+  "insumo": {
+    "id_insumo": 12,
+    "nombre": "Queso costeño",
+    "unidad": "g",
+    "stock_actual": 450,
+    "stock_minimo": 500,
+    "activo": true,
+    "bajo": true,
+    "agotado": false,
+    "actualizado_en": "2026-11-08T12:00:00.000Z"
+  }
+}
+```
+
+**400** si el `:id` no es un entero positivo · **404** `Insumo no encontrado` si no existe (un
+insumo **desactivado** sí se devuelve: la baja no lo esconde, solo lo saca del servicio).
+
+### POST /inventario/insumos — admin
+
+```json
+{ "nombre": "Queso costeño", "unidad": "g", "stock_minimo": 500, "stock_inicial": 2000 }
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `nombre` | Sí | Texto 1–80 (la columna es `VARCHAR(80)`), **único** |
+| `unidad` | No (por omisión `porcion`) | Uno de `porcion`, `unidad`, `g`, `ml` (CHECK de la tabla) |
+| `stock_minimo` | No (por omisión `0`) | Número ≥ 0, hasta 2 decimales |
+| `stock_inicial` | No | Número **> 0**, hasta 2 decimales |
+
+**201**: el insumo creado y, si hubo `stock_inicial`, el movimiento con el que entró:
+
+```json
+{
+  "insumo": { "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "stock_actual": 2000, "stock_minimo": 500, "activo": true, "bajo": false, "agotado": false, "actualizado_en": "..." },
+  "movimiento": { "id": 44, "tipo": "entrada", "cantidad": 2000, "stock_resultante": 2000, "motivo": "Stock inicial", "id_usuario": 1, "creado_en": "..." }
+}
+```
+
+- **El insumo nace con `stock_actual = 0` y el stock inicial entra como un movimiento
+  `entrada`**, en la **misma transacción**. Así `SUM(cantidad) = stock_actual` se cumple desde
+  la primera fila: si el stock inicial se escribiera en la columna, el libro arrancaría torcido
+  y ningún informe cuadraría nunca.
+- Sin `stock_inicial` no hay movimiento y `movimiento` sale en `null`. Es lo normal al dar de
+  alta algo que todavía no ha llegado.
+- **409 `nombre_en_uso`** si ya existe un insumo con ese nombre (índice único de la tabla):
+
+```json
+{ "error": "Ya hay un insumo con ese nombre", "motivo": "nombre_en_uso" }
+```
+
+### PUT /inventario/insumos/:id — admin
+
+Parcial: solo lo que se manda. Al menos un campo, o **400**.
+
+```json
+{ "stock_minimo": 800, "activo": false }
+```
+
+| Campo | Regla |
+|---|---|
+| `nombre` | Texto 1–80, único (**409 `nombre_en_uso`**) |
+| `unidad` | `porcion`, `unidad`, `g`, `ml` |
+| `stock_minimo` | Número ≥ 0, hasta 2 decimales |
+| `activo` | Booleano estricto (`"false"` o `0` son **400**) |
+
+**200** devuelve el insumo ya actualizado. El cuerpo es `.strict()`: una clave de más es
+**400**, y eso incluye **`stock_actual`**, que se rechaza en vez de ignorarse para que nadie
+crea haber corregido el stock con un PUT que no lo toca. Para eso están los movimientos.
+
+**No existe `DELETE`. Un insumo no se borra: se desactiva** con `{"activo": false}`.
+
+- Las recetas lo referencian con `ON DELETE RESTRICT` y los movimientos también: borrarlo
+  sería borrar el libro de inventario, que es justo lo que no se puede perder.
+- Desactivarlo **cuenta como "no hay"**: `fn_recalcular_*` trata un insumo inactivo igual que
+  uno sin stock, así que **los platos y las opciones que lo usan pasan a no disponibles** y
+  salen sus avisos por el canal. Volver a activarlo los recupera.
+- `stock_minimo` **no dispara ningún aviso** al cambiarlo (el trigger solo mira `stock_actual`
+  y `activo`): el panel ve la lista al abrir con `?estado=bajo`.
+
+### POST /inventario/insumos/:id/movimientos — admin
+
+El único camino para mover el stock.
+
+```json
+{ "tipo": "entrada", "cantidad": 2000, "motivo": "Compra del proveedor" }
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `tipo` | Sí | `entrada`, `ajuste` o `merma`. **Nada más**: `reserva` y `devolucion` los escribe la base al pedir o al cancelar, y mandarlos a mano descuadraría el libro |
+| `cantidad` | Sí | `entrada` y `merma`: **> 0** (el tipo ya dice el signo). `ajuste`: cualquier número **≠ 0**, con signo. Hasta 2 decimales |
+| `motivo` | No | Texto hasta 500 |
+
+**201**:
+
+```json
+{
+  "movimiento": { "id": 44, "id_insumo": 12, "tipo": "merma", "cantidad": -50, "stock_resultante": 1950, "id_detalle": null, "id_usuario": 1, "motivo": "Se cayó una bandeja", "creado_en": "..." },
+  "stock_actual": 1950
+}
+```
+
+- Lo hace **`registrar_movimiento_inventario`**, no un UPDATE del backend: ella bloquea el
+  insumo (`FOR UPDATE`), comprueba que no quede negativo, escribe la fila y devuelve el
+  movimiento. `cantidad` sale **con el signo con el que se guardó** (una merma de 50 es `-50`).
+- **El autor es el del JWT.** La función lo lee de `app.id_usuario` con
+  `fn_usuario_de_sesion()`, así que el backend hace
+  `SELECT set_config('app.id_usuario', '<id>', true)` **en la misma transacción** (con
+  `is_local`, para que no se filtre a la siguiente petición del pool). Nunca sale del cuerpo.
+- `ajuste` con signo es lo que permite **corregir un conteo** en los dos sentidos
+  (`-12` tras un recuento físico). Es lo que acepta la función, y por eso aquí la regla de
+  "cantidad > 0" aplica a `entrada` y `merma`, no a `ajuste`.
+- **400 `movimiento_invalido`** si el movimiento dejaría el stock en negativo (SQLSTATE
+  **SD002**, ya traducido en el PR 1), con el stock que hay ahora:
+
+```json
+{ "error": "El movimiento dejaría \"Queso costeño\" en negativo: hay 450.00 g", "motivo": "movimiento_invalido", "stock_actual": 450 }
+```
+
+- **404** si el insumo no existe. **400** de zod si `tipo` no es uno de los tres o `cantidad`
+  no cumple: se valida en el backend **antes** de llamar a la función, porque la base lo
+  rechazaría con un `check_violation` (23514) que el manejador central traduce a un **422**
+  opaco ("un dato está fuera del rango permitido"), y aquí sí se puede decir qué campo falla.
+- Un movimiento sobre un insumo **desactivado** se acepta: hay que poder cuadrar el libro de
+  algo que ya no se usa. Lo que no cambia es la disponibilidad, que sigue en "no hay".
+- Si el movimiento **cruza el mínimo hacia abajo**, la base publica `stock_bajo` y el panel
+  recibe `inventario:alerta` en vivo. Si deja un plato sin stock, llega además su
+  `plato:disponibilidad`.
+
+### GET /inventario/insumos/:id/movimientos — admin
+
+El libro del insumo, **lo más reciente primero**.
+
+| Parámetro | Valores | Por omisión |
+|---|---|---|
+| `limite` | 1–200 | 50 |
+| `desde` | Fecha ISO 8601; solo los movimientos desde ese instante | — |
+
+```json
+{
+  "movimientos": [
+    { "id": 44, "tipo": "merma", "cantidad": -50, "stock_resultante": 1950, "id_detalle": null, "id_usuario": 1, "motivo": "Se cayó una bandeja", "creado_en": "2026-11-08T12:00:00.000Z" },
+    { "id": 43, "tipo": "reserva", "cantidad": -2, "stock_resultante": 2000, "id_detalle": 701, "id_usuario": null, "motivo": "Pedido 87", "creado_en": "2026-11-08T11:40:00.000Z" }
+  ]
+}
+```
+
+- Salen **todos** los tipos, incluidos los que escribe la base al pedir (`reserva`,
+  `devolucion`, `merma` con `id_detalle`): es el libro, y sin ellos no cuadraría con el stock.
+- `id_detalle` dice de qué ítem de pedido salió el movimiento; `id_usuario` puede ser `null`
+  (lo hizo la reserva de un comensal, o el usuario se borró después: la FK es
+  `ON DELETE SET NULL`).
+- No se devuelve el nombre del usuario: esta ruta no es un informe y unir con `usuarios`
+  publicaría datos del personal en una lista que el panel ya sabe resolver.
+- **400** si `limite` o `desde` no son válidos · **404** si el insumo no existe (para no
+  confundir "sin movimientos" con "ese id no existe").
+
+### GET /platos/:id/receta y GET /ingredientes/:id/receta — admin
+
+Lo que consume **una unidad** del plato, o **una porción normal** de la opción.
+
+```json
+{
+  "id_plato": 12,
+  "receta": [
+    { "id_insumo": 3, "nombre": "Masa", "unidad": "porcion", "cantidad": 1, "stock_actual": 40, "activo": true },
+    { "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "cantidad": 30, "stock_actual": 450, "activo": true }
+  ]
+}
+```
+
+En `/ingredientes/:id/receta` la clave es `id_ingrediente` y el resto es igual. Una receta
+vacía es `{"receta": []}` y significa que **ese plato u opción no controla inventario**: se
+puede pedir siempre (`tiene_receta` en `v_carta_disponible` sale en `false`).
+
+**400** si el `:id` no es un entero positivo · **404** si el plato o la opción no existen.
+
+### PUT /platos/:id/receta y PUT /ingredientes/:id/receta — admin
+
+**Reemplaza la receta completa**, en una transacción:
+
+```json
+{ "insumos": [{ "id_insumo": 3, "cantidad": 1 }, { "id_insumo": 12, "cantidad": 30 }] }
+```
+
+| Campo | Regla |
+|---|---|
+| `insumos` | Arreglo de 0 a 50 entradas. **Sin `id_insumo` repetidos** (sería ambiguo: la tabla tiene PK `(id_plato, id_insumo)`) |
+| `id_insumo` | Entero positivo |
+| `cantidad` | Número **> 0**, hasta 2 decimales (el CHECK de la tabla exige `> 0`) |
+
+**200** devuelve la receta ya guardada, en el mismo formato que el `GET`.
+
+- **Es un reemplazo, no un parche**: se borra la receta anterior y se insertan las entradas
+  nuevas, todo en la misma transacción. Un `PUT` con `{"insumos": []}` **deja el plato sin
+  receta** y por tanto sin control de inventario; es la forma de quitarla.
+- Para la opción del constructor, `cantidad` es la de la **porción normal**. La base la
+  multiplica por `factores_porcion` (`ligera` 0.5, `normal` 1, `extra` 1.5).
+- **La disponibilidad cambia al guardar.** Los triggers `tr_receta_plato` y
+  `tr_receta_ingrediente` recalculan el plato o la opción con la receta nueva, así que un plato
+  puede quedar **no disponible en el mismo PUT** si algún insumo de la receta no alcanza para
+  una unidad. Sale su aviso por el canal y el panel y las mesas lo ven al instante.
+- **409 `insumo_inexistente`** si alguna entrada apunta a un `id_insumo` que no existe (la FK
+  de la receta):
+
+```json
+{ "error": "Alguno de los insumos de la receta no existe", "motivo": "insumo_inexistente" }
+```
+
+- **400 `insumo_repetido`** si el mismo `id_insumo` aparece dos veces, con el id que choca:
+
+```json
+{ "error": "El insumo 3 está repetido en la receta", "motivo": "insumo_repetido" }
+```
+
+- **404** si el plato o la opción no existen. Un insumo **desactivado** sí se puede poner en
+  una receta (se está preparando el cambio), pero deja el plato en "no hay" hasta que vuelva.
+
+### Lo que este PR NO hace
+
+- **No toca `stock_actual` directamente** por ninguna ruta, ni ofrece un `DELETE` de insumos.
+- **No da de baja recetas por plato borrado**: eso ya lo hace la base con
+  `ON DELETE CASCADE` sobre `platos` e `ingredientes`.
+- **No expone `movimientos_inventario` completo** (sin filtrar por insumo) ni informes de
+  consumo: son de reportes y van con su propia agregación en SQL.
+
+---
+
 ## Códigos de error de la base de datos
 
 El manejador central ([`errores.middleware.js`](../src/middleware/errores.middleware.js))

@@ -14,6 +14,7 @@ const transaccionesRoutes = require('./transacciones.routes');
 const pagosRoutes = require('./pagos.routes');
 const reportesRoutes = require('./reportes.routes');
 const configuracionRoutes = require('./configuracion.routes');
+const inventarioRoutes = require('./inventario.routes');
 
 const router = express.Router();
 
@@ -38,5 +39,8 @@ router.use('/pagos', pagosRoutes);
 router.use('/reportes', reportesRoutes);
 // D-16 parte B: configuracion del restaurante. GET / es publica; el resto, admin.
 router.use('/configuracion', configuracionRoutes);
+// D-17 PR 2: insumos y movimientos de bodega, solo admin. Las recetas cuelgan
+// del plato y de la opcion (/api/platos/:id/receta, /api/ingredientes/:id/receta).
+router.use('/inventario', inventarioRoutes);
 
 module.exports = router;
