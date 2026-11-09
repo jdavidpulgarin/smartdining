@@ -150,3 +150,70 @@ test('review-144 (a): el PUT de configuracion con el autor borrado da 409 autor_
   const despues = await configuracionService.obtener();
   assert.strictEqual(despues.nombre, antes.nombre);
 });
+
+/**
+ * EXTENSIÓN (b) del review de #144: el mismo bug al mover stock.
+ *
+ * `movimientos_inventario.id_usuario` tiene su FK contra `usuarios` y el nombre
+ * lo generó PostgreSQL: **`movimientos_inventario_id_usuario_fkey`**, que no
+ * sigue el patrón `fk_…` de las otras. Comprobado con un `\d` sobre la base
+ * desechable antes de escribirlo.
+ */
+test('review-144 (b): un movimiento con el autor borrado da 409 autor_inexistente', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const inventarioService = require('../../src/services/inventario.service');
+  const fantasma = await idFantasma();
+
+  // El insumo se crea SIN autor (null es válido: la FK lo admite).
+  const { insumo } = await inventarioService.crearInsumo(
+    { nombre: `AUTOR144 ${Date.now()}`, stock_inicial: 10 },
+    { idUsuario: null }
+  );
+
+  await assert.rejects(
+    () => inventarioService.registrarMovimiento(
+      insumo.id_insumo, { tipo: 'entrada', cantidad: 5 }, { idUsuario: fantasma }
+    ),
+    (err) => {
+      assert.strictEqual(err.status, 409);
+      assert.strictEqual(err.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+      assert.strictEqual(err.message, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+      return true;
+    }
+  );
+
+  // El stock se quedo como estaba: la transaccion se deshizo, y el libro cuadra.
+  const leido = await inventarioService.obtenerInsumo(insumo.id_insumo);
+  assert.strictEqual(Number(leido.stock_actual), 10);
+
+  const { rows } = await sonda.query(
+    `SELECT COALESCE(SUM(cantidad), 0) AS suma FROM movimientos_inventario WHERE id_insumo = $1`,
+    [insumo.id_insumo]
+  );
+  assert.strictEqual(Number(rows[0].suma), 10, 'SUM(cantidad) = stock_actual');
+
+  await sonda.query('DELETE FROM movimientos_inventario WHERE id_insumo = $1', [insumo.id_insumo]);
+  await sonda.query('DELETE FROM insumos WHERE id_insumo = $1', [insumo.id_insumo]);
+});
+
+test('review-144 (b): crear un insumo con stock inicial y autor borrado, igual', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const inventarioService = require('../../src/services/inventario.service');
+  const fantasma = await idFantasma();
+  const nombre = `AUTOR144b ${Date.now()}`;
+
+  await assert.rejects(
+    () => inventarioService.crearInsumo({ nombre, stock_inicial: 7 }, { idUsuario: fantasma }),
+    (err) => {
+      assert.strictEqual(err.status, 409);
+      assert.strictEqual(err.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+      return true;
+    }
+  );
+
+  // Y el insumo NO quedo a medias.
+  const { rows } = await sonda.query('SELECT count(*)::int AS n FROM insumos WHERE nombre = $1', [nombre]);
+  assert.strictEqual(rows[0].n, 0, 'la transaccion se deshizo entera');
+});

@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 /**
  * Inventario: insumos, movimientos y recetas (D-17 PR 2).
@@ -164,7 +165,9 @@ async function crearInsumo({ nombre, unidad = 'porcion', stock_minimo = 0, stock
     if (err && err.code === PG_UNIQUE) {
       throw errorDeInventario(409, MENSAJE_NOMBRE_EN_USO, MOTIVO_NOMBRE_EN_USO);
     }
-    throw err;
+    // El `stock_inicial` entra como un movimiento, así que aquí vale la misma
+    // FK del autor que en registrarMovimiento.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }
@@ -252,7 +255,11 @@ async function registrarMovimiento(idInsumo, { tipo, cantidad, motivo = null },
     // La función lanza `no_data_found` cuando el insumo no existe; para esta API
     // eso es un 404 y no un 500.
     if (err && err.code === PG_NO_DATA) return null;
-    throw err;
+    // El AUTOR (review de #144): `movimientos_inventario.id_usuario` tiene su
+    // `movimientos_inventario_id_usuario_fkey` contra `usuarios` —ese nombre lo
+    // generó PostgreSQL, no sigue el patrón `fk_`—, así que mover stock con un
+    // usuario ya borrado daba el 409 genérico de clave ajena.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }
