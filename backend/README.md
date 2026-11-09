@@ -452,6 +452,92 @@ lo que pasa en la cocina. Es lo que usa el panel de agotados.
 El detalle completo está en `docs/api-spec.md`; los eventos que emite el socket-server,
 en `socket-server/EVENTS.md` §5.3 y §5.4.
 
+## Inventario: insumos, movimientos y recetas (D-17)
+
+Lo que hay en bodega y cuánto consume cada plato. Las tablas, las funciones y las vistas son
+de `database/scripts/27_inventario.sql` y `28_aviso_insumo_agotado.sql`; el backend expone el
+CRUD y traduce sus errores. **Todo es solo `admin`**, también las lecturas.
+
+| Ruta | Para qué |
+|---|---|
+| `GET /api/inventario/insumos` | Lista de insumos; `?estado=bajo` lee la vista `v_stock_bajo` |
+| `GET /api/inventario/insumos/:id` | Un insumo |
+| `POST /api/inventario/insumos` | Crea el insumo; el `stock_inicial` entra como un movimiento |
+| `PUT /api/inventario/insumos/:id` | Nombre, unidad, mínimo y alta/baja. **No** el stock |
+| `POST /api/inventario/insumos/:id/movimientos` | Entrada, ajuste o merma |
+| `GET /api/inventario/insumos/:id/movimientos` | El libro del insumo, lo más nuevo primero |
+| `GET /api/inventario/insumos/:id/usos` | Qué recetas usan ese insumo, y cuánto |
+| `GET /api/inventario/carta` | Platos y opciones con su disponibilidad y si tienen receta |
+| `GET` y `PUT /api/platos/:id/receta` | Receta del plato (consumo por unidad) |
+| `GET` y `PUT /api/ingredientes/:id/receta` | Receta de una opción (porción normal) |
+
+Tres reglas que explican el diseño:
+
+- **`insumos.stock_actual` no se escribe nunca desde el backend.** Lo mueven la reserva de
+  los pedidos y `registrar_movimiento_inventario`, porque la regla del libro es
+  `SUM(movimientos.cantidad) = stock_actual`. Por eso no hay ningún `PUT` que toque el stock
+  y el `stock_inicial` de un insumo nuevo entra como movimiento `entrada`.
+- **Un insumo no se borra, se desactiva** (`PUT … {"activo": false}`): las recetas y los
+  movimientos lo referencian con `ON DELETE RESTRICT`.
+- **La disponibilidad la recalcula la base.** Al cambiar el stock, al activar o desactivar un
+  insumo y al tocar una receta, los triggers recalculan `platos.stock_suficiente` e
+  `ingredientes.stock_suficiente`. Lo que ve el comensal es `disponible AND stock_suficiente`.
+
+### El canal `inventario` de PostgreSQL
+
+La base publica por `pg_notify('inventario', …)` dos clases de aviso —`disponibilidad` y
+`stock_bajo`—, y **solo si la transacción se confirma**. El backend los escucha en
+`src/services/inventario-avisos.js` con una **conexión dedicada** (no una del pool: `LISTEN`
+vive en la conexión) y los reenvía al socket-server.
+
+Al arrancar, y en cada reconexión del canal, hace tres cosas **en este orden**:
+
+1. `LISTEN inventario`, primero, para no perder nada;
+2. `SELECT fn_recalcular_toda_la_carta()`, que corrige cualquier `stock_suficiente`
+   desfasado mientras el backend no estaba;
+3. lee `v_carta_disponible` y emite la disponibilidad de cada plato y cada opción, porque los
+   avisos de ese rato se perdieron. Después **invalida `cache:menu`**.
+
+Nada de esto puede tumbar el backend ni una petición: si el canal no se abre, se reintenta
+con espera creciente y el resto sigue funcionando.
+
+El contrato completo —cuerpos, filtros, los 409 y los 400— está en
+[docs/api-spec.md](docs/api-spec.md).
+
+## Configuración del restaurante e historial de precios (D-16 B)
+
+| Ruta | Roles | Para qué |
+|---|---|---|
+| `GET /api/configuracion` | **pública** | Los datos del local que ve cualquiera: nombre, teléfono, dirección, logo, horario, propina sugerida y moneda (lista blanca) |
+| `GET /api/configuracion/completa` | **admin** | Lo mismo más `id`, `actualizado_en` y `actualizado_por` |
+| `PUT /api/configuracion` | **admin** | Actualiza los campos enviados (parcial) |
+| `GET /api/platos/:id/historial-precios` | **admin** | Quién cambió el precio de un plato y cuándo |
+
+Es **una sola fila** (`configuracion_restaurante`, `id = 1`), así que no hay nada que crear ni
+borrar. El `PUT` va en una transacción que primero fija `app.id_usuario` con
+`set_config(…, true)`: de ahí saca el trigger el `actualizado_por`, y lo mismo vale para el
+autor de cada fila de `historial_precios` cuando cambia un precio. El id sale **del JWT**,
+nunca del cuerpo.
+
+## Comensales sin celular y alias del pedido (D-18)
+
+| Ruta | Roles | Para qué |
+|---|---|---|
+| `POST /api/mesas/:id/comensales` | **mesero, admin** | Sienta a alguien que no tiene teléfono, con su alias |
+| `DELETE /api/mesas/:id/comensales/:alias` | **mesero, admin** | Lo quita de la mesa |
+
+No hay tabla nueva: esa persona vive en la **misma reserva de alias** que las sesiones de QR
+(`sd:mesa:{id}:alias` en Redis), con la misma validación (`services/alias-comensal.js`) y una
+vigencia de 24 h. La unicidad se mide por **clave** —sin tildes, en minúsculas, sin espacios
+ni `. _ ' -`—, así que «Abuela», «abuela» y «Abuéla» son la misma persona, y **«General»
+está prohibido** porque es el nombre que la cuenta le da a los platos sin dueño.
+
+Cuando pide el **personal**, el alias que se guarda no es el texto que llegó sino el
+**canónico** de esa persona en la mesa (D-18b): la cuenta agrupa por el texto exacto, y
+«Abuela» con «abuela» saldrían en dos filas. Si el nombre no corresponde a nadie, **409
+`comensal_no_registrado`**. Sin Redis el pedido **no se bloquea**: se guarda el alias tal como
+llegó. El detalle, en [docs/api-spec.md](docs/api-spec.md).
+
 ## Pruebas
 
 ```bash
