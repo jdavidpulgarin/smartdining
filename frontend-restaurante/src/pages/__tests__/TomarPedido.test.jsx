@@ -586,6 +586,87 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
       })
     })
 
+    it('escribe " abuela ", recibe "Abuela" del servidor y comprueba que el pedido sale con "Abuela"', async () => {
+      let pedidoEnviado = null
+
+      vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
+        if (url.includes('/api/mesas/5/cuenta')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id_mesa: 5, comensales: [] }),
+          }
+        }
+        if (url.includes('/api/mesas/5/comensales') && opts?.method === 'POST') {
+          return {
+            ok: true,
+            status: 201,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id_mesa: 5, alias: 'Abuela' }),
+          }
+        }
+        if (url.includes('/api/menu')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => mockMenu,
+          }
+        }
+        if (url.includes('/api/pedidos') && opts?.method === 'POST') {
+          pedidoEnviado = JSON.parse(opts.body)
+          return {
+            ok: true,
+            status: 201,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({
+              id_pedido: 101,
+              codigo_pedido: 'PED-261108-XYZ101',
+              id_mesa: 5,
+              estado: 'recibido',
+              total: 34000,
+            }),
+          }
+        }
+        return { ok: true, json: async () => ({}) }
+      })
+
+      renderTomarPedido('mesero', 5)
+
+      // 1. Escribir " abuela " y registrar
+      const input = await screen.findByPlaceholderText(/Ej\. Señora sin celular/i)
+      fireEvent.change(input, { target: { value: ' abuela ' } })
+
+      const btnRegistrar = screen.getByRole('button', { name: /registrar y pedir/i })
+      fireEvent.click(btnRegistrar)
+
+      // 2. Verificar que avanzó al menú con el alias exacto normalizado devuelto por el servidor ("Abuela")
+      await waitFor(() => {
+        expect(screen.getAllByText('Abuela').length).toBeGreaterThan(0)
+      })
+
+      // 3. Agregar Hamburguesa
+      await screen.findByText('Hamburguesa Smart Angus')
+      const btnAgregar = screen.getAllByRole('button', { name: /agregar/i })[0]
+      fireEvent.click(btnAgregar)
+
+      // 4. Ver comanda en Paso 3: Resumen
+      const btnVerComanda = await screen.findByRole('button', { name: /ver comanda/i })
+      fireEvent.click(btnVerComanda)
+
+      // 5. Enviar comanda a cocina
+      const btnEnviar = await screen.findByRole('button', { name: /enviar comanda a cocina/i })
+      fireEvent.click(btnEnviar)
+
+      // 6. Comprobar que el pedido enviado al backend tiene comensal: 'Abuela'
+      await waitFor(() => {
+        expect(pedidoEnviado).not.toBeNull()
+        expect(pedidoEnviado.id_mesa).toBe(5)
+        expect(pedidoEnviado.items).toHaveLength(1)
+        expect(pedidoEnviado.items[0].comensal).toBe('Abuela')
+        expect(pedidoEnviado.items[0].precio).toBeUndefined()
+      })
+    })
+
     it('maneja 409 sin_stock marcando faltantes y explicando qué quitar', async () => {
       vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
         if (url.includes('/api/mesas/5/cuenta')) {
