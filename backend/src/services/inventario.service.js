@@ -288,23 +288,45 @@ async function listarMovimientos(idInsumo, { limite, desde } = {}) {
  *
  * Dos tablas gemelas: `recetas_plato` (consumo por UNIDAD de plato) y
  * `recetas_ingrediente` (consumo de una opción en porción NORMAL, que la base
- * multiplica por `factores_porcion`). Las dos tienen la misma forma, así que las
- * funciones reciben qué tabla y qué columna usar en vez de duplicarse.
+ * multiplica por `factores_porcion`). La lógica es la misma, así que las
+ * funciones la comparten y reciben QUÉ sentencias usar.
+ *
+ * Cada receta trae sus cuatro sentencias **escritas completas**, no un nombre de
+ * tabla que se interpole: ninguna consulta de este repo se arma pegando texto
+ * (es lo que vigila `tests/inyeccion-sql.test.js`), y así las cuatro se leen tal
+ * como salen hacia PostgreSQL. Los identificadores son fijos y los valores
+ * siempre van como parámetros.
  * -------------------------------------------------------------------------- */
 
-const RECETA_PLATO = { tabla: 'recetas_plato', columna: 'id_plato', dueno: 'platos' };
+const RECETA_PLATO = {
+  clave: 'id_plato',
+  existe: 'SELECT 1 FROM platos WHERE id_plato = $1',
+  leer: `SELECT r.id_insumo, s.nombre, s.unidad, r.cantidad, s.stock_actual, s.activo
+           FROM recetas_plato r
+           JOIN insumos s ON s.id_insumo = r.id_insumo
+          WHERE r.id_plato = $1
+          ORDER BY s.nombre ASC`,
+  borrar: 'DELETE FROM recetas_plato WHERE id_plato = $1',
+  insertar: `INSERT INTO recetas_plato (id_plato, id_insumo, cantidad)
+             VALUES ($1, $2, $3)`,
+};
+
 const RECETA_INGREDIENTE = {
-  tabla: 'recetas_ingrediente',
-  columna: 'id_ingrediente',
-  dueno: 'ingredientes',
+  clave: 'id_ingrediente',
+  existe: 'SELECT 1 FROM ingredientes WHERE id_ingrediente = $1',
+  leer: `SELECT r.id_insumo, s.nombre, s.unidad, r.cantidad, s.stock_actual, s.activo
+           FROM recetas_ingrediente r
+           JOIN insumos s ON s.id_insumo = r.id_insumo
+          WHERE r.id_ingrediente = $1
+          ORDER BY s.nombre ASC`,
+  borrar: 'DELETE FROM recetas_ingrediente WHERE id_ingrediente = $1',
+  insertar: `INSERT INTO recetas_ingrediente (id_ingrediente, id_insumo, cantidad)
+             VALUES ($1, $2, $3)`,
 };
 
 /** ¿Existe ese plato o esa opción? Una sola consulta por clave primaria. */
-async function existeDueno({ dueno, columna }, id, ejecutor = pool) {
-  const result = await ejecutor.query(
-    `SELECT 1 FROM ${dueno} WHERE ${columna} = $1`,
-    [id]
-  );
+async function existeDueno(receta, id, ejecutor = pool) {
+  const result = await ejecutor.query(receta.existe, [id]);
   return result.rows.length > 0;
 }
 
@@ -313,14 +335,7 @@ async function existeDueno({ dueno, columna }, id, ejecutor = pool) {
  * necesita para pintar la fila sin una segunda llamada por insumo.
  */
 async function obtenerReceta(receta, id, ejecutor = pool) {
-  const result = await ejecutor.query(
-    `SELECT r.id_insumo, s.nombre, s.unidad, r.cantidad, s.stock_actual, s.activo
-       FROM ${receta.tabla} r
-       JOIN insumos s ON s.id_insumo = r.id_insumo
-      WHERE r.${receta.columna} = $1
-      ORDER BY s.nombre ASC`,
-    [id]
-  );
+  const result = await ejecutor.query(receta.leer, [id]);
   return result.rows;
 }
 
@@ -350,14 +365,10 @@ async function reemplazarReceta(receta, id, insumos, { idUsuario = null } = {}) 
       return null;
     }
 
-    await client.query(`DELETE FROM ${receta.tabla} WHERE ${receta.columna} = $1`, [id]);
+    await client.query(receta.borrar, [id]);
 
     for (const entrada of insumos) {
-      await client.query(
-        `INSERT INTO ${receta.tabla} (${receta.columna}, id_insumo, cantidad)
-         VALUES ($1, $2, $3)`,
-        [id, entrada.id_insumo, entrada.cantidad]
-      );
+      await client.query(receta.insertar, [id, entrada.id_insumo, entrada.cantidad]);
     }
 
     const guardada = await obtenerReceta(receta, id, client);
