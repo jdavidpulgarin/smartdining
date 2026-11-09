@@ -734,7 +734,7 @@ Si no se envían, **el comportamiento no cambia**: el plato conserva lo que ten�
 |---|---|
 | Falta un campo, o un tipo o rango no es el declarado | **400** con el campo que falla (zod) |
 | `id_categoria` que no existe | **409** `{ "error": "Esa categoria no existe", "motivo": "categoria_inexistente" }` |
-| **El usuario del token ya no existe** | **409** `autor_inexistente` (ver [El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)) |
+| **El usuario del token ya no existe** (solo en el `PUT`, y solo si cambia el precio) | **409** `autor_inexistente` (ver [El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)) |
 | Un valor que no cabe en la columna (precio enorme) | **422** con el mensaje genérico de "dato fuera de rango" |
 | Un `CHECK` de la base (precio negativo llamando al servicio suelto) | **422** |
 
@@ -3641,7 +3641,7 @@ y **no** siguen todos el mismo patrón: el de `movimientos_inventario` lo gener�
 
 | Ruta | Qué lo escribe | Clave ajena |
 |---|---|---|
-| `POST` y `PUT /platos/:id` (cuando cambia el precio) | `tr_historial_precio_plato` → `historial_precios.id_usuario` | `fk_historial_precios_usuario` |
+| `PUT /platos/:id` (cuando cambia el precio) | `tr_historial_precio_plato` → `historial_precios.id_usuario` | `fk_historial_precios_usuario` |
 | `PUT /ingredientes/:id` (cuando cambia `precio_extra`) | `tr_historial_precio_ingrediente` → la misma tabla | `fk_historial_precios_usuario` |
 | `PUT /configuracion` | `tr_configuracion_actualizada` → `configuracion_restaurante.actualizado_por` | `fk_configuracion_actualizado_por` |
 | `POST /inventario/insumos/:id/movimientos` y `POST /inventario/insumos` con `stock_inicial` | `registrar_movimiento_inventario` → `movimientos_inventario.id_usuario` | `movimientos_inventario_id_usuario_fkey` |
@@ -3655,6 +3655,12 @@ y **no** siguen todos el mismo patrón: el de `movimientos_inventario` lo gener�
   cuatro caminos no puedan discrepar.
 - `id_usuario` **en `null` es válido** y no da este error: así quedan los movimientos que
   genera un pedido de un comensal, que no tiene usuario.
+- **`POST /platos` no entra en la lista**, aunque comparta sección con el `PUT`:
+  `tr_historial_precio_plato` es `AFTER UPDATE OF precio`, así que **crear** un plato nunca
+  escribe en `historial_precios` y no hay autor que validar. Comprobado contra PostgreSQL: un
+  `POST /platos` —y un `INSERT` a pelo con `app.id_usuario` apuntando a un usuario que no
+  existe— pasan sin error. El `tr_auditar_platos` del INSERT sí corre, pero
+  `auditoria_cambios.usuario_id` no recibe el id del JWT.
 
 > **Queda uno fuera, a propósito.** `POST /pedidos` escribe `historial_estados.id_usuario`
 > (`fk_historial_usuario`) con el id del JWT, así que un usuario borrado da el mismo 23503 sin
