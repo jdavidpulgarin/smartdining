@@ -3,6 +3,8 @@
  * y el mensaje que sale al cliente: los controllers solo hacen next(err).
  */
 
+const { traducirErrorInventario } = require('./inventario-errores');
+
 // SQLSTATE que PostgreSQL asigna a un RAISE EXCEPTION sin código propio, o sea
 // a las reglas de negocio que viven en los triggers de Jarrison.
 const PG_RAISE_EXCEPTION = 'P0001';
@@ -117,6 +119,9 @@ function traduccionDeSqlstate(codigo) {
 /**
  * Reglas:
  * - Error de negocio del backend ({ status, message }) -> ese status.
+ * - Inventario (D-17): SD001 -> 409 `sin_stock` con los faltantes, SD002 -> 400
+ *   `movimiento_invalido` con el stock actual, y el "ingrediente agotado" del
+ *   interruptor manual -> 409 `ingrediente_agotado` (ver inventario-errores.js).
  * - RAISE EXCEPTION de un trigger (P0001) -> 409 con el mensaje del trigger,
  *   que está redactado para que lo lea el usuario ("El plato X no se encuentra
  *   disponible", "Transición de estado no autorizada: de A hacia B").
@@ -147,6 +152,21 @@ function manejadorErrores(err, req, res, next) {
     const cuerpo = { error: err.message };
     if (typeof err.motivo === 'string' && err.motivo) cuerpo.motivo = err.motivo;
     return res.status(err.status).json(cuerpo);
+  }
+
+  // Inventario (D-17, P-19): SD001, SD002 y el "ingrediente agotado" del
+  // interruptor manual. Va ANTES de la rama de P0001 porque ese último ES un
+  // P0001 y aquí gana el `motivo`, que es lo que el cliente compara. SD001 y
+  // SD002 caían en el 500 genérico. La traducción vive en su propio módulo para
+  // que el PR 2 (movimientos de inventario) use exactamente la misma.
+  const inventario = traducirErrorInventario(err);
+  if (inventario) {
+    // Los campos de bodega (insumo, necesita, hay) van SOLO aquí: la respuesta
+    // lleva únicamente qué quitar del carrito.
+    console.error(
+      `Inventario (${err.code}) en ${req.method} ${req.originalUrl}: ${inventario.log}`
+    );
+    return res.status(inventario.status).json(inventario.cuerpo);
   }
 
   if (err && err.code === PG_RAISE_EXCEPTION) {
@@ -210,4 +230,7 @@ module.exports = {
   MENSAJE_CONSULTA_CANCELADA,
   TRADUCCION_POR_SQLSTATE,
   traduccionDeSqlstate,
+  // Reexportada para que quien prueba el manejador no tenga que importar los
+  // dos módulos, y para que el PR 2 encuentre la traducción desde aquí.
+  traducirErrorInventario,
 };

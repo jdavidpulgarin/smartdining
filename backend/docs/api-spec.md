@@ -3212,50 +3212,88 @@ es el único sitio donde se decide el status. Traduce lo que lanza PostgreSQL as
 
 ### Inventario: SD001 y SD002 (P-19 · los traduce D-17)
 
-> **Pendiente de D-17.** La base ya los lanza (`database/scripts/27_inventario.sql`); hasta
-> que D-17 agregue la traducción, caen en la fila de "cualquier otro error" (500).
-
-Dos SQLSTATE propios del inventario. Los dos traen en el **DETAIL** un JSON (en `pg`:
-`err.detail`), que el backend parsea:
+Dos SQLSTATE propios del inventario (`database/scripts/27_inventario.sql`). Los dos traen en
+el **DETAIL** un JSON (en `pg`: `err.detail`) que el backend parsea. La traducción vive en
+`src/middleware/inventario-errores.js` y la aplica el **manejador central**, así que vale para
+cualquier ruta que acabe tocando el inventario.
 
 | SQLSTATE | Cuándo | Status | Cuerpo |
 |---|---|---|---|
-| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "codigo": "SIN_STOCK", "error": "...", "faltantes": [{ "tipo", "id", "nombre" }] }` |
-| **SD002** "stock negativo" | `registrar_movimiento_inventario` (merma o ajuste) dejaría el stock bajo 0 | **400** | `{ "error": "...", "stock_actual": 450 }` |
+| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "error": "...", "motivo": "sin_stock", "faltantes": [{ "tipo", "id", "nombre" }] }` |
+| **SD002** "stock negativo" | `registrar_movimiento_inventario` (merma o ajuste) dejaría el stock bajo 0 | **400** | `{ "error": "...", "motivo": "movimiento_invalido", "stock_actual": 450 }` |
+| `El ingrediente "X" está agotado` (**P0001**) | Interruptor manual de una opción, anterior a P-19 | **409** | `{ "error": "...", "motivo": "ingrediente_agotado" }` |
+
+> La convención de errores de esta API es **`{ error, motivo }`** (decisión de Jarrison).
+> `motivo` es el código estable que el cliente compara; `error` es el texto para leer. **No se
+> usa `codigo`**: la versión anterior de este documento prometía un `codigo: "SIN_STOCK"` que
+> el backend nunca envía.
 
 **SD001**: `DETAIL = {"faltantes":[{ "tipo", "id", "nombre", "id_insumo", "insumo", "necesita", "hay" }]}`.
 
+```json
+{
+  "error": "Sin stock suficiente para el pedido 87",
+  "motivo": "sin_stock",
+  "faltantes": [
+    { "tipo": "plato", "id": 12, "nombre": "Arepa de Huevo" },
+    { "tipo": "ingrediente", "id": 7, "nombre": "Panceta Crujiente" }
+  ]
+}
+```
+
 - `tipo` es `"plato"` o `"ingrediente"`, e `id`/`nombre` dicen **qué quitar del carrito**.
-  `id_insumo`, `insumo`, `necesita` y `hay` explican por qué; pueden venir en `null` cuando
-  lo que falta son las opciones de un paso obligatorio del constructor.
-- **Al cliente solo van `tipo`, `id` y `nombre`**, sin repetir: el pedido puede venir de un
-  comensal anónimo y las cantidades de bodega no son de su incumbencia. `id_insumo`,
-  `insumo`, `necesita` y `hay` quedan en el log del servidor.
-- **Puede llegar en el `COMMIT`**, no en el `INSERT`: la reserva es un trigger diferido
+- **Al cliente solo van `tipo`, `id` y `nombre`, y sin repetir**: el pedido lo puede hacer un
+  comensal anónimo desde su teléfono y las cantidades de bodega no son asunto suyo.
+  `id_insumo`, `insumo`, `necesita` y `hay` quedan **solo en el log del servidor**, que es
+  donde hacen falta para reponer.
+- Se **deduplica por `tipo` + `id`**: la base arma los faltantes por INSUMO, así que un plato
+  al que le faltan tres insumos sale tres veces en el DETAIL y al cliente se le diría tres
+  veces que quite el mismo plato. Un plato y una opción con el mismo `id` **no** se pisan.
+- Los faltantes del constructor pueden traer `id_insumo`, `insumo`, `necesita` y `hay` en
+  `null` cuando lo que falta son las **opciones de un paso obligatorio**; siguen siendo
+  faltantes válidos y salen igual.
+- Si el DETAIL **no se puede parsear**, la respuesta sigue siendo **409 `sin_stock`** con
+  `faltantes: []`. Un detalle ilegible no convierte en 500 un error que el cliente sabe
+  atender; `nombre` va en `null` si la base no lo manda.
+- **Puede llegar en el `COMMIT`**, no en el `INSERT`: la reserva es un trigger **diferido**
   (`tr_reservar_inventario`) que corre al confirmar, para ver el pedido entero con sus
-  ingredientes. El `catch` que traduce el error tiene que envolver también el `COMMIT`.
-  Si el plato ya se sabía sin stock, llega antes, en el `INSERT` del detalle, con el mismo
-  formato.
-- Se revierte el **pedido entero**: no queda ningún detalle ni ninguna reserva.
+  ingredientes. El `try/catch` de `crearConDetalles` **envuelve también el `COMMIT`**, y el
+  `ROLLBACK` del catch está protegido para que no tape el SD001 (tras un COMMIT fallido la
+  transacción ya está deshecha y ese ROLLBACK solo avisa "no hay transacción en curso").
+  Si el plato ya **figuraba** sin stock, llega antes, en el `INSERT` del detalle, con el mismo
+  formato y la misma respuesta. Ojo con el reparto: el trigger del `INSERT` mira la **bandera**
+  `platos.stock_suficiente`, que la base calcula para **una unidad**, así que pedir 5 de un
+  plato que alcanza para 1 **pasa el INSERT** y falla en el `COMMIT`. Para el cliente es el
+  mismo 409; para quien depure, el camino normal del "no alcanza por la cantidad" es el COMMIT.
+- Se revierte el **pedido entero**: no queda ningún detalle ni ninguna reserva, y no se avisa
+  al socket-server de un pedido que no existe.
 - Reintentar no sirve; el cliente quita lo agotado y reenvía.
 
 **SD002**: `DETAIL = {"id_insumo", "insumo", "stock_actual", "cantidad"}` (`cantidad` con
-signo: lo que se intentó mover). El `MESSAGE` ya trae el stock actual, en lenguaje para el
-usuario: `El movimiento dejaría "Queso" en negativo: hay 450.00 g`.
+signo: lo que se intentó mover). El `MESSAGE` ya está en lenguaje para el usuario y se usa tal
+cual: `El movimiento dejaría "Queso" en negativo: hay 450.00 g`. `stock_actual` sale del
+DETAIL; si no se puede leer, el campo **no se inventa** y el mensaje ya lleva el dato.
 
-Los números del DETAIL y de los avisos `pg_notify('inventario')` ya son números JSON. Los
-que hay que convertir son los `NUMERIC` de una **consulta** con `pg` (p. ej. `v_stock_bajo`),
-que llegan como **texto**, antes de reenviarlos a `/internal/inventario-alerta`.
+**`ingrediente_agotado`** se reconoce con una expresión **estricta** (anclada y solo con
+P0001) porque `fn_tr_validar_detalle_ingrediente` lanza otros cinco P0001 ("no pertenece al
+plato", "no es personalizable", "el pedido ya está en estado X"…): un `includes` los marcaría
+todos como agotados y el cliente actuaría sobre el ingrediente cuando el problema es otro.
+Esos otros P0001 siguen saliendo como el **409 de siempre, sin `motivo`**.
 
-**Al arrancar el backend** (el caso "estaba caído cuando cambió el stock"):
+**`OVERRIDE_ADMIN` no salta el stock.** El bypass de `notas_especiales` que acepta
+`fn_tr_validar_disponibilidad_plato` solo vale para el **interruptor manual** de la cocina
+(`platos.disponible`). El stock se comprueba después y en la reserva, así que un pedido con
+`OVERRIDE_ADMIN` puede dar **SD001 igualmente**, y lo normal es que lo dé en el **COMMIT**.
+No hay forma de comandar por encima del inventario: el libro de `movimientos_inventario` no
+cuadraría.
 
-1. `LISTEN inventario` primero, para no perder nada desde ese momento.
-2. `SELECT fn_recalcular_toda_la_carta()`. Corrige cualquier `stock_suficiente` desfasado y
-   lo que cambie sale por `pg_notify` como siempre; devuelve **solo cuántos** cambiaron.
-3. Los avisos que se emitieron mientras el backend estaba caído **se perdieron**, y el
-   recálculo no los repite (el estado ya estaba al día). Para avisar la carta completa, se
-   lee `v_carta_disponible` (`tipo`, `id`, `disponible_efectivo`, `motivo`) y se emite la
-   disponibilidad de cada plato y opción. Las apps además recargan el menú al reconectar.
+**Un deadlock al crear el pedido (40P01) es 503 `reintentar`.** La reserva bloquea los insumos
+del pedido en orden de `id_insumo` justo para no cruzarse con otra transacción, pero un 40P01
+sigue siendo posible. `POST /api/pedidos` **no acepta ninguna clave de idempotencia**, así que
+el backend **no reintenta por su cuenta**: repetir la petición podría dejar la comanda
+duplicada. Se responde `{ "error": "intenta de nuevo", "motivo": "reintentar" }` y lo reenvía
+el cliente. En el resto de las rutas, un 40P01 sigue siendo el **409** genérico de concurrencia
+del manejador central.
 
 ### La frontera entre 400 y 422 (H-11)
 
