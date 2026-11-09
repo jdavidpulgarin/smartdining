@@ -859,12 +859,46 @@ expire).
 - El caché es un extra, no parte del contrato: si Redis está caído, falla o no hay
   `REDIS_URL`, el endpoint responde igual leyendo de la base. **Nunca da 500 por culpa del
   caché.**
-- Toda mutación de la carta (`POST`/`PUT`/`DELETE` de `/platos` y `/categorias`, y las 6
-  escrituras del constructor: pasos e ingredientes) borra `cache:menu` con
-  `invalidarMenu()`, así que un cambio del admin se ve de inmediato sin esperar el TTL. Con
-  Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la mutación sigue su
-  curso.
 - Un error de la base **no** se cachea.
+
+#### Qué invalida `cache:menu`
+
+Todo lo que cambia lo que ve el comensal borra la clave con `invalidarMenu()`, así que el
+cambio se ve de inmediato sin esperar el TTL. Son **tres** caminos, y hacen falta los tres:
+
+| Camino | Qué lo dispara |
+|---|---|
+| **Rutas REST de la carta** | `POST`/`PUT`/`DELETE` de `/platos` y `/categorias`, y las 6 escrituras del constructor (pasos e ingredientes) |
+| **Avisos de disponibilidad** del canal `inventario` | Cualquier cambio de `stock_suficiente` de un plato o de una opción: un **pedido que consume stock**, un movimiento de inventario, una receta nueva, un insumo activado o desactivado |
+| **Escrituras de inventario** | `POST /inventario/insumos`, `PUT /inventario/insumos/:id`, `POST /inventario/insumos/:id/movimientos`, `PUT /platos/:id/receta` y `PUT /ingredientes/:id/receta`, **después del COMMIT** |
+
+> **Por qué el segundo camino (issue #135).** La disponibilidad por **stock** la cambia la
+> **base**, no una ruta: un pedido que consume el último queso no pasa por ningún endpoint de
+> la carta. Solo avisa por `pg_notify('inventario')`, y el oyente
+> (`services/inventario-avisos.js`) no invalidaba nada: durante **hasta 60 s** el menú seguía
+> ofreciendo un plato ya agotado. El comensal lo pedía y recibía un 409 `sin_stock` por algo
+> que la carta le decía que había.
+
+- La invalidación por aviso ocurre **antes** de reenviarlo al socket-server y **aunque el
+  reenvío falle**: si el socket-server está caído, el aviso en vivo se pierde, pero la
+  siguiente petición tiene que ver la carta real.
+- **Al arrancar y en cada reconexión del canal** se invalida también, después de
+  `fn_recalcular_toda_la_carta()`: mientras el backend no estaba escuchando, el stock pudo
+  cambiar y el caché puede tener una carta anterior.
+- El tercer camino es **redundante a propósito** (el aviso ya cubre el caso) y cuesta un `DEL`:
+  cubre al admin que edita y recarga en el mismo segundo, sin depender de cuándo llegue el
+  `NOTIFY`. **No se invalida por cada pedido**: el caché dejaría de servir en hora punta, y el
+  stock que consume un pedido ya avisa por el canal.
+- Con Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la operación que la
+  llamó sigue su curso.
+
+**La carrera entre una lectura y una invalidación.** Una petición puede empezar a leer la base,
+cambiar el stock mientras tanto, y terminar guardando en el caché el menú **viejo** —ya
+invalidado— que el TTL mantendría 60 s. `menu.service.js` lleva un contador de **versión** que
+`invalidarMenu()` incrementa: `obtenerMenu()` lo anota antes de consultar y **guarda solo si no
+cambió** durante la lectura. Si cambió, responde con lo que leyó (como mucho, un instante
+desfasado) pero no lo cachea, y la siguiente petición vuelve a leer. Es un contador en memoria
+porque el backend corre en **un** proceso; no necesita Redis.
 
 ---
 
