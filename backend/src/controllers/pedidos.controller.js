@@ -5,6 +5,7 @@ const { esComensal } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
 const aliasComensal = require('../services/alias-comensal');
 const aliasEnCuenta = require('../services/alias-en-cuenta');
+const { esErrorDeConcurrencia } = require('../middleware/errores.middleware');
 
 // El trigger tr_validar_disponibilidad_plato de Jarrison deja comandar un plato
 // agotado si notas_especiales contiene 'OVERRIDE_ADMIN' (bypass administrativo).
@@ -191,6 +192,17 @@ const MENSAJE_NO_REGISTRADO =
   + '(POST /api/mesas/:id/comensales) o usa el nombre con el que ya aparece en la cuenta';
 
 /**
+ * El 503 de un deadlock al crear el pedido (D-17).
+ *
+ * `reintentar` es el motivo estable: el pedido NO se guardó y hay que volver a
+ * mandarlo. Lo repite el cliente y no el backend, porque `POST /api/pedidos` no
+ * acepta clave de idempotencia y un reintento nuestro podría duplicar la
+ * comanda (ver el catch de `crear`).
+ */
+const MOTIVO_REINTENTAR = 'reintentar';
+const MENSAJE_REINTENTAR = 'intenta de nuevo';
+
+/**
  * Los alias en bruto que trae el pedido, sin repetir.
  *
  * `comensal` manda sobre `apodo`, igual que en `aliasDelComensal`. Un ítem sin
@@ -366,6 +378,25 @@ async function crear(req, res, next) {
       total: pedido.total,
     });
   } catch (err) {
+    // D-17: un deadlock al crear el pedido NO se reintenta aquí.
+    //
+    // La reserva de inventario (`tr_reservar_inventario`) bloquea los insumos
+    // del pedido en orden de id_insumo justo para no cruzarse con otra, pero
+    // sigue compartiendo filas con las demás transacciones del salón, así que un
+    // 40P01 es posible. Reintentar por nuestra cuenta exigiría poder repetir la
+    // petición sin crear dos pedidos, y `POST /api/pedidos` **no acepta ninguna
+    // clave de idempotencia**: el reintento podría dejar la comanda duplicada.
+    //
+    // Así que se responde 503 `reintentar`, que es lo que de verdad hace falta:
+    // decirle al cliente que esta no se guardó y que la vuelva a mandar él. El
+    // 409 genérico de concurrencia del manejador central no distingue esto de
+    // una guarda de negocio que el cliente tiene que atender.
+    if (esErrorDeConcurrencia(err && err.code)) {
+      console.error(
+        `[pedidos] deadlock al crear el pedido de la mesa ${id_mesa} (${err.code}): ${err.message}`
+      );
+      return res.status(503).json({ error: MENSAJE_REINTENTAR, motivo: MOTIVO_REINTENTAR });
+    }
     return next(err);
   }
 }
@@ -516,6 +547,8 @@ async function cuentaDeMiMesa(req, res, next) {
 module.exports = {
   MOTIVO_NO_REGISTRADO,
   MENSAJE_NO_REGISTRADO,
+  MOTIVO_REINTENTAR,
+  MENSAJE_REINTENTAR,
   crear,
   listarActivos,
   obtener,
