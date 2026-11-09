@@ -9,6 +9,7 @@ import {
   validarInsumo,
   cambiosDeInsumo,
   validarMovimiento,
+  conStockActual,
   notaDeMovimiento,
   textoDeAlerta,
 } from '../inventario'
@@ -54,6 +55,14 @@ describe('utils/inventario', () => {
     expect(lista.map(estadoDeInsumo)).toEqual(['ok', 'bajo', 'agotado', 'inactivo', 'ok'])
     // Sin bajo/agotado del servidor, los deduce con la misma regla que v_stock_bajo.
     expect(estadoDeInsumo({ stock_actual: 5, stock_minimo: 5, activo: true })).toBe('bajo')
+  })
+
+  it('conStockActual: recalcula bajo y agotado con el stock nuevo (no deja la etiqueta vieja)', () => {
+    const queso = lista[0] // 3000 g, mínimo 500: OK
+    expect(estadoDeInsumo(conStockActual(queso, 50))).toBe('bajo')
+    expect(estadoDeInsumo(conStockActual(queso, 0))).toBe('agotado')
+    expect(estadoDeInsumo(conStockActual(queso, 600))).toBe('ok')
+    expect(conStockActual(lista[3], 0).bajo).toBe(false) // inactivo: no cuenta como bajo
   })
 
   it('ordenarInsumos: agotados, bajos, el resto por nombre y los inactivos al final', () => {

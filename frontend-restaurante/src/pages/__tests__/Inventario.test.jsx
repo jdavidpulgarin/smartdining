@@ -208,8 +208,14 @@ describe('P-22 · Inventario (pestaña Insumos)', () => {
 
   it('si el servidor rechaza la merma por stock (400 movimiento_invalido), lo dice y pone el stock real', async () => {
     sesionComo('admin')
+    // Como el servidor real: otro movimiento dejó el queso en 20 g, así que el 400
+    // trae ese stock y la recarga posterior también. La fila tiene que decir BAJO
+    // (20 g con mínimo 500), no la etiqueta OK de antes.
     backend({
-      escrituras: () => json({ error: 'El movimiento dejaría "Queso cheddar" en negativo: hay 20.00 g', motivo: 'movimiento_invalido', stock_actual: 20 }, 400),
+      escrituras: (url, metodo, cuerpo, estado) => {
+        estado.insumos = estado.insumos.map((i) => (i.id_insumo === 1 ? insumo(1, 'Queso cheddar', 'g', 20, 500) : i))
+        return json({ error: 'El movimiento dejaría "Queso cheddar" en negativo: hay 20.00 g', motivo: 'movimiento_invalido', stock_actual: 20 }, 400)
+      },
     })
     montar()
     fireEvent.click(await screen.findByRole('button', { name: 'Movimiento de Queso cheddar' }))
@@ -221,6 +227,7 @@ describe('P-22 · Inventario (pestaña Insumos)', () => {
 
     expect(await within(form).findByRole('alert')).toHaveTextContent('No se guardó: El movimiento dejaría "Queso cheddar" en negativo')
     expect(within(filaDe(1)).getByText('20 g')).toBeInTheDocument()
+    expect(within(filaDe(1)).getByText('BAJO')).toBeInTheDocument()
     expect(within(form).getByText('20 g')).toBeInTheDocument()
   })
 

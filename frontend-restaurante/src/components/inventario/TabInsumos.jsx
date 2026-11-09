@@ -13,6 +13,7 @@ import {
   filtrarInsumos,
   formatoCantidad,
   textoDeAlerta,
+  conStockActual,
 } from '../../utils/inventario'
 import { FormInsumo } from './FormInsumo'
 import { FormMovimiento } from './FormMovimiento'
@@ -119,9 +120,12 @@ export function TabInsumos() {
     cargar()
   }
 
-  // El servidor rechazó un movimiento por el stock: se pone el valor real en la fila.
-  const alStockReal = (idInsumo, stock) =>
-    setInsumos((prev) => prev.map((i) => (i.id_insumo === idInsumo ? { ...i, stock_actual: stock } : i)))
+  // El servidor rechazó un movimiento por el stock: se pone el valor real en la
+  // fila (con su estado recalculado) y se recarga la lista, que pudo cambiar más.
+  const alStockReal = (idInsumo, stock) => {
+    setInsumos((prev) => prev.map((i) => (i.id_insumo === idInsumo ? conStockActual(i, stock) : i)))
+    cargar()
+  }
 
   if (loading) {
     return <p style={{ color: 'var(--sd-text-muted)' }}>Cargando inventario…</p>

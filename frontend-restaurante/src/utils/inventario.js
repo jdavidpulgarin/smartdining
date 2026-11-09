@@ -83,6 +83,22 @@ export function estadoDeInsumo(insumo) {
 
 const PRIORIDAD = { agotado: 0, bajo: 1, ok: 2, inactivo: 3 }
 
+/**
+ * El insumo con otro `stock_actual` (el que devolvió el servidor en un 400
+ * `movimiento_invalido`). Recalcula `bajo` y `agotado` con la misma regla que
+ * `v_stock_bajo`: si se dejaran los de antes, la etiqueta seguiría diciendo OK
+ * con un stock que ya está bajo el mínimo.
+ */
+export function conStockActual(insumo, stock) {
+  const activo = insumo.activo !== false
+  return {
+    ...insumo,
+    stock_actual: stock,
+    bajo: activo && stock <= Number(insumo.stock_minimo),
+    agotado: stock === 0,
+  }
+}
+
 /** Primero lo agotado, luego lo bajo, luego el resto; dentro de cada grupo, por nombre. */
 export function ordenarInsumos(lista) {
   return [...(lista || [])].sort(
