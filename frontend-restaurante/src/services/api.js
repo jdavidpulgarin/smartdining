@@ -333,6 +333,22 @@ export const usuariosApi = {
   },
 }
 
+// Datos del restaurante (D-16 parte B): una sola fila, solo leer y actualizar.
+export const configuracionApi = {
+  /** GET /api/configuracion/completa (admin) → la fila con id, actualizado_en y actualizado_por */
+  async obtenerCompleta() {
+    return apiFetch('/configuracion/completa')
+  },
+
+  /** PUT /api/configuracion (admin, parcial, .strict()) → la fila completa ya actualizada */
+  async actualizar(cambios) {
+    return apiFetch('/configuracion', {
+      method: 'PUT',
+      body: JSON.stringify(cambios),
+    })
+  },
+}
+
 // Submódulo de Mesas
 export const mesasApi = {
   /**
