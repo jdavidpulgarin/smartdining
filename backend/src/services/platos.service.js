@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 /**
  * La FK de la categoria (ISSUE #132, afinado en el review de #139).
@@ -35,6 +36,20 @@ function traducirCategoria(err) {
     };
   }
   return err;
+}
+
+/**
+ * Las dos traducciones de un 23503 al crear o editar un plato, en orden
+ * (review de #144).
+ *
+ * Primero la del AUTOR —`fk_historial_precios_usuario`, que dispara el trigger
+ * del historial de precios cuando el usuario del token ya se borró— y después
+ * la de la categoría. Son dos problemas distintos y cada uno dice qué hacer:
+ * uno pide volver a iniciar sesión, el otro elegir otra categoría. Si no es
+ * ninguno de los dos, el error sube tal cual.
+ */
+function traducirFkDePlato(err) {
+  return traducirAutorInexistente(err) || traducirCategoria(err);
 }
 
 // Tabla platos (docs/modelo-er.md): id_plato, id_categoria, nombre, descripcion,
@@ -79,7 +94,7 @@ async function crear(p) {
   try {
     return await insertarPlato(p);
   } catch (err) {
-    throw traducirCategoria(err);
+    throw traducirFkDePlato(err);
   }
 }
 
@@ -180,7 +195,7 @@ async function actualizar(id, datos, { idUsuario = null } = {}) {
     }
     // Mismo criterio que al crear: una categoría que no existe es un 409 que
     // dice qué falta, no el genérico de clave ajena (ISSUE #132).
-    throw traducirCategoria(err);
+    throw traducirFkDePlato(err);
   } finally {
     client.release();
   }
@@ -281,4 +296,5 @@ module.exports = {
   MENSAJE_CATEGORIA_INEXISTENTE,
   FK_CATEGORIA,
   traducirCategoria,
+  traducirFkDePlato,
 };

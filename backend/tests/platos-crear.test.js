@@ -5,6 +5,7 @@ const app = require('../server');
 const { instalarFakeDb, tokenStaff } = require('./helpers/fake-db');
 const { instalarFakeRedis } = require('./helpers/fake-redis');
 const platosService = require('../src/services/platos.service');
+const autorInexistente = require('../src/services/autor-inexistente');
 
 // ISSUE #132: POST /api/platos sin tiempo_preparacion_estimado daba 500.
 //
@@ -335,10 +336,12 @@ test('review-139: ninguna otra FK ni otro codigo se confunde con la categoria', 
   assert.strictEqual(platosService.traducirCategoria(null), null);
 });
 
-test('review-139: por la ruta, el 23503 del historial sale como el 409 generico', async () => {
+test('review-139: por la ruta, el 23503 del historial NO se disfraza de categoria', async () => {
   // Es el caso de verdad: un admin con un token valido cuyo usuario ya se
   // borro edita el precio de un plato. El trigger del historial choca contra
-  // usuarios, y eso NO es un problema de categoria.
+  // usuarios, y eso NO es un problema de categoria. Desde el review de #144
+  // tiene su propio motivo (ver las pruebas de autor_inexistente, abajo); lo
+  // que esta prueba fija es que NUNCA sale como el de la categoria.
   const db = fakePlatos({
     error: errorDeFk('fk_historial_precios_usuario'),
     fallaEn: 'UPDATE platos',
@@ -351,9 +354,8 @@ test('review-139: por la ruta, el 23503 del historial sale como el 409 generico'
       .send({ precio: 21000 });
 
     assert.strictEqual(res.status, 409);
-    assert.strictEqual(res.body.motivo, undefined, 'no es categoria_inexistente');
+    assert.notStrictEqual(res.body.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
     assert.notStrictEqual(res.body.error, platosService.MENSAJE_CATEGORIA_INEXISTENTE);
-    assert.strictEqual(res.body.error, 'La operación choca con otro registro relacionado');
   } finally {
     redis.restaurar();
     db.restaurar();
@@ -374,6 +376,95 @@ test('review-139: y el de la categoria por el PUT sigue siendo el suyo', async (
 
     assert.strictEqual(res.status, 409);
     assert.strictEqual(res.body.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// El 23503 del AUTOR: "tu usuario ya no existe" (review de #144)
+//
+// Varias escrituras anotan quien las hizo, con el id del JWT. Si ese usuario se
+// borro mientras la sesion seguia viva, el trigger del historial de precios
+// choca contra usuarios y PostgreSQL devuelve 23503. Antes salia como el 409
+// generico de clave ajena, sin motivo: quien esta en el panel no se enteraba de
+// que el problema era su propia sesion.
+// ---------------------------------------------------------------------------
+
+test('review-144: el helper traduce las FK del autor y nada mas', () => {
+  for (const fk of autorInexistente.FK_AUTOR) {
+    const traducido = autorInexistente.traducirAutorInexistente(errorDeFk(fk));
+    assert.strictEqual(traducido.status, 409, fk);
+    assert.strictEqual(traducido.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE, fk);
+    assert.strictEqual(traducido.message, autorInexistente.MENSAJE_AUTOR_INEXISTENTE, fk);
+  }
+
+  // Otra FK, u otro codigo, no son este caso: devuelve null para que quien
+  // llama siga con su propia traduccion.
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk(platosService.FK_CATEGORIA)), null);
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk('fk_historial_usuario')), null);
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk(undefined)), null);
+  assert.strictEqual(
+    autorInexistente.traducirAutorInexistente(Object.assign(new Error('u'), { code: '23505', constraint: autorInexistente.FK_AUTOR[0] })),
+    null
+  );
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(null), null);
+});
+
+test('review-144: el mensaje dice que hacer y no nombra tablas', () => {
+  const texto = autorInexistente.MENSAJE_AUTOR_INEXISTENTE;
+
+  assert.match(texto, /vuelve a iniciar sesión/i, 'dice que hacer');
+  assert.ok(!/historial|constraint|23503|fk_/i.test(texto), 'no nombra el detalle interno');
+});
+
+test('review-144: en un plato, el autor y la categoria son errores distintos', () => {
+  const autor = platosService.traducirFkDePlato(errorDeFk('fk_historial_precios_usuario'));
+  const categoria = platosService.traducirFkDePlato(errorDeFk(platosService.FK_CATEGORIA));
+
+  assert.strictEqual(autor.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+  assert.strictEqual(categoria.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
+  assert.notStrictEqual(autor.message, categoria.message);
+});
+
+test('review-144: otra FK en un plato sigue subiendo sin traducir', () => {
+  const err = errorDeFk('fk_detalles_pedido_plato');
+
+  assert.strictEqual(platosService.traducirFkDePlato(err), err);
+});
+
+test('review-144: por la ruta, el PUT de un plato da 409 autor_inexistente', async () => {
+  // El caso de verdad: un admin con token valido cuyo usuario ya se borro edita
+  // el precio. Antes: 409 generico sin motivo.
+  const db = fakePlatos({
+    error: errorDeFk('fk_historial_precios_usuario'),
+    fallaEn: 'UPDATE platos',
+  });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await request(app)
+      .put('/api/platos/77')
+      .set('Authorization', `Bearer ${admin()}`)
+      .send({ precio: 21000 });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('review-144: y al CREAR un plato, lo mismo', async () => {
+  const db = fakePlatos({ error: errorDeFk('fk_historial_precios_usuario') });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await crear(CUERPO_MINIMO);
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
   } finally {
     redis.restaurar();
     db.restaurar();
