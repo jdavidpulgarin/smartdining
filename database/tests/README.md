@@ -173,8 +173,17 @@ Variables: `API_URL`, `CLIENTE_URL` (5174), `KDS_URL` (5175), `DEMO_PASSWORD`, `
 si esa mesa tiene pedidos abiertos, la prueba no arranca). Usa 3 inicios de sesión por corrida
 (el límite es 5 por minuto). Tarda unos 25 s.
 
-> **Problema conocido (backend):** `GET /menu` se guarda 60 s en Redis y **agotar o reponer
-> por inventario no lo invalida**. En ese minuto, quien abre el menú ve la carta vieja: Beto ve
-> la Hamburguesa agotada como disponible (si la pide, recibe 409 y la PWA se lo dice; la prueba
-> lo comprueba y lo anota), y tras reponer, un menú recién abierto puede seguir ocultándola. Por
-> eso la prueba espera, antes de empezar, a que `GET /menu` muestre la Hamburguesa (hasta 70 s).
+> **Problema conocido (backend, #135, bloqueante para la demo):** `GET /menu` se guarda 60 s
+> en Redis (`cache:menu`) y **agotar o reponer por inventario no lo invalida**. En ese minuto,
+> quien abre el menú ve la carta vieja:
+>
+> - Beto ve la Hamburguesa agotada como disponible. Si la pide, recibe 409 y la PWA se lo dice;
+>   la prueba lo comprueba y lo anota.
+> - Tras reponer, un menú recién abierto puede seguir ocultándola. Si una corrida (o un ensayo)
+>   leyó `/menu` con la Hamburguesa agotada, la siguiente que empiece antes de 60 s la encuentra
+>   escondida. Por eso la prueba **espera al empezar** (hasta 75 s, con el `beforeAll` en 135 s:
+>   los hooks no heredan el tope del `describe` y se quedaban en 30 s). Si tuvo que esperar, lo
+>   anota con los segundos (`AVISO #135: …`); pasado el límite, falla diciendo que ya no es solo
+>   la caché. Para ver cada intento: `E2E_TRAZA=1`.
+>
+> Cuando se cierre #135, la espera debería quedar siempre en 0 s.

@@ -47,8 +47,41 @@ async function api(token, ruta, { method = 'GET', body } = {}) {
     method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
+    // Una petición colgada tiene que fallar con su nombre, no comerse el
+    // tiempo de toda la prueba.
+    signal: AbortSignal.timeout(15_000),
   })
   return { status: res.status, data: await res.json().catch(() => null) }
+}
+
+const LIMITE_ESPERA_MENU_MS = 75_000 // TTL de cache:menu (60 s) + margen
+
+/**
+ * Espera a que la carta pública (GET /menu) muestre la Hamburguesa. Hace falta
+ * por #135: cache:menu vive 60 s en Redis y el inventario no lo invalida, así
+ * que si la Hamburguesa estuvo agotada hace menos de un minuto (una corrida
+ * anterior, un ensayo) la carta todavía la esconde. No se esconde el bug: si
+ * hubo que esperar se anota en el reporte con el tiempo, y pasado el límite la
+ * prueba falla diciendo por qué.
+ */
+async function esperarMenuConPlato() {
+  const inicio = Date.now()
+  const intentos = []
+  for (;;) {
+    const r = await api(null, '/menu')
+    const esta = JSON.stringify(r.data || {}).includes(PLATO)
+    const seg = Math.round((Date.now() - inicio) / 1000)
+    intentos.push(`${seg}s:${r.status}:${esta ? 'sí' : 'no'}`)
+    if (process.env.E2E_TRAZA) console.warn(`[menu] ${intentos.at(-1)}`)
+    if (esta) return { esperaSeg: seg, intentos }
+    if (Date.now() - inicio > LIMITE_ESPERA_MENU_MS) {
+      throw new Error(
+        `GET /menu no mostró "${PLATO}" en ${LIMITE_ESPERA_MENU_MS / 1000} s, más que el TTL de cache:menu (60 s): ` +
+          `ya no es solo #135. Intentos: ${intentos.join(' ')}`
+      )
+    }
+    await new Promise((res) => setTimeout(res, 2_000))
+  }
 }
 
 async function login(email) {
@@ -147,6 +180,9 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
   const creados = [] // id_pedido de todo lo que crea la prueba
 
   test.beforeAll(async () => {
+    // Los hooks NO heredan el setTimeout del describe (usan los 30 s de
+    // playwright.config.js): sin esto, la espera de #135 se cortaba a los 30 s.
+    test.setTimeout(LIMITE_ESPERA_MENU_MS + 60_000)
     admin = await login('admin@smartdining.com')
     const insumos = (await api(admin, '/inventario/insumos?limite=500')).data?.insumos || []
     const carne = insumos.find((i) => i.nombre === INSUMO)
@@ -165,16 +201,12 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
         body: { tipo: 'ajuste', cantidad: STOCK_DEMO - Number(carne.stock_actual), motivo: 'E2E demo: dejar la carne en 4' },
       })
     }
-    // GET /menu vive 60 s en caché y el inventario no lo invalida: si una corrida
-    // anterior (o un ensayo) dejó la Hamburguesa agotada hace menos de un minuto,
-    // la carta pública todavía la esconde. Se espera a que la muestre.
-    await expect
-      .poll(async () => JSON.stringify((await api(null, '/menu')).data || {}).includes(PLATO), {
-        message: 'GET /menu todavía no muestra la Hamburguesa (caché de 60 s)',
-        timeout: 70_000,
-        intervals: [2_000],
-      })
-      .toBe(true)
+    const { esperaSeg, intentos } = await esperarMenuConPlato()
+    if (esperaSeg > 0) {
+      const aviso = `#135: GET /menu escondió la Hamburguesa ${esperaSeg} s al empezar (caché de una corrida anterior)`
+      test.info().annotations.push({ type: 'problema conocido', description: `${aviso}. Intentos: ${intentos.join(' ')}` })
+      console.warn(`AVISO ${aviso}`)
+    }
     antes = await fotografiar(admin, ids)
     expect(antes).toEqual({ stock: STOCK_DEMO, platoDisponible: true, mesa: 'disponible', pedidosAbiertos: 0, libroCuadra: true })
   })
@@ -339,8 +371,7 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
       expect(r.data?.faltantes).toEqual([{ tipo: 'plato', id: ids.plato, nombre: PLATO }])
     })
 
-    await test.step('9. En Inventario el admin ve la carne en 0 y registra una entrada de 10', async () => {
-      // Por el menú del panel, como en la demo (Menú sigue abierto en su pestaña).
+    await test.step('9. En Inventario el admin ve la carne en 0 y registra una entrada de 10', async () => {      // Por el menú del panel, como en la demo (Menú sigue abierto en su pestaña).
       await panel.getByRole('navigation', { name: 'Navegación principal del restaurante' }).getByRole('link', { name: 'INVENTARIO' }).click()
       const fila = panel.getByTestId(`insumo-${ids.insumo}`)
       await expect(fila).toContainText(INSUMO)
