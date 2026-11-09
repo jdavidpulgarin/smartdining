@@ -272,7 +272,7 @@ async function crearIngrediente(idPaso, datos) {
       `INSERT INTO ingredientes (${columnas.join(', ')})
        VALUES (${marcadores})
        RETURNING id_ingrediente, id_paso, nombre, precio_extra, calorias, alergenos,
-                 url_imagen, disponible`,
+                 url_imagen, disponible, stock_suficiente`,
       valores
     );
     return r.rows[0];
@@ -329,7 +329,7 @@ async function actualizarIngrediente(idIngrediente, cambios, validar, { idUsuari
               url_imagen = $5, disponible = $6
         WHERE id_ingrediente = $7
         RETURNING id_ingrediente, id_paso, nombre, precio_extra, calorias, alergenos,
-                  url_imagen, disponible`,
+                  url_imagen, disponible, stock_suficiente`,
       [
         fila.nombre,
         fila.precio_extra,
