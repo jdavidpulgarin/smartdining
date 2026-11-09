@@ -1,5 +1,29 @@
 const pool = require('../config/db');
 
+/**
+ * La FK de la categoria (ISSUE #132).
+ *
+ * `fk_platos_categoria` es ON DELETE RESTRICT, asi que un 23503 al crear o
+ * actualizar un plato solo puede ser una cosa: la categoria no existe. Sin
+ * traducirlo, el manejador central contesta su 409 generico ("La operacion choca
+ * con otro registro relacionado"), que no dice QUE falta y no trae `motivo`.
+ */
+const PG_FK = '23503';
+const MOTIVO_CATEGORIA_INEXISTENTE = 'categoria_inexistente';
+const MENSAJE_CATEGORIA_INEXISTENTE = 'Esa categoria no existe';
+
+/** Traduce el 23503 de la categoria; cualquier otro error sube como venia. */
+function traducirCategoria(err) {
+  if (err && err.code === PG_FK) {
+    return {
+      status: 409,
+      message: MENSAJE_CATEGORIA_INEXISTENTE,
+      motivo: MOTIVO_CATEGORIA_INEXISTENTE,
+    };
+  }
+  return err;
+}
+
 // Tabla platos (docs/modelo-er.md): id_plato, id_categoria, nombre, descripcion,
 // precio, url_imagen, disponible, tiempo_preparacion_estimado, creado_en.
 // El modelo NO tiene personalizaciones ni alergenos.
@@ -16,12 +40,43 @@ async function obtenerPorId(id) {
   return result.rows[0] || null;
 }
 
+/**
+ * Valores por defecto de las columnas, repetidos aquí a propósito (ISSUE #132).
+ *
+ * `tiempo_preparacion_estimado` es `NOT NULL DEFAULT 15 CHECK (> 0)`
+ * (database/schema.sql:105) y `personalizable` es `NOT NULL DEFAULT FALSE`
+ * (database/scripts/13_constructor.sql:33). El INSERT manda las columnas por
+ * nombre, así que un parámetro en NULL **pisa el DEFAULT** en vez de dejarlo
+ * actuar: con el tiempo en NULL, PostgreSQL rechazaba la fila con 23502 y
+ * `POST /api/platos` **sin tiempo daba 500**.
+ *
+ * Se resuelve con `COALESCE($n, <constante>)`: la constante lleva el valor de la
+ * columna y un comentario que apunta al esquema, para que se vea que hay dos
+ * sitios que mantener. La alternativa —armar la lista de columnas según lo que
+ * venga— metería identificadores dinámicos en el SQL, que es justo lo que no se
+ * hace en este repo (tests/inyeccion-sql.test.js).
+ *
+ * `calorias` NO lleva constante: la columna es nullable y `null` significa "no
+ * se sabe", que es distinto de 0, así que ahí el NULL es el valor correcto.
+ */
+const TIEMPO_PREPARACION_POR_OMISION = 15;
+const PERSONALIZABLE_POR_OMISION = false;
+
 async function crear(p) {
+  try {
+    return await insertarPlato(p);
+  } catch (err) {
+    throw traducirCategoria(err);
+  }
+}
+
+async function insertarPlato(p) {
   const result = await pool.query(
     `INSERT INTO platos
       (id_categoria, nombre, descripcion, precio, url_imagen, disponible,
-       tiempo_preparacion_estimado, creado_en)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       tiempo_preparacion_estimado, personalizable, calorias, creado_en)
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, ${TIEMPO_PREPARACION_POR_OMISION}),
+             COALESCE($8, ${PERSONALIZABLE_POR_OMISION}), $9, NOW())
      RETURNING *`,
     [
       p.id_categoria,
@@ -31,6 +86,10 @@ async function crear(p) {
       p.url_imagen || null,
       p.disponible ?? true,
       p.tiempo_preparacion_estimado ?? null,
+      // D-16 B las dejó solo en el PUT: al crear se perdían en silencio aunque
+      // platoSchema las aceptara.
+      p.personalizable ?? null,
+      p.calorias ?? null,
     ]
   );
   return result.rows[0];
@@ -69,9 +128,19 @@ async function actualizar(id, datos, { idUsuario = null } = {}) {
       idUsuario === null || idUsuario === undefined ? '' : String(idUsuario),
     ]);
 
+    // Las columnas NOT NULL van con COALESCE (ISSUE #132): el controller manda
+    // la fila ya mezclada, así que por HTTP nunca llegan en null, pero llamar al
+    // servicio con datos PARCIALES daba un 23502 —y por tanto un 500— en vez de
+    // dejar el valor que había. Para una columna NOT NULL, null no puede
+    // significar otra cosa que "no lo cambies": no se puede guardar.
+    //
+    // `descripcion` y `url_imagen` NO llevan COALESCE a propósito: son nullable
+    // y poner una en null es una edición válida (quitar la imagen de un plato).
     const result = await client.query(
-      `UPDATE platos SET id_categoria = $1, nombre = $2, descripcion = $3, precio = $4,
-        url_imagen = $5, disponible = $6, tiempo_preparacion_estimado = $7,
+      `UPDATE platos SET id_categoria = COALESCE($1, id_categoria),
+        nombre = COALESCE($2, nombre), descripcion = $3, precio = COALESCE($4, precio),
+        url_imagen = $5, disponible = COALESCE($6, disponible),
+        tiempo_preparacion_estimado = COALESCE($7, tiempo_preparacion_estimado),
         personalizable = COALESCE($8, personalizable), calorias = COALESCE($9, calorias)
        WHERE id_plato = $10 RETURNING *`,
       [
@@ -96,7 +165,9 @@ async function actualizar(id, datos, { idUsuario = null } = {}) {
     } catch {
       // Ya estaba cerrada: no hay nada que deshacer.
     }
-    throw err;
+    // Mismo criterio que al crear: una categoría que no existe es un 409 que
+    // dice qué falta, no el genérico de clave ajena (ISSUE #132).
+    throw traducirCategoria(err);
   } finally {
     client.release();
   }
@@ -191,4 +262,8 @@ module.exports = {
   eliminar,
   historialPrecios,
   MAX_HISTORIAL,
+  TIEMPO_PREPARACION_POR_OMISION,
+  PERSONALIZABLE_POR_OMISION,
+  MOTIVO_CATEGORIA_INEXISTENTE,
+  MENSAJE_CATEGORIA_INEXISTENTE,
 };
