@@ -185,6 +185,45 @@ async function listarInsumos(req, res, next) {
   }
 }
 
+/**
+ * GET /api/inventario/carta — admin (D-17 PR 3).
+ *
+ * La carta con su disponibilidad y si tiene receta, para la pestaña de Recetas
+ * del panel. Sale de `v_carta_disponible`: aquí no se decide nada sobre la
+ * disponibilidad, solo se agrupa en `{ platos, ingredientes }`.
+ *
+ * Un filtro con un valor que no está en la lista es 400 y NO se ignora: un
+ * `?tipo=platos` que devolviera todo haría creer al panel que no queda nada
+ * pendiente de configurar.
+ */
+const cartaSchema = z
+  .object({
+    tipo: z.enum(['plato', 'ingrediente']).optional(),
+    sin_receta: z.enum(['true', 'false']).optional(),
+    q: z.string().trim().max(80, 'q admite como máximo 80 caracteres').optional(),
+  })
+  .strict();
+
+async function obtenerCarta(req, res, next) {
+  const parsed = cartaSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: `Filtro inválido: ${primerError(parsed)}` });
+  }
+
+  const { tipo, sin_receta: sinReceta, q } = parsed.data;
+
+  try {
+    const carta = await inventarioService.obtenerCarta({
+      tipo,
+      sinReceta: sinReceta === undefined ? undefined : sinReceta === 'true',
+      q,
+    });
+    return res.json(carta);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 /** GET /api/inventario/insumos/:id — admin. */
 async function obtenerInsumo(req, res, next) {
   const idInsumo = idDeLaUrl(req.params.id);
@@ -393,6 +432,7 @@ const recetaDeIngrediente = handlersDeReceta(
 );
 
 module.exports = {
+  obtenerCarta,
   listarInsumos,
   obtenerInsumo,
   crearInsumo,

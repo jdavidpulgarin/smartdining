@@ -20,6 +20,10 @@ const router = express.Router();
  */
 const soloAdmin = [requireAuth, requireRole('admin')];
 
+// D-17 PR 3: la carta con su disponibilidad y si tiene receta, para la pestaña
+// de Recetas del panel (P-22). Es de solo lectura: sale de v_carta_disponible.
+router.get('/carta', ...soloAdmin, ctrl.obtenerCarta);
+
 router.get('/insumos', ...soloAdmin, ctrl.listarInsumos);
 router.post('/insumos', ...soloAdmin, ctrl.crearInsumo);
 
