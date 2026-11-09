@@ -3078,8 +3078,9 @@ agotado, sin pedir plato por plato.
 
 Sale de la vista **`v_carta_disponible`** (`database/scripts/27_inventario.sql`), que es quien
 decide qué es "disponible": el backend no recalcula nada. A la vista se le añaden, con un JOIN,
-los datos que el panel necesita para agrupar las filas —la categoría del plato, y de qué plato
-y de qué paso es cada opción del constructor—, que la vista no trae.
+los datos que el panel necesita para agrupar y explicar las filas —la categoría del plato, si
+es personalizable, y de qué plato y de qué paso (con su orden) es cada opción del
+constructor—, que la vista no trae.
 
 ```http
 GET /api/inventario/carta
@@ -3093,6 +3094,7 @@ Authorization: Bearer <token de admin>
       "id": 12,
       "nombre": "Arepa de Huevo",
       "categoria": "Entradas",
+      "personalizable": false,
       "disponible": true,
       "stock_suficiente": false,
       "disponible_efectivo": false,
@@ -3103,6 +3105,7 @@ Authorization: Bearer <token de admin>
       "id": 1001,
       "nombre": "Bowl Personalizado",
       "categoria": "Bowls",
+      "personalizable": true,
       "disponible": true,
       "stock_suficiente": true,
       "disponible_efectivo": true,
@@ -3118,6 +3121,7 @@ Authorization: Bearer <token de admin>
       "plato": "Bowl Personalizado",
       "id_paso": 4,
       "paso": "Proteína",
+      "paso_orden": 2,
       "disponible": false,
       "stock_suficiente": true,
       "disponible_efectivo": false,
@@ -3138,17 +3142,29 @@ hacer falta en cada fila.
 | `id` | `id_plato` o `id_ingrediente`, según la lista |
 | `nombre` | El del plato o de la opción |
 | `categoria` | Solo en `platos`: el nombre de su categoría (`null` si no tiene) |
+| `personalizable` | Solo en `platos`: si se arma por pasos en el constructor |
 | `id_plato`, `plato` | Solo en `ingredientes`: a qué plato pertenece la opción |
-| `id_paso`, `paso` | Solo en `ingredientes`: de qué paso del constructor es |
+| `id_paso`, `paso` | Solo en `ingredientes`: de qué paso del constructor es, con su nombre |
+| `paso_orden` | Solo en `ingredientes`: el **orden de ese paso dentro de su plato** (`pasos_constructor.orden`) |
 | `disponible` | El **interruptor manual** de la cocina |
 | `stock_suficiente` | Lo que **calcula la base** a partir del stock de la receta |
 | `disponible_efectivo` | `disponible AND stock_suficiente`: lo que ve el comensal |
 | `motivo` | `null` si está disponible · `"manual"` si lo apagó la cocina · `"stock"` si no alcanza el inventario. El manual **gana**: un plato apagado a mano y además sin stock dice `"manual"` |
 | `tiene_receta` | Si tiene receta en insumos. En `false` **no controla inventario**: se puede pedir siempre |
 
-- Los `id` llegan como **números JSON**, no como texto.
-- Orden: los platos por **categoría y nombre**; las opciones por **plato, paso y nombre**. Es
-  el orden en que el panel las pinta, así que no tiene que reordenar nada.
+**`personalizable` explica un `tiene_receta: false` que NO es un olvido.** Un Bowl, un Wrap o
+una Arepa Rellena **consumen por sus opciones**, cada una con su propia receta, así que el
+plato no tiene receta propia y está bien así. Sin ese campo, el panel los pintaría en la lista
+de "falta configurar" junto a los que de verdad están sin receta.
+
+**`paso_orden` hace falta porque el nombre del paso se repite entre platos** ("Elige tu Salsa"
+está en varios): con solo `paso` no se pueden ordenar los pasos como los ve el comensal, ni
+distinguir dos pasos homónimos de platos distintos.
+
+- Los `id` y `paso_orden` llegan como **números JSON**, no como texto.
+- **Orden fijo, y es parte del contrato**: los platos por **categoría** y luego **nombre**; las
+  opciones por **plato**, luego **`paso_orden`** y luego **nombre**. Es el orden en que el panel
+  las pinta, así que no tiene que reordenar nada. Un plato sin categoría va primero.
 - Salen **todos** los platos y todas las opciones, también los agotados y los apagados a mano:
   es una pantalla de administración, no el menú del comensal (ese es `GET /menu`, que solo
   muestra lo disponible).
@@ -3166,6 +3182,9 @@ GET /api/inventario/carta?sin_receta=true&tipo=plato
 GET /api/inventario/carta?q=arepa
 ```
 
+- `sin_receta=true` filtra **solo por `tiene_receta = false`**, sin mirar `personalizable`: un
+  Bowl personalizable sin receta propia **sí sale** en esa lista, y es el panel el que decide
+  cómo mostrarlo con el campo `personalizable`. El filtro no esconde nada por su cuenta.
 - Un valor fuera de la lista es **400** y no se ignora: un `?tipo=platos` que devolviera todo
   haría creer al panel que no hay nada pendiente de configurar.
 - `q` filtra por el nombre del plato o de la opción, no por el del plato padre: buscar "bowl"
