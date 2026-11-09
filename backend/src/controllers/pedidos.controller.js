@@ -153,6 +153,10 @@ function aliasDelComensal(req, item, porClave = new Map()) {
   if (typeof bruto !== 'string' || !bruto.trim()) return null;
 
   const normalizado = aliasComensal.normalizarAlias(bruto);
+  // El cajón de los platos sin dueño no es dueño de nada: si llegara hasta aquí
+  // (no llega: `resolverAliasCanonicos` ya devolvió su 409), el ítem se queda
+  // SIN alias, que es justo donde la cuenta lo pondría.
+  if (normalizado.reservada) return null;
   // Si no se pudo normalizar, `resolverAliasCanonicos` ya respondió 400; este
   // respaldo solo existe para no devolver undefined si alguien llama suelto.
   if (normalizado.error) return bruto.trim();
@@ -226,11 +230,44 @@ async function resolverAliasCanonicos(idMesa, items) {
   const brutos = aliasEnBruto(items);
   if (brutos.length === 0) return { porClave: new Map() };
 
+  // D-18c: que la mesa EXISTA se comprueba antes de resolver alias. Si no
+  // existe, no hay nadie sentado a quien resolver, y sin esto la respuesta era
+  // un 409 comensal_no_registrado —`cuentaPorComensal` devuelve null— que
+  // culpaba al nombre del comensal de un id de mesa equivocado.
+  //
+  // Va aquí y no en `crear` a propósito: solo cuesta una consulta cuando el
+  // pedido trae alias. Un pedido SIN alias no toca esta función y sigue
+  // fallando como antes (la FK de la mesa), sin una consulta de más.
+  //
+  // `mesasService.existe` es el mismo `SELECT 1 FROM mesas` que ya hacían las
+  // dos cuentas, ahora en un solo sitio: no es una consulta nueva de este
+  // controlador.
+  if (!(await mesasService.existe(idMesa))) {
+    return { error: { status: 404, body: { error: 'Mesa no encontrada' } } };
+  }
+
   // 1. Validación: la MISMA regla que las rutas de alias (R-18). Un nombre que
   //    no pasa aquí no se puede registrar ni comparar, así que es un 400.
   const claves = new Map();
   for (const bruto of brutos) {
     const normalizado = aliasComensal.normalizarAlias(bruto);
+    // «General» (D-18c) es la excepción: no es un nombre mal escrito, es el
+    // cajón de los platos sin dueño, así que no corresponde a NADIE registrado.
+    // Sale el mismo 409 comensal_no_registrado que daba antes de que
+    // `normalizarAlias` lo rechazara, y sin mirar Redis: un ítem a nombre del
+    // cajón no se guarda ni cuando no se puede verificar quién está sentado.
+    if (normalizado.reservada) {
+      return {
+        error: {
+          status: 409,
+          body: {
+            error: MENSAJE_NO_REGISTRADO,
+            motivo: MOTIVO_NO_REGISTRADO,
+            alias: normalizado.alias,
+          },
+        },
+      };
+    }
     if (normalizado.error) {
       return { error: { status: 400, body: { error: normalizado.error, campo: 'comensal' } } };
     }
