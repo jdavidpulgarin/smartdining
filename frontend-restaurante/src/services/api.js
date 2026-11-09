@@ -298,6 +298,41 @@ export const authApi = {
   },
 }
 
+/**
+ * Personal del restaurante (P-21, contra D-16 parte A). Todo es solo de admin.
+ * El alta vive en POST /api/auth/register; no hay baja: se desactiva.
+ */
+export const usuariosApi = {
+  /** GET /api/usuarios → { usuarios: [...] } */
+  async listar() {
+    return apiFetch('/usuarios')
+  },
+
+  /** POST /api/auth/register → { usuario } */
+  async crear({ nombre, email, password, rol }) {
+    return apiFetch('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ nombre, email, password, rol }),
+    })
+  },
+
+  /** PATCH /api/usuarios/:id con nombre, rol y/o activo (.strict()) → { usuario } */
+  async actualizar(id, cambios) {
+    return apiFetch(`/usuarios/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(cambios),
+    })
+  },
+
+  /** POST /api/usuarios/:id/clave → { usuario } (sin la clave). Mínimo 8 caracteres. */
+  async cambiarClave(id, password) {
+    return apiFetch(`/usuarios/${id}/clave`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    })
+  },
+}
+
 // Submódulo de Mesas
 export const mesasApi = {
   /**
@@ -357,6 +392,31 @@ export const mesasApi = {
    */
   async obtenerCuenta(id) {
     return apiFetch(`/mesas/${id}/cuenta`)
+  },
+
+  /** Crea una mesa (P-21): POST /api/mesas, solo admin. */
+  async crear({ numero, capacidad, ubicacion }) {
+    return apiFetch('/mesas', {
+      method: 'POST',
+      body: JSON.stringify({ numero, capacidad, ubicacion }),
+    })
+  },
+
+  /**
+   * Edita el mobiliario (P-21): PATCH /api/mesas/:id, solo admin. Manda solo
+   * lo que cambió: el cuerpo es .strict() y lo que no viene no se toca.
+   * `activa` existe desde D-16 parte B.
+   */
+  async actualizarDatos(id, cambios) {
+    return apiFetch(`/mesas/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(cambios),
+    })
+  },
+
+  /** Borra una mesa (P-21): DELETE /api/mesas/:id. 409 si está ocupada o tiene pedidos. */
+  async eliminar(id) {
+    return apiFetch(`/mesas/${id}`, { method: 'DELETE' })
   },
 }
 
