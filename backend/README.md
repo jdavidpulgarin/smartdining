@@ -1,7 +1,14 @@
 # SmartDining — Backend + KDS
 
 Responsable: Carlos Ospino (Desarrollador 2 / Integrante 3).
-Ramas: `feature/backend` y `feature/frontend-kds` (el frontend del KDS se arma después, en `/frontend-kds`).
+
+El trabajo va sobre **`develop`**, con una rama por tarea (`feature/…`, `fix/…`, `docs/…`)
+que se fusiona por PR. Las ramas `feature/backend` y `feature/frontend-kds` del arranque del
+proyecto ya no existen. El frontend del KDS está en **[`/frontend-kds`](../frontend-kds)** y
+funciona.
+
+Para levantar el resto de los servicios (Redis, socket-server y los tres frontends) y ver
+sus puertos, el **[README.md de la raíz](../README.md)**.
 
 ## Modelo de datos
 
@@ -24,46 +31,97 @@ lógica. Ver el detalle en [docs/api-spec.md](docs/api-spec.md).
 | Monto del pago vs. total del pedido | Traducir los errores de la base a HTTP |
 | Liberar la mesa y rotar su `token_qr` | Escribir `historial_estados` |
 
-Los `RAISE EXCEPTION` de los triggers (SQLSTATE `P0001`) salen como **409** con el
-mensaje del trigger; cualquier otro error de PostgreSQL sale como **500** genérico sin
-exponer el detalle. Todo eso se decide en un único lugar:
-`src/middleware/errores.middleware.js`.
+**Traducir los errores de PostgreSQL se decide en un único lugar**,
+`src/middleware/errores.middleware.js` (más `inventario-errores.js` para los dos SQLSTATE
+del inventario, que el CRUD de insumos reutiliza). Lo que sale hoy:
+
+| SQLSTATE | Qué es | Respuesta |
+|---|---|---|
+| `P0001` | `RAISE EXCEPTION` de un trigger | **409** con el mensaje del trigger, que está escrito para leerse |
+| `23505` unique_violation | Ya existe una fila con esos datos | **409** genérico |
+| `23503` foreign_key_violation | Choca con otra fila relacionada | **409** genérico (algunas rutas lo afinan: `categoria_inexistente`, `insumo_inexistente`) |
+| `23514` check_violation | El valor no cumple una regla de la columna | **422** con mensaje fijo y opaco |
+| Clase `22` (22003, 22001, 22P02…) | Dato fuera de rango o mal formado | **422**, el mismo mensaje |
+| `40P01` / `40001` | Deadlock o fallo de serialización | **409** "vuelve a intentarlo". Al **crear un pedido** sale **503 `reintentar`**, porque no hay clave de idempotencia y repetirlo lo duplicaría |
+| `57014` query_canceled | Venció `statement_timeout` | **503** |
+| `SD001` | Sin stock para el pedido (inventario) | **409** `sin_stock` con los `faltantes` |
+| `SD002` | El movimiento dejaría el stock negativo | **400** `movimiento_invalido` con `stock_actual` |
+| Cualquier otro | — | **500** genérico, sin exponer el detalle (va al log) |
+
+La tabla completa, con los cuerpos de respuesta y el porqué de cada status, está en
+[docs/api-spec.md](docs/api-spec.md).
 
 ## Recrear la base de datos local
 
-El `database/README.md` de Jarrison no documenta el orden de ejecución. Desde el commit
-`7556518` el bootstrap es **el runner y después el seed**: `00_ejecutar_todo.sql` ejecuta
-`../schema.sql` él mismo como paso `[0/13]`, y ese schema arranca con `DROP TABLE` de las
-15 tablas — por eso el seed va al final, o se borraría. Además el seed ahora inserta
-`transiciones_validas`, que existe recién después del paso 0.
+**Lo carga todo `database/migrar.sh`**, que vive en este repositorio: no hay que traer
+`database/` de ninguna otra rama. El script aplica, en orden, los scripts de
+`database/scripts/` que la base todavía no tenga registrados en `schema_migraciones`, y
+cada uno corre en **una transacción junto con su registro**: o queda aplicado y
+registrado, o no queda nada.
 
-> Antes del `7556518` el orden era el inverso (`schema.sql` → `seed.sql` → runner).
-> Conviene volver a mirar el runner cada vez que Jarrison actualice la rama.
+Sabe arreglárselas con tres situaciones:
+
+| Situación | Qué hace |
+|---|---|
+| Base **vacía** | Carga la línea base con `00_ejecutar_todo.sql` —el `schema.sql` como paso `[0/26]`, los scripts 01 a 25 y el `seed.sql` como `[26/26]`— y después los scripts nuevos, del 26 en adelante (hoy son **tres**: `26_configuracion.sql`, `27_inventario.sql` y `28_aviso_insumo_agotado.sql`) |
+| Base cargada **antes de P-17** (sin `schema_migraciones`) | Corre solo el 25, que registra 00 a 25 como aplicados, y después los nuevos |
+| Base **al día** | Aplica solo lo que falte; si no falta nada, no cambia nada |
+
+> **`00_ejecutar_todo.sql` por sí solo NO alcanza.** Está congelado en la línea base (00 a
+> 25) y **no incluye los scripts 26 en adelante** —la configuración del restaurante, el
+> inventario y el aviso de agotado—, así que una base cargada solo con el runner deja
+> cinco rutas del backend respondiendo 500. Para eso está `migrar.sh`, que corre el runner
+> y luego los scripts nuevos.
 
 ```bash
-# 1. Traer la version mas reciente de la rama de Jarrison, sin mezclarla:
-#    (se extrae a una carpeta aparte; no se commitea en feature/backend)
-git fetch origin
-git archive origin/feature/base-datos database/ | tar -x -C /ruta/temporal
-
+# El nombre de la base va en una variable: cambialo y todo el bloque apunta ahi.
+export PGDATABASE=smartdining
+export PGUSER=postgres
 export PGPASSWORD=...            # el de backend/.env
 
-# 2. Recrear la base vacia
-psql -h localhost -U postgres -d postgres -c "DROP DATABASE IF EXISTS smartdining;"
-psql -h localhost -U postgres -d postgres -c "CREATE DATABASE smartdining ENCODING 'UTF8';"
+# 1. Recrear la base vacia (si solo quieres aplicar lo que falte, salta al paso 2)
+psql -h localhost -U "$PGUSER" -d postgres -c "DROP DATABASE IF EXISTS $PGDATABASE;"
+psql -h localhost -U "$PGUSER" -d postgres -c "CREATE DATABASE $PGDATABASE ENCODING 'UTF8';"
 
-# 3. El runner (incluye schema.sql). OJO: usa "\i" con rutas relativas,
-#    hay que ejecutarlo con el cwd en scripts/
-cd /ruta/temporal/database/scripts
-psql -h localhost -U postgres -d smartdining -v ON_ERROR_STOP=1 -f 00_ejecutar_todo.sql
+# 2. Cargar todo: linea base + scripts nuevos. Desde la RAIZ del repositorio.
+sh database/migrar.sh
 
-# 4. El seed, DESPUES del runner
-psql -h localhost -U postgres -d smartdining -v ON_ERROR_STOP=1 -f ../seed.sql
-
-# 5. Solo si el hash del seed no corresponde a Admin123! (el seed nuevo ya lo trae):
+# 3. Solo si el hash del seed no corresponde a la clave demo (el seed ya la trae):
 #    desde backend/
-psql -h localhost -U postgres -d smartdining -f scripts/fijar-password-demo.sql
+psql -h localhost -U "$PGUSER" -d "$PGDATABASE" -f scripts/fijar-password-demo.sql
 ```
+
+> **Para probar sin tocar tu base, usa otro nombre.** El paso 1 hace `DROP DATABASE`: con
+> `export PGDATABASE=smartdining_pruebas` el bloque entero —borrado, creación y
+> `migrar.sh`— trabaja sobre esa y tu base de desarrollo no se entera. **Nunca corras
+> `migrar.sh` sin tener `PGDATABASE` puesta a lo que quieres**, porque su valor por
+> omisión es `smartdining`.
+
+**En Windows**, `migrar.sh` es POSIX `sh` (la imagen `postgres:16-alpine` no trae bash), así
+que va con **Git Bash** o equivalente, y conviene indicarle dónde está `psql`:
+
+```bash
+PSQL="/c/Program Files/PostgreSQL/18/bin/psql.exe" PGUSER=postgres \
+  PGDATABASE=smartdining sh database/migrar.sh
+```
+
+Con Docker, que es como corre en producción:
+
+```bash
+docker compose exec -T postgres sh /smartdining-db/migrar.sh
+```
+
+La conexión sale de las variables estándar de PostgreSQL (`PGHOST`, `PGPORT`, `PGUSER`,
+`PGPASSWORD`, `PGDATABASE`); dentro del contenedor caen en `POSTGRES_USER` y `POSTGRES_DB`
+por el socket local, sin contraseña. Dos variables opcionales: **`PSQL`** (ruta de `psql`,
+por omisión el del `PATH`) y **`MIGRAR_SCRIPTS_DIR`** (carpeta de scripts, por omisión
+`database/scripts`).
+
+Dos cosas que el script vigila y conviene saber: **un script ya aplicado no se edita nunca**
+—si cambia su checksum, `migrar.sh` se detiene con error y el cambio tiene que ir en un
+script nuevo— y **no se corren dos migraciones a la vez** sobre la misma base.
+
+**El `seed.sql` no se ejecuta aparte**: la línea base ya lo incluye como su último paso.
 
 Usuarios demo (todos con `Admin123!`): `admin@smartdining.com`,
 `cocina@smartdining.com`, `mesero@smartdining.com`, `caja@smartdining.com`.
@@ -75,8 +133,16 @@ Token QR de la mesa 1 recién sembrada: `qr-token-mesa-01-a1b2c3d4`.
   verdad: `npm test` y `npm run test:cobertura` usan banderas del runner de pruebas que no
   existen en 18 (`--test-coverage-exclude`, el resumen `# cancelled` que vigila el script
   del CI).
-- PostgreSQL corriendo localmente, con `database/schema.sql` y `database/seed.sql` de Jarrison ya ejecutados
+- PostgreSQL corriendo localmente y la base **al día**: se carga con `database/migrar.sh`
+  (ver [Recrear la base de datos local](#recrear-la-base-de-datos-local)). Con solo el
+  `schema.sql` y el `seed.sql` faltan la configuración y el inventario, y cinco rutas
+  responden 500
 - Redis **opcional en desarrollo**: sin él todo funciona, solo sin caché (ver [Redis en desarrollo](#redis-en-desarrollo-es-opcional))
+- **socket-server** solo para el flujo de mesa: `POST /api/mesas/:id/abrir` y
+  `POST /api/mesas/qr/:token/sesion` le piden el QR, así que sin él responden
+  **503 `SIN_CONFIGURAR`** (o 503 si no contesta). Todo lo demás —catálogo, pedidos, KDS,
+  cobros, inventario— funciona sin el socket-server: los avisos se registran y se siguen.
+  Cómo levantarlo, en el [README.md de la raíz](../README.md)
 
 ## Instalación
 
@@ -92,6 +158,20 @@ cp .env.example .env
 alguno de los valores de ejemplo del `.env.example` (quien haya visto el repositorio podría
 firmar tokens válidos) o tiene **menos de 16 caracteres**. Ese mismo valor tiene que estar
 también en `socket-server/.env`, o los dos servicios no se reconocerán los tokens.
+
+### Las otras cuatro del `.env` que conviene entender
+
+Las de PostgreSQL y Redis se explican solas; estas cuatro no, y las dos últimas tienen que
+coincidir con las del socket-server:
+
+| Variable | En el `.env.example` | Qué hace |
+|---|---|---|
+| `JWT_EXPIRES_IN` | `8h` | Vigencia del token del **personal** (`POST /api/auth/login`). Formato de `jsonwebtoken` (`8h`, `30m`, `7d`). Si falta, el código usa `8h` |
+| `JWT_COMENSAL_EXPIRES_IN` | `3h` | Vigencia de la **sesión del comensal** que se emite al escanear el QR. Es aparte porque una comida dura menos que un turno; si falta, `3h` |
+| `INTERNAL_API_KEY` | — | La clave compartida que viaja en la cabecera `x-internal-key` hacia `/internal/*` del socket-server. **Debe ser la misma** que la de `socket-server/.env`, o él responde 401. Se genera como el `JWT_SECRET`: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Sin ella los avisos salen con `SIN_CONFIGURAR` y el backend sigue funcionando |
+| `SOCKET_TIMEOUT_MS` | `1500` | Milisegundos que el backend espera al socket-server **por intento** antes de rendirse. Es lo que evita que un socket-server colgado retenga la petición de un comensal; si falta o no es un número, 1500 |
+
+**Ningún valor de estos va en un frontend ni con prefijo `VITE_`.**
 
 ## Ejecución
 
@@ -244,8 +324,12 @@ compartido en Redis.
 - El pedido pertenece a **la mesa**, no a un usuario: el modelo ER no relaciona
   `pedidos` con `usuarios`. Cuando un comensal crea o cambia algo, `historial_estados`
   queda con `id_usuario = null`.
-- En el carrito colaborativo, a cada comensal lo identifica su **apodo**, que se guarda
-  por ítem en `detalles_pedido.notas_especiales`.
+- En el carrito colaborativo, a cada comensal lo identifica su **alias**, que se guarda por
+  ítem en **`detalles_pedido.comensal`**, su propia columna (D-03). `notas_especiales`
+  lleva **solo la nota** del ítem ("sin cebolla"): antes el alias se metía ahí y la cuenta
+  por persona no podía agruparse. El alias de un comensal sale **firmado del JWT** y el del
+  cuerpo se ignora; cuando pide el personal, se guarda el alias canónico de esa persona en
+  la mesa (D-18b). El detalle, en [docs/api-spec.md](docs/api-spec.md).
 
 ## Flujo de una mesa, de principio a fin
 
@@ -258,7 +342,8 @@ mesero   → POST /api/mesas/:id/abrir        pide el QR al socket-server, lo gu
 comensal → POST /api/mesas/qr/:token/sesion el token debe ser válido para el socket-server
                                             Y el vigente de la mesa -> JWT { id_mesa, sid }
          → GET  /api/categorias + GET /api/platos?id_categoria=
-         → POST /api/pedidos                id_mesa del token; apodo por ítem
+         → POST /api/pedidos                id_mesa del token; alias por item en
+                                            detalles_pedido.comensal
          → GET  /api/pedidos/mesa
 cocina   → PATCH /api/kds/comandas/:id/estado
 cajero   → POST /api/transacciones          cobro 'completada'
@@ -337,11 +422,26 @@ afecta a ninguna validación.
 
 ## Tiempo real
 
-El backend avisa al socket-server de Roberto por HTTP interno
-(`/internal/order-created`, `/internal/order-status`, `/internal/qr-rotado`,
-`/internal/mesa-liberada`, `/internal/ingrediente-disponibilidad`,
-`/internal/plato-disponibilidad`) desde
-`src/services/socket.notifier.js`, con `x-internal-key` y un `eventId` por acción.
+El backend avisa al socket-server de Roberto por HTTP interno desde
+`src/services/socket.notifier.js`, con `x-internal-key` y un `eventId` por acción. Son
+**nueve** rutas:
+
+| Ruta interna | Cuándo se manda |
+|---|---|
+| `POST /internal/order-created` | Pedido creado |
+| `POST /internal/order-status` | Cambio de estado de un pedido (KDS) |
+| `POST /internal/qr-rotado` | La mesa tiene un `token_qr` nuevo |
+| `POST /internal/mesa-liberada` | La mesa quedó libre (cobrada o liberada a mano) |
+| `POST /internal/payment-confirmed` | Cobro de caja confirmado |
+| `POST /internal/plato-disponibilidad` | Un plato se agotó o volvió |
+| `POST /internal/ingrediente-disponibilidad` | Una opción del constructor se agotó o volvió |
+| `POST /internal/mesa-comensal` | Alta o baja de un comensal sin celular (D-18) |
+| `POST /internal/inventario-alerta` | Un insumo cruzó su stock mínimo o se agotó (D-17) |
+
+Las dos de disponibilidad llevan el valor **efectivo** (`disponible AND stock_suficiente`),
+no el interruptor manual, y las disparan tanto el `PATCH` de la cocina como el oyente del
+canal `inventario`. Los contratos y los eventos que emite el socket-server están en
+[`socket-server/EVENTS.md`](../socket-server/EVENTS.md).
 
 Ese cliente **nunca lanza**: con timeout corto, registra el fallo y sigue, así que un
 socket-server caído no rompe un pedido ni un cobro. La excepción son `/qr/generar` y
@@ -374,20 +474,106 @@ lo que pasa en la cocina. Es lo que usa el panel de agotados.
 El detalle completo está en `docs/api-spec.md`; los eventos que emite el socket-server,
 en `socket-server/EVENTS.md` §5.3 y §5.4.
 
+## Inventario: insumos, movimientos y recetas (D-17)
+
+Lo que hay en bodega y cuánto consume cada plato. Las tablas, las funciones y las vistas son
+de `database/scripts/27_inventario.sql` y `28_aviso_insumo_agotado.sql`; el backend expone el
+CRUD y traduce sus errores. **Todo es solo `admin`**, también las lecturas.
+
+| Ruta | Para qué |
+|---|---|
+| `GET /api/inventario/insumos` | Lista de insumos; `?estado=bajo` lee la vista `v_stock_bajo` |
+| `GET /api/inventario/insumos/:id` | Un insumo |
+| `POST /api/inventario/insumos` | Crea el insumo; el `stock_inicial` entra como un movimiento |
+| `PUT /api/inventario/insumos/:id` | Nombre, unidad, mínimo y alta/baja. **No** el stock |
+| `POST /api/inventario/insumos/:id/movimientos` | Entrada, ajuste o merma |
+| `GET /api/inventario/insumos/:id/movimientos` | El libro del insumo, lo más nuevo primero |
+| `GET /api/inventario/insumos/:id/usos` | Qué recetas usan ese insumo, y cuánto |
+| `GET /api/inventario/carta` | Platos y opciones con su disponibilidad y si tienen receta |
+| `GET` y `PUT /api/platos/:id/receta` | Receta del plato (consumo por unidad) |
+| `GET` y `PUT /api/ingredientes/:id/receta` | Receta de una opción (porción normal) |
+
+Tres reglas que explican el diseño:
+
+- **`insumos.stock_actual` no se escribe nunca desde el backend.** Lo mueven la reserva de
+  los pedidos y `registrar_movimiento_inventario`, porque la regla del libro es
+  `SUM(movimientos.cantidad) = stock_actual`. Por eso no hay ningún `PUT` que toque el stock
+  y el `stock_inicial` de un insumo nuevo entra como movimiento `entrada`.
+- **Un insumo no se borra, se desactiva** (`PUT … {"activo": false}`): las recetas y los
+  movimientos lo referencian con `ON DELETE RESTRICT`.
+- **La disponibilidad la recalcula la base.** Al cambiar el stock, al activar o desactivar un
+  insumo y al tocar una receta, los triggers recalculan `platos.stock_suficiente` e
+  `ingredientes.stock_suficiente`. Lo que ve el comensal es `disponible AND stock_suficiente`.
+
+### El canal `inventario` de PostgreSQL
+
+La base publica por `pg_notify('inventario', …)` dos clases de aviso —`disponibilidad` y
+`stock_bajo`—, y **solo si la transacción se confirma**. El backend los escucha en
+`src/services/inventario-avisos.js` con una **conexión dedicada** (no una del pool: `LISTEN`
+vive en la conexión) y los reenvía al socket-server.
+
+Al arrancar, y en cada reconexión del canal, hace tres cosas **en este orden**:
+
+1. `LISTEN inventario`, primero, para no perder nada;
+2. `SELECT fn_recalcular_toda_la_carta()`, que corrige cualquier `stock_suficiente`
+   desfasado mientras el backend no estaba;
+3. lee `v_carta_disponible` y emite la disponibilidad de cada plato y cada opción, porque los
+   avisos de ese rato se perdieron. Después **invalida `cache:menu`**.
+
+Nada de esto puede tumbar el backend ni una petición: si el canal no se abre, se reintenta
+con espera creciente y el resto sigue funcionando.
+
+El contrato completo —cuerpos, filtros, los 409 y los 400— está en
+[docs/api-spec.md](docs/api-spec.md).
+
+## Configuración del restaurante e historial de precios (D-16 B)
+
+| Ruta | Roles | Para qué |
+|---|---|---|
+| `GET /api/configuracion` | **pública** | Los datos del local que ve cualquiera: nombre, teléfono, dirección, logo, horario, propina sugerida y moneda (lista blanca) |
+| `GET /api/configuracion/completa` | **admin** | Lo mismo más `id`, `actualizado_en` y `actualizado_por` |
+| `PUT /api/configuracion` | **admin** | Actualiza los campos enviados (parcial) |
+| `GET /api/platos/:id/historial-precios` | **admin** | Quién cambió el precio de un plato y cuándo |
+
+Es **una sola fila** (`configuracion_restaurante`, `id = 1`), así que no hay nada que crear ni
+borrar. El `PUT` va en una transacción que primero fija `app.id_usuario` con
+`set_config(…, true)`: de ahí saca el trigger el `actualizado_por`, y lo mismo vale para el
+autor de cada fila de `historial_precios` cuando cambia un precio. El id sale **del JWT**,
+nunca del cuerpo.
+
+## Comensales sin celular y alias del pedido (D-18)
+
+| Ruta | Roles | Para qué |
+|---|---|---|
+| `POST /api/mesas/:id/comensales` | **mesero, admin** | Sienta a alguien que no tiene teléfono, con su alias |
+| `DELETE /api/mesas/:id/comensales/:alias` | **mesero, admin** | Lo quita de la mesa |
+
+No hay tabla nueva: esa persona vive en la **misma reserva de alias** que las sesiones de QR
+(`sd:mesa:{id}:alias` en Redis), con la misma validación (`services/alias-comensal.js`) y una
+vigencia de 24 h. La unicidad se mide por **clave** —sin tildes, en minúsculas, sin espacios
+ni `. _ ' -`—, así que «Abuela», «abuela» y «Abuéla» son la misma persona, y **«General»
+está prohibido** porque es el nombre que la cuenta le da a los platos sin dueño.
+
+Cuando pide el **personal**, el alias que se guarda no es el texto que llegó sino el
+**canónico** de esa persona en la mesa (D-18b): la cuenta agrupa por el texto exacto, y
+«Abuela» con «abuela» saldrían en dos filas. Si el nombre no corresponde a nadie, **409
+`comensal_no_registrado`**. Sin Redis el pedido **no se bloquea**: se guarda el alias tal como
+llegó. El detalle, en [docs/api-spec.md](docs/api-spec.md).
+
 ## Pruebas
 
 ```bash
 npm test
 ```
 
-Más de **1.200** pruebas con `node --test` + `supertest`. **La cifra exacta no se fija
+Más de **1.700** pruebas con `node --test` + `supertest`. **La cifra exacta no se fija
 aquí a propósito**: cada PR suma pruebas y un número escrito en el README queda obsoleto a
-la semana siguiente (este decía "119" cuando ya iban más de mil). El número real lo dice el
-resumen de `npm test`:
+la semana siguiente (este decía "119" cuando ya iban más de mil, y "1.200" cuando ya iban
+1.737). El número real lo dice el resumen de `npm test`, que en noviembre de 2026 daba:
 
 ```
-ℹ tests 1222
-ℹ pass 1222
+ℹ tests 1737
+ℹ pass 1737
 ℹ fail 0
 ℹ cancelled 0
 ```
@@ -414,6 +600,21 @@ glob porque necesitan PostgreSQL de verdad; van aparte:
 npm run test:integracion
 ```
 
+**Necesitan la base al día**, cargada con `database/migrar.sh`: contra una base a la que le
+falten los scripts 26 a 28 fallan en bloque. Y **si no hay base, se saltan solas**: la salida
+dice `skipped` y el comando termina con **código 0**, así que
+
+```
+ℹ tests 29
+ℹ pass 0
+ℹ skipped 29
+```
+
+no es "todo bien", es "no se probó nada" —normalmente porque las credenciales del `.env` no
+conectan—. Lo que hay que ver es `pass 29`. Ojo también con a qué base apuntan: usan la
+`PGDATABASE` del `.env` y **escriben en ella** (crean y borran platos y mesas con números
+altos); para no tocar tu base de desarrollo, `PGDATABASE=otra npm run test:integracion`.
+
 ### Cobertura
 
 ```bash
@@ -427,18 +628,21 @@ propios archivos de prueba se excluyen del informe (`--test-coverage-exclude`): 
 interesa es cuánto de `src/` se ejercita, y contar las pruebas a sí mismas infla el
 porcentaje sin decir nada.
 
-Medido hoy (noviembre de 2026, `develop` en `067d0d0`, 1222 pruebas):
+Medido en noviembre de 2026, con `develop` en `67b1f1f` y 1.737 pruebas:
 
 | | Líneas | Ramas | Funciones |
 |---|---|---|---|
-| **`src/services/`** | **98,80 %** | 89,66 % | 98,35 % |
-| Todo el backend | 98,84 % | 93,03 % | 97,70 % |
+| Todo el backend | **98,90 %** | 93,61 % | 96,97 % |
 
-En `services/` son 3.386 de 3.427 líneas. Lo que queda sin cubrir son sobre todo ramas de
-Redis caído y de errores de red del aviso al socket-server (`socket.notifier.js` es el más
-bajo en ramas, 77 %). `server.js` baja al 85,93 % porque el bloque de `require.main`
-—`listen` y los manejadores de señal— no se ejecuta cuando las pruebas importan la app con
-supertest, que es justamente lo que se quiere.
+Es la línea `all files` del informe. No se repite aquí un número por carpeta porque
+`node --test --experimental-test-coverage` **no imprime el total de un directorio**: la
+fila `services` sale vacía y cada archivo trae el suyo. Para mirar un área concreta, el
+informe completo está en la salida del comando.
+
+Lo que queda sin cubrir son sobre todo ramas de Redis caído y de errores de red del aviso al
+socket-server: `socket.notifier.js` es el más bajo en ramas (**84,50 %**). `server.js` baja
+a **83,33 %** porque el bloque de `require.main` —`listen` y los manejadores de señal— no se
+ejecuta cuando las pruebas importan la app con supertest, que es justamente lo que se quiere.
 
 ## Estructura
 
@@ -465,7 +669,7 @@ supertest, que es justamente lo que se quiere.
 - [x] Registro de usuarios restringido a `admin`, sin `telefono`
 - [x] Sesión de comensal por QR: `POST /api/mesas/qr/:token/sesion` (JWT de mesa, 3 h)
 - [x] CRUD de categorías, platos y mesas
-- [x] Pedidos: crear (comensal/mesero/admin, transaccional, precio congelado, `codigo_pedido` único, apodo en `notas_especiales`), activos, pedidos de la mesa, cambiar estado, cancelar
+- [x] Pedidos: crear (comensal/mesero/admin, transaccional, precio congelado, `codigo_pedido` único, alias en `detalles_pedido.comensal`), activos, pedidos de la mesa, cambiar estado, cancelar
 - [x] KDS: comandas activas clasificadas por categoría, restringido a rol `cocina` (o `admin`)
 - [x] Transacciones: registrar pago con liberación atómica de la mesa
 - [x] Todas las queries alineadas con `docs/modelo-er.md`
@@ -476,8 +680,15 @@ supertest, que es justamente lo que se quiere.
 - [x] Solo un cobro `completada` liquida el pedido
 - [x] Ciclo de vida de la sesión de mesa: abrir/liberar, QR fijo por sesión y cierre por `sid`
 - [x] Integración con el socket-server: `order:created`, `order:status` y `mesa-liberada`
-- [ ] Cache de sesiones con Redis (conexión lista, falta integrarla en el middleware de auth)
-- [ ] Validar el TTL del token QR contra Redis, o confirmar que Roberto ya lo validó
-- [ ] Disparar los eventos de WebSocket hacia socket-server en los puntos ya marcados con `NOTA` en el código (coordinar con Roberto)
+- [x] Caché de la cuenta activa en el middleware de auth (H-09): `services/usuario-activo.js`,
+      consultado desde `auth.middleware.js`; con Redis caído se consulta PostgreSQL
+- [x] Vigencia del token QR validada contra el socket-server (`validarTokenQr`): si no
+      responde, la sesión no se abre y sale 503
+- [x] Avisos al socket-server en los nueve puntos (ver [Tiempo real](#tiempo-real)); ya no
+      queda ningún `NOTA` pendiente en `src/`
+- [x] Frontend del KDS (`/frontend-kds`): tablero, panel de agotados y sus pruebas
+- [x] Inventario (D-17): insumos, movimientos, recetas, carta y avisos por el canal
+      `inventario`
+- [x] Configuración del restaurante e historial de precios (D-16 B)
+- [x] Comensales sin celular y alias canónico del pedido (D-18)
 - [ ] Endpoints de `suscripciones_push` (la tabla está en el modelo, el módulo es de Roberto)
-- [ ] Frontend del KDS (`/frontend-kds`)
