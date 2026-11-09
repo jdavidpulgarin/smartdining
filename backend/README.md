@@ -133,8 +133,16 @@ Token QR de la mesa 1 recién sembrada: `qr-token-mesa-01-a1b2c3d4`.
   verdad: `npm test` y `npm run test:cobertura` usan banderas del runner de pruebas que no
   existen en 18 (`--test-coverage-exclude`, el resumen `# cancelled` que vigila el script
   del CI).
-- PostgreSQL corriendo localmente, con `database/schema.sql` y `database/seed.sql` de Jarrison ya ejecutados
+- PostgreSQL corriendo localmente y la base **al día**: se carga con `database/migrar.sh`
+  (ver [Recrear la base de datos local](#recrear-la-base-de-datos-local)). Con solo el
+  `schema.sql` y el `seed.sql` faltan la configuración y el inventario, y cinco rutas
+  responden 500
 - Redis **opcional en desarrollo**: sin él todo funciona, solo sin caché (ver [Redis en desarrollo](#redis-en-desarrollo-es-opcional))
+- **socket-server** solo para el flujo de mesa: `POST /api/mesas/:id/abrir` y
+  `POST /api/mesas/qr/:token/sesion` le piden el QR, así que sin él responden
+  **503 `SIN_CONFIGURAR`** (o 503 si no contesta). Todo lo demás —catálogo, pedidos, KDS,
+  cobros, inventario— funciona sin el socket-server: los avisos se registran y se siguen.
+  Cómo levantarlo, en el [README.md de la raíz](../README.md)
 
 ## Instalación
 
@@ -150,6 +158,20 @@ cp .env.example .env
 alguno de los valores de ejemplo del `.env.example` (quien haya visto el repositorio podría
 firmar tokens válidos) o tiene **menos de 16 caracteres**. Ese mismo valor tiene que estar
 también en `socket-server/.env`, o los dos servicios no se reconocerán los tokens.
+
+### Las otras cuatro del `.env` que conviene entender
+
+Las de PostgreSQL y Redis se explican solas; estas cuatro no, y las dos últimas tienen que
+coincidir con las del socket-server:
+
+| Variable | En el `.env.example` | Qué hace |
+|---|---|---|
+| `JWT_EXPIRES_IN` | `8h` | Vigencia del token del **personal** (`POST /api/auth/login`). Formato de `jsonwebtoken` (`8h`, `30m`, `7d`). Si falta, el código usa `8h` |
+| `JWT_COMENSAL_EXPIRES_IN` | `3h` | Vigencia de la **sesión del comensal** que se emite al escanear el QR. Es aparte porque una comida dura menos que un turno; si falta, `3h` |
+| `INTERNAL_API_KEY` | — | La clave compartida que viaja en la cabecera `x-internal-key` hacia `/internal/*` del socket-server. **Debe ser la misma** que la de `socket-server/.env`, o él responde 401. Se genera como el `JWT_SECRET`: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Sin ella los avisos salen con `SIN_CONFIGURAR` y el backend sigue funcionando |
+| `SOCKET_TIMEOUT_MS` | `1500` | Milisegundos que el backend espera al socket-server **por intento** antes de rendirse. Es lo que evita que un socket-server colgado retenga la petición de un comensal; si falta o no es un número, 1500 |
+
+**Ningún valor de estos va en un frontend ni con prefijo `VITE_`.**
 
 ## Ejecución
 
@@ -577,6 +599,21 @@ glob porque necesitan PostgreSQL de verdad; van aparte:
 ```bash
 npm run test:integracion
 ```
+
+**Necesitan la base al día**, cargada con `database/migrar.sh`: contra una base a la que le
+falten los scripts 26 a 28 fallan en bloque. Y **si no hay base, se saltan solas**: la salida
+dice `skipped` y el comando termina con **código 0**, así que
+
+```
+ℹ tests 29
+ℹ pass 0
+ℹ skipped 29
+```
+
+no es "todo bien", es "no se probó nada" —normalmente porque las credenciales del `.env` no
+conectan—. Lo que hay que ver es `pass 29`. Ojo también con a qué base apuntan: usan la
+`PGDATABASE` del `.env` y **escriben en ella** (crean y borran platos y mesas con números
+altos); para no tocar tu base de desarrollo, `PGDATABASE=otra npm run test:integracion`.
 
 ### Cobertura
 
