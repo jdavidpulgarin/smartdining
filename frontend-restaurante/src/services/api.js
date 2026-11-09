@@ -633,6 +633,15 @@ export const platosApi = {
       method: 'DELETE',
     })
   },
+  /**
+   * GET /api/platos/:id/historial-precios?limite= (solo admin, D-16 B) →
+   * { historial: [{ id, precio_anterior, precio_nuevo, id_usuario, cambiado_en, … }] },
+   * el cambio más reciente primero. Trae `id_usuario`, no el nombre.
+   */
+  async historialPrecios(id, { limite } = {}) {
+    const query = limite ? `?limite=${limite}` : ''
+    return apiFetch(`/platos/${id}/historial-precios${query}`)
+  },
   async marcarPersonalizable(id, { personalizable = true, calorias = null }) {
     // Sin respaldo: si el backend lo rechaza, el error sube a la pantalla.
     return apiFetch(`/platos/${id}`, {

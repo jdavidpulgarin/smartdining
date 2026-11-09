@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useContext } from 'react'
 import {
   Search,
   Plus,
@@ -19,6 +19,8 @@ import {
 } from 'lucide-react'
 import { agotadosApi, platosApi, categoriasApi, mensajeNoGuardado } from '../services/api'
 import { EditorPasos } from '../components/admin/EditorPasos'
+import { HistorialPrecios } from '../components/admin/HistorialPrecios'
+import { AuthContext } from '../context/authContextDef'
 import { useSocketListener } from '../hooks'
 import { crearUltimoPorId } from '../utils/dedupeEventos'
 
@@ -52,6 +54,14 @@ export function Menu() {
 
   // Modal del Constructor de Pasos e Ingredientes (P-09 / D-04)
   const [selectedDishForConstructor, setSelectedDishForConstructor] = useState(null)
+
+  // "Ver historial" de precios (P-21, P2). GET /platos/:id/historial-precios es
+  // solo de admin y Menú lo ven todos los roles del panel: al resto no se le
+  // ofrece un enlace que terminaría en 403. Se lee el contexto sin useAuth para
+  // no exigir un AuthProvider (sin sesión, no hay enlace).
+  const sesion = useContext(AuthContext)
+  const esAdmin = sesion?.user?.rol === 'admin'
+  const [platoHistorial, setPlatoHistorial] = useState(null)
 
   // tipo 'error': el cambio NO se guardó; se queda más tiempo a la vista.
   const showNotice = (msg, tipo = 'info') => {
@@ -587,9 +597,30 @@ export function Menu() {
                           {dish.name}
                         </h4>
                       </div>
-                      <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 20, fontWeight: 800, color: 'var(--sd-white)', whiteSpace: 'nowrap' }}>
-                        {dish.priceFormatted}
-                      </strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                        <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 20, fontWeight: 800, color: 'var(--sd-white)', whiteSpace: 'nowrap' }}>
+                          {dish.priceFormatted}
+                        </strong>
+                        {esAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => setPlatoHistorial(dish)}
+                            aria-label={`Ver historial de precios de ${dish.name}`}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              color: 'var(--sd-text-muted)',
+                              fontSize: 12,
+                              textDecoration: 'underline',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            Ver historial
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <p style={{ fontSize: 13, color: 'var(--sd-text-muted)', margin: 0, lineClamp: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
@@ -1041,6 +1072,10 @@ export function Menu() {
           onClose={() => setSelectedDishForConstructor(null)}
           onDishUpdated={() => recargarCarta()}
         />
+      )}
+
+      {platoHistorial && (
+        <HistorialPrecios plato={platoHistorial} onClose={() => setPlatoHistorial(null)} />
       )}
     </div>
   )
