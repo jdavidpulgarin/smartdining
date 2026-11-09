@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useContext } from 'react'
+import { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import {
   Search,
   Plus,
@@ -30,6 +30,9 @@ import { crearUltimoPorId } from '../utils/dedupeEventos'
  * platos disponibles, así que un plato agotado desaparecería del panel y no
  * habría cómo reponerlo.
  */
+/** Lo que ve el comensal: encendido a mano Y con stock para una unidad. */
+const estaDisponible = (dish) => dish.available && dish.stockOk !== false
+
 async function obtenerCartaAdmin() {
   const [respCategorias, respPlatos] = await Promise.all([categoriasApi.listar(), platosApi.listar()])
   const platos = respPlatos?.platos || []
@@ -96,7 +99,11 @@ export function Menu() {
             (isArepa ? '/img/arepa-rellena.png' : null) ||
             p.url_imagen ||
             'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+          // available = interruptor MANUAL de la cocina (platos.disponible).
+          // stockOk = lo que calcula la base desde el inventario (stock_suficiente,
+          // script 27). El comensal ve los dos juntos: ver estaDisponible().
           available: p.disponible !== false,
+          stockOk: p.stock_suficiente !== false,
           personalizable: Boolean(p.personalizable),
           calorias: p.calorias || null,
         }
@@ -171,7 +178,7 @@ export function Menu() {
     const matchesSearch =
       dish.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       dish.description.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesAvailability = onlyAvailable ? dish.available : true
+    const matchesAvailability = onlyAvailable ? estaDisponible(dish) : true
 
     return matchesCategory && matchesSearch && matchesAvailability
   })
@@ -191,25 +198,54 @@ export function Menu() {
       const plato = await agotadosApi.togglePlato(dishId, nuevoEstado)
       // Manda el servidor, no lo que se pidió.
       if (typeof plato?.disponible === 'boolean') ponerEstado(plato.disponible)
+      if (typeof plato?.stock_suficiente === 'boolean') ponerFlags(dishId, { stockOk: plato.stock_suficiente })
     } catch (err) {
       ponerEstado(dish.available)
       showNotice(mensajeNoGuardado(err), 'error')
     }
   }
 
-  // plato:disponibilidad { id_plato, disponible, emitidoEn } (EVENTS.md §5.4):
-  // otro admin o la cocina agotó o repuso un plato. Se aplica en vivo, sin
-  // recargar. No trae eventId (es estado completo): solo se descarta un aviso
-  // más viejo que el último aplicado para ese plato.
-  const [platoViejo] = useState(() => crearUltimoPorId())
+  function ponerFlags(idPlato, cambios) {
+    setDishesList((prev) => prev.map((d) => (d.id === idPlato ? { ...d, ...cambios } : d)))
+  }
 
-  useSocketListener('plato:disponibilidad', (data) => {
+  // plato:disponibilidad { id_plato, disponible, emitidoEn } (EVENTS.md §5.4):
+  // otro admin, la cocina o el inventario agotó o repuso un plato. No trae
+  // eventId (es estado completo): se descarta un aviso más viejo que el último
+  // aplicado para ese plato.
+  //
+  // El aviso no dice POR QUÉ: el que sale del inventario trae el disponible
+  // EFECTIVO (manual Y stock) y el del PATCH manual trae solo el interruptor.
+  // Así que no se adivina: se relee el plato (GET /platos/:id, público) y se
+  // aplican los dos campos tal como están en la base. De varias relecturas del
+  // mismo plato solo vale la última que se pidió.
+  const [platoViejo] = useState(() => crearUltimoPorId())
+  const relecturas = useRef(new Map())
+
+  useSocketListener('plato:disponibilidad', async (data) => {
     const idPlato = Number(data?.id_plato)
     if (!Number.isInteger(idPlato) || typeof data?.disponible !== 'boolean') return
     if (platoViejo(idPlato, data.emitidoEn)) return
-    setDishesList((prev) =>
-      prev.map((d) => (d.id === idPlato ? { ...d, available: data.disponible } : d))
-    )
+    const turno = (relecturas.current.get(idPlato) || 0) + 1
+    relecturas.current.set(idPlato, turno)
+    try {
+      const plato = await platosApi.obtener(idPlato)
+      if (relecturas.current.get(idPlato) !== turno) return
+      ponerFlags(idPlato, {
+        available: plato?.disponible !== false,
+        stockOk: plato?.stock_suficiente !== false,
+      })
+    } catch {
+      if (relecturas.current.get(idPlato) !== turno) return
+      // Sin la relectura, lo mejor que se sabe es el efectivo del aviso: un
+      // true dice que los dos están bien; un false se muestra como falta de
+      // stock solo si el interruptor manual estaba encendido.
+      if (data.disponible) ponerFlags(idPlato, { available: true, stockOk: true })
+      else
+        setDishesList((prev) =>
+          prev.map((d) => (d.id !== idPlato ? d : d.available ? { ...d, stockOk: false } : d))
+        )
+    }
   })
 
   // Abrir modal de creación/edición de plato
@@ -501,8 +537,8 @@ export function Menu() {
                   flexDirection: 'column',
                   overflow: 'hidden',
                   padding: 0,
-                  opacity: dish.available ? 1 : 0.65,
-                  borderTop: !dish.available
+                  opacity: estaDisponible(dish) ? 1 : 0.65,
+                  borderTop: !estaDisponible(dish)
                     ? '4px solid var(--sd-red)'
                     : dish.personalizable
                     ? '4px solid var(--sd-gold)'
@@ -642,18 +678,28 @@ export function Menu() {
                         letterSpacing: '0.04em',
                         borderRadius: 4,
                         cursor: 'pointer',
-                        background: dish.available ? 'var(--sd-surface)' : 'var(--sd-red)',
+                        background: estaDisponible(dish) ? 'var(--sd-surface)' : 'var(--sd-red)',
                         color: 'var(--sd-white)',
-                        border: dish.available ? '1px solid var(--sd-border-strong)' : 'none',
+                        border: estaDisponible(dish) ? '1px solid var(--sd-border-strong)' : 'none',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: 6,
                       }}
                     >
-                      {dish.available ? (
+                      {estaDisponible(dish) ? (
                         <>
                           <CheckCircle2 size={13} />
                           <span>DISPONIBLE</span>
+                        </>
+                      ) : dish.available ? (
+                        // Encendido a mano pero sin stock: lo apagó el inventario, no
+                        // la cocina. El botón sigue siendo el interruptor MANUAL (un clic
+                        // lo apaga a mano); el plato vuelve solo con una entrada.
+                        <>
+                          <XCircle size={13} />
+                          <span title="Sin stock en Inventario: vuelve solo al registrar una entrada">
+                            AGOTADO · SIN STOCK
+                          </span>
                         </>
                       ) : (
                         <>
