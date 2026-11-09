@@ -35,24 +35,17 @@ async function crear({ numero, capacidad, ubicacion, estado, token_qr }) {
   // Una mesa que nace 'ocupada' (caso raro, al dar de alta el salón con gente
   // sentada) ya está en una visita, así que arranca con su sesion_iniciada_en.
   // Si nace libre queda NULL, y la primera apertura la fijará.
-  //
-  // La comparación se hace aquí y llega como booleano ($6). Antes era
-  // `CASE WHEN $4 = $6` en el SQL: $4 iba a la vez a la columna estado
-  // (varchar) y a esa comparación (text), y PostgreSQL rechazaba la consulta
-  // ("inconsistent types deduced for parameter $4"), así que POST /api/mesas
-  // daba 500 siempre. Lo cubre tests/integracion/mesas-sql.test.js.
-  const estadoInicial = estado || ESTADO_MESA_LIBRE;
   const result = await pool.query(
     `INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr, sesion_iniciada_en)
      VALUES ($1, COALESCE($2, 4), COALESCE($3, 'Principal'), $4, $5,
-             CASE WHEN $6 THEN NOW() ELSE NULL END) RETURNING *`,
+             CASE WHEN $4 = $6 THEN NOW() ELSE NULL END) RETURNING *`,
     [
       numero,
       capacidad ?? null,
       ubicacion || null,
-      estadoInicial,
+      estado || ESTADO_MESA_LIBRE,
       token_qr || null,
-      estadoInicial === ESTADO_MESA_OCUPADA,
+      ESTADO_MESA_OCUPADA,
     ]
   );
   return result.rows[0];
