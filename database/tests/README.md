@@ -128,9 +128,10 @@ arranca). Sale con código 0 si todo pasa.
 
 Con `PEDIDOS=100 PORCIONES=7` también pasa (7 creados, 93 `sin_stock`).
 
-> `POST /api/platos` sin `tiempo_preparacion_estimado` responde **500**: el esquema lo deja
-> opcional y el backend inserta `NULL`, pero la columna es `NOT NULL` **sin `DEFAULT`**. El
-> script lo manda explícito; el arreglo es del backend (issue #132).
+> Hasta #139, `POST /api/platos` sin `tiempo_preparacion_estimado` respondía **500**. La
+> columna es `NOT NULL DEFAULT 15`, pero el backend mandaba un `NULL` **explícito**, y un
+> `NULL` explícito pisa el `DEFAULT` (issue #132, arreglado en #139). El script sigue mandando
+> el campo, así que también corre contra un backend anterior al arreglo.
 
 ## 4. Guion E2E de la demo (G-08): agotar la Hamburguesa y reponerla
 

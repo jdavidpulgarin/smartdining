@@ -705,12 +705,43 @@ Si no se envían, **el comportamiento no cambia**: el plato conserva lo que ten�
 }
 ```
 
+#### Cuerpo de POST y PUT /platos
+
+| Campo | Obligatorio al crear | Regla |
+|---|---|---|
+| `nombre` | Sí | Texto, 1–120 |
+| `precio` | Sí | Número > 0. Cabe en `DECIMAL(10,2)`: más allá es **422** (desbordamiento), no 500 |
+| `id_categoria` | Sí | Entero. Si la categoría no existe, **409 `categoria_inexistente`** |
+| `descripcion`, `url_imagen` | No | Texto; `url_imagen` tiene que ser una URL. Son **nullable**: ponerlas en `null` las borra |
+| `disponible` | No (por omisión `true`) | Booleano |
+| `tiempo_preparacion_estimado` | **No** | Entero > 0. **Si no se envía, queda en 15**, el `DEFAULT` de la columna (`database/schema.sql:105`) |
+| `personalizable` | No (por omisión `false`) | Booleano. Decide si el plato se arma por pasos en el constructor |
+| `calorias` | No (por omisión `null`) | Entero ≥ 0, o `null` ("no se sabe", distinto de 0) |
+
+> **Issue #132.** `tiempo_preparacion_estimado` ya era opcional en el esquema, pero el INSERT
+> mandaba `NULL` explícito en esa columna, y un `NULL` **pisa el `DEFAULT`**: la columna es
+> `NOT NULL DEFAULT 15`, así que PostgreSQL rechazaba la fila con 23502 y **`POST /platos` sin
+> ese campo daba 500**. Ahora el INSERT usa `COALESCE($7, 15)`.
+>
+> En el mismo arreglo, **`personalizable` y `calorias` se guardan también al CREAR**: el
+> esquema las aceptaba desde D-16 B, pero solo el `PUT` las escribía, así que un `POST` que las
+> mandara las perdía en silencio. Lo cubre
+> `backend/tests/integracion/platos-sql.test.js` contra PostgreSQL de verdad.
+
+**Nada de un cuerpo válido acaba en 500:**
+
+| Caso | Respuesta |
+|---|---|
+| Falta un campo, o un tipo o rango no es el declarado | **400** con el campo que falla (zod) |
+| `id_categoria` que no existe | **409** `{ "error": "Esa categoria no existe", "motivo": "categoria_inexistente" }` |
+| Un valor que no cabe en la columna (precio enorme) | **422** con el mensaje genérico de "dato fuera de rango" |
+| Un `CHECK` de la base (precio negativo llamando al servicio suelto) | **422** |
+
 > El modelo ER no tiene `personalizaciones` ni `alergenos` en `platos`: ese campo se
 > eliminó del backend. Las preferencias del comensal van por ítem del pedido, en
 > `detalles_pedido.notas_especiales`.
 >
-> Lo que agregó el constructor (`personalizable`, `calorias` en `platos`;
-> `alergenos` en `ingredientes`) sale por `GET /menu`, no por estas rutas.
+> `alergenos` (en `ingredientes`) sale por `GET /menu`, no por estas rutas.
 
 #### `disponible`, `stock_suficiente` y el efectivo
 
@@ -911,12 +942,46 @@ expire).
 - El caché es un extra, no parte del contrato: si Redis está caído, falla o no hay
   `REDIS_URL`, el endpoint responde igual leyendo de la base. **Nunca da 500 por culpa del
   caché.**
-- Toda mutación de la carta (`POST`/`PUT`/`DELETE` de `/platos` y `/categorias`, y las 6
-  escrituras del constructor: pasos e ingredientes) borra `cache:menu` con
-  `invalidarMenu()`, así que un cambio del admin se ve de inmediato sin esperar el TTL. Con
-  Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la mutación sigue su
-  curso.
 - Un error de la base **no** se cachea.
+
+#### Qué invalida `cache:menu`
+
+Todo lo que cambia lo que ve el comensal borra la clave con `invalidarMenu()`, así que el
+cambio se ve de inmediato sin esperar el TTL. Son **tres** caminos, y hacen falta los tres:
+
+| Camino | Qué lo dispara |
+|---|---|
+| **Rutas REST de la carta** | `POST`/`PUT`/`DELETE` de `/platos` y `/categorias`, y las 6 escrituras del constructor (pasos e ingredientes) |
+| **Avisos de disponibilidad** del canal `inventario` | Cualquier cambio de `stock_suficiente` de un plato o de una opción: un **pedido que consume stock**, un movimiento de inventario, una receta nueva, un insumo activado o desactivado |
+| **Escrituras de inventario** | `POST /inventario/insumos`, `PUT /inventario/insumos/:id`, `POST /inventario/insumos/:id/movimientos`, `PUT /platos/:id/receta` y `PUT /ingredientes/:id/receta`, **después del COMMIT** |
+
+> **Por qué el segundo camino (issue #135).** La disponibilidad por **stock** la cambia la
+> **base**, no una ruta: un pedido que consume el último queso no pasa por ningún endpoint de
+> la carta. Solo avisa por `pg_notify('inventario')`, y el oyente
+> (`services/inventario-avisos.js`) no invalidaba nada: durante **hasta 60 s** el menú seguía
+> ofreciendo un plato ya agotado. El comensal lo pedía y recibía un 409 `sin_stock` por algo
+> que la carta le decía que había.
+
+- La invalidación por aviso ocurre **antes** de reenviarlo al socket-server y **aunque el
+  reenvío falle**: si el socket-server está caído, el aviso en vivo se pierde, pero la
+  siguiente petición tiene que ver la carta real.
+- **Al arrancar y en cada reconexión del canal** se invalida también, después de
+  `fn_recalcular_toda_la_carta()`: mientras el backend no estaba escuchando, el stock pudo
+  cambiar y el caché puede tener una carta anterior.
+- El tercer camino es **redundante a propósito** (el aviso ya cubre el caso) y cuesta un `DEL`:
+  cubre al admin que edita y recarga en el mismo segundo, sin depender de cuándo llegue el
+  `NOTIFY`. **No se invalida por cada pedido**: el caché dejaría de servir en hora punta, y el
+  stock que consume un pedido ya avisa por el canal.
+- Con Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la operación que la
+  llamó sigue su curso.
+
+**La carrera entre una lectura y una invalidación.** Una petición puede empezar a leer la base,
+cambiar el stock mientras tanto, y terminar guardando en el caché el menú **viejo** —ya
+invalidado— que el TTL mantendría 60 s. `menu.service.js` lleva un contador de **versión** que
+`invalidarMenu()` incrementa: `obtenerMenu()` lo anota antes de consultar y **guarda solo si no
+cambió** durante la lectura. Si cambió, responde con lo que leyó (como mucho, un instante
+desfasado) pero no lo cachea, y la siguiente petición vuelve a leer. Es un contador en memoria
+porque el backend corre en **un** proceso; no necesita Redis.
 
 ---
 
