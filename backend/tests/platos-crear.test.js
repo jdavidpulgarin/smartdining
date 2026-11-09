@@ -34,14 +34,27 @@ const PLATO = {
   creado_en: '2026-11-09T12:00:00.000Z',
 };
 
-function fakePlatos({ error = null } = {}) {
+/**
+ * @param {{error?: Error, fallaEn?: string}} opciones
+ *   `fallaEn` es el fragmento de SQL con el que el doble lanza `error`
+ *   (por omision, el INSERT).
+ */
+function fakePlatos({ error = null, fallaEn = 'INSERT INTO platos' } = {}) {
   return instalarFakeDb((sql) => {
-    if (error && sql.includes('INSERT INTO platos')) throw error;
+    if (error && sql.includes(fallaEn)) throw error;
     if (sql.includes('INSERT INTO platos')) return { rows: [PLATO] };
     if (sql.includes('FROM platos WHERE id_plato')) return { rows: [PLATO] };
     if (sql.includes('UPDATE platos')) return { rows: [PLATO] };
     return { rows: [] };
   });
+}
+
+/** Un 23503 de PostgreSQL con el nombre del constraint que choco. */
+function errorDeFk(constraint) {
+  const err = new Error(`viola la llave foranea ${constraint}`);
+  err.code = '23503';
+  err.constraint = constraint;
+  return err;
 }
 
 const crear = (cuerpo) => request(app)
@@ -166,9 +179,7 @@ test('issue-132: calorias en null se acepta (es "no se sabe")', async () => {
 // ---------------------------------------------------------------------------
 
 test('issue-132: una categoria inexistente es 409 categoria_inexistente, no 500', async () => {
-  const err = new Error('fk_platos_categoria');
-  err.code = '23503';
-  const db = fakePlatos({ error: err });
+  const db = fakePlatos({ error: errorDeFk(platosService.FK_CATEGORIA) });
   const redis = instalarFakeRedis();
   try {
     const res = await crear(CUERPO_MINIMO);
@@ -270,6 +281,99 @@ test('issue-132: el PUT por HTTP sigue mandando la fila mezclada', async () => {
     const params = db.buscar('UPDATE platos').params;
     assert.strictEqual(params[1], PLATO.nombre, 'el nombre viene de la fila actual');
     assert.strictEqual(params[3], 21000);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Solo la FK de la categoria se traduce (review de #139)
+//
+// Actualizar un plato no tiene UNA sola FK en juego: el trigger
+// tr_historial_precio_plato escribe en historial_precios, que tiene su propia
+// fk_historial_precios_usuario contra usuarios. Si el usuario del token ya no
+// existe, ese 23503 salia como "Esa categoria no existe" y mandaba a buscar el
+// problema al sitio equivocado.
+// ---------------------------------------------------------------------------
+
+test('review-139: traducirCategoria mira el NOMBRE del constraint', () => {
+  const traducido = platosService.traducirCategoria(errorDeFk(platosService.FK_CATEGORIA));
+
+  assert.strictEqual(traducido.status, 409);
+  assert.strictEqual(traducido.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
+  assert.strictEqual(traducido.message, platosService.MENSAJE_CATEGORIA_INEXISTENTE);
+});
+
+test('review-139: la FK del historial de precios NO se traduce', () => {
+  const err = errorDeFk('fk_historial_precios_usuario');
+  const traducido = platosService.traducirCategoria(err);
+
+  // Sube tal cual: el manejador central lo da como el 409 generico de clave
+  // ajena, que es lo correcto cuando no se sabe cual choco.
+  assert.strictEqual(traducido, err, 'es el MISMO error, no uno traducido');
+  assert.strictEqual(traducido.motivo, undefined);
+  assert.strictEqual(traducido.status, undefined);
+  assert.strictEqual(traducido.code, '23503');
+});
+
+test('review-139: ninguna otra FK ni otro codigo se confunde con la categoria', () => {
+  for (const err of [
+    errorDeFk('fk_recetas_plato_insumo'),
+    errorDeFk('fk_detalles_pedido_plato'),
+    errorDeFk(undefined),
+    Object.assign(new Error('unique'), { code: '23505', constraint: platosService.FK_CATEGORIA }),
+    Object.assign(new Error('check'), { code: '23514' }),
+    new Error('pelado'),
+  ]) {
+    assert.strictEqual(
+      platosService.traducirCategoria(err),
+      err,
+      String(err.constraint || err.code || err.message)
+    );
+  }
+  assert.strictEqual(platosService.traducirCategoria(null), null);
+});
+
+test('review-139: por la ruta, el 23503 del historial sale como el 409 generico', async () => {
+  // Es el caso de verdad: un admin con un token valido cuyo usuario ya se
+  // borro edita el precio de un plato. El trigger del historial choca contra
+  // usuarios, y eso NO es un problema de categoria.
+  const db = fakePlatos({
+    error: errorDeFk('fk_historial_precios_usuario'),
+    fallaEn: 'UPDATE platos',
+  });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await request(app)
+      .put('/api/platos/77')
+      .set('Authorization', `Bearer ${admin()}`)
+      .send({ precio: 21000 });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, undefined, 'no es categoria_inexistente');
+    assert.notStrictEqual(res.body.error, platosService.MENSAJE_CATEGORIA_INEXISTENTE);
+    assert.strictEqual(res.body.error, 'La operación choca con otro registro relacionado');
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('review-139: y el de la categoria por el PUT sigue siendo el suyo', async () => {
+  const db = fakePlatos({
+    error: errorDeFk(platosService.FK_CATEGORIA),
+    fallaEn: 'UPDATE platos',
+  });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await request(app)
+      .put('/api/platos/77')
+      .set('Authorization', `Bearer ${admin()}`)
+      .send({ id_categoria: 999999 });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
   } finally {
     redis.restaurar();
     db.restaurar();

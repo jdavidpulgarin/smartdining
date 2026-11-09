@@ -245,3 +245,85 @@ test('issue-132: el plato creado se puede leer tal como quedo', async (t) => {
   assert.strictEqual(leido.personalizable, true);
   assert.strictEqual(leido.calorias, 300);
 });
+
+/**
+ * El 23503 del HISTORIAL de precios, no el de la categoria (review de #139).
+ *
+ * Actualizar un plato dispara `tr_historial_precio_plato`
+ * (database/scripts/26_configuracion.sql), que escribe en `historial_precios`
+ * con el autor que sale de `app.id_usuario`. Esa tabla tiene su propia
+ * `fk_historial_precios_usuario` contra `usuarios`: con un id que no existe, el
+ * UPDATE falla con 23503 y ANTES salia traducido como "Esa categoria no
+ * existe", que manda a buscar el problema al sitio equivocado.
+ */
+test('review-139: el 23503 del historial NO sale como categoria_inexistente', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const plato = await platosService.crear({
+    id_categoria: idCategoria,
+    nombre: nombreLibre(),
+    precio: 18000,
+  });
+  creados.push(plato.id_plato);
+
+  // Un id de usuario que seguro no existe: es lo que el servicio pone en
+  // app.id_usuario, y de ahi lo toma el trigger.
+  const { rows: libres } = await sonda.query(
+    'SELECT COALESCE(MAX(id_usuario), 0) + 1000 AS inexistente FROM usuarios'
+  );
+  const idFantasma = Number(libres[0].inexistente);
+
+  await assert.rejects(
+    // El precio TIENE que cambiar: el trigger solo escribe cuando cambia
+    // (WHEN OLD.precio IS DISTINCT FROM NEW.precio).
+    () => platosService.actualizar(plato.id_plato, { precio: 19500 }, { idUsuario: idFantasma }),
+    (err) => {
+      assert.strictEqual(err.code, '23503', `SQLSTATE inesperado: ${err.code}`);
+      assert.strictEqual(
+        err.constraint,
+        'fk_historial_precios_usuario',
+        `constraint inesperado: ${err.constraint}`
+      );
+      // Lo que arregla este cambio: NO se disfraza de problema de categoria.
+      assert.strictEqual(err.motivo, undefined, 'no es categoria_inexistente');
+      assert.strictEqual(err.status, undefined, 'sube sin traducir, al 409 generico');
+      assert.notStrictEqual(err.message, platosService.MENSAJE_CATEGORIA_INEXISTENTE);
+      return true;
+    }
+  );
+
+  // Y el plato se quedo como estaba: la transaccion se deshizo.
+  const leido = await platosService.obtenerPorId(plato.id_plato);
+  assert.strictEqual(leido.precio, 18000);
+});
+
+test('review-139: con un usuario que existe, el mismo cambio de precio entra', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const plato = await platosService.crear({
+    id_categoria: idCategoria,
+    nombre: nombreLibre(),
+    precio: 18000,
+  });
+  creados.push(plato.id_plato);
+
+  const { rows: usuarios } = await sonda.query(
+    'SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1'
+  );
+  const cambiado = await platosService.actualizar(
+    plato.id_plato,
+    { precio: 19500 },
+    { idUsuario: usuarios[0].id_usuario }
+  );
+
+  assert.strictEqual(cambiado.precio, 19500);
+  // Y el historial quedo con su autor.
+  const { rows: historial } = await sonda.query(
+    `SELECT id_usuario, precio_anterior, precio_nuevo FROM historial_precios
+      WHERE tipo = 'plato' AND id_referencia = $1 ORDER BY id DESC LIMIT 1`,
+    [plato.id_plato]
+  );
+  assert.strictEqual(historial[0].id_usuario, usuarios[0].id_usuario);
+  assert.strictEqual(Number(historial[0].precio_anterior), 18000);
+  assert.strictEqual(Number(historial[0].precio_nuevo), 19500);
+});
