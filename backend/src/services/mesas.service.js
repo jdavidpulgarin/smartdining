@@ -35,17 +35,24 @@ async function crear({ numero, capacidad, ubicacion, estado, token_qr }) {
   // Una mesa que nace 'ocupada' (caso raro, al dar de alta el salón con gente
   // sentada) ya está en una visita, así que arranca con su sesion_iniciada_en.
   // Si nace libre queda NULL, y la primera apertura la fijará.
+  //
+  // La comparación se hace aquí y llega como booleano ($6). Antes era
+  // `CASE WHEN $4 = $6` en el SQL: $4 iba a la vez a la columna estado
+  // (varchar) y a esa comparación (text), y PostgreSQL rechazaba la consulta
+  // ("inconsistent types deduced for parameter $4"), así que POST /api/mesas
+  // daba 500 siempre. Lo cubre tests/integracion/mesas-sql.test.js.
+  const estadoInicial = estado || ESTADO_MESA_LIBRE;
   const result = await pool.query(
     `INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr, sesion_iniciada_en)
      VALUES ($1, COALESCE($2, 4), COALESCE($3, 'Principal'), $4, $5,
-             CASE WHEN $4 = $6 THEN NOW() ELSE NULL END) RETURNING *`,
+             CASE WHEN $6 THEN NOW() ELSE NULL END) RETURNING *`,
     [
       numero,
       capacidad ?? null,
       ubicacion || null,
-      estado || ESTADO_MESA_LIBRE,
+      estadoInicial,
       token_qr || null,
-      ESTADO_MESA_OCUPADA,
+      estadoInicial === ESTADO_MESA_OCUPADA,
     ]
   );
   return result.rows[0];
@@ -327,6 +334,23 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
 }
 
 /**
+ * ¿Existe esa mesa? Una sola consulta por clave primaria y sin traer la fila.
+ *
+ * Es la pregunta previa de todo lo que recibe un `id_mesa` de fuera: las dos
+ * cuentas ya la hacían (sin esto, `obtener_cuenta_mesa_json` lanza un RAISE que
+ * el manejador central daría como un 409 incomprensible) y desde D-18c también
+ * `POST /api/pedidos`, para que un id equivocado sea un 404 y no un 409 que
+ * culpa al nombre del comensal.
+ *
+ * `SELECT 1` y no `SELECT *`: solo interesa si hay fila, y traerla entera
+ * invitaría a usar este helper como un `obtenerPorId` barato, que no es.
+ */
+async function existe(idMesa) {
+  const result = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
+  return result.rows.length > 0;
+}
+
+/**
  * Cuenta de la mesa para el socket-server (EVENTS.md §8.2), en centavos.
  *
  * Los centavos se calculan EN SQL (`ROUND(x * 100)::bigint`) y no en
@@ -345,8 +369,7 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
  *          lanzaría un RAISE, que el manejador central traduciría a 409).
  */
 async function cuentaInterna(idMesa) {
-  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
-  if (existe.rows.length === 0) return null;
+  if (!(await existe(idMesa))) return null;
 
   const result = await pool.query(
     `WITH cuenta AS (SELECT obtener_cuenta_mesa_json($1) AS j)
@@ -398,8 +421,7 @@ async function cuentaInterna(idMesa) {
  *          SQL lanzaría un RAISE, que el manejador central daría como 409.
  */
 async function cuentaPorComensal(idMesa) {
-  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
-  if (existe.rows.length === 0) return null;
+  if (!(await existe(idMesa))) return null;
 
   const result = await pool.query('SELECT obtener_cuenta_mesa_json($1) AS cuenta', [idMesa]);
   return result.rows[0].cuenta;
@@ -664,6 +686,7 @@ module.exports = {
   rotarQr,
   liberarSesion,
   liberarSiNoQuedanPedidosAbiertos,
+  existe,
   cuentaInterna,
   cuentaPorComensal,
   tokenQrDeMesa,
