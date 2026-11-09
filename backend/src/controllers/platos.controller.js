@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const platosService = require('../services/platos.service');
 const menuService = require('../services/menu.service');
+const { disponibilidadEfectiva } = require('../services/disponibilidad-efectiva');
 const socketNotifier = require('../services/socket.notifier');
 
 // Columnas segun docs/modelo-er.md: url_imagen (no "imagen_url"), id_categoria
@@ -130,10 +131,18 @@ async function cambiarDisponibilidad(req, res, next) {
     // notificarPlatoDisponibilidad nunca lanza, así que un socket-server caído
     // no altera esta respuesta. Se encadena para que las pruebas puedan
     // esperarlo con esperarAvisos().
+    // ISSUE #136: lo que viaja es la disponibilidad EFECTIVA
+    // (disponible AND stock_suficiente), no el interruptor manual.
+    //
+    // Antes se mandaba `resultado.plato.disponible`: si la cocina encendia a
+    // mano un plato sin stock, todos los sockets recibian disponible: true, la
+    // PWA y el KDS lo mostraban disponible y pedirlo daba 409 sin_stock. El
+    // oyente del canal 'inventario' ya mandaba el efectivo, asi que los dos
+    // caminos se contradecian y decidia el ultimo aviso en llegar.
     socketNotifier.encadenarAvisos([
       () => socketNotifier.notificarPlatoDisponibilidad(
         resultado.plato.id_plato,
-        resultado.plato.disponible
+        disponibilidadEfectiva(resultado.plato)
       ),
     ]);
 
