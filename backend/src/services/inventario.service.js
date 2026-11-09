@@ -512,6 +512,72 @@ async function obtenerCarta({ tipo, sinReceta, q } = {}) {
 }
 
 /* -------------------------------------------------------------------------- *
+ * Dónde se usa un insumo (D-17 PR 3, P2)
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Qué platos y qué opciones del constructor llevan ese insumo en su receta, y
+ * cuánto.
+ *
+ * Es la pregunta de antes de tocar un insumo: "si lo desactivo o cambio su
+ * unidad, ¿qué se cae?". La respuesta la tiene la base en `recetas_plato` y
+ * `recetas_ingrediente`; aquí solo se leen las dos, con el mismo orden que la
+ * carta para que el panel las pinte igual.
+ */
+const SQL_USOS_PLATOS = `
+  SELECT r.id_plato AS id, p.nombre, r.cantidad
+    FROM recetas_plato r
+    JOIN platos p ON p.id_plato = r.id_plato
+   WHERE r.id_insumo = $1
+   ORDER BY p.nombre ASC`;
+
+const SQL_USOS_INGREDIENTES = `
+  SELECT r.id_ingrediente AS id, i.nombre,
+         pc.id_plato, pl.nombre AS plato, pc.id_paso, pc.nombre AS paso, pc.orden AS paso_orden,
+         r.cantidad
+    FROM recetas_ingrediente r
+    JOIN ingredientes i ON i.id_ingrediente = r.id_ingrediente
+    JOIN pasos_constructor pc ON pc.id_paso = i.id_paso
+    JOIN platos pl ON pl.id_plato = pc.id_plato
+   WHERE r.id_insumo = $1
+   ORDER BY pl.nombre ASC, pc.orden ASC, i.nombre ASC`;
+
+/**
+ * @returns {Promise<null | {id_insumo: number, nombre: string, platos: Array, ingredientes: Array}>}
+ *   null si el insumo no existe (la ruta responde 404; una lista vacía
+ *   significaría "no se usa en ninguna receta", que es otra cosa).
+ */
+async function usosDeInsumo(idInsumo) {
+  const insumo = await obtenerInsumo(idInsumo);
+  if (!insumo) return null;
+
+  const [platos, ingredientes] = await Promise.all([
+    pool.query(SQL_USOS_PLATOS, [idInsumo]),
+    pool.query(SQL_USOS_INGREDIENTES, [idInsumo]),
+  ]);
+
+  return {
+    id_insumo: insumo.id_insumo,
+    nombre: insumo.nombre,
+    platos: platos.rows.map((f) => ({
+      id: aEntero(f.id),
+      nombre: f.nombre,
+      cantidad: f.cantidad,
+    })),
+    ingredientes: ingredientes.rows.map((f) => ({
+      id: aEntero(f.id),
+      nombre: f.nombre,
+      id_plato: aEntero(f.id_plato),
+      plato: f.plato,
+      id_paso: aEntero(f.id_paso),
+      paso: f.paso,
+      paso_orden: aEntero(f.paso_orden),
+      cantidad: f.cantidad,
+    })),
+  };
+}
+
+/* -------------------------------------------------------------------------- *
  * Auxiliares
  * -------------------------------------------------------------------------- */
 
@@ -559,6 +625,7 @@ module.exports = {
   reemplazarReceta,
   existeDueno,
   obtenerCarta,
+  usosDeInsumo,
   aEntero,
   RECETA_PLATO,
   RECETA_INGREDIENTE,

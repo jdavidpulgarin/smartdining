@@ -436,3 +436,138 @@ test('d-17c: el servicio devuelve las dos listas sin pasar por la ruta', async (
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// GET /api/inventario/insumos/:id/usos (P2)
+// ---------------------------------------------------------------------------
+
+const INSUMO = {
+  id_insumo: 12,
+  nombre: 'Queso costeño',
+  unidad: 'g',
+  stock_actual: 450,
+  stock_minimo: 500,
+  activo: true,
+  bajo: true,
+  agotado: false,
+  actualizado_en: '2026-11-09T12:00:00.000Z',
+};
+
+const USO_PLATO = { id: 1004, nombre: 'Nachos Supremos', cantidad: 30 };
+const USO_OPCION = {
+  id: 7,
+  nombre: 'Queso Extra',
+  id_plato: 1001,
+  plato: 'Bowl Personalizado',
+  id_paso: 6,
+  paso: 'Añade Toppings',
+  paso_orden: 3,
+  cantidad: 15,
+};
+
+/** @param {{insumo?: object|null, platos?: Array, ingredientes?: Array}} opciones */
+function fakeUsos({ insumo = INSUMO, platos = [USO_PLATO], ingredientes = [USO_OPCION] } = {}) {
+  return instalarFakeDb((sql) => {
+    if (sql.includes('FROM insumos s WHERE s.id_insumo')) return { rows: insumo ? [insumo] : [] };
+    if (sql.includes('FROM recetas_plato r')) return { rows: platos };
+    if (sql.includes('FROM recetas_ingrediente r')) return { rows: ingredientes };
+    return { rows: [] };
+  });
+}
+
+test('d-17c: los usos dicen que platos y que opciones llevan el insumo', async () => {
+  const db = fakeUsos();
+  try {
+    const res = await get('/api/inventario/insumos/12/usos');
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body, {
+      id_insumo: 12,
+      nombre: 'Queso costeño',
+      platos: [USO_PLATO],
+      ingredientes: [USO_OPCION],
+    });
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-17c: las opciones de los usos traen su plato y su paso, como la carta', async () => {
+  const db = fakeUsos();
+  try {
+    const res = await get('/api/inventario/insumos/12/usos');
+    const opcion = res.body.ingredientes[0];
+
+    assert.deepStrictEqual(Object.keys(opcion).sort(), [
+      'cantidad', 'id', 'id_paso', 'id_plato', 'nombre', 'paso', 'paso_orden', 'plato',
+    ]);
+    assert.strictEqual(typeof opcion.paso_orden, 'number');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-17c: los usos se piden por nombre y por paso_orden', async () => {
+  const db = fakeUsos();
+  try {
+    await get('/api/inventario/insumos/12/usos');
+
+    assert.ok(db.buscar('FROM recetas_plato r').sql.includes('ORDER BY p.nombre ASC'));
+    assert.ok(db.buscar('FROM recetas_ingrediente r').sql
+      .includes('ORDER BY pl.nombre ASC, pc.orden ASC, i.nombre ASC'));
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-17c: un insumo sin usos devuelve dos listas vacias', async () => {
+  // Es lo normal en uno recien creado, y la señal de que se puede desactivar
+  // sin romper nada.
+  const db = fakeUsos({ platos: [], ingredientes: [] });
+  try {
+    const res = await get('/api/inventario/insumos/12/usos');
+
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body.platos, []);
+    assert.deepStrictEqual(res.body.ingredientes, []);
+    assert.strictEqual(res.body.id_insumo, 12);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-17c: un insumo que no existe es 404, no dos listas vacias', async () => {
+  // "No se usa" y "no existe" son cosas distintas.
+  const db = fakeUsos({ insumo: null });
+  try {
+    const res = await get('/api/inventario/insumos/99/usos');
+
+    assert.strictEqual(res.status, 404);
+    assert.ok(!db.buscar('FROM recetas_plato r'), 'no se consultan las recetas');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-17c: un id raro en los usos es 400', async () => {
+  const db = fakeUsos();
+  try {
+    for (const malo of ['abc', '0', '-3', '1.5']) {
+      assert.strictEqual((await get(`/api/inventario/insumos/${malo}/usos`)).status, 400, malo);
+    }
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('d-17c: los usos parametrizan el id del insumo', async () => {
+  const db = fakeUsos();
+  try {
+    await get('/api/inventario/insumos/12/usos');
+
+    assert.deepStrictEqual(db.buscar('FROM recetas_plato r').params, [12]);
+    assert.deepStrictEqual(db.buscar('FROM recetas_ingrediente r').params, [12]);
+  } finally {
+    db.restaurar();
+  }
+});

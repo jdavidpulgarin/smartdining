@@ -224,6 +224,29 @@ async function obtenerCarta(req, res, next) {
   }
 }
 
+/**
+ * GET /api/inventario/insumos/:id/usos — admin (D-17 PR 3, P2).
+ *
+ * Que platos y que opciones del constructor llevan ese insumo en su receta, y
+ * cuanto. Es la pregunta de antes de desactivar un insumo o cambiarle la
+ * unidad: "si lo toco, que se cae".
+ *
+ * 404 y no una lista vacia cuando el insumo no existe: una lista vacia
+ * significa "no se usa en ninguna receta", que es otra cosa.
+ */
+async function usosDeInsumo(req, res, next) {
+  const idInsumo = idDeLaUrl(req.params.id);
+  if (idInsumo === null) return res.status(400).json({ error: MENSAJE_ID });
+
+  try {
+    const usos = await inventarioService.usosDeInsumo(idInsumo);
+    if (!usos) return res.status(404).json({ error: MENSAJE_INSUMO_NO_ENCONTRADO });
+    return res.json(usos);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 /** GET /api/inventario/insumos/:id — admin. */
 async function obtenerInsumo(req, res, next) {
   const idInsumo = idDeLaUrl(req.params.id);
@@ -433,6 +456,7 @@ const recetaDeIngrediente = handlersDeReceta(
 
 module.exports = {
   obtenerCarta,
+  usosDeInsumo,
   listarInsumos,
   obtenerInsumo,
   crearInsumo,

@@ -29,6 +29,9 @@ router.post('/insumos', ...soloAdmin, ctrl.crearInsumo);
 
 // Las rutas con sufijo van ANTES de las de ':id' a secas por claridad; aquí no
 // hay ambigüedad posible porque el método o el sufijo las distinguen.
+// D-17 PR 3 (P2): donde se usa ese insumo (que recetas lo llevan).
+router.get('/insumos/:id/usos', ...soloAdmin, ctrl.usosDeInsumo);
+
 router.get('/insumos/:id/movimientos', ...soloAdmin, ctrl.listarMovimientos);
 router.post('/insumos/:id/movimientos', ...soloAdmin, ctrl.registrarMovimiento);
 

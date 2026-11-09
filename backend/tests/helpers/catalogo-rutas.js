@@ -98,6 +98,14 @@ const TABLA = [
     roles: ['admin'],
   },
 
+  // --- D-17 PR 3 (P2): donde se usa un insumo (solo admin) ------------------
+  {
+    metodo: 'GET',
+    patron: '/api/inventario/insumos/:id/usos',
+    url: '/api/inventario/insumos/3/usos',
+    roles: ['admin'],
+  },
+
   // --- D-17 PR 3: la carta con su disponibilidad (solo admin) ---------------
   { metodo: 'GET', patron: '/api/inventario/carta', url: '/api/inventario/carta', roles: ['admin'] },
 

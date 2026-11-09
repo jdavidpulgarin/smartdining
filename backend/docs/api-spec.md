@@ -2841,6 +2841,7 @@ constructor. Las tablas, la función y las vistas son de `database/scripts/27_in
 | PUT | `/inventario/insumos/:id` | **admin** | Nombre, unidad, mínimo y alta/baja. **No** el stock |
 | POST | `/inventario/insumos/:id/movimientos` | **admin** | Entrada, ajuste o merma |
 | GET | `/inventario/insumos/:id/movimientos` | **admin** | Historial del insumo, lo más nuevo primero |
+| GET | `/inventario/insumos/:id/usos` | **admin** | Qué recetas usan ese insumo, y cuánto (D-17 PR 3) |
 | GET | `/inventario/carta` | **admin** | Platos y opciones con su disponibilidad y si tienen receta (D-17 PR 3) |
 | GET | `/platos/:id/receta` | **admin** | Receta del plato |
 | PUT | `/platos/:id/receta` | **admin** | Reemplaza la receta completa |
@@ -3069,6 +3070,48 @@ El libro del insumo, **lo más reciente primero**.
   publicaría datos del personal en una lista que el panel ya sabe resolver.
 - **400** si `limite` o `desde` no son válidos · **404** si el insumo no existe (para no
   confundir "sin movimientos" con "ese id no existe").
+
+### GET /inventario/insumos/:id/usos — admin (D-17 PR 3)
+
+**Dónde se usa ese insumo**: qué platos y qué opciones del constructor lo llevan en su receta,
+y cuánto. Es la pregunta de antes de tocarlo —desactivarlo, cambiarle la unidad, cambiar su
+receta—: *si lo toco, qué se cae*. Con `PUT /inventario/insumos/:id {"activo": false}` el panel
+puede avisar exactamente qué platos van a quedar en "no hay".
+
+```json
+{
+  "id_insumo": 12,
+  "nombre": "Queso costeño",
+  "platos": [
+    { "id": 1004, "nombre": "Nachos Supremos", "cantidad": 30 }
+  ],
+  "ingredientes": [
+    {
+      "id": 7,
+      "nombre": "Queso Extra",
+      "id_plato": 1001,
+      "plato": "Bowl Personalizado",
+      "id_paso": 6,
+      "paso": "Añade Toppings",
+      "paso_orden": 3,
+      "cantidad": 15
+    }
+  ]
+}
+```
+
+- `cantidad` es lo que consume **una unidad** del plato, o **una porción normal** de la opción
+  (la base multiplica esta última por `factores_porcion`: `ligera` 0.5, `normal` 1, `extra`
+  1.5). Llega como **número**, no como texto.
+- Las opciones traen su `plato`, su `paso` y `paso_orden`, igual que en
+  [`GET /inventario/carta`](#get-inventariocarta--admin-d-17-pr-3), para que el panel las
+  agrupe de la misma forma.
+- Orden: los platos por **nombre**; las opciones por **plato**, **`paso_orden`** y **nombre**.
+- Un insumo que **no se usa en ninguna receta** devuelve las dos listas vacías. Es lo normal
+  en uno recién creado, y es la señal de que se puede desactivar sin romper nada.
+- **404** `Insumo no encontrado` si el insumo no existe, y **no** dos listas vacías: "no se usa"
+  y "no existe" son cosas distintas. **400** si el `:id` no es un entero positivo.
+- Es de **solo lectura**: no cambia nada ni dispara ningún aviso.
 
 ### GET /inventario/carta — admin (D-17 PR 3)
 
