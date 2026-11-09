@@ -47,6 +47,35 @@ export function cargarWidget() {
 }
 
 /**
+ * Determina la URL de redirección para Wompi (J-15).
+ * CloudFront de Wompi bloquea peticiones con redirect-url en http o localhost (403 Request blocked).
+ * Solo se debe enviar redirectUrl si el origen es seguro (https) y no es localhost.
+ *
+ * @param {string|null} origen - Origen de la aplicación (ej. window.location.origin)
+ * @param {string} [ruta='/pago'] - Ruta de retorno
+ * @returns {string|null} URL completa de redirección o null
+ */
+export function urlRedireccionWompi(origen, ruta = '/pago') {
+  if (!origen || typeof origen !== 'string') return null;
+
+  const origenTrim = origen.trim();
+  const lower = origenTrim.toLowerCase();
+
+  // Debe ser https://
+  if (!lower.startsWith('https://')) return null;
+
+  // No localhost ni 127.0.0.1
+  const sinProtocolo = lower.slice('https://'.length);
+  if (sinProtocolo.startsWith('localhost') || sinProtocolo.startsWith('127.0.0.1')) {
+    return null;
+  }
+
+  const rutaNorm = ruta ? (ruta.startsWith('/') ? ruta : `/${ruta}`) : '';
+  const origenBase = origenTrim.replace(/\/+$/, '');
+  return `${origenBase}${rutaNorm}`;
+}
+
+/**
  * Abre la pasarela de Wompi Checkout con la intención firmada por el servidor.
  *
  * IMPORTANTE: La confirmación definitiva del pago NO la define el callback del widget;
@@ -66,7 +95,12 @@ export async function abrirCheckout(intencion, onResultado = null) {
     throw new Error('El Widget de Wompi no está disponible en este entorno');
   }
 
-  const checkout = new WidgetCheckout({
+  const redirectUrl = urlRedireccionWompi(
+    typeof window !== 'undefined' ? window.location?.origin : null,
+    '/pago'
+  );
+
+  const opciones = {
     currency: intencion.moneda || 'COP',
     amountInCents: intencion.monto_en_centavos,
     reference: intencion.referencia,
@@ -75,8 +109,13 @@ export async function abrirCheckout(intencion, onResultado = null) {
       integrity: intencion.firma_integridad,
     },
     expirationTime: intencion.expira_en,
-    redirectUrl: `${window.location.origin}/pago`,
-  });
+  };
+
+  if (redirectUrl) {
+    opciones.redirectUrl = redirectUrl;
+  }
+
+  const checkout = new WidgetCheckout(opciones);
 
   checkout.open((resultado) => {
     if (typeof onResultado === 'function') {
@@ -87,7 +126,40 @@ export async function abrirCheckout(intencion, onResultado = null) {
   return checkout;
 }
 
+/**
+ * Remueve cualquier overlay, modal o iframe inyectado en el DOM por el widget de Wompi (J-15).
+ */
+export function cerrarWidget() {
+  if (typeof document === 'undefined') return;
+  const selectores = [
+    '.waybox-backdrop',
+    '.waybox-modal',
+    'iframe[src*="wompi"]',
+    'iframe[name*="wompi"]',
+    '#smartdining-wompi-widget-container',
+  ];
+  selectores.forEach((sel) => {
+    try {
+      const elementos = document.querySelectorAll(sel);
+      elementos.forEach((el) => {
+        try {
+          el.remove();
+        } catch {
+          // Elemento ya removido
+        }
+      });
+    } catch {
+      // Ignorar selector no soportado
+    }
+  });
+  if (document.body?.classList) {
+    document.body.classList.remove('no-scroll');
+  }
+}
+
 export default {
   cargarWidget,
   abrirCheckout,
+  urlRedireccionWompi,
+  cerrarWidget,
 };

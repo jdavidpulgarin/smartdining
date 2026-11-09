@@ -448,6 +448,532 @@ export function textoCajaSegunEstado(avisoCuenta) {
   }
 }
 
+/**
+ * Aviso en la pantalla de pago para quien pidió para varios comensales (J-15).
+ * Decisión del equipo: Opción A, "quien pide, paga".
+ *
+ * @param {object} opciones
+ * @param {object} [opciones.cuenta] - Cuenta normalizada de la mesa
+ * @param {object} [opciones.presencia] - Estado de mesa:presencia ({ comensales, sin_celular, pagaron })
+ * @param {string} [opciones.yo] - Alias de quien paga
+ * @param {string} [opciones.modo] - Modo de pago ('propio' | 'igual' | 'total')
+ * @returns {{ tipo: 'especifico' | 'general', nombres: string[], mensaje: string } | null}
+ */
+export function avisoPedidoGrupal({ cuenta, presencia, yo, modo } = {}) {
+  // Solo aplica si modo === 'propio' y mi saldo (cuenta.mia.saldo) > 0. Si no, null.
+  if (modo !== 'propio') return null;
+  const miSaldo = Number(cuenta?.mia?.saldo ?? 0);
+  if (miSaldo <= 0) return null;
+
+  const miAlias = typeof yo === 'string' ? yo.trim() : '';
+
+  function esGeneral(alias) {
+    return String(alias || '').trim().toLowerCase() === 'general';
+  }
+
+  function esYo(alias) {
+    if (!miAlias) return false;
+    return String(alias || '').trim() === miAlias;
+  }
+
+  // Personas de la mesa: unión de presencia.comensales y presencia.sin_celular (si hay presencia)
+  // con los comensales de la cuenta que no son "General". Sin repetidos y sin incluirme a mí (compara con el alias tal cual).
+  const personasMesaSet = new Set();
+
+  if (presencia) {
+    if (Array.isArray(presencia.comensales)) {
+      for (const a of presencia.comensales) {
+        const str = typeof a === 'string' ? a.trim() : '';
+        if (str && !esGeneral(str) && !esYo(str)) {
+          personasMesaSet.add(str);
+        }
+      }
+    }
+    if (Array.isArray(presencia.sin_celular)) {
+      for (const a of presencia.sin_celular) {
+        const str = typeof a === 'string' ? a.trim() : '';
+        if (str && !esGeneral(str) && !esYo(str)) {
+          personasMesaSet.add(str);
+        }
+      }
+    }
+  }
+
+  const comensalesCuenta = Array.isArray(cuenta?.comensales) ? cuenta.comensales : [];
+  for (const c of comensalesCuenta) {
+    const nombre = typeof c === 'string' ? c.trim() : (c?.nombre || c?.comensal || '').trim();
+    if (nombre && !esGeneral(nombre) && !esYo(nombre)) {
+      personasMesaSet.add(nombre);
+    }
+  }
+
+  // Si no hay nadie más en la mesa → null.
+  if (personasMesaSet.size === 0) return null;
+
+  // "sinPedidos": personas de la presencia que NO aparecen en la cuenta o aparecen con subtotal 0 (sin "General" y sin mí).
+  const sinPedidos = [];
+  if (presencia) {
+    const personasPresenciaSet = new Set();
+    if (Array.isArray(presencia.comensales)) {
+      for (const a of presencia.comensales) {
+        const str = typeof a === 'string' ? a.trim() : '';
+        if (str && !esGeneral(str) && !esYo(str)) {
+          personasPresenciaSet.add(str);
+        }
+      }
+    }
+    if (Array.isArray(presencia.sin_celular)) {
+      for (const a of presencia.sin_celular) {
+        const str = typeof a === 'string' ? a.trim() : '';
+        if (str && !esGeneral(str) && !esYo(str)) {
+          personasPresenciaSet.add(str);
+        }
+      }
+    }
+
+    for (const p of personasPresenciaSet) {
+      const registro = comensalesCuenta.find((c) => {
+        const nombre = typeof c === 'string' ? c.trim() : (c?.nombre || c?.comensal || '').trim();
+        return nombre === p;
+      });
+
+      if (!registro || Number(registro.subtotal ?? 0) <= 0) {
+        sinPedidos.push(p);
+      }
+    }
+  }
+
+  // Si hay sinPedidos → tipo 'especifico'
+  if (sinPedidos.length > 0) {
+    let nombres;
+    let textoSujetos;
+    const esPlural = sinPedidos.length > 1;
+
+    if (sinPedidos.length === 1) {
+      nombres = [sinPedidos[0]];
+      textoSujetos = sinPedidos[0];
+    } else if (sinPedidos.length === 2) {
+      nombres = [sinPedidos[0], sinPedidos[1]];
+      textoSujetos = `${sinPedidos[0]} y ${sinPedidos[1]}`;
+    } else if (sinPedidos.length === 3) {
+      nombres = [sinPedidos[0], sinPedidos[1], sinPedidos[2]];
+      textoSujetos = `${sinPedidos[0]}, ${sinPedidos[1]} y ${sinPedidos[2]}`;
+    } else {
+      const restantes = sinPedidos.length - 3;
+      nombres = [sinPedidos[0], sinPedidos[1], sinPedidos[2], `y ${restantes} más`];
+      textoSujetos = `${sinPedidos.slice(0, 3).join(', ')} y ${restantes} más`;
+    }
+
+    const mensaje = esPlural
+      ? `${textoSujetos} no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes dividir o pagar toda la mesa.`
+      : `${textoSujetos} no tiene nada a su nombre. Si tú pediste por él o ella, puedes dividir o pagar toda la mesa.`;
+
+    return {
+      tipo: 'especifico',
+      nombres,
+      mensaje,
+    };
+  }
+
+  // Si no → tipo 'general'
+  return {
+    tipo: 'general',
+    nombres: [],
+    mensaje: '¿Pediste para otros? Usa DIVIDIR o TODA LA MESA.',
+  };
+}
+
+export const TEXTO_SUGERENCIA_SIN_CELULAR =
+  '¿Alguien no tiene celular? Pídele al mesero que lo agregue a la mesa.';
+
+/**
+ * Determina si se debe mostrar la sugerencia para comensales sin celular (J-15).
+ * Se muestra mientras haya saldo pendiente en la mesa.
+ *
+ * @param {object} [cuenta] - Cuenta normalizada de la mesa
+ * @returns {boolean}
+ */
+export function debeMostrarSugerenciaSinCelular(cuenta) {
+  const saldoMesa = Math.max(0, Number(cuenta?.saldo ?? 0));
+  return saldoMesa > 0;
+}
+
+/**
+ * Determina si se debe salir de la pantalla de espera tras un intento de pago (J-15).
+ * Si el saldo actual bajó respecto al saldo que había antes de iniciar el pago,
+ * significa que el pago ya fue confirmado e impactado en la cuenta.
+ *
+ * @param {object} [opciones]
+ * @param {number} [opciones.saldoAntes]
+ * @param {number} [opciones.saldoAhora]
+ * @returns {boolean}
+ */
+export function debeSalirDeEspera({ saldoAntes, saldoAhora } = {}) {
+  if (
+    saldoAntes == null ||
+    saldoAhora == null ||
+    typeof saldoAntes !== 'number' ||
+    typeof saldoAhora !== 'number' ||
+    !Number.isFinite(saldoAntes) ||
+    !Number.isFinite(saldoAhora)
+  ) {
+    return false;
+  }
+  return saldoAhora < saldoAntes;
+}
+
+/**
+ * Decide si se debe salir de la pantalla de espera o mantenerla (J-15).
+ * Con el widget abierto (o origen 'widget'), NUNCA se cierra el widget ni se
+ * sale de la espera por pagos de terceros o por bajas de saldo. Solo se sale
+ * ante un pago confirmado propio, o por cierre/rechazo del propio widget.
+ *
+ * @param {object} [opciones]
+ * @param {'widget'|'redireccion'} [opciones.origen='redireccion'] - Origen del estado de espera
+ * @param {boolean} [opciones.widgetAbierto=false] - Si el modal del widget de Wompi está abierto
+ * @param {number|null} [opciones.saldoAntes] - Saldo antes de iniciar el pago
+ * @param {number|null} [opciones.saldoAhora] - Saldo actual tras la actualización
+ * @param {'pago_propio'|'pago_mesa'|'pago_otro'|'salida_espera'|'saldo_cero'|string} [opciones.tipoEvento]
+ * @returns {'mantener' | 'confirmado_propio' | 'confirmado_mesa' | 'salir_a_cuenta'}
+ */
+export function decidirSalidaEspera({
+  origen = 'redireccion',
+  widgetAbierto = false,
+  saldoAntes = null,
+  saldoAhora = null,
+  tipoEvento = 'salida_espera',
+} = {}) {
+  const tieneWidget = Boolean(widgetAbierto || origen === 'widget');
+
+  // Si mi widget está abierto (o el origen de la espera es el widget):
+  if (tieneWidget) {
+    if (tipoEvento === 'pago_propio') {
+      return 'confirmado_propio';
+    }
+    // Cualquier otro evento (pago de otro, mesa en 0 por otro, baja de saldo) se mantiene
+    return 'mantener';
+  }
+
+  // Sin widget abierto (origen 'redireccion'):
+  if (tipoEvento === 'pago_propio') {
+    return 'confirmado_propio';
+  }
+
+  if (tipoEvento === 'pago_mesa' || tipoEvento === 'saldo_cero') {
+    return 'confirmado_mesa';
+  }
+
+  // Salida por baja de saldo (debeSalirDeEspera / salida_espera):
+  if (
+    saldoAntes != null &&
+    saldoAhora != null &&
+    typeof saldoAntes === 'number' &&
+    typeof saldoAhora === 'number' &&
+    Number.isFinite(saldoAntes) &&
+    Number.isFinite(saldoAhora) &&
+    saldoAhora < saldoAntes
+  ) {
+    return saldoAhora === 0 ? 'confirmado_mesa' : 'salir_a_cuenta';
+  }
+
+  return 'mantener';
+}
+
+/**
+ * Clasifica un evento payment:confirmed o el estado de confirmación (J-15).
+ * - 'propio': el comensal coincide con el usuario actual ('yo').
+ * - 'mesa': cobro de toda la mesa en caja (comensal null/vacío), pago de otro
+ *           comensal con el que la mesa queda en saldo 0, o estado de saldo 0 sin evento propio.
+ * - 'otro': pago realizado por otro comensal dejando aún saldo pendiente.
+ *
+ * @param {object} [opciones]
+ * @param {string|null} [opciones.comensal] - Alias del comensal en el evento
+ * @param {string|null} [opciones.yo] - Alias del usuario actual
+ * @param {number|null} [opciones.saldoRestante] - Saldo restante de la mesa tras el pago
+ * @returns {'propio' | 'mesa' | 'otro'}
+ */
+export function mensajePagoConfirmado({ comensal, yo, saldoRestante } = {}) {
+  const comensalNorm = comensal ? String(comensal).trim().toLowerCase() : null;
+  const yoNorm = yo ? String(yo).trim().toLowerCase() : null;
+
+  if (!comensalNorm) {
+    return 'mesa';
+  }
+
+  if (yoNorm && comensalNorm === yoNorm) {
+    return 'propio';
+  }
+
+  // Si pagó otro comensal pero con eso la mesa quedó en $0:
+  if (saldoRestante !== undefined && saldoRestante !== null && Number(saldoRestante) <= 0) {
+    return 'mesa';
+  }
+
+  return 'otro';
+}
+
+/**
+ * Determina el texto a mostrar en la pantalla de confirmación de pago (J-15).
+ * Solo si tipo === 'propio' se muestra "Pagaste $X. Te llegará el comprobante de Wompi."
+ * En cualquier otro caso ('mesa', 'otro', etc.) se muestra "La mesa quedó pagada."
+ *
+ * @param {object} [opciones]
+ * @param {'propio'|'mesa'|'otro'|string} [opciones.tipo]
+ * @param {number} [opciones.monto]
+ * @param {function} [opciones.formato]
+ * @returns {{ esPropio: boolean, mensaje: string, comprobante: string|null }}
+ */
+export function textoDetalleConfirmacion({ tipo, monto = 0, formato = formatoPesos } = {}) {
+  if (tipo === 'propio') {
+    return {
+      esPropio: true,
+      mensaje: `Pagaste ${formato(monto)}.`,
+      comprobante: 'Te llegará el comprobante de Wompi.',
+    };
+  }
+
+  return {
+    esPropio: false,
+    mensaje: 'La mesa quedó pagada.',
+    comprobante: null,
+  };
+}
+
+/**
+ * Determina qué eventId usar al crear una intención de pago (J-15).
+ * Reutiliza el eventId previo si se reintenta el mismo modo con el mismo saldo
+ * y no se ha confirmado un pago previo, evitando agotar la cuota de rate limit.
+ *
+ * @param {object|null} previo - Intento previo { eventId, modo, saldo, confirmado }
+ * @param {object} [actual] - Estado actual { modo, saldo }
+ * @param {function} [generar] - Función que genera un nuevo eventId
+ * @returns {string|null}
+ */
+export function eventIdParaIntento(previo, { modo, saldo } = {}, generar) {
+  if (
+    previo &&
+    previo.eventId &&
+    !previo.confirmado &&
+    previo.modo === modo &&
+    previo.saldo === saldo
+  ) {
+    return previo.eventId;
+  }
+  return typeof generar === 'function' ? generar() : null;
+}
+
+/**
+ * Determina el estado del selector de pago y de las opciones disponibles (J-15).
+ * Permite dividir o pagar toda la mesa a quien no tiene consumos propios.
+ *
+ * @param {object} [opciones]
+ * @param {number} [opciones.saldoMesa=0] - Saldo restante de la mesa
+ * @param {number} [opciones.miSaldo=0] - Saldo personal del comensal
+ * @param {number} [opciones.miPagado=0] - Monto ya pagado por el comensal
+ * @returns {{
+ *   mostrarSelector: boolean,
+ *   loMioHabilitado: boolean,
+ *   modoInicial: 'propio' | 'igual',
+ *   yaPague: boolean
+ * }}
+ */
+export function estadoSelectorPago({ saldoMesa = 0, miSaldo = 0, miPagado = 0 } = {}) {
+  const saldoM = Math.max(0, Number(saldoMesa) || 0);
+  const saldoP = Math.max(0, Number(miSaldo) || 0);
+  const pagadoP = Math.max(0, Number(miPagado) || 0);
+
+  const mostrarSelector = saldoM > 0;
+  const loMioHabilitado = saldoP > 0;
+  const modoInicial = saldoP > 0 ? 'propio' : 'igual';
+  const yaPague = pagadoP > 0 && saldoP <= 0;
+
+  return {
+    mostrarSelector,
+    loMioHabilitado,
+    modoInicial,
+    yaPague,
+  };
+}
+
+/**
+ * Determina el color y texto de ayuda de la tarjeta "TU PARTE" (J-15).
+ * - yaPague true: $0 en verde (#2FA35A) y "Ya pagaste lo tuyo. ¡Gracias!".
+ * - Sin consumos propios (miSaldo 0 y miPagado 0): color normal (#FFFFFF) y
+ *   "No tienes nada a tu nombre. Puedes aportar con DIVIDIR o TODA LA MESA.".
+ * - Saldo propio pendiente (miSaldo > 0): color normal (#FFFFFF) y "Consumiste $X".
+ *
+ * @param {object} [opciones]
+ * @param {number} [opciones.miSaldo=0] - Saldo personal del comensal
+ * @param {number} [opciones.miPagado=0] - Monto ya pagado por el comensal
+ * @param {number} [opciones.miSubtotal=0] - Subtotal consumido por el comensal
+ * @param {boolean} [opciones.yaPague] - Si ya pagó según estadoSelectorPago
+ * @param {function} [opciones.formato=formatoPesos]
+ * @returns {{ color: string, esVerde: boolean, mensaje: string }}
+ */
+export function infoTuParte({
+  miSaldo = 0,
+  miPagado = 0,
+  miSubtotal = 0,
+  yaPague,
+  formato = formatoPesos,
+} = {}) {
+  const saldo = Math.max(0, Number(miSaldo) || 0);
+  const pagado = Math.max(0, Number(miPagado) || 0);
+  const subtotal = Math.max(0, Number(miSubtotal) || 0);
+
+  const pago = yaPague !== undefined ? Boolean(yaPague) : (pagado > 0 && saldo <= 0);
+
+  if (pago) {
+    return {
+      color: '#2FA35A',
+      esVerde: true,
+      mensaje: 'Ya pagaste lo tuyo. ¡Gracias!',
+    };
+  }
+
+  if (saldo <= 0) {
+    return {
+      color: '#FFFFFF',
+      esVerde: false,
+      mensaje: 'No tienes nada a tu nombre. Puedes aportar con DIVIDIR o TODA LA MESA.',
+    };
+  }
+
+  return {
+    color: '#FFFFFF',
+    esVerde: false,
+    mensaje: `Consumiste ${formato(subtotal)}`,
+  };
+}
+
+/**
+ * Calcula el monto a mostrar en la tarjeta "TU PARTE" (J-15).
+ * Muestra el saldo personal del comensal con tope en el saldo pendiente de la mesa,
+ * reflejando adecuadamente si otro comensal pagó con DIVIDIR o TODA LA MESA.
+ *
+ * @param {object} [opciones]
+ * @param {number} [opciones.saldoMesa=0] - Saldo restante de la mesa
+ * @param {number} [opciones.miSaldo=0] - Saldo personal del comensal
+ * @returns {number}
+ */
+export function montoTuParte(opciones = {}) {
+  const opts = opciones || {};
+  const saldoM = Math.max(0, Number(opts.saldoMesa) || 0);
+  const saldoP = Math.max(0, Number(opts.miSaldo) || 0);
+  return Math.min(saldoM, saldoP);
+}
+
+/**
+ * Determina la siguiente pantalla y acciones de limpieza tras eventos de pago (J-15).
+ * Apaga el estado de espera, el overlay y el spinner al confirmar o cancelar un pago.
+ *
+ * @param {object} [opciones]
+ * @param {'pago_confirmado'|'saldo_cero'|'salida_espera'|'widget_resultado'|'volver_cuenta'} [opciones.tipo]
+ * @param {'propio'|'mesa'|'otro'} [opciones.tipoConfirmado]
+ * @param {number} [opciones.saldoMesa]
+ * @param {object|null} [opciones.resultadoWidget]
+ * @param {string} [opciones.pantallaActual='cuenta']
+ * @returns {{
+ *   pantalla: 'cuenta' | 'espera' | 'confirmado' | 'caja',
+ *   apagarEspera: boolean,
+ *   limpiarAlmacenamiento: boolean,
+ *   cerrarWidget: boolean,
+ *   errorPago: string | null
+ * }}
+ */
+export function transicionPantallaPago({
+  tipo,
+  tipoConfirmado,
+  saldoMesa = 0,
+  resultadoWidget = null,
+  pantallaActual = 'cuenta',
+} = {}) {
+  switch (tipo) {
+    case 'pago_confirmado': {
+      if (tipoConfirmado === 'propio' || tipoConfirmado === 'mesa') {
+        return {
+          pantalla: 'confirmado',
+          apagarEspera: true,
+          limpiarAlmacenamiento: true,
+          cerrarWidget: true,
+          errorPago: null,
+        };
+      }
+      return {
+        pantalla: pantallaActual,
+        apagarEspera: false,
+        limpiarAlmacenamiento: false,
+        cerrarWidget: false,
+        errorPago: null,
+      };
+    }
+
+    case 'saldo_cero': {
+      return {
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      };
+    }
+
+    case 'salida_espera': {
+      const saldo = Math.max(0, Number(saldoMesa) || 0);
+      return {
+        pantalla: saldo === 0 ? 'confirmado' : 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      };
+    }
+
+    case 'widget_resultado': {
+      const status = resultadoWidget?.transaction?.status;
+      if (status === 'APPROVED') {
+        return {
+          pantalla: 'espera',
+          apagarEspera: false,
+          limpiarAlmacenamiento: false,
+          cerrarWidget: false,
+          errorPago: null,
+        };
+      }
+
+      const esRechazado = status === 'DECLINED' || status === 'ERROR';
+      return {
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: esRechazado
+          ? 'El pago no fue aprobado. Puedes intentar nuevamente.'
+          : null,
+      };
+    }
+
+    case 'volver_cuenta': {
+      return {
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      };
+    }
+
+    default:
+      return {
+        pantalla: pantallaActual,
+        apagarEspera: false,
+        limpiarAlmacenamiento: false,
+        cerrarWidget: false,
+        errorPago: null,
+      };
+  }
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -461,4 +987,16 @@ export default {
   ESTADO_CUENTA_ENVIANDO,
   estadoCuentaSolicitada,
   textoCajaSegunEstado,
+  avisoPedidoGrupal,
+  TEXTO_SUGERENCIA_SIN_CELULAR,
+  debeMostrarSugerenciaSinCelular,
+  debeSalirDeEspera,
+  mensajePagoConfirmado,
+  textoDetalleConfirmacion,
+  eventIdParaIntento,
+  estadoSelectorPago,
+  infoTuParte,
+  montoTuParte,
+  transicionPantallaPago,
+  decidirSalidaEspera,
 };
