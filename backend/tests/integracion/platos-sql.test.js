@@ -28,6 +28,7 @@ require('dotenv').config({ path: `${B}/.env` });
 const { Pool } = require('pg');
 const pool = require('../../src/config/db');
 const platosService = require('../../src/services/platos.service');
+const autorInexistente = require('../../src/services/autor-inexistente');
 
 let sonda = null;
 let hayBase = false;
@@ -244,4 +245,145 @@ test('issue-132: el plato creado se puede leer tal como quedo', async (t) => {
   assert.strictEqual(leido.tiempo_preparacion_estimado, 15);
   assert.strictEqual(leido.personalizable, true);
   assert.strictEqual(leido.calorias, 300);
+});
+
+/**
+ * El 23503 del HISTORIAL de precios, no el de la categoria (review de #139).
+ *
+ * Actualizar un plato dispara `tr_historial_precio_plato`
+ * (database/scripts/26_configuracion.sql), que escribe en `historial_precios`
+ * con el autor que sale de `app.id_usuario`. Esa tabla tiene su propia
+ * `fk_historial_precios_usuario` contra `usuarios`: con un id que no existe, el
+ * UPDATE falla con 23503 y ANTES salia traducido como "Esa categoria no
+ * existe", que manda a buscar el problema al sitio equivocado.
+ */
+test('review-139: el 23503 del historial NO sale como categoria_inexistente', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const plato = await platosService.crear({
+    id_categoria: idCategoria,
+    nombre: nombreLibre(),
+    precio: 18000,
+  });
+  creados.push(plato.id_plato);
+
+  // Un id de usuario que seguro no existe: es lo que el servicio pone en
+  // app.id_usuario, y de ahi lo toma el trigger.
+  const { rows: libres } = await sonda.query(
+    'SELECT COALESCE(MAX(id_usuario), 0) + 1000 AS inexistente FROM usuarios'
+  );
+  const idFantasma = Number(libres[0].inexistente);
+
+  await assert.rejects(
+    // El precio TIENE que cambiar: el trigger solo escribe cuando cambia
+    // (WHEN OLD.precio IS DISTINCT FROM NEW.precio).
+    () => platosService.actualizar(plato.id_plato, { precio: 19500 }, { idUsuario: idFantasma }),
+    (err) => {
+      // Lo que arregla este cambio: NO se disfraza de problema de categoria.
+      // (Desde el review de #144 trae su propio motivo, 'autor_inexistente';
+      // eso lo fija la prueba de mas abajo. Aqui solo se exige que no sea el
+      // de la categoria, que era el fallo original.)
+      assert.notStrictEqual(err.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
+      assert.notStrictEqual(err.message, platosService.MENSAJE_CATEGORIA_INEXISTENTE);
+      return true;
+    }
+  );
+
+  // Y el plato se quedo como estaba: la transaccion se deshizo.
+  const leido = await platosService.obtenerPorId(plato.id_plato);
+  assert.strictEqual(leido.precio, 18000);
+});
+
+test('review-139: con un usuario que existe, el mismo cambio de precio entra', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const plato = await platosService.crear({
+    id_categoria: idCategoria,
+    nombre: nombreLibre(),
+    precio: 18000,
+  });
+  creados.push(plato.id_plato);
+
+  const { rows: usuarios } = await sonda.query(
+    'SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1'
+  );
+  const cambiado = await platosService.actualizar(
+    plato.id_plato,
+    { precio: 19500 },
+    { idUsuario: usuarios[0].id_usuario }
+  );
+
+  assert.strictEqual(cambiado.precio, 19500);
+  // Y el historial quedo con su autor.
+  const { rows: historial } = await sonda.query(
+    `SELECT id_usuario, precio_anterior, precio_nuevo FROM historial_precios
+      WHERE tipo = 'plato' AND id_referencia = $1 ORDER BY id DESC LIMIT 1`,
+    [plato.id_plato]
+  );
+  assert.strictEqual(historial[0].id_usuario, usuarios[0].id_usuario);
+  assert.strictEqual(Number(historial[0].precio_anterior), 18000);
+  assert.strictEqual(Number(historial[0].precio_nuevo), 19500);
+});
+
+/**
+ * El 23503 del AUTOR, contra PostgreSQL real (review de #144).
+ *
+ * Mismo escenario que la prueba de arriba —el usuario del token ya no existe—,
+ * pero ahora el error SÍ se traduce: 409 con `motivo: 'autor_inexistente'` y un
+ * mensaje que dice que hay que volver a iniciar sesión. Antes subía pelado y
+ * salía como el 409 genérico de clave ajena.
+ */
+test('review-144: el 23503 del historial sale como 409 autor_inexistente', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const plato = await platosService.crear({
+    id_categoria: idCategoria,
+    nombre: nombreLibre(),
+    precio: 18000,
+  });
+  creados.push(plato.id_plato);
+
+  const { rows: libres } = await sonda.query(
+    'SELECT COALESCE(MAX(id_usuario), 0) + 1000 AS inexistente FROM usuarios'
+  );
+  const idFantasma = Number(libres[0].inexistente);
+
+  await assert.rejects(
+    () => platosService.actualizar(plato.id_plato, { precio: 19500 }, { idUsuario: idFantasma }),
+    (err) => {
+      assert.strictEqual(err.status, 409, 'traducido, no el 500 ni el generico');
+      assert.strictEqual(err.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+      assert.strictEqual(err.message, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+      return true;
+    }
+  );
+
+  // Y el plato se quedo como estaba: la transaccion se deshizo.
+  const leido = await platosService.obtenerPorId(plato.id_plato);
+  assert.strictEqual(leido.precio, 18000);
+});
+
+test('review-144: la FK del AUTOR y la de la CATEGORIA no se confunden', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const plato = await platosService.crear({
+    id_categoria: idCategoria,
+    nombre: nombreLibre(),
+    precio: 18000,
+  });
+  creados.push(plato.id_plato);
+
+  // Categoria inexistente con un usuario que SI existe: el otro motivo.
+  const { rows: usuarios } = await sonda.query(
+    'SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1'
+  );
+  await assert.rejects(
+    () => platosService.actualizar(
+      plato.id_plato, { id_categoria: 999999 }, { idUsuario: usuarios[0].id_usuario }
+    ),
+    (err) => {
+      assert.strictEqual(err.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
+      return true;
+    }
+  );
 });

@@ -1,20 +1,34 @@
 const pool = require('../config/db');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 /**
- * La FK de la categoria (ISSUE #132).
+ * La FK de la categoria (ISSUE #132, afinado en el review de #139).
  *
- * `fk_platos_categoria` es ON DELETE RESTRICT, asi que un 23503 al crear o
- * actualizar un plato solo puede ser una cosa: la categoria no existe. Sin
- * traducirlo, el manejador central contesta su 409 generico ("La operacion choca
- * con otro registro relacionado"), que no dice QUE falta y no trae `motivo`.
+ * Un 23503 al crear o actualizar un plato se traduce a un 409 que dice QUE
+ * falta, porque el 409 generico del manejador central ("La operacion choca con
+ * otro registro relacionado") no lo dice y no trae `motivo`.
+ *
+ * PERO se mira el NOMBRE del constraint, no solo el SQLSTATE: al actualizar un
+ * plato no hay una sola FK en juego. El trigger `tr_historial_precio_plato`
+ * (database/scripts/26_configuracion.sql) escribe en `historial_precios`, que
+ * tiene su propia `fk_historial_precios_usuario` contra `usuarios`: si el
+ * usuario del token ya no existe, ese 23503 saldria como "Esa categoria no
+ * existe" y mandaria a buscar el problema al sitio equivocado.
+ *
+ * Cualquier otro 23503 sube tal cual y el manejador central lo da como el 409
+ * generico de clave ajena, que es lo correcto cuando no se sabe cual choco.
  */
 const PG_FK = '23503';
+const FK_CATEGORIA = 'fk_platos_categoria';
 const MOTIVO_CATEGORIA_INEXISTENTE = 'categoria_inexistente';
 const MENSAJE_CATEGORIA_INEXISTENTE = 'Esa categoria no existe';
 
-/** Traduce el 23503 de la categoria; cualquier otro error sube como venia. */
+/**
+ * Traduce SOLO el 23503 de `fk_platos_categoria`; cualquier otro error —otra FK
+ * o otro codigo— sube como venia.
+ */
 function traducirCategoria(err) {
-  if (err && err.code === PG_FK) {
+  if (err && err.code === PG_FK && err.constraint === FK_CATEGORIA) {
     return {
       status: 409,
       message: MENSAJE_CATEGORIA_INEXISTENTE,
@@ -22,6 +36,20 @@ function traducirCategoria(err) {
     };
   }
   return err;
+}
+
+/**
+ * Las dos traducciones de un 23503 al crear o editar un plato, en orden
+ * (review de #144).
+ *
+ * Primero la del AUTOR —`fk_historial_precios_usuario`, que dispara el trigger
+ * del historial de precios cuando el usuario del token ya se borró— y después
+ * la de la categoría. Son dos problemas distintos y cada uno dice qué hacer:
+ * uno pide volver a iniciar sesión, el otro elegir otra categoría. Si no es
+ * ninguno de los dos, el error sube tal cual.
+ */
+function traducirFkDePlato(err) {
+  return traducirAutorInexistente(err) || traducirCategoria(err);
 }
 
 // Tabla platos (docs/modelo-er.md): id_plato, id_categoria, nombre, descripcion,
@@ -66,7 +94,7 @@ async function crear(p) {
   try {
     return await insertarPlato(p);
   } catch (err) {
-    throw traducirCategoria(err);
+    throw traducirFkDePlato(err);
   }
 }
 
@@ -167,7 +195,7 @@ async function actualizar(id, datos, { idUsuario = null } = {}) {
     }
     // Mismo criterio que al crear: una categoría que no existe es un 409 que
     // dice qué falta, no el genérico de clave ajena (ISSUE #132).
-    throw traducirCategoria(err);
+    throw traducirFkDePlato(err);
   } finally {
     client.release();
   }
@@ -266,4 +294,7 @@ module.exports = {
   PERSONALIZABLE_POR_OMISION,
   MOTIVO_CATEGORIA_INEXISTENTE,
   MENSAJE_CATEGORIA_INEXISTENTE,
+  FK_CATEGORIA,
+  traducirCategoria,
+  traducirFkDePlato,
 };

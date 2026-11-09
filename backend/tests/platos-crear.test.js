@@ -5,6 +5,7 @@ const app = require('../server');
 const { instalarFakeDb, tokenStaff } = require('./helpers/fake-db');
 const { instalarFakeRedis } = require('./helpers/fake-redis');
 const platosService = require('../src/services/platos.service');
+const autorInexistente = require('../src/services/autor-inexistente');
 
 // ISSUE #132: POST /api/platos sin tiempo_preparacion_estimado daba 500.
 //
@@ -34,14 +35,27 @@ const PLATO = {
   creado_en: '2026-11-09T12:00:00.000Z',
 };
 
-function fakePlatos({ error = null } = {}) {
+/**
+ * @param {{error?: Error, fallaEn?: string}} opciones
+ *   `fallaEn` es el fragmento de SQL con el que el doble lanza `error`
+ *   (por omision, el INSERT).
+ */
+function fakePlatos({ error = null, fallaEn = 'INSERT INTO platos' } = {}) {
   return instalarFakeDb((sql) => {
-    if (error && sql.includes('INSERT INTO platos')) throw error;
+    if (error && sql.includes(fallaEn)) throw error;
     if (sql.includes('INSERT INTO platos')) return { rows: [PLATO] };
     if (sql.includes('FROM platos WHERE id_plato')) return { rows: [PLATO] };
     if (sql.includes('UPDATE platos')) return { rows: [PLATO] };
     return { rows: [] };
   });
+}
+
+/** Un 23503 de PostgreSQL con el nombre del constraint que choco. */
+function errorDeFk(constraint) {
+  const err = new Error(`viola la llave foranea ${constraint}`);
+  err.code = '23503';
+  err.constraint = constraint;
+  return err;
 }
 
 const crear = (cuerpo) => request(app)
@@ -166,9 +180,7 @@ test('issue-132: calorias en null se acepta (es "no se sabe")', async () => {
 // ---------------------------------------------------------------------------
 
 test('issue-132: una categoria inexistente es 409 categoria_inexistente, no 500', async () => {
-  const err = new Error('fk_platos_categoria');
-  err.code = '23503';
-  const db = fakePlatos({ error: err });
+  const db = fakePlatos({ error: errorDeFk(platosService.FK_CATEGORIA) });
   const redis = instalarFakeRedis();
   try {
     const res = await crear(CUERPO_MINIMO);
@@ -270,6 +282,189 @@ test('issue-132: el PUT por HTTP sigue mandando la fila mezclada', async () => {
     const params = db.buscar('UPDATE platos').params;
     assert.strictEqual(params[1], PLATO.nombre, 'el nombre viene de la fila actual');
     assert.strictEqual(params[3], 21000);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Solo la FK de la categoria se traduce (review de #139)
+//
+// Actualizar un plato no tiene UNA sola FK en juego: el trigger
+// tr_historial_precio_plato escribe en historial_precios, que tiene su propia
+// fk_historial_precios_usuario contra usuarios. Si el usuario del token ya no
+// existe, ese 23503 salia como "Esa categoria no existe" y mandaba a buscar el
+// problema al sitio equivocado.
+// ---------------------------------------------------------------------------
+
+test('review-139: traducirCategoria mira el NOMBRE del constraint', () => {
+  const traducido = platosService.traducirCategoria(errorDeFk(platosService.FK_CATEGORIA));
+
+  assert.strictEqual(traducido.status, 409);
+  assert.strictEqual(traducido.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
+  assert.strictEqual(traducido.message, platosService.MENSAJE_CATEGORIA_INEXISTENTE);
+});
+
+test('review-139: la FK del historial de precios NO se traduce', () => {
+  const err = errorDeFk('fk_historial_precios_usuario');
+  const traducido = platosService.traducirCategoria(err);
+
+  // Sube tal cual: el manejador central lo da como el 409 generico de clave
+  // ajena, que es lo correcto cuando no se sabe cual choco.
+  assert.strictEqual(traducido, err, 'es el MISMO error, no uno traducido');
+  assert.strictEqual(traducido.motivo, undefined);
+  assert.strictEqual(traducido.status, undefined);
+  assert.strictEqual(traducido.code, '23503');
+});
+
+test('review-139: ninguna otra FK ni otro codigo se confunde con la categoria', () => {
+  for (const err of [
+    errorDeFk('fk_recetas_plato_insumo'),
+    errorDeFk('fk_detalles_pedido_plato'),
+    errorDeFk(undefined),
+    Object.assign(new Error('unique'), { code: '23505', constraint: platosService.FK_CATEGORIA }),
+    Object.assign(new Error('check'), { code: '23514' }),
+    new Error('pelado'),
+  ]) {
+    assert.strictEqual(
+      platosService.traducirCategoria(err),
+      err,
+      String(err.constraint || err.code || err.message)
+    );
+  }
+  assert.strictEqual(platosService.traducirCategoria(null), null);
+});
+
+test('review-139: por la ruta, el 23503 del historial NO se disfraza de categoria', async () => {
+  // Es el caso de verdad: un admin con un token valido cuyo usuario ya se
+  // borro edita el precio de un plato. El trigger del historial choca contra
+  // usuarios, y eso NO es un problema de categoria. Desde el review de #144
+  // tiene su propio motivo (ver las pruebas de autor_inexistente, abajo); lo
+  // que esta prueba fija es que NUNCA sale como el de la categoria.
+  const db = fakePlatos({
+    error: errorDeFk('fk_historial_precios_usuario'),
+    fallaEn: 'UPDATE platos',
+  });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await request(app)
+      .put('/api/platos/77')
+      .set('Authorization', `Bearer ${admin()}`)
+      .send({ precio: 21000 });
+
+    assert.strictEqual(res.status, 409);
+    assert.notStrictEqual(res.body.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
+    assert.notStrictEqual(res.body.error, platosService.MENSAJE_CATEGORIA_INEXISTENTE);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('review-139: y el de la categoria por el PUT sigue siendo el suyo', async () => {
+  const db = fakePlatos({
+    error: errorDeFk(platosService.FK_CATEGORIA),
+    fallaEn: 'UPDATE platos',
+  });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await request(app)
+      .put('/api/platos/77')
+      .set('Authorization', `Bearer ${admin()}`)
+      .send({ id_categoria: 999999 });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// El 23503 del AUTOR: "tu usuario ya no existe" (review de #144)
+//
+// Varias escrituras anotan quien las hizo, con el id del JWT. Si ese usuario se
+// borro mientras la sesion seguia viva, el trigger del historial de precios
+// choca contra usuarios y PostgreSQL devuelve 23503. Antes salia como el 409
+// generico de clave ajena, sin motivo: quien esta en el panel no se enteraba de
+// que el problema era su propia sesion.
+// ---------------------------------------------------------------------------
+
+test('review-144: el helper traduce las FK del autor y nada mas', () => {
+  for (const fk of autorInexistente.FK_AUTOR) {
+    const traducido = autorInexistente.traducirAutorInexistente(errorDeFk(fk));
+    assert.strictEqual(traducido.status, 409, fk);
+    assert.strictEqual(traducido.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE, fk);
+    assert.strictEqual(traducido.message, autorInexistente.MENSAJE_AUTOR_INEXISTENTE, fk);
+  }
+
+  // Otra FK, u otro codigo, no son este caso: devuelve null para que quien
+  // llama siga con su propia traduccion.
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk(platosService.FK_CATEGORIA)), null);
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk('fk_historial_usuario')), null);
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk(undefined)), null);
+  assert.strictEqual(
+    autorInexistente.traducirAutorInexistente(Object.assign(new Error('u'), { code: '23505', constraint: autorInexistente.FK_AUTOR[0] })),
+    null
+  );
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(null), null);
+});
+
+test('review-144: el mensaje dice que hacer y no nombra tablas', () => {
+  const texto = autorInexistente.MENSAJE_AUTOR_INEXISTENTE;
+
+  assert.match(texto, /vuelve a iniciar sesión/i, 'dice que hacer');
+  assert.ok(!/historial|constraint|23503|fk_/i.test(texto), 'no nombra el detalle interno');
+});
+
+test('review-144: en un plato, el autor y la categoria son errores distintos', () => {
+  const autor = platosService.traducirFkDePlato(errorDeFk('fk_historial_precios_usuario'));
+  const categoria = platosService.traducirFkDePlato(errorDeFk(platosService.FK_CATEGORIA));
+
+  assert.strictEqual(autor.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+  assert.strictEqual(categoria.motivo, platosService.MOTIVO_CATEGORIA_INEXISTENTE);
+  assert.notStrictEqual(autor.message, categoria.message);
+});
+
+test('review-144: otra FK en un plato sigue subiendo sin traducir', () => {
+  const err = errorDeFk('fk_detalles_pedido_plato');
+
+  assert.strictEqual(platosService.traducirFkDePlato(err), err);
+});
+
+test('review-144: por la ruta, el PUT de un plato da 409 autor_inexistente', async () => {
+  // El caso de verdad: un admin con token valido cuyo usuario ya se borro edita
+  // el precio. Antes: 409 generico sin motivo.
+  const db = fakePlatos({
+    error: errorDeFk('fk_historial_precios_usuario'),
+    fallaEn: 'UPDATE platos',
+  });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await request(app)
+      .put('/api/platos/77')
+      .set('Authorization', `Bearer ${admin()}`)
+      .send({ precio: 21000 });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('review-144: y al CREAR un plato, lo mismo', async () => {
+  const db = fakePlatos({ error: errorDeFk('fk_historial_precios_usuario') });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await crear(CUERPO_MINIMO);
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
   } finally {
     redis.restaurar();
     db.restaurar();

@@ -4,6 +4,7 @@ const request = require('supertest');
 const app = require('../server');
 const { instalarFakeDb, tokenStaff, tokenComensal } = require('./helpers/fake-db');
 const configuracionService = require('../src/services/configuracion.service');
+const autorInexistente = require('../src/services/autor-inexistente');
 
 // D-16 parte B: configuracion del restaurante (tabla configuracion_restaurante,
 // database/scripts/26_configuracion.sql).
@@ -422,6 +423,59 @@ test('d-16b: el servicio sabe que la fila es la 1 y no acepta otra', async () =>
     await request(app).get('/api/configuracion');
     assert.deepStrictEqual(db.buscar('FROM configuracion_restaurante').params, [1]);
     assert.strictEqual(configuracionService.ID_CONFIGURACION, 1);
+  } finally {
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// El 23503 del AUTOR al guardar la configuracion (review de #144)
+// ---------------------------------------------------------------------------
+
+test('review-144: el PUT con el autor borrado da 409 autor_inexistente', async () => {
+  // tr_configuracion_actualizada escribe `actualizado_por` con el id del JWT, y
+  // esa columna tiene fk_configuracion_actualizado_por contra usuarios. Si el
+  // usuario ya no existe, antes salia el 409 generico de clave ajena.
+  const err = new Error('viola la llave foranea fk_configuracion_actualizado_por');
+  err.code = '23503';
+  err.constraint = 'fk_configuracion_actualizado_por';
+
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('UPDATE configuracion_restaurante')) throw err;
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .put('/api/configuracion')
+      .set('Authorization', `Bearer ${tokenStaff(1, 'admin')}`)
+      .send({ nombre: 'SmartDining' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+    assert.ok(db.buscar('ROLLBACK'), 'la transaccion se deshizo');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('review-144: otro 23503 en la configuracion sigue subiendo sin traducir', async () => {
+  const err = new Error('otra fk');
+  err.code = '23503';
+  err.constraint = 'fk_de_otra_cosa';
+
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('UPDATE configuracion_restaurante')) throw err;
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .put('/api/configuracion')
+      .set('Authorization', `Bearer ${tokenStaff(1, 'admin')}`)
+      .send({ nombre: 'SmartDining' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, undefined, 'el generico del manejador central');
   } finally {
     db.restaurar();
   }

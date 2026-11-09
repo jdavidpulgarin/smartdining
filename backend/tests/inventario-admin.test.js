@@ -5,6 +5,7 @@ const app = require('../server');
 const { instalarFakeDb, tokenStaff } = require('./helpers/fake-db');
 const inventarioService = require('../src/services/inventario.service');
 const inventarioCtrl = require('../src/controllers/inventario.controller');
+const autorInexistente = require('../src/services/autor-inexistente');
 
 // D-17 PR 2: inventario del panel (insumos, movimientos y recetas).
 //
@@ -47,6 +48,14 @@ const MOVIMIENTO = {
   motivo: 'Compra del proveedor',
   creado_en: '2026-11-08T12:00:00.000Z',
 };
+
+/** Un 23503 (u otro code) con el NOMBRE del constraint que choco. */
+function errorDeFk(constraint, code = '23503') {
+  const err = new Error(`viola la llave foranea ${constraint}`);
+  err.code = code;
+  err.constraint = constraint;
+  return err;
+}
 
 /** Un error de pg con su SQLSTATE. */
 function errorDeLaBase(code, message = 'error de la base') {
@@ -751,6 +760,92 @@ test('d-17b: el PUT de la receta tambien fija el autor de la transaccion', async
     await put('/api/platos/12/receta', { insumos: [{ id_insumo: 3, cantidad: 1 }] });
 
     assert.deepStrictEqual(db.buscar('set_config').params, ['app.id_usuario', '1']);
+  } finally {
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// El 23503 del AUTOR al mover stock (review de #144, extension b)
+//
+// movimientos_inventario.id_usuario tiene su propia FK contra usuarios, y el
+// nombre lo genero PostgreSQL: movimientos_inventario_id_usuario_fkey. Si el
+// usuario del token ya no existe, antes salia el 409 generico de clave ajena.
+// ---------------------------------------------------------------------------
+
+/** La FK del autor de un movimiento, con su nombre REAL (de la base). */
+const FK_MOVIMIENTO_AUTOR = 'movimientos_inventario_id_usuario_fkey';
+
+test('review-144: un movimiento con el autor borrado da 409 autor_inexistente', async () => {
+  const db = fakeInventario({
+    responder: (sql) => {
+      if (sql.includes('registrar_movimiento_inventario')) throw errorDeFk(FK_MOVIMIENTO_AUTOR);
+      return undefined;
+    },
+  });
+  try {
+    const res = await post('/api/inventario/insumos/12/movimientos', { tipo: 'merma', cantidad: 5 });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+    assert.ok(db.buscar('ROLLBACK'));
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('review-144: crear un insumo con stock inicial y autor borrado, igual', async () => {
+  // El stock_inicial entra como un movimiento, asi que choca la misma FK.
+  const db = fakeInventario({
+    responder: (sql) => {
+      if (sql.includes('registrar_movimiento_inventario')) throw errorDeFk(FK_MOVIMIENTO_AUTOR);
+      return undefined;
+    },
+  });
+  try {
+    const res = await post('/api/inventario/insumos', { nombre: 'Masa nueva', stock_inicial: 10 });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('review-144: el nombre en uso sigue siendo nombre_en_uso, no autor_inexistente', async () => {
+  // El orden importa: la traduccion del autor va DESPUES de la del nombre.
+  const db = fakeInventario({
+    responder: (sql) => {
+      if (sql.includes('INSERT INTO insumos')) throw errorDeFk('uq insumos_nombre', '23505');
+      return undefined;
+    },
+  });
+  try {
+    const res = await post('/api/inventario/insumos', { nombre: 'Queso costeño' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, inventarioService.MOTIVO_NOMBRE_EN_USO);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('review-144: un insumo inexistente sigue dando 404, no el 409 del autor', async () => {
+  const db = fakeInventario({
+    responder: (sql) => {
+      if (sql.includes('registrar_movimiento_inventario')) {
+        const err = new Error('El insumo 99 no existe');
+        err.code = 'P0002';
+        throw err;
+      }
+      return undefined;
+    },
+  });
+  try {
+    const res = await post('/api/inventario/insumos/99/movimientos', { tipo: 'entrada', cantidad: 5 });
+
+    assert.strictEqual(res.status, 404);
   } finally {
     db.restaurar();
   }

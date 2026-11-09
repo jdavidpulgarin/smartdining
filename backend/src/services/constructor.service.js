@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 /**
  * Pasos e ingredientes del constructor de platos (D-04).
@@ -47,6 +48,14 @@ const MENSAJE_INGREDIENTE_VENDIDO =
  */
 function traducirError(err, contexto = {}) {
   if (!err || typeof err.code !== 'string') return err;
+
+  // El AUTOR va primero (review de #144): cambiar el `precio_extra` de una
+  // opción dispara `tr_historial_precio_ingrediente`, que escribe en
+  // `historial_precios` con el id del JWT. Si ese usuario ya se borró, el 23503
+  // es de `fk_historial_precios_usuario` y no tiene nada que ver con el
+  // constructor, así que sale con su propio motivo en vez del 409 genérico.
+  const autor = traducirAutorInexistente(err);
+  if (autor) return autor;
 
   if (err.code === PG_UNIQUE) {
     if (err.constraint === UQ_PASO_ORDEN) {
@@ -364,6 +373,7 @@ async function eliminarIngrediente(idIngrediente) {
 }
 
 module.exports = {
+  traducirError,
   pasosDePlato,
   obtenerPaso,
   obtenerIngrediente,

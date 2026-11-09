@@ -734,6 +734,7 @@ Si no se envían, **el comportamiento no cambia**: el plato conserva lo que ten�
 |---|---|
 | Falta un campo, o un tipo o rango no es el declarado | **400** con el campo que falla (zod) |
 | `id_categoria` que no existe | **409** `{ "error": "Esa categoria no existe", "motivo": "categoria_inexistente" }` |
+| **El usuario del token ya no existe** | **409** `autor_inexistente` (ver [El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)) |
 | Un valor que no cabe en la columna (precio enorme) | **422** con el mensaje genérico de "dato fuera de rango" |
 | Un `CHECK` de la base (precio negativo llamando al servicio suelto) | **422** |
 
@@ -3618,6 +3619,47 @@ Un mismo cambio de stock avisa una sola vez aunque cumpla los dos (p. ej. mínim
 del mismo insumo) deja **dos** avisos, uno con el stock que quedó bajo y otro con `0`: el
 socket-server marca el segundo con `agotado: true`. Lo prueba
 `database/tests/test_g06_aviso_agotado.sh`.
+
+### El autor que ya no existe: 409 `autor_inexistente`
+
+Varias escrituras del panel anotan **quién** las hizo, y ese id sale del JWT. Si el usuario se
+borró mientras su sesión seguía viva, la escritura choca contra la clave ajena de `usuarios` y
+PostgreSQL devuelve **23503**. Antes salía como el 409 genérico de clave ajena —"La operación
+choca con otro registro relacionado", sin `motivo`—, que no dice que el problema sea la propia
+sesión. Ahora:
+
+```json
+{ "error": "Tu usuario ya no existe; vuelve a iniciar sesión", "motivo": "autor_inexistente" }
+```
+
+**Status 409.** El cliente no puede arreglarlo reintentando ni corrigiendo el cuerpo: lo que
+toca es volver a entrar. El mensaje no nombra tablas ni constraints, porque a quien está en el
+panel no le sirve saber qué fila chocó.
+
+Dónde puede salir, y qué clave ajena lo provoca (los nombres están comprobados contra la base,
+y **no** siguen todos el mismo patrón: el de `movimientos_inventario` lo generó PostgreSQL):
+
+| Ruta | Qué lo escribe | Clave ajena |
+|---|---|---|
+| `POST` y `PUT /platos/:id` (cuando cambia el precio) | `tr_historial_precio_plato` → `historial_precios.id_usuario` | `fk_historial_precios_usuario` |
+| `PUT /ingredientes/:id` (cuando cambia `precio_extra`) | `tr_historial_precio_ingrediente` → la misma tabla | `fk_historial_precios_usuario` |
+| `PUT /configuracion` | `tr_configuracion_actualizada` → `configuracion_restaurante.actualizado_por` | `fk_configuracion_actualizado_por` |
+| `POST /inventario/insumos/:id/movimientos` y `POST /inventario/insumos` con `stock_inicial` | `registrar_movimiento_inventario` → `movimientos_inventario.id_usuario` | `movimientos_inventario_id_usuario_fkey` |
+
+- **La transacción se deshace entera**: el precio no cambia, la configuración se queda como
+  estaba y el stock no se mueve (el libro de inventario sigue cuadrando).
+- Se mira el **nombre del constraint**, no solo el SQLSTATE: un 23503 de otra cosa —una
+  categoría que no existe, un insumo que no existe— significa algo distinto y conserva su
+  propio motivo. La cuenta vive en un solo sitio,
+  [`src/services/autor-inexistente.js`](../src/services/autor-inexistente.js), para que los
+  cuatro caminos no puedan discrepar.
+- `id_usuario` **en `null` es válido** y no da este error: así quedan los movimientos que
+  genera un pedido de un comensal, que no tiene usuario.
+
+> **Queda uno fuera, a propósito.** `POST /pedidos` escribe `historial_estados.id_usuario`
+> (`fk_historial_usuario`) con el id del JWT, así que un usuario borrado da el mismo 23503 sin
+> traducir. No entró en este cambio para no mezclarlo con el review; es una línea con el mismo
+> helper cuando se decida.
 
 ### La frontera entre 400 y 422 (H-11)
 
