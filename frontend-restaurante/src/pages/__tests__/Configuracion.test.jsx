@@ -21,10 +21,13 @@ function sesionComo(rol, id = 1) {
 }
 
 /** Backend simulado. `escrituras(url, metodo, cuerpo)` decide cada POST/PATCH/DELETE. */
-function backend({ mesas = [], usuarios = [], escrituras = () => json({}) }) {
+function backend({ mesas = [], usuarios = [], configuracion = null, escrituras = () => json({}) }) {
   return vi.spyOn(global, 'fetch').mockImplementation(async (url, config = {}) => {
     const metodo = config.method || 'GET'
     if (metodo !== 'GET') return escrituras(url, metodo, config.body ? JSON.parse(config.body) : undefined)
+    if (url.includes('/configuracion/completa')) {
+      return typeof configuracion === 'function' ? configuracion() : json(configuracion)
+    }
     if (url.includes('/usuarios')) return json({ usuarios })
     if (url.includes('/mesas')) return json({ mesas })
     return json({})
@@ -265,15 +268,134 @@ describe('P-21 · Configuración', () => {
     })
   })
 
-  it('pestaña Restaurante: avisa que el formulario está pendiente, sin datos de ejemplo', async () => {
-    sesionComo('admin')
-    const spy = backend({ mesas: mesasBase })
-    montar()
-    fireEvent.click(await screen.findByRole('tab', { name: 'RESTAURANTE' }))
-    expect(screen.getByText('Datos del restaurante: pendiente')).toBeInTheDocument()
-    expect(screen.queryByRole('textbox')).toBeNull()
-    // No pide nada a /configuracion: no hay formulario todavía.
-    expect(spy.mock.calls.some(([url]) => url.includes('/configuracion'))).toBe(false)
+  describe('pestaña Restaurante (P2)', () => {
+    // Forma real de GET /configuracion/completa (api-spec, D-16 parte B).
+    const configBase = {
+      id: 1,
+      nombre: 'SmartDining',
+      telefono: '3001234567',
+      direccion: 'Calle 1 #2-3',
+      url_logo: null,
+      horario: { lunes: { abre: '11:00', cierra: '22:00' } },
+      propina_sugerida_pct: 10,
+      moneda: 'COP',
+      actualizado_en: '2026-11-08T12:00:00.000Z',
+      actualizado_por: 1,
+    }
+    const personal = [{ id_usuario: 1, nombre: 'Ana Ríos', email: 'ana@mail.com', rol: 'admin', activo: true }]
+
+    async function abrirRestaurante() {
+      fireEvent.click(await screen.findByRole('tab', { name: 'RESTAURANTE' }))
+      return screen.findByRole('form', { name: 'Datos del restaurante' })
+    }
+
+    it('carga los datos reales del local, el horario por día y quién guardó por última vez', async () => {
+      sesionComo('admin')
+      backend({ mesas: mesasBase, usuarios: personal, configuracion: configBase })
+      montar()
+      const form = await abrirRestaurante()
+
+      expect(within(form).getByLabelText('NOMBRE')).toHaveValue('SmartDining')
+      expect(within(form).getByLabelText('MONEDA')).toHaveValue('COP')
+      expect(within(form).getByLabelText('PROPINA SUGERIDA (%)')).toHaveValue('10')
+      expect(within(form).getByLabelText('Lunes')).toBeChecked()
+      expect(within(form).getByLabelText('Abre el Lunes')).toHaveValue('11:00')
+      expect(within(form).getByLabelText('Martes')).not.toBeChecked()
+      expect(await within(form).findByText(/Última actualización: .* · por Ana Ríos/)).toBeInTheDocument()
+      expect(screen.queryByText(/pendiente/i)).toBeNull()
+    })
+
+    it('guardar manda solo lo que cambió y muestra la fila que devuelve el servidor', async () => {
+      sesionComo('admin')
+      const guardada = {
+        ...configBase,
+        propina_sugerida_pct: 12.5,
+        horario: { ...configBase.horario, domingo: { abre: '12:00', cierra: '21:00' } },
+        actualizado_en: '2026-11-09T15:00:00.000Z',
+      }
+      const spy = backend({
+        mesas: mesasBase,
+        usuarios: personal,
+        configuracion: configBase,
+        escrituras: (url, metodo) => (url.endsWith('/configuracion') && metodo === 'PUT' ? json(guardada) : json({}, 404)),
+      })
+      montar()
+      const form = await abrirRestaurante()
+
+      fireEvent.change(within(form).getByLabelText('PROPINA SUGERIDA (%)'), { target: { value: '12,5' } })
+      fireEvent.click(within(form).getByLabelText('Domingo'))
+      fireEvent.change(within(form).getByLabelText('Abre el Domingo'), { target: { value: '12:00' } })
+      fireEvent.change(within(form).getByLabelText('Cierra el Domingo'), { target: { value: '21:00' } })
+      fireEvent.click(within(form).getByRole('button', { name: /GUARDAR CAMBIOS/ }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Datos del restaurante guardados.')
+      expect(escriturasDe(spy)).toEqual([
+        {
+          url: expect.stringMatching(/\/configuracion$/),
+          metodo: 'PUT',
+          cuerpo: {
+            propina_sugerida_pct: 12.5,
+            horario: { lunes: { abre: '11:00', cierra: '22:00' }, domingo: { abre: '12:00', cierra: '21:00' } },
+          },
+        },
+      ])
+      expect(within(form).getByLabelText('PROPINA SUGERIDA (%)')).toHaveValue('12.5')
+
+      // Sin tocar nada más no hay segundo PUT: se compara contra lo ya guardado.
+      fireEvent.click(within(form).getByRole('button', { name: /GUARDAR CAMBIOS/ }))
+      expect(await screen.findByText('No hay cambios que guardar.')).toBeInTheDocument()
+      expect(escriturasDe(spy)).toHaveLength(1)
+    })
+
+    it('valida antes de mandar: un día abierto sin hora de cierre no llega al servidor', async () => {
+      sesionComo('admin')
+      const spy = backend({ mesas: mesasBase, usuarios: personal, configuracion: configBase })
+      montar()
+      const form = await abrirRestaurante()
+
+      fireEvent.click(within(form).getByLabelText('Martes'))
+      fireEvent.change(within(form).getByLabelText('Abre el Martes'), { target: { value: '11:00' } })
+      fireEvent.click(within(form).getByRole('button', { name: /GUARDAR CAMBIOS/ }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Martes: pon la hora de apertura y de cierre (HH:MM).')
+      expect(escriturasDe(spy)).toEqual([])
+    })
+
+    it('si el servidor rechaza el cambio, muestra su mensaje y conserva lo escrito', async () => {
+      sesionComo('admin')
+      backend({
+        mesas: mesasBase,
+        usuarios: personal,
+        configuracion: configBase,
+        escrituras: () => json({ error: 'moneda debe ser un código ISO 4217 de 3 letras' }, 400),
+      })
+      montar()
+      const form = await abrirRestaurante()
+
+      fireEvent.change(within(form).getByLabelText('MONEDA'), { target: { value: 'xyz' } })
+      fireEvent.click(within(form).getByRole('button', { name: /GUARDAR CAMBIOS/ }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('No se guardó: moneda debe ser un código ISO 4217 de 3 letras')
+      expect(within(form).getByLabelText('MONEDA')).toHaveValue('XYZ')
+    })
+
+    it('si no carga, dice por qué y deja reintentar, sin un formulario con datos inventados', async () => {
+      sesionComo('admin')
+      let intentos = 0
+      backend({
+        mesas: mesasBase,
+        usuarios: personal,
+        configuracion: () => (++intentos === 1 ? json({ error: 'Error interno del servidor' }, 500) : json(configBase)),
+      })
+      montar()
+      fireEvent.click(await screen.findByRole('tab', { name: 'RESTAURANTE' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Error interno del servidor')
+      expect(screen.queryByRole('form', { name: 'Datos del restaurante' })).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: /REINTENTAR/ }))
+      expect(await screen.findByRole('form', { name: 'Datos del restaurante' })).toBeInTheDocument()
+    })
   })
 
   it('errorDeClave: mínimo 8 caracteres y máximo 72 bytes (las tildes cuentan doble)', () => {
