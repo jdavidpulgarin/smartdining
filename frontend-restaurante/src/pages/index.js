@@ -6,3 +6,5 @@ export { Caja } from './Caja'
 export { Reportes } from './Reportes'
 export { Login } from './Login'
 export { PantallaMesa } from './PantallaMesa'
+export { TomarPedido } from './TomarPedido'
+
