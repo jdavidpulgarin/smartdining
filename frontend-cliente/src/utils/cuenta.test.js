@@ -13,6 +13,18 @@ import {
   ESTADO_CUENTA_ENVIANDO,
   estadoCuentaSolicitada,
   textoCajaSegunEstado,
+  avisoPedidoGrupal,
+  TEXTO_SUGERENCIA_SIN_CELULAR,
+  debeMostrarSugerenciaSinCelular,
+  debeSalirDeEspera,
+  mensajePagoConfirmado,
+  textoDetalleConfirmacion,
+  eventIdParaIntento,
+  estadoSelectorPago,
+  infoTuParte,
+  montoTuParte,
+  transicionPantallaPago,
+  decidirSalidaEspera,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -463,6 +475,738 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(textoCajaSegunEstado(null)).toBe(
         'Puedes acercarte a la caja a pagar o esperar al mesero en la mesa.'
       );
+    });
+  });
+
+  describe('avisoPedidoGrupal (J-15)', () => {
+    const cuentaBase = {
+      mia: { saldo: 46000, subtotal: 46000 },
+      saldo: 46000,
+      comensales: [
+        { nombre: 'Ana', subtotal: 46000, saldo: 46000 },
+      ],
+    };
+
+    it('modo distinto de propio → null', () => {
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      expect(
+        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'igual' })
+      ).toBeNull();
+      expect(
+        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'total' })
+      ).toBeNull();
+    });
+
+    it('mi saldo 0 → null', () => {
+      const cuentaSinSaldo = {
+        mia: { saldo: 0, subtotal: 20000 },
+        saldo: 30000,
+        comensales: [{ nombre: 'Ana', subtotal: 20000, saldo: 0 }],
+      };
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      expect(
+        avisoPedidoGrupal({ cuenta: cuentaSinSaldo, presencia, yo: 'Ana', modo: 'propio' })
+      ).toBeNull();
+    });
+
+    it('solo yo en la mesa → null', () => {
+      const presencia = { comensales: ['Ana'], sin_celular: [] };
+      expect(
+        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'propio' })
+      ).toBeNull();
+    });
+
+    it('alguien presente sin platos → específico con su nombre', () => {
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+
+      expect(res).not.toBeNull();
+      expect(res.tipo).toBe('especifico');
+      expect(res.nombres).toEqual(['Beto']);
+      expect(res.mensaje).toBe(
+        'Beto no tiene nada a su nombre. Si tú pediste por él o ella, puedes dividir o pagar toda la mesa.'
+      );
+    });
+
+    it('alguien con subtotal 0 → específico', () => {
+      const cuentaConBetoCero = {
+        mia: { saldo: 46000, subtotal: 46000 },
+        comensales: [
+          { nombre: 'Ana', subtotal: 46000, saldo: 46000 },
+          { nombre: 'Beto', subtotal: 0, saldo: 0 },
+        ],
+      };
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaConBetoCero,
+        presencia,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+
+      expect(res).not.toBeNull();
+      expect(res.tipo).toBe('especifico');
+      expect(res.nombres).toEqual(['Beto']);
+      expect(res.mensaje).toContain('Beto no tiene nada a su nombre');
+    });
+
+    it('varios sin pedidos (plural y "y N más")', () => {
+      // 2 sin pedidos
+      const presencia2 = { comensales: ['Ana', 'Beto', 'Carla'], sin_celular: [] };
+      const res2 = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia: presencia2,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res2.tipo).toBe('especifico');
+      expect(res2.nombres).toEqual(['Beto', 'Carla']);
+      expect(res2.mensaje).toBe(
+        'Beto y Carla no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes dividir o pagar toda la mesa.'
+      );
+
+      // 4 sin pedidos: máximo 3 y "y 1 más"
+      const presencia4 = {
+        comensales: ['Ana', 'Beto', 'Carla', 'Dani', 'Elena'],
+        sin_celular: [],
+      };
+      const res4 = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia: presencia4,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res4.tipo).toBe('especifico');
+      expect(res4.nombres).toEqual(['Beto', 'Carla', 'Dani', 'y 1 más']);
+      expect(res4.mensaje).toBe(
+        'Beto, Carla, Dani y 1 más no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes dividir o pagar toda la mesa.'
+      );
+
+      // 5 sin pedidos: "y 2 más"
+      const presencia5 = {
+        comensales: ['Ana', 'Beto', 'Carla', 'Dani', 'Elena', 'Fabi'],
+        sin_celular: [],
+      };
+      const res5 = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia: presencia5,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res5.nombres).toEqual(['Beto', 'Carla', 'Dani', 'y 2 más']);
+      expect(res5.mensaje).toContain('y 2 más no tienen nada a su nombre');
+    });
+
+    it('todos con platos → general', () => {
+      const cuentaTodos = {
+        mia: { saldo: 20000, subtotal: 20000 },
+        comensales: [
+          { nombre: 'Ana', subtotal: 20000, saldo: 20000 },
+          { nombre: 'Beto', subtotal: 26000, saldo: 26000 },
+        ],
+      };
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaTodos,
+        presencia,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res).not.toBeNull();
+      expect(res.tipo).toBe('general');
+      expect(res.nombres).toEqual([]);
+      expect(res.mensaje).toBe(
+        '¿Pediste para otros? Usa DIVIDIR o TODA LA MESA.'
+      );
+    });
+
+    it('"General" nunca cuenta como persona', () => {
+      const cuentaConGeneral = {
+        mia: { saldo: 20000, subtotal: 20000 },
+        comensales: [
+          { nombre: 'Ana', subtotal: 20000, saldo: 20000 },
+          { nombre: 'General', subtotal: 10000, saldo: 10000 },
+        ],
+      };
+      // Sin nadie más que Ana y General
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaConGeneral,
+        presencia: null,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res).toBeNull();
+
+      // En presencia tampoco cuenta si viniera "General"
+      const presenciaGeneral = { comensales: ['Ana', 'General'], sin_celular: [] };
+      const resPresencia = avisoPedidoGrupal({
+        cuenta: cuentaConGeneral,
+        presencia: presenciaGeneral,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(resPresencia).toBeNull();
+    });
+
+    it('sin presencia → usa solo la cuenta y da general', () => {
+      const cuentaConBeto = {
+        mia: { saldo: 20000, subtotal: 20000 },
+        comensales: [
+          { nombre: 'Ana', subtotal: 20000, saldo: 20000 },
+          { nombre: 'Beto', subtotal: 26000, saldo: 26000 },
+        ],
+      };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaConBeto,
+        presencia: null,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res).not.toBeNull();
+      expect(res.tipo).toBe('general');
+      expect(res.mensaje).toBe(
+        '¿Pediste para otros? Usa DIVIDIR o TODA LA MESA.'
+      );
+    });
+
+    it('yo nunca aparezco en nombres', () => {
+      const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res.nombres).not.toContain('Ana');
+      expect(res.mensaje).not.toContain('Ana');
+    });
+
+    it('incluye personas en sin_celular de la presencia', () => {
+      const presenciaSinCel = { comensales: ['Ana'], sin_celular: ['Carlos'] };
+      const res = avisoPedidoGrupal({
+        cuenta: cuentaBase,
+        presencia: presenciaSinCel,
+        yo: 'Ana',
+        modo: 'propio',
+      });
+      expect(res.tipo).toBe('especifico');
+      expect(res.nombres).toEqual(['Carlos']);
+      expect(res.mensaje).toContain('Carlos no tiene nada a su nombre');
+    });
+  });
+
+  describe('debeMostrarSugerenciaSinCelular (J-15)', () => {
+    it('muestra la sugerencia si hay saldo pendiente en la mesa', () => {
+      expect(debeMostrarSugerenciaSinCelular({ saldo: 46000 })).toBe(true);
+      expect(debeMostrarSugerenciaSinCelular({ saldo: 1 })).toBe(true);
+    });
+
+    it('no se muestra si el saldo de la mesa es 0 o negativo', () => {
+      expect(debeMostrarSugerenciaSinCelular({ saldo: 0, mia: { saldo: 0 } })).toBe(false);
+      expect(debeMostrarSugerenciaSinCelular({ saldo: -500 })).toBe(false);
+      expect(debeMostrarSugerenciaSinCelular(null)).toBe(false);
+      expect(debeMostrarSugerenciaSinCelular({})).toBe(false);
+    });
+
+    it('el texto exacto coincide con la especificación', () => {
+      expect(TEXTO_SUGERENCIA_SIN_CELULAR).toBe(
+        '¿Alguien no tiene celular? Pídele al mesero que lo agregue a la mesa.'
+      );
+    });
+  });
+
+  describe('debeSalirDeEspera (J-15)', () => {
+    it('bajó el saldo → true', () => {
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: 30000 })).toBe(true);
+      expect(debeSalirDeEspera({ saldoAntes: 10000, saldoAhora: 0 })).toBe(true);
+    });
+
+    it('saldo igual → false', () => {
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: 50000 })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: 0, saldoAhora: 0 })).toBe(false);
+    });
+
+    it('saldo subió → false', () => {
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: 60000 })).toBe(false);
+    });
+
+    it('datos faltantes o inválidos → false', () => {
+      expect(debeSalirDeEspera({ saldoAntes: null, saldoAhora: 30000 })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: null })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: undefined, saldoAhora: 30000 })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: 50000, saldoAhora: undefined })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: NaN, saldoAhora: 30000 })).toBe(false);
+      expect(debeSalirDeEspera({ saldoAntes: '50000', saldoAhora: 30000 })).toBe(false);
+      expect(debeSalirDeEspera({})).toBe(false);
+      expect(debeSalirDeEspera()).toBe(false);
+    });
+  });
+
+  describe('mensajePagoConfirmado (J-15)', () => {
+    it('comensal coincide con el usuario actual → "propio"', () => {
+      expect(mensajePagoConfirmado({ comensal: 'Ana', yo: 'Ana' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: 'ana', yo: 'Ana' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: '  Ana  ', yo: 'ana' })).toBe('propio');
+    });
+
+    it('comensal es null, undefined o vacío (cobro de caja de la mesa) → "mesa"', () => {
+      expect(mensajePagoConfirmado({ comensal: null, yo: 'Ana' })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: undefined, yo: 'Ana' })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: '', yo: 'Ana' })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: null, yo: null })).toBe('mesa');
+      expect(mensajePagoConfirmado({})).toBe('mesa');
+      expect(mensajePagoConfirmado()).toBe('mesa');
+    });
+
+    it('comensal es otra persona → "otro"', () => {
+      expect(mensajePagoConfirmado({ comensal: 'Beto', yo: 'Ana' })).toBe('otro');
+      expect(mensajePagoConfirmado({ comensal: 'Carlos', yo: 'Beto' })).toBe('otro');
+      expect(mensajePagoConfirmado({ comensal: 'Beto', yo: null })).toBe('otro');
+      expect(mensajePagoConfirmado({ comensal: 'Beto', yo: 'Ana', saldoRestante: 15000 })).toBe('otro');
+    });
+
+    it('comensal es otra persona pero saldoRestante es 0 → "mesa"', () => {
+      expect(mensajePagoConfirmado({ comensal: 'Beto', yo: 'Ana', saldoRestante: 0 })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: 'Carlos', yo: 'Ana', saldoRestante: 0 })).toBe('mesa');
+    });
+
+    it('sin evento propio y saldo 0 → "mesa"', () => {
+      expect(mensajePagoConfirmado({ comensal: null, yo: 'Ana', saldoRestante: 0 })).toBe('mesa');
+      expect(mensajePagoConfirmado({ comensal: null, yo: null, saldoRestante: 0 })).toBe('mesa');
+    });
+  });
+
+  describe('textoDetalleConfirmacion (J-15)', () => {
+    it('tipo "propio" → esPropio true, monto formateado y comprobante Wompi', () => {
+      const res = textoDetalleConfirmacion({ tipo: 'propio', monto: 46000 });
+      expect(res.esPropio).toBe(true);
+      expect(res.mensaje).toBe('Pagaste $ 46.000.');
+      expect(res.comprobante).toBe('Te llegará el comprobante de Wompi.');
+    });
+
+    it('tipo "mesa" → esPropio false, "La mesa quedó pagada." y sin comprobante', () => {
+      const res = textoDetalleConfirmacion({ tipo: 'mesa', monto: 46000 });
+      expect(res.esPropio).toBe(false);
+      expect(res.mensaje).toBe('La mesa quedó pagada.');
+      expect(res.comprobante).toBeNull();
+    });
+
+    it('cualquier otro caso ("otro", null, undefined) → "La mesa quedó pagada."', () => {
+      expect(textoDetalleConfirmacion({ tipo: 'otro' })).toEqual({
+        esPropio: false,
+        mensaje: 'La mesa quedó pagada.',
+        comprobante: null,
+      });
+      expect(textoDetalleConfirmacion({})).toEqual({
+        esPropio: false,
+        mensaje: 'La mesa quedó pagada.',
+        comprobante: null,
+      });
+      expect(textoDetalleConfirmacion()).toEqual({
+        esPropio: false,
+        mensaje: 'La mesa quedó pagada.',
+        comprobante: null,
+      });
+    });
+  });
+
+  describe('eventIdParaIntento (J-15)', () => {
+    const generar = () => 'nuevo-uuid-456';
+
+    it('mismo modo y saldo → reutiliza', () => {
+      const previo = { eventId: 'previo-uuid-123', modo: 'propio', saldo: 50000 };
+      expect(
+        eventIdParaIntento(previo, { modo: 'propio', saldo: 50000 }, generar)
+      ).toBe('previo-uuid-123');
+    });
+
+    it('cambia modo → nuevo', () => {
+      const previo = { eventId: 'previo-uuid-123', modo: 'propio', saldo: 50000 };
+      expect(
+        eventIdParaIntento(previo, { modo: 'igual', saldo: 50000 }, generar)
+      ).toBe('nuevo-uuid-456');
+    });
+
+    it('cambia saldo → nuevo', () => {
+      const previo = { eventId: 'previo-uuid-123', modo: 'propio', saldo: 50000 };
+      expect(
+        eventIdParaIntento(previo, { modo: 'propio', saldo: 35000 }, generar)
+      ).toBe('nuevo-uuid-456');
+    });
+
+    it('sin previo → nuevo', () => {
+      expect(
+        eventIdParaIntento(null, { modo: 'propio', saldo: 50000 }, generar)
+      ).toBe('nuevo-uuid-456');
+      expect(
+        eventIdParaIntento(undefined, { modo: 'propio', saldo: 50000 }, generar)
+      ).toBe('nuevo-uuid-456');
+    });
+
+    it('pago anterior confirmado → nuevo', () => {
+      const previo = { eventId: 'previo-uuid-123', modo: 'propio', saldo: 50000, confirmado: true };
+      expect(
+        eventIdParaIntento(previo, { modo: 'propio', saldo: 50000 }, generar)
+      ).toBe('nuevo-uuid-456');
+    });
+  });
+
+  describe('estadoSelectorPago (J-15)', () => {
+    it('sin fila en la cuenta (nunca pedí nada): selector visible, lo mío deshabilitado, arranca en igual y no yaPague', () => {
+      const res = estadoSelectorPago({ saldoMesa: 50000, miSaldo: 0, miPagado: 0 });
+      expect(res).toEqual({
+        mostrarSelector: true,
+        loMioHabilitado: false,
+        modoInicial: 'igual',
+        yaPague: false,
+      });
+    });
+
+    it('saldo propio > 0: selector visible, lo mío habilitado, arranca en propio y no yaPague', () => {
+      const res = estadoSelectorPago({ saldoMesa: 50000, miSaldo: 20000, miPagado: 0 });
+      expect(res).toEqual({
+        mostrarSelector: true,
+        loMioHabilitado: true,
+        modoInicial: 'propio',
+        yaPague: false,
+      });
+    });
+
+    it('ya pagué lo mío con la mesa debiendo: selector visible para ayudar, lo mío deshabilitado, arranca en igual y yaPague true', () => {
+      const res = estadoSelectorPago({ saldoMesa: 30000, miSaldo: 0, miPagado: 20000 });
+      expect(res).toEqual({
+        mostrarSelector: true,
+        loMioHabilitado: false,
+        modoInicial: 'igual',
+        yaPague: true,
+      });
+    });
+
+    it('ya pagué lo mío con la mesa en 0: selector oculto, lo mío deshabilitado, yaPague true', () => {
+      const res = estadoSelectorPago({ saldoMesa: 0, miSaldo: 0, miPagado: 20000 });
+      expect(res).toEqual({
+        mostrarSelector: false,
+        loMioHabilitado: false,
+        modoInicial: 'igual',
+        yaPague: true,
+      });
+    });
+
+    it('mesa en 0 sin consumos ni pagos: selector oculto, lo mío deshabilitado, yaPague false', () => {
+      const res = estadoSelectorPago({ saldoMesa: 0, miSaldo: 0, miPagado: 0 });
+      expect(res).toEqual({
+        mostrarSelector: false,
+        loMioHabilitado: false,
+        modoInicial: 'igual',
+        yaPague: false,
+      });
+    });
+  });
+
+  describe('infoTuParte (J-15)', () => {
+    it('yaPague true: $0 en verde y "Ya pagaste lo tuyo. ¡Gracias!"', () => {
+      const res = infoTuParte({
+        miSaldo: 0,
+        miPagado: 25000,
+        miSubtotal: 25000,
+        yaPague: true,
+      });
+      expect(res).toEqual({
+        color: '#2FA35A',
+        esVerde: true,
+        mensaje: 'Ya pagaste lo tuyo. ¡Gracias!',
+      });
+    });
+
+    it('sin consumos propios (miSaldo 0 y miPagado 0): color blanco y texto exacto para aportar', () => {
+      const res = infoTuParte({
+        miSaldo: 0,
+        miPagado: 0,
+        miSubtotal: 0,
+        yaPague: false,
+      });
+      expect(res).toEqual({
+        color: '#FFFFFF',
+        esVerde: false,
+        mensaje: 'No tienes nada a tu nombre. Puedes aportar con DIVIDIR o TODA LA MESA.',
+      });
+    });
+
+    it('con saldo pendiente (miSaldo > 0): color blanco y texto Consumiste $X', () => {
+      const res = infoTuParte({
+        miSaldo: 18000,
+        miPagado: 0,
+        miSubtotal: 18000,
+        yaPague: false,
+      });
+      expect(res).toEqual({
+        color: '#FFFFFF',
+        esVerde: false,
+        mensaje: 'Consumiste $ 18.000',
+      });
+    });
+  });
+
+  describe('montoTuParte (J-15)', () => {
+    it('otro pagó con DIVIDIR y la mesa debe menos que mi saldo → TU PARTE = saldo de la mesa', () => {
+      expect(montoTuParte({ saldoMesa: 20000, miSaldo: 46000 })).toBe(20000);
+      expect(montoTuParte({ saldoMesa: 15000, miSaldo: 30000 })).toBe(15000);
+    });
+
+    it('caso normal (la mesa debe más o igual que mi saldo) → TU PARTE = mi saldo', () => {
+      expect(montoTuParte({ saldoMesa: 70000, miSaldo: 46000 })).toBe(46000);
+      expect(montoTuParte({ saldoMesa: 46000, miSaldo: 46000 })).toBe(46000);
+    });
+
+    it('saldo de la mesa en 0 → 0', () => {
+      expect(montoTuParte({ saldoMesa: 0, miSaldo: 46000 })).toBe(0);
+    });
+
+    it('comensal sin saldo propio → 0', () => {
+      expect(montoTuParte({ saldoMesa: 50000, miSaldo: 0 })).toBe(0);
+    });
+
+    it('valores nulos o no numéricos → 0', () => {
+      expect(montoTuParte(null)).toBe(0);
+      expect(montoTuParte({})).toBe(0);
+      expect(montoTuParte({ saldoMesa: 'abc', miSaldo: null })).toBe(0);
+    });
+  });
+
+  describe('transicionPantallaPago (J-15)', () => {
+    it('pago_confirmado propio → pantalla confirmado, apaga espera, limpia y cierra widget', () => {
+      const res = transicionPantallaPago({
+        tipo: 'pago_confirmado',
+        tipoConfirmado: 'propio',
+        saldoMesa: 0,
+      });
+      expect(res).toEqual({
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('pago_confirmado mesa → pantalla confirmado, apaga espera, limpia y cierra widget', () => {
+      const res = transicionPantallaPago({
+        tipo: 'pago_confirmado',
+        tipoConfirmado: 'mesa',
+        saldoMesa: 0,
+      });
+      expect(res).toEqual({
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('pago_confirmado de otro con saldo pendiente → conserva pantalla sin cerrar ni limpiar', () => {
+      const res = transicionPantallaPago({
+        tipo: 'pago_confirmado',
+        tipoConfirmado: 'otro',
+        saldoMesa: 20000,
+        pantallaActual: 'cuenta',
+      });
+      expect(res).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: false,
+        limpiarAlmacenamiento: false,
+        cerrarWidget: false,
+        errorPago: null,
+      });
+    });
+
+    it('saldo_cero → pantalla confirmado y apaga espera', () => {
+      const res = transicionPantallaPago({ tipo: 'saldo_cero' });
+      expect(res).toEqual({
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('salida_espera con saldo 0 → confirmado; con saldo > 0 → cuenta', () => {
+      const saldoCero = transicionPantallaPago({ tipo: 'salida_espera', saldoMesa: 0 });
+      expect(saldoCero).toEqual({
+        pantalla: 'confirmado',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+
+      const saldoPendiente = transicionPantallaPago({ tipo: 'salida_espera', saldoMesa: 24000 });
+      expect(saldoPendiente).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('widget_resultado aprobado → espera continua sin cerrar widget', () => {
+      const res = transicionPantallaPago({
+        tipo: 'widget_resultado',
+        resultadoWidget: { transaction: { status: 'APPROVED' } },
+      });
+      expect(res).toEqual({
+        pantalla: 'espera',
+        apagarEspera: false,
+        limpiarAlmacenamiento: false,
+        cerrarWidget: false,
+        errorPago: null,
+      });
+    });
+
+    it('widget_resultado rechazado (DECLINED/ERROR) → vuelve a cuenta con mensaje de error', () => {
+      const decl = transicionPantallaPago({
+        tipo: 'widget_resultado',
+        resultadoWidget: { transaction: { status: 'DECLINED' } },
+      });
+      expect(decl).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: 'El pago no fue aprobado. Puedes intentar nuevamente.',
+      });
+
+      const err = transicionPantallaPago({
+        tipo: 'widget_resultado',
+        resultadoWidget: { transaction: { status: 'ERROR' } },
+      });
+      expect(err).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: 'El pago no fue aprobado. Puedes intentar nuevamente.',
+      });
+    });
+
+    it('widget_resultado cerrado sin pagar (null o sin transaccion) → vuelve a cuenta sin error', () => {
+      const sinPago = transicionPantallaPago({
+        tipo: 'widget_resultado',
+        resultadoWidget: null,
+      });
+      expect(sinPago).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+
+    it('volver_cuenta → vuelve a cuenta y apaga espera', () => {
+      const res = transicionPantallaPago({ tipo: 'volver_cuenta' });
+      expect(res).toEqual({
+        pantalla: 'cuenta',
+        apagarEspera: true,
+        limpiarAlmacenamiento: true,
+        cerrarWidget: true,
+        errorPago: null,
+      });
+    });
+  });
+
+  describe('decidirSalidaEspera (J-15)', () => {
+    it('otro paga con mi widget abierto → mantener', () => {
+      const res = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: true,
+        saldoAntes: 70000,
+        saldoAhora: 46000,
+        tipoEvento: 'pago_otro',
+      });
+      expect(res).toBe('mantener');
+    });
+
+    it('pago propio con widget abierto → confirmado_propio', () => {
+      const res = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: true,
+        saldoAntes: 70000,
+        saldoAhora: 24000,
+        tipoEvento: 'pago_propio',
+      });
+      expect(res).toBe('confirmado_propio');
+    });
+
+    it('vuelvo de redirección y el saldo bajó a mayor que 0 → salir_a_cuenta', () => {
+      const res = decidirSalidaEspera({
+        origen: 'redireccion',
+        widgetAbierto: false,
+        saldoAntes: 70000,
+        saldoAhora: 46000,
+        tipoEvento: 'salida_espera',
+      });
+      expect(res).toBe('salir_a_cuenta');
+    });
+
+    it('vuelvo de redirección y el saldo bajó a 0 → confirmado_mesa', () => {
+      const res = decidirSalidaEspera({
+        origen: 'redireccion',
+        widgetAbierto: false,
+        saldoAntes: 70000,
+        saldoAhora: 0,
+        tipoEvento: 'salida_espera',
+      });
+      expect(res).toBe('confirmado_mesa');
+    });
+
+    it('vuelvo de redirección y el saldo es igual → mantener', () => {
+      const res = decidirSalidaEspera({
+        origen: 'redireccion',
+        widgetAbierto: false,
+        saldoAntes: 70000,
+        saldoAhora: 70000,
+        tipoEvento: 'salida_espera',
+      });
+      expect(res).toBe('mantener');
+    });
+
+    it('mesa en 0 por otro con mi widget abierto → mantener', () => {
+      const porSaldoCero = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: true,
+        saldoAntes: 70000,
+        saldoAhora: 0,
+        tipoEvento: 'saldo_cero',
+      });
+      expect(porSaldoCero).toBe('mantener');
+
+      const porPagoMesa = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: true,
+        saldoAntes: 70000,
+        saldoAhora: 0,
+        tipoEvento: 'pago_mesa',
+      });
+      expect(porPagoMesa).toBe('mantener');
+    });
+
+    it('en modo simulado (origen widget) otro paga → mantener', () => {
+      const res = decidirSalidaEspera({
+        origen: 'widget',
+        widgetAbierto: false,
+        saldoAntes: 70000,
+        saldoAhora: 24000,
+        tipoEvento: 'pago_otro',
+      });
+      expect(res).toBe('mantener');
     });
   });
 });
