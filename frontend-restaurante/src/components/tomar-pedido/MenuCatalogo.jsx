@@ -128,11 +128,11 @@ export function MenuCatalogo({
     if (texto) {
       // Búsqueda global en todas las categorías
       platos = categorias.flatMap((c) =>
-        (c.platos || []).map((p) => ({ ...p, categoriaNombre: c.nombre }))
-      ).filter((p) => p.nombre.toLowerCase().includes(texto))
+        (c.platos || []).map((p) => ({ ...p, categoriaNombre: c.categoria || c.nombre || '' }))
+      ).filter((p) => (p.nombre || '').toLowerCase().includes(texto))
     } else {
       const cat = categorias.find((c) => c.id_categoria === categoriaSeleccionada)
-      platos = (cat?.platos || []).map((p) => ({ ...p, categoriaNombre: cat.nombre }))
+      platos = (cat?.platos || []).map((p) => ({ ...p, categoriaNombre: cat?.categoria || cat?.nombre || '' }))
     }
 
     return platos
@@ -292,7 +292,7 @@ export function MenuCatalogo({
                   transition: 'all 0.15s ease',
                 }}
               >
-                {cat.nombre}
+                {cat.categoria || cat.nombre}
               </button>
             )
           })}

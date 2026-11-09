@@ -62,12 +62,12 @@ export function Menu() {
     const cats = data?.categorias || []
     const categoriasParsed = cats.map((c) => ({
       id: c.id_categoria,
-      name: c.nombre || c.categoria || '',
+      name: c.categoria || c.nombre || '',
       description: c.descripcion || '',
     }))
 
     const platosParsed = cats.flatMap((c) => {
-      const catNombre = c.nombre || c.categoria || 'General'
+      const catNombre = c.categoria || c.nombre || 'General'
       return (c.platos || []).map((p) => {
         const isArepa = p.nombre?.toLowerCase().includes('arepa rellena')
         return {
@@ -77,7 +77,7 @@ export function Menu() {
           categoryId: c.id_categoria,
           price: Number(p.precio || 0),
           priceFormatted: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
-          prepTime: p.tiempo_preparacion_estimado || 15,
+          prepTime: p.tiempo_estimado ?? p.tiempo_preparacion_estimado ?? 15,
           tag: catNombre,
           description: p.descripcion || '',
           imageUrl:
