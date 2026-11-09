@@ -18,7 +18,7 @@ export function constructorReducer(estado, accion) {
   switch (accion.type) {
     case 'ALTERNAR_INGREDIENTE': {
       const { paso, ingrediente } = accion
-      if (!paso || !ingrediente || !ingrediente.disponible) {
+      if (!paso || !ingrediente || ingrediente.disponible === false) {
         return estado
       }
 

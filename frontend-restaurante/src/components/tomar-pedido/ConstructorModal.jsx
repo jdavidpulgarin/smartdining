@@ -18,7 +18,7 @@ export function ConstructorModal({ plato, comensal, onAgregar, onClose }) {
     return pasosPendientes(plato, estado.selecciones)
   }, [plato, estado.selecciones])
 
-  const esValido = pendientes.length === 0
+  const esValido = pendientes.length === 0 && plato?.disponible !== false
 
   const handleAgregar = () => {
     if (!esValido) return

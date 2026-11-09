@@ -91,7 +91,7 @@ export function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) 
             idIng
           )
           const porcionElegida = seleccionesDelPaso[idIng] || 'normal'
-          const agotado = !ingrediente.disponible
+          const agotado = ingrediente.disponible === false
           const deshabilitado = agotado || (maxAlcanzado && !seleccionado)
 
           return (

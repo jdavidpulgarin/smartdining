@@ -139,7 +139,7 @@ export function MenuCatalogo({
   }, [categorias, categoriaSeleccionada, busqueda])
 
   const handleAgregarEstandar = (plato) => {
-    if (!plato.disponible) return
+    if (plato.disponible === false) return
     onAgregarItem({
       id_plato: plato.id_plato,
       nombre: plato.nombre,
