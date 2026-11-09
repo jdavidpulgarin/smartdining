@@ -3295,6 +3295,79 @@ duplicada. Se responde `{ "error": "intenta de nuevo", "motivo": "reintentar" }`
 el cliente. En el resto de las rutas, un 40P01 sigue siendo el **409** genérico de concurrencia
 del manejador central.
 
+### Avisos de inventario en vivo (D-17)
+
+`27_inventario.sql` publica en el canal `inventario` de PostgreSQL (`pg_notify`), y **solo si
+la transacción se confirma**:
+
+```json
+{"tipo":"disponibilidad","entidad":"plato","id":12,"disponible":false,"motivo":"stock"}
+{"tipo":"stock_bajo","id_insumo":12,"nombre":"Queso costeño","unidad":"g","stock_actual":450,"stock_minimo":500}
+```
+
+El backend los escucha en `src/services/inventario-avisos.js` y los reenvía al socket-server:
+
+| Aviso | Ruta interna | Notas |
+|---|---|---|
+| `disponibilidad` de un plato | `POST /internal/plato-disponibilidad` | lo que viaja es el **efectivo** (`disponible AND stock_suficiente`) |
+| `disponibilidad` de una opción | `POST /internal/ingrediente-disponibilidad` | igual |
+| `stock_bajo` | `POST /internal/inventario-alerta` | contrato de EVENTS.md §5.5 (propuesta v1.1) |
+
+- **Conexión dedicada, no una del pool.** `LISTEN` vive en la conexión: una del pool se
+  devuelve en cuanto acaba la consulta y la siguiente petición la usaría —con su `LISTEN`
+  puesto— para otra cosa, o `idleTimeoutMillis` la cerraría y el canal quedaría muerto sin que
+  nadie se enterara. Esa conexión tampoco lleva `statement_timeout`: el recálculo del arranque
+  recorre toda la carta.
+- **Con `eventId` y reintentos.** Estos avisos van **siempre** con reintento
+  (`enviarConReintento`: 3 intentos, 150 ms, solo ante `500/502/503 ERROR_INTERNO`), porque
+  nadie está esperando la respuesta y el aviso no se guarda en ningún sitio: si se pierde, la
+  carta queda desfasada en las mesas hasta el próximo movimiento. Las rutas del personal
+  (`PATCH /platos/:id/disponible`) siguen con un solo intento, como antes.
+- **Los números tienen que ser números.** Los del `pg_notify` ya son números JSON, pero los
+  `NUMERIC` de una **consulta** con `pg` llegan como texto (`'450.00'`), y el socket-server
+  responde `400 PAYLOAD_INVALIDO` a un `stock_actual` de texto. Se convierten antes de
+  reenviarlos.
+- `agotado` y `emitidoEn` **no se mandan**: los pone el socket-server al emitir.
+- Un payload **ilegible o incompleto se ignora** y se registra: el canal lo llena la base, así
+  que un aviso raro es un script más nuevo o un cambio de contrato, nunca algo que deba cortar
+  el oyente.
+
+**Al arrancar el backend** (el caso "estaba caído cuando cambió el stock"), en este orden:
+
+1. `LISTEN inventario` **primero**, para no perder nada desde ese momento. Si se recalculara
+   antes, los avisos de ese propio recálculo se emitirían con el canal todavía sin escuchar.
+2. `SELECT fn_recalcular_toda_la_carta()`. Corrige cualquier `stock_suficiente` desfasado y lo
+   que cambie sale por `pg_notify` como siempre; devuelve **solo cuántos** cambiaron.
+3. Los avisos emitidos mientras el backend no estaba **se perdieron**, y el recálculo no los
+   repite (si el estado ya era correcto, no hay cambio que notificar). Así que se lee
+   `v_carta_disponible` (`tipo`, `id`, `disponible_efectivo`, `motivo`) y se **emite la
+   disponibilidad de cada plato y de cada opción**. Las apps además recargan el menú al
+   reconectar.
+
+Si el socket-server no responde, la emisión de la carta se **abandona tras 5 fallos seguidos**:
+los demás van a fallar igual y serían minutos de timeouts y decenas de líneas idénticas en el
+log. **Si se cae la conexión del canal**, se reconecta con espera creciente (1 s, 2 s, 4 s…
+hasta 30 s), se vuelve a hacer `LISTEN` y se repiten los pasos 2 y 3. El apagado ordenado
+cierra esa conexión y **cancela la reconexión pendiente** antes de cerrar el pool.
+
+**Nada de esto puede tumbar el backend ni una petición**: el tiempo real es un extra. El
+backend arranca y sirve igual sin Redis, sin socket-server y con el canal cerrado.
+
+**`stock_minimo` no dispara ningún aviso al cambiarlo.** El trigger `tr_insumo_recalcular` solo
+mira `stock_actual` y `activo`, así que subir el mínimo de un insumo que ya está por debajo
+**no** avisa: el panel ve esa lista al abrir, leyendo la vista `v_stock_bajo` (ruta REST
+pendiente del PR 2). `inventario:alerta` es solo para los avisos en vivo, y el propio contrato
+de Roberto dice que no se guardan.
+
+> ⚠️ **Hallazgo para G-06 (no se inventa nada aquí).** EVENTS.md §5.5 dice que el backend avisa
+> "cuando el insumo **pasa** de estar sobre el mínimo a estar en o bajo el mínimo (**o llega a
+> 0**)". El SQL solo avisa el **cruce hacia abajo** del mínimo
+> (`NEW.stock_actual <= NEW.stock_minimo AND (OLD.stock_actual > OLD.stock_minimo OR NOT OLD.activo)`):
+> un insumo que ya estaba bajo el mínimo y se **agota del todo** NO genera `pg_notify`, así que
+> el panel no recibe el aviso de "agotado". Si ese segundo cruce hace falta, el cambio es del
+> script 27 (de Jarrison), no del backend: inventarlo aquí —avisando en cada movimiento— sería
+> justo lo que el SQL evita.
+
 ### La frontera entre 400 y 422 (H-11)
 
 Los dos significan "esto no se va a arreglar reintentando", pero **no son lo mismo** y el
