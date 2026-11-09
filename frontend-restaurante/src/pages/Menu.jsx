@@ -19,6 +19,8 @@ import {
 } from 'lucide-react'
 import { agotadosApi, platosApi, categoriasApi, mensajeNoGuardado } from '../services/api'
 import { EditorPasos } from '../components/admin/EditorPasos'
+import { useSocketListener } from '../hooks'
+import { crearUltimoPorId } from '../utils/dedupeEventos'
 
 /**
  * Carta para ADMINISTRAR: todas las categorías y TODOS los platos, también los
@@ -184,6 +186,21 @@ export function Menu() {
       showNotice(mensajeNoGuardado(err), 'error')
     }
   }
+
+  // plato:disponibilidad { id_plato, disponible, emitidoEn } (EVENTS.md §5.4):
+  // otro admin o la cocina agotó o repuso un plato. Se aplica en vivo, sin
+  // recargar. No trae eventId (es estado completo): solo se descarta un aviso
+  // más viejo que el último aplicado para ese plato.
+  const [platoViejo] = useState(() => crearUltimoPorId())
+
+  useSocketListener('plato:disponibilidad', (data) => {
+    const idPlato = Number(data?.id_plato)
+    if (!Number.isInteger(idPlato) || typeof data?.disponible !== 'boolean') return
+    if (platoViejo(idPlato, data.emitidoEn)) return
+    setDishesList((prev) =>
+      prev.map((d) => (d.id === idPlato ? { ...d, available: data.disponible } : d))
+    )
+  })
 
   // Abrir modal de creación/edición de plato
   const handleOpenDishModal = (dish = null) => {
