@@ -200,3 +200,88 @@ test('POST /pedidos de un comensal: no hay autor que pueda faltar', async () => 
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// PATCH /pedidos/:id/estado y el tablero del KDS
+//
+// Cada cambio de estado deja su linea en historial_estados con el id del JWT,
+// asi que es el mismo caso y la misma clave ajena. El KDS no tiene codigo
+// propio para esto: kdsService.cambiarEstado llama a pedidosService
+// .actualizarEstado, de modo que la traduccion le llega por ahi.
+// ---------------------------------------------------------------------------
+
+/**
+ * Doble para los cambios de estado. El pedido existe y esta en `estadoActual`;
+ * con `error` el doble lo lanza en el INSERT del historial, que es donde
+ * PostgreSQL lo lanza de verdad.
+ */
+function fakeEstado({ error = null, estadoActual = 'recibido' } = {}) {
+  return instalarFakeDb((sql, params) => {
+    if (error && sql.includes('INSERT INTO historial_estados')) throw error;
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: estadoActual }] };
+    if (sql.includes('UPDATE pedidos SET estado')) {
+      return { rows: [{ ...PEDIDO, estado: params[0] }] };
+    }
+    if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) {
+      return { rows: [{ ...PEDIDO, estado: estadoActual }] };
+    }
+    return { rows: [] };
+  });
+}
+
+test('PATCH /pedidos/:id/estado: el autor borrado da 409 autor_inexistente', async () => {
+  const db = fakeEstado({ error: errorDeAutor() });
+  try {
+    const res = await request(app)
+      .patch(`/api/pedidos/${PEDIDO.id_pedido}/estado`)
+      .set('Authorization', `Bearer ${mesero()}`)
+      .send({ estado: 'en_preparacion' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('PATCH /kds/comandas/:id/estado: la cocina ve el mismo 409', async () => {
+  const db = fakeEstado({ error: errorDeAutor() });
+  try {
+    const res = await request(app)
+      .patch(`/api/kds/comandas/${PEDIDO.id_pedido}/estado`)
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'en_preparacion' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('Un cambio de estado: el P0001 del trigger de transiciones no se disfraza', async () => {
+  // La transicion ilegal la rechaza tr_validar_transicion_estado con su propio
+  // mensaje, y eso tiene que seguir llegando tal cual: no es un problema de
+  // sesion, es que de ahi no se puede ir alla.
+  const mensaje = 'Transición de estado no autorizada: de "recibido" hacia "pagado"';
+  const trigger = new Error(mensaje);
+  trigger.code = 'P0001';
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) throw trigger;
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch(`/api/pedidos/${PEDIDO.id_pedido}/estado`)
+      .set('Authorization', `Bearer ${mesero()}`)
+      .send({ estado: 'pagado' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.error, mensaje);
+    assert.notStrictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+  } finally {
+    db.restaurar();
+  }
+});

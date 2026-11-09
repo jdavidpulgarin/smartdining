@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 /**
- * El 23503 del AUTOR al crear un pedido, contra PostgreSQL real.
+ * El 23503 del AUTOR al crear un pedido o moverlo de estado, contra
+ * PostgreSQL real.
  *
  * `POST /pedidos` escribe `historial_estados.id_usuario` con el id del JWT, y la
  * columna tiene su `fk_historial_usuario` contra `usuarios`. Si el usuario se
@@ -25,6 +26,7 @@ require('dotenv').config({ path: `${B}/.env` });
 const { Pool } = require('pg');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
+const kdsService = require('../../src/services/kds.service');
 const autorInexistente = require('../../src/services/autor-inexistente');
 
 let sonda = null;
@@ -172,5 +174,51 @@ test('POST /pedidos con un usuario que existe: entra y deja su linea de historia
   );
   assert.strictEqual(rows[0].id_usuario, usuarioReal.id_usuario);
   assert.strictEqual(rows[0].estado_nuevo, 'recibido');
+});
+
+test('PATCH /pedidos/:id/estado con el autor borrado: 409 autor_inexistente', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const fantasma = await idFantasma();
+  const pedido = await pedidosService.crearConDetalles({
+    id_mesa: mesa.id_mesa,
+    id_usuario: usuarioReal.id_usuario,
+    items: unItem(),
+  });
+
+  await assert.rejects(
+    () => pedidosService.actualizarEstado(pedido.id_pedido, 'en_preparacion', null, fantasma),
+    (err) => {
+      assert.strictEqual(err.status, 409);
+      assert.strictEqual(err.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+      return true;
+    }
+  );
+
+  // Y el pedido NO se movio: el estado es parte de la misma transaccion.
+  const { rows } = await sonda.query('SELECT estado FROM pedidos WHERE id_pedido = $1', [
+    pedido.id_pedido,
+  ]);
+  assert.strictEqual(rows[0].estado, 'recibido', 'sigue donde estaba');
+});
+
+test('El tablero del KDS pasa por el mismo servicio, y traduce igual', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const fantasma = await idFantasma();
+  const pedido = await pedidosService.crearConDetalles({
+    id_mesa: mesa.id_mesa,
+    id_usuario: usuarioReal.id_usuario,
+    items: unItem(),
+  });
+
+  await assert.rejects(
+    () => kdsService.cambiarEstado(pedido.id_pedido, 'en_preparacion', null, fantasma),
+    (err) => {
+      assert.strictEqual(err.status, 409);
+      assert.strictEqual(err.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+      return true;
+    }
+  );
 });
 

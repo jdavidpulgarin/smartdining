@@ -3646,6 +3646,7 @@ y **no** siguen todos el mismo patrón: el de `movimientos_inventario` lo gener�
 | `PUT /configuracion` | `tr_configuracion_actualizada` → `configuracion_restaurante.actualizado_por` | `fk_configuracion_actualizado_por` |
 | `POST /inventario/insumos/:id/movimientos` y `POST /inventario/insumos` con `stock_inicial` | `registrar_movimiento_inventario` → `movimientos_inventario.id_usuario` | `movimientos_inventario_id_usuario_fkey` |
 | `POST /pedidos` | el INSERT de `historial_estados` que deja el pedido en `recibido` | `fk_historial_usuario` |
+| `PATCH /pedidos/:id/estado` y `PATCH /kds/comandas/:id/estado` | la línea de `historial_estados` de cada cambio de estado (el KDS pasa por el mismo servicio) | `fk_historial_usuario` |
 
 - **La transacción se deshace entera**: el precio no cambia, la configuración se queda como
   estaba, el stock no se mueve (el libro de inventario sigue cuadrando) y del pedido no queda

@@ -383,7 +383,12 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
     return { ...pedido, estado_anterior: estadoAnterior, mesaLiberada, cerradoPorPago };
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    // El mismo AUTOR que al crear: cada cambio de estado deja su linea en
+    // historial_estados con el id del JWT (fk_historial_usuario). Pasa por aqui
+    // tanto PATCH /pedidos/:id/estado como el tablero del KDS, que llama a este
+    // mismo servicio. El P0001 de una transicion ilegal no se toca: ese lo
+    // traduce el manejador central con el mensaje del trigger.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }
