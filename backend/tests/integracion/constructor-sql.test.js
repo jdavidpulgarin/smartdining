@@ -120,3 +120,33 @@ test('review-144: con un usuario que existe, el cambio entra y queda en el histo
   assert.strictEqual(historial[0].id_usuario, usuarios[0].id_usuario);
   assert.strictEqual(Number(historial[0].precio_nuevo), nuevo);
 });
+
+/**
+ * EXTENSIÓN (a) del review de #144: el mismo bug en `PUT /api/configuracion`.
+ *
+ * `tr_configuracion_actualizada` escribe `actualizado_por` con el id del JWT y
+ * la columna tiene `fk_configuracion_actualizado_por` contra `usuarios`.
+ * Comprobado contra PostgreSQL real: con un id inexistente el error es ese
+ * 23503 y antes salía como el 409 genérico.
+ */
+test('review-144 (a): el PUT de configuracion con el autor borrado da 409 autor_inexistente', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const configuracionService = require('../../src/services/configuracion.service');
+  const antes = await configuracionService.obtener();
+  const fantasma = await idFantasma();
+
+  await assert.rejects(
+    () => configuracionService.actualizar({ nombre: 'Prueba autor' }, { idUsuario: fantasma }),
+    (err) => {
+      assert.strictEqual(err.status, 409);
+      assert.strictEqual(err.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+      assert.strictEqual(err.message, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+      return true;
+    }
+  );
+
+  // Y la fila se quedo como estaba.
+  const despues = await configuracionService.obtener();
+  assert.strictEqual(despues.nombre, antes.nombre);
+});
