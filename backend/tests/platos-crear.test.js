@@ -403,7 +403,7 @@ test('review-144: el helper traduce las FK del autor y nada mas', () => {
   // Otra FK, u otro codigo, no son este caso: devuelve null para que quien
   // llama siga con su propia traduccion.
   assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk(platosService.FK_CATEGORIA)), null);
-  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk('fk_historial_usuario')), null);
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk('fk_detalles_pedido_plato')), null);
   assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk(undefined)), null);
   assert.strictEqual(
     autorInexistente.traducirAutorInexistente(Object.assign(new Error('u'), { code: '23505', constraint: autorInexistente.FK_AUTOR[0] })),

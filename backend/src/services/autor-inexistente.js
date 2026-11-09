@@ -37,15 +37,21 @@ const PG_FK = '23503';
  *     .actualizado_por`, que pone `tr_configuracion_actualizada` en cada PUT.
  *   - `movimientos_inventario_id_usuario_fkey` → `movimientos_inventario
  *     .id_usuario` (script 27), en cada entrada, ajuste o merma.
+ *   - `fk_historial_usuario` → `historial_estados.id_usuario`, que escribe el
+ *     backend a mano (no un trigger) cada vez que un pedido nace o cambia de
+ *     estado: `POST /pedidos`, `PATCH /pedidos/:id/estado`, el tablero del KDS
+ *     —que pasa por el mismo servicio— y el cobro que liquida la cuenta.
  *
- * Todas leen el id con `fn_usuario_de_sesion()`, o sea de
+ * Las tres primeras leen el id con `fn_usuario_de_sesion()`, o sea de
  * `set_config('app.id_usuario', …)`, salvo la de movimientos, que además lo
- * recibe desde `registrar_movimiento_inventario`.
+ * recibe desde `registrar_movimiento_inventario`. La de `historial_estados` no
+ * usa `app.id_usuario`: el id del JWT va como parámetro del INSERT.
  */
 const FK_AUTOR = [
   'fk_historial_precios_usuario',
   'fk_configuracion_actualizado_por',
   'movimientos_inventario_id_usuario_fkey',
+  'fk_historial_usuario',
 ];
 
 const MOTIVO_AUTOR_INEXISTENTE = 'autor_inexistente';
