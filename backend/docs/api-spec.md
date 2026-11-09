@@ -2841,6 +2841,8 @@ constructor. Las tablas, la función y las vistas son de `database/scripts/27_in
 | PUT | `/inventario/insumos/:id` | **admin** | Nombre, unidad, mínimo y alta/baja. **No** el stock |
 | POST | `/inventario/insumos/:id/movimientos` | **admin** | Entrada, ajuste o merma |
 | GET | `/inventario/insumos/:id/movimientos` | **admin** | Historial del insumo, lo más nuevo primero |
+| GET | `/inventario/insumos/:id/usos` | **admin** | Qué recetas usan ese insumo, y cuánto (D-17 PR 3) |
+| GET | `/inventario/carta` | **admin** | Platos y opciones con su disponibilidad y si tienen receta (D-17 PR 3) |
 | GET | `/platos/:id/receta` | **admin** | Receta del plato |
 | PUT | `/platos/:id/receta` | **admin** | Reemplaza la receta completa |
 | GET | `/ingredientes/:id/receta` | **admin** | Receta de una opción del constructor |
@@ -3033,9 +3035,13 @@ El único camino para mover el stock.
   opaco ("un dato está fuera del rango permitido"), y aquí sí se puede decir qué campo falla.
 - Un movimiento sobre un insumo **desactivado** se acepta: hay que poder cuadrar el libro de
   algo que ya no se usa. Lo que no cambia es la disponibilidad, que sigue en "no hay".
-- Si el movimiento **cruza el mínimo hacia abajo**, la base publica `stock_bajo` y el panel
-  recibe `inventario:alerta` en vivo. Si deja un plato sin stock, llega además su
-  `plato:disponibilidad`.
+- La base publica `stock_bajo` —y el panel recibe `inventario:alerta` en vivo— si el
+  movimiento **cruza el mínimo hacia abajo** o si **deja el insumo en 0** viniendo de más de 0,
+  **aunque ya estuviera bajo el mínimo** (script 28, G-06). Nunca en cada movimiento: un
+  insumo que sigue bajando por debajo del mínimo sin llegar a 0 no vuelve a avisar. El detalle
+  de los dos casos está en
+  [Cuándo sale `stock_bajo`](#avisos-de-inventario-en-vivo-d-17). Si el movimiento deja un
+  plato sin stock, llega además su `plato:disponibilidad`.
 
 ### GET /inventario/insumos/:id/movimientos — admin
 
@@ -3064,6 +3070,178 @@ El libro del insumo, **lo más reciente primero**.
   publicaría datos del personal en una lista que el panel ya sabe resolver.
 - **400** si `limite` o `desde` no son válidos · **404** si el insumo no existe (para no
   confundir "sin movimientos" con "ese id no existe").
+
+### GET /inventario/insumos/:id/usos — admin (D-17 PR 3)
+
+**Dónde se usa ese insumo**: qué platos y qué opciones del constructor lo llevan en su receta,
+y cuánto. Es la pregunta de antes de tocarlo —desactivarlo, cambiarle la unidad, cambiar su
+receta—: *si lo toco, qué se cae*. Con `PUT /inventario/insumos/:id {"activo": false}` el panel
+puede avisar exactamente qué platos van a quedar en "no hay".
+
+```json
+{
+  "id_insumo": 12,
+  "nombre": "Queso costeño",
+  "platos": [
+    { "id": 1004, "nombre": "Nachos Supremos", "cantidad": 30 }
+  ],
+  "ingredientes": [
+    {
+      "id": 7,
+      "nombre": "Queso Extra",
+      "id_plato": 1001,
+      "plato": "Bowl Personalizado",
+      "id_paso": 6,
+      "paso": "Añade Toppings",
+      "paso_orden": 3,
+      "cantidad": 15
+    }
+  ]
+}
+```
+
+- `cantidad` es lo que consume **una unidad** del plato, o **una porción normal** de la opción
+  (la base multiplica esta última por `factores_porcion`: `ligera` 0.5, `normal` 1, `extra`
+  1.5). Llega como **número**, no como texto.
+- Las opciones traen su `plato`, su `paso` y `paso_orden`, igual que en
+  [`GET /inventario/carta`](#get-inventariocarta--admin-d-17-pr-3), para que el panel las
+  agrupe de la misma forma.
+- Orden: los platos por **nombre**; las opciones por **plato**, **`paso_orden`** y **nombre**.
+- Un insumo que **no se usa en ninguna receta** devuelve las dos listas vacías. Es lo normal
+  en uno recién creado, y es la señal de que se puede desactivar sin romper nada.
+- **404** `Insumo no encontrado` si el insumo no existe, y **no** dos listas vacías: "no se usa"
+  y "no existe" son cosas distintas. **400** si el `:id` no es un entero positivo.
+- Es de **solo lectura**: no cambia nada ni dispara ningún aviso.
+
+### GET /inventario/carta — admin (D-17 PR 3)
+
+La carta entera con **su disponibilidad y si tiene receta**: es lo que necesita la pestaña de
+**Recetas** del panel (P-22) para listar de una sola llamada qué hay que configurar y qué está
+agotado, sin pedir plato por plato.
+
+Sale de la vista **`v_carta_disponible`** (`database/scripts/27_inventario.sql`), que es quien
+decide qué es "disponible": el backend no recalcula nada. A la vista se le añaden, con un JOIN,
+los datos que el panel necesita para agrupar y explicar las filas —la categoría del plato, si
+es personalizable, y de qué plato y de qué paso (con su orden) es cada opción del
+constructor—, que la vista no trae.
+
+```http
+GET /api/inventario/carta
+Authorization: Bearer <token de admin>
+```
+
+```json
+{
+  "platos": [
+    {
+      "id": 12,
+      "nombre": "Arepa de Huevo",
+      "categoria": "Entradas",
+      "personalizable": false,
+      "disponible": true,
+      "stock_suficiente": false,
+      "disponible_efectivo": false,
+      "motivo": "stock",
+      "tiene_receta": true
+    },
+    {
+      "id": 1001,
+      "nombre": "Bowl Personalizado",
+      "categoria": "Bowls",
+      "personalizable": true,
+      "disponible": true,
+      "stock_suficiente": true,
+      "disponible_efectivo": true,
+      "motivo": null,
+      "tiene_receta": false
+    }
+  ],
+  "ingredientes": [
+    {
+      "id": 7,
+      "nombre": "Panceta Crujiente",
+      "id_plato": 1001,
+      "plato": "Bowl Personalizado",
+      "id_paso": 4,
+      "paso": "Proteína",
+      "paso_orden": 2,
+      "disponible": false,
+      "stock_suficiente": true,
+      "disponible_efectivo": false,
+      "motivo": "manual",
+      "tiene_receta": true
+    }
+  ]
+}
+```
+
+**Dos listas y no una**, aunque la vista las devuelva juntas con un `tipo`: un plato y una
+opción no se pintan igual (la opción cuelga de un paso de su plato) y el panel las muestra en
+dos tablas. Separarlas aquí le ahorra filtrar por `tipo` en el cliente, y el `tipo` deja de
+hacer falta en cada fila.
+
+| Campo | Qué es |
+|---|---|
+| `id` | `id_plato` o `id_ingrediente`, según la lista |
+| `nombre` | El del plato o de la opción |
+| `categoria` | Solo en `platos`: el nombre de su categoría (`null` si no tiene) |
+| `personalizable` | Solo en `platos`: si se arma por pasos en el constructor |
+| `id_plato`, `plato` | Solo en `ingredientes`: a qué plato pertenece la opción |
+| `id_paso`, `paso` | Solo en `ingredientes`: de qué paso del constructor es, con su nombre |
+| `paso_orden` | Solo en `ingredientes`: el **orden de ese paso dentro de su plato** (`pasos_constructor.orden`) |
+| `disponible` | El **interruptor manual** de la cocina |
+| `stock_suficiente` | Lo que **calcula la base** a partir del stock de la receta |
+| `disponible_efectivo` | `disponible AND stock_suficiente`: lo que ve el comensal |
+| `motivo` | `null` si está disponible · `"manual"` si lo apagó la cocina · `"stock"` si no alcanza el inventario. El manual **gana**: un plato apagado a mano y además sin stock dice `"manual"` |
+| `tiene_receta` | Si tiene receta en insumos. En `false` **no controla inventario**: se puede pedir siempre |
+
+**`personalizable` explica un `tiene_receta: false` que NO es un olvido.** Un Bowl, un Wrap o
+una Arepa Rellena **consumen por sus opciones**, cada una con su propia receta, así que el
+plato no tiene receta propia y está bien así. Sin ese campo, el panel los pintaría en la lista
+de "falta configurar" junto a los que de verdad están sin receta.
+
+**`paso_orden` hace falta porque el nombre del paso se repite entre platos** ("Elige tu Salsa"
+está en varios): con solo `paso` no se pueden ordenar los pasos como los ve el comensal, ni
+distinguir dos pasos homónimos de platos distintos.
+
+- Los `id` y `paso_orden` llegan como **números JSON**, no como texto.
+- **Orden fijo, y es parte del contrato**: los platos por **categoría** y luego **nombre**; las
+  opciones por **plato**, luego **`paso_orden`** y luego **nombre**. Es el orden en que el panel
+  las pinta, así que no tiene que reordenar nada. Un plato sin categoría va primero.
+- Salen **todos** los platos y todas las opciones, también los agotados y los apagados a mano:
+  es una pantalla de administración, no el menú del comensal (ese es `GET /menu`, que solo
+  muestra lo disponible).
+
+**Filtros opcionales** (`.strict()`: un parámetro que no esté aquí es **400**):
+
+| Parámetro | Valores | Qué hace |
+|---|---|---|
+| `tipo` | `plato`, `ingrediente` | Devuelve solo esa lista; la otra viaja **vacía**, no se omite |
+| `sin_receta` | `true`, `false` | Con `true`, solo lo que **no tiene receta**: es la lista de "falta configurar" de la pestaña |
+| `q` | Texto, hasta 80 | Busca por **nombre**, sin distinguir mayúsculas. Va parametrizado (`ILIKE $1`), nunca pegado al SQL |
+
+```http
+GET /api/inventario/carta?sin_receta=true&tipo=plato
+GET /api/inventario/carta?q=arepa
+```
+
+- `sin_receta=true` filtra **solo por `tiene_receta = false`**, sin mirar `personalizable`: un
+  Bowl personalizable sin receta propia **sí sale** en esa lista, y es el panel el que decide
+  cómo mostrarlo con el campo `personalizable`. El filtro no esconde nada por su cuenta.
+- Un valor fuera de la lista es **400** y no se ignora: un `?tipo=platos` que devolviera todo
+  haría creer al panel que no hay nada pendiente de configurar.
+- `q` filtra por el nombre del plato o de la opción, no por el del plato padre: buscar "bowl"
+  no trae todas sus opciones.
+- Con `tipo=ingrediente`, la respuesta sigue trayendo `"platos": []`, para que el cliente no
+  tenga que comprobar si la clave existe.
+
+**Qué cambia la disponibilidad.** Nada de esta ruta: es de solo lectura. La cambian un
+movimiento de inventario, activar o desactivar un insumo, editar una receta
+(`PUT /platos/:id/receta`) o el interruptor manual (`PATCH /platos/:id/disponible`). La base
+recalcula y publica el aviso por el canal `inventario`, y el panel lo recibe en vivo como
+`plato:disponibilidad` o `ingrediente:disponibilidad` (ver
+[Avisos de inventario en vivo](#avisos-de-inventario-en-vivo-d-17)): esta llamada es para
+**cargar la pantalla**, no para refrescarla en bucle.
 
 ### GET /platos/:id/receta y GET /ingredientes/:id/receta — admin
 
@@ -3298,9 +3476,10 @@ backend arranca y sirve igual sin Redis, sin socket-server y con el canal cerrad
 
 **`stock_minimo` no dispara ningún aviso al cambiarlo.** El trigger `tr_insumo_recalcular` solo
 mira `stock_actual` y `activo`, así que subir el mínimo de un insumo que ya está por debajo
-**no** avisa: el panel ve esa lista al abrir, leyendo la vista `v_stock_bajo` (ruta REST
-pendiente del PR 2). `inventario:alerta` es solo para los avisos en vivo, y el propio contrato
-de Roberto dice que no se guardan.
+**no** avisa: el panel ve esa lista al abrir, con
+[`GET /inventario/insumos?estado=bajo`](#get-inventarioinsumos--admin), que lee esa misma
+vista. `inventario:alerta` es solo para los avisos en vivo, y el propio contrato de Roberto
+dice que no se guardan.
 
 **Cuándo sale `stock_bajo` (script 28, G-06).** La base avisa en dos casos, con el **mismo**
 payload, y nunca en cada movimiento:

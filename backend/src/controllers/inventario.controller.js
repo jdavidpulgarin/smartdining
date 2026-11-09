@@ -185,6 +185,68 @@ async function listarInsumos(req, res, next) {
   }
 }
 
+/**
+ * GET /api/inventario/carta — admin (D-17 PR 3).
+ *
+ * La carta con su disponibilidad y si tiene receta, para la pestaña de Recetas
+ * del panel. Sale de `v_carta_disponible`: aquí no se decide nada sobre la
+ * disponibilidad, solo se agrupa en `{ platos, ingredientes }`.
+ *
+ * Un filtro con un valor que no está en la lista es 400 y NO se ignora: un
+ * `?tipo=platos` que devolviera todo haría creer al panel que no queda nada
+ * pendiente de configurar.
+ */
+const cartaSchema = z
+  .object({
+    tipo: z.enum(['plato', 'ingrediente']).optional(),
+    sin_receta: z.enum(['true', 'false']).optional(),
+    q: z.string().trim().max(80, 'q admite como máximo 80 caracteres').optional(),
+  })
+  .strict();
+
+async function obtenerCarta(req, res, next) {
+  const parsed = cartaSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: `Filtro inválido: ${primerError(parsed)}` });
+  }
+
+  const { tipo, sin_receta: sinReceta, q } = parsed.data;
+
+  try {
+    const carta = await inventarioService.obtenerCarta({
+      tipo,
+      sinReceta: sinReceta === undefined ? undefined : sinReceta === 'true',
+      q,
+    });
+    return res.json(carta);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
+ * GET /api/inventario/insumos/:id/usos — admin (D-17 PR 3, P2).
+ *
+ * Que platos y que opciones del constructor llevan ese insumo en su receta, y
+ * cuanto. Es la pregunta de antes de desactivar un insumo o cambiarle la
+ * unidad: "si lo toco, que se cae".
+ *
+ * 404 y no una lista vacia cuando el insumo no existe: una lista vacia
+ * significa "no se usa en ninguna receta", que es otra cosa.
+ */
+async function usosDeInsumo(req, res, next) {
+  const idInsumo = idDeLaUrl(req.params.id);
+  if (idInsumo === null) return res.status(400).json({ error: MENSAJE_ID });
+
+  try {
+    const usos = await inventarioService.usosDeInsumo(idInsumo);
+    if (!usos) return res.status(404).json({ error: MENSAJE_INSUMO_NO_ENCONTRADO });
+    return res.json(usos);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 /** GET /api/inventario/insumos/:id — admin. */
 async function obtenerInsumo(req, res, next) {
   const idInsumo = idDeLaUrl(req.params.id);
@@ -393,6 +455,8 @@ const recetaDeIngrediente = handlersDeReceta(
 );
 
 module.exports = {
+  obtenerCarta,
+  usosDeInsumo,
   listarInsumos,
   obtenerInsumo,
   crearInsumo,

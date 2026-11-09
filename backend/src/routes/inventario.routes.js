@@ -20,11 +20,18 @@ const router = express.Router();
  */
 const soloAdmin = [requireAuth, requireRole('admin')];
 
+// D-17 PR 3: la carta con su disponibilidad y si tiene receta, para la pestaña
+// de Recetas del panel (P-22). Es de solo lectura: sale de v_carta_disponible.
+router.get('/carta', ...soloAdmin, ctrl.obtenerCarta);
+
 router.get('/insumos', ...soloAdmin, ctrl.listarInsumos);
 router.post('/insumos', ...soloAdmin, ctrl.crearInsumo);
 
 // Las rutas con sufijo van ANTES de las de ':id' a secas por claridad; aquí no
 // hay ambigüedad posible porque el método o el sufijo las distinguen.
+// D-17 PR 3 (P2): donde se usa ese insumo (que recetas lo llevan).
+router.get('/insumos/:id/usos', ...soloAdmin, ctrl.usosDeInsumo);
+
 router.get('/insumos/:id/movimientos', ...soloAdmin, ctrl.listarMovimientos);
 router.post('/insumos/:id/movimientos', ...soloAdmin, ctrl.registrarMovimiento);
 
