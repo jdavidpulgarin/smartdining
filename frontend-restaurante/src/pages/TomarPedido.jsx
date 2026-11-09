@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   User,
   UserPlus,
-  Utensils,
   AlertCircle,
   CheckCircle2,
   RefreshCw,
@@ -17,6 +16,7 @@ import {
   buscarPorClave,
   accionError409,
 } from '../utils/tomarPedido'
+import { MenuCatalogo } from '../components/tomar-pedido/MenuCatalogo'
 
 export function TomarPedido() {
   const { id } = useParams()
@@ -50,7 +50,38 @@ export function TomarPedido() {
   const [exitoRegistro, setExitoRegistro] = useState(null)
 
   // Carrito local del mesero (para FASE 4 y 5)
-  const [carrito, _setCarrito] = useState([])
+  const [carrito, setCarrito] = useState([])
+
+  const totalItemsEnCarrito = useMemo(() => {
+    return carrito.reduce((acc, it) => acc + (it.cantidad || 1), 0)
+  }, [carrito])
+
+  const handleAgregarAlCarrito = (item) => {
+    setCarrito((prev) => {
+      // Si es plato estándar idéntico (mismo id_plato, mismo comensal, sin notas ni ingredientes), suma cantidad
+      const indiceIdentico = prev.findIndex(
+        (p) =>
+          p.id_plato === item.id_plato &&
+          p.comensal === item.comensal &&
+          !p.notas &&
+          !item.notas &&
+          (!p.ingredientes || p.ingredientes.length === 0) &&
+          (!item.ingredientes || item.ingredientes.length === 0)
+      )
+
+      if (indiceIdentico !== -1) {
+        const copia = [...prev]
+        const actual = copia[indiceIdentico]
+        copia[indiceIdentico] = {
+          ...actual,
+          cantidad: Math.min(20, (actual.cantidad || 1) + (item.cantidad || 1)),
+        }
+        return copia
+      }
+
+      return [...prev, item]
+    })
+  }
 
   // Cargar cuenta de la mesa
   const cargarDatosMesa = useCallback(async () => {
@@ -538,35 +569,16 @@ export function TomarPedido() {
         </section>
       )}
 
-      {/* Placeholder para PASO 2 y PASO 3 (se integran en FASE 4 y FASE 5) */}
+      {/* PASO 2: Menú y Constructor de platos */}
       {paso === 2 && (
-        <section className="paso-menu-container" style={{ padding: '16px 0' }}>
-          <div
-            style={{
-              padding: '24px',
-              textAlign: 'center',
-              background: 'var(--sd-surface)',
-              borderRadius: '12px',
-              border: '1px solid var(--sd-border)',
-            }}
-          >
-            <Utensils size={36} style={{ color: 'var(--sd-red)', margin: '0 auto 12px' }} />
-            <h2 style={{ color: 'var(--sd-text)', margin: '0 0 8px' }}>
-              Menú y Carta para {comensalActivo}
-            </h2>
-            <p style={{ color: 'var(--sd-text-muted)', fontSize: '0.9rem', margin: '0 0 20px' }}>
-              Paso 2: Selección de platos e ingredientes para el comensal.
-            </p>
-            <button
-              type="button"
-              className="table-btn-secondary"
-              onClick={() => setPaso(1)}
-              style={{ minHeight: '44px', padding: '8px 18px' }}
-            >
-              <ArrowLeft size={16} />
-              <span>Cambiar comensal</span>
-            </button>
-          </div>
+        <section className="paso-menu-container" style={{ padding: '8px 0' }}>
+          <MenuCatalogo
+            comensal={comensalActivo}
+            onCambiarComensal={() => setPaso(1)}
+            onAgregarItem={handleAgregarAlCarrito}
+            onIrAResumen={() => setPaso(3)}
+            totalItemsEnCarrito={totalItemsEnCarrito}
+          />
         </section>
       )}
     </div>
