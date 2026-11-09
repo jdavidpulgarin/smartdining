@@ -17,6 +17,7 @@ import {
   accionError409,
 } from '../utils/tomarPedido'
 import { MenuCatalogo } from '../components/tomar-pedido/MenuCatalogo'
+import { ResumenPedido } from '../components/tomar-pedido/ResumenPedido'
 
 export function TomarPedido() {
   const { id } = useParams()
@@ -51,6 +52,7 @@ export function TomarPedido() {
 
   // Carrito local del mesero (para FASE 4 y 5)
   const [carrito, setCarrito] = useState([])
+  const [mensajeExitoPedido, setMensajeExitoPedido] = useState(null)
 
   const totalItemsEnCarrito = useMemo(() => {
     return carrito.reduce((acc, it) => acc + (it.cantidad || 1), 0)
@@ -81,6 +83,38 @@ export function TomarPedido() {
 
       return [...prev, item]
     })
+  }
+
+  const handleModificarCantidad = (indice, delta) => {
+    setCarrito((prev) => {
+      const copia = [...prev]
+      const item = copia[indice]
+      if (!item) return prev
+      const nuevaCantidad = (item.cantidad || 1) + delta
+      if (nuevaCantidad <= 0) {
+        copia.splice(indice, 1)
+        return copia
+      }
+      copia[indice] = {
+        ...item,
+        cantidad: Math.min(20, nuevaCantidad),
+      }
+      return copia
+    })
+  }
+
+  const handleEliminarItem = (indice) => {
+    setCarrito((prev) => prev.filter((_, idx) => idx !== indice))
+  }
+
+  const handlePedidoExitoso = (resultado) => {
+    setMensajeExitoPedido(
+      `¡Comanda enviada a cocina! Pedido ${resultado?.codigo_pedido || `#${resultado?.id_pedido}`}`
+    )
+    setCarrito([])
+    setTimeout(() => {
+      navigate('/mesas')
+    }, 1500)
   }
 
   // Cargar cuenta de la mesa
@@ -569,6 +603,28 @@ export function TomarPedido() {
         </section>
       )}
 
+      {/* Mensaje global de pedido enviado con éxito */}
+      {mensajeExitoPedido && (
+        <div
+          style={{
+            padding: '16px 20px',
+            borderRadius: '12px',
+            background: 'rgba(47, 107, 58, 0.2)',
+            border: '1px solid #4ade80',
+            color: '#4ade80',
+            fontSize: '1rem',
+            fontWeight: 700,
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+          }}
+        >
+          <CheckCircle2 size={24} />
+          <span>{mensajeExitoPedido}</span>
+        </div>
+      )}
+
       {/* PASO 2: Menú y Constructor de platos */}
       {paso === 2 && (
         <section className="paso-menu-container" style={{ padding: '8px 0' }}>
@@ -578,6 +634,21 @@ export function TomarPedido() {
             onAgregarItem={handleAgregarAlCarrito}
             onIrAResumen={() => setPaso(3)}
             totalItemsEnCarrito={totalItemsEnCarrito}
+          />
+        </section>
+      )}
+
+      {/* PASO 3: Resumen de la comanda y envío a cocina */}
+      {paso === 3 && (
+        <section className="paso-resumen-container" style={{ padding: '8px 0' }}>
+          <ResumenPedido
+            idMesa={idMesa}
+            carrito={carrito}
+            onModificarCantidad={handleModificarCantidad}
+            onEliminarItem={handleEliminarItem}
+            onActualizarCarrito={setCarrito}
+            onVolverAlMenu={() => setPaso(2)}
+            onPedidoExitoso={handlePedidoExitoso}
           />
         </section>
       )}

@@ -482,4 +482,253 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
       expect(screen.getByText(/Ver comanda \(1\)/i)).toBeInTheDocument()
     })
   })
+
+  describe('Paso 3: Resumen y envío del pedido del mesero (J-16)', () => {
+    const mockMenu = {
+      categorias: [
+        {
+          id_categoria: 1,
+          nombre: 'Hamburguesas',
+          platos: [
+            {
+              id_plato: 10,
+              nombre: 'Hamburguesa Smart Angus',
+              precio: 34000,
+              disponible: true,
+              personalizable: false,
+            },
+            {
+              id_plato: 20,
+              nombre: 'Papas Rústicas',
+              precio: 14000,
+              disponible: true,
+              personalizable: false,
+            },
+          ],
+        },
+      ],
+    }
+
+    it('muestra el resumen agrupado por comensal con total y permite enviar el pedido exitosamente (201)', async () => {
+      let pedidoEnviado = null
+
+      vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
+        if (url.includes('/api/mesas/5/cuenta')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id_mesa: 5, comensales: [{ comensal: 'Señora sin celular' }] }),
+          }
+        }
+        if (url.includes('/api/menu')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => mockMenu,
+          }
+        }
+        if (url.includes('/api/pedidos') && opts?.method === 'POST') {
+          pedidoEnviado = JSON.parse(opts.body)
+          return {
+            ok: true,
+            status: 201,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({
+              id_pedido: 99,
+              codigo_pedido: 'PED-261108-XYZ99',
+              id_mesa: 5,
+              estado: 'recibido',
+              total: 34000,
+            }),
+          }
+        }
+        return { ok: true, json: async () => ({}) }
+      })
+
+      renderTomarPedido('mesero', 5)
+
+      // 1. Elegir a "Señora sin celular"
+      const btnComensal = await screen.findByText('Señora sin celular')
+      fireEvent.click(btnComensal)
+
+      // 2. Agregar Hamburguesa
+      await screen.findByText('Hamburguesa Smart Angus')
+      const btnAgregar = screen.getAllByRole('button', { name: /agregar/i })[0]
+      fireEvent.click(btnAgregar)
+
+      // 3. Ir a Paso 3: Resumen
+      const btnVerComanda = await screen.findByRole('button', { name: /ver comanda/i })
+      fireEvent.click(btnVerComanda)
+
+      // 4. Verificar encabezado y agrupación
+      await screen.findByText('Resumen de la Comanda')
+      expect(screen.getAllByText('Señora sin celular').length).toBeGreaterThan(0)
+      expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument()
+      expect(screen.getAllByText('$34.000').length).toBeGreaterThan(0)
+
+      // 5. Enviar comanda a cocina
+      const btnEnviar = screen.getByRole('button', { name: /enviar comanda a cocina/i })
+      fireEvent.click(btnEnviar)
+
+      // Debe haberse enviado el payload limpio con id_mesa y comensal, sin campos de precio
+      await waitFor(() => {
+        expect(pedidoEnviado).not.toBeNull()
+        expect(pedidoEnviado.id_mesa).toBe(5)
+        expect(pedidoEnviado.items).toHaveLength(1)
+        expect(pedidoEnviado.items[0].id_plato).toBe(10)
+        expect(pedidoEnviado.items[0].comensal).toBe('Señora sin celular')
+        expect(pedidoEnviado.items[0].precio).toBeUndefined()
+      })
+
+      // Debe mostrar mensaje de éxito con el código del pedido
+      await waitFor(() => {
+        expect(screen.getByText(/¡Comanda enviada a cocina! Pedido PED-261108-XYZ99/i)).toBeInTheDocument()
+      })
+    })
+
+    it('maneja 409 sin_stock marcando faltantes y explicando qué quitar', async () => {
+      vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
+        if (url.includes('/api/mesas/5/cuenta')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id_mesa: 5, comensales: [{ comensal: 'Beto' }] }),
+          }
+        }
+        if (url.includes('/api/menu')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => mockMenu,
+          }
+        }
+        if (url.includes('/api/pedidos') && opts?.method === 'POST') {
+          return {
+            ok: false,
+            status: 409,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({
+              error: 'El plato Hamburguesa Smart Angus está agotado',
+              motivo: 'SIN_STOCK',
+              faltantes: [{ id_plato: 10, nombre: 'Hamburguesa Smart Angus' }],
+            }),
+          }
+        }
+        return { ok: true, json: async () => ({}) }
+      })
+
+      renderTomarPedido('mesero', 5)
+
+      const btnBeto = await screen.findByText('Beto')
+      fireEvent.click(btnBeto)
+
+      await screen.findByText('Hamburguesa Smart Angus')
+      fireEvent.click(screen.getAllByRole('button', { name: /agregar/i })[0])
+
+      const btnVerComanda = await screen.findByRole('button', { name: /ver comanda/i })
+      fireEvent.click(btnVerComanda)
+
+      const btnEnviar = await screen.findByRole('button', { name: /enviar comanda a cocina/i })
+      fireEvent.click(btnEnviar)
+
+      // Debe mostrar el error y marcar el ítem con AGOTADO
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Algunos platos o ingredientes están agotados/i)
+        ).toBeInTheDocument()
+        expect(screen.getByText('AGOTADO')).toBeInTheDocument()
+      })
+    })
+
+    it('maneja 409 comensal_no_registrado, permite volver a registrar y reintenta una vez', async () => {
+      let intentosEnvio = 0
+      let aliasRegistrado = null
+
+      vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
+        if (url.includes('/api/mesas/5/cuenta')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id_mesa: 5, comensales: [{ comensal: 'Abuela' }] }),
+          }
+        }
+        if (url.includes('/api/menu')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => mockMenu,
+          }
+        }
+        if (url.includes('/api/mesas/5/comensales') && opts?.method === 'POST') {
+          const body = JSON.parse(opts.body)
+          aliasRegistrado = body.alias
+          return {
+            ok: true,
+            status: 201,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id_mesa: 5, alias: 'Abuela' }),
+          }
+        }
+        if (url.includes('/api/pedidos') && opts?.method === 'POST') {
+          intentosEnvio++
+          if (intentosEnvio === 1) {
+            // Primer intento falla con comensal_no_registrado
+            return {
+              ok: false,
+              status: 409,
+              headers: new Headers({ 'content-type': 'application/json' }),
+              json: async () => ({
+                error: 'Esa persona no está registrada en la mesa',
+                motivo: 'comensal_no_registrado',
+                alias: 'Abuela',
+              }),
+            }
+          }
+          // Segundo intento (tras re-registrar) triunfa con 201
+          return {
+            ok: true,
+            status: 201,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({
+              id_pedido: 100,
+              codigo_pedido: 'PED-RETRY-OK',
+              id_mesa: 5,
+              total: 34000,
+            }),
+          }
+        }
+        return { ok: true, json: async () => ({}) }
+      })
+
+      renderTomarPedido('mesero', 5)
+
+      const btnAbuela = await screen.findByText('Abuela')
+      fireEvent.click(btnAbuela)
+
+      await screen.findByText('Hamburguesa Smart Angus')
+      fireEvent.click(screen.getAllByRole('button', { name: /agregar/i })[0])
+
+      const btnVerComanda = await screen.findByRole('button', { name: /ver comanda/i })
+      fireEvent.click(btnVerComanda)
+
+      const btnEnviar = await screen.findByRole('button', { name: /enviar comanda a cocina/i })
+      fireEvent.click(btnEnviar)
+
+      // Debe mostrar el botón "Volver a registrar a «Abuela»"
+      const btnReRegistrar = await screen.findByRole('button', {
+        name: /volver a registrar a «abuela»/i,
+      })
+      expect(btnReRegistrar).toBeInTheDocument()
+
+      // Hacer clic en volver a registrar
+      fireEvent.click(btnReRegistrar)
+
+      // Debe llamar a POST comensales y reintentar el envío con éxito
+      await waitFor(() => {
+        expect(aliasRegistrado).toBe('Abuela')
+        expect(intentosEnvio).toBe(2)
+        expect(screen.getByText(/¡Comanda enviada a cocina! Pedido PED-RETRY-OK/i)).toBeInTheDocument()
+      })
+    })
+  })
 })
