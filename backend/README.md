@@ -1,7 +1,14 @@
 # SmartDining — Backend + KDS
 
 Responsable: Carlos Ospino (Desarrollador 2 / Integrante 3).
-Ramas: `feature/backend` y `feature/frontend-kds` (el frontend del KDS se arma después, en `/frontend-kds`).
+
+El trabajo va sobre **`develop`**, con una rama por tarea (`feature/…`, `fix/…`, `docs/…`)
+que se fusiona por PR. Las ramas `feature/backend` y `feature/frontend-kds` del arranque del
+proyecto ya no existen. El frontend del KDS está en **[`/frontend-kds`](../frontend-kds)** y
+funciona.
+
+Para levantar el resto de los servicios (Redis, socket-server y los tres frontends) y ver
+sus puertos, el **[README.md de la raíz](../README.md)**.
 
 ## Modelo de datos
 
@@ -24,10 +31,25 @@ lógica. Ver el detalle en [docs/api-spec.md](docs/api-spec.md).
 | Monto del pago vs. total del pedido | Traducir los errores de la base a HTTP |
 | Liberar la mesa y rotar su `token_qr` | Escribir `historial_estados` |
 
-Los `RAISE EXCEPTION` de los triggers (SQLSTATE `P0001`) salen como **409** con el
-mensaje del trigger; cualquier otro error de PostgreSQL sale como **500** genérico sin
-exponer el detalle. Todo eso se decide en un único lugar:
-`src/middleware/errores.middleware.js`.
+**Traducir los errores de PostgreSQL se decide en un único lugar**,
+`src/middleware/errores.middleware.js` (más `inventario-errores.js` para los dos SQLSTATE
+del inventario, que el CRUD de insumos reutiliza). Lo que sale hoy:
+
+| SQLSTATE | Qué es | Respuesta |
+|---|---|---|
+| `P0001` | `RAISE EXCEPTION` de un trigger | **409** con el mensaje del trigger, que está escrito para leerse |
+| `23505` unique_violation | Ya existe una fila con esos datos | **409** genérico |
+| `23503` foreign_key_violation | Choca con otra fila relacionada | **409** genérico (algunas rutas lo afinan: `categoria_inexistente`, `insumo_inexistente`) |
+| `23514` check_violation | El valor no cumple una regla de la columna | **422** con mensaje fijo y opaco |
+| Clase `22` (22003, 22001, 22P02…) | Dato fuera de rango o mal formado | **422**, el mismo mensaje |
+| `40P01` / `40001` | Deadlock o fallo de serialización | **409** "vuelve a intentarlo". Al **crear un pedido** sale **503 `reintentar`**, porque no hay clave de idempotencia y repetirlo lo duplicaría |
+| `57014` query_canceled | Venció `statement_timeout` | **503** |
+| `SD001` | Sin stock para el pedido (inventario) | **409** `sin_stock` con los `faltantes` |
+| `SD002` | El movimiento dejaría el stock negativo | **400** `movimiento_invalido` con `stock_actual` |
+| Cualquier otro | — | **500** genérico, sin exponer el detalle (va al log) |
+
+La tabla completa, con los cuerpos de respuesta y el porqué de cada status, está en
+[docs/api-spec.md](docs/api-spec.md).
 
 ## Recrear la base de datos local
 
@@ -280,8 +302,12 @@ compartido en Redis.
 - El pedido pertenece a **la mesa**, no a un usuario: el modelo ER no relaciona
   `pedidos` con `usuarios`. Cuando un comensal crea o cambia algo, `historial_estados`
   queda con `id_usuario = null`.
-- En el carrito colaborativo, a cada comensal lo identifica su **apodo**, que se guarda
-  por ítem en `detalles_pedido.notas_especiales`.
+- En el carrito colaborativo, a cada comensal lo identifica su **alias**, que se guarda por
+  ítem en **`detalles_pedido.comensal`**, su propia columna (D-03). `notas_especiales`
+  lleva **solo la nota** del ítem ("sin cebolla"): antes el alias se metía ahí y la cuenta
+  por persona no podía agruparse. El alias de un comensal sale **firmado del JWT** y el del
+  cuerpo se ignora; cuando pide el personal, se guarda el alias canónico de esa persona en
+  la mesa (D-18b). El detalle, en [docs/api-spec.md](docs/api-spec.md).
 
 ## Flujo de una mesa, de principio a fin
 
@@ -294,7 +320,8 @@ mesero   → POST /api/mesas/:id/abrir        pide el QR al socket-server, lo gu
 comensal → POST /api/mesas/qr/:token/sesion el token debe ser válido para el socket-server
                                             Y el vigente de la mesa -> JWT { id_mesa, sid }
          → GET  /api/categorias + GET /api/platos?id_categoria=
-         → POST /api/pedidos                id_mesa del token; apodo por ítem
+         → POST /api/pedidos                id_mesa del token; alias por item en
+                                            detalles_pedido.comensal
          → GET  /api/pedidos/mesa
 cocina   → PATCH /api/kds/comandas/:id/estado
 cajero   → POST /api/transacciones          cobro 'completada'
@@ -373,11 +400,26 @@ afecta a ninguna validación.
 
 ## Tiempo real
 
-El backend avisa al socket-server de Roberto por HTTP interno
-(`/internal/order-created`, `/internal/order-status`, `/internal/qr-rotado`,
-`/internal/mesa-liberada`, `/internal/ingrediente-disponibilidad`,
-`/internal/plato-disponibilidad`) desde
-`src/services/socket.notifier.js`, con `x-internal-key` y un `eventId` por acción.
+El backend avisa al socket-server de Roberto por HTTP interno desde
+`src/services/socket.notifier.js`, con `x-internal-key` y un `eventId` por acción. Son
+**nueve** rutas:
+
+| Ruta interna | Cuándo se manda |
+|---|---|
+| `POST /internal/order-created` | Pedido creado |
+| `POST /internal/order-status` | Cambio de estado de un pedido (KDS) |
+| `POST /internal/qr-rotado` | La mesa tiene un `token_qr` nuevo |
+| `POST /internal/mesa-liberada` | La mesa quedó libre (cobrada o liberada a mano) |
+| `POST /internal/payment-confirmed` | Cobro de caja confirmado |
+| `POST /internal/plato-disponibilidad` | Un plato se agotó o volvió |
+| `POST /internal/ingrediente-disponibilidad` | Una opción del constructor se agotó o volvió |
+| `POST /internal/mesa-comensal` | Alta o baja de un comensal sin celular (D-18) |
+| `POST /internal/inventario-alerta` | Un insumo cruzó su stock mínimo o se agotó (D-17) |
+
+Las dos de disponibilidad llevan el valor **efectivo** (`disponible AND stock_suficiente`),
+no el interruptor manual, y las disparan tanto el `PATCH` de la cocina como el oyente del
+canal `inventario`. Los contratos y los eventos que emite el socket-server están en
+[`socket-server/EVENTS.md`](../socket-server/EVENTS.md).
 
 Ese cliente **nunca lanza**: con timeout corto, registra el fallo y sigue, así que un
 socket-server caído no rompe un pedido ni un cobro. La excepción son `/qr/generar` y
@@ -416,14 +458,14 @@ en `socket-server/EVENTS.md` §5.3 y §5.4.
 npm test
 ```
 
-Más de **1.200** pruebas con `node --test` + `supertest`. **La cifra exacta no se fija
+Más de **1.700** pruebas con `node --test` + `supertest`. **La cifra exacta no se fija
 aquí a propósito**: cada PR suma pruebas y un número escrito en el README queda obsoleto a
-la semana siguiente (este decía "119" cuando ya iban más de mil). El número real lo dice el
-resumen de `npm test`:
+la semana siguiente (este decía "119" cuando ya iban más de mil, y "1.200" cuando ya iban
+1.737). El número real lo dice el resumen de `npm test`, que en noviembre de 2026 daba:
 
 ```
-ℹ tests 1222
-ℹ pass 1222
+ℹ tests 1737
+ℹ pass 1737
 ℹ fail 0
 ℹ cancelled 0
 ```
@@ -463,18 +505,21 @@ propios archivos de prueba se excluyen del informe (`--test-coverage-exclude`): 
 interesa es cuánto de `src/` se ejercita, y contar las pruebas a sí mismas infla el
 porcentaje sin decir nada.
 
-Medido hoy (noviembre de 2026, `develop` en `067d0d0`, 1222 pruebas):
+Medido en noviembre de 2026, con `develop` en `67b1f1f` y 1.737 pruebas:
 
 | | Líneas | Ramas | Funciones |
 |---|---|---|---|
-| **`src/services/`** | **98,80 %** | 89,66 % | 98,35 % |
-| Todo el backend | 98,84 % | 93,03 % | 97,70 % |
+| Todo el backend | **98,90 %** | 93,61 % | 96,97 % |
 
-En `services/` son 3.386 de 3.427 líneas. Lo que queda sin cubrir son sobre todo ramas de
-Redis caído y de errores de red del aviso al socket-server (`socket.notifier.js` es el más
-bajo en ramas, 77 %). `server.js` baja al 85,93 % porque el bloque de `require.main`
-—`listen` y los manejadores de señal— no se ejecuta cuando las pruebas importan la app con
-supertest, que es justamente lo que se quiere.
+Es la línea `all files` del informe. No se repite aquí un número por carpeta porque
+`node --test --experimental-test-coverage` **no imprime el total de un directorio**: la
+fila `services` sale vacía y cada archivo trae el suyo. Para mirar un área concreta, el
+informe completo está en la salida del comando.
+
+Lo que queda sin cubrir son sobre todo ramas de Redis caído y de errores de red del aviso al
+socket-server: `socket.notifier.js` es el más bajo en ramas (**84,50 %**). `server.js` baja
+a **83,33 %** porque el bloque de `require.main` —`listen` y los manejadores de señal— no se
+ejecuta cuando las pruebas importan la app con supertest, que es justamente lo que se quiere.
 
 ## Estructura
 
@@ -501,7 +546,7 @@ supertest, que es justamente lo que se quiere.
 - [x] Registro de usuarios restringido a `admin`, sin `telefono`
 - [x] Sesión de comensal por QR: `POST /api/mesas/qr/:token/sesion` (JWT de mesa, 3 h)
 - [x] CRUD de categorías, platos y mesas
-- [x] Pedidos: crear (comensal/mesero/admin, transaccional, precio congelado, `codigo_pedido` único, apodo en `notas_especiales`), activos, pedidos de la mesa, cambiar estado, cancelar
+- [x] Pedidos: crear (comensal/mesero/admin, transaccional, precio congelado, `codigo_pedido` único, alias en `detalles_pedido.comensal`), activos, pedidos de la mesa, cambiar estado, cancelar
 - [x] KDS: comandas activas clasificadas por categoría, restringido a rol `cocina` (o `admin`)
 - [x] Transacciones: registrar pago con liberación atómica de la mesa
 - [x] Todas las queries alineadas con `docs/modelo-er.md`
@@ -512,8 +557,15 @@ supertest, que es justamente lo que se quiere.
 - [x] Solo un cobro `completada` liquida el pedido
 - [x] Ciclo de vida de la sesión de mesa: abrir/liberar, QR fijo por sesión y cierre por `sid`
 - [x] Integración con el socket-server: `order:created`, `order:status` y `mesa-liberada`
-- [ ] Cache de sesiones con Redis (conexión lista, falta integrarla en el middleware de auth)
-- [ ] Validar el TTL del token QR contra Redis, o confirmar que Roberto ya lo validó
-- [ ] Disparar los eventos de WebSocket hacia socket-server en los puntos ya marcados con `NOTA` en el código (coordinar con Roberto)
+- [x] Caché de la cuenta activa en el middleware de auth (H-09): `services/usuario-activo.js`,
+      consultado desde `auth.middleware.js`; con Redis caído se consulta PostgreSQL
+- [x] Vigencia del token QR validada contra el socket-server (`validarTokenQr`): si no
+      responde, la sesión no se abre y sale 503
+- [x] Avisos al socket-server en los nueve puntos (ver [Tiempo real](#tiempo-real)); ya no
+      queda ningún `NOTA` pendiente en `src/`
+- [x] Frontend del KDS (`/frontend-kds`): tablero, panel de agotados y sus pruebas
+- [x] Inventario (D-17): insumos, movimientos, recetas, carta y avisos por el canal
+      `inventario`
+- [x] Configuración del restaurante e historial de precios (D-16 B)
+- [x] Comensales sin celular y alias canónico del pedido (D-18)
 - [ ] Endpoints de `suscripciones_push` (la tabla está en el modelo, el módulo es de Roberto)
-- [ ] Frontend del KDS (`/frontend-kds`)
