@@ -507,428 +507,7 @@ registrado como autor, sin una segunda llamada.
 | `url_logo` | Texto hasta 255, o `null` (quitar el logo es normal) |
 | `horario` | **Objeto** JSON. La tabla lo exige con `ck_configuracion_horario_objeto`; un arreglo o un número son **400** aquí, no un 422 de la base |
 | `propina_sugerida_pct` | Número **entre 0 y 30**, con **2 decimales como máximo** |
-| `moneda` | **3 letras mayúsculas** (ISO 4217), como el CHECK `^[A-Z]{3}# Contrato de la API REST — SmartDining Backend
-
-Responsable: Carlos Ospino (Integrante 3 / Desarrollador 2)
-Base URL local: `http://localhost:4000/api`
-Formato de errores estándar: `{ "error": "mensaje" }`
-Auth: `Authorization: Bearer <token>`
-
-Los nombres de tablas y columnas de este contrato siguen **[modelo-er.md](./modelo-er.md)**,
-el modelo entidad-relación oficial de Jarrison (dueño de la base de datos).
-
-## Reparto de responsabilidades (acordado con el equipo)
-
-**La base de datos es la fuente de verdad** y el backend no replica su lógica:
-
-| Responsabilidad | Dónde vive |
-|---|---|
-| Totales y subtotales | Triggers `tr_validar_detalle_pedido` y `tr_actualizar_total_pedido` |
-| Transiciones de estado del pedido | Trigger `tr_validar_transicion_estado` contra la tabla `transiciones_validas` |
-| Disponibilidad del plato | Trigger `tr_validar_disponibilidad_plato` |
-| Forma del JSON del menú (categorías, platos, pasos, ingredientes) | Función `obtener_menu_completo()`; el backend solo la cachea 60 s |
-| Precios históricos | Se congelan leyendo `platos.precio` dentro del propio INSERT |
-| Validación de pagos (monto vs total) | Trigger `tr_validar_transaccion_financiera` |
-| Firmar y validar los tokens QR | **socket-server** (`POST /qr/generar`, `POST /qr/validar`) |
-| Ciclo de vida de `mesas.token_qr` y del estado de la mesa | **Backend** (el trigger `tr_regenerar_token_qr` fue retirado) |
-| Autenticación, roles (RBAC) | **Backend** |
-| Que el body venga bien formado | **Backend** (zod) |
-
-### Errores de la base de datos
-
-Se traducen en un solo lugar (`src/middleware/errores.middleware.js`):
-
-- **409 Conflict** — `RAISE EXCEPTION` de un trigger (SQLSTATE `P0001`). El mensaje
-  del trigger se devuelve tal cual porque está redactado para el usuario final:
-  `{ "error": "Transición de estado no autorizada: de \"recibido\" hacia \"listo\"" }`
-- **400 Bad Request** — el body no cumple el esquema (dominio de un enum, tipos, campos faltantes).
-- **500** genérico — cualquier otro error de PostgreSQL (CHECK `23514`, FK `23503`,
-  unique `23505`). El detalle queda solo en el log del servidor, nunca en la respuesta.
-
-### Transiciones válidas (tabla `transiciones_validas`)
-
-```
-recibido        -> en_preparacion | cancelado
-en_preparacion  -> listo | cancelado
-listo           -> entregado
-entregado       -> pagado
-```
-
-Es la máquina de estados completa: cualquier otro salto responde **409**. `pagado` es
-terminal. Verificado contra la base real de Jarrison, estado por estado:
-
-| Desde | → `pagado` | → `cancelado` |
-|---|---|---|
-| `recibido` | 409 | **permitido** |
-| `en_preparacion` | 409 | **permitido** |
-| `listo` | 409 | 409 |
-| `entregado` | **permitido** | 409 |
-
-### Regla de cierre: `entregado` **y** pagado, en cualquier orden
-
-> Un pedido pasa a `estado = 'pagado'` en el momento en que está **entregado** y
-> **totalmente pagado**. Da igual cuál de las dos cosas pase primero.
-
-`entregado → pagado` sigue siendo la única transición que llega a `pagado` (la valida
-`tr_validar_transicion_estado`), pero **pagar y entregar son dos ejes distintos** desde
-el script 22 de Jarrison (H-03), que separó el estado financiero en la columna
-`pedidos.estado_pago` (`pendiente` | `parcial` | `pagado`). Esa columna la mantiene el
-trigger `tr_sincronizar_estado_pago_pedido` sobre `transacciones`; el backend solo la
-lee, nunca la escribe.
-
-Los dos órdenes existen de verdad y cada uno lo cierra un endpoint distinto:
-
-| Orden | Quién cobra | Quién cierra el pedido |
-|---|---|---|
-| Se entrega y después se cobra | `POST /transacciones` (caja) | el propio cobro, al dejar el saldo en 0 |
-| Se paga y después sale la comida | `POST /transacciones/internal` (pago en línea) o la caja cobrando por adelantado | `PATCH /pedidos/:id/estado` con `entregado` |
-
-- **Cobrar un pedido que aún no se entregó ya no falla.** La transacción se registra
-  (201), `estado_pago` queda en `pagado` y el `estado` de cocina **no se toca**: el
-  pedido sigue su curso. Antes se intentaba el `UPDATE` a `pagado` igualmente, el trigger
-  lo abortaba con 409 y el `ROLLBACK` **se llevaba el pago entero** (medido: pedido en
-  `listo` cobrado completo → 409 y cero filas en `transacciones`).
-- **Marcar `entregado` un pedido con la cuenta ya cubierta lo cierra en `pagado`** en la
-  misma transacción, y libera la mesa si no le quedan otros pedidos abiertos. Sin esto un
-  pago en línea dejaba la mesa `ocupada` con su QR vivo **para siempre**: el pedido nunca
-  volvía a `pagado`, así que seguía contando como abierto y ni el mesero ni la caja
-  podían cerrar la mesa.
-- El cierre pide que **las dos fuentes digan lo mismo**: `estado_pago = 'pagado'` y
-  `obtener_saldo_pendiente(:id) <= 0`. `estado_pago` se recalcula al tocar
-  `transacciones`, así que es esa columna la que podría quedarse atrás respecto del
-  total; con una sola fuente se podría cerrar un pedido con saldo vivo.
-- **La mesa se libera al entregar y pagar, nunca solo al pagar.** Pagar antes de recibir
-  la comida no suelta la mesa ni invalida el QR: el comensal sigue sentado y su sesión
-  tiene que seguir en pie.
-- `historial_estados` guarda **los dos saltos**, no solo el último: `listo → entregado`
-  con las observaciones de quien entregó, y `entregado → pagado` con
-  `'Cuenta ya cubierta al entregar'`.
-- Solo un `estado_transaccion = 'completada'` cuenta para la cuenta: una transacción
-  `pendiente`, `fallida` o `reembolsada` se guarda en `transacciones` pero no mueve
-  `estado_pago` ni cierra nada (si liquidara, un pago rechazado liberaría la mesa y la
-  cuenta quedaría como cobrada).
-
-**Orden de bloqueos.** Como marcar `entregado` puede ahora cerrar el pedido y tocar la
-tabla `mesas`, ese camino bloquea **la mesa antes del pedido**, igual que los dos
-endpoints de pago. Un camino que fuera pedido → mesa se interbloquearía con ellos
-(SQLSTATE `40P01`, medido en 19 de 20 intentos en su momento). Las transiciones del KDS
-(`en_preparacion`, `listo`) no tocan la mesa y por eso no la bloquean: hacerlo
-serializaría sin motivo las comandas de una misma mesa.
-
-### Regla de cancelación: solo desde `recibido` o `en_preparacion`
-
-`POST /pedidos/:id/cancelar` solo funciona mientras el pedido no se haya entregado.
-Desde `listo` o `entregado` responde 409: a esa altura la comida ya salió de cocina, así
-que la salida es cobrar, no cancelar. Un pedido `pagado` tampoco se puede cancelar.
-La función `cancelar_pedido()` de Jarrison aplica la misma regla.
-
----
-
-## Roles y sesiones
-
-| Rol | Origen | Payload del JWT | Vigencia |
-|---|---|---|---|
-| `admin`, `mesero`, `cajero`, `cocina` | Tabla `usuarios` (`usuarios.rol`), vía `POST /auth/login` | `{ id_usuario, rol }` | `JWT_EXPIRES_IN` (8 h) |
-| `comensal` | **No existe en la tabla usuarios.** Se emite al escanear el QR de la mesa, vía `POST /mesas/qr/:token/sesion` | `{ id_mesa, sid, rol: "comensal", comensal }` (`comensal` = su alias, único en la sesión) | 3 h, y cae antes si la mesa se libera (ver *Ciclo de vida de la sesión de mesa*) |
-
-Notas del flujo del comensal (definido por Jarrison):
-
-- El rol `cliente` ya no existe.
-- La sesión del comensal pertenece a **la mesa**, no a una persona: el modelo ER no
-  relaciona `pedidos` con `usuarios`, el pedido es de la mesa.
-- Varios comensales comparten la misma mesa y, por tanto, el mismo pedido. A cada uno
-  lo identifica su **alias**, que viaja por ítem en `comensal` y se guarda en
-  `detalles_pedido.comensal` (columna propia desde D-03, para poder dividir la cuenta
-  por persona sin parsear texto libre). `notas_especiales` lleva **solo la nota** del
-  ítem.
-- En `historial_estados`, `id_usuario` va `null` cuando el cambio lo hizo un comensal.
-
-**Estados de un pedido (flujo estricto):**
-`recibido → en_preparacion → listo → entregado → pagado`. `cancelado` solo se alcanza
-desde `recibido` o `en_preparacion` (ver *Transiciones válidas* arriba).
-
----
-
-## Autenticación
-
-### POST /auth/register — solo `admin`
-
-Da de alta personal del restaurante. El comensal no se registra.
-El primer `admin` sale del `seed.sql` de Jarrison, no de este endpoint.
-
-Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "123456", "rol": "mesero" }`
-
-`rol` es obligatorio y solo acepta `admin`, `mesero`, `cajero`, `cocina`.
-
-201: `{ "usuario": { "id_usuario": 1, "nombre": "Ana Ríos", "email": "ana@mail.com", "rol": "mesero", "activo": true } }`
-
-400: `{ "error": "Ese email ya está registrado" }` · 401 sin token · 403 si el token no es de un admin
-
-### POST /auth/login
-
-Body: `{ "email": "ana@mail.com", "password": "123456" }`
-
-200: `{ "usuario": { "id_usuario": 1, "nombre": "...", "email": "...", "rol": "mesero" }, "token": "..." }`
-
-| Código | Cuerpo | Cuándo |
-|---|---|---|
-| 200 | `{ usuario, token }` | Credenciales correctas y cuenta activa |
-| 400 | `{ "error": "..." }` | El body no cumple el esquema (email inválido, contraseña de menos de 6) |
-| **401** | `{ "error": "Credenciales inválidas" }` | **El email no existe, la contraseña es incorrecta o la cuenta está inactiva: los tres responden lo mismo** |
-| 429 | `{ "error": "Demasiados intentos..." }` | Límite de intentos (H-04): 5 fallos por minuto y por IP+email |
-
-#### Un solo código y un solo mensaje (H-12)
-
-Antes este endpoint distinguía los tres casos, y eso permitía **enumerar usuarios**:
-
-- un email inexistente respondía en **~3 ms** y uno existente en **~70 ms**, porque solo el
-  segundo llegaba a bcrypt;
-- una cuenta desactivada respondía **403 `Usuario inactivo`**, confirmando que el email
-  existe, y además **antes** de validar la contraseña.
-
-Con eso se podía recorrer una lista de correos y quedarse con los que sí tienen cuenta sin
-acertar una sola contraseña. Ahora:
-
-- el login **siempre** pasa por `bcrypt.compare`, exista el usuario o no. Si no existe (o
-  no tiene hash) se compara contra un **hash ficticio** generado al arrancar a partir de
-  una cadena aleatoria y con el **mismo costo** que los hashes reales (`$2b$10$`, el de
-  `register` y el del seed), así que los tres casos tardan lo mismo;
-- la decisión **no depende** de esa comparación: sin usuario, o con la cuenta inactiva, se
-  rechaza siempre;
-- un **único** 401 con un **único** mensaje para los tres casos.
-
-> La cuenta desactivada sí se explica, pero en el **middleware** (H-09, más abajo): allí ya
-> hay un JWT válido, así que no queda nada que enumerar.
-
----
-
-## Usuarios del personal (D-16)
-
-Administración de las cuentas del personal. **Todo es solo de `admin`**, sin excepciones:
-aquí se reparte quién entra y con qué permisos, así que no hay ninguna lectura
-"inofensiva" que abrir a otro rol.
-
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| GET | /usuarios | **admin** | Lista el personal |
-| PATCH | /usuarios/:id | **admin** | Cambia `nombre`, `rol` y `activo` |
-| POST | /usuarios/:id/clave | **admin** | Guarda una clave nueva |
-
-El **alta** sigue en [`POST /auth/register`](#post-authregister--solo-admin), que ya es de
-admin: no se duplica aquí. **No hay baja**: `usuarios` está referenciada por pedidos y
-pagos, así que borrar una fila sería perder quién cobró qué. Lo que se hace es desactivar
-(`activo: false`), que es lo que el middleware comprueba en cada petición (H-09).
-
-**El hash de la clave no sale de ninguna de las tres rutas.** Las lecturas piden las
-columnas una por una (`id_usuario`, `nombre`, `email`, `rol`, `activo`, `creado_en`), nunca
-`SELECT *`, para que agregar una columna sensible a la tabla no la publique sola.
-
-### GET /usuarios
-
-200:
-
-```json
-{ "usuarios": [
-  { "id_usuario": 1, "nombre": "Carlos Ospino", "email": "admin@mail.com",
-    "rol": "admin", "activo": true, "creado_en": "2026-01-01T00:00:00.000Z" }
-] }
-```
-
-Ordenada por `id_usuario`: es el orden de alta, que es estable (dos personas pueden
-llamarse igual) y el que espera quien acaba de crear una cuenta y la busca al final.
-
-### PATCH /usuarios/:id
-
-Body, **todos los campos opcionales** pero al menos uno:
-
-```json
-{ "nombre": "Ana María Ríos", "rol": "cajero", "activo": false }
-```
-
-- El cuerpo es `.strict()`: una clave de más es **400**. El **`email` queda fuera a
-  propósito**: es la credencial de entrada y la clave de unicidad de la tabla, así que
-  cambiarlo es dar de alta otra identidad, no editar un perfil. Sin `.strict()`, un panel
-  que reenviara la fila entera colaría `email` o `password_hash` y el `COALESCE` los
-  ignoraría en silencio: quien llama creería haber cambiado algo que no cambió.
-- Un cuerpo vacío `{}` es **400**: no es una edición.
-- `rol` solo acepta `admin`, `mesero`, `cajero`, `cocina` — los del CHECK de la tabla.
-  `comensal` **no** está: no es una fila de `usuarios`, es un rol que solo existe dentro
-  del JWT de una mesa.
-- `:id` tiene que ser un **entero positivo**, o **400**. Un usuario que no existe, **404**.
-- Lo que no se manda **no se toca** (`COALESCE`), así que el panel puede enviar solo lo que
-  cambió.
-- 200 devuelve `{ "usuario": { … } }` con la fila actualizada, sin el hash.
-
-#### Los dos 409
-
-```json
-{ "error": "No se puede dejar el sistema sin ningún admin activo: asciende o activa a otro antes." }
-{ "error": "No puedes desactivarte ni cambiarte el rol a ti mismo: pídeselo a otro admin." }
-```
-
-- **Siempre tiene que quedar al menos un admin activo.** Sin esta regla, el último admin
-  puede desactivarse o quitarse el rol y no queda nadie que pueda volver a repartir
-  permisos: habría que entrar a la base a mano. Se comprueba **dentro de la transacción y
-  con la fila bloqueada** (`SELECT … FOR UPDATE`), porque si no dos admins podrían
-  desactivarse a la vez, cada uno viendo al otro como activo.
-- **Un admin no puede desactivarse ni cambiarse el rol a sí mismo.** No es paternalismo: es
-  el error que deja a alguien fuera de su propio panel, con la sesión abierta y sin forma
-  de deshacerlo. **Otro** admin sí puede hacerlo, y cambiarse el **nombre** a sí mismo
-  también se puede. Reafirmar el rol que ya se tiene no cuenta como cambio, para que un
-  panel que reenvía el rol sin tocarlo no choque.
-- Reactivar a alguien o devolverle el rol de admin **nunca** se bloquea: esas operaciones
-  suman admins, no los quitan.
-
-### POST /usuarios/:id/clave
-
-Body: `{ "password": "clave-nueva-larga" }`, `.strict()`.
-
-- **Mínimo 8 caracteres** (400 si no). Más que los 6 de `/auth/register`, cuyo mínimo ya
-  está publicado en este contrato: bajarlo aquí para igualarlo sería empeorar a propósito.
-  El mínimo se mide en **caracteres**, que es lo que la persona escribe y cuenta.
-- **Máximo 72 BYTES** (no 72 caracteres), medidos con `Buffer.byteLength(clave, 'utf8')`.
-  Es por bytes como trunca bcrypt: a partir del byte 72 ignora el resto **en silencio**. Y
-  la diferencia no es teórica en español: una `ñ` o una tilde ocupan **dos** bytes en
-  UTF-8, así que una clave de 40 caracteres puede pasarse de 72 bytes. Contando caracteres,
-  esa clave entraría, bcrypt la cortaría por la mitad y el usuario acabaría con una
-  contraseña que no es la que escribió. Rechazarla es mejor que cortarla sin avisar.
-
-  > `POST /auth/register` **no** valida igual: pide `password` de **mínimo 6 caracteres y
-  > sin máximo**, así que por ahí una clave larga sí se trunca en silencio. No se cambia en
-  > este PR para no tocar un contrato ya publicado; queda anotado.
-- Se guarda con el **mismo bcrypt y el mismo costo** que `/auth/register` (`COSTO_BCRYPT`,
-  importado y no copiado): dos costos distintos en el proyecto producen hashes que el login
-  reconoce pero que cuestan tiempos distintos, y eso es justo lo que evita H-12.
-- 200 devuelve `{ "usuario": { … } }` **sin la clave ni el hash**: la respuesta de un cambio
-  de clave no tiene ninguna razón para llevar la clave. **404** si el usuario no existe.
-
-### La caché de usuario activo se invalida (H-09)
-
-Al **desactivar**, **cambiar el rol** o **cambiar la clave** se borra la llave
-`sd:usuario:{id}:activo`. Sin eso, el cambio tardaría hasta el TTL (60 s por defecto) en
-surtir efecto, porque `estaActivo` contesta desde Redis sin preguntarle a la base: el token
-de alguien recién desactivado seguiría abriendo la API hasta un minuto.
-
-Se invalida **después del COMMIT**, no antes: hacerlo antes sería peor que no hacerlo, ya
-que una petición en vuelo podría volver a cachear el valor viejo justo antes de que el
-cambio se guarde. Cambiar **solo el nombre** no toca la caché: el middleware solo mira
-`activo`, y tirar la llave por un nombre sería perder caché sin ninguna razón.
-
-**Si Redis no responde, la operación NO falla**: el cambio ya está guardado en PostgreSQL,
-que es quien manda, y lo único que se pierde es que tarde el TTL en verse.
-
----
-
-## Seguridad del transporte y del acceso
-
-### Cabeceras y CORS (H-10)
-
-El backend usa **helmet** (`nosniff`, `X-Frame-Options`, `Referrer-Policy`, CSP por
-defecto…) y ya **no anuncia `x-powered-by`**.
-
-**CORS con lista blanca**, nunca `*`. Los orígenes salen de `CORS_ORIGINS` (separados por
-comas):
-
-| Entorno | Si falta `CORS_ORIGINS` |
-|---|---|
-| `NODE_ENV=production` | **Ningún origen cruzado permitido**: un despliegue sin configurar se queda corto, no abierto |
-| desarrollo y pruebas | `http://localhost:5173`, `:5174`, `:5175` (restaurante, cliente y KDS) |
-| `NODE_ENV=development` (modo red local) | lo anterior **más** cualquier `http://<IPv4 privada>` en los puertos 5173, 5174 o 5175 (solo `http`), para probar desde un celular de la misma Wi-Fi (ver `backend/README.md`) |
-
-Cabeceras permitidas: `Content-Type`, `Authorization` y `x-internal-key`. **No** se
-habilitan credenciales: la API autentica con `Authorization: Bearer`, no con cookies.
-
-Una petición **sin** cabecera `Origin` (curl, el socket-server, una prueba) se deja pasar:
-CORS protege al navegador y esas peticiones no vienen de uno. Lo que decide el acceso ahí
-es el JWT o la clave interna.
-
-### Límite de peticiones (H-04, H-27 y D-21)
-
-Hay **tres** límites. Los dos de ruta cubren las públicas —las que no piden sesión
-previa— y el global es un techo de respaldo para todo lo demás. Todos responden **429**
-con `Retry-After` y el mismo cuerpo `{ "error": … }` que el resto de la API:
-
-| Ruta | Límite por defecto | Clave del contador | Qué cuenta |
-|---|---|---|---|
-| `POST /auth/login` | **5 / minuto** | IP **+ email** | Solo los intentos **fallidos** |
-| `POST /mesas/qr/:token/sesion` | **20 / minuto** | IP | Todos los intentos |
-| **todas las demás** (D-21) | **2000 / minuto** | IP | Todas las peticiones |
-
-Los contadores son **independientes**: una petición al login gasta cupo del límite de
-login **y** del global, pero agotar uno no agota el otro.
-
-```json
-{ "error": "Demasiados intentos de inicio de sesión. Espera un momento y vuelve a intentarlo." }
-```
-
-La clave del login combina IP y email a propósito: por IP sola, una botnet esquiva el
-límite; por email solo, cualquiera podría bloquear la cuenta de otro. Y solo cuentan los
-fallos, para que un cajero que entra y sale varias veces no se bloquee a sí mismo. El QR
-va más holgado porque una mesa entera escanea desde la misma IP del local, y ahí sí
-cuentan los aciertos: reusar un token válido muchas veces por segundo tampoco debería
-pasar.
-
-#### El límite global (D-21)
-
-```json
-{ "error": "Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo." }
-```
-
-**No cuenta** dos cosas:
-
-- **`GET /api/health`**: es la sonda de Docker y del balanceador. Si contara, un límite
-  agotado haría que el contenedor se declarara enfermo y se reiniciara solo.
-- **El canal interno**: `POST /api/transacciones/internal` y
-  `GET /api/mesas/:id/cuenta/interno`. Los llama el socket-server con `x-internal-key`,
-  toda esa máquina sale con **una** IP, y ya tienen su propia autenticación.
-
-**Por qué 2000 por minuto, que parece muchísimo:** los comensales de un local comparten
-**una sola IP pública**, la del wifi, así que el cupo no es de una persona sino del
-restaurante entero. Con 20 mesas de 4 son 80 teléfonos y, en el pico, cada uno hace del
-orden de 15 a 20 peticiones en ese minuto (80 × 20 = 1600), más las tablets del personal.
-2000 deja pasar ese pico y aun así corta a una sola máquina que intente raspar la API: 33
-por segundo sostenidos no los hace ningún comensal.
-
-**Variables:** `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS`, `RATE_LIMIT_QR_MAX`,
-`RATE_LIMIT_QR_VENTANA_MS`, `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS`. Los
-tres límites se desactivan solos dentro de las pruebas.
-
-> **Detrás de un proxy** (nginx, Docker), `req.ip` es la IP del proxy y el límite contaría
-> a todo el mundo como un solo visitante. Hay que poner **`TRUST_PROXY`** (`true`, un
-> número de saltos, o una lista de IPs/rangos). Está **apagada por defecto**: confiar en
-> `X-Forwarded-For` sin un proxy delante permite falsificar la IP.
->
-> **Limitación:** el contador vive en memoria del proceso. Con varias instancias el límite
-> es por instancia (con N instancias, el techo real es 5×N, o 2000×N en el global). Para
-> hacerlo global de verdad haría falta un store compartido en Redis.
-
-### Cuenta desactivada (H-09)
-
-El middleware de autenticación comprueba en **cada petición del personal** que la cuenta
-siga `activo`, no solo que el JWT sea válido. Antes, al desactivar a alguien su token
-seguía abriendo la API hasta caducar (8 h).
-
-- Cuenta desactivada o borrada → **401** `Tu cuenta está desactivada, habla con administración`.
-- Se comprueba **antes** del rol, así que un desactivado recibe 401 y no 403.
-- **No afecta** al token del **comensal** (el rol `comensal` no existe en `usuarios`), ni
-  al **canal interno** con `x-internal-key` (detrás no hay un usuario, es un servicio), ni
-  al **login** (todavía no hay JWT que comprobar).
-
-El resultado se guarda en Redis (`sd:usuario:{id}:activo`) con TTL **`CACHE_USUARIO_TTL_SEG`**,
-60 s por defecto, para no añadir una consulta por petición.
-
-> **Ventana aceptada:** con la caché de 60 s, **un usuario recién desactivado puede seguir
-> entrando hasta un minuto**. Es el precio de no consultar la base en cada llamada; si hace
-> falta cerrar antes, se baja el TTL o se borra la llave al desactivar
-> (`usuario-activo.olvidar`).
->
-> Redis aquí es **solo caché** y nunca tumba una petición: si falla al leer o al escribir,
-> se consulta PostgreSQL y se sigue. Si falla **la base**, la petición falla cerrada (no se
-> deja pasar a ciegas).
-
----
-
- |
+| `moneda` | **3 letras mayúsculas** (ISO 4217), como el CHECK `^[A-Z]{3}$` |
 
 - El cuerpo es `.strict()`: **una clave de más es 400**. En particular `actualizado_en`,
   `actualizado_por` e `id` **no se editan** —los pone el trigger, o el CHECK—, y sin
@@ -3230,6 +2809,330 @@ rechazarlo, así que lo que no se puede guardar se degrada a `NULL`:
 
 **400** solo si falta uno de los tres obligatorios, o si un campo presente no cumple su
 forma (p. ej. `moneda` de más de 3 caracteres, `monto_centavos` no entero).
+
+---
+
+## Inventario: insumos, movimientos y recetas (D-17 PR 2)
+
+Lo que hay en bodega, cómo entra y sale, y cuánto consume cada plato y cada opción del
+constructor. Las tablas, la función y las vistas son de `database/scripts/27_inventario.sql`
+(P-19, Jarrison); este backend solo expone el CRUD y traduce sus errores.
+
+**La base es la fuente de verdad, y aquí más que en ningún otro módulo:**
+
+- `insumos.stock_actual` **no se edita nunca a mano**. Lo mueven la reserva de los pedidos y
+  `registrar_movimiento_inventario`, y la regla del libro es
+  `SUM(movimientos_inventario.cantidad) = insumos.stock_actual`. Por eso no hay ningún `PUT`
+  ni `PATCH` que escriba el stock: un UPDATE directo descuadraría el libro para siempre.
+- La **disponibilidad se recalcula sola**. Al cambiar el stock, al activar o desactivar un
+  insumo y al tocar una receta, los triggers del script 27 recalculan
+  `platos.stock_suficiente` e `ingredientes.stock_suficiente`, y lo que cambie sale por el
+  canal `inventario` de PostgreSQL. El backend ya lo escucha y lo reenvía al socket-server
+  (ver [Avisos de inventario en vivo](#avisos-de-inventario-en-vivo-d-17), D-17 PR 1): el
+  panel y las mesas se enteran sin pedir nada.
+- Lo que ve el comensal es `disponible AND stock_suficiente`: el **interruptor manual** de la
+  cocina sigue siendo `disponible`, y el stock es lo calculado.
+
+| Método | Ruta | Roles | Descripción |
+|---|---|---|---|
+| GET | `/inventario/insumos` | **admin** | Lista de insumos; `?estado=bajo` lee `v_stock_bajo` |
+| GET | `/inventario/insumos/:id` | **admin** | Un insumo |
+| POST | `/inventario/insumos` | **admin** | Crea el insumo; `stock_inicial` entra como movimiento |
+| PUT | `/inventario/insumos/:id` | **admin** | Nombre, unidad, mínimo y alta/baja. **No** el stock |
+| POST | `/inventario/insumos/:id/movimientos` | **admin** | Entrada, ajuste o merma |
+| GET | `/inventario/insumos/:id/movimientos` | **admin** | Historial del insumo, lo más nuevo primero |
+| GET | `/platos/:id/receta` | **admin** | Receta del plato |
+| PUT | `/platos/:id/receta` | **admin** | Reemplaza la receta completa |
+| GET | `/ingredientes/:id/receta` | **admin** | Receta de una opción del constructor |
+| PUT | `/ingredientes/:id/receta` | **admin** | Reemplaza la receta completa |
+
+> **Todo es solo `admin`, también las lecturas.** El inventario dice cuánto cuesta y cuánto
+> queda de cada cosa: es información del negocio, no de sala. El `mesero` y el `cajero` sí
+> reciben en vivo el aviso `inventario:alerta` de lo que se está agotando (EVENTS.md §5.5,
+> `room:admin`), que es lo que necesitan para no ofrecer lo que no hay. **Propuesta para
+> G-06:** si el panel quiere además una lectura REST de `?estado=bajo` para esos dos roles, es
+> un cambio de una línea en la ruta; no lo abro por mi cuenta.
+
+### GET /inventario/insumos — admin
+
+| Parámetro | Valores | Por omisión |
+|---|---|---|
+| `estado` | `todos`, `bajo` | `todos` |
+| `activo` | `true`, `false` (sin él, todos) | — |
+| `q` | Texto, busca por nombre sin distinguir mayúsculas ni acentos | — |
+| `limite` | 1–200 | 100 |
+
+`?estado=bajo` lee la vista **`v_stock_bajo`** (`activo AND stock_actual <= stock_minimo`), que
+trae su propio `agotado`:
+
+```json
+{
+  "insumos": [
+    { "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "stock_actual": 450, "stock_minimo": 500, "agotado": false },
+    { "id_insumo": 3, "nombre": "Masa", "unidad": "porcion", "stock_actual": 0, "stock_minimo": 10, "agotado": true }
+  ]
+}
+```
+
+Sin `estado=bajo` (o con `estado=todos`) sale la tabla `insumos`, con `activo` y
+`actualizado_en`, y además `bajo` y `agotado` calculados, para que el panel pinte la misma
+señal en las dos vistas sin tener que comparar a mano:
+
+```json
+{
+  "insumos": [
+    {
+      "id_insumo": 12,
+      "nombre": "Queso costeño",
+      "unidad": "g",
+      "stock_actual": 450,
+      "stock_minimo": 500,
+      "activo": true,
+      "bajo": true,
+      "agotado": false,
+      "actualizado_en": "2026-11-08T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+- **Los `NUMERIC` salen como números JSON** (`450`, `0.5`), no como texto: el backend registra
+  un parser para el OID 1700 (`src/config/db.js`). Es la misma regla que ya cumplen `total` y
+  `precio`.
+- `estado` y `activo` con un valor que no está en la lista son **400**, no se ignoran en
+  silencio: un `?estado=bajos` que devolviera todo haría creer al panel que no hay faltantes.
+- Orden: por `nombre`. Con `estado=bajo`, primero lo **agotado** y luego por nombre.
+
+### GET /inventario/insumos/:id — admin
+
+```json
+{
+  "insumo": {
+    "id_insumo": 12,
+    "nombre": "Queso costeño",
+    "unidad": "g",
+    "stock_actual": 450,
+    "stock_minimo": 500,
+    "activo": true,
+    "bajo": true,
+    "agotado": false,
+    "actualizado_en": "2026-11-08T12:00:00.000Z"
+  }
+}
+```
+
+**400** si el `:id` no es un entero positivo · **404** `Insumo no encontrado` si no existe (un
+insumo **desactivado** sí se devuelve: la baja no lo esconde, solo lo saca del servicio).
+
+### POST /inventario/insumos — admin
+
+```json
+{ "nombre": "Queso costeño", "unidad": "g", "stock_minimo": 500, "stock_inicial": 2000 }
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `nombre` | Sí | Texto 1–80 (la columna es `VARCHAR(80)`), **único** |
+| `unidad` | No (por omisión `porcion`) | Uno de `porcion`, `unidad`, `g`, `ml` (CHECK de la tabla) |
+| `stock_minimo` | No (por omisión `0`) | Número ≥ 0, hasta 2 decimales |
+| `stock_inicial` | No | Número **> 0**, hasta 2 decimales |
+
+**201**: el insumo creado y, si hubo `stock_inicial`, el movimiento con el que entró:
+
+```json
+{
+  "insumo": { "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "stock_actual": 2000, "stock_minimo": 500, "activo": true, "bajo": false, "agotado": false, "actualizado_en": "..." },
+  "movimiento": { "id": 44, "tipo": "entrada", "cantidad": 2000, "stock_resultante": 2000, "motivo": "Stock inicial", "id_usuario": 1, "creado_en": "..." }
+}
+```
+
+- **El insumo nace con `stock_actual = 0` y el stock inicial entra como un movimiento
+  `entrada`**, en la **misma transacción**. Así `SUM(cantidad) = stock_actual` se cumple desde
+  la primera fila: si el stock inicial se escribiera en la columna, el libro arrancaría torcido
+  y ningún informe cuadraría nunca.
+- Sin `stock_inicial` no hay movimiento y `movimiento` sale en `null`. Es lo normal al dar de
+  alta algo que todavía no ha llegado.
+- **409 `nombre_en_uso`** si ya existe un insumo con ese nombre (índice único de la tabla):
+
+```json
+{ "error": "Ya hay un insumo con ese nombre", "motivo": "nombre_en_uso" }
+```
+
+### PUT /inventario/insumos/:id — admin
+
+Parcial: solo lo que se manda. Al menos un campo, o **400**.
+
+```json
+{ "stock_minimo": 800, "activo": false }
+```
+
+| Campo | Regla |
+|---|---|
+| `nombre` | Texto 1–80, único (**409 `nombre_en_uso`**) |
+| `unidad` | `porcion`, `unidad`, `g`, `ml` |
+| `stock_minimo` | Número ≥ 0, hasta 2 decimales |
+| `activo` | Booleano estricto (`"false"` o `0` son **400**) |
+
+**200** devuelve el insumo ya actualizado. El cuerpo es `.strict()`: una clave de más es
+**400**, y eso incluye **`stock_actual`**, que se rechaza en vez de ignorarse para que nadie
+crea haber corregido el stock con un PUT que no lo toca. Para eso están los movimientos.
+
+**No existe `DELETE`. Un insumo no se borra: se desactiva** con `{"activo": false}`.
+
+- Las recetas lo referencian con `ON DELETE RESTRICT` y los movimientos también: borrarlo
+  sería borrar el libro de inventario, que es justo lo que no se puede perder.
+- Desactivarlo **cuenta como "no hay"**: `fn_recalcular_*` trata un insumo inactivo igual que
+  uno sin stock, así que **los platos y las opciones que lo usan pasan a no disponibles** y
+  salen sus avisos por el canal. Volver a activarlo los recupera.
+- `stock_minimo` **no dispara ningún aviso** al cambiarlo (el trigger solo mira `stock_actual`
+  y `activo`): el panel ve la lista al abrir con `?estado=bajo`.
+
+### POST /inventario/insumos/:id/movimientos — admin
+
+El único camino para mover el stock.
+
+```json
+{ "tipo": "entrada", "cantidad": 2000, "motivo": "Compra del proveedor" }
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `tipo` | Sí | `entrada`, `ajuste` o `merma`. **Nada más**: `reserva` y `devolucion` los escribe la base al pedir o al cancelar, y mandarlos a mano descuadraría el libro |
+| `cantidad` | Sí | `entrada` y `merma`: **> 0** (el tipo ya dice el signo). `ajuste`: cualquier número **≠ 0**, con signo. Hasta 2 decimales |
+| `motivo` | No | Texto hasta 500 |
+
+**201**:
+
+```json
+{
+  "movimiento": { "id": 44, "id_insumo": 12, "tipo": "merma", "cantidad": -50, "stock_resultante": 1950, "id_detalle": null, "id_usuario": 1, "motivo": "Se cayó una bandeja", "creado_en": "..." },
+  "stock_actual": 1950
+}
+```
+
+- Lo hace **`registrar_movimiento_inventario`**, no un UPDATE del backend: ella bloquea el
+  insumo (`FOR UPDATE`), comprueba que no quede negativo, escribe la fila y devuelve el
+  movimiento. `cantidad` sale **con el signo con el que se guardó** (una merma de 50 es `-50`).
+- **El autor es el del JWT.** La función lo lee de `app.id_usuario` con
+  `fn_usuario_de_sesion()`, así que el backend hace
+  `SELECT set_config('app.id_usuario', '<id>', true)` **en la misma transacción** (con
+  `is_local`, para que no se filtre a la siguiente petición del pool). Nunca sale del cuerpo.
+- `ajuste` con signo es lo que permite **corregir un conteo** en los dos sentidos
+  (`-12` tras un recuento físico). Es lo que acepta la función, y por eso aquí la regla de
+  "cantidad > 0" aplica a `entrada` y `merma`, no a `ajuste`.
+- **400 `movimiento_invalido`** si el movimiento dejaría el stock en negativo (SQLSTATE
+  **SD002**, ya traducido en el PR 1), con el stock que hay ahora:
+
+```json
+{ "error": "El movimiento dejaría \"Queso costeño\" en negativo: hay 450.00 g", "motivo": "movimiento_invalido", "stock_actual": 450 }
+```
+
+- **404** si el insumo no existe. **400** de zod si `tipo` no es uno de los tres o `cantidad`
+  no cumple: se valida en el backend **antes** de llamar a la función, porque la base lo
+  rechazaría con un `check_violation` (23514) que el manejador central traduce a un **422**
+  opaco ("un dato está fuera del rango permitido"), y aquí sí se puede decir qué campo falla.
+- Un movimiento sobre un insumo **desactivado** se acepta: hay que poder cuadrar el libro de
+  algo que ya no se usa. Lo que no cambia es la disponibilidad, que sigue en "no hay".
+- Si el movimiento **cruza el mínimo hacia abajo**, la base publica `stock_bajo` y el panel
+  recibe `inventario:alerta` en vivo. Si deja un plato sin stock, llega además su
+  `plato:disponibilidad`.
+
+### GET /inventario/insumos/:id/movimientos — admin
+
+El libro del insumo, **lo más reciente primero**.
+
+| Parámetro | Valores | Por omisión |
+|---|---|---|
+| `limite` | 1–200 | 50 |
+| `desde` | Fecha ISO 8601; solo los movimientos desde ese instante | — |
+
+```json
+{
+  "movimientos": [
+    { "id": 44, "tipo": "merma", "cantidad": -50, "stock_resultante": 1950, "id_detalle": null, "id_usuario": 1, "motivo": "Se cayó una bandeja", "creado_en": "2026-11-08T12:00:00.000Z" },
+    { "id": 43, "tipo": "reserva", "cantidad": -2, "stock_resultante": 2000, "id_detalle": 701, "id_usuario": null, "motivo": "Pedido 87", "creado_en": "2026-11-08T11:40:00.000Z" }
+  ]
+}
+```
+
+- Salen **todos** los tipos, incluidos los que escribe la base al pedir (`reserva`,
+  `devolucion`, `merma` con `id_detalle`): es el libro, y sin ellos no cuadraría con el stock.
+- `id_detalle` dice de qué ítem de pedido salió el movimiento; `id_usuario` puede ser `null`
+  (lo hizo la reserva de un comensal, o el usuario se borró después: la FK es
+  `ON DELETE SET NULL`).
+- No se devuelve el nombre del usuario: esta ruta no es un informe y unir con `usuarios`
+  publicaría datos del personal en una lista que el panel ya sabe resolver.
+- **400** si `limite` o `desde` no son válidos · **404** si el insumo no existe (para no
+  confundir "sin movimientos" con "ese id no existe").
+
+### GET /platos/:id/receta y GET /ingredientes/:id/receta — admin
+
+Lo que consume **una unidad** del plato, o **una porción normal** de la opción.
+
+```json
+{
+  "id_plato": 12,
+  "receta": [
+    { "id_insumo": 3, "nombre": "Masa", "unidad": "porcion", "cantidad": 1, "stock_actual": 40, "activo": true },
+    { "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "cantidad": 30, "stock_actual": 450, "activo": true }
+  ]
+}
+```
+
+En `/ingredientes/:id/receta` la clave es `id_ingrediente` y el resto es igual. Una receta
+vacía es `{"receta": []}` y significa que **ese plato u opción no controla inventario**: se
+puede pedir siempre (`tiene_receta` en `v_carta_disponible` sale en `false`).
+
+**400** si el `:id` no es un entero positivo · **404** si el plato o la opción no existen.
+
+### PUT /platos/:id/receta y PUT /ingredientes/:id/receta — admin
+
+**Reemplaza la receta completa**, en una transacción:
+
+```json
+{ "insumos": [{ "id_insumo": 3, "cantidad": 1 }, { "id_insumo": 12, "cantidad": 30 }] }
+```
+
+| Campo | Regla |
+|---|---|
+| `insumos` | Arreglo de 0 a 50 entradas. **Sin `id_insumo` repetidos** (sería ambiguo: la tabla tiene PK `(id_plato, id_insumo)`) |
+| `id_insumo` | Entero positivo |
+| `cantidad` | Número **> 0**, hasta 2 decimales (el CHECK de la tabla exige `> 0`) |
+
+**200** devuelve la receta ya guardada, en el mismo formato que el `GET`.
+
+- **Es un reemplazo, no un parche**: se borra la receta anterior y se insertan las entradas
+  nuevas, todo en la misma transacción. Un `PUT` con `{"insumos": []}` **deja el plato sin
+  receta** y por tanto sin control de inventario; es la forma de quitarla.
+- Para la opción del constructor, `cantidad` es la de la **porción normal**. La base la
+  multiplica por `factores_porcion` (`ligera` 0.5, `normal` 1, `extra` 1.5).
+- **La disponibilidad cambia al guardar.** Los triggers `tr_receta_plato` y
+  `tr_receta_ingrediente` recalculan el plato o la opción con la receta nueva, así que un plato
+  puede quedar **no disponible en el mismo PUT** si algún insumo de la receta no alcanza para
+  una unidad. Sale su aviso por el canal y el panel y las mesas lo ven al instante.
+- **409 `insumo_inexistente`** si alguna entrada apunta a un `id_insumo` que no existe (la FK
+  de la receta):
+
+```json
+{ "error": "Alguno de los insumos de la receta no existe", "motivo": "insumo_inexistente" }
+```
+
+- **400 `insumo_repetido`** si el mismo `id_insumo` aparece dos veces, con el id que choca:
+
+```json
+{ "error": "El insumo 3 está repetido en la receta", "motivo": "insumo_repetido" }
+```
+
+- **404** si el plato o la opción no existen. Un insumo **desactivado** sí se puede poner en
+  una receta (se está preparando el cambio), pero deja el plato en "no hay" hasta que vuelva.
+
+### Lo que este PR NO hace
+
+- **No toca `stock_actual` directamente** por ninguna ruta, ni ofrece un `DELETE` de insumos.
+- **No da de baja recetas por plato borrado**: eso ya lo hace la base con
+  `ON DELETE CASCADE` sobre `platos` e `ingredientes`.
+- **No expone `movimientos_inventario` completo** (sin filtrar por insumo) ni informes de
+  consumo: son de reportes y van con su propia agregación en SQL.
 
 ---
 

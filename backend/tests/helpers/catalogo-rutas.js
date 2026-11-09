@@ -98,6 +98,63 @@ const TABLA = [
     roles: ['admin'],
   },
 
+  // --- D-17 PR 2: inventario del panel (todo solo admin) --------------------
+  { metodo: 'GET', patron: '/api/inventario/insumos', url: '/api/inventario/insumos', roles: ['admin'] },
+  {
+    metodo: 'POST',
+    patron: '/api/inventario/insumos',
+    url: '/api/inventario/insumos',
+    roles: ['admin'],
+    cuerpo: { nombre: 'Insumo de prueba' },
+  },
+  {
+    metodo: 'GET',
+    patron: '/api/inventario/insumos/:id',
+    url: '/api/inventario/insumos/3',
+    roles: ['admin'],
+  },
+  {
+    metodo: 'PUT',
+    patron: '/api/inventario/insumos/:id',
+    url: '/api/inventario/insumos/3',
+    roles: ['admin'],
+    cuerpo: { stock_minimo: 10 },
+  },
+  {
+    metodo: 'GET',
+    patron: '/api/inventario/insumos/:id/movimientos',
+    url: '/api/inventario/insumos/3/movimientos',
+    roles: ['admin'],
+  },
+  {
+    metodo: 'POST',
+    patron: '/api/inventario/insumos/:id/movimientos',
+    url: '/api/inventario/insumos/3/movimientos',
+    roles: ['admin'],
+    cuerpo: { tipo: 'entrada', cantidad: 5 },
+  },
+  { metodo: 'GET', patron: '/api/platos/:id/receta', url: '/api/platos/7/receta', roles: ['admin'] },
+  {
+    metodo: 'PUT',
+    patron: '/api/platos/:id/receta',
+    url: '/api/platos/7/receta',
+    roles: ['admin'],
+    cuerpo: { insumos: [] },
+  },
+  {
+    metodo: 'GET',
+    patron: '/api/ingredientes/:id/receta',
+    url: '/api/ingredientes/4/receta',
+    roles: ['admin'],
+  },
+  {
+    metodo: 'PUT',
+    patron: '/api/ingredientes/:id/receta',
+    url: '/api/ingredientes/4/receta',
+    roles: ['admin'],
+    cuerpo: { insumos: [] },
+  },
+
   // --- D-16 parte B: configuración del restaurante (solo admin) -------------
   { metodo: 'GET', patron: '/api/configuracion/completa', url: '/api/configuracion/completa', roles: ['admin'] },
   {
