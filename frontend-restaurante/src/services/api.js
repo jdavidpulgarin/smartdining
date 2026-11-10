@@ -261,6 +261,11 @@ export async function apiFetch(endpoint, options = {}) {
     const error = new Error(errorMsg)
     error.status = response.status
     error.data = data
+    if (typeof data === 'object' && data !== null) {
+      if (data.motivo) error.motivo = data.motivo
+      if (data.alias) error.alias = data.alias
+      if (data.faltantes) error.faltantes = data.faltantes
+    }
     if (response.status === 429) {
       error.retryAfter = segundosEspera
     }
@@ -474,6 +479,16 @@ export const mesasApi = {
     return apiFetch(`/mesas/${id}/cuenta`)
   },
 
+  /**
+   * Registra a un comensal sin celular en la mesa: POST /api/mesas/:id/comensales
+   */
+  async registrarComensal(idMesa, alias) {
+    return apiFetch(`/mesas/${idMesa}/comensales`, {
+      method: 'POST',
+      body: JSON.stringify({ alias }),
+    })
+  },
+
   /** Crea una mesa (P-21): POST /api/mesas, solo admin. */
   async crear({ numero, capacidad, ubicacion }) {
     return apiFetch('/mesas', {
@@ -502,6 +517,23 @@ export const mesasApi = {
 
 // Submódulo de Pedidos
 export const pedidosApi = {
+  /**
+   * Crea un nuevo pedido / comanda: POST /api/pedidos
+   */
+  async crear(body) {
+    return apiFetch('/pedidos', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  },
+
+  /**
+   * Envía el pedido desde el panel (alias de crear): POST /api/pedidos
+   */
+  async enviarPedido(body) {
+    return this.crear(body)
+  },
+
   /**
    * Obtiene la lista de pedidos activos para sala/cocina: GET /api/pedidos/activos
    */
@@ -896,5 +928,21 @@ export const agotadosApi = {
     })
   },
 }
+
+/**
+ * Funciones de conveniencia para la toma de pedidos del personal (J-16)
+ */
+export async function registrarComensal(idMesa, alias) {
+  return mesasApi.registrarComensal(idMesa, alias)
+}
+
+export async function enviarPedido(body) {
+  return pedidosApi.enviarPedido(body)
+}
+
+export async function obtenerCuenta(idMesa) {
+  return mesasApi.obtenerCuenta(idMesa)
+}
+
 
 

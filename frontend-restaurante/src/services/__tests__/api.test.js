@@ -13,6 +13,11 @@ import {
   usarMocks,
   constructorApi,
   platosApi,
+  mesasApi,
+  pedidosApi,
+  registrarComensal,
+  enviarPedido,
+  obtenerCuenta,
 } from '../api'
 import { generarTokenQrMesa, rotarTokenQrMesa } from '../qrService'
 
@@ -350,6 +355,120 @@ describe('Interceptor y cliente HTTP (apiFetch)', () => {
       window.location.pathname = '/home'
       navegarALogin()
       expect(window.location.assign).toHaveBeenCalledWith('/login')
+    })
+  })
+
+  describe('Servicios para toma de pedidos del mesero (J-16)', () => {
+    it('registrarComensal hace POST /api/mesas/:id/comensales y conserva status y motivo en caso de error', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 409,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          error: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
+          motivo: 'alias_en_uso',
+        }),
+      })
+
+      try {
+        await registrarComensal(5, 'Abuela')
+        expect.fail('debió fallar')
+      } catch (err) {
+        expect(err.status).toBe(409)
+        expect(err.motivo).toBe('alias_en_uso')
+        expect(err.message).toContain('Ese nombre ya lo usa otra persona')
+      }
+    })
+
+    it('registrarComensal devuelve el alias normalizado en caso exitoso (201)', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 201,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ id_mesa: 5, alias: 'Abuela' }),
+      })
+
+      const res = await registrarComensal(5, '  abuela  ')
+      expect(res).toEqual({ id_mesa: 5, alias: 'Abuela' })
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/mesas/5/comensales'),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ alias: '  abuela  ' }),
+        })
+      )
+
+      // También verificar método en mesasApi
+      const resMetodo = await mesasApi.registrarComensal(5, 'Abuela')
+      expect(resMetodo).toEqual({ id_mesa: 5, alias: 'Abuela' })
+    })
+
+    it('enviarPedido hace POST /api/pedidos y conserva status, motivo, alias y faltantes en error 409', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 409,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          error: 'Esa persona no está registrada en la mesa',
+          motivo: 'comensal_no_registrado',
+          alias: 'Abuela',
+        }),
+      })
+
+      try {
+        await enviarPedido({ id_mesa: 5, items: [{ id_plato: 1, cantidad: 1, comensal: 'Abuela' }] })
+        expect.fail('debió fallar')
+      } catch (err) {
+        expect(err.status).toBe(409)
+        expect(err.motivo).toBe('comensal_no_registrado')
+        expect(err.alias).toBe('Abuela')
+      }
+
+      // También verificar método en pedidosApi
+      await expect(
+        pedidosApi.enviarPedido({ id_mesa: 5, items: [] })
+      ).rejects.toMatchObject({ status: 409, motivo: 'comensal_no_registrado' })
+    })
+
+    it('enviarPedido conserva status y motivo también en el 503 reintentar (D-17)', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 503,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          error: 'intenta de nuevo',
+          motivo: 'reintentar',
+        }),
+      })
+
+      try {
+        await enviarPedido({ id_mesa: 5, items: [{ id_plato: 10, cantidad: 1, comensal: 'Abuela' }] })
+        expect.fail('debió fallar con 503')
+      } catch (err) {
+        expect(err.status).toBe(503)
+        expect(err.motivo).toBe('reintentar')
+      }
+    })
+
+    it('obtenerCuenta hace GET /api/mesas/:id/cuenta', async () => {
+      const mockCuenta = {
+        id_mesa: 5,
+        total_mesa: 50000,
+        comensales: [{ comensal: 'Abuela', subtotal: 50000 }],
+      }
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => mockCuenta,
+      })
+
+      const res = await obtenerCuenta(5)
+      expect(res).toEqual(mockCuenta)
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/mesas/5/cuenta'),
+        expect.anything()
+      )
     })
   })
 })
