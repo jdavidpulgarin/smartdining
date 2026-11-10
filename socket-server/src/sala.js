@@ -17,11 +17,14 @@ const PREFIJO_SALA_MESA = 'room:mesa-';
  * Presencia de comensales por mesa, calculada de los sockets que de verdad
  * están en la sala (no de un contador que se pueda desincronizar).
  *
- * - comensales: alias distintos de los comensales conectados, ordenados.
+ * - comensales: alias distintos de los comensales conectados y de los sin
+ *   celular, ordenados.
  * - total: personas en la mesa = alias distintos + sockets de comensal sin
  *   alias (dos pestañas de "Ana" cuentan como una persona).
  * - pagaron: alias que ya pagaron algo en esta sesión de mesa (estén o no
  *   sentados), ordenados. Con esto la PWA calcula "igual" como el servidor.
+ * - sin_celular: alias que agregó el personal (POST /internal/mesa-comensal),
+ *   ordenados; también entran en comensales y en total.
  *
  * `programar(idMesa)` emite `mesa:presencia` a room:admin y a la sala de esa
  * mesa al instante si no hubo aviso reciente; si lo hubo, deja uno pendiente
@@ -39,10 +42,15 @@ function crearPresencia({ io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS }) {
       if (s.data.alias) alias.add(s.data.alias);
       else anonimos += 1;
     }
+    // Los sin celular (§6.4) cuentan como personas sentadas: van en
+    // comensales y en total, así «igual» y la rotación del QR los ven sin
+    // lógica aparte.
+    const sinCelular = Object.values(await estadoMesas.sinCelular(idMesa)).sort((a, b) => a.localeCompare(b));
+    for (const a of sinCelular) alias.add(a);
     const comensales = [...alias].sort((a, b) => a.localeCompare(b));
     const pagaron = await estadoMesas.pagaron(idMesa);
     return {
-      id_mesa: idMesa, comensales, total: comensales.length + anonimos, pagaron,
+      id_mesa: idMesa, comensales, total: comensales.length + anonimos, pagaron, sin_celular: sinCelular,
     };
   }
 
@@ -79,12 +87,20 @@ function crearPresencia({ io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS }) {
 // Una mesa puede llamar al mesero una vez por minuto: suficiente para pedir
 // ayuda de verdad y corta el abuso de un comensal que pulsa sin parar.
 const LIMITE_LLAMADA_SEG = 60;
+// Igual que sd:mesa:{ID}:sin_celular en Redis (24 h, como pagaron).
+const TTL_SIN_CELULAR_MS = 24 * 60 * 60 * 1000;
 
 /** Estado de sala por mesa en memoria (desarrollo y pruebas, sin REDIS_URL). */
 function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
   const llamadas = new Map(); // idMesa -> ms en que vence el bloqueo
   const cuentas = new Set(); // mesas que pidieron la cuenta
   const pagos = new Map(); // idMesa -> Set de alias que ya pagaron
+  const sinCelular = new Map(); // idMesa -> { ms en que vence, Map(clave -> alias) }
+  const listaSinCelular = (idMesa) => {
+    const e = sinCelular.get(idMesa);
+    if (e && e.vence <= ahora()) sinCelular.delete(idMesa);
+    return sinCelular.get(idMesa);
+  };
   return {
     marcarCuenta(idMesa) { cuentas.add(idMesa); },
     cuentaSolicitada(idMesa) { return cuentas.has(idMesa); },
@@ -92,6 +108,25 @@ function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
       cuentas.delete(idMesa);
       llamadas.delete(idMesa);
       pagos.delete(idMesa);
+      sinCelular.delete(idMesa);
+    },
+    sinCelular(idMesa) {
+      const e = listaSinCelular(idMesa);
+      return e ? Object.fromEntries(e.alias) : {};
+    },
+    agregarSinCelular(idMesa, clave, alias) {
+      let e = listaSinCelular(idMesa);
+      if (e && e.alias.has(clave)) return false;
+      if (!e) { e = { vence: 0, alias: new Map() }; sinCelular.set(idMesa, e); }
+      e.alias.set(clave, alias);
+      e.vence = ahora() + TTL_SIN_CELULAR_MS; // como EXPIRE en Redis: se renueva al agregar
+      return true;
+    },
+    quitarSinCelular(idMesa, clave) {
+      const e = listaSinCelular(idMesa);
+      if (!e || !e.alias.delete(clave)) return false;
+      if (e.alias.size === 0) sinCelular.delete(idMesa);
+      return true;
     },
     marcarPago(idMesa, alias) {
       if (!pagos.has(idMesa)) pagos.set(idMesa, new Set());
