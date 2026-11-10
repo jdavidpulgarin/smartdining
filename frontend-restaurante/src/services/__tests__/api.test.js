@@ -430,6 +430,26 @@ describe('Interceptor y cliente HTTP (apiFetch)', () => {
       ).rejects.toMatchObject({ status: 409, motivo: 'comensal_no_registrado' })
     })
 
+    it('enviarPedido conserva status y motivo también en el 503 reintentar (D-17)', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 503,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          error: 'intenta de nuevo',
+          motivo: 'reintentar',
+        }),
+      })
+
+      try {
+        await enviarPedido({ id_mesa: 5, items: [{ id_plato: 10, cantidad: 1, comensal: 'Abuela' }] })
+        expect.fail('debió fallar con 503')
+      } catch (err) {
+        expect(err.status).toBe(503)
+        expect(err.motivo).toBe('reintentar')
+      }
+    })
+
     it('obtenerCuenta hace GET /api/mesas/:id/cuenta', async () => {
       const mockCuenta = {
         id_mesa: 5,

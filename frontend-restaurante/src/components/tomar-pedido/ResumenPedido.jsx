@@ -16,7 +16,7 @@ import {
 import { enviarPedido, registrarComensal } from '../../services/api'
 import {
   armarPedido,
-  accionError409,
+  accionErrorEnvio,
   itemTieneFaltante,
   reemplazarAlias,
 } from '../../utils/tomarPedido'
@@ -86,7 +86,7 @@ export function ResumenPedido({
       const respuesta = await enviarPedido(payload)
       onPedidoExitoso(respuesta)
     } catch (err) {
-      const accion = accionError409(err)
+      const accion = accionErrorEnvio(err)
 
       if (accion.tipo === 'sin_stock') {
         const faltantes = accion.faltantes || []
@@ -101,6 +101,8 @@ export function ResumenPedido({
         const aliasFaltante = accion.alias || itemsParaEnviar[0]?.comensal || 'Comensal'
         setErrorEnvio(`La persona «${aliasFaltante}» no está registrada en la mesa (la reserva pudo vencer).`)
         setComensalARegistrar(aliasFaltante)
+      } else if (accion.tipo === 'reintentar') {
+        setErrorEnvio(accion.mensaje)
       } else {
         setErrorEnvio(accion.mensaje || 'Error al enviar la comanda a cocina')
       }
@@ -132,7 +134,7 @@ export function ResumenPedido({
       // 3. Reintentar el envío UNA sola vez
       await handleEnviarPedido(carritoActualizado)
     } catch (err) {
-      const accion = accionError409(err)
+      const accion = accionErrorEnvio(err)
       setErrorEnvio(`No se pudo volver a registrar: ${accion.mensaje}`)
     } finally {
       setReintentandoComensal(false)

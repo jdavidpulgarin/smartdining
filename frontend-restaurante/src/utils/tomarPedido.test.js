@@ -4,6 +4,7 @@ import {
   unirComensales,
   buscarPorClave,
   itemTieneFaltante,
+  accionErrorEnvio,
   accionError409,
   opcionPedirExistente,
   reemplazarAlias,
@@ -231,6 +232,39 @@ describe('tomarPedido - lógica pura (J-16)', () => {
       ])
       expect(accion.mensaje).toContain('Costillas BBQ')
       expect(accion.mensaje).toContain('Panceta Crujiente')
+    })
+
+    it('reconoce 503 con motivo reintentar y devuelve el mensaje de cruce de pedidos', () => {
+      const error = {
+        status: 503,
+        motivo: 'reintentar',
+        data: {
+          error: 'intenta de nuevo',
+          motivo: 'reintentar',
+        },
+      }
+      const accion = accionErrorEnvio(error)
+      expect(accion.tipo).toBe('reintentar')
+      expect(accion.mensaje).toBe('Hubo un cruce con otro pedido, vuelve a enviarlo.')
+    })
+
+    it('en otros errores sin motivo reintentar devuelve el mensaje genérico de siempre', () => {
+      const errorSinMensaje = { status: 500 }
+      const accionGenerica = accionErrorEnvio(errorSinMensaje)
+      expect(accionGenerica.tipo).toBe('desconocido')
+      expect(accionGenerica.mensaje).toBe('Error al enviar la comanda a cocina')
+
+      const error503Timeout = {
+        status: 503,
+        data: {
+          error: 'La operación tardó demasiado y se canceló, vuelve a intentarlo en un momento',
+        },
+      }
+      const accionTimeout = accionErrorEnvio(error503Timeout)
+      expect(accionTimeout.tipo).toBe('desconocido')
+      expect(accionTimeout.mensaje).toBe(
+        'La operación tardó demasiado y se canceló, vuelve a intentarlo en un momento'
+      )
     })
 
     it('mapea motivos desconocidos de forma segura', () => {

@@ -138,17 +138,30 @@ export function itemTieneFaltante(item, faltantes) {
   })
 }
 
+export const MENSAJE_REINTENTAR_PEDIDO = 'Hubo un cruce con otro pedido, vuelve a enviarlo.'
+export const MENSAJE_ERROR_ENVIO_GENERICO = 'Error al enviar la comanda a cocina'
+
 /**
- * Interpreta el error 409 de comensales o pedidos según el motivo del contrato.
+ * Interpreta el error al registrar comensales o enviar pedidos (409, 503, etc.)
+ * según el status y el motivo del contrato (D-17, D-18).
  *
  * @param {any} error
- * @returns {{ tipo: 'alias_en_uso'|'mesa_sin_sesion'|'comensal_no_registrado'|'sin_stock'|'desconocido', mensaje: string, alias?: string, faltantes?: Array<{ tipo: 'plato'|'ingrediente', id: number, nombre: string|null }> }}
+ * @returns {{ tipo: 'alias_en_uso'|'mesa_sin_sesion'|'comensal_no_registrado'|'sin_stock'|'reintentar'|'desconocido', mensaje: string, alias?: string, faltantes?: Array<{ tipo: 'plato'|'ingrediente', id: number, nombre: string|null }> }}
  */
-export function accionError409(error) {
+export function accionErrorEnvio(error) {
   const data = error?.data || error?.response?.data || error || {}
+  const status = Number(error?.status ?? error?.response?.status ?? data?.status ?? 0)
   const motivoRaw = data?.motivo || error?.motivo || ''
   const motivo = String(motivoRaw).toLowerCase()
-  const mensaje = data?.error || data?.mensaje || error?.message || 'Error en la operación'
+  const mensaje =
+    data?.error || data?.mensaje || error?.message || MENSAJE_ERROR_ENVIO_GENERICO
+
+  if (motivo === 'reintentar' && (status === 503 || status === 0)) {
+    return {
+      tipo: 'reintentar',
+      mensaje: MENSAJE_REINTENTAR_PEDIDO,
+    }
+  }
 
   if (motivo === 'alias_en_uso') {
     return {
@@ -213,6 +226,8 @@ export function accionError409(error) {
     faltantes: data?.faltantes || error?.faltantes,
   }
 }
+
+export const accionError409 = accionErrorEnvio
 
 /**
  * Determina qué alias ofrecer en "Pedir para «alias»" cuando POST /api/mesas/:id/comensales

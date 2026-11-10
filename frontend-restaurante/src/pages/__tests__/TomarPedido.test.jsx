@@ -845,5 +845,68 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
         expect(screen.getByText(/¡Comanda enviada a cocina! Pedido PED-RETRY-OK/i)).toBeInTheDocument()
       })
     })
+
+    it('ante 503 con motivo reintentar muestra mensaje de cruce, conserva el carrito, rehabilita Enviar y no reintenta solo', async () => {
+      let intentosEnvio = 0
+
+      vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
+        if (url.includes('/api/mesas/5/cuenta')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ id_mesa: 5, comensales: [{ comensal: 'Beto' }] }),
+          }
+        }
+        if (url.includes('/api/menu')) {
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => mockMenu,
+          }
+        }
+        if (url.includes('/api/pedidos') && opts?.method === 'POST') {
+          intentosEnvio++
+          return {
+            ok: false,
+            status: 503,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({
+              error: 'intenta de nuevo',
+              motivo: 'reintentar',
+            }),
+          }
+        }
+        return { ok: true, json: async () => ({}) }
+      })
+
+      renderTomarPedido('mesero', 5)
+
+      fireEvent.click(await screen.findByText('Beto'))
+
+      await screen.findByText('Hamburguesa Smart Angus')
+      fireEvent.click(screen.getAllByRole('button', { name: /agregar/i })[0])
+
+      fireEvent.click(await screen.findByRole('button', { name: /ver comanda/i }))
+
+      const btnEnviar = await screen.findByRole('button', { name: /enviar comanda a cocina/i })
+      fireEvent.click(btnEnviar)
+
+      // 1. Muestra el mensaje exacto de cruce de pedidos
+      await waitFor(() => {
+        expect(
+          screen.getByText('Hubo un cruce con otro pedido, vuelve a enviarlo.')
+        ).toBeInTheDocument()
+      })
+
+      // 2. Conserva el carrito intacto
+      expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument()
+
+      // 3. Rehabilita el botón de Enviar
+      const btnEnviarRehabilitado = screen.getByRole('button', { name: /enviar comanda a cocina/i })
+      expect(btnEnviarRehabilitado).not.toBeDisabled()
+
+      // 4. No reintenta automáticamente
+      expect(intentosEnvio).toBe(1)
+    })
   })
 })
