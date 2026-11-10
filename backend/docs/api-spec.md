@@ -419,6 +419,256 @@ El resultado se guarda en Redis (`sd:usuario:{id}:activo`) con TTL **`CACHE_USUA
 
 ---
 
+## Configuración del restaurante (D-16 parte B)
+
+Los datos del local: cómo se llama, dónde está, a qué horas abre, en qué moneda cobra y
+cuánta propina sugiere. Es **una sola fila** (`configuracion_restaurante`, `id = 1`, fijado
+por el CHECK `ck_configuracion_fila_unica`), así que no hay nada que crear ni que borrar:
+solo leer y actualizar. El script `database/scripts/26_configuracion.sql` ya inserta la fila
+con los valores por defecto.
+
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| GET | /configuracion | **No** | Los datos públicos del local (lista blanca) |
+| GET | /configuracion/completa | **admin** | Todos los campos, incluida la auditoría |
+| PUT | /configuracion | **admin** | Actualiza los campos enviados (parcial) |
+
+### GET /configuracion — pública
+
+Sin login: la PWA del comensal necesita el nombre, el horario, la moneda y la propina
+sugerida **antes** de escanear nada, y son los mismos datos que cualquiera ve en la puerta
+del local.
+
+```json
+{
+  "nombre": "SmartDining",
+  "telefono": "3001234567",
+  "direccion": "Calle 1 #2-3",
+  "url_logo": null,
+  "horario": {
+    "lunes": { "abre": "11:00", "cierra": "22:00" },
+    "domingo": { "abre": "12:00", "cierra": "21:00" }
+  },
+  "propina_sugerida_pct": 10,
+  "moneda": "COP"
+}
+```
+
+Son **exactamente** esos siete campos, en una **lista blanca** y no un `delete` de lo
+sensible: así una columna nueva en la tabla **no se publica sola** el día que alguien la
+agregue. **`actualizado_en`, `actualizado_por` e `id` no salen por aquí**: dicen quién tocó
+la configuración del local y cuándo, que es auditoría.
+
+> La `COMMENT ON TABLE` de `26_configuracion.sql` menciona cinco campos públicos (sin
+> `telefono` ni `direccion`). La lista de arriba es la que implementa el backend: el teléfono
+> y la dirección de un restaurante son públicos —están en la carta y en la fachada— y la PWA
+> los necesita para el pie de página. Queda anotado para alinear el comentario del script.
+
+`propina_sugerida_pct` llega como **número** (10, 12.5), no como texto: el backend registra
+un parser para `NUMERIC` (ver `src/config/db.js`). `horario` es un **objeto** por día; un día
+ausente significa cerrado.
+
+### GET /configuracion/completa — admin
+
+Lo mismo más `id`, `actualizado_en` y `actualizado_por`:
+
+```json
+{
+  "id": 1,
+  "nombre": "SmartDining",
+  "telefono": "3001234567",
+  "direccion": "Calle 1 #2-3",
+  "url_logo": null,
+  "horario": { "lunes": { "abre": "11:00", "cierra": "22:00" } },
+  "propina_sugerida_pct": 10,
+  "moneda": "COP",
+  "actualizado_en": "2026-11-08T12:00:00.000Z",
+  "actualizado_por": 1
+}
+```
+
+### PUT /configuracion — admin, parcial
+
+Body con **los campos que se quieran cambiar**, al menos uno:
+
+```json
+{ "propina_sugerida_pct": 12.5, "moneda": "USD" }
+```
+
+**200** devuelve la configuración **completa ya actualizada**, con el `actualizado_en` y el
+`actualizado_por` que acaba de poner el trigger: así el panel ve de una vez quién quedó
+registrado como autor, sin una segunda llamada.
+
+| Campo | Regla |
+|---|---|
+| `nombre` | Texto, 1–120 (la columna es `VARCHAR(120)`). No admite `null` (`NOT NULL`) |
+| `telefono` | Texto hasta 30, o `null` |
+| `direccion` | Texto hasta 200, o `null` |
+| `url_logo` | Texto hasta 255, o `null` (quitar el logo es normal) |
+| `horario` | **Objeto** JSON. La tabla lo exige con `ck_configuracion_horario_objeto`; un arreglo o un número son **400** aquí, no un 422 de la base |
+| `propina_sugerida_pct` | Número **entre 0 y 30**, con **2 decimales como máximo** |
+| `moneda` | **3 letras mayúsculas** (ISO 4217), como el CHECK `^[A-Z]{3}$` |
+
+- El cuerpo es `.strict()`: **una clave de más es 400**. En particular `actualizado_en`,
+  `actualizado_por` e `id` **no se editan** —los pone el trigger, o el CHECK—, y sin
+  `.strict()` el UPDATE los ignoraría en silencio: quien llama creería haber cambiado algo
+  que no cambió.
+- Un cuerpo vacío `{}` es **400**: no es una edición.
+- Los límites de texto son los de las columnas, no inventados. El de los decimales es porque
+  la columna es `NUMERIC(4,2)`: un tercer decimal se redondearía en silencio y el valor
+  guardado no sería el que se mandó.
+- **Es parcial de verdad**: el UPDATE se arma solo con las columnas enviadas, así que un PUT
+  que manda el teléfono **no reescribe** el horario con un valor viejo que el cliente ni vio.
+
+**El autor del cambio.** El UPDATE va en una **transacción** que primero hace
+
+```sql
+SELECT set_config('app.id_usuario', '<id del JWT>', true);
+```
+
+que es de donde el trigger `tr_configuracion_actualizada` saca `actualizado_por` (vía
+`fn_usuario_de_sesion()`). El tercer argumento en `true` (`is_local`) hace que el valor viva
+**solo hasta el fin de la transacción**: así no se filtra a la siguiente petición que use esa
+conexión del pool. El id sale **del JWT**, nunca del cuerpo.
+
+---
+
+## Mesas activas e inactivas (D-16 parte B)
+
+`mesas.activa` permite **retirar una mesa del servicio sin borrarla** (ADR-06). Hace falta
+porque una mesa con pedidos **no se puede borrar**: `DELETE /mesas/:id` responde 409 para no
+perder el historial. Desactivarla es la única salida real.
+
+Una mesa inactiva **no se abre, no recibe QR y no aparece como disponible**: lo impone el
+trigger `tr_validar_mesa_activa` y las funciones `obtener_mesa_por_qr` y
+`obtener_mesas_disponibles` del script 26.
+
+`activa` sale ahora en **todas** las respuestas de mesa (la vista pública y la del personal).
+
+### Cambiarla: `PATCH /mesas/:id` — admin
+
+Es la misma ruta del alta/baja del mobiliario (D-16 parte A), que es justo de lo que se
+trata; `estado` sigue teniendo la suya (`PATCH /mesas/:id/estado`).
+
+```json
+{ "activa": false }
+```
+
+`activa` es **booleano estricto**: `"false"`, `0` o `null` son **400**. Se puede mandar junto
+con `numero`, `capacidad` y `ubicacion`.
+
+### 409 `mesa_ocupada` — una mesa ocupada no se desactiva
+
+```json
+{ "error": "Esa mesa está ocupada: libérala antes de desactivarla.", "motivo": "mesa_ocupada" }
+```
+
+Lo único que impide desactivar es que **haya gente sentada** (`estado = 'ocupada'`): si se
+desactiva con comensales dentro, su sesión queda abierta y sin forma de cerrarla por el camino
+normal. Se comprueba **en el backend, con la fila bloqueada, antes de tocar la base**: así el
+mensaje dice qué pasa y qué hacer, y no se gasta un viaje para que el trigger lo rechace.
+
+Un `token_qr` en una mesa **`disponible` no bloquea**: es el resto de una sesión que ya
+terminó —el cierre deja el token hasta la próxima rotación—, así que no hay nadie a quien
+dejar colgado.
+
+**Al desactivar se borra el token**, en la **misma sentencia** del `UPDATE`
+(`token_qr = CASE WHEN $5 IS FALSE THEN NULL ELSE token_qr END`): una mesa inactiva no
+conserva un QR, o quedaría un código impreso que escanea a una mesa fuera de servicio. El
+`CASE` solo dispara cuando `activa` llega en `false`: si el campo no viene, o viene en `true`,
+**el token no se toca**.
+
+**Reactivar nunca se bloquea**, ni con la mesa ocupada: activar no quita nada a nadie. Y
+reafirmar `activa: false` en una mesa que ya lo está tampoco choca con la guarda.
+
+### 409 `mesa_inactiva` — una mesa inactiva no se abre ni recibe QR
+
+```json
+{ "error": "Esa mesa está inactiva: actívala antes de abrirla o de generarle un QR.", "motivo": "mesa_inactiva" }
+```
+
+Lo rechaza el trigger con **SQLSTATE 23514** (`check_violation`), y lo devuelven
+`POST /mesas/:id/abrir` y `POST /mesas/:id/rotar-qr`. **Sin traducirlo** el manejador central
+lo convertiría en un **422** genérico («un dato está fuera del rango permitido»), que no dice
+ni qué mesa ni qué hacer: son reglas de sala, así que salen como 409 con su `motivo`.
+
+El mismo 23514 en el `PATCH` de `activa` sale como **409 `mesa_ocupada`**: es la red de
+seguridad para los caminos que la guarda del backend no ve (una consulta a mano, o una
+carrera entre el `SELECT` y el `UPDATE`). Cualquier **otro** SQLSTATE sube como venía, para no
+tapar un CHECK distinto de la misma tabla.
+
+> La convención de errores de esta API es **`{ error, motivo }`**. `motivo` es el código
+> estable que el cliente compara; `error` es el texto para leer. No se usa `codigo`.
+
+---
+
+## Historial de precios (D-16 parte B)
+
+Cada cambio de `platos.precio` y de `ingredientes.precio_extra` queda en
+`historial_precios`, con quién lo hizo. Lo escriben los triggers
+`tr_historial_precio_plato` y `tr_historial_precio_ingrediente`, y **solo cuando el valor
+cambia de verdad**: un `PUT` que reenvía la fila entera sin tocar el precio no deja filas
+vacías (el `WHEN` del trigger).
+
+**Lo que le toca al backend es el autor.** Los triggers lo sacan de `app.id_usuario`, que se
+fija con `set_config(..., true)` y vive **solo dentro de la misma transacción**. Por eso:
+
+- `PUT /platos/:id` pasó a ser **transaccional** (antes era un `pool.query` suelto: el
+  `set_config` y el `UPDATE` podían salir por **conexiones distintas** del pool y el
+  historial quedaba con `id_usuario` NULL).
+- `PUT /ingredientes/:id` y `PATCH /ingredientes/:id/disponible` ya eran transaccionales:
+  solo se agregó el `set_config` al inicio.
+
+El id sale **del JWT** (`req.user.id_usuario`), nunca del cuerpo. `historial_precios.id_usuario`
+puede quedar en NULL: un cambio anterior a D-16 B, una consulta a mano, o un usuario que
+después se borró (la FK es `ON DELETE SET NULL`).
+
+### GET /platos/:id/historial-precios — admin
+
+Los cambios de precio de un plato, **los más recientes primero**.
+
+```json
+{
+  "historial": [
+    {
+      "id": 12,
+      "tipo": "plato",
+      "id_referencia": 7,
+      "precio_anterior": 28000,
+      "precio_nuevo": 30000,
+      "id_usuario": 1,
+      "cambiado_en": "2026-11-08T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+- `:id` tiene que ser un **entero positivo**, o **400**. Un plato que no existe, **404**.
+- Un plato sin cambios devuelve `{ "historial": [] }`.
+- `?limite=` acota el número de filas (1–500, por defecto 100).
+- `id_usuario` puede ser `null` (ver arriba). No se devuelve el nombre del usuario: esta
+  ruta no es un reporte, y unir con `usuarios` publicaría datos del personal en una lista que
+  el panel ya sabe resolver.
+- El orden sale gratis: el índice `idx_historial_precios_referencia` es exactamente
+  `(tipo, id_referencia, cambiado_en DESC)`.
+
+---
+
+## Platos: `personalizable` y `calorias`
+
+Las dos columnas existían desde `13_constructor.sql`, pero el esquema de `POST /platos` y
+`PUT /platos/:id` no las aceptaba, así que un cuerpo que las mandara **las perdía en
+silencio**. Ahora son **opcionales** en los dos:
+
+| Campo | Regla |
+|---|---|
+| `personalizable` | Booleano. Decide si el plato se arma por pasos en el constructor |
+| `calorias` | Entero **≥ 0**, o `null` ("no se sabe", que es distinto de 0) |
+
+Si no se envían, **el comportamiento no cambia**: el plato conserva lo que tenía.
+
+---
+
 ## Categorías
 
 | Método | Ruta | Auth | Descripción |
@@ -445,6 +695,7 @@ El resultado se guarda en Redis (`sd:usuario:{id}:activo`) con TTL **`CACHE_USUA
 | PUT | /platos/:id | admin | Actualiza |
 | DELETE | /platos/:id | admin | Elimina |
 | PATCH | /platos/:id/disponible | **admin, cocina** | Agota o repone (D-05, ver abajo) |
+| **GET** | **/platos/:id/historial-precios** | **admin** | **Cambios de precio, el mas reciente primero (D-16 B)** |
 
 ```json
 {
@@ -454,12 +705,84 @@ El resultado se guarda en Redis (`sd:usuario:{id}:activo`) con TTL **`CACHE_USUA
 }
 ```
 
+#### Cuerpo de POST y PUT /platos
+
+| Campo | Obligatorio al crear | Regla |
+|---|---|---|
+| `nombre` | Sí | Texto, 1–120 |
+| `precio` | Sí | Número > 0. Cabe en `DECIMAL(10,2)`: más allá es **422** (desbordamiento), no 500 |
+| `id_categoria` | Sí | Entero. Si la categoría no existe, **409 `categoria_inexistente`** |
+| `descripcion`, `url_imagen` | No | Texto; `url_imagen` tiene que ser una URL. Son **nullable**: ponerlas en `null` las borra |
+| `disponible` | No (por omisión `true`) | Booleano |
+| `tiempo_preparacion_estimado` | **No** | Entero > 0. **Si no se envía, queda en 15**, el `DEFAULT` de la columna (`database/schema.sql:105`) |
+| `personalizable` | No (por omisión `false`) | Booleano. Decide si el plato se arma por pasos en el constructor |
+| `calorias` | No (por omisión `null`) | Entero ≥ 0, o `null` ("no se sabe", distinto de 0) |
+
+> **Issue #132.** `tiempo_preparacion_estimado` ya era opcional en el esquema, pero el INSERT
+> mandaba `NULL` explícito en esa columna, y un `NULL` **pisa el `DEFAULT`**: la columna es
+> `NOT NULL DEFAULT 15`, así que PostgreSQL rechazaba la fila con 23502 y **`POST /platos` sin
+> ese campo daba 500**. Ahora el INSERT usa `COALESCE($7, 15)`.
+>
+> En el mismo arreglo, **`personalizable` y `calorias` se guardan también al CREAR**: el
+> esquema las aceptaba desde D-16 B, pero solo el `PUT` las escribía, así que un `POST` que las
+> mandara las perdía en silencio. Lo cubre
+> `backend/tests/integracion/platos-sql.test.js` contra PostgreSQL de verdad.
+
+**Nada de un cuerpo válido acaba en 500:**
+
+| Caso | Respuesta |
+|---|---|
+| Falta un campo, o un tipo o rango no es el declarado | **400** con el campo que falla (zod) |
+| `id_categoria` que no existe | **409** `{ "error": "Esa categoria no existe", "motivo": "categoria_inexistente" }` |
+| **El usuario del token ya no existe** | **409** `autor_inexistente` (ver [El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)) |
+| Un valor que no cabe en la columna (precio enorme) | **422** con el mensaje genérico de "dato fuera de rango" |
+| Un `CHECK` de la base (precio negativo llamando al servicio suelto) | **422** |
+
 > El modelo ER no tiene `personalizaciones` ni `alergenos` en `platos`: ese campo se
 > eliminó del backend. Las preferencias del comensal van por ítem del pedido, en
 > `detalles_pedido.notas_especiales`.
 >
-> Lo que agregó el constructor (`personalizable`, `calorias` en `platos`;
-> `alergenos` en `ingredientes`) sale por `GET /menu`, no por estas rutas.
+> `alergenos` (en `ingredientes`) sale por `GET /menu`, no por estas rutas.
+
+#### `disponible`, `stock_suficiente` y el efectivo
+
+`GET /platos` y `GET /platos/:id` devuelven la fila de la base, así que traen **las dos
+columnas** de disponibilidad por separado. Son cosas distintas y el panel necesita las dos:
+
+| Campo | Quién lo mueve | Qué significa |
+|---|---|---|
+| `disponible` | **La cocina**, con `PATCH /platos/:id/disponible` (y el admin con el `PUT`) | El **interruptor manual**: "se acabó" / "volvió". Es una decisión de una persona |
+| `stock_suficiente` | **La base**, sola (P-19, `database/scripts/27_inventario.sql`) | Si el **inventario** alcanza para una unidad del plato. El backend **nunca** lo escribe. Un plato **sin receta** lo tiene en `true`: no controla inventario |
+| *efectivo* | — | `disponible AND stock_suficiente`: **lo que ve el comensal**. No es una columna; lo publica `v_carta_disponible` como `disponible_efectivo` |
+
+```json
+{ "id_plato": 12, "nombre": "Arepa de Huevo", "disponible": true, "stock_suficiente": false }
+```
+
+Ese plato **no se puede pedir** (da **409 `sin_stock`**) aunque `disponible` sea `true`: la
+cocina lo dio por repuesto, pero falta un insumo de su receta. Quien pinta una carta tiene que
+mirar **las dos**, nunca `disponible` a secas:
+
+- `GET /menu` ya hace la cuenta y **solo trae lo pedible**, así que la PWA del comensal no
+  necesita estos campos.
+- Un panel de administración (KDS de agotados, pestaña de Menú del restaurante) sí los
+  necesita, porque tiene que **distinguir por qué** está agotado: el interruptor se puede
+  cambiar con un botón, el stock no. Con solo `disponible`, un plato agotado por inventario
+  se ve "DISPONIBLE" al recargar (issue #137).
+- `motivo` de `GET /inventario/carta` dice lo mismo ya resuelto: `"manual"` o `"stock"`,
+  y el manual gana cuando los dos están apagados.
+
+**Los avisos en vivo llevan el EFECTIVO, en los tres caminos** (issue #136). El payload de
+`plato:disponibilidad` e `ingrediente:disponibilidad` tiene **un solo** booleano, y es el AND:
+
+| Camino | Quién avisa |
+|---|---|
+| `PATCH /platos/:id/disponible` y `PATCH /ingredientes/:id/disponible` | El controlador, con `disponible AND stock_suficiente` de la fila que acaba de guardar |
+| Canal `inventario` de PostgreSQL | El oyente, con el `disponible` del payload, que la base ya calcula como el efectivo |
+| Arranque y reconexión del canal | El oyente, con `disponible_efectivo` de `v_carta_disponible` |
+
+Un solo booleano porque el evento va **a todos los sockets**, incluidas las mesas: a un
+comensal le da igual por qué no hay arepa. Quien necesita el detalle lo pide por REST.
 
 ### PATCH /platos/:id/disponible — agotar o reponer (D-05)
 
@@ -498,6 +821,18 @@ reciben 403.
 El paso 2 va antes del 3 y no al revés: si se avisara primero, un cliente que reaccione al
 evento pidiendo `GET /menu` podría recibir la copia vieja de la caché (TTL 60 s) y seguir
 mostrando el plato como disponible.
+
+> **El `disponible` del aviso es el EFECTIVO, no el interruptor (issue #136).** Lo que viaja
+> es `disponible AND stock_suficiente`, igual que en los otros dos caminos. Así que **encender
+> a mano un plato sin stock responde 200 y deja el interruptor en `true`, pero avisa
+> `disponible: false`**: la cocina queda apuntada como "este plato sí se puede hacer", y el
+> plato volverá solo cuando haya inventario. Antes se mandaba el interruptor a secas, y la PWA
+> y el KDS lo mostraban disponible mientras pedirlo daba **409 `sin_stock`**.
+>
+> La cuenta vive en un solo sitio (`src/services/disponibilidad-efectiva.js`) para que los
+> tres caminos no puedan discrepar otra vez. El **cuerpo de la respuesta** sigue siendo la
+> fila de la base, con sus dos columnas por separado: el panel necesita saber cuál de las dos
+> apagó el plato.
 
 **El aviso es un extra, no parte de la operación.** Se manda
 `POST /internal/plato-disponibilidad` con `{ id_plato, disponible, eventId }`, y el
@@ -608,12 +943,46 @@ expire).
 - El caché es un extra, no parte del contrato: si Redis está caído, falla o no hay
   `REDIS_URL`, el endpoint responde igual leyendo de la base. **Nunca da 500 por culpa del
   caché.**
-- Toda mutación de la carta (`POST`/`PUT`/`DELETE` de `/platos` y `/categorias`, y las 6
-  escrituras del constructor: pasos e ingredientes) borra `cache:menu` con
-  `invalidarMenu()`, así que un cambio del admin se ve de inmediato sin esperar el TTL. Con
-  Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la mutación sigue su
-  curso.
 - Un error de la base **no** se cachea.
+
+#### Qué invalida `cache:menu`
+
+Todo lo que cambia lo que ve el comensal borra la clave con `invalidarMenu()`, así que el
+cambio se ve de inmediato sin esperar el TTL. Son **tres** caminos, y hacen falta los tres:
+
+| Camino | Qué lo dispara |
+|---|---|
+| **Rutas REST de la carta** | `POST`/`PUT`/`DELETE` de `/platos` y `/categorias`, y las 6 escrituras del constructor (pasos e ingredientes) |
+| **Avisos de disponibilidad** del canal `inventario` | Cualquier cambio de `stock_suficiente` de un plato o de una opción: un **pedido que consume stock**, un movimiento de inventario, una receta nueva, un insumo activado o desactivado |
+| **Escrituras de inventario** | `POST /inventario/insumos`, `PUT /inventario/insumos/:id`, `POST /inventario/insumos/:id/movimientos`, `PUT /platos/:id/receta` y `PUT /ingredientes/:id/receta`, **después del COMMIT** |
+
+> **Por qué el segundo camino (issue #135).** La disponibilidad por **stock** la cambia la
+> **base**, no una ruta: un pedido que consume el último queso no pasa por ningún endpoint de
+> la carta. Solo avisa por `pg_notify('inventario')`, y el oyente
+> (`services/inventario-avisos.js`) no invalidaba nada: durante **hasta 60 s** el menú seguía
+> ofreciendo un plato ya agotado. El comensal lo pedía y recibía un 409 `sin_stock` por algo
+> que la carta le decía que había.
+
+- La invalidación por aviso ocurre **antes** de reenviarlo al socket-server y **aunque el
+  reenvío falle**: si el socket-server está caído, el aviso en vivo se pierde, pero la
+  siguiente petición tiene que ver la carta real.
+- **Al arrancar y en cada reconexión del canal** se invalida también, después de
+  `fn_recalcular_toda_la_carta()`: mientras el backend no estaba escuchando, el stock pudo
+  cambiar y el caché puede tener una carta anterior.
+- El tercer camino es **redundante a propósito** (el aviso ya cubre el caso) y cuesta un `DEL`:
+  cubre al admin que edita y recarga en el mismo segundo, sin depender de cuándo llegue el
+  `NOTIFY`. **No se invalida por cada pedido**: el caché dejaría de servir en hora punta, y el
+  stock que consume un pedido ya avisa por el canal.
+- Con Redis caído, `invalidarMenu()` tampoco falla: devuelve `false` y la operación que la
+  llamó sigue su curso.
+
+**La carrera entre una lectura y una invalidación.** Una petición puede empezar a leer la base,
+cambiar el stock mientras tanto, y terminar guardando en el caché el menú **viejo** —ya
+invalidado— que el TTL mantendría 60 s. `menu.service.js` lleva un contador de **versión** que
+`invalidarMenu()` incrementa: `obtenerMenu()` lo anota antes de consultar y **guarda solo si no
+cambió** durante la lectura. Si cambió, responde con lo que leyó (como mucho, un instante
+desfasado) pero no lo cachea, y la siguiente petición vuelve a leer. Es un contador en memoria
+porque el backend corre en **un** proceso; no necesita Redis.
 
 ---
 
@@ -674,6 +1043,13 @@ El interruptor de "se acabó" / "volvió". Cuerpo con **un solo campo**:
 El paso 2 va antes del 3 y no al revés: si se avisara primero, un cliente que reaccione al
 evento pidiendo `GET /menu` podría recibir la copia vieja de la caché (TTL 60 s) y seguir
 mostrando el ingrediente como disponible. Es una carrera real.
+
+> **El `disponible` del aviso es el EFECTIVO (issue #136)**, igual que en platos:
+> `disponible AND stock_suficiente`. Reponer a mano una opción cuyo insumo se agotó responde
+> 200 y deja el interruptor encendido, pero avisa `disponible: false`, así que el constructor
+> no la ofrece hasta que haya inventario. La respuesta incluye **`stock_suficiente`** junto a
+> `disponible`, para que el panel vea cuál de las dos la apagó (ver
+> [la tabla de los tres campos](#disponible-stock_suficiente-y-el-efectivo)).
 
 **El aviso es un extra, no parte de la operación.** Se manda
 `POST /internal/ingrediente-disponibilidad` con `{ id_ingrediente, disponible, eventId }`, y
@@ -950,6 +1326,15 @@ Body: `{ "alias": "Abuela" }`
   por **clave** (sin tildes, en minúsculas, sin espacios ni `. _ ' -`), así que «Abuela»,
   «abuela» y «Abuéla» son la misma persona. Un alias inválido es **400** con
   `{ "error": …, "campo": "alias" }`.
+- **«General» está prohibido (D-18c).** Es el nombre que `obtener_cuenta_mesa` le pone al
+  cajón de los ítems **sin dueño** (`COALESCE(NULLIF(btrim(dp.comensal), ''), 'General')`),
+  no una persona. Registrar a alguien así mezclaría su consumo con lo que todavía no es de
+  nadie: su cuenta mostraría platos que no pidió y los platos sin dueño quedarían cobrados a
+  esa persona. Se rechaza con **400** como cualquier otro alias inválido.
+
+  Se compara por **clave**, igual que la unicidad, así que «General», « general », «GENERAL»
+  y «Géneral» quedan fuera. Un nombre que solo **contiene** la palabra —«General Pérez»,
+  «Generalísimo»— es válido: la clave tiene que ser **exactamente** la reservada.
 - `:id` tiene que ser un **entero positivo**, o **400**. Una mesa que no existe, **404**.
 - **201** devuelve `{ "id_mesa": 5, "alias": "Abuela" }` con el alias **tal como quedó
   reservado**: el escrito ya normalizado o, si esa persona ya tenía platos, el texto con el
@@ -1579,6 +1964,16 @@ Body:
 
 400: plato inexistente o no disponible, `id_mesa` faltante para staff · 403: rol no permitido
 
+**404 `Mesa no encontrada` (D-18c).** Si el pedido trae algún `comensal` y el `id_mesa` no
+existe, la respuesta es **404**, como en el resto de las rutas de mesa. Antes era un **409
+`comensal_no_registrado`**: la cuenta de una mesa inexistente viene vacía y el resolutor de
+alias lo leía como «esa persona no está sentada», así que el mesero veía un error sobre el
+**nombre del comensal** cuando lo que estaba mal era el **número de la mesa**.
+
+La comprobación es una sola consulta (`SELECT 1 FROM mesas`, la misma que ya hacían las dos
+cuentas) y corre **antes** de resolver alias: no se lee la cuenta ni Redis. Un pedido **sin
+alias** no la paga: sigue fallando contra la FK de `pedidos.id_mesa` (**409**) exactamente
+como antes.
 
 #### El alias del comensal cuando pide el personal (D-18b)
 
@@ -1630,6 +2025,13 @@ luego hay que arreglar a mano.
 clave vacía) es **400**, con el **mismo mensaje** y el mismo `campo: "comensal"` que las
 demás rutas de alias, y solo si el `comensal` viene informado.
 
+**Un ítem a nombre de «General» es 409 `comensal_no_registrado`, no 400 (D-18c).** El alta
+de comensales lo rechaza como alias inválido (ver R-18 arriba), pero aquí el significado es
+otro: «General» es el **cajón de los platos sin dueño**, así que no es un nombre mal escrito
+sino un nombre que **no corresponde a nadie**. Era ya la respuesta antes de que la regla
+existiera —no aparecía en las reservas ni como fila con platos propios— y se mantiene para
+no cambiarle el error a quien ya lo maneja. El `alias` del cuerpo trae el texto normalizado.
+
 **Lo que no cambia:**
 
 - **Un ítem sin `comensal`** sigue cayendo en «General», como siempre. No se consulta nada.
@@ -1646,7 +2048,9 @@ alguna reserva no apareció).
 que una persona no esté registrada cuando no se puede leer el registro, y una caché caída
 no puede impedir que una mesa coma. En ese caso se intenta **igual** con la cuenta (que vive
 en PostgreSQL) y, si tampoco aparece, se guarda el alias **recortado y normalizado**, que es
-exactamente lo que hacía el backend antes de D-18b. **Nunca sale el 409 sin Redis.** Queda
+exactamente lo que hacía el backend antes de D-18b. **Sin Redis el único 409 posible es el
+de «General»** (D-18c), que no necesita consultar nada: un ítem no se guarda a nombre del
+cajón de los platos sin dueño ni cuando no se puede verificar quién está sentado. Queda
 un aviso en el log del servidor **sin el alias** —es un dato de quién está sentado en una
 mesa, y estos logs acaban en archivos y en consolas ajenas—, solo con el `id_mesa` para
 poder investigar.
@@ -1765,8 +2169,13 @@ cuenta dividida por persona).
 
 **Solo la visita actual** (`creado_en >= mesas.sesion_iniciada_en`): sin ese filtro el
 grupo que se acaba de sentar vería lo que pidió el anterior, con sus alias y sus platos.
-Un pedido creado en el instante exacto de la apertura **sí** entra. Con
-`sesion_iniciada_en` en `null` se devuelven todos, como antes del script 17.
+Un pedido creado en el instante exacto de la apertura **sí** entra.
+
+Con `sesion_iniciada_en` en `null` esta lista devuelve **todos** los pedidos: la consulta
+es del backend y mantiene el criterio del script 17. Ojo, porque **la cuenta hace lo
+contrario**: `obtener_cuenta_mesa` devuelve una cuenta **vacía** cuando no hay sesión
+(regla H-02, script 20). Son dos respuestas distintas a propósito —ver una comanda vieja
+no cobra nada; sumarla en la cuenta, sí—, pero conviene no leer una por la otra.
 
 La misma regla se aplica a **`GET /pedidos/:id` cuando quien pregunta es un comensal**:
 un pedido de su mesa pero de otra visita responde **403**. El personal sí ve el histórico
@@ -1906,9 +2315,14 @@ y 17) y se devuelve tal cual: sus campos son el contrato.
 **Es la cuenta de la VISITA ACTUAL, no el histórico de la mesa.** `mesas.sesion_iniciada_en`
 marca cuándo se sentó el grupo que está ahora, y solo cuentan los pedidos creados desde
 entonces: si el grupo anterior dejó algo sin pagar, no se le cobra a este. La respuesta
-incluye ese `sesion_iniciada_en` para que el cliente sepa de qué visita habla (es `null`
-en una mesa que nunca se ha abierto desde el script 17, y entonces entran todos los
-pedidos no cancelados).
+incluye ese `sesion_iniciada_en` para que el cliente sepa de qué visita habla.
+
+**Sin sesión abierta, la cuenta sale VACÍA**, no completa: con `sesion_iniciada_en` en
+`null` la función devuelve totales en `0.00` y `pedidos`/`comensales` vacíos (regla H-02,
+`database/scripts/20_fix_h02_sesion_mesa_cuenta.sql`). Es lo contrario de lo que hacía el
+script 17, donde un `null` sumaba todo el histórico y la cuenta del grupo nuevo arrastraba
+lo del anterior. Así que una mesa con pedidos pero sin abrir no muestra `$0` por error:
+muestra que no hay ninguna visita a la que cobrarle.
 
 El backend fija `sesion_iniciada_en = NOW()` **solo cuando la mesa pasa de no ocupada a
 `ocupada`**, en la misma sentencia que el estado y el token:
@@ -2407,10 +2821,12 @@ Todos los montos de estas rutas viajan en **centavos enteros** (`monto_centavos`
 - **404** si la mesa no existe (se comprueba antes de llamar a la función, que
   lanzaría un `RAISE` y saldría como 409). **400** si el id no es un entero.
 
-> ⚠️ **Limitación conocida (no es de este endpoint):** `obtener_cuenta_mesa` toma todos
-> los pedidos de la mesa con `estado != 'cancelado'`, **sin distinguir la sesión**, así
-> que un pedido ya pagado de un grupo anterior sigue sumando en `total_centavos` y
-> descuadra `por_comensal`. Ver *Pendiente por acordar con el equipo*.
+- **Es la cuenta de la VISITA ACTUAL.** `obtener_cuenta_mesa` filtra por
+  `creado_en >= mesas.sesion_iniciada_en`, así que los pedidos de un grupo anterior **no**
+  suman en `total_centavos`. Y si la mesa no tiene sesión abierta
+  (`sesion_iniciada_en IS NULL`), la cuenta sale **vacía**: totales en `0` y
+  `por_comensal` en `[]` (scripts 17 y 20). Lo de que mezclaba sesiones era cierto hasta
+  el script 15 y ya no lo es.
 
 ### POST /transacciones/internal
 
@@ -2521,6 +2937,508 @@ forma (p. ej. `moneda` de más de 3 caracteres, `monto_centavos` no entero).
 
 ---
 
+## Inventario: insumos, movimientos y recetas (D-17 PR 2)
+
+Lo que hay en bodega, cómo entra y sale, y cuánto consume cada plato y cada opción del
+constructor. Las tablas, la función y las vistas son de `database/scripts/27_inventario.sql`
+(P-19, Jarrison); este backend solo expone el CRUD y traduce sus errores.
+
+**La base es la fuente de verdad, y aquí más que en ningún otro módulo:**
+
+- `insumos.stock_actual` **no se edita nunca a mano**. Lo mueven la reserva de los pedidos y
+  `registrar_movimiento_inventario`, y la regla del libro es
+  `SUM(movimientos_inventario.cantidad) = insumos.stock_actual`. Por eso no hay ningún `PUT`
+  ni `PATCH` que escriba el stock: un UPDATE directo descuadraría el libro para siempre.
+- La **disponibilidad se recalcula sola**. Al cambiar el stock, al activar o desactivar un
+  insumo y al tocar una receta, los triggers del script 27 recalculan
+  `platos.stock_suficiente` e `ingredientes.stock_suficiente`, y lo que cambie sale por el
+  canal `inventario` de PostgreSQL. El backend ya lo escucha y lo reenvía al socket-server
+  (ver [Avisos de inventario en vivo](#avisos-de-inventario-en-vivo-d-17), D-17 PR 1): el
+  panel y las mesas se enteran sin pedir nada.
+- Lo que ve el comensal es `disponible AND stock_suficiente`: el **interruptor manual** de la
+  cocina sigue siendo `disponible`, y el stock es lo calculado.
+
+| Método | Ruta | Roles | Descripción |
+|---|---|---|---|
+| GET | `/inventario/insumos` | **admin** | Lista de insumos; `?estado=bajo` lee `v_stock_bajo` |
+| GET | `/inventario/insumos/:id` | **admin** | Un insumo |
+| POST | `/inventario/insumos` | **admin** | Crea el insumo; `stock_inicial` entra como movimiento |
+| PUT | `/inventario/insumos/:id` | **admin** | Nombre, unidad, mínimo y alta/baja. **No** el stock |
+| POST | `/inventario/insumos/:id/movimientos` | **admin** | Entrada, ajuste o merma |
+| GET | `/inventario/insumos/:id/movimientos` | **admin** | Historial del insumo, lo más nuevo primero |
+| GET | `/inventario/insumos/:id/usos` | **admin** | Qué recetas usan ese insumo, y cuánto (D-17 PR 3) |
+| GET | `/inventario/carta` | **admin** | Platos y opciones con su disponibilidad y si tienen receta (D-17 PR 3) |
+| GET | `/platos/:id/receta` | **admin** | Receta del plato |
+| PUT | `/platos/:id/receta` | **admin** | Reemplaza la receta completa |
+| GET | `/ingredientes/:id/receta` | **admin** | Receta de una opción del constructor |
+| PUT | `/ingredientes/:id/receta` | **admin** | Reemplaza la receta completa |
+
+> **Todo es solo `admin`, también las lecturas.** El inventario dice cuánto cuesta y cuánto
+> queda de cada cosa: es información del negocio, no de sala. El `mesero` y el `cajero` sí
+> reciben en vivo el aviso `inventario:alerta` de lo que se está agotando (EVENTS.md §5.5,
+> `room:admin`), que es lo que necesitan para no ofrecer lo que no hay. **Propuesta para
+> G-06:** si el panel quiere además una lectura REST de `?estado=bajo` para esos dos roles, es
+> un cambio de una línea en la ruta; no lo abro por mi cuenta.
+
+### GET /inventario/insumos — admin
+
+| Parámetro | Valores | Por omisión |
+|---|---|---|
+| `estado` | `todos`, `bajo` | `todos` |
+| `activo` | `true`, `false` (sin él, todos) | — |
+| `q` | Texto, busca por nombre sin distinguir mayúsculas ni acentos | — |
+| `limite` | 1–200 | 100 |
+
+`?estado=bajo` lee la vista **`v_stock_bajo`** (`activo AND stock_actual <= stock_minimo`), que
+trae su propio `agotado`:
+
+```json
+{
+  "insumos": [
+    { "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "stock_actual": 450, "stock_minimo": 500, "agotado": false },
+    { "id_insumo": 3, "nombre": "Masa", "unidad": "porcion", "stock_actual": 0, "stock_minimo": 10, "agotado": true }
+  ]
+}
+```
+
+Sin `estado=bajo` (o con `estado=todos`) sale la tabla `insumos`, con `activo` y
+`actualizado_en`, y además `bajo` y `agotado` calculados, para que el panel pinte la misma
+señal en las dos vistas sin tener que comparar a mano:
+
+```json
+{
+  "insumos": [
+    {
+      "id_insumo": 12,
+      "nombre": "Queso costeño",
+      "unidad": "g",
+      "stock_actual": 450,
+      "stock_minimo": 500,
+      "activo": true,
+      "bajo": true,
+      "agotado": false,
+      "actualizado_en": "2026-11-08T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+- **Los `NUMERIC` salen como números JSON** (`450`, `0.5`), no como texto: el backend registra
+  un parser para el OID 1700 (`src/config/db.js`). Es la misma regla que ya cumplen `total` y
+  `precio`.
+- `estado` y `activo` con un valor que no está en la lista son **400**, no se ignoran en
+  silencio: un `?estado=bajos` que devolviera todo haría creer al panel que no hay faltantes.
+- Orden: por `nombre`. Con `estado=bajo`, primero lo **agotado** y luego por nombre.
+
+### GET /inventario/insumos/:id — admin
+
+```json
+{
+  "insumo": {
+    "id_insumo": 12,
+    "nombre": "Queso costeño",
+    "unidad": "g",
+    "stock_actual": 450,
+    "stock_minimo": 500,
+    "activo": true,
+    "bajo": true,
+    "agotado": false,
+    "actualizado_en": "2026-11-08T12:00:00.000Z"
+  }
+}
+```
+
+**400** si el `:id` no es un entero positivo · **404** `Insumo no encontrado` si no existe (un
+insumo **desactivado** sí se devuelve: la baja no lo esconde, solo lo saca del servicio).
+
+### POST /inventario/insumos — admin
+
+```json
+{ "nombre": "Queso costeño", "unidad": "g", "stock_minimo": 500, "stock_inicial": 2000 }
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `nombre` | Sí | Texto 1–80 (la columna es `VARCHAR(80)`), **único** |
+| `unidad` | No (por omisión `porcion`) | Uno de `porcion`, `unidad`, `g`, `ml` (CHECK de la tabla) |
+| `stock_minimo` | No (por omisión `0`) | Número ≥ 0, hasta 2 decimales |
+| `stock_inicial` | No | Número **> 0**, hasta 2 decimales |
+
+**201**: el insumo creado y, si hubo `stock_inicial`, el movimiento con el que entró:
+
+```json
+{
+  "insumo": { "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "stock_actual": 2000, "stock_minimo": 500, "activo": true, "bajo": false, "agotado": false, "actualizado_en": "..." },
+  "movimiento": { "id": 44, "tipo": "entrada", "cantidad": 2000, "stock_resultante": 2000, "motivo": "Stock inicial", "id_usuario": 1, "creado_en": "..." }
+}
+```
+
+- **El insumo nace con `stock_actual = 0` y el stock inicial entra como un movimiento
+  `entrada`**, en la **misma transacción**. Así `SUM(cantidad) = stock_actual` se cumple desde
+  la primera fila: si el stock inicial se escribiera en la columna, el libro arrancaría torcido
+  y ningún informe cuadraría nunca.
+- Sin `stock_inicial` no hay movimiento y `movimiento` sale en `null`. Es lo normal al dar de
+  alta algo que todavía no ha llegado.
+- **409 `nombre_en_uso`** si ya existe un insumo con ese nombre (índice único de la tabla):
+
+```json
+{ "error": "Ya hay un insumo con ese nombre", "motivo": "nombre_en_uso" }
+```
+
+### PUT /inventario/insumos/:id — admin
+
+Parcial: solo lo que se manda. Al menos un campo, o **400**.
+
+```json
+{ "stock_minimo": 800, "activo": false }
+```
+
+| Campo | Regla |
+|---|---|
+| `nombre` | Texto 1–80, único (**409 `nombre_en_uso`**) |
+| `unidad` | `porcion`, `unidad`, `g`, `ml` |
+| `stock_minimo` | Número ≥ 0, hasta 2 decimales |
+| `activo` | Booleano estricto (`"false"` o `0` son **400**) |
+
+**200** devuelve el insumo ya actualizado. El cuerpo es `.strict()`: una clave de más es
+**400**, y eso incluye **`stock_actual`**, que se rechaza en vez de ignorarse para que nadie
+crea haber corregido el stock con un PUT que no lo toca. Para eso están los movimientos.
+
+**No existe `DELETE`. Un insumo no se borra: se desactiva** con `{"activo": false}`.
+
+- Las recetas lo referencian con `ON DELETE RESTRICT` y los movimientos también: borrarlo
+  sería borrar el libro de inventario, que es justo lo que no se puede perder.
+- Desactivarlo **cuenta como "no hay"**: `fn_recalcular_*` trata un insumo inactivo igual que
+  uno sin stock, así que **los platos y las opciones que lo usan pasan a no disponibles** y
+  salen sus avisos por el canal. Volver a activarlo los recupera.
+- `stock_minimo` **no dispara ningún aviso** al cambiarlo (el trigger solo mira `stock_actual`
+  y `activo`): el panel ve la lista al abrir con `?estado=bajo`.
+
+### POST /inventario/insumos/:id/movimientos — admin
+
+El único camino para mover el stock.
+
+```json
+{ "tipo": "entrada", "cantidad": 2000, "motivo": "Compra del proveedor" }
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `tipo` | Sí | `entrada`, `ajuste` o `merma`. **Nada más**: `reserva` y `devolucion` los escribe la base al pedir o al cancelar, y mandarlos a mano descuadraría el libro |
+| `cantidad` | Sí | `entrada` y `merma`: **> 0** (el tipo ya dice el signo). `ajuste`: cualquier número **≠ 0**, con signo. Hasta 2 decimales |
+| `motivo` | No | Texto hasta 500 |
+
+**201**:
+
+```json
+{
+  "movimiento": { "id": 44, "id_insumo": 12, "tipo": "merma", "cantidad": -50, "stock_resultante": 1950, "id_detalle": null, "id_usuario": 1, "motivo": "Se cayó una bandeja", "creado_en": "..." },
+  "stock_actual": 1950
+}
+```
+
+- Lo hace **`registrar_movimiento_inventario`**, no un UPDATE del backend: ella bloquea el
+  insumo (`FOR UPDATE`), comprueba que no quede negativo, escribe la fila y devuelve el
+  movimiento. `cantidad` sale **con el signo con el que se guardó** (una merma de 50 es `-50`).
+- **El autor es el del JWT.** La función lo lee de `app.id_usuario` con
+  `fn_usuario_de_sesion()`, así que el backend hace
+  `SELECT set_config('app.id_usuario', '<id>', true)` **en la misma transacción** (con
+  `is_local`, para que no se filtre a la siguiente petición del pool). Nunca sale del cuerpo.
+- `ajuste` con signo es lo que permite **corregir un conteo** en los dos sentidos
+  (`-12` tras un recuento físico). Es lo que acepta la función, y por eso aquí la regla de
+  "cantidad > 0" aplica a `entrada` y `merma`, no a `ajuste`.
+- **400 `movimiento_invalido`** si el movimiento dejaría el stock en negativo (SQLSTATE
+  **SD002**, ya traducido en el PR 1), con el stock que hay ahora:
+
+```json
+{ "error": "El movimiento dejaría \"Queso costeño\" en negativo: hay 450.00 g", "motivo": "movimiento_invalido", "stock_actual": 450 }
+```
+
+- **404** si el insumo no existe. **400** de zod si `tipo` no es uno de los tres o `cantidad`
+  no cumple: se valida en el backend **antes** de llamar a la función, porque la base lo
+  rechazaría con un `check_violation` (23514) que el manejador central traduce a un **422**
+  opaco ("un dato está fuera del rango permitido"), y aquí sí se puede decir qué campo falla.
+- Un movimiento sobre un insumo **desactivado** se acepta: hay que poder cuadrar el libro de
+  algo que ya no se usa. Lo que no cambia es la disponibilidad, que sigue en "no hay".
+- La base publica `stock_bajo` —y el panel recibe `inventario:alerta` en vivo— si el
+  movimiento **cruza el mínimo hacia abajo** o si **deja el insumo en 0** viniendo de más de 0,
+  **aunque ya estuviera bajo el mínimo** (script 28, G-06). Nunca en cada movimiento: un
+  insumo que sigue bajando por debajo del mínimo sin llegar a 0 no vuelve a avisar. El detalle
+  de los dos casos está en
+  [Cuándo sale `stock_bajo`](#avisos-de-inventario-en-vivo-d-17). Si el movimiento deja un
+  plato sin stock, llega además su `plato:disponibilidad`.
+
+### GET /inventario/insumos/:id/movimientos — admin
+
+El libro del insumo, **lo más reciente primero**.
+
+| Parámetro | Valores | Por omisión |
+|---|---|---|
+| `limite` | 1–200 | 50 |
+| `desde` | Fecha ISO 8601; solo los movimientos desde ese instante | — |
+
+```json
+{
+  "movimientos": [
+    { "id": 44, "tipo": "merma", "cantidad": -50, "stock_resultante": 1950, "id_detalle": null, "id_usuario": 1, "motivo": "Se cayó una bandeja", "creado_en": "2026-11-08T12:00:00.000Z" },
+    { "id": 43, "tipo": "reserva", "cantidad": -2, "stock_resultante": 2000, "id_detalle": 701, "id_usuario": null, "motivo": "Pedido 87", "creado_en": "2026-11-08T11:40:00.000Z" }
+  ]
+}
+```
+
+- Salen **todos** los tipos, incluidos los que escribe la base al pedir (`reserva`,
+  `devolucion`, `merma` con `id_detalle`): es el libro, y sin ellos no cuadraría con el stock.
+- `id_detalle` dice de qué ítem de pedido salió el movimiento; `id_usuario` puede ser `null`
+  (lo hizo la reserva de un comensal, o el usuario se borró después: la FK es
+  `ON DELETE SET NULL`).
+- No se devuelve el nombre del usuario: esta ruta no es un informe y unir con `usuarios`
+  publicaría datos del personal en una lista que el panel ya sabe resolver.
+- **400** si `limite` o `desde` no son válidos · **404** si el insumo no existe (para no
+  confundir "sin movimientos" con "ese id no existe").
+
+### GET /inventario/insumos/:id/usos — admin (D-17 PR 3)
+
+**Dónde se usa ese insumo**: qué platos y qué opciones del constructor lo llevan en su receta,
+y cuánto. Es la pregunta de antes de tocarlo —desactivarlo, cambiarle la unidad, cambiar su
+receta—: *si lo toco, qué se cae*. Con `PUT /inventario/insumos/:id {"activo": false}` el panel
+puede avisar exactamente qué platos van a quedar en "no hay".
+
+```json
+{
+  "id_insumo": 12,
+  "nombre": "Queso costeño",
+  "platos": [
+    { "id": 1004, "nombre": "Nachos Supremos", "cantidad": 30 }
+  ],
+  "ingredientes": [
+    {
+      "id": 7,
+      "nombre": "Queso Extra",
+      "id_plato": 1001,
+      "plato": "Bowl Personalizado",
+      "id_paso": 6,
+      "paso": "Añade Toppings",
+      "paso_orden": 3,
+      "cantidad": 15
+    }
+  ]
+}
+```
+
+- `cantidad` es lo que consume **una unidad** del plato, o **una porción normal** de la opción
+  (la base multiplica esta última por `factores_porcion`: `ligera` 0.5, `normal` 1, `extra`
+  1.5). Llega como **número**, no como texto.
+- Las opciones traen su `plato`, su `paso` y `paso_orden`, igual que en
+  [`GET /inventario/carta`](#get-inventariocarta--admin-d-17-pr-3), para que el panel las
+  agrupe de la misma forma.
+- Orden: los platos por **nombre**; las opciones por **plato**, **`paso_orden`** y **nombre**.
+- Un insumo que **no se usa en ninguna receta** devuelve las dos listas vacías. Es lo normal
+  en uno recién creado, y es la señal de que se puede desactivar sin romper nada.
+- **404** `Insumo no encontrado` si el insumo no existe, y **no** dos listas vacías: "no se usa"
+  y "no existe" son cosas distintas. **400** si el `:id` no es un entero positivo.
+- Es de **solo lectura**: no cambia nada ni dispara ningún aviso.
+
+### GET /inventario/carta — admin (D-17 PR 3)
+
+La carta entera con **su disponibilidad y si tiene receta**: es lo que necesita la pestaña de
+**Recetas** del panel (P-22) para listar de una sola llamada qué hay que configurar y qué está
+agotado, sin pedir plato por plato.
+
+Sale de la vista **`v_carta_disponible`** (`database/scripts/27_inventario.sql`), que es quien
+decide qué es "disponible": el backend no recalcula nada. A la vista se le añaden, con un JOIN,
+los datos que el panel necesita para agrupar y explicar las filas —la categoría del plato, si
+es personalizable, y de qué plato y de qué paso (con su orden) es cada opción del
+constructor—, que la vista no trae.
+
+```http
+GET /api/inventario/carta
+Authorization: Bearer <token de admin>
+```
+
+```json
+{
+  "platos": [
+    {
+      "id": 12,
+      "nombre": "Arepa de Huevo",
+      "categoria": "Entradas",
+      "personalizable": false,
+      "disponible": true,
+      "stock_suficiente": false,
+      "disponible_efectivo": false,
+      "motivo": "stock",
+      "tiene_receta": true
+    },
+    {
+      "id": 1001,
+      "nombre": "Bowl Personalizado",
+      "categoria": "Bowls",
+      "personalizable": true,
+      "disponible": true,
+      "stock_suficiente": true,
+      "disponible_efectivo": true,
+      "motivo": null,
+      "tiene_receta": false
+    }
+  ],
+  "ingredientes": [
+    {
+      "id": 7,
+      "nombre": "Panceta Crujiente",
+      "id_plato": 1001,
+      "plato": "Bowl Personalizado",
+      "id_paso": 4,
+      "paso": "Proteína",
+      "paso_orden": 2,
+      "disponible": false,
+      "stock_suficiente": true,
+      "disponible_efectivo": false,
+      "motivo": "manual",
+      "tiene_receta": true
+    }
+  ]
+}
+```
+
+**Dos listas y no una**, aunque la vista las devuelva juntas con un `tipo`: un plato y una
+opción no se pintan igual (la opción cuelga de un paso de su plato) y el panel las muestra en
+dos tablas. Separarlas aquí le ahorra filtrar por `tipo` en el cliente, y el `tipo` deja de
+hacer falta en cada fila.
+
+| Campo | Qué es |
+|---|---|
+| `id` | `id_plato` o `id_ingrediente`, según la lista |
+| `nombre` | El del plato o de la opción |
+| `categoria` | Solo en `platos`: el nombre de su categoría (`null` si no tiene) |
+| `personalizable` | Solo en `platos`: si se arma por pasos en el constructor |
+| `id_plato`, `plato` | Solo en `ingredientes`: a qué plato pertenece la opción |
+| `id_paso`, `paso` | Solo en `ingredientes`: de qué paso del constructor es, con su nombre |
+| `paso_orden` | Solo en `ingredientes`: el **orden de ese paso dentro de su plato** (`pasos_constructor.orden`) |
+| `disponible` | El **interruptor manual** de la cocina |
+| `stock_suficiente` | Lo que **calcula la base** a partir del stock de la receta |
+| `disponible_efectivo` | `disponible AND stock_suficiente`: lo que ve el comensal |
+| `motivo` | `null` si está disponible · `"manual"` si lo apagó la cocina · `"stock"` si no alcanza el inventario. El manual **gana**: un plato apagado a mano y además sin stock dice `"manual"` |
+| `tiene_receta` | Si tiene receta en insumos. En `false` **no controla inventario**: se puede pedir siempre |
+
+**`personalizable` explica un `tiene_receta: false` que NO es un olvido.** Un Bowl, un Wrap o
+una Arepa Rellena **consumen por sus opciones**, cada una con su propia receta, así que el
+plato no tiene receta propia y está bien así. Sin ese campo, el panel los pintaría en la lista
+de "falta configurar" junto a los que de verdad están sin receta.
+
+**`paso_orden` hace falta porque el nombre del paso se repite entre platos** ("Elige tu Salsa"
+está en varios): con solo `paso` no se pueden ordenar los pasos como los ve el comensal, ni
+distinguir dos pasos homónimos de platos distintos.
+
+- Los `id` y `paso_orden` llegan como **números JSON**, no como texto.
+- **Orden fijo, y es parte del contrato**: los platos por **categoría** y luego **nombre**; las
+  opciones por **plato**, luego **`paso_orden`** y luego **nombre**. Es el orden en que el panel
+  las pinta, así que no tiene que reordenar nada. Un plato sin categoría va primero.
+- Salen **todos** los platos y todas las opciones, también los agotados y los apagados a mano:
+  es una pantalla de administración, no el menú del comensal (ese es `GET /menu`, que solo
+  muestra lo disponible).
+
+**Filtros opcionales** (`.strict()`: un parámetro que no esté aquí es **400**):
+
+| Parámetro | Valores | Qué hace |
+|---|---|---|
+| `tipo` | `plato`, `ingrediente` | Devuelve solo esa lista; la otra viaja **vacía**, no se omite |
+| `sin_receta` | `true`, `false` | Con `true`, solo lo que **no tiene receta**: es la lista de "falta configurar" de la pestaña |
+| `q` | Texto, hasta 80 | Busca por **nombre**, sin distinguir mayúsculas. Va parametrizado (`ILIKE $1`), nunca pegado al SQL |
+
+```http
+GET /api/inventario/carta?sin_receta=true&tipo=plato
+GET /api/inventario/carta?q=arepa
+```
+
+- `sin_receta=true` filtra **solo por `tiene_receta = false`**, sin mirar `personalizable`: un
+  Bowl personalizable sin receta propia **sí sale** en esa lista, y es el panel el que decide
+  cómo mostrarlo con el campo `personalizable`. El filtro no esconde nada por su cuenta.
+- Un valor fuera de la lista es **400** y no se ignora: un `?tipo=platos` que devolviera todo
+  haría creer al panel que no hay nada pendiente de configurar.
+- `q` filtra por el nombre del plato o de la opción, no por el del plato padre: buscar "bowl"
+  no trae todas sus opciones.
+- Con `tipo=ingrediente`, la respuesta sigue trayendo `"platos": []`, para que el cliente no
+  tenga que comprobar si la clave existe.
+
+**Qué cambia la disponibilidad.** Nada de esta ruta: es de solo lectura. La cambian un
+movimiento de inventario, activar o desactivar un insumo, editar una receta
+(`PUT /platos/:id/receta`) o el interruptor manual (`PATCH /platos/:id/disponible`). La base
+recalcula y publica el aviso por el canal `inventario`, y el panel lo recibe en vivo como
+`plato:disponibilidad` o `ingrediente:disponibilidad` (ver
+[Avisos de inventario en vivo](#avisos-de-inventario-en-vivo-d-17)): esta llamada es para
+**cargar la pantalla**, no para refrescarla en bucle.
+
+### GET /platos/:id/receta y GET /ingredientes/:id/receta — admin
+
+Lo que consume **una unidad** del plato, o **una porción normal** de la opción.
+
+```json
+{
+  "id_plato": 12,
+  "receta": [
+    { "id_insumo": 3, "nombre": "Masa", "unidad": "porcion", "cantidad": 1, "stock_actual": 40, "activo": true },
+    { "id_insumo": 12, "nombre": "Queso costeño", "unidad": "g", "cantidad": 30, "stock_actual": 450, "activo": true }
+  ]
+}
+```
+
+En `/ingredientes/:id/receta` la clave es `id_ingrediente` y el resto es igual. Una receta
+vacía es `{"receta": []}` y significa que **ese plato u opción no controla inventario**: se
+puede pedir siempre (`tiene_receta` en `v_carta_disponible` sale en `false`).
+
+**400** si el `:id` no es un entero positivo · **404** si el plato o la opción no existen.
+
+### PUT /platos/:id/receta y PUT /ingredientes/:id/receta — admin
+
+**Reemplaza la receta completa**, en una transacción:
+
+```json
+{ "insumos": [{ "id_insumo": 3, "cantidad": 1 }, { "id_insumo": 12, "cantidad": 30 }] }
+```
+
+| Campo | Regla |
+|---|---|
+| `insumos` | Arreglo de 0 a 50 entradas. **Sin `id_insumo` repetidos** (sería ambiguo: la tabla tiene PK `(id_plato, id_insumo)`) |
+| `id_insumo` | Entero positivo |
+| `cantidad` | Número **> 0**, hasta 2 decimales (el CHECK de la tabla exige `> 0`) |
+
+**200** devuelve la receta ya guardada, en el mismo formato que el `GET`.
+
+- **Es un reemplazo, no un parche**: se borra la receta anterior y se insertan las entradas
+  nuevas, todo en la misma transacción. Un `PUT` con `{"insumos": []}` **deja el plato sin
+  receta** y por tanto sin control de inventario; es la forma de quitarla.
+- Para la opción del constructor, `cantidad` es la de la **porción normal**. La base la
+  multiplica por `factores_porcion` (`ligera` 0.5, `normal` 1, `extra` 1.5).
+- **La disponibilidad cambia al guardar.** Los triggers `tr_receta_plato` y
+  `tr_receta_ingrediente` recalculan el plato o la opción con la receta nueva, así que un plato
+  puede quedar **no disponible en el mismo PUT** si algún insumo de la receta no alcanza para
+  una unidad. Sale su aviso por el canal y el panel y las mesas lo ven al instante.
+- **409 `insumo_inexistente`** si alguna entrada apunta a un `id_insumo` que no existe (la FK
+  de la receta):
+
+```json
+{ "error": "Alguno de los insumos de la receta no existe", "motivo": "insumo_inexistente" }
+```
+
+- **400 `insumo_repetido`** si el mismo `id_insumo` aparece dos veces, con el id que choca:
+
+```json
+{ "error": "El insumo 3 está repetido en la receta", "motivo": "insumo_repetido" }
+```
+
+- **404** si el plato o la opción no existen. Un insumo **desactivado** sí se puede poner en
+  una receta (se está preparando el cambio), pero deja el plato en "no hay" hasta que vuelva.
+
+### Lo que este PR NO hace
+
+- **No toca `stock_actual` directamente** por ninguna ruta, ni ofrece un `DELETE` de insumos.
+- **No da de baja recetas por plato borrado**: eso ya lo hace la base con
+  `ON DELETE CASCADE` sobre `platos` e `ingredientes`.
+- **No expone `movimientos_inventario` completo** (sin filtrar por insumo) ni informes de
+  consumo: son de reportes y van con su propia agregación en SQL.
+
+---
+
 ## Códigos de error de la base de datos
 
 El manejador central ([`errores.middleware.js`](../src/middleware/errores.middleware.js))
@@ -2540,50 +3458,208 @@ es el único sitio donde se decide el status. Traduce lo que lanza PostgreSQL as
 
 ### Inventario: SD001 y SD002 (P-19 · los traduce D-17)
 
-> **Pendiente de D-17.** La base ya los lanza (`database/scripts/27_inventario.sql`); hasta
-> que D-17 agregue la traducción, caen en la fila de "cualquier otro error" (500).
-
-Dos SQLSTATE propios del inventario. Los dos traen en el **DETAIL** un JSON (en `pg`:
-`err.detail`), que el backend parsea:
+Dos SQLSTATE propios del inventario (`database/scripts/27_inventario.sql`). Los dos traen en
+el **DETAIL** un JSON (en `pg`: `err.detail`) que el backend parsea. La traducción vive en
+`src/middleware/inventario-errores.js` y la aplica el **manejador central**, así que vale para
+cualquier ruta que acabe tocando el inventario.
 
 | SQLSTATE | Cuándo | Status | Cuerpo |
 |---|---|---|---|
-| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "codigo": "SIN_STOCK", "error": "...", "faltantes": [{ "tipo", "id", "nombre" }] }` |
-| **SD002** "stock negativo" | `registrar_movimiento_inventario` (merma o ajuste) dejaría el stock bajo 0 | **400** | `{ "error": "...", "stock_actual": 450 }` |
+| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "error": "...", "motivo": "sin_stock", "faltantes": [{ "tipo", "id", "nombre" }] }` |
+| **SD002** "stock negativo" | `registrar_movimiento_inventario` (merma o ajuste) dejaría el stock bajo 0 | **400** | `{ "error": "...", "motivo": "movimiento_invalido", "stock_actual": 450 }` |
+| `El ingrediente "X" está agotado` (**P0001**) | Interruptor manual de una opción, anterior a P-19 | **409** | `{ "error": "...", "motivo": "ingrediente_agotado" }` |
+
+> La convención de errores de esta API es **`{ error, motivo }`** (decisión de Jarrison).
+> `motivo` es el código estable que el cliente compara; `error` es el texto para leer. **No se
+> usa `codigo`**: la versión anterior de este documento prometía un `codigo: "SIN_STOCK"` que
+> el backend nunca envía.
 
 **SD001**: `DETAIL = {"faltantes":[{ "tipo", "id", "nombre", "id_insumo", "insumo", "necesita", "hay" }]}`.
 
+```json
+{
+  "error": "Sin stock suficiente para el pedido 87",
+  "motivo": "sin_stock",
+  "faltantes": [
+    { "tipo": "plato", "id": 12, "nombre": "Arepa de Huevo" },
+    { "tipo": "ingrediente", "id": 7, "nombre": "Panceta Crujiente" }
+  ]
+}
+```
+
 - `tipo` es `"plato"` o `"ingrediente"`, e `id`/`nombre` dicen **qué quitar del carrito**.
-  `id_insumo`, `insumo`, `necesita` y `hay` explican por qué; pueden venir en `null` cuando
-  lo que falta son las opciones de un paso obligatorio del constructor.
-- **Al cliente solo van `tipo`, `id` y `nombre`**, sin repetir: el pedido puede venir de un
-  comensal anónimo y las cantidades de bodega no son de su incumbencia. `id_insumo`,
-  `insumo`, `necesita` y `hay` quedan en el log del servidor.
-- **Puede llegar en el `COMMIT`**, no en el `INSERT`: la reserva es un trigger diferido
+- **Al cliente solo van `tipo`, `id` y `nombre`, y sin repetir**: el pedido lo puede hacer un
+  comensal anónimo desde su teléfono y las cantidades de bodega no son asunto suyo.
+  `id_insumo`, `insumo`, `necesita` y `hay` quedan **solo en el log del servidor**, que es
+  donde hacen falta para reponer.
+- Se **deduplica por `tipo` + `id`**: la base arma los faltantes por INSUMO, así que un plato
+  al que le faltan tres insumos sale tres veces en el DETAIL y al cliente se le diría tres
+  veces que quite el mismo plato. Un plato y una opción con el mismo `id` **no** se pisan.
+- Los faltantes del constructor pueden traer `id_insumo`, `insumo`, `necesita` y `hay` en
+  `null` cuando lo que falta son las **opciones de un paso obligatorio**; siguen siendo
+  faltantes válidos y salen igual.
+- Si el DETAIL **no se puede parsear**, la respuesta sigue siendo **409 `sin_stock`** con
+  `faltantes: []`. Un detalle ilegible no convierte en 500 un error que el cliente sabe
+  atender; `nombre` va en `null` si la base no lo manda.
+- **Puede llegar en el `COMMIT`**, no en el `INSERT`: la reserva es un trigger **diferido**
   (`tr_reservar_inventario`) que corre al confirmar, para ver el pedido entero con sus
-  ingredientes. El `catch` que traduce el error tiene que envolver también el `COMMIT`.
-  Si el plato ya se sabía sin stock, llega antes, en el `INSERT` del detalle, con el mismo
-  formato.
-- Se revierte el **pedido entero**: no queda ningún detalle ni ninguna reserva.
+  ingredientes. El `try/catch` de `crearConDetalles` **envuelve también el `COMMIT`**, y el
+  `ROLLBACK` del catch está protegido para que no tape el SD001 (tras un COMMIT fallido la
+  transacción ya está deshecha y ese ROLLBACK solo avisa "no hay transacción en curso").
+  Si el plato ya **figuraba** sin stock, llega antes, en el `INSERT` del detalle, con el mismo
+  formato y la misma respuesta. Ojo con el reparto: el trigger del `INSERT` mira la **bandera**
+  `platos.stock_suficiente`, que la base calcula para **una unidad**, así que pedir 5 de un
+  plato que alcanza para 1 **pasa el INSERT** y falla en el `COMMIT`. Para el cliente es el
+  mismo 409; para quien depure, el camino normal del "no alcanza por la cantidad" es el COMMIT.
+- Se revierte el **pedido entero**: no queda ningún detalle ni ninguna reserva, y no se avisa
+  al socket-server de un pedido que no existe.
 - Reintentar no sirve; el cliente quita lo agotado y reenvía.
 
 **SD002**: `DETAIL = {"id_insumo", "insumo", "stock_actual", "cantidad"}` (`cantidad` con
-signo: lo que se intentó mover). El `MESSAGE` ya trae el stock actual, en lenguaje para el
-usuario: `El movimiento dejaría "Queso" en negativo: hay 450.00 g`.
+signo: lo que se intentó mover). El `MESSAGE` ya está en lenguaje para el usuario y se usa tal
+cual: `El movimiento dejaría "Queso" en negativo: hay 450.00 g`. `stock_actual` sale del
+DETAIL; si no se puede leer, el campo **no se inventa** y el mensaje ya lleva el dato.
 
-Los números del DETAIL y de los avisos `pg_notify('inventario')` ya son números JSON. Los
-que hay que convertir son los `NUMERIC` de una **consulta** con `pg` (p. ej. `v_stock_bajo`),
-que llegan como **texto**, antes de reenviarlos a `/internal/inventario-alerta`.
+**`ingrediente_agotado`** se reconoce con una expresión **estricta** (anclada y solo con
+P0001) porque `fn_tr_validar_detalle_ingrediente` lanza otros cinco P0001 ("no pertenece al
+plato", "no es personalizable", "el pedido ya está en estado X"…): un `includes` los marcaría
+todos como agotados y el cliente actuaría sobre el ingrediente cuando el problema es otro.
+Esos otros P0001 siguen saliendo como el **409 de siempre, sin `motivo`**.
 
-**Al arrancar el backend** (el caso "estaba caído cuando cambió el stock"):
+**`OVERRIDE_ADMIN` no salta el stock.** El bypass de `notas_especiales` que acepta
+`fn_tr_validar_disponibilidad_plato` solo vale para el **interruptor manual** de la cocina
+(`platos.disponible`). El stock se comprueba después y en la reserva, así que un pedido con
+`OVERRIDE_ADMIN` puede dar **SD001 igualmente**, y lo normal es que lo dé en el **COMMIT**.
+No hay forma de comandar por encima del inventario: el libro de `movimientos_inventario` no
+cuadraría.
 
-1. `LISTEN inventario` primero, para no perder nada desde ese momento.
-2. `SELECT fn_recalcular_toda_la_carta()`. Corrige cualquier `stock_suficiente` desfasado y
-   lo que cambie sale por `pg_notify` como siempre; devuelve **solo cuántos** cambiaron.
-3. Los avisos que se emitieron mientras el backend estaba caído **se perdieron**, y el
-   recálculo no los repite (el estado ya estaba al día). Para avisar la carta completa, se
-   lee `v_carta_disponible` (`tipo`, `id`, `disponible_efectivo`, `motivo`) y se emite la
-   disponibilidad de cada plato y opción. Las apps además recargan el menú al reconectar.
+**Un deadlock al crear el pedido (40P01) es 503 `reintentar`.** La reserva bloquea los insumos
+del pedido en orden de `id_insumo` justo para no cruzarse con otra transacción, pero un 40P01
+sigue siendo posible. `POST /api/pedidos` **no acepta ninguna clave de idempotencia**, así que
+el backend **no reintenta por su cuenta**: repetir la petición podría dejar la comanda
+duplicada. Se responde `{ "error": "intenta de nuevo", "motivo": "reintentar" }` y lo reenvía
+el cliente. En el resto de las rutas, un 40P01 sigue siendo el **409** genérico de concurrencia
+del manejador central.
+
+### Avisos de inventario en vivo (D-17)
+
+`27_inventario.sql` publica en el canal `inventario` de PostgreSQL (`pg_notify`), y **solo si
+la transacción se confirma**:
+
+```json
+{"tipo":"disponibilidad","entidad":"plato","id":12,"disponible":false,"motivo":"stock"}
+{"tipo":"stock_bajo","id_insumo":12,"nombre":"Queso costeño","unidad":"g","stock_actual":450,"stock_minimo":500}
+```
+
+El backend los escucha en `src/services/inventario-avisos.js` y los reenvía al socket-server:
+
+| Aviso | Ruta interna | Notas |
+|---|---|---|
+| `disponibilidad` de un plato | `POST /internal/plato-disponibilidad` | lo que viaja es el **efectivo** (`disponible AND stock_suficiente`) |
+| `disponibilidad` de una opción | `POST /internal/ingrediente-disponibilidad` | igual |
+| `stock_bajo` | `POST /internal/inventario-alerta` | contrato de EVENTS.md §5.5 (propuesta v1.1) |
+
+- **Conexión dedicada, no una del pool.** `LISTEN` vive en la conexión: una del pool se
+  devuelve en cuanto acaba la consulta y la siguiente petición la usaría —con su `LISTEN`
+  puesto— para otra cosa, o `idleTimeoutMillis` la cerraría y el canal quedaría muerto sin que
+  nadie se enterara. Esa conexión tampoco lleva `statement_timeout`: el recálculo del arranque
+  recorre toda la carta.
+- **Con `eventId` y reintentos.** Estos avisos van **siempre** con reintento
+  (`enviarConReintento`: 3 intentos, 150 ms, solo ante `500/502/503 ERROR_INTERNO`), porque
+  nadie está esperando la respuesta y el aviso no se guarda en ningún sitio: si se pierde, la
+  carta queda desfasada en las mesas hasta el próximo movimiento. Las rutas del personal
+  (`PATCH /platos/:id/disponible`) siguen con un solo intento, como antes.
+- **Los números tienen que ser números.** Los del `pg_notify` ya son números JSON, pero los
+  `NUMERIC` de una **consulta** con `pg` llegan como texto (`'450.00'`), y el socket-server
+  responde `400 PAYLOAD_INVALIDO` a un `stock_actual` de texto. Se convierten antes de
+  reenviarlos.
+- `agotado` y `emitidoEn` **no se mandan**: los pone el socket-server al emitir.
+- Un payload **ilegible o incompleto se ignora** y se registra: el canal lo llena la base, así
+  que un aviso raro es un script más nuevo o un cambio de contrato, nunca algo que deba cortar
+  el oyente.
+
+**Al arrancar el backend** (el caso "estaba caído cuando cambió el stock"), en este orden:
+
+1. `LISTEN inventario` **primero**, para no perder nada desde ese momento. Si se recalculara
+   antes, los avisos de ese propio recálculo se emitirían con el canal todavía sin escuchar.
+2. `SELECT fn_recalcular_toda_la_carta()`. Corrige cualquier `stock_suficiente` desfasado y lo
+   que cambie sale por `pg_notify` como siempre; devuelve **solo cuántos** cambiaron.
+3. Los avisos emitidos mientras el backend no estaba **se perdieron**, y el recálculo no los
+   repite (si el estado ya era correcto, no hay cambio que notificar). Así que se lee
+   `v_carta_disponible` (`tipo`, `id`, `disponible_efectivo`, `motivo`) y se **emite la
+   disponibilidad de cada plato y de cada opción**. Las apps además recargan el menú al
+   reconectar.
+
+Si el socket-server no responde, la emisión de la carta se **abandona tras 5 fallos seguidos**:
+los demás van a fallar igual y serían minutos de timeouts y decenas de líneas idénticas en el
+log. **Si se cae la conexión del canal**, se reconecta con espera creciente (1 s, 2 s, 4 s…
+hasta 30 s), se vuelve a hacer `LISTEN` y se repiten los pasos 2 y 3. El apagado ordenado
+cierra esa conexión y **cancela la reconexión pendiente** antes de cerrar el pool.
+
+**Nada de esto puede tumbar el backend ni una petición**: el tiempo real es un extra. El
+backend arranca y sirve igual sin Redis, sin socket-server y con el canal cerrado.
+
+**`stock_minimo` no dispara ningún aviso al cambiarlo.** El trigger `tr_insumo_recalcular` solo
+mira `stock_actual` y `activo`, así que subir el mínimo de un insumo que ya está por debajo
+**no** avisa: el panel ve esa lista al abrir, con
+[`GET /inventario/insumos?estado=bajo`](#get-inventarioinsumos--admin), que lee esa misma
+vista. `inventario:alerta` es solo para los avisos en vivo, y el propio contrato de Roberto
+dice que no se guardan.
+
+**Cuándo sale `stock_bajo` (script 28, G-06).** La base avisa en dos casos, con el **mismo**
+payload, y nunca en cada movimiento:
+
+1. el insumo **cruza su mínimo hacia abajo** (estaba sobre el mínimo, o inactivo, y queda en o
+   bajo él), o
+2. el insumo **llega a 0** desde más de 0, **aunque ya estuviera bajo el mínimo**. Es lo que
+   pide EVENTS.md §5.5 ("o llega a 0"); hasta el script 27 este caso no avisaba.
+
+Un mismo cambio de stock avisa una sola vez aunque cumpla los dos (p. ej. mínimo 0 y llega a
+0). Un pedido que en la **misma transacción** cruza el mínimo y luego llega a 0 (dos detalles
+del mismo insumo) deja **dos** avisos, uno con el stock que quedó bajo y otro con `0`: el
+socket-server marca el segundo con `agotado: true`. Lo prueba
+`database/tests/test_g06_aviso_agotado.sh`.
+
+### El autor que ya no existe: 409 `autor_inexistente`
+
+Varias escrituras del panel anotan **quién** las hizo, y ese id sale del JWT. Si el usuario se
+borró mientras su sesión seguía viva, la escritura choca contra la clave ajena de `usuarios` y
+PostgreSQL devuelve **23503**. Antes salía como el 409 genérico de clave ajena —"La operación
+choca con otro registro relacionado", sin `motivo`—, que no dice que el problema sea la propia
+sesión. Ahora:
+
+```json
+{ "error": "Tu usuario ya no existe; vuelve a iniciar sesión", "motivo": "autor_inexistente" }
+```
+
+**Status 409.** El cliente no puede arreglarlo reintentando ni corrigiendo el cuerpo: lo que
+toca es volver a entrar. El mensaje no nombra tablas ni constraints, porque a quien está en el
+panel no le sirve saber qué fila chocó.
+
+Dónde puede salir, y qué clave ajena lo provoca (los nombres están comprobados contra la base,
+y **no** siguen todos el mismo patrón: el de `movimientos_inventario` lo generó PostgreSQL):
+
+| Ruta | Qué lo escribe | Clave ajena |
+|---|---|---|
+| `POST` y `PUT /platos/:id` (cuando cambia el precio) | `tr_historial_precio_plato` → `historial_precios.id_usuario` | `fk_historial_precios_usuario` |
+| `PUT /ingredientes/:id` (cuando cambia `precio_extra`) | `tr_historial_precio_ingrediente` → la misma tabla | `fk_historial_precios_usuario` |
+| `PUT /configuracion` | `tr_configuracion_actualizada` → `configuracion_restaurante.actualizado_por` | `fk_configuracion_actualizado_por` |
+| `POST /inventario/insumos/:id/movimientos` y `POST /inventario/insumos` con `stock_inicial` | `registrar_movimiento_inventario` → `movimientos_inventario.id_usuario` | `movimientos_inventario_id_usuario_fkey` |
+
+- **La transacción se deshace entera**: el precio no cambia, la configuración se queda como
+  estaba y el stock no se mueve (el libro de inventario sigue cuadrando).
+- Se mira el **nombre del constraint**, no solo el SQLSTATE: un 23503 de otra cosa —una
+  categoría que no existe, un insumo que no existe— significa algo distinto y conserva su
+  propio motivo. La cuenta vive en un solo sitio,
+  [`src/services/autor-inexistente.js`](../src/services/autor-inexistente.js), para que los
+  cuatro caminos no puedan discrepar.
+- `id_usuario` **en `null` es válido** y no da este error: así quedan los movimientos que
+  genera un pedido de un comensal, que no tiene usuario.
+
+> **Queda uno fuera, a propósito.** `POST /pedidos` escribe `historial_estados.id_usuario`
+> (`fk_historial_usuario`) con el id del JWT, así que un usuario borrado da el mismo 23503 sin
+> traducir. No entró en este cambio para no mezclarlo con el review; es una línea con el mismo
+> helper cuando se decida.
 
 ### La frontera entre 400 y 422 (H-11)
 
@@ -2736,14 +3812,11 @@ Sigue abierto:
 - `suscripciones_push` está en el modelo ER pero todavía no la consume ningún endpoint
   de este backend (las notificaciones Web Push son módulo de Roberto).
 - ¿Debe el comensal poder cancelar su propio pedido? Hoy cancelar es solo de staff.
-- **`obtener_cuenta_mesa` mezcla sesiones de la misma mesa.** Filtra por
-  `estado != 'cancelado'`, así que los pedidos ya pagados del grupo anterior siguen
-  contando. Con un pedido viejo de $10.000 pagado (ítem de 'Ana', pago sin alias) y uno
-  nuevo de $30.000 de 'Beto': `total_mesa` = 40.000 en vez de 30.000, y por comensal sale
-  Ana debiendo 10.000 que ya pagó, mientras el pago aparece bajo 'General'. La suma de
-  los saldos por comensal (40.000) no cuadra con `saldo_mesa` (30.000). Hace falta
-  delimitar la sesión: una columna de apertura en `mesas` o un `id_sesion` en
-  `pedidos` (hoy `mesas` no tiene ninguna columna que sirva).
+- ~~**`obtener_cuenta_mesa` mezcla sesiones de la misma mesa.**~~ **RESUELTO** por
+  `mesas.sesion_iniciada_en` (script 17) y la regla H-02 (script 20): la cuenta filtra por
+  `creado_en >= sesion_iniciada_en` y, sin sesión abierta, sale vacía en vez de arrastrar
+  el histórico. El backend fija el timestamp al pasar la mesa a `ocupada`; ver
+  *GET /mesas/:id/cuenta*.
 - **`registrarPago` marca el pedido `pagado` con cualquier cobro `completada`, aunque
   sea parcial.** El trigger solo rechaza el exceso, no el pago de menos, así que abonar
   $1 de una cuenta de $56.000 la deja como cobrada y libera la mesa. `POST

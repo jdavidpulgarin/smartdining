@@ -95,6 +95,24 @@ describe('Pedidos en tiempo real (order:created)', () => {
     expect(screen.getAllByText(/Wrap/).length).toBeGreaterThan(0)
   })
 
+  it('P-14: un order:status reintentado tarde no hace retroceder el estado', async () => {
+    await montar()
+    act(() => oyentes['order:created'](eventoOrderCreated(pedidoNuevo)))
+
+    const estado = (eventId, nuevo) => ({
+      eventId, id_pedido: 87, id_mesa: 5, codigo_pedido: pedidoNuevo.codigo_pedido,
+      estado_anterior: 'recibido', estado: nuevo, emitidoEn: new Date().toISOString(),
+    })
+    act(() => oyentes['order:status'](estado('evt-listo', 'listo')))
+    act(() => oyentes['order:status'](estado('evt-entregado', 'entregado')))
+    expect(screen.getByText('Pedido 87 cambió a: entregado')).toBeInTheDocument()
+
+    // El servidor reintenta el "listo" con su mismo eventId: se ignora.
+    act(() => oyentes['order:status'](estado('evt-listo', 'listo')))
+    expect(screen.getByText('Pedido 87 cambió a: entregado')).toBeInTheDocument()
+    expect(screen.queryByText('Pedido 87 cambió a: listo')).toBeNull()
+  })
+
   it('ignora un evento sin pedido válido', async () => {
     await montar()
 

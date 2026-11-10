@@ -4,8 +4,9 @@ const request = require('supertest');
 const { instalarFakeDb, tokenStaff, tokenComensal } = require('./helpers/fake-db');
 const { instalarFakeRedis } = require('./helpers/fake-redis');
 const { CLAVE_CACHE } = require('../src/services/menu.service');
-const { MENSAJE_INGREDIENTE_VENDIDO } = require('../src/services/constructor.service');
+const { MENSAJE_INGREDIENTE_VENDIDO, traducirError } = require('../src/services/constructor.service');
 const app = require('../server');
+const autorInexistente = require('../src/services/autor-inexistente');
 
 // D-04: CRUD de ingredientes del constructor.
 //
@@ -507,4 +508,53 @@ test('con Redis caido la escritura de ingredientes sigue funcionando', async () 
     redis.restaurar();
     db.restaurar();
   }
+});
+
+// ---------------------------------------------------------------------------
+// El 23503 del AUTOR al editar una opcion (review de #144)
+// ---------------------------------------------------------------------------
+
+test('review-144: el PUT de una opcion con el autor borrado da 409 autor_inexistente', async () => {
+  // Cambiar el precio_extra dispara tr_historial_precio_ingrediente, que
+  // escribe en historial_precios con el id del JWT. Si ese usuario ya no
+  // existe, el 23503 es de fk_historial_precios_usuario: antes salia como el
+  // 409 generico de clave ajena.
+  const err = new Error('viola la llave foranea fk_historial_precios_usuario');
+  err.code = '23503';
+  err.constraint = 'fk_historial_precios_usuario';
+
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('UPDATE ingredientes')) throw err;
+    if (sql.includes('FROM ingredientes i') || sql.includes('FROM ingredientes WHERE')) {
+      return { rows: [{ id_ingrediente: 7, id_paso: 4, nombre: 'Panceta', precio_extra: 3000, calorias: null, alergenos: null, url_imagen: null, disponible: true, stock_suficiente: true }] };
+    }
+    return { rows: [] };
+  });
+  const redis = instalarFakeRedis();
+  try {
+    const res = await request(app)
+      .put('/api/ingredientes/7')
+      .set('Authorization', `Bearer ${tokenStaff(1, 'admin')}`)
+      .send({ nombre: 'Panceta', precio_extra: 3500 });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+  } finally {
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+test('review-144: el traductor del constructor no se come los otros errores', () => {
+  // El autor va primero, pero las traducciones propias del constructor siguen
+  // intactas: un nombre repetido es su 409 de siempre.
+  const err = new Error('uq ingredientes');
+  err.code = '23505';
+  err.constraint = 'uq_ingredientes_paso_nombre';
+
+  const traducido = traducirError(err);
+  assert.strictEqual(traducido.status, 409);
+  assert.strictEqual(traducido.motivo, undefined);
+  assert.match(traducido.message, /ya hay otro ingrediente/i);
 });
