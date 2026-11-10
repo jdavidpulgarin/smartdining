@@ -82,7 +82,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable. `motivo: "pagada"`: caja Estable (PR #58); en línea Conectado (falta prueba E2E con Wompi sandbox) (PR #33) | [§5.1](#51-mesaliberada) |
 | `ingrediente:disponibilidad` | todos los sockets | Opcional | Estable (el backend lo llama desde PR #70) | [§5.3](#53-ingredientedisponibilidad) |
 | `plato:disponibilidad` | todos los sockets | Opcional | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
-| `inventario:alerta` | `room:admin` | Sí | Propuesta (v1.1) | [§5.5](#55-inventarioalerta) |
+| `inventario:alerta` | `room:admin` | Sí | Estable (el backend la llama desde D-17; el panel la escucha, P-22) | [§5.5](#55-inventarioalerta) |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Caja: Estable vía `/internal/payment-confirmed` (PR #58). Wompi: Conectado (falta prueba E2E con Wompi sandbox), vía webhook con cuenta ([§8.2](#82-contrato-que-necesita-del-backend)) y registro ([§8.4](#84-contrato-de-registro-que-necesita-del-backend)) en el backend (PR #33) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6), [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 | `pago:alerta` | `room:admin` | Sí | Conectado (falta prueba E2E con Wompi sandbox); el backend guarda el intento (PR #33) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
 
@@ -101,7 +101,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `POST /internal/plato-disponibilidad` | backend (`PATCH /api/platos/:id/disponible`) | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
 | `POST /internal/payment-confirmed` | backend (cobros de caja) | Estable (el backend la llama desde `registrarPago`, PR #58) | [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 | `POST /internal/mesa-comensal` | backend (tras el COMMIT de D-18) | Estable (el backend ya la llama, D-18/D-18b) | [§6.4](#64-comensales-sin-celular-post-internalmesa-comensal) |
-| `POST /internal/inventario-alerta` | backend (D-17) | Propuesta (v1.1) | [§5.5](#55-inventarioalerta) |
+| `POST /internal/inventario-alerta` | backend (D-17, oyente del canal `inventario`) | Estable (el backend ya la llama, D-17) | [§5.5](#55-inventarioalerta) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
 responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
@@ -545,7 +545,7 @@ hasta que se libere.
 | `mesa:presencia` | `room:admin`, `room:mesa-{ID}` (solo la de esa mesa) | `{ id_mesa, comensales: [alias], total, pagaron: [alias], sin_celular: [alias] }` (ver §5.2) |
 | `ingrediente:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_ingrediente, disponible, emitidoEn }` |
 | `plato:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_plato, disponible, emitidoEn }` |
-| `inventario:alerta` (Propuesta v1.1) | `room:admin` | `{ eventId, id_insumo, nombre, unidad, stock_actual, stock_minimo, agotado, emitidoEn }` (§5.5) |
+| `inventario:alerta` | `room:admin` | `{ eventId, id_insumo, nombre, unidad, stock_actual, stock_minimo, agotado, emitidoEn }` (§5.5) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | `{ id_mesa, motivo, emitidoEn }` (`motivo`: `pagada` o `liberada`) |
 
 Notas para el frontend:
@@ -676,10 +676,10 @@ Content-Type: application/json
 
 ### 5.5. `inventario:alerta`
 
-> **Propuesta (v1.1) · R-20.** Aún no implementado. Nadie debe depender de él en producción
-> hasta que pase a Estable.
->
-> Los nombres de campos se confirman con Jarrinson en G-06 contra la tabla insumos.
+> **Estable · R-20.2.** Implementado en `src/sala.js` (pruebas: `tests/sala-inventario.test.js`).
+> El backend la llama desde D-17 (`services/inventario-avisos.js` → `notificarInventarioAlerta`)
+> y el panel escucha `inventario:alerta` en la pestaña de insumos (P-22). Los campos son los de la
+> tabla `insumos` (`database/scripts/27_inventario.sql`).
 
 El backend (D-17, `LISTEN 'inventario'`) detecta que un insumo cruzó su stock mínimo y avisa al
 panel de administración en vivo con `POST /internal/inventario-alerta`:
@@ -700,7 +700,7 @@ socket-server solo retransmite. Ningún frontend la llama; nginx responde 404 de
 | Campo | Obligatorio | Regla |
 |---|---|---|
 | `id_insumo` | Sí | Entero positivo seguro |
-| `nombre` | Sí | Texto de 1 a 80 caracteres |
+| `nombre` | Sí | Texto de 1 a 80 caracteres (se cuentan caracteres, como `VARCHAR(80)`) |
 | `unidad` | Sí | Texto de 1 a 15 caracteres |
 | `stock_actual` | Sí | Número JSON finito ≥ 0 (puede tener decimales) |
 | `stock_minimo` | Sí | Número JSON finito ≥ 0 (puede tener decimales) |
@@ -715,7 +715,9 @@ Errores, sin emitir nada en ningún caso: `400 PAYLOAD_INVALIDO`, `400 JSON_INVA
 - Respuesta normal: `200 { "ok": true, "duplicado": false }`.
 - **Idempotencia:** clave propia `backend:inventario-alerta:{eventId}`, TTL de 10 min. Repetido
   → `200 { "ok": true, "duplicado": true }` sin reemitir. Se reserva el `eventId`, se emite y,
-  si falla la emisión, se libera la clave. Un `4xx` no consume el `eventId`.
+  si falla la emisión, se libera la clave y se responde `500 ERROR_INTERNO` (también si el
+  almacén de idempotencia, Redis, no responde). Todo se valida antes de reservar: un `4xx` no
+  consume el `eventId`.
 - **Reintentos:** el backend solo reintenta, con el mismo `eventId`, ante
   `500/502/503 ERROR_INTERNO`; nunca ante `503 NO_CONFIGURADO` ni ante un `4xx`.
 
@@ -1406,5 +1408,6 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Propuesta (v1.1) · `POST /internal/mesa-comensal` · `mesa:presencia.sin_celular` | Una persona sin celular no contaba en la presencia ni en «igual» | Nueva ruta para agregar o quitar comensales sin celular y campo `sin_celular`; `comensales` y `total` los incluyen (§6.4, §5.2) | Backend: llamarla tras el COMMIT de D-18. PWA (J-11/J-16): usar `comensales` y `pagaron`, que ya incluyen a los sin celular. Panel: mostrarlos en la mesa |
 | Propuesta (v1.1) · `POST /internal/inventario-alerta` · `inventario:alerta` | — | Nuevos: el backend avisa cuando un insumo cruza su stock mínimo y se difunde solo a `room:admin` (§5.5) | Backend (D-17): llamarla en la transición. Panel (P-22): escuchar `inventario:alerta` en `room:admin` y cargar stock bajo por REST al iniciar |
 | `POST /pagos/intencion` · `POST /pagos/webhook` · plazos de la intención (R-13.4b) | El registro duraba `PAGOS_TTL_MINUTOS` (30 min): un webhook posterior no lo encontraba y un `APPROVED` quedaba como `referencia_desconocida`, sin registrar | Marca de pendiente: `PAGOS_TTL_MINUTOS`. Registro: `PAGOS_TTL_MINUTOS` × 60 + tolerancia del webhook + 30 min (26 h por defecto). Una intención a 5 min o menos de vencer no se reutiliza, ni al repetir el `eventId` | Nadie: mismo contrato; solo se acepta tarde lo que antes se perdía |
+| Estable (R-20.2) · `POST /internal/inventario-alerta` · `inventario:alerta` | Propuesta (v1.1): sin implementar; el backend (D-17) ya la llamaba y recibía `404` y el aviso se perdía | Implementada según §5.5 sin cambios de contrato: validación estricta, solo `room:admin`, idempotencia `backend:inventario-alerta:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`) | Nadie: backend (D-17) y panel (P-22) ya usan este contrato |
 | Estable (R-19.2) · `POST /internal/mesa-comensal` · `mesa:presencia.sin_celular` | Propuesta (v1.1): sin implementar; el backend (D-18) ya la llamaba y recibía `404`, y la persona sin celular no contaba en «igual» | Implementada según §6.4 y §5.2: `sin_celular` siempre presente; `comensales` y `total` lo incluyen; misma regla de alias que el backend, con paridad probada; además rechaza la clave reservada `general` (D-18c) con `400` | Nadie: backend (D-18) y PWA ya usan este contrato |
 | `POST /internal/payment-confirmed` · `comensal` en `pagaron` (R-19.2) | Se anotaba en `pagaron` el texto tal cual («Abuela » no coincidía con «Abuela») | Se anota normalizado con la regla del alias; si no es válido, tal cual (§8.6). `payment:confirmed` no cambia | Nadie: compatible hacia atrás |

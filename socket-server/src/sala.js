@@ -266,6 +266,71 @@ function rutaDisponibilidad({ campoId, evento, prefijo }) {
   };
 }
 
+const MAX_NOMBRE_INSUMO = 80;
+const MAX_UNIDAD_INSUMO = 15;
+
+// Se cuentan caracteres (puntos de código), como VARCHAR en PostgreSQL, y no
+// unidades UTF-16: un nombre de 80 caracteres con tildes o emoji que la base
+// aceptó no se rechaza aquí.
+const esTextoDe1a = (v, max) => typeof v === 'string' && v.length > 0 && [...v].length <= max;
+// Solo números JSON: el texto ("450.00", lo que da pg con NUMERIC) se rechaza
+// para que el error salga en el backend y no en el panel.
+const esCantidadValida = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+
+/** Valida el cuerpo de /internal/inventario-alerta (EVENTS.md §5.5); lanza 400 si no cumple. */
+function validarAvisoInventario(c) {
+  const invalido = (mensaje) => new ErrorHttp(400, 'PAYLOAD_INVALIDO', mensaje);
+  if (!Number.isSafeInteger(c.id_insumo) || c.id_insumo <= 0) throw invalido('id_insumo debe ser un entero positivo');
+  if (!esTextoDe1a(c.nombre, MAX_NOMBRE_INSUMO)) throw invalido(`nombre debe tener de 1 a ${MAX_NOMBRE_INSUMO} caracteres`);
+  if (!esTextoDe1a(c.unidad, MAX_UNIDAD_INSUMO)) throw invalido(`unidad debe tener de 1 a ${MAX_UNIDAD_INSUMO} caracteres`);
+  if (!esCantidadValida(c.stock_actual)) throw invalido('stock_actual debe ser un número ≥ 0');
+  if (!esCantidadValida(c.stock_minimo)) throw invalido('stock_minimo debe ser un número ≥ 0');
+  if (!esEventIdValido(c.eventId)) throw invalido('eventId debe ser un UUID');
+}
+
+/**
+ * POST /internal/inventario-alerta (EVENTS.md §5.5) — un insumo cruzó su stock
+ * mínimo hacia abajo. Lo llama el backend (D-17); cuándo avisar lo decide él,
+ * aquí solo se valida y se retransmite.
+ *
+ * Se emite SOLO a room:admin (admin, mesero, cajero): ni las mesas ni la cocina
+ * deben ver el inventario. Solo viajan los campos validados; `agotado` y
+ * `emitidoEn` los pone este servidor.
+ *
+ * Idempotencia: todo se valida ANTES de reservar (un 4xx no consume el
+ * eventId). Si la emisión falla, se libera la reserva y se responde 500
+ * ERROR_INTERNO, que el backend reintenta con el mismo eventId.
+ */
+async function rutaInventarioAlerta(req, res, ctx) {
+  exigirClaveInterna(req, ctx.config);
+  const cuerpo = parsearJson(await leerCuerpoCrudo(req));
+  validarAvisoInventario(cuerpo);
+
+  const clave = `backend:inventario-alerta:${cuerpo.eventId}`;
+  if (!(await ctx.registro.reservar(clave))) return enviarJson(res, 200, { ok: true, duplicado: true });
+  try {
+    ctx.io.to(SALA_ADMIN).emit('inventario:alerta', {
+      eventId: cuerpo.eventId,
+      id_insumo: cuerpo.id_insumo,
+      nombre: cuerpo.nombre,
+      unidad: cuerpo.unidad,
+      stock_actual: cuerpo.stock_actual,
+      stock_minimo: cuerpo.stock_minimo,
+      agotado: cuerpo.stock_actual === 0,
+      emitidoEn: new Date().toISOString(),
+    });
+  } catch (err) {
+    try {
+      await ctx.registro.liberar(clave);
+    } catch (errLiberar) {
+      // Sin liberar, el reintento llegará como duplicado: que quede en el log.
+      log.error('inventario-alerta: no se pudo liberar el eventId tras fallar la emisión', { error: errLiberar });
+    }
+    throw err;
+  }
+  return enviarJson(res, 200, { ok: true, duplicado: false });
+}
+
 /**
  * Rutas internas de sala (solo backend, con x-internal-key).
  *
@@ -273,8 +338,10 @@ function rutaDisponibilidad({ campoId, evento, prefijo }) {
  * (el constructor de la PWA deshabilita la opción en vivo).
  * POST /internal/plato-disponibilidad — un plato se agotó o volvió (lo llama el
  * backend después del COMMIT de PATCH /api/platos/:id/disponible).
+ * POST /internal/inventario-alerta — un insumo cruzó su mínimo (D-17); solo al panel.
  */
 const rutasSala = {
+  'POST /internal/inventario-alerta': rutaInventarioAlerta,
   'POST /internal/ingrediente-disponibilidad': rutaDisponibilidad({
     campoId: 'id_ingrediente', evento: 'ingrediente:disponibilidad', prefijo: 'ingrediente',
   }),
@@ -284,6 +351,6 @@ const rutasSala = {
 };
 
 module.exports = {
-  rutasSala,
+  rutasSala, MAX_NOMBRE_INSUMO, MAX_UNIDAD_INSUMO,
   registrarSala, crearEstadoMesasMemoria, crearPresencia, VENTANA_PRESENCIA_MS, validarComensalEnSala, LIMITE_LLAMADA_SEG, MAX_MOTIVO,
 };
