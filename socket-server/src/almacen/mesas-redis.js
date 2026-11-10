@@ -38,7 +38,9 @@ function crearEstadoMesasRedis({ cliente }) {
      * clave del alias -> alias guardado, TTL de 24 h como pagaron.
      */
     async sinCelular(idMesa) {
-      return cliente.hGetAll(llave(idMesa, 'sin_celular'));
+      // node-redis arma la respuesta de HGETALL con Object.create(null): se
+      // copia a un objeto normal para devolver lo mismo que el almacén en memoria.
+      return { ...(await cliente.hGetAll(llave(idMesa, 'sin_celular'))) };
     },
     /** HSETNX: false si esa clave ya estaba (otro alias con la misma clave). */
     async agregarSinCelular(idMesa, clave, alias) {
