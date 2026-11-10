@@ -1,4 +1,56 @@
 const pool = require('../config/db');
+const { traducirAutorInexistente } = require('./autor-inexistente');
+
+/**
+ * La FK de la categoria (ISSUE #132, afinado en el review de #139).
+ *
+ * Un 23503 al crear o actualizar un plato se traduce a un 409 que dice QUE
+ * falta, porque el 409 generico del manejador central ("La operacion choca con
+ * otro registro relacionado") no lo dice y no trae `motivo`.
+ *
+ * PERO se mira el NOMBRE del constraint, no solo el SQLSTATE: al actualizar un
+ * plato no hay una sola FK en juego. El trigger `tr_historial_precio_plato`
+ * (database/scripts/26_configuracion.sql) escribe en `historial_precios`, que
+ * tiene su propia `fk_historial_precios_usuario` contra `usuarios`: si el
+ * usuario del token ya no existe, ese 23503 saldria como "Esa categoria no
+ * existe" y mandaria a buscar el problema al sitio equivocado.
+ *
+ * Cualquier otro 23503 sube tal cual y el manejador central lo da como el 409
+ * generico de clave ajena, que es lo correcto cuando no se sabe cual choco.
+ */
+const PG_FK = '23503';
+const FK_CATEGORIA = 'fk_platos_categoria';
+const MOTIVO_CATEGORIA_INEXISTENTE = 'categoria_inexistente';
+const MENSAJE_CATEGORIA_INEXISTENTE = 'Esa categoria no existe';
+
+/**
+ * Traduce SOLO el 23503 de `fk_platos_categoria`; cualquier otro error —otra FK
+ * o otro codigo— sube como venia.
+ */
+function traducirCategoria(err) {
+  if (err && err.code === PG_FK && err.constraint === FK_CATEGORIA) {
+    return {
+      status: 409,
+      message: MENSAJE_CATEGORIA_INEXISTENTE,
+      motivo: MOTIVO_CATEGORIA_INEXISTENTE,
+    };
+  }
+  return err;
+}
+
+/**
+ * Las dos traducciones de un 23503 al crear o editar un plato, en orden
+ * (review de #144).
+ *
+ * Primero la del AUTOR —`fk_historial_precios_usuario`, que dispara el trigger
+ * del historial de precios cuando el usuario del token ya se borró— y después
+ * la de la categoría. Son dos problemas distintos y cada uno dice qué hacer:
+ * uno pide volver a iniciar sesión, el otro elegir otra categoría. Si no es
+ * ninguno de los dos, el error sube tal cual.
+ */
+function traducirFkDePlato(err) {
+  return traducirAutorInexistente(err) || traducirCategoria(err);
+}
 
 // Tabla platos (docs/modelo-er.md): id_plato, id_categoria, nombre, descripcion,
 // precio, url_imagen, disponible, tiempo_preparacion_estimado, creado_en.
@@ -16,12 +68,43 @@ async function obtenerPorId(id) {
   return result.rows[0] || null;
 }
 
+/**
+ * Valores por defecto de las columnas, repetidos aquí a propósito (ISSUE #132).
+ *
+ * `tiempo_preparacion_estimado` es `NOT NULL DEFAULT 15 CHECK (> 0)`
+ * (database/schema.sql:105) y `personalizable` es `NOT NULL DEFAULT FALSE`
+ * (database/scripts/13_constructor.sql:33). El INSERT manda las columnas por
+ * nombre, así que un parámetro en NULL **pisa el DEFAULT** en vez de dejarlo
+ * actuar: con el tiempo en NULL, PostgreSQL rechazaba la fila con 23502 y
+ * `POST /api/platos` **sin tiempo daba 500**.
+ *
+ * Se resuelve con `COALESCE($n, <constante>)`: la constante lleva el valor de la
+ * columna y un comentario que apunta al esquema, para que se vea que hay dos
+ * sitios que mantener. La alternativa —armar la lista de columnas según lo que
+ * venga— metería identificadores dinámicos en el SQL, que es justo lo que no se
+ * hace en este repo (tests/inyeccion-sql.test.js).
+ *
+ * `calorias` NO lleva constante: la columna es nullable y `null` significa "no
+ * se sabe", que es distinto de 0, así que ahí el NULL es el valor correcto.
+ */
+const TIEMPO_PREPARACION_POR_OMISION = 15;
+const PERSONALIZABLE_POR_OMISION = false;
+
 async function crear(p) {
+  try {
+    return await insertarPlato(p);
+  } catch (err) {
+    throw traducirFkDePlato(err);
+  }
+}
+
+async function insertarPlato(p) {
   const result = await pool.query(
     `INSERT INTO platos
       (id_categoria, nombre, descripcion, precio, url_imagen, disponible,
-       tiempo_preparacion_estimado, creado_en)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       tiempo_preparacion_estimado, personalizable, calorias, creado_en)
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, ${TIEMPO_PREPARACION_POR_OMISION}),
+             COALESCE($8, ${PERSONALIZABLE_POR_OMISION}), $9, NOW())
      RETURNING *`,
     [
       p.id_categoria,
@@ -31,6 +114,10 @@ async function crear(p) {
       p.url_imagen || null,
       p.disponible ?? true,
       p.tiempo_preparacion_estimado ?? null,
+      // D-16 B las dejó solo en el PUT: al crear se perdían en silencio aunque
+      // platoSchema las aceptara.
+      p.personalizable ?? null,
+      p.calorias ?? null,
     ]
   );
   return result.rows[0];
@@ -69,9 +156,19 @@ async function actualizar(id, datos, { idUsuario = null } = {}) {
       idUsuario === null || idUsuario === undefined ? '' : String(idUsuario),
     ]);
 
+    // Las columnas NOT NULL van con COALESCE (ISSUE #132): el controller manda
+    // la fila ya mezclada, así que por HTTP nunca llegan en null, pero llamar al
+    // servicio con datos PARCIALES daba un 23502 —y por tanto un 500— en vez de
+    // dejar el valor que había. Para una columna NOT NULL, null no puede
+    // significar otra cosa que "no lo cambies": no se puede guardar.
+    //
+    // `descripcion` y `url_imagen` NO llevan COALESCE a propósito: son nullable
+    // y poner una en null es una edición válida (quitar la imagen de un plato).
     const result = await client.query(
-      `UPDATE platos SET id_categoria = $1, nombre = $2, descripcion = $3, precio = $4,
-        url_imagen = $5, disponible = $6, tiempo_preparacion_estimado = $7,
+      `UPDATE platos SET id_categoria = COALESCE($1, id_categoria),
+        nombre = COALESCE($2, nombre), descripcion = $3, precio = COALESCE($4, precio),
+        url_imagen = $5, disponible = COALESCE($6, disponible),
+        tiempo_preparacion_estimado = COALESCE($7, tiempo_preparacion_estimado),
         personalizable = COALESCE($8, personalizable), calorias = COALESCE($9, calorias)
        WHERE id_plato = $10 RETURNING *`,
       [
@@ -96,7 +193,9 @@ async function actualizar(id, datos, { idUsuario = null } = {}) {
     } catch {
       // Ya estaba cerrada: no hay nada que deshacer.
     }
-    throw err;
+    // Mismo criterio que al crear: una categoría que no existe es un 409 que
+    // dice qué falta, no el genérico de clave ajena (ISSUE #132).
+    throw traducirFkDePlato(err);
   } finally {
     client.release();
   }
@@ -191,4 +290,11 @@ module.exports = {
   eliminar,
   historialPrecios,
   MAX_HISTORIAL,
+  TIEMPO_PREPARACION_POR_OMISION,
+  PERSONALIZABLE_POR_OMISION,
+  MOTIVO_CATEGORIA_INEXISTENTE,
+  MENSAJE_CATEGORIA_INEXISTENTE,
+  FK_CATEGORIA,
+  traducirCategoria,
+  traducirFkDePlato,
 };

@@ -204,4 +204,56 @@ describe('Flujo de Menú en frontend-restaurante', () => {
       expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument()
     })
   })
+describe('agotado por stock al cargar (stock_suficiente de GET /platos)', () => {
+    const platosStock = [
+      { id_plato: 301, id_categoria: 1, nombre: 'Hamburguesa Smart Angus', precio: 34000, disponible: true, stock_suficiente: false },
+      { id_plato: 302, id_categoria: 1, nombre: 'Burger Apagada', precio: 20000, disponible: false, stock_suficiente: false },
+      { id_plato: 303, id_categoria: 1, nombre: 'Burger Normal', precio: 22000, disponible: true, stock_suficiente: true },
+      // Una respuesta sin el campo (backend anterior al 27) se trata como con stock.
+      { id_plato: 304, id_categoria: 1, nombre: 'Burger Vieja', precio: 21000, disponible: true },
+    ]
+
+    it('encendido a mano pero sin stock sale "AGOTADO · SIN STOCK"; apagado a mano, "AGOTADO"', async () => {
+      simularBackend({ categorias: categoriasBase, platos: platosStock, escrituras: () => json({}) })
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument())
+
+      expect(within(tarjetaDe('Hamburguesa Smart Angus')).getByText('AGOTADO · SIN STOCK')).toBeInTheDocument()
+      expect(within(tarjetaDe('Burger Apagada')).getByText('AGOTADO')).toBeInTheDocument()
+      expect(within(tarjetaDe('Burger Apagada')).queryByText('AGOTADO · SIN STOCK')).not.toBeInTheDocument()
+      expect(within(tarjetaDe('Burger Normal')).getByText('DISPONIBLE')).toBeInTheDocument()
+      expect(within(tarjetaDe('Burger Vieja')).getByText('DISPONIBLE')).toBeInTheDocument()
+    })
+
+    it('"Solo disponibles" esconde también los agotados por stock', async () => {
+      simularBackend({ categorias: categoriasBase, platos: platosStock, escrituras: () => json({}) })
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument())
+
+      fireEvent.click(screen.getByLabelText('SOLO DISPONIBLES'))
+      expect(screen.queryByText('Hamburguesa Smart Angus')).not.toBeInTheDocument()
+      expect(screen.queryByText('Burger Apagada')).not.toBeInTheDocument()
+      expect(screen.getByText('Burger Normal')).toBeInTheDocument()
+    })
+
+    it('el botón sigue siendo el interruptor MANUAL: en un plato sin stock, el clic lo apaga a mano', async () => {
+      const spy = simularBackend({
+        categorias: categoriasBase,
+        platos: platosStock,
+        escrituras: () => json({ id_plato: 301, disponible: false, stock_suficiente: false }),
+      })
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument())
+
+      fireEvent.click(within(tarjetaDe('Hamburguesa Smart Angus')).getByTitle('Alternar disponibilidad para comensales'))
+
+      await waitFor(() =>
+        expect(within(tarjetaDe('Hamburguesa Smart Angus')).queryByText('AGOTADO · SIN STOCK')).not.toBeInTheDocument()
+      )
+      expect(within(tarjetaDe('Hamburguesa Smart Angus')).getByText('AGOTADO')).toBeInTheDocument()
+      const patch = spy.mock.calls.find(([, c]) => c?.method === 'PATCH')
+      expect(patch[0]).toMatch(/\/platos\/301\/disponible$/)
+      expect(JSON.parse(patch[1].body)).toEqual({ disponible: false })
+    })
+  })
 })

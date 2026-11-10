@@ -266,8 +266,9 @@ test('una mesa creada ya ocupada arranca con su sesion', async () => {
 
     assert.strictEqual(res.status, 201);
     const insert = db.buscar('INSERT INTO mesas');
-    assert.ok(insert.sql.includes('CASE WHEN $4 = $6 THEN NOW() ELSE NULL END'));
-    assert.strictEqual(insert.params[5], 'ocupada');
+    assert.ok(insert.sql.includes('CASE WHEN $6 THEN NOW() ELSE NULL END'));
+    assert.strictEqual(insert.params[3], 'ocupada');
+    assert.strictEqual(insert.params[5], true);
   } finally {
     db.restaurar();
   }

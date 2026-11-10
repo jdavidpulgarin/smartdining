@@ -467,11 +467,51 @@ export function marcarErrorPlatos(estado, mensaje, status = null) {
 }
 
 /**
+ * Un plato de GET /platos, con los dos motivos separados (ISSUE #137).
+ *
+ * La fila de la base trae DOS columnas y hay que mirar las dos:
+ *
+ *   - `disponible`: el interruptor MANUAL de la cocina. Es el que mueve el
+ *     boton de este panel.
+ *   - `stock_suficiente`: lo calcula la base desde el stock de la receta
+ *     (P-19). El panel no lo puede cambiar.
+ *
+ * Lo que la fila muestra como "Disponible" es el EFECTIVO, el AND de los dos.
+ * Antes solo se miraba `disponible`, asi que un plato agotado por inventario se
+ * veia AGOTADO en vivo (por el evento) y volvia a DISPONIBLE al recargar.
+ *
+ * Se guardan los tres: `disponible` (lo que se muestra),
+ * `disponible_manual` (lo que el boton conmuta) y `agotado_por_stock` (para la
+ * etiqueta del motivo, que ya existia esperando este dato).
+ *
+ * `stock_suficiente` ausente se trata como CON stock: es el DEFAULT de la
+ * columna y el valor de un plato sin receta, que no controla inventario. Asi, un
+ * backend viejo que no mande el campo se comporta como antes.
+ */
+function platoDeLaApi(p) {
+  const manual = p.disponible !== false
+  const conStock = p.stock_suficiente !== false
+
+  const plato = {
+    id_plato: Number(p.id_plato),
+    nombre: p.nombre || 'Sin nombre',
+    disponible: manual && conStock,
+    disponible_manual: manual,
+    stock_suficiente: conStock,
+  }
+
+  // Compatibilidad: si algun dia el backend manda el motivo ya resuelto, se
+  // respeta. Lo normal es deducirlo de stock_suficiente (ver motivoAgotado).
+  if (typeof p.agotado_por_stock === 'boolean') plato.agotado_por_stock = p.agotado_por_stock
+
+  return plato
+}
+
+/**
  * Carga la lista desde la respuesta de GET /platos.
  *
  * Conserva el orden que da la base (por id_plato) y se queda SOLO con los
- * campos que el panel usa. `agotado_por_stock` se copia unicamente si viene
- * como booleano: hoy el backend no lo manda nunca (ver motivoAgotado).
+ * campos que el panel usa (ver platoDeLaApi).
  */
 export function cargarPlatos(estado, filas) {
   const lista = (Array.isArray(filas) ? filas : [])
@@ -479,17 +519,7 @@ export function cargarPlatos(estado, filas) {
     // URL. Con `Number.isFinite` a secas no basta: Number(null) es 0, y una
     // fila rota entraria en la lista como el plato numero 0.
     .filter((p) => Number.isInteger(Number(p?.id_plato)) && Number(p.id_plato) > 0)
-    .map((p) => {
-      const plato = {
-        id_plato: Number(p.id_plato),
-        nombre: p.nombre || 'Sin nombre',
-        disponible: p.disponible !== false,
-      }
-      if (typeof p.agotado_por_stock === 'boolean') {
-        plato.agotado_por_stock = p.agotado_por_stock
-      }
-      return plato
-    })
+    .map(platoDeLaApi)
 
   return {
     ...estado,
@@ -564,7 +594,70 @@ export function motivoListaVaciaPlatos(estado, { texto = '', soloAgotados = fals
 /** Cambia el `disponible` de un plato en la lista, por id. */
 function conDisponiblePlato(lista, idPlato, disponible) {
   const id = Number(idPlato)
-  return (lista || []).map((plato) => (plato.id_plato === id ? { ...plato, disponible } : plato))
+  return (lista || []).map((plato) => {
+    if (plato.id_plato !== id) return plato
+
+    // El boton mueve el interruptor MANUAL (ISSUE #137); lo que se MUESTRA es el
+    // efectivo. Encender a mano un plato sin stock lo deja agotado, que es lo
+    // que va a contestar el backend y lo que ve el comensal.
+    const conStock = plato.stock_suficiente !== false
+    return { ...plato, disponible_manual: disponible, disponible: disponible && conStock }
+  })
+}
+
+/**
+ * Aplica el valor EFECTIVO que trae el evento `plato:disponibilidad`.
+ *
+ * El evento tiene UN solo booleano y no dice por que (EVENTS.md §5.4): un
+ * `false` puede ser el interruptor o el inventario. Se usa cuando la relectura
+ * del plato no esta disponible o falla, y se interpreta de la unica forma
+ * sensata (ISSUE #137):
+ *
+ *   - `true`: los dos estan bien, asi que se enciende el interruptor y se da el
+ *     stock por suficiente.
+ *   - `false`: si el interruptor estaba ENCENDIDO, lo que falta es stock (y la
+ *     fila lo dice con su etiqueta); si ya estaba apagado, se queda como estaba.
+ *
+ * Nunca apaga el interruptor manual por un evento: eso es una decision de la
+ * cocina y el evento no la trae.
+ */
+function conEfectivoPlato(lista, idPlato, efectivo) {
+  const id = Number(idPlato)
+  return (lista || []).map((plato) => {
+    if (plato.id_plato !== id) return plato
+    if (efectivo) {
+      return { ...plato, disponible: true, disponible_manual: true, stock_suficiente: true }
+    }
+    const manual = plato.disponible_manual ?? plato.disponible
+    return manual
+      ? { ...plato, disponible: false, stock_suficiente: false }
+      : { ...plato, disponible: false }
+  })
+}
+
+/**
+ * Reemplaza un plato con la fila RECIEN LEIDA de GET /platos/:id (ISSUE #137).
+ *
+ * Es la respuesta buena al evento: la fila trae las dos columnas, asi que no hay
+ * que adivinar que las apago. Si ese plato ya no esta en la lista, no se agrega:
+ * la lista la manda GET /platos.
+ */
+export function aplicarPlatoReleido(estado, { id, fila }) {
+  const idPlato = Number(id ?? fila?.id_plato)
+  if (!Number.isInteger(idPlato) || idPlato <= 0) return estado
+  if (!fila || typeof fila !== 'object') return estado
+  if (!buscarPlato(estado, idPlato)) return estado
+
+  const leido = platoDeLaApi({ ...fila, id_plato: idPlato })
+  return {
+    ...estado,
+    platos: {
+      ...estado.platos,
+      lista: estado.platos.lista.map((plato) =>
+        plato.id_plato === idPlato ? { ...plato, ...leido } : plato
+      ),
+    },
+  }
 }
 
 /** Cambio OPTIMISTA de un plato: el interruptor se mueve ya, antes del PATCH. */
@@ -672,7 +765,7 @@ export function aplicarEventoPlato(estado, evento) {
       ...estado,
       platos: {
         ...platos,
-        lista: conDisponiblePlato(estado.platos.lista, id, evento.disponible),
+        lista: conEfectivoPlato(estado.platos.lista, id, evento.disponible),
         ...anotarRespuesta(estado.platos, id),
       },
     }
@@ -680,7 +773,7 @@ export function aplicarEventoPlato(estado, evento) {
 
   return {
     ...estado,
-    platos: { ...platos, lista: conDisponiblePlato(estado.platos.lista, id, evento.disponible) },
+    platos: { ...platos, lista: conEfectivoPlato(estado.platos.lista, id, evento.disponible) },
   }
 }
 
@@ -701,18 +794,20 @@ export function avisoDelPanelPlatos(estado) {
  * Este plato esta agotado POR STOCK --se acabo el inventario-- y no porque
  * alguien lo apagara a mano?
  *
- * HOY DEVUELVE SIEMPRE null, a proposito: no hay de donde saberlo. La tabla
- * `platos` solo tiene `disponible`, un booleano sin motivo, y `GET /platos`
- * devuelve esa fila tal cual. Esto es el sitio reservado para cuando el backend
- * lo diga: el dia que la fila traiga `agotado_por_stock: true`, la etiqueta
- * aparece sola y no hay que tocar ni el componente ni el estado.
+ * Ya funciona (ISSUE #137): `cargarPlatos` pone `agotado_por_stock` cuando
+ * `GET /platos` dice `stock_suficiente: false` con el interruptor manual
+ * ENCENDIDO. Si lo apago el cocinero, no se le echa la culpa al inventario y
+ * esto devuelve null: el motivo que se muestra es el que se puede arreglar con
+ * el boton.
  *
- * No se adivina a partir de `disponible = false`: hoy eso significa casi siempre
- * que lo apago el cocinero, y etiquetarlo mal es peor que no etiquetar nada.
+ * Nunca se adivina a partir de `disponible = false` a secas: etiquetar mal el
+ * motivo es peor que no etiquetar nada.
  *
  * @returns {'stock'|null}
  */
 export function motivoAgotado(plato) {
   if (plato?.disponible !== false) return null
+  // Sin stock y con el interruptor encendido: la culpa es del inventario.
+  if (plato?.stock_suficiente === false && plato?.disponible_manual !== false) return 'stock'
   return plato?.agotado_por_stock === true ? 'stock' : null
 }

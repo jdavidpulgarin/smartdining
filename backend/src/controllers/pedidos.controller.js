@@ -5,6 +5,7 @@ const { esComensal } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
 const aliasComensal = require('../services/alias-comensal');
 const aliasEnCuenta = require('../services/alias-en-cuenta');
+const { esErrorDeConcurrencia } = require('../middleware/errores.middleware');
 
 // El trigger tr_validar_disponibilidad_plato de Jarrison deja comandar un plato
 // agotado si notas_especiales contiene 'OVERRIDE_ADMIN' (bypass administrativo).
@@ -153,6 +154,10 @@ function aliasDelComensal(req, item, porClave = new Map()) {
   if (typeof bruto !== 'string' || !bruto.trim()) return null;
 
   const normalizado = aliasComensal.normalizarAlias(bruto);
+  // El cajón de los platos sin dueño no es dueño de nada: si llegara hasta aquí
+  // (no llega: `resolverAliasCanonicos` ya devolvió su 409), el ítem se queda
+  // SIN alias, que es justo donde la cuenta lo pondría.
+  if (normalizado.reservada) return null;
   // Si no se pudo normalizar, `resolverAliasCanonicos` ya respondió 400; este
   // respaldo solo existe para no devolver undefined si alguien llama suelto.
   if (normalizado.error) return bruto.trim();
@@ -191,6 +196,17 @@ const MENSAJE_NO_REGISTRADO =
   + '(POST /api/mesas/:id/comensales) o usa el nombre con el que ya aparece en la cuenta';
 
 /**
+ * El 503 de un deadlock al crear el pedido (D-17).
+ *
+ * `reintentar` es el motivo estable: el pedido NO se guardó y hay que volver a
+ * mandarlo. Lo repite el cliente y no el backend, porque `POST /api/pedidos` no
+ * acepta clave de idempotencia y un reintento nuestro podría duplicar la
+ * comanda (ver el catch de `crear`).
+ */
+const MOTIVO_REINTENTAR = 'reintentar';
+const MENSAJE_REINTENTAR = 'intenta de nuevo';
+
+/**
  * Los alias en bruto que trae el pedido, sin repetir.
  *
  * `comensal` manda sobre `apodo`, igual que en `aliasDelComensal`. Un ítem sin
@@ -226,11 +242,44 @@ async function resolverAliasCanonicos(idMesa, items) {
   const brutos = aliasEnBruto(items);
   if (brutos.length === 0) return { porClave: new Map() };
 
+  // D-18c: que la mesa EXISTA se comprueba antes de resolver alias. Si no
+  // existe, no hay nadie sentado a quien resolver, y sin esto la respuesta era
+  // un 409 comensal_no_registrado —`cuentaPorComensal` devuelve null— que
+  // culpaba al nombre del comensal de un id de mesa equivocado.
+  //
+  // Va aquí y no en `crear` a propósito: solo cuesta una consulta cuando el
+  // pedido trae alias. Un pedido SIN alias no toca esta función y sigue
+  // fallando como antes (la FK de la mesa), sin una consulta de más.
+  //
+  // `mesasService.existe` es el mismo `SELECT 1 FROM mesas` que ya hacían las
+  // dos cuentas, ahora en un solo sitio: no es una consulta nueva de este
+  // controlador.
+  if (!(await mesasService.existe(idMesa))) {
+    return { error: { status: 404, body: { error: 'Mesa no encontrada' } } };
+  }
+
   // 1. Validación: la MISMA regla que las rutas de alias (R-18). Un nombre que
   //    no pasa aquí no se puede registrar ni comparar, así que es un 400.
   const claves = new Map();
   for (const bruto of brutos) {
     const normalizado = aliasComensal.normalizarAlias(bruto);
+    // «General» (D-18c) es la excepción: no es un nombre mal escrito, es el
+    // cajón de los platos sin dueño, así que no corresponde a NADIE registrado.
+    // Sale el mismo 409 comensal_no_registrado que daba antes de que
+    // `normalizarAlias` lo rechazara, y sin mirar Redis: un ítem a nombre del
+    // cajón no se guarda ni cuando no se puede verificar quién está sentado.
+    if (normalizado.reservada) {
+      return {
+        error: {
+          status: 409,
+          body: {
+            error: MENSAJE_NO_REGISTRADO,
+            motivo: MOTIVO_NO_REGISTRADO,
+            alias: normalizado.alias,
+          },
+        },
+      };
+    }
     if (normalizado.error) {
       return { error: { status: 400, body: { error: normalizado.error, campo: 'comensal' } } };
     }
@@ -366,6 +415,25 @@ async function crear(req, res, next) {
       total: pedido.total,
     });
   } catch (err) {
+    // D-17: un deadlock al crear el pedido NO se reintenta aquí.
+    //
+    // La reserva de inventario (`tr_reservar_inventario`) bloquea los insumos
+    // del pedido en orden de id_insumo justo para no cruzarse con otra, pero
+    // sigue compartiendo filas con las demás transacciones del salón, así que un
+    // 40P01 es posible. Reintentar por nuestra cuenta exigiría poder repetir la
+    // petición sin crear dos pedidos, y `POST /api/pedidos` **no acepta ninguna
+    // clave de idempotencia**: el reintento podría dejar la comanda duplicada.
+    //
+    // Así que se responde 503 `reintentar`, que es lo que de verdad hace falta:
+    // decirle al cliente que esta no se guardó y que la vuelva a mandar él. El
+    // 409 genérico de concurrencia del manejador central no distingue esto de
+    // una guarda de negocio que el cliente tiene que atender.
+    if (esErrorDeConcurrencia(err && err.code)) {
+      console.error(
+        `[pedidos] deadlock al crear el pedido de la mesa ${id_mesa} (${err.code}): ${err.message}`
+      );
+      return res.status(503).json({ error: MENSAJE_REINTENTAR, motivo: MOTIVO_REINTENTAR });
+    }
     return next(err);
   }
 }
@@ -516,6 +584,8 @@ async function cuentaDeMiMesa(req, res, next) {
 module.exports = {
   MOTIVO_NO_REGISTRADO,
   MENSAJE_NO_REGISTRADO,
+  MOTIVO_REINTENTAR,
+  MENSAJE_REINTENTAR,
   crear,
   listarActivos,
   obtener,

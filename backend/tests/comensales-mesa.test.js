@@ -1263,17 +1263,21 @@ test('d-18b: con empate gana el primero de la cuenta', async () => {
 });
 
 test('d-18b: la fila General de la cuenta se ignora', async () => {
-  // No es una persona: la pone la funcion SQL para los items sin comensal.
+  // No es una persona: la pone la funcion SQL para los items sin comensal, asi
+  // que no puede acabar siendo el texto canonico de nadie. Desde D-18c nadie
+  // puede llamarse "General" (ver alias-general.test.js), asi que lo que se
+  // comprueba aqui es que esa fila no estorba al alta de OTRA persona.
   const db = fakeMesa({ cuenta: { id_mesa: MESA, comensales: [filaCuenta('General', 9)] } });
   const redis = instalarFakeRedis();
   const socket = instalarFakeSocket(() => ({ ok: true }));
   try {
-    const res = await agregar(mesero(), { alias: 'General' });
+    const res = await agregar(mesero(), { alias: 'Abuela' });
 
     assert.strictEqual(res.status, 201);
-    assert.strictEqual(res.body.alias, 'General', 'el escrito, no la fila de la cuenta');
+    assert.strictEqual(res.body.alias, 'Abuela', 'el escrito, no la fila de la cuenta');
     // Y lo que se reserva es el alias escrito, no el cajon.
-    assert.ok(redis.valorDe(alias.llave(MESA)).general);
+    assert.ok(redis.valorDe(alias.llave(MESA)).abuela);
+    assert.strictEqual(redis.valorDe(alias.llave(MESA)).general, undefined, 'el cajon no se reserva');
   } finally {
     socket.restaurar();
     redis.restaurar();

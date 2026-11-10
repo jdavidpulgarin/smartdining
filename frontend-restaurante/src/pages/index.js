@@ -7,4 +7,5 @@ export { Reportes } from './Reportes'
 export { Login } from './Login'
 export { PantallaMesa } from './PantallaMesa'
 export { TomarPedido } from './TomarPedido'
-
+export { Configuracion } from './Configuracion'
+export { Inventario } from './Inventario'

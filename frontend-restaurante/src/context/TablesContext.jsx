@@ -3,6 +3,7 @@ import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTok
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
+import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
 
@@ -188,8 +189,15 @@ export function TablesProvider({ children }) {
   }, [tokenSesion])
 
 
+  // order:created y order:status pueden llegar repetidos si el servidor
+  // reintenta (EVENTS.md §5): un eventId ya visto se ignora entero, sin repetir
+  // la notificación ni el sonido. Una ventana por tipo, de los últimos 200.
+  const [createdVisto] = useState(() => crearVentanaEventos())
+  const [statusVisto] = useState(() => crearVentanaEventos())
+
   // Escuchar cuando entra un pedido nuevo (order:created)
   useSocketListener('order:created', (data) => {
+    if (createdVisto(data?.eventId)) return
     if (data?.pedido) {
       const p = data.pedido
       const idMesa = Number(p.id_mesa)
@@ -221,6 +229,7 @@ export function TablesProvider({ children }) {
 
   // Escuchar cambio de estado de pedido (order:status)
   useSocketListener('order:status', (data) => {
+    if (statusVisto(data?.eventId)) return
     if (data?.id_pedido) {
       const idPedido = Number(data.id_pedido)
       const nuevoEstado = data.estado

@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 /**
  * Configuración del restaurante (D-16 parte B, tabla `configuracion_restaurante`).
@@ -107,7 +108,12 @@ async function actualizar(cambios, { idUsuario = null } = {}) {
     } catch {
       // Ya estaba cerrada: no hay nada que deshacer.
     }
-    throw err;
+    // El AUTOR (review de #144): `tr_configuracion_actualizada` escribe
+    // `actualizado_por` con el id del JWT, y la columna tiene su
+    // `fk_configuracion_actualizado_por` contra `usuarios`. Si ese usuario ya se
+    // borró, el 23503 salía como el 409 genérico de clave ajena, que no dice que
+    // el problema sea la sesión de quien está editando.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }

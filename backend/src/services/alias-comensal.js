@@ -29,6 +29,29 @@ const MAX = 40;
 // emojis: el alias se muestra en el panel, en la cocina y en notificaciones.
 const PERMITIDOS = /^[\p{L}\p{M}\p{N} ._'-]+$/u;
 
+/**
+ * La clave que NADIE puede usar como alias (D-18c).
+ *
+ * «General» es el nombre que `obtener_cuenta_mesa` le pone al cajón de los
+ * ítems sin dueño (`COALESCE(NULLIF(btrim(dp.comensal), ''), 'General')`, ver
+ * `services/alias-en-cuenta.js` → `CAJON_SIN_COMENSAL`). No es una persona: es
+ * «lo que todavía no es de nadie».
+ *
+ * Desde D-18 se puede registrar a un comensal con el nombre que sea, así que
+ * alguien llamado «General» pasaría a compartir fila con los platos sin dueño:
+ * su cuenta mostraría consumos que no pidió, y los platos sin dueño quedarían
+ * cobrados a una persona. Por eso se rechaza al validar, que es el único punto
+ * por el que entran todos los alias.
+ *
+ * Se compara sobre la CLAVE ya normalizada, no sobre el texto: así «General»,
+ * « general », «GENERAL» y «Géneral» quedan fuera igual, que es como se mide la
+ * identidad de un comensal en el resto del sistema.
+ */
+const CLAVE_RESERVADA = 'general';
+
+const MENSAJE_RESERVADA =
+  'comensal no puede llamarse «General»: así figuran en la cuenta los platos que aún no tienen dueño';
+
 const llave = (idMesa) => `sd:mesa:${idMesa}:alias`;
 
 /**
@@ -61,6 +84,14 @@ function segundos(vigencia) {
  * Valida y normaliza el alias. Devuelve { alias, clave } o { error }.
  * - alias: como se muestra (sin espacios a los lados y sin dobles espacios).
  * - clave: para comparar (minúsculas, sin tildes ni espacios).
+ *
+ * El rechazo de la clave reservada (`CLAVE_RESERVADA`) trae además
+ * `reservada: true` y la pareja `{alias, clave}` ya calculada. Quien solo
+ * mira `error` —todas las rutas de alias— responde su 400 como con cualquier
+ * otro nombre inválido y no se enteran de la diferencia; quien necesita
+ * distinguir ese caso es `POST /api/pedidos`, donde un ítem a nombre de
+ * «General» ya era un 409 `comensal_no_registrado` y debe seguir siéndolo:
+ * el alias no es inválido de forma, es que no corresponde a nadie.
  */
 function normalizarAlias(valor) {
   if (typeof valor !== 'string') return { error: 'comensal es obligatorio (tu nombre o apodo en la mesa)' };
@@ -72,6 +103,11 @@ function normalizarAlias(valor) {
   }
   const clave = alias.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[\s._'-]/g, '');
   if (clave.length === 0) return { error: 'comensal debe tener al menos una letra o un número' };
+  // Un nombre que solo CONTIENE la palabra («General Pérez», «Generalísimo») no
+  // choca: la clave tiene que ser exactamente la reservada.
+  if (clave === CLAVE_RESERVADA) {
+    return { error: MENSAJE_RESERVADA, reservada: true, alias, clave };
+  }
   return { alias, clave };
 }
 
@@ -319,4 +355,5 @@ async function olvidarMesa(idMesa) {
 module.exports = {
   normalizarAlias, reservar, leerReserva, esSinCelular, aliasReservado, liberar,
   olvidarMesa, segundos, llave, MIN, MAX, VIGENCIA_SIN_CELULAR, MARCA_SIN_CELULAR,
+  CLAVE_RESERVADA, MENSAJE_RESERVADA,
 };

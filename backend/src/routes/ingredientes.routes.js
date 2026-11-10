@@ -1,8 +1,14 @@
 const express = require('express');
 const ctrl = require('../controllers/constructor.controller');
+const inventarioCtrl = require('../controllers/inventario.controller');
 const { requireAuth, requireRole } = require('../middleware/auth.middleware');
 
 const router = express.Router();
+
+// D-17 PR 2: la receta en insumos de la opcion (consumo en porcion NORMAL; la
+// base lo multiplica por factores_porcion). Va ANTES de PUT /:id por claridad.
+router.get('/:id/receta', requireAuth, requireRole('admin'), inventarioCtrl.obtenerRecetaIngrediente);
+router.put('/:id/receta', requireAuth, requireRole('admin'), inventarioCtrl.reemplazarRecetaIngrediente);
 
 // D-04. Escribir el constructor es de admin.
 router.put('/:id', requireAuth, requireRole('admin'), ctrl.actualizarIngrediente);
