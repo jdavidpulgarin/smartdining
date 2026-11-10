@@ -78,7 +78,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `qr:actualizado` | `room:mesa-{ID}` (incluye la pantalla) | No | Estable | [§6.2](#62-cómo-avisa-el-backend-una-rotación-de-token_qr-pantalla-de-mesa) |
 | `mesa:llamar_mesero` | `room:admin` | Sí | Estable | [§4](#mesallamar_mesero) |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§4](#cuentasolicitada) |
-| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` | No (estado completo) | Estable; campo `sin_celular`: Propuesta (v1.1) | [§5.2](#52-mesapresencia) |
+| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` | No (estado completo) | Estable (con `sin_celular` desde R-19.2) | [§5.2](#52-mesapresencia) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable. `motivo: "pagada"`: caja Estable (PR #58); en línea Conectado (falta prueba E2E con Wompi sandbox) (PR #33) | [§5.1](#51-mesaliberada) |
 | `ingrediente:disponibilidad` | todos los sockets | Opcional | Estable (el backend lo llama desde PR #70) | [§5.3](#53-ingredientedisponibilidad) |
 | `plato:disponibilidad` | todos los sockets | Opcional | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
@@ -100,7 +100,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `POST /internal/ingrediente-disponibilidad` | backend | Estable (el backend ya la usa, PR #70) | [§5.3](#53-ingredientedisponibilidad) |
 | `POST /internal/plato-disponibilidad` | backend (`PATCH /api/platos/:id/disponible`) | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
 | `POST /internal/payment-confirmed` | backend (cobros de caja) | Estable (el backend la llama desde `registrarPago`, PR #58) | [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
-| `POST /internal/mesa-comensal` | backend (tras el COMMIT de D-18) | Propuesta (v1.1) | [§6.4](#64-comensales-sin-celular-post-internalmesa-comensal) |
+| `POST /internal/mesa-comensal` | backend (tras el COMMIT de D-18) | Estable (el backend ya la llama, D-18/D-18b) | [§6.4](#64-comensales-sin-celular-post-internalmesa-comensal) |
 | `POST /internal/inventario-alerta` | backend (D-17, oyente del canal `inventario`) | Estable (el backend ya la llama, D-17) | [§5.5](#55-inventarioalerta) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
@@ -143,9 +143,9 @@ motivo exacto) va solo al log del servidor.
 | `403 NO_AUTORIZADO` | Credencial válida sin permiso (rol, alias que no está en la mesa) |
 | `404` | Ruta inexistente (y toda `/internal/*` desde Internet, en nginx) |
 | `409 SIN_SALDO` | Intención de pago sin nada que cobrar |
-| `409 MESA_LIBERADA` | Propuesta (v1.1). La mesa figura liberada y no se ha generado un QR nuevo ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
-| `409 ALIAS_EN_USO` | Propuesta (v1.1). La clave del alias ya está en uso en la mesa ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
-| `409 LIMITE_COMENSALES` | Propuesta (v1.1). La mesa ya tiene 20 comensales sin celular ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
+| `409 MESA_LIBERADA` | La mesa figura liberada y no se ha generado un QR nuevo ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
+| `409 ALIAS_EN_USO` | La clave del alias ya está en uso en la mesa ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
+| `409 LIMITE_COMENSALES` | La mesa ya tiene 20 comensales sin celular ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
 | `413 CUERPO_DEMASIADO_GRANDE` | Cuerpo de más de 100 KB |
 | `429 RATE_LIMIT` | Más de 5 intenciones de pago por minuto (o límite de nginx en login y pagos) |
 | `500/502/503 ERROR_INTERNO` | Fallo propio, del backend o reinicio en curso; reintentar |
@@ -542,7 +542,7 @@ hasta que se libere.
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
-| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` (solo la de esa mesa) | `{ id_mesa, comensales: [alias], total, pagaron: [alias] }` (ver §5.2). Propuesta (v1.1): además `sin_celular: [alias]` |
+| `mesa:presencia` | `room:admin`, `room:mesa-{ID}` (solo la de esa mesa) | `{ id_mesa, comensales: [alias], total, pagaron: [alias], sin_celular: [alias] }` (ver §5.2) |
 | `ingrediente:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_ingrediente, disponible, emitidoEn }` |
 | `plato:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_plato, disponible, emitidoEn }` |
 | `inventario:alerta` | `room:admin` | `{ eventId, id_insumo, nombre, unidad, stock_actual, stock_minimo, agotado, emitidoEn }` (§5.5) |
@@ -603,13 +603,14 @@ recibe) cada vez que:
 
 - un **comensal** hace `join:table`, `leave:table` o se desconecta;
 - se confirma un pago con alias: un pago en línea (webhook, §8.3) o un cobro de caja con
-  `comensal` (§8.6), siempre que quede saldo.
+  `comensal` (§8.6), siempre que quede saldo;
+- el personal agrega o quita a alguien sin celular (§6.4) y la lista cambia.
 
 Máximo **un aviso por mesa cada 500 ms**: el primero sale al instante y, si hubo más cambios
 dentro de esa ventana, se envía uno más al cerrarla (el último estado siempre llega).
 
 ```json
-{ "id_mesa": 5, "comensales": ["Ana", "Beto"], "total": 2, "pagaron": ["Ana"] }
+{ "id_mesa": 5, "comensales": ["Ana", "Beto"], "total": 2, "pagaron": ["Ana"], "sin_celular": [] }
 ```
 
 - `comensales`: alias distintos, ordenados. Dos pestañas de "Ana" cuentan como una persona.
@@ -623,7 +624,7 @@ dentro de esa ventana, se envía uno más al cerrarla (el último estado siempre
 - La PWA lo usa para mostrar cuánto es «igual» antes de pedir la intención
   ([§8.1](#81-post-pagosintencion)).
 
-**Propuesta (v1.1): campo `sin_celular`** (aún no implementado; compatible hacia atrás). Las
+**Campo `sin_celular`** (Estable desde R-19.2; compatible hacia atrás). Las
 personas sin celular las agrega el personal con
 [`POST /internal/mesa-comensal`](#64-comensales-sin-celular-post-internalmesa-comensal):
 
@@ -814,8 +815,9 @@ reintento termina de quitar las líneas del carrito sin volver a emitir la coman
 
 ### 6.4. Comensales sin celular: `POST /internal/mesa-comensal`
 
-> **Propuesta (v1.1) · R-19.** Aún no implementada. Nadie debe depender de ella en producción
-> hasta que pase a Estable.
+> **Estable · R-19.2.** Implementada en `src/mesa-comensal.js` (regla del alias en `src/alias.js`;
+> pruebas: `tests/mesa-comensal.test.js` y `tests/alias-paridad.test.js`). El backend la llama
+> desde D-18/D-18b (`notificarMesaComensal`, con reintentos y una cola por mesa).
 
 Alguien en la mesa no tiene celular y el mesero (o el admin) pide por esa persona desde el panel
 (D-18: `POST /api/mesas/:id/comensales` en el backend). Debe contar como persona en
@@ -850,6 +852,15 @@ Cualquier otro campo del cuerpo se descarta.
 - Solo letras, marcas, números, espacio y `. _ ' -`.
 - La unicidad se mide por **clave**: sin tildes, en minúsculas y sin espacios ni `. _ ' -`
   («Ana», «ana» y «Ána» tienen la misma). Una clave vacía es inválida.
+- La clave `general` está **reservada** (D-18c): «General» es el cajón de los platos sin dueño en
+  la cuenta. «General», « GENERAL » o «Géneral» son `400 PAYLOAD_INVALIDO`; un nombre que solo la
+  contiene («General Pérez») es válido.
+- Se guarda la forma **normalizada** («  Abuela » se guarda como «Abuela»).
+
+`tests/alias-paridad.test.js` compara `src/alias.js` con `normalizarAlias` del backend en más de
+70 casos. Carga el módulo del backend con un sustituto de `backend/src/config/redis.js` (el CI del
+socket-server no instala el backend) y falla con un mensaje claro si ese módulo se mueve, deja de
+exportar la función o importa algo nuevo.
 
 Respuestas (`{ ok: false, codigo, mensaje }` en los errores; **en ningún error se emite nada**):
 
@@ -904,19 +915,19 @@ Defensa doble: además, el backend envía el alias guardado en la reserva (D-18b
 - La lista vive en `sd:mesa:{ID}:sin_celular` con TTL de 24 h, igual que `pagaron`, y se borra al
   liberarse la mesa, en el mismo momento que `pagaron`.
 - **«Igual»:** cuenta a los sin celular porque van en `comensales`.
-- **Cobro en caja:** el `comensal` debe coincidir **exacto** con el alias de `sin_celular`; si no,
-  esa persona sigue contando en «igual».
+- **Cobro en caja:** el `comensal` se normaliza con la regla del alias antes de anotarlo en
+  `pagaron` (§8.6), así «Abuela » de la cuenta marca a «Abuela». Si después de normalizar no
+  coincide con el alias de `sin_celular`, esa persona sigue contando en «igual».
 - **Rotación del QR:** con un sin celular `total` es mayor que 0 y el QR deja de rotar, igual que
   con el primer comensal conectado: hay alguien sentado.
 - **Mesa solo con sin celular:** al liberarla no sale `mesa:presencia`, porque no hay comensales
   que desconectar. El panel la limpia con `mesa:liberada`.
 
-**Notas para la implementación (R-19.2):**
-
-- La clave del socket-server debe ser la **misma función** que la del backend, con casos de prueba
-  compartidos para que no se separen. Deben incluir `Abuela`/`abuela` y `Ána`/`ana`.
-- Llevar a Redis la marca de mesa liberada (hoy `mesasLiberadas`, en memoria) para que sobreviva
-  a los reinicios.
+**Pendiente (R-15):** la marca de mesa liberada que usa `409 MESA_LIBERADA` (`mesasLiberadas`)
+sigue en memoria: tras un reinicio del socket-server no hay marca y esta guardia no actúa (el
+backend valida igual la sesión de la mesa). Llevarla a Redis toca `liberarMesa` y `/qr/generar`:
+si el borrado de la marca fallara al generar el QR, la siguiente liberación se tomaría como
+duplicada y no revocaría los QR ni limpiaría el estado de la sesión nueva.
 
 ---
 
@@ -1044,7 +1055,7 @@ Reglas de la cuenta dividida:
   | 4 personas, $120.000 | Ana propio $10.000 → Beto **$36.667** → Carlos **$36.667** → Dani **$36.666** |
   | 3 personas, $100.000 | Ana **$33.333** → Beto **$33.334** → Carlos **$33.333** (todos igual) |
 
-  **Propuesta (v1.1):** las «personas presentes» incluyen los alias de `sin_celular`
+  Las «personas presentes» incluyen los alias de `sin_celular`
   ([§5.2](#52-mesapresencia)), que ya van en `comensales`; la PWA debe usar `comensales` y
   `pagaron` de `mesa:presencia`, tal como dice la fórmula, y no calcular con `total`. Ejemplo:
   3 personas (1 sin celular), $90.000, nadie ha pagado → igual **$30.000** cada uno.
@@ -1278,7 +1289,7 @@ Content-Type: application/json
 | `id_mesa` | Sí | Entero positivo |
 | `monto_centavos` | Sí | Entero > 0 y ≤ 10 000 000 000 (centavos: `Math.round(monto * 100)`) |
 | `saldo_restante_centavos` | Sí | Entero ≥ 0 y ≤ 10 000 000 000. Saldo de la mesa **después** de este cobro |
-| `comensal` | No | Texto de 1 a 40 caracteres (alias), o `null` si se paga la mesa completa |
+| `comensal` | No | Texto de 1 a 40 caracteres (alias), o `null` si se paga la mesa completa. Para `pagaron` se normaliza (ver abajo) |
 | `referencia_externa` | No | Texto de 1 a 255 caracteres (voucher del datáfono, recibo…), o `null` |
 | `id_transaccion` | No (recomendado) | Entero positivo: id de la fila en `transacciones`. Segunda guardia de idempotencia |
 
@@ -1320,6 +1331,12 @@ Respuestas:
   "emitidoEn": "2026-10-13T20:15:00.000Z"
 }
 ```
+
+**`comensal` y `pagaron` (R-19.2):** si queda saldo, el `comensal` se anota en `pagaron`
+([§5.2](#52-mesapresencia)) **normalizado** con la regla del alias (§6.4): «Abuela » se anota
+como «Abuela» y deja de contar en «igual». Si no es un alias válido (p. ej. «Mesa #5»), se anota
+tal cual, como antes: el cobro nunca falla por esto. `payment:confirmed` lleva el `comensal`
+tal como llegó.
 
 **Abonos parciales:** una llamada **por abono**, cada una con su `eventId` (y su
 `id_transaccion`) y el `saldo_restante_centavos` que queda después de ese abono.
@@ -1392,3 +1409,5 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Propuesta (v1.1) · `POST /internal/inventario-alerta` · `inventario:alerta` | — | Nuevos: el backend avisa cuando un insumo cruza su stock mínimo y se difunde solo a `room:admin` (§5.5) | Backend (D-17): llamarla en la transición. Panel (P-22): escuchar `inventario:alerta` en `room:admin` y cargar stock bajo por REST al iniciar |
 | `POST /pagos/intencion` · `POST /pagos/webhook` · plazos de la intención (R-13.4b) | El registro duraba `PAGOS_TTL_MINUTOS` (30 min): un webhook posterior no lo encontraba y un `APPROVED` quedaba como `referencia_desconocida`, sin registrar | Marca de pendiente: `PAGOS_TTL_MINUTOS`. Registro: `PAGOS_TTL_MINUTOS` × 60 + tolerancia del webhook + 30 min (26 h por defecto). Una intención a 5 min o menos de vencer no se reutiliza, ni al repetir el `eventId` | Nadie: mismo contrato; solo se acepta tarde lo que antes se perdía |
 | Estable (R-20.2) · `POST /internal/inventario-alerta` · `inventario:alerta` | Propuesta (v1.1): sin implementar; el backend (D-17) ya la llamaba y recibía `404` y el aviso se perdía | Implementada según §5.5 sin cambios de contrato: validación estricta, solo `room:admin`, idempotencia `backend:inventario-alerta:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`) | Nadie: backend (D-17) y panel (P-22) ya usan este contrato |
+| Estable (R-19.2) · `POST /internal/mesa-comensal` · `mesa:presencia.sin_celular` | Propuesta (v1.1): sin implementar; el backend (D-18) ya la llamaba y recibía `404`, y la persona sin celular no contaba en «igual» | Implementada según §6.4 y §5.2: `sin_celular` siempre presente; `comensales` y `total` lo incluyen; misma regla de alias que el backend, con paridad probada; además rechaza la clave reservada `general` (D-18c) con `400` | Nadie: backend (D-18) y PWA ya usan este contrato |
+| `POST /internal/payment-confirmed` · `comensal` en `pagaron` (R-19.2) | Se anotaba en `pagaron` el texto tal cual («Abuela » no coincidía con «Abuela») | Se anota normalizado con la regla del alias; si no es válido, tal cual (§8.6). `payment:confirmed` no cambia | Nadie: compatible hacia atrás |

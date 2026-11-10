@@ -228,7 +228,7 @@ for (const almacen of ['memoria', 'redis']) {
     const i = await pedir('Ana', 'igual');
     await pagar(i.cuerpo.referencia, i.cuerpo.monto_en_centavos);
     assert.deepStrictEqual(await llega, {
-      id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: ['Ana'],
+      id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: ['Ana'], sin_celular: [],
     });
     await fetch(`${s.url}/internal/mesa-liberada`, {
       method: 'POST', headers: { 'x-internal-key': CLAVE_INTERNA }, body: JSON.stringify({ id_mesa: 5 }),

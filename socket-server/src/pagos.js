@@ -9,6 +9,7 @@ const {
   verificarJwt, esComensalSinAlias, ROL_COMENSAL, MAX_ALIAS,
 } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
+const { normalizarAlias } = require('./alias');
 const {
   calcularMonto, personasPorPagar, validarCuenta, MODOS,
 } = require('./cuenta');
@@ -413,6 +414,18 @@ function validarPagoCaja(p) {
 }
 
 /**
+ * El alias con el que se anota un cobro de caja en `pagaron` (§8.6). Se
+ * normaliza con la regla del alias para que «Abuela » (texto viejo de la
+ * cuenta) coincida con «Abuela» de comensales/sin_celular y deje de contar en
+ * «igual». Si no es un alias válido, se anota tal cual, como antes: el cobro
+ * nunca se rompe por esto.
+ */
+function aliasParaPagaron(comensal) {
+  const n = normalizarAlias(comensal);
+  return n.error ? comensal : n.alias;
+}
+
+/**
  * Cobro de caja (efectivo, datáfono o abono parcial) ya guardado por el
  * backend: se anuncia con el mismo payment:confirmed que un pago de Wompi.
  * Solo se reenvían los campos conocidos; el resto del cuerpo se descarta.
@@ -427,7 +440,7 @@ async function difundirPagoConfirmado(ctx, p) {
   // backend lo vuelve a intentar (marcarPago es idempotente). Con saldo 0 no
   // se anota (la mesa se libera; ver el webhook).
   const conAlias = typeof p.comensal === 'string' && p.saldo_restante_centavos > 0;
-  if (conAlias) await ctx.estadoMesas.marcarPago(p.id_mesa, p.comensal);
+  if (conAlias) await ctx.estadoMesas.marcarPago(p.id_mesa, aliasParaPagaron(p.comensal));
 
   // Doble guardia, como order:created: por eventId (reintento exacto) y por
   // id_transaccion (el backend reintenta el mismo cobro con otro eventId).
