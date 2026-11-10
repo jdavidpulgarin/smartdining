@@ -15,6 +15,7 @@ export class ErrorApi extends Error {
     mensaje = 'Ocurrió un error, intenta de nuevo',
     campo = null,
     retryAfter = null,
+    faltantes = null,
   } = {}) {
     super(mensaje);
     this.name = 'ErrorApi';
@@ -23,6 +24,7 @@ export class ErrorApi extends Error {
     this.mensaje = mensaje;
     this.campo = campo;
     this.retryAfter = retryAfter;
+    this.faltantes = Array.isArray(faltantes) ? faltantes : null;
   }
 }
 
@@ -74,6 +76,7 @@ export async function pedirJson(ruta, { method = 'GET', body, token } = {}) {
       mensaje = 'Demasiados intentos. Espera un minuto e inténtalo de nuevo';
     }
     const campo = data?.campo || null;
+    const faltantes = Array.isArray(data?.faltantes) ? data.faltantes : null;
 
     if (token && respuesta.status === 401 && manejadorSesionInvalida) {
       manejadorSesionInvalida(motivo || 'sesion_invalida', mensaje);
@@ -85,6 +88,7 @@ export async function pedirJson(ruta, { method = 'GET', body, token } = {}) {
       mensaje,
       campo,
       retryAfter,
+      faltantes,
     });
   }
 
