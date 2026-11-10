@@ -1,6 +1,13 @@
 import { ErrorApi } from './api';
+import { faltantesDelItem } from '../utils/sinStock';
 
 export const CLAVE_PEDIDOS_SIMULADOS = 'smartdining_pedidos_simulados';
+export const CLAVE_SIM_PEDIDO = 'smartdining_sim_pedido';
+
+export const FALTANTES_SIMULADOS_DEFAULT = [
+  { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
+  { tipo: 'ingrediente', id: 10, nombre: 'Aguacate' },
+];
 
 /**
  * Obtiene la lista de pedidos simulados guardados en sessionStorage.
@@ -28,6 +35,41 @@ export function listarPedidosMesaSimulados(idMesa = 5) {
  */
 export async function crearPedidoSimulado({ lineas = [], notasGenerales = '' } = {}) {
   await new Promise((resolve) => setTimeout(resolve, 400));
+
+  if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+    let simPedido = null;
+    try {
+      simPedido = sessionStorage.getItem(CLAVE_SIM_PEDIDO);
+    } catch {
+      simPedido = null;
+    }
+
+    if (simPedido === 'reintentar') {
+      throw new ErrorApi({
+        status: 503,
+        motivo: 'reintentar',
+        mensaje: 'intenta de nuevo',
+      });
+    }
+
+    if (simPedido === 'sin_stock') {
+      const tieneFaltanteEnCarrito = lineas.some(
+        (l) => faltantesDelItem(l, FALTANTES_SIMULADOS_DEFAULT).length > 0
+      );
+      const sonPlatosDelMenuSimulado =
+        lineas.length > 0 &&
+        lineas.every((l) => Number(l.id_plato || l.idPlato) >= 1000);
+
+      if (tieneFaltanteEnCarrito || !sonPlatosDelMenuSimulado) {
+        throw new ErrorApi({
+          status: 409,
+          motivo: 'sin_stock',
+          mensaje: 'No alcanza el inventario para completar el pedido',
+          faltantes: FALTANTES_SIMULADOS_DEFAULT,
+        });
+      }
+    }
+  }
 
   const hayAgotado =
     /agotado/i.test(notasGenerales || '') ||
@@ -96,6 +138,8 @@ export async function crearPedidoSimulado({ lineas = [], notasGenerales = '' } =
 
 export default {
   CLAVE_PEDIDOS_SIMULADOS,
+  CLAVE_SIM_PEDIDO,
+  FALTANTES_SIMULADOS_DEFAULT,
   listarPedidosMesaSimulados,
   crearPedidoSimulado,
 };

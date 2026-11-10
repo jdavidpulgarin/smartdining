@@ -285,4 +285,36 @@ describe('pedidoService (H-05, H-06, J-05)', () => {
     expect(pedidosMesa5).toHaveLength(1);
     expect(pedidosMesa5[0].id_pedido).toBe(55);
   });
+
+  it('J-17: en modo simulado fuerza 409 sin_stock con forma real [{ tipo, id, nombre }] cuando smartdining_sim_pedido = sin_stock', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    globalThis.sessionStorage.setItem('smartdining_sim_pedido', 'sin_stock');
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1008, cantidad: 1, nombre: 'Limonada de Coco' }],
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      motivo: 'sin_stock',
+      faltantes: [
+        { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
+        { tipo: 'ingrediente', id: 10, nombre: 'Aguacate' },
+      ],
+    });
+  });
+
+  it('J-17: en modo simulado fuerza 503 reintentar cuando smartdining_sim_pedido = reintentar', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    globalThis.sessionStorage.setItem('smartdining_sim_pedido', 'reintentar');
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1006, cantidad: 1, nombre: 'Hamburguesa Smart Angus' }],
+      })
+    ).rejects.toMatchObject({
+      status: 503,
+      motivo: 'reintentar',
+    });
+  });
 });
