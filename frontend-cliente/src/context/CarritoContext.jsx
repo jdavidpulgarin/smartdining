@@ -26,6 +26,8 @@ import {
   actualizarDisponibilidadEnCache,
   aplicarDisponibilidadPlato,
   actualizarDisponibilidadPlatoEnCache,
+  aplicarFaltantesMenu,
+  marcarFaltantesEnCache,
   recargarMenu,
 } from '../services/menuService';
 
@@ -417,6 +419,15 @@ export function CarritoProvider({ children }) {
 
   const limpiarError = useCallback(() => setError(null), []);
 
+  const marcarFaltantesEnMenu = useCallback((faltantes = []) => {
+    if (!Array.isArray(faltantes) || faltantes.length === 0) return;
+    marcarFaltantesEnCache(faltantes);
+    setMenuRaw((prev) => {
+      if (!prev) return prev;
+      return aplicarFaltantesMenu(prev, faltantes);
+    });
+  }, []);
+
   const lineasLocales = useMemo(() => {
     if (modo === 'compartido') return state.lineas;
     if (!menuRaw) return state.lineas;
@@ -484,6 +495,7 @@ export function CarritoProvider({ children }) {
       actualizarCantidad,
       eliminarLinea,
       vaciarCarrito,
+      marcarFaltantesEnMenu,
       enviando,
       error,
       limpiarError,
@@ -504,6 +516,7 @@ export function CarritoProvider({ children }) {
       actualizarCantidad,
       eliminarLinea,
       vaciarCarrito,
+      marcarFaltantesEnMenu,
       enviando,
       error,
       limpiarError,
