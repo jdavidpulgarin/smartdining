@@ -96,7 +96,8 @@ database/scripts/
 ├── 24_vistas_reportes.sql              # Vistas analiticas para modulo de BI
 ├── 25_schema_migraciones.sql          # Registro de scripts aplicados (P-17); fin de la línea base
 ├── 26_configuracion.sql                # Configuración del local, mesas.activa e historial de precios (P-18; lo aplica migrar.sh)
-└── 27_inventario.sql                   # Inventario real: insumos, recetas, reserva al pedir, devoluciones y avisos (P-19)
+├── 27_inventario.sql                   # Inventario real: insumos, recetas, reserva al pedir, devoluciones y avisos (P-19)
+└── 28_aviso_insumo_agotado.sql         # Aviso stock_bajo también al llegar a 0 aunque ya estuviera bajo (G-06)
 ```
 
 ### ⚠️ Regla: un script aplicado NUNCA se edita
@@ -196,3 +197,70 @@ sh database/tests/test_p19_concurrencia.sh          # misma conexión que migrar
 PEDIDOS=50 PORCIONES=10 sh database/tests/test_p19_concurrencia.sh
 docker compose exec -T postgres sh /smartdining-db/tests/test_p19_concurrencia.sh
 ```
+
+Aviso de insumo agotado (script 28, G-06): también necesita `COMMIT` (escucha `LISTEN
+inventario`), crea y borra sus propios datos (prefijo `G06A`):
+
+```bash
+sh database/tests/test_g06_aviso_agotado.sh
+docker compose exec -T postgres sh /smartdining-db/tests/test_g06_aviso_agotado.sh
+```
+
+### Datos de inventario para la demo (G-07)
+
+`database/seed_inventario_demo.sql` carga 34 insumos con su stock inicial y las recetas
+de los platos y opciones de `seed.sql`. **Es solo para local, staging y la demo:** no lo
+corren `docker-init.sh` ni `migrar.sh`, así que nunca llega solo a producción. Se carga
+**a mano**, después de `migrar.sh` (necesita el script 27).
+
+Lo que deja preparado:
+
+- **Hamburguesa Smart Angus** con 4 porciones de carne Angus: el **4.º pedido** la agota
+  y sale de la carta; el 5.º recibe el error de sin stock.
+- **Arepa de Chócolo** (opción de la Arepa Rellena) con 2 unidades y mínimo 4: sale en
+  stock bajo desde el inicio y se agota con 2 pedidos.
+- **Panceta Crujiente del Bowl** sigue apagada a mano (de `seed.sql`): en la carta sale
+  como `manual`, no como `stock`, para mostrar la diferencia.
+
+Se puede correr varias veces: no duplica insumos ni recetas, y el stock inicial entra como
+una `entrada` **solo** para el insumo que todavía no tiene movimientos. Una segunda
+corrida no repone stock gastado (para eso está el movimiento de `entrada`).
+
+**Local (Docker):**
+
+```bash
+docker compose exec -T postgres psql -U postgres -d smartdining -v ON_ERROR_STOP=1 \
+  -f /smartdining-db/seed_inventario_demo.sql
+# comprobar (BEGIN … ROLLBACK, no gasta stock):
+docker compose exec -T postgres sh -c 'cd /smartdining-db/tests && psql -q -U postgres -d smartdining -v ON_ERROR_STOP=1 -f test_g07_inventario_demo.sql'
+```
+
+En Git Bash, antes: `export MSYS_NO_PATHCONV=1` (ver arriba).
+
+#### Para Roberto: cargarlo en staging
+
+Solo en **staging**, nunca en producción. En el servidor, desde la carpeta del proyecto
+y con la rama ya desplegada:
+
+```bash
+# 1. La base al día (aplica el 27 si falta)
+docker compose -f docker-compose.prod.yml exec -T postgres sh /smartdining-db/migrar.sh
+
+# 2. Los datos de la demo (usa el usuario y la base del contenedor)
+docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /smartdining-db/seed_inventario_demo.sql'
+
+# 3. Comprobar: debe terminar en "=== PRUEBA G-07 PASADA SATISFACTORIAMENTE ==="
+docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
+  'cd /smartdining-db/tests && psql -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f test_g07_inventario_demo.sql'
+```
+
+El paso 2 debe terminar en `COMMIT` con `34 | 20 | 39 | 1` en el resumen (insumos,
+recetas de plato, recetas de opción, insumos en stock bajo). La prueba del paso 3 espera
+el stock recién cargado: si ya se hicieron pedidos de hamburguesa en staging, el caso 5
+lo avisa y no es un fallo del seed.
+
+**Para dejar la demo como al inicio** antes de presentarla, repón con `entrada` lo que se
+gastó (por ejemplo desde la pantalla de Inventario cuando esté, o con
+`SELECT registrar_movimiento_inventario(id_insumo, 'entrada', cantidad, 'Reposición demo')`),
+sin borrar movimientos: el libro debe seguir cuadrando.

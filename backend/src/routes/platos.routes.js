@@ -1,6 +1,7 @@
 const express = require('express');
 const ctrl = require('../controllers/platos.controller');
 const constructorCtrl = require('../controllers/constructor.controller');
+const inventarioCtrl = require('../controllers/inventario.controller');
 const { requireAuth, requireRole } = require('../middleware/auth.middleware');
 
 const router = express.Router();
@@ -22,6 +23,20 @@ router.post(
   requireRole('admin'),
   constructorCtrl.crearPaso
 );
+
+// D-16 parte B (P2): quién cambió el precio y cuándo. Va ANTES de GET /:id para
+// que 'historial-precios' no se lea como parte del id.
+router.get(
+  '/:id/historial-precios',
+  requireAuth,
+  requireRole('admin'),
+  ctrl.historialPrecios
+);
+
+// D-17 PR 2: la receta en insumos del plato (lo que consume UNA unidad). Va
+// ANTES de GET /:id para que 'receta' no se lea como parte del id.
+router.get('/:id/receta', requireAuth, requireRole('admin'), inventarioCtrl.obtenerRecetaPlato);
+router.put('/:id/receta', requireAuth, requireRole('admin'), inventarioCtrl.reemplazarRecetaPlato);
 
 router.get('/:id', ctrl.obtener);
 

@@ -2,6 +2,7 @@ const { z } = require('zod');
 const constructorService = require('../services/constructor.service');
 const platosService = require('../services/platos.service');
 const menuService = require('../services/menu.service');
+const { disponibilidadEfectiva } = require('../services/disponibilidad-efectiva');
 const socketNotifier = require('../services/socket.notifier');
 
 /**
@@ -113,10 +114,14 @@ const disponibilidadSchema = z.object({ disponible: z.boolean() }).strict();
  * encadena para que las pruebas puedan esperarlo con esperarAvisos().
  */
 function avisarDisponibilidad(ingrediente) {
+  // ISSUE #136: viaja la disponibilidad EFECTIVA (disponible AND
+  // stock_suficiente), igual que en platos y que en el oyente del canal. Con
+  // solo el interruptor manual, reponer a mano una opcion sin stock la mostraba
+  // elegible en el constructor y el pedido moria con un 409 sin_stock.
   socketNotifier.encadenarAvisos([
     () => socketNotifier.notificarIngredienteDisponibilidad(
       ingrediente.id_ingrediente,
-      ingrediente.disponible
+      disponibilidadEfectiva(ingrediente)
     ),
   ]);
 }
@@ -281,7 +286,13 @@ async function actualizarIngrediente(req, res, next) {
   if (cambios.calorias === null) cambios.calorias = 0;
 
   try {
-    const resultado = await constructorService.actualizarIngrediente(idIngrediente, cambios);
+    const resultado = await constructorService.actualizarIngrediente(
+      idIngrediente,
+      cambios,
+      undefined,
+      // El autor del cambio de precio_extra, para el historial (D-16 parte B).
+      { idUsuario: req.user?.id_usuario ?? null }
+    );
     if (!resultado) return res.status(404).json({ error: 'Ingrediente no encontrado' });
 
     const { ingrediente, anterior } = resultado;

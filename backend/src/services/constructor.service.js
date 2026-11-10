@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 /**
  * Pasos e ingredientes del constructor de platos (D-04).
@@ -47,6 +48,14 @@ const MENSAJE_INGREDIENTE_VENDIDO =
  */
 function traducirError(err, contexto = {}) {
   if (!err || typeof err.code !== 'string') return err;
+
+  // El AUTOR va primero (review de #144): cambiar el `precio_extra` de una
+  // opción dispara `tr_historial_precio_ingrediente`, que escribe en
+  // `historial_precios` con el id del JWT. Si ese usuario ya se borró, el 23503
+  // es de `fk_historial_precios_usuario` y no tiene nada que ver con el
+  // constructor, así que sale con su propio motivo en vez del 409 genérico.
+  const autor = traducirAutorInexistente(err);
+  if (autor) return autor;
 
   if (err.code === PG_UNIQUE) {
     if (err.constraint === UQ_PASO_ORDEN) {
@@ -272,7 +281,7 @@ async function crearIngrediente(idPaso, datos) {
       `INSERT INTO ingredientes (${columnas.join(', ')})
        VALUES (${marcadores})
        RETURNING id_ingrediente, id_paso, nombre, precio_extra, calorias, alergenos,
-                 url_imagen, disponible`,
+                 url_imagen, disponible, stock_suficiente`,
       valores
     );
     return r.rows[0];
@@ -297,10 +306,19 @@ async function crearIngrediente(idPaso, datos) {
  *
  * Sigue devolviendo `null` si el ingrediente no existe.
  */
-async function actualizarIngrediente(idIngrediente, cambios, validar) {
+async function actualizarIngrediente(idIngrediente, cambios, validar, { idUsuario = null } = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // D-16 parte B: el autor del cambio de precio_extra, para el trigger
+    // tr_historial_precio_ingrediente. `set_config(..., true)` vive solo hasta
+    // el fin de ESTA transacción, que es justo lo que se quiere: el valor no se
+    // filtra a la siguiente petición que use esta conexión del pool.
+    await client.query('SELECT set_config($1, $2, true)', [
+      'app.id_usuario',
+      idUsuario === null || idUsuario === undefined ? '' : String(idUsuario),
+    ]);
 
     const actual = await client.query(
       `SELECT i.* FROM ingredientes i WHERE i.id_ingrediente = $1 FOR UPDATE`,
@@ -320,7 +338,7 @@ async function actualizarIngrediente(idIngrediente, cambios, validar) {
               url_imagen = $5, disponible = $6
         WHERE id_ingrediente = $7
         RETURNING id_ingrediente, id_paso, nombre, precio_extra, calorias, alergenos,
-                  url_imagen, disponible`,
+                  url_imagen, disponible, stock_suficiente`,
       [
         fila.nombre,
         fila.precio_extra,
@@ -355,6 +373,7 @@ async function eliminarIngrediente(idIngrediente) {
 }
 
 module.exports = {
+  traducirError,
   pasosDePlato,
   obtenerPaso,
   obtenerIngrediente,

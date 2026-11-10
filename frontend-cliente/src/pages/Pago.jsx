@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useCuentaMesa } from '../hooks/useCuentaMesa';
 import { useMesaSocket } from '../context/MesaSocketContext';
 import {
@@ -10,9 +10,20 @@ import {
   ESTADO_CUENTA_ENVIANDO,
   estadoCuentaSolicitada,
   textoCajaSegunEstado,
+  avisoPedidoGrupal,
+  TEXTO_SUGERENCIA_SIN_CELULAR,
+  debeMostrarSugerenciaSinCelular,
+  mensajePagoConfirmado,
+  eventIdParaIntento,
+  estadoSelectorPago,
+  infoTuParte,
+  montoTuParte,
+  transicionPantallaPago,
+  decidirSalidaEspera,
 } from '../utils/cuenta';
+import { crearDeduplicador } from '../utils/deduplicador';
 import { crearIntencion } from '../services/pagoService';
-import { abrirCheckout } from '../services/wompiWidget';
+import { abrirCheckout, cerrarWidget } from '../services/wompiWidget';
 import { uuidV4 } from '../services/clienteMesa';
 
 /**
@@ -24,7 +35,7 @@ import { uuidV4 } from '../services/clienteMesa';
  */
 function Pago() {
   const { cuenta, cargando, error, recargar, idMesa, comensal } = useCuentaMesa();
-  const { on: socketOn, enviar, presencia } = useMesaSocket();
+  const { on: socketOn, enviar, presencia, estado: estadoSocket } = useMesaSocket();
 
   const [pantalla, setPantalla] = useState(() => {
     if (typeof window !== 'undefined' && window.location.search) {
@@ -35,6 +46,16 @@ function Pago() {
     }
     return 'cuenta';
   });
+  const [origenEspera, setOrigenEspera] = useState(() => {
+    if (typeof window !== 'undefined' && window.location.search) {
+      const search = window.location.search;
+      if (search.includes('id=') || search.includes('env=')) {
+        return 'redireccion';
+      }
+    }
+    return null;
+  });
+  const [widgetAbierto, setWidgetAbierto] = useState(false);
   const [modo, setModo] = useState('propio');
   const [avisoCuenta, setAvisoCuenta] = useState(ESTADO_CUENTA_INICIAL);
   const [avisoMesero, setAvisoMesero] = useState(null);
@@ -42,24 +63,93 @@ function Pago() {
   const [errorPago, setErrorPago] = useState(null);
   const [intencionActual, setIntencionActual] = useState(null);
   const [ultimoPago, setUltimoPago] = useState(0);
+  const [tipoConfirmado, setTipoConfirmado] = useState('mesa');
+  const intentoPrevioRef = useRef(null);
+
+  const estadoEsperaRef = useRef({ pantalla, origenEspera, widgetAbierto, intencionActual });
+  useEffect(() => {
+    estadoEsperaRef.current = { pantalla, origenEspera, widgetAbierto, intencionActual };
+  }, [pantalla, origenEspera, widgetAbierto, intencionActual]);
+
+  const deduplicador = useMemo(
+    () => crearDeduplicador({ capacidad: 200 }),
+    []
+  );
+
+  // Cleanup al desmontar: cerrar cualquier widget remanente
+  useEffect(() => {
+    return () => {
+      cerrarWidget();
+    };
+  }, []);
 
   // Escuchar eventos de socket (payment:confirmed y cuenta:solicitada)
   useEffect(() => {
     if (!socketOn) return undefined;
 
     const bajaPayment = socketOn('payment:confirmed', (evento) => {
-      if (!evento) return;
-      const comensalEvento = evento.comensal ? String(evento.comensal).trim().toLowerCase() : null;
-      const aliasActual = (comensal || '').trim().toLowerCase();
-      const esMio = !comensalEvento || (aliasActual && comensalEvento === aliasActual);
+      if (!evento || deduplicador.visto(evento.eventId)) return;
 
-      if (esMio) {
+      const saldoRestante = evento.saldo_restante_centavos != null
+        ? Number(evento.saldo_restante_centavos) / 100
+        : (evento.saldo_restante != null ? Number(evento.saldo_restante) : null);
+
+      const tipo = mensajePagoConfirmado({
+        comensal: evento.comensal,
+        yo: comensal,
+        saldoRestante,
+      });
+
+      // Si estoy en espera, consultar decidirSalidaEspera
+      const { pantalla: pActual, origenEspera: oEspera, widgetAbierto: wAbierto, intencionActual: iActual } =
+        estadoEsperaRef.current;
+
+      if (pActual === 'espera') {
+        const tipoEvt = tipo === 'propio' ? 'pago_propio' : (tipo === 'mesa' ? 'pago_mesa' : 'pago_otro');
+        const decision = decidirSalidaEspera({
+          origen: oEspera,
+          widgetAbierto: wAbierto || Boolean(iActual),
+          saldoAntes: intentoPrevioRef.current?.saldo,
+          saldoAhora: saldoRestante,
+          tipoEvento: tipoEvt,
+        });
+
+        if (decision === 'mantener') {
+          // No cerrar widget ni salir de la pantalla de espera
+          return;
+        }
+      }
+
+      const trans = transicionPantallaPago({
+        tipo: 'pago_confirmado',
+        tipoConfirmado: tipo,
+        saldoMesa: saldoRestante,
+      });
+
+      if (trans.cerrarWidget) {
+        setWidgetAbierto(false);
+        setOrigenEspera(null);
+        cerrarWidget();
+      }
+      if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.removeItem('smartdining_saldo_antes_pago');
+      }
+      if (trans.apagarEspera) {
+        setIniciandoPago(false);
+      }
+
+      if (tipo === 'propio' || tipo === 'mesa') {
+        if (intentoPrevioRef.current) {
+          intentoPrevioRef.current.confirmado = true;
+        }
         const monto = evento.monto != null
           ? Number(evento.monto)
           : (evento.monto_centavos != null ? Number(evento.monto_centavos) / 100 : 0);
         setUltimoPago(monto);
-        setPantalla('confirmado');
+        setTipoConfirmado(tipo);
+        setPantalla(trans.pantalla);
       }
+      // 'otro' con saldo restante > 0: solo el aviso "X pagó", sin cambiar de pantalla
     });
 
     const bajaCuenta = socketOn('cuenta:solicitada', () => {
@@ -73,7 +163,7 @@ function Pago() {
       bajaPayment?.();
       bajaCuenta?.();
     };
-  }, [socketOn, comensal]);
+  }, [socketOn, comensal, deduplicador]);
 
   // Limpiar parámetros de retorno de Wompi de la URL sin recargar
   useEffect(() => {
@@ -84,6 +174,127 @@ function Pago() {
       }
     }
   }, []);
+
+  // Al montar Pago o reconectar el socket mientras está en espera, recargar la cuenta
+  const estadoSocketAnteriorRef = useRef(estadoSocket);
+  useEffect(() => {
+    if (pantalla === 'espera') {
+      recargar?.();
+    }
+  }, [pantalla, recargar]);
+
+  useEffect(() => {
+    if (
+      estadoSocketAnteriorRef.current !== 'conectado' &&
+      estadoSocket === 'conectado' &&
+      pantalla === 'espera'
+    ) {
+      recargar?.();
+    }
+    estadoSocketAnteriorRef.current = estadoSocket;
+  }, [estadoSocket, pantalla, recargar]);
+
+  // Si el saldo de la mesa bajó respecto al que había antes del pago, salir de espera
+  useEffect(() => {
+    if (pantalla !== 'espera' || !cuenta) return;
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    const saldoAntesRaw = sessionStorage.getItem('smartdining_saldo_antes_pago');
+    if (saldoAntesRaw != null) {
+      const saldoAntes = Number(saldoAntesRaw);
+      const decision = decidirSalidaEspera({
+        origen: origenEspera,
+        widgetAbierto: widgetAbierto || Boolean(intencionActual),
+        saldoAntes,
+        saldoAhora: cuenta.saldo,
+        tipoEvento: 'salida_espera',
+      });
+
+      if (decision === 'mantener') {
+        return;
+      }
+
+      const trans = transicionPantallaPago({
+        tipo: 'salida_espera',
+        saldoMesa: cuenta.saldo,
+      });
+
+      if (trans.cerrarWidget) {
+        cerrarWidget();
+      }
+      if (trans.limpiarAlmacenamiento) {
+        sessionStorage.removeItem('smartdining_saldo_antes_pago');
+      }
+      if (intentoPrevioRef.current) {
+        intentoPrevioRef.current.confirmado = true;
+      }
+      queueMicrotask(() => {
+        setWidgetAbierto(false);
+        setOrigenEspera(null);
+        if (trans.apagarEspera) {
+          setIniciandoPago(false);
+        }
+        if (decision === 'confirmado_mesa' || trans.pantalla === 'confirmado') {
+          setTipoConfirmado((prev) => (prev === 'propio' ? 'propio' : 'mesa'));
+          setPantalla('confirmado');
+        } else {
+          setPantalla('cuenta');
+        }
+      });
+    }
+  }, [pantalla, cuenta, origenEspera, widgetAbierto, intencionActual]);
+
+  // Si la cuenta tiene saldo 0 (y total > 0) al montar o recargar sin un evento propio, mostrar pantalla de mesa pagada
+  useEffect(() => {
+    if (!cuenta) return;
+    if (cuenta.saldo === 0 && (cuenta.total ?? 0) > 0 && pantalla !== 'confirmado') {
+      if (pantalla === 'espera') {
+        const decision = decidirSalidaEspera({
+          origen: origenEspera,
+          widgetAbierto: widgetAbierto || Boolean(intencionActual),
+          saldoAhora: 0,
+          tipoEvento: 'saldo_cero',
+        });
+        if (decision === 'mantener') {
+          return;
+        }
+      }
+
+      const trans = transicionPantallaPago({
+        tipo: 'saldo_cero',
+        saldoMesa: 0,
+      });
+
+      if (trans.cerrarWidget) {
+        cerrarWidget();
+      }
+      if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.removeItem('smartdining_saldo_antes_pago');
+      }
+      queueMicrotask(() => {
+        setWidgetAbierto(false);
+        setOrigenEspera(null);
+        if (trans.apagarEspera) {
+          setIniciandoPago(false);
+        }
+        setTipoConfirmado((prev) => (prev === 'propio' ? 'propio' : 'mesa'));
+        setPantalla(trans.pantalla);
+      });
+    }
+  }, [cuenta, pantalla, origenEspera, widgetAbierto, intencionActual]);
+
+  const saldoMesa = cuenta?.saldo ?? 0;
+  const miSaldoCuenta = cuenta?.mia?.saldo ?? 0;
+  const loMioHabilitado = miSaldoCuenta > 0;
+
+  // Si la cuenta se actualiza y mi saldo pasa a 0 estando en 'propio', cambia a 'igual' solo si la mesa aún debe
+  useEffect(() => {
+    if (!cuenta) return;
+    if (modo === 'propio' && !loMioHabilitado && saldoMesa > 0) {
+      queueMicrotask(() => {
+        setModo('igual');
+      });
+    }
+  }, [cuenta, modo, loMioHabilitado, saldoMesa]);
 
   if (cargando && !cuenta) {
     return (
@@ -118,22 +329,35 @@ function Pago() {
     );
   }
 
-  const mesaNumero = cuenta?.numero || idMesa || 5;
-  const ubicacion = cuenta?.ubicacion || 'Terraza';
+  const mesaNumero = cuenta?.numero || idMesa || null;
+  const ubicacion = cuenta?.ubicacion || null;
   const total = cuenta?.total ?? 0;
   const pagado = cuenta?.pagado ?? 0;
   const saldo = cuenta?.saldo ?? 0;
   const miSaldo = cuenta?.mia?.saldo ?? 0;
   const miSubtotal = cuenta?.mia?.subtotal ?? 0;
+  const miPagado = cuenta?.mia?.pagado ?? 0;
+
+  const { mostrarSelector, yaPague } = estadoSelectorPago({
+    saldoMesa: saldo,
+    miSaldo,
+    miPagado,
+  });
+
+  const tuParte = infoTuParte({
+    miSaldo,
+    miPagado,
+    miSubtotal,
+    yaPague,
+  });
+
+  const tuParteMonto = montoTuParte({ saldoMesa: saldo, miSaldo });
 
   const comensales = cuenta?.comensales || [];
   const numPersonasDividir = personasDividir(cuenta, { presencia, yo: comensal });
 
   const montos = montosPorModo(cuenta, { presencia, yo: comensal });
   const montoModo = montos[modo] ?? miSaldo;
-
-  const puedoPagar = saldo > 0 && montoModo > 0;
-  const yaPague = miSaldo === 0 && saldo > 0;
   const progreso = total > 0 ? Math.min(100, Math.round((pagado / total) * 100)) : 0;
 
   const textoAyudaDividir = numPersonasDividir === 1
@@ -145,6 +369,15 @@ function Pago() {
     igual: textoAyudaDividir,
     total: 'Pagas todo lo que le falta a la mesa (invitas tú).',
   };
+
+  const avisoGrupal = avisoPedidoGrupal({
+    cuenta,
+    presencia,
+    yo: comensal,
+    modo,
+  });
+
+  const mostrarSinCelular = debeMostrarSugerenciaSinCelular(cuenta);
 
   const handlePedirCuenta = async () => {
     if (avisoCuenta.deshabilitado && avisoCuenta.estado !== 'inicial') return;
@@ -185,17 +418,67 @@ function Pago() {
     setErrorPago(null);
 
     try {
-      const intencion = await crearIntencion(modo, null, {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.setItem('smartdining_saldo_antes_pago', String(cuenta?.saldo ?? 0));
+      }
+      const eventId = eventIdParaIntento(
+        intentoPrevioRef.current,
+        { modo, saldo: cuenta?.saldo },
+        uuidV4
+      );
+      intentoPrevioRef.current = {
+        eventId,
+        modo,
+        saldo: cuenta?.saldo,
+        confirmado: false,
+      };
+
+      const intencion = await crearIntencion(modo, eventId, {
         presenciaSim: presencia,
         yoSim: comensal,
       });
       setIntencionActual(intencion);
+      setOrigenEspera('widget');
+      setWidgetAbierto(true);
       setPantalla('espera');
 
       // En modo real, abrir el widget emergente de Wompi
       if (!(import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true')) {
-        abrirCheckout(intencion).catch((err) => {
-          // Si falla el script de checkout, se informa pero se conserva la pantalla de espera
+        abrirCheckout(intencion, (resultado) => {
+          setWidgetAbierto(false);
+          setOrigenEspera(null);
+          setIntencionActual(null);
+
+          const trans = transicionPantallaPago({
+            tipo: 'widget_resultado',
+            resultadoWidget: resultado,
+          });
+
+          if (trans.cerrarWidget) {
+            cerrarWidget();
+          }
+          if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
+            sessionStorage.removeItem('smartdining_saldo_antes_pago');
+          }
+          if (trans.apagarEspera) {
+            setIniciandoPago(false);
+          }
+          if (trans.errorPago) {
+            setErrorPago(trans.errorPago);
+          }
+          if (trans.pantalla !== 'espera') {
+            setPantalla(trans.pantalla);
+          }
+        }).catch((err) => {
+          setWidgetAbierto(false);
+          setOrigenEspera(null);
+          setIntencionActual(null);
+          cerrarWidget();
+          if (typeof window !== 'undefined' && window.sessionStorage) {
+            sessionStorage.removeItem('smartdining_saldo_antes_pago');
+          }
+          setIniciandoPago(false);
+          setPantalla('cuenta');
           setErrorPago(err.message || 'No se pudo abrir la ventana de Wompi');
         });
       }
@@ -207,8 +490,20 @@ function Pago() {
   };
 
   const handleVolverCuenta = () => {
-    setPantalla('cuenta');
+    setWidgetAbierto(false);
+    setOrigenEspera(null);
+    setIntencionActual(null);
+    const trans = transicionPantallaPago({ tipo: 'volver_cuenta' });
+    if (trans.cerrarWidget) {
+      cerrarWidget();
+    }
+    if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
+      sessionStorage.removeItem('smartdining_saldo_antes_pago');
+    }
+    setIniciandoPago(false);
+    setPantalla(trans.pantalla);
     setErrorPago(null);
+    setTipoConfirmado('mesa');
   };
 
   return (
@@ -259,9 +554,11 @@ function Pago() {
               <h1 className="m-0 font-titulo text-[40px] tracking-wider leading-none text-white">
                 LA CUENTA
               </h1>
-              <span className="text-xs text-texto-suave">
-                Mesa {mesaNumero} · {ubicacion}
-              </span>
+              {(mesaNumero || ubicacion) && (
+                <span className="text-xs text-texto-suave">
+                  {[mesaNumero ? `Mesa ${mesaNumero}` : null, ubicacion].filter(Boolean).join(' · ')}
+                </span>
+              )}
             </div>
 
             <div className="flex flex-col gap-1">
@@ -270,14 +567,12 @@ function Pago() {
               </span>
               <span
                 className="font-titulo text-[64px] tracking-wider leading-[0.95]"
-                style={{ color: miSaldo === 0 ? '#2FA35A' : '#FFFFFF' }}
+                style={{ color: tuParte.color }}
               >
-                {formatoPesos(miSaldo)}
+                {formatoPesos(tuParteMonto)}
               </span>
               <span className="text-xs text-texto-suave">
-                {miSaldo === 0
-                  ? 'Ya pagaste lo tuyo. ¡Gracias!'
-                  : `Consumiste ${formatoPesos(miSubtotal)}`}
+                {tuParte.mensaje}
               </span>
             </div>
 
@@ -308,7 +603,7 @@ function Pago() {
             <div className="flex flex-col divide-y divide-[#222222]">
               {comensales.map((c, idx) => {
                 const deb = Math.max(0, c.saldo);
-                const yaPago = deb === 0;
+                const yaPago = c.esMio ? yaPague : (c.pagado > 0 && deb === 0);
                 const inicial = c.nombre ? c.nombre.charAt(0).toUpperCase() : '?';
 
                 return (
@@ -367,7 +662,7 @@ function Pago() {
           </section>
 
           {/* Opciones de pago si hay saldo pendiente */}
-          {puedoPagar && (
+          {mostrarSelector && (
             <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-3">
               <h2 className="m-0 font-etiqueta font-bold text-sm tracking-wider text-white uppercase">
                 ¿CÓMO QUIERES PAGAR?
@@ -380,20 +675,26 @@ function Pago() {
               >
                 {['propio', 'igual', 'total'].map((k) => {
                   const activo = modo === k;
+                  const deshabilitado = k === 'propio' && !loMioHabilitado;
                   return (
                     <button
                       key={k}
                       type="button"
                       role="radio"
                       aria-checked={activo}
+                      aria-disabled={deshabilitado || undefined}
+                      disabled={deshabilitado}
                       onClick={() => {
+                        if (deshabilitado) return;
                         setModo(k);
                         setErrorPago(null);
                       }}
-                      className={`min-h-[48px] rounded-lg cursor-pointer flex flex-col items-center justify-center gap-0.5 transition-colors ${
-                        activo
-                          ? 'bg-primario text-white shadow-sm'
-                          : 'bg-transparent text-texto-suave hover:text-white'
+                      className={`min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
+                        deshabilitado
+                          ? 'opacity-40 cursor-not-allowed bg-transparent text-texto-tenue'
+                          : activo
+                          ? 'bg-primario text-white shadow-sm cursor-pointer'
+                          : 'bg-transparent text-texto-suave hover:text-white cursor-pointer'
                       }`}
                     >
                       <span className="font-etiqueta font-bold text-sm tracking-wider uppercase">
@@ -411,6 +712,65 @@ function Pago() {
                 {ayudas[modo]}
               </p>
 
+              {mostrarSinCelular && (
+                <p className="m-0 text-xs text-texto-tenue">
+                  {TEXTO_SUGERENCIA_SIN_CELULAR}
+                </p>
+              )}
+
+              {/* Tarjeta de aviso si pidió para varios (J-15) */}
+              {avisoGrupal && (
+                <div
+                  role="note"
+                  className="min-h-[44px] bg-[#1F1F1F] border border-[#2A2A2A] rounded-xl p-3 flex flex-col gap-2.5 text-[#FFFFFF]"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#F2B705"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="shrink-0 mt-0.5"
+                      aria-hidden="true"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <p className="m-0 text-xs text-[#FFFFFF] leading-relaxed">
+                      {avisoGrupal.mensaje}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1 border-t border-[#2A2A2A]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModo('igual');
+                        setErrorPago(null);
+                      }}
+                      className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#2A2A2A] hover:bg-[#333333] active:bg-[#3a3a3a] text-white font-etiqueta font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer border border-[#3A3A3A] flex items-center justify-center"
+                    >
+                      Dividir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModo('total');
+                        setErrorPago(null);
+                      }}
+                      className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#2A2A2A] hover:bg-[#333333] active:bg-[#3a3a3a] text-white font-etiqueta font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer border border-[#3A3A3A] flex items-center justify-center"
+                    >
+                      Toda la mesa
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Aviso de error de pago junto al botón */}
               {errorPago && (
                 <div
@@ -426,9 +786,11 @@ function Pago() {
               <button
                 type="button"
                 onClick={handlePagarWompi}
-                disabled={iniciandoPago}
-                className={`min-h-[56px] rounded-2xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-[19px] tracking-wider cursor-pointer flex items-center justify-center gap-2.5 transition-colors shadow-sm ${
-                  iniciandoPago ? 'opacity-70 cursor-not-allowed' : ''
+                disabled={iniciandoPago || montoModo <= 0}
+                className={`min-h-[56px] rounded-2xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-[19px] tracking-wider flex items-center justify-center gap-2.5 transition-colors shadow-sm ${
+                  iniciandoPago || montoModo <= 0
+                    ? 'opacity-70 cursor-not-allowed'
+                    : 'cursor-pointer'
                 }`}
               >
                 {iniciandoPago ? (
@@ -457,7 +819,10 @@ function Pago() {
               <button
                 type="button"
                 onClick={handlePagarCaja}
-                className="min-h-[52px] rounded-xl border border-borde bg-superficie-2 hover:bg-[#252525] text-white font-etiqueta font-bold text-base tracking-wider cursor-pointer flex items-center justify-center gap-2 transition-colors"
+                disabled={montoModo <= 0}
+                className={`min-h-[52px] rounded-xl border border-borde bg-superficie-2 text-white font-etiqueta font-bold text-base tracking-wider flex items-center justify-center gap-2 transition-colors ${
+                  montoModo <= 0 ? 'opacity-70 cursor-not-allowed' : 'hover:bg-[#252525] cursor-pointer'
+                }`}
               >
                 <svg
                   width="18"
@@ -619,7 +984,7 @@ function Pago() {
               <path d="M8 10V7a4 4 0 0 1 8 0v3" />
             </svg>
             <span className="truncate">
-              Ref. {intencionActual?.referencia || `SD-${mesaNumero}-PENDIENTE`} · expira en 30 min
+              Ref. {intencionActual?.referencia || (mesaNumero ? `SD-${mesaNumero}-PENDIENTE` : 'SD-PENDIENTE')} · expira en 30 min
             </span>
           </div>
 
@@ -661,9 +1026,15 @@ function Pago() {
             ¡PAGO CONFIRMADO!
           </h1>
 
-          <p className="m-0 text-[15px] text-white">
-            Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
-          </p>
+          {tipoConfirmado === 'propio' ? (
+            <p className="m-0 text-[15px] text-white">
+              Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
+            </p>
+          ) : (
+            <p className="m-0 text-[15px] text-white">
+              La mesa quedó pagada.
+            </p>
+          )}
 
           <div className="w-full box-border bg-superficie-2 border border-borde rounded-xl p-3 flex justify-between items-center text-sm">
             <span className="text-texto-suave">Le falta a la mesa</span>
@@ -733,7 +1104,7 @@ function Pago() {
               DILE AL CAJERO
             </span>
             <span className="font-titulo text-[34px] tracking-wider text-white">
-              MESA {mesaNumero} · {(comensal || 'MESA').toUpperCase()}
+              {mesaNumero ? `MESA ${mesaNumero}` : 'MESA'} · {(comensal || 'MESA').toUpperCase()}
             </span>
             <span className="text-[15px] text-acento font-semibold">
               {formatoPesos(montoModo)}

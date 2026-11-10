@@ -464,12 +464,16 @@ async function notificarMesaLiberada(id_mesa, motivo) {
  * recuperan los clientes que se perdieron el anterior, en vez de que Roberto lo
  * deduplique y el aviso se pierda en silencio.
  */
-async function notificarIngredienteDisponibilidad(id_ingrediente, disponible) {
-  return enviar('/internal/ingrediente-disponibilidad', {
-    id_ingrediente,
-    disponible,
-    eventId: nuevoEventId(),
-  });
+async function notificarIngredienteDisponibilidad(id_ingrediente, disponible, { conReintento = false } = {}) {
+  const cuerpo = { id_ingrediente, disponible, eventId: nuevoEventId() };
+  // conReintento lo pide quien avisa por su cuenta y no dentro de una peticion
+  // HTTP: el oyente del canal 'inventario' (D-17). Ahi no hay nadie esperando
+  // una respuesta, asi que perder el aviso por un 503 pasajero del socket-server
+  // dejaria la carta desfasada en las mesas hasta el proximo cambio de stock.
+  // Las rutas del personal siguen con enviar() a secas, como siempre.
+  return conReintento
+    ? enviarConReintento('/internal/ingrediente-disponibilidad', cuerpo)
+    : enviar('/internal/ingrediente-disponibilidad', cuerpo);
 }
 
 /**
@@ -488,10 +492,41 @@ async function notificarIngredienteDisponibilidad(id_ingrediente, disponible) {
  * recuperan los clientes que se perdieron el anterior, en vez de que Roberto lo
  * deduplique y el aviso se pierda en silencio.
  */
-async function notificarPlatoDisponibilidad(id_plato, disponible) {
-  return enviar('/internal/plato-disponibilidad', {
-    id_plato,
-    disponible,
+async function notificarPlatoDisponibilidad(id_plato, disponible, { conReintento = false } = {}) {
+  const cuerpo = { id_plato, disponible, eventId: nuevoEventId() };
+  // Mismo criterio que en notificarIngredienteDisponibilidad.
+  return conReintento
+    ? enviarConReintento('/internal/plato-disponibilidad', cuerpo)
+    : enviar('/internal/plato-disponibilidad', cuerpo);
+}
+
+/**
+ * POST /internal/inventario-alerta (D-17 · EVENTS.md §5.5, propuesta v1.1 de
+ * Roberto) — un insumo cruzó su stock mínimo hacia abajo.
+ *
+ * El socket-server lo emite como `inventario:alerta` SOLO a `room:admin` (admin,
+ * cajero y mesero: el mesero necesita saber qué se está agotando); nunca a las
+ * mesas ni al KDS. `agotado` lo calcula él (`stock_actual === 0`) y `emitidoEn`
+ * lo pone al emitir, así que ninguno de los dos se manda.
+ *
+ * Lo dispara el oyente del canal `inventario` de PostgreSQL, no una petición
+ * HTTP, así que va SIEMPRE con reintento: nadie está esperando esta respuesta y
+ * el aviso no se guarda en ningún sitio, así que si se pierde no vuelve. El
+ * contrato manda reintentar solo ante 500/502/503 `ERROR_INTERNO`, que es
+ * exactamente lo que decide `esReintentable`.
+ *
+ * `stock_actual` y `stock_minimo` tienen que ser NÚMEROS JSON: son `NUMERIC` en
+ * la base y `pg` los entrega como texto cuando salen de una CONSULTA, y un texto
+ * ahí es un `400 PAYLOAD_INVALIDO` del socket-server. La conversión la hace
+ * quien arma el aviso (services/inventario-avisos.js).
+ */
+async function notificarInventarioAlerta({ id_insumo, nombre, unidad, stock_actual, stock_minimo }) {
+  return enviarConReintento('/internal/inventario-alerta', {
+    id_insumo,
+    nombre,
+    unidad,
+    stock_actual,
+    stock_minimo,
     eventId: nuevoEventId(),
   });
 }
@@ -697,6 +732,7 @@ function notificarMesaComensal(id_mesa, alias, accion, clave) {
 
 module.exports = {
   nuevoEventId,
+  notificarInventarioAlerta,
   armarPedido,
   encadenarAvisos,
   esperarAvisos,

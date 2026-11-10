@@ -35,17 +35,24 @@ async function crear({ numero, capacidad, ubicacion, estado, token_qr }) {
   // Una mesa que nace 'ocupada' (caso raro, al dar de alta el salón con gente
   // sentada) ya está en una visita, así que arranca con su sesion_iniciada_en.
   // Si nace libre queda NULL, y la primera apertura la fijará.
+  //
+  // La comparación se hace aquí y llega como booleano ($6). Antes era
+  // `CASE WHEN $4 = $6` en el SQL: $4 iba a la vez a la columna estado
+  // (varchar) y a esa comparación (text), y PostgreSQL rechazaba la consulta
+  // ("inconsistent types deduced for parameter $4"), así que POST /api/mesas
+  // daba 500 siempre. Lo cubre tests/integracion/mesas-sql.test.js.
+  const estadoInicial = estado || ESTADO_MESA_LIBRE;
   const result = await pool.query(
     `INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr, sesion_iniciada_en)
      VALUES ($1, COALESCE($2, 4), COALESCE($3, 'Principal'), $4, $5,
-             CASE WHEN $4 = $6 THEN NOW() ELSE NULL END) RETURNING *`,
+             CASE WHEN $6 THEN NOW() ELSE NULL END) RETURNING *`,
     [
       numero,
       capacidad ?? null,
       ubicacion || null,
-      estado || ESTADO_MESA_LIBRE,
+      estadoInicial,
       token_qr || null,
-      ESTADO_MESA_OCUPADA,
+      estadoInicial === ESTADO_MESA_OCUPADA,
     ]
   );
   return result.rows[0];
@@ -155,7 +162,10 @@ async function abrirSesion(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
     return { mesa: actualizada.rows[0], token: generado.token, reutilizado: false };
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    // Una mesa INACTIVA no se abre ni recibe un QR nuevo: lo impide
+    // tr_validar_mesa_activa con un 23514, que sin traducir saldría como un 422
+    // genérico. Es una regla de sala, así que sale 409 con su motivo.
+    throw traducirMesaActiva(err, MOTIVO_MESA_INACTIVA, MENSAJE_INACTIVA);
   } finally {
     client.release();
   }
@@ -212,7 +222,10 @@ async function rotarQr(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
     return { mesa: actualizada.rows[0], token: generado.token, expira_en: generado.expira_en ?? null };
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    // Una mesa INACTIVA no se abre ni recibe un QR nuevo: lo impide
+    // tr_validar_mesa_activa con un 23514, que sin traducir saldría como un 422
+    // genérico. Es una regla de sala, así que sale 409 con su motivo.
+    throw traducirMesaActiva(err, MOTIVO_MESA_INACTIVA, MENSAJE_INACTIVA);
   } finally {
     client.release();
   }
@@ -321,6 +334,23 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
 }
 
 /**
+ * ¿Existe esa mesa? Una sola consulta por clave primaria y sin traer la fila.
+ *
+ * Es la pregunta previa de todo lo que recibe un `id_mesa` de fuera: las dos
+ * cuentas ya la hacían (sin esto, `obtener_cuenta_mesa_json` lanza un RAISE que
+ * el manejador central daría como un 409 incomprensible) y desde D-18c también
+ * `POST /api/pedidos`, para que un id equivocado sea un 404 y no un 409 que
+ * culpa al nombre del comensal.
+ *
+ * `SELECT 1` y no `SELECT *`: solo interesa si hay fila, y traerla entera
+ * invitaría a usar este helper como un `obtenerPorId` barato, que no es.
+ */
+async function existe(idMesa) {
+  const result = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
+  return result.rows.length > 0;
+}
+
+/**
  * Cuenta de la mesa para el socket-server (EVENTS.md §8.2), en centavos.
  *
  * Los centavos se calculan EN SQL (`ROUND(x * 100)::bigint`) y no en
@@ -339,8 +369,7 @@ async function liberarSiNoQuedanPedidosAbiertos(client, idMesa) {
  *          lanzaría un RAISE, que el manejador central traduciría a 409).
  */
 async function cuentaInterna(idMesa) {
-  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
-  if (existe.rows.length === 0) return null;
+  if (!(await existe(idMesa))) return null;
 
   const result = await pool.query(
     `WITH cuenta AS (SELECT obtener_cuenta_mesa_json($1) AS j)
@@ -392,8 +421,7 @@ async function cuentaInterna(idMesa) {
  *          SQL lanzaría un RAISE, que el manejador central daría como 409.
  */
 async function cuentaPorComensal(idMesa) {
-  const existe = await pool.query('SELECT 1 FROM mesas WHERE id_mesa = $1', [idMesa]);
-  if (existe.rows.length === 0) return null;
+  if (!(await existe(idMesa))) return null;
 
   const result = await pool.query('SELECT obtener_cuenta_mesa_json($1) AS cuenta', [idMesa]);
   return result.rows[0].cuenta;
@@ -412,6 +440,26 @@ async function tokenQrDeMesa(idMesa) {
 /** SQLSTATE de unicidad. En mesas solo puede ser `numero` o `token_qr`. */
 const PG_UNIQUE = '23505';
 
+/**
+ * SQLSTATE con el que `tr_validar_mesa_activa` rechaza las tres cosas que no se
+ * pueden hacer con una mesa inactiva (database/scripts/26_configuracion.sql:
+ * `USING ERRCODE = 'check_violation'`): desactivar una ocupada, abrir una
+ * inactiva y darle un QR nuevo a una inactiva.
+ *
+ * Sin traducirlo, el manejador central lo convierte en un 422 genérico («un dato
+ * está fuera del rango permitido») que no dice ni qué mesa ni qué hacer. Son
+ * reglas de sala, así que aquí se vuelven 409 con su `motivo`.
+ */
+const PG_CHECK = '23514';
+
+const MOTIVO_MESA_OCUPADA = 'mesa_ocupada';
+const MOTIVO_MESA_INACTIVA = 'mesa_inactiva';
+
+const MENSAJE_OCUPADA_NO_SE_DESACTIVA =
+  'Esa mesa está ocupada: libérala antes de desactivarla.';
+const MENSAJE_INACTIVA =
+  'Esa mesa está inactiva: actívala antes de abrirla o de generarle un QR.';
+
 const MENSAJE_NUMERO_EN_USO = 'Ya hay otra mesa con ese número';
 const MENSAJE_OCUPADA_NO_SE_RENUMERA =
   'Esa mesa está ocupada: no se puede cambiar su número mientras haya gente sentada. '
@@ -422,9 +470,31 @@ const MENSAJE_CON_PEDIDOS =
   'Esa mesa tiene pedidos registrados: no se puede borrar sin perder el historial. '
   + 'Déjala en mantenimiento si ya no se usa.';
 
-/** Error de negocio con status, que es la primera rama de errores.middleware. */
-function errorDeMesa(status, message) {
-  return { status, message };
+/**
+ * Error de negocio con status, que es la primera rama de errores.middleware.
+ *
+ * `motivo` es opcional y es el código estable que el cliente compara, al lado
+ * del `error` que es texto para leer: la convención `{ error, motivo }` de los
+ * 409 de mesas y pedidos. El manejador central lo pasa tal cual si viene.
+ */
+function errorDeMesa(status, message, motivo) {
+  return motivo ? { status, message, motivo } : { status, message };
+}
+
+/**
+ * Traduce el 23514 de `tr_validar_mesa_activa` a un 409 con su motivo.
+ *
+ * Es una red de seguridad, no el camino normal: desactivar una mesa ocupada ya
+ * se corta antes en `actualizarDatos`, sin llegar a la base. Pero el trigger
+ * cubre caminos que el backend no controla (abrir una mesa inactiva, rotarle el
+ * QR, o una consulta a mano), y por esos sí llega aquí.
+ *
+ * Solo el 23514: cualquier otro error sube como venía, para no tapar un CHECK
+ * distinto de la misma tabla.
+ */
+function traducirMesaActiva(err, motivo, mensaje) {
+  if (err && err.code === PG_CHECK) return errorDeMesa(409, mensaje, motivo);
+  return err;
 }
 
 /**
@@ -442,6 +512,11 @@ function errorDeMesa(status, message) {
  *     escanear: cambiárselo con gente sentada y pedidos en marcha deja los
  *     tiquetes de cocina apuntando a una mesa que ya no existe con ese nombre.
  *     Capacidad y ubicación sí se pueden corregir, porque no identifican nada.
+ *   - una mesa OCUPADA o con SESIÓN ABIERTA no se desactiva (409
+ *     `mesa_ocupada`). Se comprueba aquí, con la fila ya bloqueada, y no se
+ *     delega al trigger: así el mensaje dice qué pasa y qué hacer, y no se gasta
+ *     un viaje a la base para que lo rechace. El trigger sigue siendo la red de
+ *     seguridad para los caminos que no pasan por aquí.
  *   - un número repetido es 409 con un mensaje que lo dice (el UNIQUE de la base
  *     daría un 23505, que el manejador central traduce a un "Ya existe un
  *     registro con esos datos" genérico).
@@ -461,7 +536,7 @@ async function actualizarDatos(id, cambios) {
     await client.query('BEGIN');
 
     const actual = await client.query(
-      'SELECT m.id_mesa, m.numero, m.estado FROM mesas m WHERE m.id_mesa = $1 FOR UPDATE',
+      'SELECT m.id_mesa, m.numero, m.estado, m.activa, m.token_qr FROM mesas m WHERE m.id_mesa = $1 FOR UPDATE',
       [id]
     );
     const mesa = actual.rows[0];
@@ -476,14 +551,39 @@ async function actualizarDatos(id, cambios) {
       throw errorDeMesa(409, MENSAJE_OCUPADA_NO_SE_RENUMERA);
     }
 
+    // Desactivar es retirar la mesa del servicio (ADR-06). Lo único que lo
+    // impide es que haya gente sentada: con la mesa ocupada, desactivarla deja
+    // una sesión que no se puede cerrar por el camino normal.
+    //
+    // Un `token_qr` en una mesa 'disponible' NO bloquea: es el resto de una
+    // sesión que ya terminó (el cierre deja el token hasta la próxima rotación),
+    // así que no hay nadie a quien dejar colgado.
+    const seDesactiva = cambios.activa === false && mesa.activa === true;
+    if (seDesactiva && mesa.estado === ESTADO_MESA_OCUPADA) {
+      await client.query('ROLLBACK');
+      throw errorDeMesa(409, MENSAJE_OCUPADA_NO_SE_DESACTIVA, MOTIVO_MESA_OCUPADA);
+    }
+
+    // Al desactivar se borra el token en la MISMA sentencia: una mesa inactiva
+    // no conserva un QR, o quedaría un código que escanea a una mesa fuera de
+    // servicio. `$5 IS FALSE` solo es cierto cuando `activa` llega en `false`:
+    // con `null` (el campo no viene) o con `true`, el token no se toca.
     const result = await client.query(
       `UPDATE mesas
           SET numero    = COALESCE($2, numero),
               capacidad = COALESCE($3, capacidad),
-              ubicacion = COALESCE($4, ubicacion)
+              ubicacion = COALESCE($4, ubicacion),
+              activa    = COALESCE($5, activa),
+              token_qr  = CASE WHEN $5 IS FALSE THEN NULL ELSE token_qr END
         WHERE id_mesa = $1
         RETURNING *`,
-      [id, cambios.numero ?? null, cambios.capacidad ?? null, cambios.ubicacion ?? null]
+      [
+        id,
+        cambios.numero ?? null,
+        cambios.capacidad ?? null,
+        cambios.ubicacion ?? null,
+        cambios.activa ?? null,
+      ]
     );
 
     await client.query('COMMIT');
@@ -494,9 +594,12 @@ async function actualizarDatos(id, cambios) {
     } catch {
       // Ya estaba cerrada.
     }
-    // Solo `numero` puede chocar por aquí: `token_qr` no se toca en este UPDATE.
+    // Solo `numero` puede chocar por aquí: a `token_qr` este UPDATE solo le
+    // escribe NULL, y el índice único no cuenta los NULL.
     if (err && err.code === PG_UNIQUE) throw errorDeMesa(409, MENSAJE_NUMERO_EN_USO);
-    throw err;
+    // Red de seguridad: si el trigger rechaza el cambio de `activa` por un
+    // camino que la guarda de arriba no vio, sale 409 y no un 422 genérico.
+    throw traducirMesaActiva(err, MOTIVO_MESA_OCUPADA, MENSAJE_OCUPADA_NO_SE_DESACTIVA);
   } finally {
     client.release();
   }
@@ -583,6 +686,7 @@ module.exports = {
   rotarQr,
   liberarSesion,
   liberarSiNoQuedanPedidosAbiertos,
+  existe,
   cuentaInterna,
   cuentaPorComensal,
   tokenQrDeMesa,
@@ -595,6 +699,11 @@ module.exports = {
   eliminar,
   MENSAJE_NUMERO_EN_USO,
   MENSAJE_OCUPADA_NO_SE_RENUMERA,
+  MENSAJE_OCUPADA_NO_SE_DESACTIVA,
+  MENSAJE_INACTIVA,
+  MOTIVO_MESA_OCUPADA,
+  MOTIVO_MESA_INACTIVA,
+  traducirMesaActiva,
   MENSAJE_OCUPADA_NO_SE_BORRA,
   MENSAJE_CON_PEDIDOS,
 };

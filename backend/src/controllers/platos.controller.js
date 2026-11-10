@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const platosService = require('../services/platos.service');
 const menuService = require('../services/menu.service');
+const { disponibilidadEfectiva } = require('../services/disponibilidad-efectiva');
 const socketNotifier = require('../services/socket.notifier');
 
 // Columnas segun docs/modelo-er.md: url_imagen (no "imagen_url"), id_categoria
@@ -13,6 +14,14 @@ const platoSchema = z.object({
   id_categoria: z.number().int(),
   disponible: z.boolean().optional(),
   tiempo_preparacion_estimado: z.number().int().positive().optional(),
+  // D-16 parte B: las dos columnas existen desde 13_constructor.sql, pero este
+  // esquema no las aceptaba, así que un POST o un PUT que las mandara las
+  // perdía en silencio. OPCIONALES: si no vienen, nada cambia.
+  //
+  // `personalizable` decide si el plato se arma por pasos en el constructor;
+  // `calorias` admite null ("no se sabe"), que es distinto de 0.
+  personalizable: z.boolean().optional(),
+  calorias: z.number().int().min(0).nullable().optional(),
 });
 
 /**
@@ -73,7 +82,13 @@ async function actualizar(req, res, next) {
     const actual = await platosService.obtenerPorId(req.params.id);
     if (!actual) return res.status(404).json({ error: 'Plato no encontrado' });
 
-    const plato = await platosService.actualizar(req.params.id, { ...actual, ...parsed.data });
+    // El autor del cambio de precio sale del JWT (req.user), nunca del cuerpo:
+    // es lo que el trigger del historial guarda en historial_precios.id_usuario.
+    const plato = await platosService.actualizar(
+      req.params.id,
+      { ...actual, ...parsed.data },
+      { idUsuario: req.user?.id_usuario ?? null }
+    );
     await menuService.invalidarMenu();
     return res.json(plato);
   } catch (err) {
@@ -116,10 +131,18 @@ async function cambiarDisponibilidad(req, res, next) {
     // notificarPlatoDisponibilidad nunca lanza, así que un socket-server caído
     // no altera esta respuesta. Se encadena para que las pruebas puedan
     // esperarlo con esperarAvisos().
+    // ISSUE #136: lo que viaja es la disponibilidad EFECTIVA
+    // (disponible AND stock_suficiente), no el interruptor manual.
+    //
+    // Antes se mandaba `resultado.plato.disponible`: si la cocina encendia a
+    // mano un plato sin stock, todos los sockets recibian disponible: true, la
+    // PWA y el KDS lo mostraban disponible y pedirlo daba 409 sin_stock. El
+    // oyente del canal 'inventario' ya mandaba el efectivo, asi que los dos
+    // caminos se contradecian y decidia el ultimo aviso en llegar.
     socketNotifier.encadenarAvisos([
       () => socketNotifier.notificarPlatoDisponibilidad(
         resultado.plato.id_plato,
-        resultado.plato.disponible
+        disponibilidadEfectiva(resultado.plato)
       ),
     ]);
 
@@ -143,4 +166,37 @@ async function eliminar(req, res, next) {
   }
 }
 
-module.exports = { listar, obtener, crear, actualizar, cambiarDisponibilidad, eliminar };
+/**
+ * GET /api/platos/:id/historial-precios — solo admin (D-16 parte B, P2).
+ *
+ * Quién cambió el precio y cuándo. Es de admin porque dice qué decisiones de
+ * precio tomó el negocio y quién las tomó: no es información de sala.
+ *
+ * Se comprueba que el plato exista para distinguir «no hay cambios» (lista
+ * vacía) de «ese plato no existe» (404): con una lista vacía en los dos casos,
+ * un id mal escrito parecería un plato sin historia.
+ */
+async function historialPrecios(req, res, next) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'El id debe ser un entero positivo' });
+  }
+
+  const limite = req.query.limite === undefined ? undefined : Number(req.query.limite);
+  if (limite !== undefined && (!Number.isInteger(limite) || limite <= 0)) {
+    return res.status(400).json({ error: 'limite debe ser un entero positivo' });
+  }
+
+  try {
+    const plato = await platosService.obtenerPorId(id);
+    if (!plato) return res.status(404).json({ error: 'Plato no encontrado' });
+
+    const historial = await platosService.historialPrecios(id, limite === undefined ? {} : { limite });
+    return res.json({ historial });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = {
+  historialPrecios, listar, obtener, crear, actualizar, cambiarDisponibilidad, eliminar };

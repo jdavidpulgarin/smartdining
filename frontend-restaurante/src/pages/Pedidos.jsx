@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Flame,
   BellRing,
@@ -15,6 +15,7 @@ import {
 import { StatusBadge } from '../components/ui/Badge'
 import { pedidosApi } from '../services/api'
 import { useSocketListener, useSocketEmit } from '../hooks'
+import { crearVentanaEventos } from '../utils/dedupeEventos'
 
 function backendEstadoAUI(estado) {
   switch (estado) {
@@ -129,8 +130,15 @@ export function Pedidos() {
     }
   }, [])
 
+  // Duplicados, como pide EVENTS.md ("deduplica por eventId"): un evento con
+  // un eventId ya visto se ignora entero, sin repetir el aviso. Una ventana de
+  // los últimos 200 por tipo de evento.
+  const [createdVisto] = useState(() => crearVentanaEventos())
+  const [statusVisto] = useState(() => crearVentanaEventos())
+
   // Escuchar eventos en vivo desde el socket-server / backend
   useSocketListener('order:status', (data) => {
+    if (statusVisto(data?.eventId)) return
     if (data?.id_pedido) {
       setOrdersList((prev) =>
         prev.map((ord) =>
@@ -146,22 +154,12 @@ export function Pedidos() {
   // Comanda nueva: { eventId, pedido, emitidoEn } (EVENTS.md §5). Antes se
   // escuchaba 'order:new', que nadie emite, y la lista no se enteraba de nada.
   //
-  // Duplicados, como pide EVENTS.md ("deduplica por eventId"): un evento con
-  // un eventId ya visto se ignora entero, sin repetir el aviso. Y si el mismo
-  // pedido llega con otro eventId, su tarjeta se reemplaza en vez de duplicarse.
-  const eventosVistos = useRef(new Set())
-
+  // Duplicados por eventId: ver createdVisto arriba. Y si el mismo pedido llega
+  // con otro eventId, su tarjeta se reemplaza en vez de duplicarse.
   useSocketListener('order:created', (data) => {
     const pedido = data?.pedido
     if (!pedido?.id_pedido) return
-    if (data.eventId) {
-      if (eventosVistos.current.has(data.eventId)) return
-      eventosVistos.current.add(data.eventId)
-      // Ventana acotada: con los últimos 200 basta para los reintentos.
-      if (eventosVistos.current.size > 200) {
-        eventosVistos.current.delete(eventosVistos.current.values().next().value)
-      }
-    }
+    if (createdVisto(data.eventId)) return
     const normalizado = normalizarPedido(pedido)
     setOrdersList((prev) =>
       prev.some((o) => o.rawId === normalizado.rawId)

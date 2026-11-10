@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import {
   Search,
   Plus,
@@ -19,6 +19,10 @@ import {
 } from 'lucide-react'
 import { agotadosApi, platosApi, categoriasApi, mensajeNoGuardado } from '../services/api'
 import { EditorPasos } from '../components/admin/EditorPasos'
+import { HistorialPrecios } from '../components/admin/HistorialPrecios'
+import { AuthContext } from '../context/authContextDef'
+import { useSocketListener } from '../hooks'
+import { crearUltimoPorId } from '../utils/dedupeEventos'
 
 /**
  * Carta para ADMINISTRAR: todas las categorías y TODOS los platos, también los
@@ -26,6 +30,9 @@ import { EditorPasos } from '../components/admin/EditorPasos'
  * platos disponibles, así que un plato agotado desaparecería del panel y no
  * habría cómo reponerlo.
  */
+/** Lo que ve el comensal: encendido a mano Y con stock para una unidad. */
+const estaDisponible = (dish) => dish.available && dish.stockOk !== false
+
 async function obtenerCartaAdmin() {
   const [respCategorias, respPlatos] = await Promise.all([categoriasApi.listar(), platosApi.listar()])
   const platos = respPlatos?.platos || []
@@ -50,6 +57,14 @@ export function Menu() {
 
   // Modal del Constructor de Pasos e Ingredientes (P-09 / D-04)
   const [selectedDishForConstructor, setSelectedDishForConstructor] = useState(null)
+
+  // "Ver historial" de precios (P-21, P2). GET /platos/:id/historial-precios es
+  // solo de admin y Menú lo ven todos los roles del panel: al resto no se le
+  // ofrece un enlace que terminaría en 403. Se lee el contexto sin useAuth para
+  // no exigir un AuthProvider (sin sesión, no hay enlace).
+  const sesion = useContext(AuthContext)
+  const esAdmin = sesion?.user?.rol === 'admin'
+  const [platoHistorial, setPlatoHistorial] = useState(null)
 
   // tipo 'error': el cambio NO se guardó; se queda más tiempo a la vista.
   const showNotice = (msg, tipo = 'info') => {
@@ -84,7 +99,11 @@ export function Menu() {
             (isArepa ? '/img/arepa-rellena.png' : null) ||
             p.url_imagen ||
             'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+          // available = interruptor MANUAL de la cocina (platos.disponible).
+          // stockOk = lo que calcula la base desde el inventario (stock_suficiente,
+          // script 27). El comensal ve los dos juntos: ver estaDisponible().
           available: p.disponible !== false,
+          stockOk: p.stock_suficiente !== false,
           personalizable: Boolean(p.personalizable),
           calorias: p.calorias || null,
         }
@@ -159,7 +178,7 @@ export function Menu() {
     const matchesSearch =
       dish.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       dish.description.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesAvailability = onlyAvailable ? dish.available : true
+    const matchesAvailability = onlyAvailable ? estaDisponible(dish) : true
 
     return matchesCategory && matchesSearch && matchesAvailability
   })
@@ -179,11 +198,55 @@ export function Menu() {
       const plato = await agotadosApi.togglePlato(dishId, nuevoEstado)
       // Manda el servidor, no lo que se pidió.
       if (typeof plato?.disponible === 'boolean') ponerEstado(plato.disponible)
+      if (typeof plato?.stock_suficiente === 'boolean') ponerFlags(dishId, { stockOk: plato.stock_suficiente })
     } catch (err) {
       ponerEstado(dish.available)
       showNotice(mensajeNoGuardado(err), 'error')
     }
   }
+
+  function ponerFlags(idPlato, cambios) {
+    setDishesList((prev) => prev.map((d) => (d.id === idPlato ? { ...d, ...cambios } : d)))
+  }
+
+  // plato:disponibilidad { id_plato, disponible, emitidoEn } (EVENTS.md §5.4):
+  // otro admin, la cocina o el inventario agotó o repuso un plato. No trae
+  // eventId (es estado completo): se descarta un aviso más viejo que el último
+  // aplicado para ese plato.
+  //
+  // El aviso no dice POR QUÉ: el que sale del inventario trae el disponible
+  // EFECTIVO (manual Y stock) y el del PATCH manual trae solo el interruptor.
+  // Así que no se adivina: se relee el plato (GET /platos/:id, público) y se
+  // aplican los dos campos tal como están en la base. De varias relecturas del
+  // mismo plato solo vale la última que se pidió.
+  const [platoViejo] = useState(() => crearUltimoPorId())
+  const relecturas = useRef(new Map())
+
+  useSocketListener('plato:disponibilidad', async (data) => {
+    const idPlato = Number(data?.id_plato)
+    if (!Number.isInteger(idPlato) || typeof data?.disponible !== 'boolean') return
+    if (platoViejo(idPlato, data.emitidoEn)) return
+    const turno = (relecturas.current.get(idPlato) || 0) + 1
+    relecturas.current.set(idPlato, turno)
+    try {
+      const plato = await platosApi.obtener(idPlato)
+      if (relecturas.current.get(idPlato) !== turno) return
+      ponerFlags(idPlato, {
+        available: plato?.disponible !== false,
+        stockOk: plato?.stock_suficiente !== false,
+      })
+    } catch {
+      if (relecturas.current.get(idPlato) !== turno) return
+      // Sin la relectura, lo mejor que se sabe es el efectivo del aviso: un
+      // true dice que los dos están bien; un false se muestra como falta de
+      // stock solo si el interruptor manual estaba encendido.
+      if (data.disponible) ponerFlags(idPlato, { available: true, stockOk: true })
+      else
+        setDishesList((prev) =>
+          prev.map((d) => (d.id !== idPlato ? d : d.available ? { ...d, stockOk: false } : d))
+        )
+    }
+  })
 
   // Abrir modal de creación/edición de plato
   const handleOpenDishModal = (dish = null) => {
@@ -474,8 +537,8 @@ export function Menu() {
                   flexDirection: 'column',
                   overflow: 'hidden',
                   padding: 0,
-                  opacity: dish.available ? 1 : 0.65,
-                  borderTop: !dish.available
+                  opacity: estaDisponible(dish) ? 1 : 0.65,
+                  borderTop: !estaDisponible(dish)
                     ? '4px solid var(--sd-red)'
                     : dish.personalizable
                     ? '4px solid var(--sd-gold)'
@@ -570,9 +633,30 @@ export function Menu() {
                           {dish.name}
                         </h4>
                       </div>
-                      <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 20, fontWeight: 800, color: 'var(--sd-white)', whiteSpace: 'nowrap' }}>
-                        {dish.priceFormatted}
-                      </strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                        <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 20, fontWeight: 800, color: 'var(--sd-white)', whiteSpace: 'nowrap' }}>
+                          {dish.priceFormatted}
+                        </strong>
+                        {esAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => setPlatoHistorial(dish)}
+                            aria-label={`Ver historial de precios de ${dish.name}`}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              color: 'var(--sd-text-muted)',
+                              fontSize: 12,
+                              textDecoration: 'underline',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            Ver historial
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <p style={{ fontSize: 13, color: 'var(--sd-text-muted)', margin: 0, lineClamp: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
@@ -594,18 +678,28 @@ export function Menu() {
                         letterSpacing: '0.04em',
                         borderRadius: 4,
                         cursor: 'pointer',
-                        background: dish.available ? 'var(--sd-surface)' : 'var(--sd-red)',
+                        background: estaDisponible(dish) ? 'var(--sd-surface)' : 'var(--sd-red)',
                         color: 'var(--sd-white)',
-                        border: dish.available ? '1px solid var(--sd-border-strong)' : 'none',
+                        border: estaDisponible(dish) ? '1px solid var(--sd-border-strong)' : 'none',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: 6,
                       }}
                     >
-                      {dish.available ? (
+                      {estaDisponible(dish) ? (
                         <>
                           <CheckCircle2 size={13} />
                           <span>DISPONIBLE</span>
+                        </>
+                      ) : dish.available ? (
+                        // Encendido a mano pero sin stock: lo apagó el inventario, no
+                        // la cocina. El botón sigue siendo el interruptor MANUAL (un clic
+                        // lo apaga a mano); el plato vuelve solo con una entrada.
+                        <>
+                          <XCircle size={13} />
+                          <span title="Sin stock en Inventario: vuelve solo al registrar una entrada">
+                            AGOTADO · SIN STOCK
+                          </span>
                         </>
                       ) : (
                         <>
@@ -1024,6 +1118,10 @@ export function Menu() {
           onClose={() => setSelectedDishForConstructor(null)}
           onDishUpdated={() => recargarCarta()}
         />
+      )}
+
+      {platoHistorial && (
+        <HistorialPrecios plato={platoHistorial} onClose={() => setPlatoHistorial(null)} />
       )}
     </div>
   )

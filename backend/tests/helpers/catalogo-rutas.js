@@ -55,6 +55,10 @@ const TABLA = [
     cuerpo: {},
   },
 
+  // D-16 parte B: la configuracion del local. La lectura publica son los mismos
+  // datos que se ven en la puerta; el resto es de admin.
+  { metodo: 'GET', patron: '/api/configuracion', url: '/api/configuracion', acceso: PUBLICA },
+
   // --- Internas: x-internal-key, sin JWT ------------------------------------
   {
     metodo: 'GET',
@@ -84,6 +88,92 @@ const TABLA = [
     url: '/api/auth/register',
     roles: ['admin'],
     cuerpo: { nombre: 'Ana Ríos', email: 'ana@mail.com', password: 'secreta123', rol: 'mesero' },
+  },
+
+  // D-16 parte B (P2): el historial de precios de un plato.
+  {
+    metodo: 'GET',
+    patron: '/api/platos/:id/historial-precios',
+    url: '/api/platos/7/historial-precios',
+    roles: ['admin'],
+  },
+
+  // --- D-17 PR 3 (P2): donde se usa un insumo (solo admin) ------------------
+  {
+    metodo: 'GET',
+    patron: '/api/inventario/insumos/:id/usos',
+    url: '/api/inventario/insumos/3/usos',
+    roles: ['admin'],
+  },
+
+  // --- D-17 PR 3: la carta con su disponibilidad (solo admin) ---------------
+  { metodo: 'GET', patron: '/api/inventario/carta', url: '/api/inventario/carta', roles: ['admin'] },
+
+  // --- D-17 PR 2: inventario del panel (todo solo admin) --------------------
+  { metodo: 'GET', patron: '/api/inventario/insumos', url: '/api/inventario/insumos', roles: ['admin'] },
+  {
+    metodo: 'POST',
+    patron: '/api/inventario/insumos',
+    url: '/api/inventario/insumos',
+    roles: ['admin'],
+    cuerpo: { nombre: 'Insumo de prueba' },
+  },
+  {
+    metodo: 'GET',
+    patron: '/api/inventario/insumos/:id',
+    url: '/api/inventario/insumos/3',
+    roles: ['admin'],
+  },
+  {
+    metodo: 'PUT',
+    patron: '/api/inventario/insumos/:id',
+    url: '/api/inventario/insumos/3',
+    roles: ['admin'],
+    cuerpo: { stock_minimo: 10 },
+  },
+  {
+    metodo: 'GET',
+    patron: '/api/inventario/insumos/:id/movimientos',
+    url: '/api/inventario/insumos/3/movimientos',
+    roles: ['admin'],
+  },
+  {
+    metodo: 'POST',
+    patron: '/api/inventario/insumos/:id/movimientos',
+    url: '/api/inventario/insumos/3/movimientos',
+    roles: ['admin'],
+    cuerpo: { tipo: 'entrada', cantidad: 5 },
+  },
+  { metodo: 'GET', patron: '/api/platos/:id/receta', url: '/api/platos/7/receta', roles: ['admin'] },
+  {
+    metodo: 'PUT',
+    patron: '/api/platos/:id/receta',
+    url: '/api/platos/7/receta',
+    roles: ['admin'],
+    cuerpo: { insumos: [] },
+  },
+  {
+    metodo: 'GET',
+    patron: '/api/ingredientes/:id/receta',
+    url: '/api/ingredientes/4/receta',
+    roles: ['admin'],
+  },
+  {
+    metodo: 'PUT',
+    patron: '/api/ingredientes/:id/receta',
+    url: '/api/ingredientes/4/receta',
+    roles: ['admin'],
+    cuerpo: { insumos: [] },
+  },
+
+  // --- D-16 parte B: configuración del restaurante (solo admin) -------------
+  { metodo: 'GET', patron: '/api/configuracion/completa', url: '/api/configuracion/completa', roles: ['admin'] },
+  {
+    metodo: 'PUT',
+    patron: '/api/configuracion',
+    url: '/api/configuracion',
+    roles: ['admin'],
+    cuerpo: { nombre: 'SmartDining' },
   },
 
   // --- D-16: administración de usuarios del personal (solo admin) -----------

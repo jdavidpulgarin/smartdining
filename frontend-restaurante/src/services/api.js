@@ -298,6 +298,121 @@ export const authApi = {
   },
 }
 
+/**
+ * Personal del restaurante (P-21, contra D-16 parte A). Todo es solo de admin.
+ * El alta vive en POST /api/auth/register; no hay baja: se desactiva.
+ */
+export const usuariosApi = {
+  /** GET /api/usuarios → { usuarios: [...] } */
+  async listar() {
+    return apiFetch('/usuarios')
+  },
+
+  /** POST /api/auth/register → { usuario } */
+  async crear({ nombre, email, password, rol }) {
+    return apiFetch('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ nombre, email, password, rol }),
+    })
+  },
+
+  /** PATCH /api/usuarios/:id con nombre, rol y/o activo (.strict()) → { usuario } */
+  async actualizar(id, cambios) {
+    return apiFetch(`/usuarios/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(cambios),
+    })
+  },
+
+  /** POST /api/usuarios/:id/clave → { usuario } (sin la clave). Mínimo 8 caracteres. */
+  async cambiarClave(id, password) {
+    return apiFetch(`/usuarios/${id}/clave`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    })
+  },
+}
+
+// Inventario (D-17 PR 2): insumos y su libro de movimientos. Todo solo admin.
+// `stock_actual` no se edita por ninguna ruta: lo mueven los movimientos.
+export const inventarioApi = {
+  /** GET /api/inventario/insumos?limite=… → { insumos: [...] } con bajo y agotado calculados */
+  async listar({ limite = 200 } = {}) {
+    return apiFetch(`/inventario/insumos?limite=${limite}`)
+  },
+
+  /** POST /api/inventario/insumos → { insumo, movimiento } (movimiento null sin stock_inicial) */
+  async crear(datos) {
+    return apiFetch('/inventario/insumos', {
+      method: 'POST',
+      body: JSON.stringify(datos),
+    })
+  },
+
+  /** PUT /api/inventario/insumos/:id (parcial: nombre, unidad, stock_minimo, activo) → { insumo } */
+  async actualizar(id, cambios) {
+    return apiFetch(`/inventario/insumos/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(cambios),
+    })
+  },
+
+  /** POST /api/inventario/insumos/:id/movimientos { tipo, cantidad, motivo? } → { movimiento, stock_actual } */
+  async registrarMovimiento(id, datos) {
+    return apiFetch(`/inventario/insumos/${id}/movimientos`, {
+      method: 'POST',
+      body: JSON.stringify(datos),
+    })
+  },
+
+  /** GET /api/inventario/insumos/:id/movimientos?limite=… → { movimientos } (lo más nuevo primero) */
+  async movimientos(id, { limite = 50 } = {}) {
+    return apiFetch(`/inventario/insumos/${id}/movimientos?limite=${limite}`)
+  },
+
+  /** GET /api/inventario/insumos/:id/usos → { id_insumo, nombre, platos, ingredientes } (D-17 PR 3) */
+  async usos(id) {
+    return apiFetch(`/inventario/insumos/${id}/usos`)
+  },
+
+  /** GET /api/inventario/carta → { platos, ingredientes } con disponibilidad y tiene_receta (D-17 PR 3) */
+  async carta() {
+    return apiFetch('/inventario/carta')
+  },
+
+  /**
+   * GET /api/platos/:id/receta o /api/ingredientes/:id/receta
+   * → { id_plato | id_ingrediente, receta: [{ id_insumo, nombre, unidad, cantidad, stock_actual, activo }] }
+   */
+  async receta(tipo, id) {
+    return apiFetch(`${tipo === 'plato' ? '/platos' : '/ingredientes'}/${id}/receta`)
+  },
+
+  /** PUT /api/platos/:id/receta o /api/ingredientes/:id/receta { insumos } → la receta guardada (reemplazo completo) */
+  async guardarReceta(tipo, id, insumos) {
+    return apiFetch(`${tipo === 'plato' ? '/platos' : '/ingredientes'}/${id}/receta`, {
+      method: 'PUT',
+      body: JSON.stringify({ insumos }),
+    })
+  },
+}
+
+// Datos del restaurante (D-16 parte B): una sola fila, solo leer y actualizar.
+export const configuracionApi = {
+  /** GET /api/configuracion/completa (admin) → la fila con id, actualizado_en y actualizado_por */
+  async obtenerCompleta() {
+    return apiFetch('/configuracion/completa')
+  },
+
+  /** PUT /api/configuracion (admin, parcial, .strict()) → la fila completa ya actualizada */
+  async actualizar(cambios) {
+    return apiFetch('/configuracion', {
+      method: 'PUT',
+      body: JSON.stringify(cambios),
+    })
+  },
+}
+
 // Submódulo de Mesas
 export const mesasApi = {
   /**
@@ -357,6 +472,31 @@ export const mesasApi = {
    */
   async obtenerCuenta(id) {
     return apiFetch(`/mesas/${id}/cuenta`)
+  },
+
+  /** Crea una mesa (P-21): POST /api/mesas, solo admin. */
+  async crear({ numero, capacidad, ubicacion }) {
+    return apiFetch('/mesas', {
+      method: 'POST',
+      body: JSON.stringify({ numero, capacidad, ubicacion }),
+    })
+  },
+
+  /**
+   * Edita el mobiliario (P-21): PATCH /api/mesas/:id, solo admin. Manda solo
+   * lo que cambió: el cuerpo es .strict() y lo que no viene no se toca.
+   * `activa` existe desde D-16 parte B.
+   */
+  async actualizarDatos(id, cambios) {
+    return apiFetch(`/mesas/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(cambios),
+    })
+  },
+
+  /** Borra una mesa (P-21): DELETE /api/mesas/:id. 409 si está ocupada o tiene pedidos. */
+  async eliminar(id) {
+    return apiFetch(`/mesas/${id}`, { method: 'DELETE' })
   },
 }
 
@@ -492,6 +632,15 @@ export const platosApi = {
     return apiFetch(`/platos/${id}`, {
       method: 'DELETE',
     })
+  },
+  /**
+   * GET /api/platos/:id/historial-precios?limite= (solo admin, D-16 B) →
+   * { historial: [{ id, precio_anterior, precio_nuevo, id_usuario, cambiado_en, … }] },
+   * el cambio más reciente primero. Trae `id_usuario`, no el nombre.
+   */
+  async historialPrecios(id, { limite } = {}) {
+    const query = limite ? `?limite=${limite}` : ''
+    return apiFetch(`/platos/${id}/historial-precios${query}`)
   },
   async marcarPersonalizable(id, { personalizable = true, calorias = null }) {
     // Sin respaldo: si el backend lo rechaza, el error sube a la pantalla.

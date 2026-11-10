@@ -6,6 +6,7 @@
     "test:db": "node --test tests/db.test.js",
     "test:integracion": "node --test tests/integracion/api.test.js",
     "test:tiempo-real": "node --test tests/tiempo-real/socket.test.js",
+    "test:concurrencia": "node tests/integracion/concurrencia-pedidos.js",
     "test:real": "node --test tests/db.test.js tests/integracion/api.test.js tests/tiempo-real/socket.test.js"
   },
   "dependencies": {
