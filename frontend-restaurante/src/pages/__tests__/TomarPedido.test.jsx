@@ -701,7 +701,7 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
       })
     })
 
-    it('maneja 409 sin_stock marcando faltantes y explicando qué quitar', async () => {
+    it('maneja 409 sin_stock con la forma real [{ tipo, id, nombre }], marcando faltantes y explicando qué quitar con f.nombre', async () => {
       vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
         if (url.includes('/api/mesas/5/cuenta')) {
           return {
@@ -723,9 +723,9 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
             status: 409,
             headers: new Headers({ 'content-type': 'application/json' }),
             json: async () => ({
-              error: 'El plato Hamburguesa Smart Angus está agotado',
-              motivo: 'SIN_STOCK',
-              faltantes: [{ id_plato: 10, nombre: 'Hamburguesa Smart Angus' }],
+              error: 'Sin stock suficiente para el pedido 87',
+              motivo: 'sin_stock',
+              faltantes: [{ tipo: 'plato', id: 10, nombre: 'Hamburguesa Smart Angus' }],
             }),
           }
         }
@@ -746,10 +746,10 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
       const btnEnviar = await screen.findByRole('button', { name: /enviar comanda a cocina/i })
       fireEvent.click(btnEnviar)
 
-      // Debe mostrar el error y marcar el ítem con AGOTADO
+      // Debe mostrar el error con f.nombre indicando qué quitar y marcar el ítem con AGOTADO
       await waitFor(() => {
         expect(
-          screen.getByText(/Algunos platos o ingredientes están agotados/i)
+          screen.getByText(/Algunos platos o ingredientes están agotados\. Quita del pedido: Hamburguesa Smart Angus\./i)
         ).toBeInTheDocument()
         expect(screen.getByText('AGOTADO')).toBeInTheDocument()
       })

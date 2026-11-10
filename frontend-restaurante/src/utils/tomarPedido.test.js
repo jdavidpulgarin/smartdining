@@ -3,6 +3,7 @@ import {
   claveAlias,
   unirComensales,
   buscarPorClave,
+  itemTieneFaltante,
   accionError409,
   opcionPedirExistente,
   reemplazarAlias,
@@ -114,6 +115,61 @@ describe('tomarPedido - lógica pura (J-16)', () => {
     })
   })
 
+  describe('itemTieneFaltante', () => {
+    it('marca un ítem cuyo plato está en faltantes (tipo: plato)', () => {
+      const item = { id_plato: 10, nombre: 'Hamburguesa Smart Angus', cantidad: 1 }
+      const faltantes = [{ tipo: 'plato', id: 10, nombre: 'Hamburguesa Smart Angus' }]
+
+      expect(itemTieneFaltante(item, faltantes)).toBe(true)
+    })
+
+    it('marca un plato del constructor cuando uno de sus ingredientes está en faltantes (tipo: ingrediente)', () => {
+      const itemConstructor = {
+        id_plato: 20,
+        nombre: 'Bowl Personalizado',
+        cantidad: 1,
+        ingredientes: [
+          { id_ingrediente: 101, nombre: 'Arroz Integral', porcion: 'normal' },
+          { id_ingrediente: 102, nombre: 'Quinua Orgánica', porcion: 'extra' },
+        ],
+      }
+      const faltantes = [{ tipo: 'ingrediente', id: 102, nombre: 'Quinua Orgánica' }]
+
+      expect(itemTieneFaltante(itemConstructor, faltantes)).toBe(true)
+    })
+
+    it('devuelve false para un ítem sin faltantes', () => {
+      const item = {
+        id_plato: 20,
+        nombre: 'Bowl Personalizado',
+        cantidad: 1,
+        ingredientes: [{ id_ingrediente: 101, nombre: 'Arroz Integral', porcion: 'normal' }],
+      }
+      const faltantes = [
+        { tipo: 'plato', id: 10, nombre: 'Hamburguesa Smart Angus' },
+        { tipo: 'ingrediente', id: 999, nombre: 'Panceta Crujiente' },
+      ]
+
+      expect(itemTieneFaltante(item, faltantes)).toBe(false)
+      expect(itemTieneFaltante(item, [])).toBe(false)
+    })
+
+    it('NO marca nada si faltantes viene con la forma vieja ({ id_plato } o { id_ingrediente } sin tipo ni id)', () => {
+      const item = {
+        id_plato: 10,
+        nombre: 'Hamburguesa Smart Angus',
+        cantidad: 1,
+        ingredientes: [{ id_ingrediente: 101, nombre: 'Arroz Integral', porcion: 'normal' }],
+      }
+      const faltantesFormaVieja = [
+        { id_plato: 10, nombre: 'Hamburguesa Smart Angus' },
+        { id_ingrediente: 101, nombre: 'Arroz Integral' },
+      ]
+
+      expect(itemTieneFaltante(item, faltantesFormaVieja)).toBe(false)
+    })
+  })
+
   describe('accionError409', () => {
     it('reconoce motivo alias_en_uso', () => {
       const error = {
@@ -155,22 +211,26 @@ describe('tomarPedido - lógica pura (J-16)', () => {
       expect(accion.alias).toBe('Abuela')
     })
 
-    it('reconoce motivo sin_stock y extrae faltantes', () => {
+    it('reconoce motivo sin_stock con la forma real [{ tipo, id, nombre }] y arma el mensaje con f.nombre', () => {
       const error = {
         status: 409,
         data: {
-          error: 'Algunos platos o ingredientes están agotados',
-          motivo: 'SIN_STOCK',
+          error: 'Sin stock suficiente para el pedido 87',
+          motivo: 'sin_stock',
           faltantes: [
-            { id_plato: 7, nombre: 'Costillas BBQ' },
-            { id_ingrediente: 12, nombre: 'Panceta Crujiente' },
+            { tipo: 'plato', id: 7, nombre: 'Costillas BBQ' },
+            { tipo: 'ingrediente', id: 12, nombre: 'Panceta Crujiente' },
           ],
         },
       }
       const accion = accionError409(error)
       expect(accion.tipo).toBe('sin_stock')
-      expect(accion.faltantes).toHaveLength(2)
-      expect(accion.faltantes[0].nombre).toBe('Costillas BBQ')
+      expect(accion.faltantes).toEqual([
+        { tipo: 'plato', id: 7, nombre: 'Costillas BBQ' },
+        { tipo: 'ingrediente', id: 12, nombre: 'Panceta Crujiente' },
+      ])
+      expect(accion.mensaje).toContain('Costillas BBQ')
+      expect(accion.mensaje).toContain('Panceta Crujiente')
     })
 
     it('mapea motivos desconocidos de forma segura', () => {

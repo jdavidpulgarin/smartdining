@@ -100,10 +100,49 @@ export function buscarPorClave(lista, texto) {
 }
 
 /**
+ * Comprueba si un ítem del carrito tiene algún plato o ingrediente agotado
+ * según la lista `faltantes` del error 409 `sin_stock` (`[{ tipo, id, nombre }]`, D-17).
+ *
+ * @param {object} item
+ * @param {Array<{ tipo?: string, id?: number|string, nombre?: string }>} faltantes
+ * @returns {boolean}
+ */
+export function itemTieneFaltante(item, faltantes) {
+  if (!item || !Array.isArray(faltantes) || faltantes.length === 0) return false
+
+  const idPlatoItem = item.id_plato ?? item.idPlato
+  const listaIngredientes = Array.isArray(item.ingredientes)
+    ? item.ingredientes
+    : Array.isArray(item.selecciones)
+      ? item.selecciones
+      : []
+
+  return faltantes.some((f) => {
+    if (!f || typeof f !== 'object') return false
+
+    if (f.tipo === 'plato' && f.id != null && idPlatoItem != null) {
+      return Number(f.id) === Number(idPlatoItem)
+    }
+
+    if (f.tipo === 'ingrediente' && f.id != null && listaIngredientes.length > 0) {
+      return listaIngredientes.some((ig) => {
+        const idIng =
+          typeof ig === 'object' && ig !== null
+            ? (ig.id_ingrediente ?? ig.idIngrediente ?? ig.id)
+            : ig
+        return idIng != null && Number(idIng) === Number(f.id)
+      })
+    }
+
+    return false
+  })
+}
+
+/**
  * Interpreta el error 409 de comensales o pedidos según el motivo del contrato.
  *
  * @param {any} error
- * @returns {{ tipo: 'alias_en_uso'|'mesa_sin_sesion'|'comensal_no_registrado'|'sin_stock'|'desconocido', mensaje: string, alias?: string, faltantes?: any[] }}
+ * @returns {{ tipo: 'alias_en_uso'|'mesa_sin_sesion'|'comensal_no_registrado'|'sin_stock'|'desconocido', mensaje: string, alias?: string, faltantes?: Array<{ tipo: 'plato'|'ingrediente', id: number, nombre: string|null }> }}
  */
 export function accionError409(error) {
   const data = error?.data || error?.response?.data || error || {}
@@ -135,10 +174,35 @@ export function accionError409(error) {
   }
 
   if (motivo === 'sin_stock') {
+    const crudos = Array.isArray(data?.faltantes)
+      ? data.faltantes
+      : Array.isArray(error?.faltantes)
+        ? error.faltantes
+        : []
+    const faltantes = crudos
+      .filter(
+        (f) =>
+          f &&
+          (f.tipo === 'plato' || f.tipo === 'ingrediente') &&
+          f.id != null &&
+          Number.isInteger(Number(f.id)) &&
+          Number(f.id) > 0
+      )
+      .map((f) => ({
+        tipo: f.tipo,
+        id: Number(f.id),
+        nombre: typeof f.nombre === 'string' && f.nombre.trim() ? f.nombre.trim() : null,
+      }))
+    const nombres = faltantes.map((f) => f.nombre).filter(Boolean)
+    const mensajeQuitar =
+      nombres.length > 0
+        ? `Algunos platos o ingredientes están agotados. Quita del pedido: ${nombres.join(', ')}.`
+        : mensaje || 'Sin stock disponible'
+
     return {
       tipo: 'sin_stock',
-      mensaje: mensaje || 'Sin stock disponible',
-      faltantes: data?.faltantes || error?.faltantes || [],
+      mensaje: mensajeQuitar,
+      faltantes,
     }
   }
 

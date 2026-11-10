@@ -17,6 +17,7 @@ import { enviarPedido, registrarComensal } from '../../services/api'
 import {
   armarPedido,
   accionError409,
+  itemTieneFaltante,
   reemplazarAlias,
 } from '../../utils/tomarPedido'
 
@@ -66,20 +67,6 @@ export function ResumenPedido({
     )
   }, [carrito])
 
-  // Comprobar si un ítem tiene faltantes según el error 409 SIN_STOCK
-  const itemTieneFaltante = (item) => {
-    if (!faltantesStock || faltantesStock.length === 0) return false
-    return faltantesStock.some((f) => {
-      if (f.id_plato && Number(f.id_plato) === Number(item.id_plato)) return true
-      if (f.id_ingrediente && Array.isArray(item.ingredientes)) {
-        return item.ingredientes.some(
-          (ig) => Number(ig.id_ingrediente) === Number(f.id_ingrediente)
-        )
-      }
-      return false
-    })
-  }
-
   // Enviar el pedido a la API
   const handleEnviarPedido = async (itemsParaEnviar = carrito) => {
     if (!itemsParaEnviar || itemsParaEnviar.length === 0 || enviando) return
@@ -102,10 +89,14 @@ export function ResumenPedido({
       const accion = accionError409(err)
 
       if (accion.tipo === 'sin_stock') {
+        const faltantes = accion.faltantes || []
+        const nombres = faltantes.map((f) => f?.nombre).filter(Boolean)
         setErrorEnvio(
-          'Algunos platos o ingredientes están agotados. Revisa los ítems resaltados en rojo y quítalos para poder enviar la comanda.'
+          nombres.length > 0
+            ? `Algunos platos o ingredientes están agotados. Quita del pedido: ${nombres.join(', ')}.`
+            : 'Algunos platos o ingredientes están agotados. Revisa los ítems resaltados en rojo y quítalos para poder enviar la comanda.'
         )
-        setFaltantesStock(accion.faltantes || [])
+        setFaltantesStock(faltantes)
       } else if (accion.tipo === 'comensal_no_registrado') {
         const aliasFaltante = accion.alias || itemsParaEnviar[0]?.comensal || 'Comensal'
         setErrorEnvio(`La persona «${aliasFaltante}» no está registrada en la mesa (la reserva pudo vencer).`)
@@ -328,7 +319,7 @@ export function ResumenPedido({
             {/* Ítems del comensal */}
             <div style={{ padding: '8px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {items.map((item) => {
-                const tieneFaltante = itemTieneFaltante(item)
+                const tieneFaltante = itemTieneFaltante(item, faltantesStock)
                 const subtotalItem = (Number(item.precio) || 0) * (item.cantidad || 1)
 
                 return (
