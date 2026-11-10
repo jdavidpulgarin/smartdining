@@ -89,6 +89,29 @@ export function actualizarDisponibilidadPlatoEnCache(idPlato, disponible) {
   );
 }
 
+export function aplicarFaltantesMenu(menu, faltantes = []) {
+  if (!menu || !Array.isArray(faltantes) || faltantes.length === 0) return menu;
+  let actual = menu;
+  for (const f of faltantes) {
+    if (!f || typeof f !== 'object') continue;
+    if (f.tipo === 'plato' && f.id != null) {
+      actual = aplicarDisponibilidadPlato(actual, f.id, false);
+    } else if (f.tipo === 'ingrediente' && f.id != null) {
+      actual = aplicarDisponibilidad(actual, f.id, false);
+    }
+  }
+  return actual;
+}
+
+export function marcarFaltantesEnCache(faltantes = []) {
+  if (!cacheMenuPromise || !Array.isArray(faltantes) || faltantes.length === 0) {
+    return;
+  }
+  cacheMenuPromise = cacheMenuPromise.then((raw) =>
+    aplicarFaltantesMenu(raw, faltantes)
+  );
+}
+
 export function normalizarCategorias(rawMenu) {
   if (Array.isArray(rawMenu)) return rawMenu;
   if (Array.isArray(rawMenu?.categorias)) return rawMenu.categorias;
@@ -197,4 +220,6 @@ export default {
   actualizarDisponibilidadEnCache,
   aplicarDisponibilidadPlato,
   actualizarDisponibilidadPlatoEnCache,
+  aplicarFaltantesMenu,
+  marcarFaltantesEnCache,
 };

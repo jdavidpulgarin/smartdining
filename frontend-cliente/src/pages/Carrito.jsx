@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCarrito } from '../context/CarritoContext';
 import { formatearPrecio } from '../utils/formato';
@@ -9,8 +9,12 @@ import LineaCarrito from '../components/carrito/LineaCarrito';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { crearPedido } from '../services/pedidoService';
-import { recargarMenu } from '../services/menuService';
-import { traducirErrorPedido } from '../utils/erroresPedido';
+import { recargarMenu, marcarFaltantesEnCache } from '../services/menuService';
+import {
+  faltantesDelItem,
+  resumenFaltantes,
+  accionErrorPedido,
+} from '../utils/sinStock';
 
 function Carrito() {
   const navigate = useNavigate();
@@ -25,6 +29,7 @@ function Carrito() {
     actualizarCantidad,
     eliminarLinea,
     vaciarCarrito,
+    marcarFaltantesEnMenu,
   } = useCarrito();
 
   const [confirmandoVaciar, setConfirmandoVaciar] = useState(false);
@@ -32,10 +37,22 @@ function Carrito() {
   const [notasGenerales, setNotasGenerales] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [errorPedido, setErrorPedido] = useState(null);
+  const [faltantesStock, setFaltantesStock] = useState([]);
   const [bloqueoSegundos, setBloqueoSegundos] = useState(0);
 
   const miNombre = obtenerApodo();
   const validacionEnvio = puedoEnviar(misLineas);
+  const resumenStock = useMemo(
+    () => resumenFaltantes(misLineas, faltantesStock),
+    [misLineas, faltantesStock]
+  );
+  const tieneFaltantesPendientes = resumenStock.idsLineasAfectadas.length > 0;
+  const errorPedidoVisible =
+    errorPedido?.tipo === 'sin_stock' &&
+    !tieneFaltantesPendientes &&
+    validacionEnvio.ok
+      ? null
+      : errorPedido;
 
   useEffect(() => {
     if (bloqueoSegundos <= 0) return;
@@ -53,7 +70,14 @@ function Carrito() {
   }, [bloqueoSegundos]);
 
   const manejarConfirmarPedido = async () => {
-    if (enviando || bloqueoSegundos > 0 || !validacionEnvio.ok) return;
+    if (
+      enviando ||
+      bloqueoSegundos > 0 ||
+      !validacionEnvio.ok ||
+      tieneFaltantesPendientes
+    ) {
+      return;
+    }
 
     setEnviando(true);
     setErrorPedido(null);
@@ -65,11 +89,22 @@ function Carrito() {
       });
 
       setModalConfirmarAbierto(false);
+      setFaltantesStock([]);
       await vaciarCarrito();
       navigate('/seguimiento', { state: { pedido: respuesta } });
     } catch (err) {
-      const infoError = traducirErrorPedido(err);
+      const infoError = accionErrorPedido(err, misLineas);
       if (infoError.ignorar) return;
+
+      if (infoError.tipo === 'sin_stock') {
+        const listaFaltantes = infoError.faltantes || [];
+        setFaltantesStock(listaFaltantes);
+        marcarFaltantesEnCache(listaFaltantes);
+        marcarFaltantesEnMenu?.(listaFaltantes);
+        setModalConfirmarAbierto(false);
+        setErrorPedido(infoError);
+        return;
+      }
 
       if (infoError.recargarMenu) {
         recargarMenu();
@@ -158,6 +193,36 @@ function Carrito() {
         </div>
       )}
 
+      {/* Aviso superior cuando algo se agotó o hubo cruce al enviar */}
+      {errorPedidoVisible && (
+        <div
+          role="alert"
+          className="p-4 bg-superficie rounded-2xl border-2 border-primario text-primario-texto text-sm space-y-1.5 animate-fadeIn"
+        >
+          <p className="font-semibold text-white">
+            {errorPedidoVisible.tipo === 'sin_stock'
+              ? resumenStock.texto || errorPedidoVisible.mensaje
+              : errorPedidoVisible.mensaje}
+          </p>
+          {errorPedidoVisible.ayuda && (
+            <p className="text-xs text-texto-suave font-medium">
+              {errorPedidoVisible.ayuda}
+            </p>
+          )}
+          {(errorPedidoVisible.esConexion ||
+            errorPedidoVisible.esReintentable) && (
+            <button
+              type="button"
+              disabled={enviando}
+              onClick={manejarConfirmarPedido}
+              className="min-h-11 px-3 py-2 text-xs font-bold text-acento hover:underline inline-flex items-center cursor-pointer"
+            >
+              Reintentar envío
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Barra de conteo y botón vaciar lo mío */}
       <div className="flex items-center justify-between gap-2 px-1">
         <span className="text-xs text-texto-suave font-medium">
@@ -174,14 +239,14 @@ function Carrito() {
                   vaciarCarrito();
                   setConfirmandoVaciar(false);
                 }}
-                className="text-xs font-bold text-primario-texto hover:underline px-2 py-1 rounded transition-colors cursor-pointer"
+                className="min-h-11 text-xs font-bold text-primario-texto hover:underline px-2.5 py-1 rounded transition-colors cursor-pointer"
               >
                 Sí, vaciar lo mío
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmandoVaciar(false)}
-                className="text-xs font-semibold text-texto-suave hover:text-texto px-2 py-1 rounded transition-colors cursor-pointer"
+                className="min-h-11 text-xs font-semibold text-texto-suave hover:text-texto px-2.5 py-1 rounded transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
@@ -190,7 +255,7 @@ function Carrito() {
             <button
               type="button"
               onClick={() => setConfirmandoVaciar(true)}
-              className="text-xs font-medium text-texto-suave hover:text-primario-texto py-1 px-2 rounded transition-colors cursor-pointer"
+              className="min-h-11 text-xs font-medium text-texto-suave hover:text-primario-texto py-1 px-2.5 rounded transition-colors cursor-pointer"
             >
               Vaciar lo mío
             </button>
@@ -226,6 +291,7 @@ function Carrito() {
               <LineaCarrito
                 key={linea.id_linea}
                 linea={linea}
+                faltantes={faltantesDelItem(linea, faltantesStock)}
                 onActualizarCantidad={actualizarCantidad}
                 onEliminar={eliminarLinea}
               />
@@ -328,30 +394,6 @@ function Carrito() {
         </div>
       </div>
 
-      {/* Mensaje de error si falla el pedido */}
-      {errorPedido && (
-        <div
-          role="alert"
-          className="p-4 bg-superficie rounded-2xl border border-primario text-primario-texto text-sm space-y-1 animate-fadeIn"
-        >
-          <p className="font-semibold">{errorPedido.mensaje}</p>
-          {errorPedido.ayuda && (
-            <p className="text-xs text-texto-suave font-medium">
-              {errorPedido.ayuda}
-            </p>
-          )}
-          {errorPedido.esConexion && (
-            <button
-              type="button"
-              onClick={manejarConfirmarPedido}
-              className="text-xs font-bold text-primario hover:underline pt-1 block cursor-pointer"
-            >
-              Reintentar ahora
-            </button>
-          )}
-        </div>
-      )}
-
       {/* Acciones finales: confirmar pedido y volver al menú */}
       <div className="space-y-2 pt-2">
         <Button
@@ -362,7 +404,8 @@ function Carrito() {
             enviando ||
             bloqueoSegundos > 0 ||
             misLineas.length === 0 ||
-            !validacionEnvio.ok
+            !validacionEnvio.ok ||
+            tieneFaltantesPendientes
           }
           className="w-full min-h-12 py-3 px-4 font-bold font-etiqueta uppercase text-base rounded-xl flex items-center justify-center gap-2"
         >
@@ -373,11 +416,12 @@ function Carrito() {
           )}
         </Button>
 
-        {!validacionEnvio.ok && misLineas.length > 0 && (
-          <p className="text-xs text-primario-texto text-center font-medium">
-            {validacionEnvio.motivo}
-          </p>
-        )}
+        {(!validacionEnvio.ok || tieneFaltantesPendientes) &&
+          misLineas.length > 0 && (
+            <p className="text-xs text-primario-texto text-center font-medium">
+              {resumenStock.texto || validacionEnvio.motivo}
+            </p>
+          )}
 
         <p className="text-xs text-texto-suave text-center">
           Se envía todo lo tuyo a la cocina. Cada quien paga lo suyo al final.
@@ -455,14 +499,14 @@ function Carrito() {
             </div>
           )}
 
-          {errorPedido && (
+          {errorPedidoVisible && (
             <div
               role="alert"
               className="p-3 bg-superficie rounded-xl border border-primario text-primario-texto text-xs space-y-1"
             >
-              <p className="font-semibold">{errorPedido.mensaje}</p>
-              {errorPedido.ayuda && (
-                <p className="text-texto-suave">{errorPedido.ayuda}</p>
+              <p className="font-semibold">{errorPedidoVisible.mensaje}</p>
+              {errorPedidoVisible.ayuda && (
+                <p className="text-texto-suave">{errorPedidoVisible.ayuda}</p>
               )}
             </div>
           )}
