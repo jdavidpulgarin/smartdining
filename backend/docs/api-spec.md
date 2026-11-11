@@ -2390,6 +2390,7 @@ cuenta y los alias de otra mesa.
 |---|---|---|---|
 | POST | /transacciones | admin, cajero | Registra un pago: crea la transacción, marca el pedido `pagado` y **libera la mesa automáticamente** |
 | GET | /transacciones/pedido/:id_pedido | admin, cajero | Lista las transacciones de un pedido |
+| **POST** | **/transacciones/mesa** | **admin, cajero** | **Cobra un monto a la MESA y lo reparte entre sus pedidos, del más viejo al más nuevo** |
 
 ### POST /transacciones
 
@@ -2902,6 +2903,102 @@ error. El cuerpo exige `referencia_externa`, `id_transaccion_pasarela`, `pasarel
 `id_mesa`, `modo`, `monto_centavos` (entero > 0) y `moneda` **exactamente `"COP"`**;
 solo `comensal` admite `null` y solo `metodo_pago` tiene valor por omisión.
 Nada se degrada a NULL en silencio.
+
+### POST /transacciones/mesa — cobro de mesa en caja
+
+**Roles:** `admin`, `cajero`. Sin token **401**; `mesero`, `cocina` o un comensal, **403**.
+
+La caja cobra **a la mesa**, no a un pedido: el monto se reparte entre los pedidos de la mesa
+que tienen saldo, **del más viejo al más nuevo**, con el mismo núcleo que el pago en línea
+(`POST /transacciones/internal`). Es lo que hay que usar para «cobrar lo de Ana» o «cobrar toda
+la mesa»; `POST /transacciones` sigue siendo el cobro de **un pedido** concreto y no cambia.
+
+**Cuerpo** (zod `.strict()`: un campo de más es 400):
+
+```json
+{ "id_mesa": 5, "monto": 34000, "metodo_pago": "efectivo", "comensal": "Ana",
+  "id_cobro": "3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f" }
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `id_mesa` | Sí | Entero > 0 |
+| `monto` | Sí | Pesos, número > 0 con **como mucho 2 decimales** y que quepa en `DECIMAL(10,2)` (hasta 99.999.999,99). Se convierte a **centavos enteros** desde el texto del número, sin coma flotante (`1.15` son 115 centavos, no 114) |
+| `metodo_pago` | Sí | `efectivo`, `tarjeta_debito`, `tarjeta_credito` o `transferencia`. **`online` no**: es solo de Wompi |
+| `comensal` | No | Las mismas reglas que en `POST /transacciones`: texto de 1 a 40, o `null`. Es de quién se descuenta en la cuenta por persona; sin él, el cobro es «de la mesa» |
+| `id_cobro` | Sí | **UUID**. Ver abajo |
+
+**`id_cobro`: generarlo una vez y reutilizarlo en los reintentos.** La caja genera un UUID v4
+(`crypto.randomUUID()`) **cuando el cajero pulsa «Cobrar»**, no en cada envío, y si la petición
+falla por red o no llega la respuesta, **reintenta con el MISMO `id_cobro`**. Con el mismo
+`id_cobro` el backend no cobra dos veces: responde `200 { duplicado: true }` con el saldo actual.
+Un cobro nuevo (otro monto, otra persona) lleva un `id_cobro` nuevo. Por dentro se guarda como
+`referencia_externa = 'caja:' + id_cobro`, así que nunca choca con una referencia de Wompi y
+usa el mismo índice único (`uq_transacciones_referencia_externa`) e idempotencia que el pago en
+línea, incluida la carrera de dos peticiones simultáneas: una cobra, la otra es duplicado.
+
+**El reparto**, en una sola transacción:
+
+- Se bloquea la mesa y después sus pedidos por `id_pedido`: el mismo orden que el cobro por
+  pedido y el webhook de Wompi, así que la caja y Wompi sobre la misma mesa se serializan, sin
+  interbloqueo y sin cobrar de más (el segundo ve el saldo ya reducido).
+- Cada pedido recibe hasta su saldo, empezando por el más viejo; una fila de `transacciones` por
+  pedido tocado.
+- Un pedido que queda en cero **y ya está entregado** pasa a `pagado`, con su línea de
+  `historial_estados` cuyo autor es **quien cobra** (el id del JWT) y la observación
+  **`Pago en caja`**. Si todavía está en cocina, el dinero queda registrado y el pedido sigue su
+  curso.
+- Si con eso no queda ningún pedido abierto, la mesa se libera (estado `disponible`, QR
+  invalidado) en la misma transacción.
+- **La propina no entra**: este cobro solo cubre el saldo de los pedidos. Un monto mayor que el
+  saldo es `409 excede`, no una propina.
+
+**Respuestas:**
+
+```json
+201 {
+  "duplicado": false,
+  "saldo_restante": 0,
+  "mesa_liberada": true,
+  "pagados": [91, 92],
+  "transacciones": [
+    { "id_transaccion": 120, "id_pedido": 91, "monto": 34000, "comensal": null },
+    { "id_transaccion": 121, "id_pedido": 92, "monto": 34000, "comensal": null }
+  ]
+}
+```
+
+- `saldo_restante` es el saldo de **la mesa** tras el cobro, en pesos (número). `pagados` son
+  los `id_pedido` que pasaron a `pagado` con este cobro. `transacciones`, las filas creadas, con
+  `monto` en pesos.
+
+| Status | Cuerpo | Cuándo |
+|---|---|---|
+| **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró: no se cobra ni se avisa otra vez |
+| **400** | `{ "error", "motivo": "cuerpo_invalido" }` | Cuerpo inválido (tabla de arriba) |
+| **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
+| **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
+| **409** | `{ "error", "motivo": "excede", "saldo": 68000 }` | El monto supera el saldo de la mesa (`saldo` en pesos). No se escribe nada |
+| **409** | `{ "error", "motivo": "autor_inexistente" }` | El usuario del token ya no existe ([El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)). La transacción se deshace entera |
+
+`POST /transacciones/internal` (Wompi) responde los mismos casos **sin** `motivo` y en
+centavos; ese contrato no cambia.
+
+**Avisos de tiempo real**, después del COMMIT y en este orden, los mismos que el cobro de caja
+por pedido (`POST /transacciones`):
+
+1. `POST /internal/payment-confirmed` → `payment:confirmed` (EVENTS.md §8.6): **uno por cobro**,
+   con el monto entero, el saldo de la mesa, el `comensal`, `referencia_externa: "caja:<id_cobro>"`
+   y el `id_transaccion` de la primera fila (la guardia de idempotencia del socket-server).
+2. `order:status` → `pagado` por cada pedido que se liquidó.
+3. `mesa:liberada` con motivo `pagada`, si la mesa quedó libre (y se olvidan sus alias).
+
+Un `duplicado` no avisa nada. Si el socket-server no responde, el cobro ya está guardado.
+
+Cobertura: `tests/transacciones-mesa.test.js` (roles, validación, centavos, cada respuesta,
+avisos) y `tests/integracion/transacciones-mesa-sql.test.js` contra PostgreSQL (reparto entre
+pedidos, pago parcial, pedido en cocina, excede, `id_cobro` repetido en serie y a la vez, caja y
+Wompi a la vez, autor inexistente, historial).
 
 ### POST /pagos/intentos-fallidos/interno
 
