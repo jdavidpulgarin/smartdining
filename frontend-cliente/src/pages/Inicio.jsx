@@ -345,7 +345,7 @@ function Inicio() {
             )}
 
             {estado === 'sin_sesion' && (
-              <div className="space-y-3 text-center py-2">
+              <div className="space-y-4 text-center py-2">
                 <div
                   aria-hidden="true"
                   className="w-14 h-14 bg-superficie-2 text-primario-texto border border-borde rounded-full flex items-center justify-center mx-auto text-xl font-bold"
@@ -360,6 +360,13 @@ function Inicio() {
                     Usa la cámara de tu celular para escanear el código ubicado en tu mesa y unirte al pedido.
                   </p>
                 </div>
+                <Button
+                  variante="secundario"
+                  onClick={() => navigate('/carta')}
+                  className="w-full"
+                >
+                  Ver la carta
+                </Button>
               </div>
             )}
           </Card>
