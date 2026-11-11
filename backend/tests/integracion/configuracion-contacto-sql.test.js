@@ -12,11 +12,13 @@ const assert = require('node:assert');
  *      - correo: un UPDATE de verdad dentro de un SAVEPOINT que se deshace, así
  *        responden ck_configuracion_correo y el VARCHAR(254).
  *
- * Deja la configuración EXACTAMENTE como estaba, incluidos actualizado_en y
- * actualizado_por: el trigger tr_configuracion_actualizada los reescribe en
- * todo UPDATE, así que la restauración va en una transacción con
+ * Deja la configuración como estaba. Con SUPERUSUARIO, EXACTAMENTE, incluidos
+ * actualizado_en y actualizado_por: el trigger tr_configuracion_actualizada los
+ * reescribe en todo UPDATE, así que la restauración va en una transacción con
  * `SET LOCAL session_replication_role = replica` (sin triggers, solo en esa
- * transacción; los CHECK siguen valiendo).
+ * transacción; los CHECK siguen valiendo). Con un usuario NORMAL ese SET da
+ * 42501: se hace ROLLBACK, se restauran los campos de negocio con un UPDATE
+ * normal y se comprueban solo esos (ver `restaurar`).
  *
  * Con VER_TABLA=1 imprime la tabla de casos.
  *
@@ -33,10 +35,15 @@ const pool = require('../../src/config/db');
 const servicio = require('../../src/services/configuracion.service');
 const { configuracionSchema } = require('../../src/controllers/configuracion.controller');
 
-const COLUMNAS = [
+/** Los campos de NEGOCIO: lo que un admin edita. */
+const CAMPOS_NEGOCIO = [
   'nombre', 'telefono', 'direccion', 'url_logo', 'horario', 'propina_sugerida_pct', 'moneda',
-  'correo', 'redes', 'actualizado_en', 'actualizado_por',
+  'correo', 'redes',
 ];
+const COLUMNAS = [...CAMPOS_NEGOCIO, 'actualizado_en', 'actualizado_por'];
+
+/** SQLSTATE insufficient_privilege: un usuario no superusuario no puede usar el modo replica. */
+const SIN_PERMISO = '42501';
 
 let sonda = null;
 let hayBase = false;
@@ -47,35 +54,60 @@ async function filaActual() {
   // actualizado_en se guarda TAMBIÉN como texto: `pg` lo entrega como Date de
   // JavaScript, que solo tiene milisegundos, y la columna guarda microsegundos.
   // Restaurarlo desde el Date lo dejaría distinto.
+  // Dos huellas: la de la fila ENTERA (con la auditoría) y la de los campos de
+  // negocio, que es la que se compara cuando no se puede restaurar la auditoría.
   const { rows } = await sonda.query(
     `SELECT ${COLUMNAS.join(', ')}, actualizado_en::text AS actualizado_en_texto,
-            md5(row_to_json(c)::text) AS huella
+            md5(row_to_json(c)::text) AS huella,
+            md5(json_build_object(${CAMPOS_NEGOCIO.map((k) => `'${k}', ${k}`).join(', ')})::text) AS huella_negocio
        FROM configuracion_restaurante c WHERE id = 1`
   );
   return rows[0];
 }
 
+/** Los valores de negocio originales, como parámetros $1..$9 del UPDATE. */
+const valoresNegocio = () => [
+  original.nombre, original.telefono, original.direccion, original.url_logo,
+  JSON.stringify(original.horario), original.propina_sugerida_pct, original.moneda,
+  original.correo, JSON.stringify(original.redes),
+];
+
+const SET_NEGOCIO = `nombre = $1::text, telefono = $2::text, direccion = $3::text, url_logo = $4::text,
+              horario = $5::jsonb, propina_sugerida_pct = $6::numeric, moneda = $7::text,
+              correo = $8::text, redes = $9::jsonb`;
+
+/**
+ * Deja la configuración como estaba. Devuelve qué tan exacta quedó:
+ *   - 'exacta': con superusuario, en una transacción con session_replication_role
+ *     = replica (sin el trigger): vuelven también actualizado_en y actualizado_por.
+ *   - 'negocio': sin permiso para el modo replica (42501, un usuario normal de
+ *     PostgreSQL, como el de Jarrison o el del CI): ROLLBACK de ese intento y un
+ *     UPDATE normal de los campos de negocio; el trigger reescribe la auditoría.
+ * Cualquier otro error se propaga: no se oculta.
+ */
 async function restaurar() {
   const c = await sonda.connect();
   try {
     await c.query('BEGIN');
-    await c.query("SET LOCAL session_replication_role = 'replica'");
+    try {
+      await c.query("SET LOCAL session_replication_role = 'replica'");
+    } catch (err) {
+      if (!err || err.code !== SIN_PERMISO) throw err;
+      await c.query('ROLLBACK');
+      await c.query(`UPDATE configuracion_restaurante SET ${SET_NEGOCIO} WHERE id = 1`, valoresNegocio());
+      return 'negocio';
+    }
     await c.query(
       `UPDATE configuracion_restaurante
-          SET nombre = $1::text, telefono = $2::text, direccion = $3::text, url_logo = $4::text,
-              horario = $5::jsonb, propina_sugerida_pct = $6::numeric, moneda = $7::text,
-              correo = $8::text, redes = $9::jsonb,
+          SET ${SET_NEGOCIO},
               actualizado_en = $10::timestamptz, actualizado_por = $11::int
         WHERE id = 1`,
-      [
-        original.nombre, original.telefono, original.direccion, original.url_logo,
-        JSON.stringify(original.horario), original.propina_sugerida_pct, original.moneda,
-        original.correo, JSON.stringify(original.redes), original.actualizado_en_texto, original.actualizado_por,
-      ]
+      [...valoresNegocio(), original.actualizado_en_texto, original.actualizado_por]
     );
     await c.query('COMMIT');
+    return 'exacta';
   } catch (err) {
-    await c.query('ROLLBACK');
+    try { await c.query('ROLLBACK'); } catch { /* ya cerrada */ }
     throw err;
   } finally {
     c.release();
@@ -102,9 +134,16 @@ test.before(async () => {
 test.after(async () => {
   try {
     if (hayBase && original) {
-      await restaurar();
+      const modo = await restaurar();
       const despues = await filaActual();
-      assert.strictEqual(despues.huella, original.huella, 'la configuracion quedo exactamente como estaba');
+      if (process.env.VER_TABLA) console.log(`restauracion: ${modo}`);
+      if (modo === 'exacta') {
+        assert.strictEqual(despues.huella, original.huella, 'la configuracion quedo exactamente como estaba');
+      } else {
+        // Sin superusuario el trigger reescribe actualizado_en/actualizado_por:
+        // se comparan solo los campos de negocio.
+        assert.strictEqual(despues.huella_negocio, original.huella_negocio, 'los campos de negocio quedaron como estaban');
+      }
     }
   } finally {
     if (sonda) await sonda.end();
