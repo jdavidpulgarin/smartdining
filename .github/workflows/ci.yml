@@ -88,7 +88,7 @@ jobs:
               echo "sh -n   $f"; sh -n "$f"
             fi
           done
-      - name: Pruebas (contraseñas del personal)
+      - name: Pruebas de los scripts (contraseñas del personal y respaldo)
         run: node --test "infra/scripts/*.test.cjs"
 
   frontends:
