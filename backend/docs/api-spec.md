@@ -2390,6 +2390,7 @@ cuenta y los alias de otra mesa.
 |---|---|---|---|
 | POST | /transacciones | admin, cajero | Registra un pago: crea la transacción, marca el pedido `pagado` y **libera la mesa automáticamente** |
 | GET | /transacciones/pedido/:id_pedido | admin, cajero | Lista las transacciones de un pedido |
+| **GET** | **/transacciones?desde=hoy** | **admin, cajero** | **Las transacciones completadas de hoy (día de Bogotá), con total y cantidad: el cierre de caja** |
 
 ### POST /transacciones
 
@@ -2569,6 +2570,65 @@ propia consulta con el `JOIN pedidos` y el filtro del rango.
 sería un promedio de promedios: cada día pesaría igual, tenga 2 pedidos u 80.
 
 **`tiempoCocinaPromedio` va ponderado** por `platos_preparados`, por lo mismo.
+
+### GET /transacciones?desde=hoy — el cierre de caja
+
+**Roles:** `admin`, `cajero` (los mismos que registran pagos). Sin token **401**; `mesero`,
+`cocina` o un comensal, **403**.
+
+**Query**, validada con zod `.strict()`:
+
+| Parámetro | Obligatorio | Valores |
+|---|---|---|
+| `desde` | Sí | Solo `hoy` por ahora |
+
+Cualquier otro valor (`desde=ayer`, `desde=2026-11-10`) o cualquier parámetro extra responde
+**400** `{ "error": "...", "motivo": "consulta_invalida" }`. El esquema está preparado para
+aceptar después una fecha `AAAA-MM-DD`; no se implementa todavía porque exige decidir en qué
+zona se interpreta y cómo se valida que exista.
+
+**Respuesta 200:**
+
+```json
+{
+  "desde": "2026-11-10",
+  "total": 58000,
+  "cantidad": 2,
+  "transacciones": [
+    {
+      "id_transaccion": 41, "id_pedido": 87, "codigo_pedido": "PED-261110-7K2Q9",
+      "id_mesa": 5, "numero_mesa": 5, "monto": 34000, "metodo_pago": "efectivo",
+      "comensal": "Ana", "fecha": "2026-11-11T01:12:40.512Z"
+    },
+    { "id_transaccion": 40, "id_pedido": 86, "codigo_pedido": "PED-261110-3M8ZT",
+      "id_mesa": 2, "numero_mesa": 2, "monto": 24000, "metodo_pago": "tarjeta_debito",
+      "comensal": null, "fecha": "2026-11-10T18:03:11.004Z" }
+  ]
+}
+```
+
+- Solo `estado_transaccion = 'completada'`: ni pendientes, ni fallidas, ni reembolsadas.
+- **Más reciente primero** (`creado_en` descendente; a igual instante, id descendente).
+- `monto` y `total` son **números**, no texto (los `NUMERIC` se convierten); `cantidad` es un
+  entero. `total` y `cantidad` los calcula la base en la misma consulta que la lista.
+- `fecha` es el instante en ISO 8601 UTC (`Z`); el cliente lo muestra en su hora local.
+- `comensal` es quien pagó cuando la mesa dividió la cuenta; `null` en un cobro de la mesa
+  completa.
+- **No expone nada más** de la transacción: ni `referencia_externa` ni ningún dato de la
+  pasarela (Wompi) salen por aquí.
+
+**"Hoy" es el día calendario en América/Bogotá**, no el del servidor ni UTC, y lo calcula la
+base: `desde = date_trunc('day', now() AT TIME ZONE 'America/Bogota') AT TIME ZONE
+'America/Bogota'` y `hasta = desde + 1 día`, con `creado_en >= desde AND creado_en < hasta`.
+Por eso una venta a las 20:00 de Bogotá (01:00 UTC del día siguiente) cuenta como de hoy, y una
+a las 23:30 de Bogotá de ayer no. Es la misma zona que usan los reportes (`ZONA` en
+`reportes.service.js`); no hay zona configurable en `configuracion_restaurante`. La condición
+va sobre `creado_en` sin funciones encima, así que `idx_transacciones_estado_fecha`
+(`estado_transaccion, creado_en DESC, monto`) puede servir la consulta.
+
+Cobertura: `tests/transacciones-del-dia.test.js` (roles, query, forma) y
+`tests/integracion/transacciones-del-dia-sql.test.js` contra PostgreSQL (estados, ayer/hoy y
+los dos bordes del día de Bogotá).
 
 ### Agrupación de `metodosPago`
 
