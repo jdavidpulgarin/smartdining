@@ -1,6 +1,10 @@
 const pool = require('../config/db');
 const mesasService = require('./mesas.service');
-const { traducirAutorInexistente } = require('./autor-inexistente');
+const {
+  traducirAutorInexistente,
+  MOTIVO_AUTOR_INEXISTENTE,
+  MENSAJE_AUTOR_INEXISTENTE,
+} = require('./autor-inexistente');
 
 // Tabla transacciones (docs/modelo-er.md): id_transaccion, id_pedido,
 // metodo_pago, monto, estado_transaccion, referencia_externa, creado_en.
@@ -252,19 +256,250 @@ function referenciaDeFila(referencia, indice) {
   return indice === 0 ? referencia : `${referencia}#${indice + 1}`;
 }
 
+/** Observación del historial cuando el pago de la mesa llega por Wompi. */
+const OBSERVACION_PAGO_EN_LINEA = 'Pago en linea';
+/** Observación del historial cuando la caja cobra la mesa. */
+const OBSERVACION_PAGO_EN_CAJA = 'Pago en caja';
+/** Prefijo de la referencia de un cobro de mesa en caja: no choca con las de Wompi. */
+const PREFIJO_REFERENCIA_CAJA = 'caja:';
+
+/** Las únicas observaciones posibles: van como literal en el SQL, así que se cierran aquí. */
+const OBSERVACIONES_DE_PAGO = [OBSERVACION_PAGO_EN_LINEA, OBSERVACION_PAGO_EN_CAJA];
+
 /**
- * Registra un pago de la pasarela (lo llama el socket-server, EVENTS.md §8.4).
+ * El INSERT de historial_estados del paso a 'pagado'.
  *
- * El pago es **de la mesa**, no de un pedido: Wompi cobra un monto y aquí se
- * reparte entre los pedidos abiertos de esa mesa, del más antiguo al más nuevo,
- * en UNA sola transacción. La base sigue siendo la autoridad: el monto contra
- * el total lo valida tr_validar_transaccion_financiera y la transición a
- * 'pagado' la valida tr_validar_transicion_estado.
+ * Sin autor (Wompi) es EXACTAMENTE la sentencia de siempre —`NULL` y la
+ * observación como literales, `estado_anterior` en `$2`—, para que el pago en
+ * línea no cambie ni en el SQL que manda. Con autor (la caja), el id va como
+ * `$3::int`, de modo que `estado_anterior` sigue en `$2` en los dos casos.
+ *
+ * La observación se escribe como literal porque no viene de ninguna petición:
+ * solo puede ser una de OBSERVACIONES_DE_PAGO, y cualquier otra cosa lanza.
+ */
+function sqlHistorialPagado(idUsuario, observacion) {
+  if (!OBSERVACIONES_DE_PAGO.includes(observacion)) {
+    throw new Error('observación de pago desconocida');
+  }
+  const cabecera = `INSERT INTO historial_estados
+          (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones, fecha_cambio)`;
+  if (idUsuario === null || idUsuario === undefined) {
+    return {
+      sql: `${cabecera}
+         VALUES ($1, NULL, $2, 'pagado', '${observacion}', NOW())`,
+      params: (pedido) => [pedido.id_pedido, pedido.estado],
+    };
+  }
+  return {
+    sql: `${cabecera}
+         VALUES ($1::int, $3::int, $2::text, 'pagado', '${observacion}', NOW())`,
+    params: (pedido) => [pedido.id_pedido, pedido.estado, idUsuario],
+  };
+}
+
+/**
+ * NÚCLEO COMPARTIDO del pago de una MESA: lo usan el pago en línea
+ * (registrarPagoInterno, Wompi) y el cobro de mesa en caja (cobrarMesaEnCaja).
+ *
+ * Recibe el `client` YA dentro de una transacción y no hace BEGIN, COMMIT ni
+ * ROLLBACK: eso es de quien llama (`cobrarMesa`). Así los dos caminos reparten
+ * exactamente igual y solo difieren en la referencia, el autor del historial y
+ * su observación.
+ *
+ * El pago es **de la mesa**, no de un pedido: se reparte entre los pedidos
+ * abiertos de esa mesa, del más antiguo al más nuevo. La base sigue siendo la
+ * autoridad: el monto contra el total lo valida tr_validar_transaccion_financiera
+ * y la transición a 'pagado' la valida tr_validar_transicion_estado.
  *
  * Todo lo que decide esta función es el reparto y a quién le toca cada peso;
  * ningún total se recalcula en JavaScript. Los montos viajan en centavos
  * enteros y la división por 100 se hace en SQL, para no meter coma flotante en
  * una cuenta.
+ *
+ * @param {import('pg').PoolClient} client cliente con la transacción abierta.
+ * @param {object} pago
+ * @param {string} pago.referencia_externa  la de Wompi, o 'caja:' + id_cobro.
+ * @param {number} pago.id_mesa
+ * @param {string|null} pago.comensal
+ * @param {number} pago.monto_centavos      entero > 0.
+ * @param {string} pago.metodo_pago
+ * @param {number|null} pago.id_usuario     autor de la línea de historial (NULL en Wompi).
+ * @param {string} pago.observacion         'Pago en linea' o 'Pago en caja'.
+ * @returns { noExiste: true }
+ *        | { duplicado: true, saldo_restante_centavos }
+ *        | { sinCuenta: true } | { excede: true, saldo_centavos }
+ *        | { duplicado: false, saldo_restante_centavos, mesa_liberada, pagados, transacciones }
+ */
+async function repartirPagoDeMesa(client, {
+  referencia_externa,
+  id_mesa,
+  comensal,
+  monto_centavos,
+  metodo_pago,
+  id_usuario,
+  observacion,
+}) {
+  // La fila de la mesa se bloquea de entrada: dos webhooks de Wompi para la
+  // misma mesa (o un webhook y un cobro en caja) se serializan, así no se
+  // reparte dos veces sobre el mismo saldo.
+  const mesa = await client.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE', [
+    id_mesa,
+  ]);
+  if (mesa.rows.length === 0) return { noExiste: true };
+
+  // Idempotencia: Wompi reintenta el mismo evento, y la caja reintenta el mismo
+  // id_cobro. Si la referencia ya está registrada, no se cobra otra vez; se
+  // contesta qué saldo hay ahora.
+  const yaRegistrada = await client.query(
+    'SELECT 1 FROM transacciones WHERE referencia_externa = $1 LIMIT 1',
+    [referencia_externa]
+  );
+  if (yaRegistrada.rows.length > 0) {
+    const saldo = await saldoDeLaMesaEnCentavos(client, id_mesa);
+    return { duplicado: true, saldo_restante_centavos: saldo };
+  }
+
+  // H-01: los pedidos entre los que se va a repartir también se bloquean,
+  // ORDENADOS POR id_pedido y después de la mesa. Es el mismo orden que usa
+  // registrarPago (mesa primero, pedidos por id), que es lo que evita el
+  // interbloqueo entre el cobro en caja y el pago en línea.
+  //
+  // Sin este bloqueo, dos webhooks sobre mesas distintas que comparten un
+  // pedido no pueden chocar, pero un webhook y una caja sobre el MISMO pedido
+  // sí: los dos leerían el mismo saldo pendiente.
+  await client.query(
+    `SELECT id_pedido FROM pedidos
+      WHERE id_mesa = $1 AND estado <> 'cancelado'
+      ORDER BY id_pedido ASC
+      FOR UPDATE`,
+    [id_mesa]
+  );
+
+  const pedidos = (await client.query(SQL_PEDIDOS_CON_SALDO, [id_mesa])).rows
+    .map((p) => ({ ...p, saldo_centavos: Number(p.saldo_centavos) }))
+    .filter((p) => p.saldo_centavos > 0);
+
+  if (pedidos.length === 0) return { sinCuenta: true };
+
+  const saldoMesa = pedidos.reduce((s, p) => s + p.saldo_centavos, 0);
+  if (monto_centavos > saldoMesa) return { excede: true, saldo_centavos: saldoMesa };
+
+  // Reparto: cada pedido recibe hasta su saldo, empezando por el más viejo.
+  let restante = monto_centavos;
+  const pagados = [];
+  const transacciones = [];
+  let filas = 0;
+
+  for (const pedido of pedidos) {
+    if (restante <= 0) break;
+    const aplicado = Math.min(restante, pedido.saldo_centavos);
+    restante -= aplicado;
+
+    // Tipos explícitos en cada parámetro: un mismo $N, siempre el mismo tipo.
+    const fila = await client.query(
+      `INSERT INTO transacciones
+        (id_pedido, metodo_pago, monto, estado_transaccion, referencia_externa, comensal, creado_en)
+       VALUES ($1::int, $2::text, ($3::bigint)::numeric / 100, 'completada', $4::text, $5::text, NOW())
+       RETURNING id_transaccion, id_pedido, monto, comensal`,
+      [
+        pedido.id_pedido,
+        metodo_pago,
+        aplicado,
+        referenciaDeFila(referencia_externa, filas),
+        comensal,
+      ]
+    );
+    filas += 1;
+    // PostgreSQL siempre devuelve la fila; el `|| {}` es para los dobles de
+    // pruebas anteriores al RETURNING, que no la traen.
+    const t = (fila && fila.rows && fila.rows[0]) || {};
+    transacciones.push({
+      id_transaccion: t.id_transaccion ?? null,
+      id_pedido: t.id_pedido ?? pedido.id_pedido,
+      monto_centavos: aplicado,
+      comensal: t.comensal ?? comensal ?? null,
+    });
+
+    // Un pedido se liquida solo si quedó en cero Y ya está entregado: el
+    // trigger no deja pasar a 'pagado' desde otro estado. Si todavía está en
+    // cocina, el pago queda registrado y el pedido sigue su curso; al llegar
+    // a entregado el saldo ya es 0 y la caja no vuelve a cobrar.
+    const liquidado = aplicado === pedido.saldo_centavos;
+    if (liquidado && pedido.estado === ESTADO_ENTREGADO) {
+      await client.query(`UPDATE pedidos SET estado = 'pagado' WHERE id_pedido = $1`, [
+        pedido.id_pedido,
+      ]);
+      // El autor: NULL para Wompi (no hay usuario), el del JWT para la caja.
+      const historial = sqlHistorialPagado(id_usuario, observacion);
+      await client.query(historial.sql, historial.params(pedido));
+      pagados.push({ id_pedido: pedido.id_pedido, estado_anterior: pedido.estado });
+    }
+  }
+
+  // Si esta pasada cerró el último pedido abierto, la mesa se libera en la
+  // misma transacción (igual que al cobrar en caja).
+  let mesa_liberada = false;
+  if (pagados.length > 0) {
+    mesa_liberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, id_mesa);
+  }
+
+  const saldo_restante_centavos = await saldoDeLaMesaEnCentavos(client, id_mesa);
+
+  return { duplicado: false, saldo_restante_centavos, mesa_liberada, pagados, transacciones };
+}
+
+/**
+ * ¿Es el 23503 del autor del historial? `fk_historial_usuario` todavía no está
+ * en FK_AUTOR de autor-inexistente.js en develop: lo añade la rama de #146
+ * (fix/api-autor-inexistente-pedidos-2), sin fusionar. Para no chocar con ella
+ * se reconoce aquí con los MISMOS mensaje y motivo del helper; cuando #146
+ * entre, traducirAutorInexistente ya lo atrapa antes y esto queda redundante.
+ */
+function traducirAutorDelHistorial(err) {
+  if (!err || err.code !== '23503' || err.constraint !== 'fk_historial_usuario') return null;
+  return { status: 409, message: MENSAJE_AUTOR_INEXISTENTE, motivo: MOTIVO_AUTOR_INEXISTENTE };
+}
+
+/**
+ * La TRANSACCIÓN alrededor del núcleo: BEGIN, reparto, COMMIT solo si se cobró,
+ * y ROLLBACK en cualquier otro caso. Una carrera con el mismo pago (23505 del
+ * índice único de la referencia) cuenta como duplicado; el 23503 del autor del
+ * historial se traduce a 409 autor_inexistente, con la transacción deshecha.
+ */
+async function cobrarMesa(pago) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await repartirPagoDeMesa(client, pago);
+    // Las salidas tempranas (sin mesa, duplicado, sin cuenta, excede) no
+    // escribieron nada: se cierran con ROLLBACK, como siempre.
+    await client.query(r.duplicado === false ? 'COMMIT' : 'ROLLBACK');
+    return r;
+  } catch (err) {
+    await client.query('ROLLBACK');
+
+    // Carrera con otro intento del mismo pago (el mismo evento de Wompi o el
+    // mismo id_cobro de la caja): el índice único de la referencia es la
+    // última palabra. Cuenta como duplicado, no como error.
+    if (err && err.code === '23505') {
+      return {
+        duplicado: true,
+        saldo_restante_centavos: await saldoDeLaMesaEnCentavos(pool, pago.id_mesa),
+      };
+    }
+    throw traducirAutorInexistente(err) || traducirAutorDelHistorial(err) || err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Registra un pago de la pasarela (lo llama el socket-server, EVENTS.md §8.4).
+ *
+ * Es el núcleo compartido (`repartirPagoDeMesa`) sin autor en el historial y
+ * con la observación 'Pago en linea'. Devuelve EXACTAMENTE las mismas claves
+ * que antes de extraer el núcleo: la lista de transacciones que también arma el
+ * núcleo no sale por aquí.
  *
  * @returns { noExiste: true }
  *        | { duplicado: true, saldo_restante_centavos }
@@ -278,133 +513,40 @@ async function registrarPagoInterno({
   monto_centavos,
   metodo_pago = 'online',
 }) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  const r = await cobrarMesa({
+    referencia_externa,
+    id_mesa,
+    comensal,
+    monto_centavos,
+    metodo_pago,
+    id_usuario: null,
+    observacion: OBSERVACION_PAGO_EN_LINEA,
+  });
+  if (r.duplicado !== false) return r;
+  const { transacciones, ...igualQueAntes } = r;
+  return igualQueAntes;
+}
 
-    // La fila de la mesa se bloquea de entrada: dos webhooks de Wompi para la
-    // misma mesa (o un webhook y un cobro en caja) se serializan, así no se
-    // reparte dos veces sobre el mismo saldo.
-    const mesa = await client.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE', [
-      id_mesa,
-    ]);
-    if (mesa.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return { noExiste: true };
-    }
-
-    // Idempotencia: Wompi reintenta el mismo evento. Si la referencia ya está
-    // registrada, no se cobra otra vez; se contesta qué saldo hay ahora.
-    const yaRegistrada = await client.query(
-      'SELECT 1 FROM transacciones WHERE referencia_externa = $1 LIMIT 1',
-      [referencia_externa]
-    );
-    if (yaRegistrada.rows.length > 0) {
-      const saldo = await saldoDeLaMesaEnCentavos(client, id_mesa);
-      await client.query('ROLLBACK');
-      return { duplicado: true, saldo_restante_centavos: saldo };
-    }
-
-    // H-01: los pedidos entre los que se va a repartir también se bloquean,
-    // ORDENADOS POR id_pedido y después de la mesa. Es el mismo orden que usa
-    // registrarPago (mesa primero, pedidos por id), que es lo que evita el
-    // interbloqueo entre el cobro en caja y el pago en línea.
-    //
-    // Sin este bloqueo, dos webhooks sobre mesas distintas que comparten un
-    // pedido no pueden chocar, pero un webhook y una caja sobre el MISMO pedido
-    // sí: los dos leerían el mismo saldo pendiente.
-    await client.query(
-      `SELECT id_pedido FROM pedidos
-        WHERE id_mesa = $1 AND estado <> 'cancelado'
-        ORDER BY id_pedido ASC
-        FOR UPDATE`,
-      [id_mesa]
-    );
-
-    const pedidos = (await client.query(SQL_PEDIDOS_CON_SALDO, [id_mesa])).rows
-      .map((p) => ({ ...p, saldo_centavos: Number(p.saldo_centavos) }))
-      .filter((p) => p.saldo_centavos > 0);
-
-    if (pedidos.length === 0) {
-      await client.query('ROLLBACK');
-      return { sinCuenta: true };
-    }
-
-    const saldoMesa = pedidos.reduce((s, p) => s + p.saldo_centavos, 0);
-    if (monto_centavos > saldoMesa) {
-      await client.query('ROLLBACK');
-      return { excede: true, saldo_centavos: saldoMesa };
-    }
-
-    // Reparto: cada pedido recibe hasta su saldo, empezando por el más viejo.
-    let restante = monto_centavos;
-    const pagados = [];
-    let filas = 0;
-
-    for (const pedido of pedidos) {
-      if (restante <= 0) break;
-      const aplicado = Math.min(restante, pedido.saldo_centavos);
-      restante -= aplicado;
-
-      await client.query(
-        `INSERT INTO transacciones
-          (id_pedido, metodo_pago, monto, estado_transaccion, referencia_externa, comensal, creado_en)
-         VALUES ($1, $2, ($3::bigint)::numeric / 100, 'completada', $4, $5, NOW())`,
-        [
-          pedido.id_pedido,
-          metodo_pago,
-          aplicado,
-          referenciaDeFila(referencia_externa, filas),
-          comensal,
-        ]
-      );
-      filas += 1;
-
-      // Un pedido se liquida solo si quedó en cero Y ya está entregado: el
-      // trigger no deja pasar a 'pagado' desde otro estado. Si todavía está en
-      // cocina, el pago queda registrado y el pedido sigue su curso; al llegar
-      // a entregado el saldo ya es 0 y la caja no vuelve a cobrar.
-      const liquidado = aplicado === pedido.saldo_centavos;
-      if (liquidado && pedido.estado === ESTADO_ENTREGADO) {
-        await client.query(`UPDATE pedidos SET estado = 'pagado' WHERE id_pedido = $1`, [
-          pedido.id_pedido,
-        ]);
-        await client.query(
-          `INSERT INTO historial_estados
-            (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones, fecha_cambio)
-           VALUES ($1, NULL, $2, 'pagado', 'Pago en linea', NOW())`,
-          [pedido.id_pedido, pedido.estado]
-        );
-        pagados.push({ id_pedido: pedido.id_pedido, estado_anterior: pedido.estado });
-      }
-    }
-
-    // Si esta pasada cerró el último pedido abierto, la mesa se libera en la
-    // misma transacción (igual que al cobrar en caja).
-    let mesa_liberada = false;
-    if (pagados.length > 0) {
-      mesa_liberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, id_mesa);
-    }
-
-    const saldo_restante_centavos = await saldoDeLaMesaEnCentavos(client, id_mesa);
-
-    await client.query('COMMIT');
-    return { duplicado: false, saldo_restante_centavos, mesa_liberada, pagados };
-  } catch (err) {
-    await client.query('ROLLBACK');
-
-    // Carrera con otro webhook del mismo evento: el índice único de la
-    // referencia es la última palabra. Cuenta como duplicado, no como error.
-    if (err && err.code === '23505') {
-      return {
-        duplicado: true,
-        saldo_restante_centavos: await saldoDeLaMesaEnCentavos(pool, id_mesa),
-      };
-    }
-    throw err;
-  } finally {
-    client.release();
-  }
+/**
+ * Cobro de MESA en caja (POST /transacciones/mesa): la caja cobra un monto a
+ * la mesa y se reparte entre sus pedidos con saldo, del más viejo al más
+ * nuevo, igual que un pago en línea. El autor del historial es quien cobra (el
+ * id del JWT) y la observación, 'Pago en caja'.
+ *
+ * La referencia es 'caja:' + id_cobro: reutiliza el índice único de las
+ * referencias y su idempotencia (el reintento con el mismo id_cobro no cobra),
+ * sin chocar nunca con una de Wompi.
+ */
+async function cobrarMesaEnCaja({ id_mesa, monto_centavos, metodo_pago, comensal = null, id_cobro, id_usuario }) {
+  return cobrarMesa({
+    referencia_externa: PREFIJO_REFERENCIA_CAJA + id_cobro,
+    id_mesa,
+    comensal,
+    monto_centavos,
+    metodo_pago,
+    id_usuario,
+    observacion: OBSERVACION_PAGO_EN_CAJA,
+  });
 }
 
 async function obtenerPorPedido(idPedido) {
@@ -418,7 +560,12 @@ async function obtenerPorPedido(idPedido) {
 module.exports = {
   registrarPago,
   registrarPagoInterno,
+  cobrarMesaEnCaja,
+  repartirPagoDeMesa,
   obtenerPorPedido,
+  OBSERVACION_PAGO_EN_LINEA,
+  OBSERVACION_PAGO_EN_CAJA,
+  PREFIJO_REFERENCIA_CAJA,
   referenciaDeFila,
   ESTADO_COBRADO,
   ESTADO_ENTREGADO,

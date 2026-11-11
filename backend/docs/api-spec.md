@@ -151,9 +151,34 @@ Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "123456", "
 
 `rol` es obligatorio y solo acepta `admin`, `mesero`, `cajero`, `cocina`.
 
+`password`: mínimo **6 caracteres** y como mucho **72 bytes** en UTF-8 (ver
+[La clave máxima: 72 bytes](#la-clave-máxima-72-bytes)).
+
 201: `{ "usuario": { "id_usuario": 1, "nombre": "Ana Ríos", "email": "ana@mail.com", "rol": "mesero", "activo": true } }`
 
-400: `{ "error": "Ese email ya está registrado" }` · 401 sin token · 403 si el token no es de un admin
+400: `{ "error": "Ese email ya está registrado" }` · 400 `{ "error", "motivo": "clave_demasiado_larga" }` · 401 sin token · 403 si el token no es de un admin
+
+#### La clave máxima: 72 bytes
+
+bcrypt solo usa los **primeros 72 BYTES** de una contraseña y descarta el resto **en
+silencio**: con una clave más larga, cualquier texto con el mismo comienzo entraría. Por eso
+toda clave que se **fija o cambia** (`POST /auth/register` y `POST /usuarios/:id/clave`, los
+dos únicos sitios que llaman a `bcrypt.hash`) se rechaza si pasa de 72 bytes en UTF-8:
+
+```json
+400 { "error": "La contraseña no puede pasar de 72 bytes; las letras con tilde y los emojis ocupan más de uno", "motivo": "clave_demasiado_larga" }
+```
+
+- Se cuentan **bytes**, no caracteres: una `ñ` o una tilde son 2 bytes y un emoji, 4. 72 `a`
+  entran; 25 `ñ` (50 bytes) entran; 37 `ñ` (74 bytes) no; 69 letras y un emoji (73 bytes, 70
+  caracteres) no.
+- Los **demás** 400 de validación de esas rutas no cambian de forma: `{ "error" }` sin
+  `motivo`. El `motivo` solo acompaña a este caso, para que el panel lo distinga sin comparar
+  textos.
+- **El login no lleva tope**, a propósito: quien creó una clave más larga antes de esta regla
+  sigue entrando con ella (bcrypt la compara truncada, igual que la guardó).
+- Los mínimos **no** son iguales: 6 caracteres al registrar y 8 al cambiar la clave.
+- La regla vive en un solo sitio: `src/utils/clave-bcrypt.js`.
 
 ### POST /auth/login
 
@@ -283,10 +308,9 @@ Body: `{ "password": "clave-nueva-larga" }`, `.strict()`.
   UTF-8, así que una clave de 40 caracteres puede pasarse de 72 bytes. Contando caracteres,
   esa clave entraría, bcrypt la cortaría por la mitad y el usuario acabaría con una
   contraseña que no es la que escribió. Rechazarla es mejor que cortarla sin avisar.
-
-  > `POST /auth/register` **no** valida igual: pide `password` de **mínimo 6 caracteres y
-  > sin máximo**, así que por ahí una clave larga sí se trunca en silencio. No se cambia en
-  > este PR para no tocar un contrato ya publicado; queda anotado.
+  Responde 400 `{ "error", "motivo": "clave_demasiado_larga" }`; es la misma regla que
+  `POST /auth/register` (ver [La clave máxima: 72 bytes](#la-clave-máxima-72-bytes)), que
+  antes no la tenía.
 - Se guarda con el **mismo bcrypt y el mismo costo** que `/auth/register` (`COSTO_BCRYPT`,
   importado y no copiado): dos costos distintos en el proyecto producen hashes que el login
   reconoce pero que cuestan tiempos distintos, y eso es justo lo que evita H-12.
@@ -1402,6 +1426,24 @@ puede no ser el que escribió el mesero.
 { "error": "No se pudo agregar al comensal, intenta de nuevo en unos segundos", "motivo": "alias_no_disponible" }
 ```
 
+**El 409 `alias_en_uso` trae el alias guardado** (revisión del #119), en un campo `alias`
+**opcional**:
+
+```json
+{ "error": "Ese nombre ya lo usa otra persona en la mesa, elige otro", "motivo": "alias_en_uso", "alias": "Abuela" }
+```
+
+- Es el texto **tal como está guardado**, no el que se envió: con «Abuela» ya reservada, un
+  `POST` con `abuela` devuelve `"alias": "Abuela"`. Sirve para que el panel ofrezca pedir
+  para esa persona en vez de inventar otro nombre.
+- **Puede faltar.** Si la reserva no se puede leer (Redis no responde, el valor guardado no
+  tiene texto legible, o la lectura falla), el 409 sale igual que antes, **sin** `alias`. Nunca
+  se convierte en 500 ni en 503 por esto: el cliente tiene que tratar `alias` como opcional.
+- No se registra en el log.
+- **El 409 de la sesión por QR (`POST /mesas/qr/:token/sesion`) NO lo trae**, a propósito:
+  quien escanea el QR no es personal, y devolverle el texto exacto le daría el nombre de otra
+  persona de la mesa para entrar como ella.
+
 El **503 `alias_no_disponible`** es el mismo comportamiento que las sesiones de QR: sin
 Redis no hay unicidad garantizada, y una mesa sin unicidad de alias permite cargarle los
 platos a otra persona, así que **falla cerrada** y no se da de alta a nadie.
@@ -1503,10 +1545,11 @@ comensal conectado.
 
 #### El aviso interno `POST /internal/mesa-comensal`
 
-> **Depende de R-19 y del PR #99, que todavía es una PROPUESTA.** El contrato está en
-> `socket-server/EVENTS.md` §6.4 de la rama `docs/socket-contratos-v11`, **sin fusionar**, y
-> la ruta puede **no existir aún** en el socket-server. Nada de la API REST depende de que
-> funcione.
+> **El contrato es `socket-server/EVENTS.md` §6.4, Estable desde R-19.2** (ruta implementada
+> en `socket-server/src/mesa-comensal.js`). Aun así, nada de la API REST depende de que
+> funcione: si el socket-server responde 404 o no hay nadie escuchando, el aviso falla y la
+> respuesta HTTP del mesero sigue siendo correcta, porque la reserva del alias ya está hecha
+> en el backend, que es la fuente de verdad.
 
 Tras reservar o soltar el alias, el backend manda:
 
@@ -1518,18 +1561,20 @@ El socket-server lo suma a `sd:mesa:{id}:sin_celular` y lo incluye en `mesa:pres
 (§6.4 y §5.2), así cuenta para «igual» y puede pagar en caja con su alias.
 
 - **`accion`** es `"agregar"` o `"quitar"`.
-- **El `alias` que viaja es SIEMPRE el texto con el que se reservó**, en las dos acciones:
-  §6.4 compara **texto idéntico** para quitar, así que mandar lo que escribió el mesero
-  —con otra capitalización, una tilde de más o un espacio doble— dejaría a la persona
-  sentada para siempre.
+- **El `alias` que viaja es SIEMPRE el texto con el que se reservó**, en las dos acciones.
+  El socket-server compara `quitar` por **clave** (§6.4, R-19.2), con la misma normalización
+  de [`alias-comensal.js`](../src/services/alias-comensal.js) —sin tildes, en minúsculas y
+  sin espacios ni `. _ ' -`—: busca en `sin_celular` el alias guardado cuya clave coincida y
+  quita **ese**. Por eso el backend puede mandar el alias tal como está guardado, sin que
+  importen la capitalización, una tilde o un espacio doble.
 
   Al **agregar** es el alias que acaba de normalizarse y reservarse. Al **quitar** es el que
   la reserva tenía **guardado**, no el de la URL: el `DELETE` libera la reserva por
-  **clave**, así que `DELETE …/comensales/abuela` sobre la reserva de «Abuela» responde 204 y
-  suelta la reserva, pero el socket-server solo quita a «Abuela» si recibe ese mismo texto.
-  Mandando el de la URL, la persona se quedaba **24 h** en la presencia de la mesa. Así, el
-  par `agregar`/`quitar` de una misma persona siempre viaja con el mismo texto, letra por
-  letra.
+  **clave**, así que `DELETE …/comensales/abuela` sobre la reserva de «Abuela» responde 204,
+  suelta la reserva y el socket-server quita a «Abuela» igual, porque la clave es la misma.
+  Se manda el guardado porque es el texto real de esa persona: así el par
+  `agregar`/`quitar` de una misma persona viaja con el mismo texto, y repetir un `agregar`
+  es «sin cambio» en vez de un `409 ALIAS_EN_USO` por un alias distinto con la misma clave.
 
   La única excepción es un alias que **no está reservado** (el 204 idempotente): ahí se
   manda el **normalizado de la URL**, porque no hay otro texto de donde sacarlo.
@@ -1817,7 +1862,9 @@ comensal de su mesa.
 **400** `{ "error": "...", "campo": "comensal" }` si falta el alias o no cumple las reglas.
 
 **409** `{ "motivo": "alias_en_uso" }` si otro comensal de la sesión ya tiene ese alias:
-la PWA debe pedir otro nombre.
+la PWA debe pedir otro nombre. **Sin campo `alias`**, a diferencia del alta del personal
+(`POST /mesas/:id/comensales`): devolver el texto guardado le daría a quien escanea el nombre
+exacto de otra persona de la mesa para entrar como ella.
 
 **503** si el socket-server no responde (sin validar no se puede dejar entrar a nadie) o,
 con `motivo: "alias_no_disponible"`, si no se pudo reservar el alias.
@@ -2390,6 +2437,7 @@ cuenta y los alias de otra mesa.
 |---|---|---|---|
 | POST | /transacciones | admin, cajero | Registra un pago: crea la transacción, marca el pedido `pagado` y **libera la mesa automáticamente** |
 | GET | /transacciones/pedido/:id_pedido | admin, cajero | Lista las transacciones de un pedido |
+| **POST** | **/transacciones/mesa** | **admin, cajero** | **Cobra un monto a la MESA y lo reparte entre sus pedidos, del más viejo al más nuevo** |
 
 ### POST /transacciones
 
@@ -2903,6 +2951,102 @@ error. El cuerpo exige `referencia_externa`, `id_transaccion_pasarela`, `pasarel
 solo `comensal` admite `null` y solo `metodo_pago` tiene valor por omisión.
 Nada se degrada a NULL en silencio.
 
+### POST /transacciones/mesa — cobro de mesa en caja
+
+**Roles:** `admin`, `cajero`. Sin token **401**; `mesero`, `cocina` o un comensal, **403**.
+
+La caja cobra **a la mesa**, no a un pedido: el monto se reparte entre los pedidos de la mesa
+que tienen saldo, **del más viejo al más nuevo**, con el mismo núcleo que el pago en línea
+(`POST /transacciones/internal`). Es lo que hay que usar para «cobrar lo de Ana» o «cobrar toda
+la mesa»; `POST /transacciones` sigue siendo el cobro de **un pedido** concreto y no cambia.
+
+**Cuerpo** (zod `.strict()`: un campo de más es 400):
+
+```json
+{ "id_mesa": 5, "monto": 34000, "metodo_pago": "efectivo", "comensal": "Ana",
+  "id_cobro": "3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f" }
+```
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `id_mesa` | Sí | Entero > 0 |
+| `monto` | Sí | Pesos, número > 0 con **como mucho 2 decimales** y que quepa en `DECIMAL(10,2)` (hasta 99.999.999,99). Se convierte a **centavos enteros** desde el texto del número, sin coma flotante (`1.15` son 115 centavos, no 114) |
+| `metodo_pago` | Sí | `efectivo`, `tarjeta_debito`, `tarjeta_credito` o `transferencia`. **`online` no**: es solo de Wompi |
+| `comensal` | No | Las mismas reglas que en `POST /transacciones`: texto de 1 a 40, o `null`. Es de quién se descuenta en la cuenta por persona; sin él, el cobro es «de la mesa» |
+| `id_cobro` | Sí | **UUID**. Ver abajo |
+
+**`id_cobro`: generarlo una vez y reutilizarlo en los reintentos.** La caja genera un UUID v4
+(`crypto.randomUUID()`) **cuando el cajero pulsa «Cobrar»**, no en cada envío, y si la petición
+falla por red o no llega la respuesta, **reintenta con el MISMO `id_cobro`**. Con el mismo
+`id_cobro` el backend no cobra dos veces: responde `200 { duplicado: true }` con el saldo actual.
+Un cobro nuevo (otro monto, otra persona) lleva un `id_cobro` nuevo. Por dentro se guarda como
+`referencia_externa = 'caja:' + id_cobro`, así que nunca choca con una referencia de Wompi y
+usa el mismo índice único (`uq_transacciones_referencia_externa`) e idempotencia que el pago en
+línea, incluida la carrera de dos peticiones simultáneas: una cobra, la otra es duplicado.
+
+**El reparto**, en una sola transacción:
+
+- Se bloquea la mesa y después sus pedidos por `id_pedido`: el mismo orden que el cobro por
+  pedido y el webhook de Wompi, así que la caja y Wompi sobre la misma mesa se serializan, sin
+  interbloqueo y sin cobrar de más (el segundo ve el saldo ya reducido).
+- Cada pedido recibe hasta su saldo, empezando por el más viejo; una fila de `transacciones` por
+  pedido tocado.
+- Un pedido que queda en cero **y ya está entregado** pasa a `pagado`, con su línea de
+  `historial_estados` cuyo autor es **quien cobra** (el id del JWT) y la observación
+  **`Pago en caja`**. Si todavía está en cocina, el dinero queda registrado y el pedido sigue su
+  curso.
+- Si con eso no queda ningún pedido abierto, la mesa se libera (estado `disponible`, QR
+  invalidado) en la misma transacción.
+- **La propina no entra**: este cobro solo cubre el saldo de los pedidos. Un monto mayor que el
+  saldo es `409 excede`, no una propina.
+
+**Respuestas:**
+
+```json
+201 {
+  "duplicado": false,
+  "saldo_restante": 0,
+  "mesa_liberada": true,
+  "pagados": [91, 92],
+  "transacciones": [
+    { "id_transaccion": 120, "id_pedido": 91, "monto": 34000, "comensal": null },
+    { "id_transaccion": 121, "id_pedido": 92, "monto": 34000, "comensal": null }
+  ]
+}
+```
+
+- `saldo_restante` es el saldo de **la mesa** tras el cobro, en pesos (número). `pagados` son
+  los `id_pedido` que pasaron a `pagado` con este cobro. `transacciones`, las filas creadas, con
+  `monto` en pesos.
+
+| Status | Cuerpo | Cuándo |
+|---|---|---|
+| **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró: no se cobra ni se avisa otra vez |
+| **400** | `{ "error", "motivo": "cuerpo_invalido" }` | Cuerpo inválido (tabla de arriba) |
+| **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
+| **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
+| **409** | `{ "error", "motivo": "excede", "saldo": 68000 }` | El monto supera el saldo de la mesa (`saldo` en pesos). No se escribe nada |
+| **409** | `{ "error", "motivo": "autor_inexistente" }` | El usuario del token ya no existe ([El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)). La transacción se deshace entera |
+
+`POST /transacciones/internal` (Wompi) responde los mismos casos **sin** `motivo` y en
+centavos; ese contrato no cambia.
+
+**Avisos de tiempo real**, después del COMMIT y en este orden, los mismos que el cobro de caja
+por pedido (`POST /transacciones`):
+
+1. `POST /internal/payment-confirmed` → `payment:confirmed` (EVENTS.md §8.6): **uno por cobro**,
+   con el monto entero, el saldo de la mesa, el `comensal`, `referencia_externa: "caja:<id_cobro>"`
+   y el `id_transaccion` de la primera fila (la guardia de idempotencia del socket-server).
+2. `order:status` → `pagado` por cada pedido que se liquidó.
+3. `mesa:liberada` con motivo `pagada`, si la mesa quedó libre (y se olvidan sus alias).
+
+Un `duplicado` no avisa nada. Si el socket-server no responde, el cobro ya está guardado.
+
+Cobertura: `tests/transacciones-mesa.test.js` (roles, validación, centavos, cada respuesta,
+avisos) y `tests/integracion/transacciones-mesa-sql.test.js` contra PostgreSQL (reparto entre
+pedidos, pago parcial, pedido en cocina, excede, `id_cobro` repetido en serie y a la vez, caja y
+Wompi a la vez, autor inexistente, historial).
+
 ### POST /pagos/intentos-fallidos/interno
 
 Body: solo tres campos son **obligatorios** — `referencia_externa`,
@@ -2986,8 +3130,15 @@ constructor. Las tablas, la función y las vistas son de `database/scripts/27_in
 |---|---|---|
 | `estado` | `todos`, `bajo` | `todos` |
 | `activo` | `true`, `false` (sin él, todos) | — |
-| `q` | Texto, busca por nombre sin distinguir mayúsculas ni acentos | — |
+| `q` | Texto **literal**, busca por nombre sin distinguir mayúsculas (ver abajo) | — |
 | `limite` | 1–200 | 100 |
+
+**`q` es texto literal, sin comodines** (aquí, en `?estado=bajo` y en `GET /inventario/carta`).
+Lo que escribe el usuario no se usa como patrón: `%`, `_` y `\` se escapan y la consulta lleva
+`ILIKE … ESCAPE '\'` explícito. Así `q=%` solo trae nombres que contienen un `%`, `q=_` solo
+los que tienen un guion bajo, y una barra invertida se busca tal cual en vez de romper el
+patrón. Antes `q=%` devolvía todo. Distingue **acentos**: `costeno` no encuentra «Queso
+costeño» (es un `ILIKE`, sin `unaccent`); las mayúsculas, no.
 
 `?estado=bajo` lee la vista **`v_stock_bajo`** (`activo AND stock_actual <= stock_minimo`), que
 trae su propio `agotado`:
@@ -3343,7 +3494,7 @@ distinguir dos pasos homónimos de platos distintos.
 |---|---|---|
 | `tipo` | `plato`, `ingrediente` | Devuelve solo esa lista; la otra viaja **vacía**, no se omite |
 | `sin_receta` | `true`, `false` | Con `true`, solo lo que **no tiene receta**: es la lista de "falta configurar" de la pestaña |
-| `q` | Texto, hasta 80 | Busca por **nombre**, sin distinguir mayúsculas. Va parametrizado (`ILIKE $1`), nunca pegado al SQL |
+| `q` | Texto, hasta 80 | Busca por **nombre** como texto **literal** (sin comodines: `%`, `_` y `\` se escapan, con `ESCAPE '\'`), sin distinguir mayúsculas pero sí acentos. Va parametrizado, nunca pegado al SQL |
 
 ```http
 GET /api/inventario/carta?sin_receta=true&tipo=plato
@@ -3557,7 +3708,7 @@ El backend los escucha en `src/services/inventario-avisos.js` y los reenvía al 
 |---|---|---|
 | `disponibilidad` de un plato | `POST /internal/plato-disponibilidad` | lo que viaja es el **efectivo** (`disponible AND stock_suficiente`) |
 | `disponibilidad` de una opción | `POST /internal/ingrediente-disponibilidad` | igual |
-| `stock_bajo` | `POST /internal/inventario-alerta` | contrato de EVENTS.md §5.5 (propuesta v1.1) |
+| `stock_bajo` | `POST /internal/inventario-alerta` | contrato de EVENTS.md §5.5 (Estable, R-20.2) |
 
 - **Conexión dedicada, no una del pool.** `LISTEN` vive en la conexión: una del pool se
   devuelve en cuanto acaba la consulta y la siguiente petición la usaría —con su `LISTEN`

@@ -13,4 +13,8 @@ router.post('/internal', requireInternalKey, ctrl.crearInterno);
 
 router.get('/pedido/:id_pedido', requireAuth, requireRole('admin', 'cajero'), ctrl.obtenerPorPedido);
 
+// Cobro de MESA en caja: el monto se reparte entre los pedidos de la mesa, del
+// más viejo al más nuevo (el mismo núcleo que el pago en línea).
+router.post('/mesa', requireAuth, requireRole('admin', 'cajero'), ctrl.cobrarMesa);
+
 module.exports = router;

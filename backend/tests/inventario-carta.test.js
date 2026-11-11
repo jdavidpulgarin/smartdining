@@ -329,7 +329,8 @@ test('d-17c: q busca por nombre y va parametrizado', async () => {
     await get('/api/inventario/carta?q=arepa');
 
     const consulta = consultaDePlatos(db);
-    assert.strictEqual(consulta.params[1], 'arepa');
+    // q viaja como el patron literal (%…%, comodines del usuario escapados).
+    assert.strictEqual(consulta.params[1], '%arepa%');
     // ILIKE con el valor como parametro: el texto del cliente NUNCA se pega al
     // SQL (lo vigila la suite de inyeccion).
     assert.ok(consulta.sql.includes('ILIKE'));
@@ -345,7 +346,7 @@ test('d-17c: los dos filtros se combinan', async () => {
     const res = await get('/api/inventario/carta?sin_receta=true&tipo=plato&q=bowl');
 
     assert.strictEqual(res.status, 200);
-    assert.deepStrictEqual(consultaDePlatos(db).params, [false, 'bowl']);
+    assert.deepStrictEqual(consultaDePlatos(db).params, [false, '%bowl%']);
     assert.deepStrictEqual(res.body.ingredientes, []);
   } finally {
     db.restaurar();
