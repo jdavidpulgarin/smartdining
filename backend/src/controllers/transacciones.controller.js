@@ -253,6 +253,7 @@ const MOTIVO_CUERPO_INVALIDO = 'cuerpo_invalido';
 const MOTIVO_MESA_INEXISTENTE = 'mesa_inexistente';
 const MOTIVO_SIN_CUENTA = 'sin_cuenta';
 const MOTIVO_EXCEDE = 'excede';
+const MOTIVO_ID_COBRO_EN_USO = 'id_cobro_en_uso';
 
 /**
  * Pesos con como mucho 2 decimales -> centavos ENTEROS, sin coma flotante.
@@ -334,6 +335,14 @@ async function cobrarMesa(req, res, next) {
         saldo: aPesos(r.saldo_centavos),
       });
     }
+    // Un id_cobro que ya se usó en OTRA mesa: no es un reintento de este cobro,
+    // y contestar "duplicado" haría creer a la caja que cobró. No se escribe nada.
+    if (r.idCobroEnUso) {
+      return res.status(409).json({
+        error: 'Ese id_cobro ya se usó en otra mesa; genera uno nuevo',
+        motivo: MOTIVO_ID_COBRO_EN_USO,
+      });
+    }
     // El reintento con el mismo id_cobro no cobra ni avisa otra vez: los avisos
     // ya salieron con el primero.
     if (r.duplicado) {
@@ -403,6 +412,7 @@ module.exports = {
   MOTIVO_CUERPO_INVALIDO,
   MOTIVO_SIN_CUENTA,
   MOTIVO_EXCEDE,
+  MOTIVO_ID_COBRO_EN_USO,
   METODOS_PAGO,
   ESTADOS_TRANSACCION,
   MONEDA,

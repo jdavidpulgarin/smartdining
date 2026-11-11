@@ -2984,6 +2984,15 @@ Un cobro nuevo (otro monto, otra persona) lleva un `id_cobro` nuevo. Por dentro 
 usa el mismo índice único (`uq_transacciones_referencia_externa`) e idempotencia que el pago en
 línea, incluida la carrera de dos peticiones simultáneas: una cobra, la otra es duplicado.
 
+**Un `id_cobro` ya usado en OTRA mesa no es un duplicado**: es **409** `id_cobro_en_uso`. El
+backend mira a qué mesa pertenece la transacción que ya tiene `caja:<id_cobro>` (por su pedido):
+si es la misma mesa, es el reintento de este cobro y responde `duplicado`; si es otra, contestar
+`duplicado` haría creer a la caja que cobró sin haber cobrado nada, así que responde 409 y no
+escribe nada. Pasa también en la carrera: dos peticiones a la vez con el mismo `id_cobro` en
+mesas distintas → una cobra y la otra recibe 409, no `duplicado`. Si llega este 409, la caja
+tiene que generar un `id_cobro` nuevo. (El pago en línea, `/transacciones/internal`, no cambia:
+una referencia de Wompi ya registrada sigue siendo duplicado.)
+
 **El reparto**, en una sola transacción:
 
 - Se bloquea la mesa y después sus pedidos por `id_pedido`: el mismo orden que el cobro por
@@ -3021,7 +3030,8 @@ línea, incluida la carrera de dos peticiones simultáneas: una cobra, la otra e
 
 | Status | Cuerpo | Cuándo |
 |---|---|---|
-| **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró: no se cobra ni se avisa otra vez |
+| **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró **en esta mesa**: no se cobra ni se avisa otra vez |
+| **409** | `{ "error": "Ese id_cobro ya se usó en otra mesa; genera uno nuevo", "motivo": "id_cobro_en_uso" }` | Ese `id_cobro` ya se usó en **otra** mesa. No se escribe nada |
 | **400** | `{ "error", "motivo": "cuerpo_invalido" }` | Cuerpo inválido (tabla de arriba) |
 | **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
 | **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
