@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   soportePush,
   puedePedirPermiso,
+  estadoTarjetaPush,
   urlBase64AUint8Array,
   suscribir,
   desuscribir,
@@ -160,6 +161,73 @@ describe('push service (J-09)', () => {
           tienePedidoConfirmado: true,
         })
       ).toBe(false);
+    });
+  });
+
+  describe('estadoTarjetaPush', () => {
+    it('resuelve el estado correcto segun soporte, permiso, sesion y pedido confirmado', () => {
+      expect(
+        estadoTarjetaPush({
+          soporte: 'ok',
+          permiso: 'default',
+          yaPregunto: false,
+          tienePedidoConfirmado: false,
+        })
+      ).toBe('oculto');
+
+      expect(
+        estadoTarjetaPush({
+          soporte: 'ok',
+          permiso: 'default',
+          yaPregunto: false,
+          tienePedidoConfirmado: true,
+        })
+      ).toBe('pedir');
+
+      expect(
+        estadoTarjetaPush({
+          soporte: 'ok',
+          permiso: 'granted',
+          yaPregunto: true,
+          tienePedidoConfirmado: true,
+        })
+      ).toBe('suscribir_silencio');
+
+      expect(
+        estadoTarjetaPush({
+          soporte: 'ok',
+          permiso: 'denied',
+          yaPregunto: false,
+          tienePedidoConfirmado: true,
+        })
+      ).toBe('oculto');
+
+      expect(
+        estadoTarjetaPush({
+          soporte: 'ios_sin_instalar',
+          permiso: 'default',
+          yaPregunto: false,
+          tienePedidoConfirmado: true,
+        })
+      ).toBe('ios_sin_instalar');
+
+      expect(
+        estadoTarjetaPush({
+          soporte: 'ios_sin_instalar',
+          permiso: 'default',
+          yaPregunto: true,
+          tienePedidoConfirmado: true,
+        })
+      ).toBe('oculto');
+
+      expect(
+        estadoTarjetaPush({
+          soporte: 'sin_soporte',
+          permiso: 'default',
+          yaPregunto: false,
+          tienePedidoConfirmado: true,
+        })
+      ).toBe('oculto');
     });
   });
 

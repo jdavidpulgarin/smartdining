@@ -117,6 +117,44 @@ export function puedePedirPermiso({
 }
 
 /**
+ * Resuelve qué debe mostrar (o hacer en silencio) la tarjeta de permiso push
+ * en la pantalla de seguimiento tras confirmar un pedido:
+ * - 'pedir': mostrar "¿Te avisamos cuando tu plato esté listo?"
+ * - 'ios_sin_instalar': mostrar guía para agregar a pantalla de inicio en iPhone
+ * - 'suscribir_silencio': permiso ya concedido -> suscribir sin UI
+ * - 'oculto': no mostrar nada
+ */
+export function estadoTarjetaPush({
+  soporte,
+  permiso,
+  yaPregunto = false,
+  tienePedidoConfirmado = false,
+} = {}) {
+  if (!tienePedidoConfirmado) return 'oculto';
+
+  if (soporte === 'ok') {
+    if (permiso === 'granted') return 'suscribir_silencio';
+    if (
+      puedePedirPermiso({
+        soporte,
+        permiso,
+        yaPregunto,
+        tienePedidoConfirmado,
+      })
+    ) {
+      return 'pedir';
+    }
+    return 'oculto';
+  }
+
+  if (soporte === 'ios_sin_instalar') {
+    return yaPregunto ? 'oculto' : 'ios_sin_instalar';
+  }
+
+  return 'oculto';
+}
+
+/**
  * Convierte una clave pública VAPID en formato base64url a Uint8Array
  * para pasarla como `applicationServerKey` a `pushManager.subscribe`.
  */
@@ -180,8 +218,8 @@ async function obtenerRegistroServiceWorker(swContainer) {
   if (!reg && typeof swContainer.register === 'function') {
     reg = await swContainer.register('/sw-push.js', { scope: '/' });
   }
-  if (!reg && swContainer.ready) {
-    reg = await swContainer.ready;
+  if ((!reg || !reg.active) && swContainer.ready) {
+    reg = (await swContainer.ready) || reg;
   }
   return reg;
 }
@@ -353,6 +391,7 @@ export async function desuscribir({
 export default {
   soportePush,
   puedePedirPermiso,
+  estadoTarjetaPush,
   urlBase64AUint8Array,
   suscribir,
   desuscribir,
