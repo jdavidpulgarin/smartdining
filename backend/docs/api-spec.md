@@ -1742,7 +1742,75 @@ responde (no se guarda nada). Si falla solo el aviso a la tablet, responde 201 i
 
 > Hoy el middleware de sesión compara el `sid` del JWT del comensal con el `token_qr`
 > vigente, así que **rotar cierra las sesiones de quienes ya estaban sentados**. Si se quiere
-> que conserven su sesión tras una rotación, hay que cambiar ese criterio (pendiente).
+> que conserven su sesión tras una rotación, hay que cambiar ese criterio (pendiente). La
+> rotación **automática** (abajo) no tiene ese problema: no rota si alguien ya entró.
+
+### POST /mesas/:id/token-qr/interno — interna (rotación automática del QR)
+
+La llama **el socket-server**, no un frontend: mientras una mesa está abierta y **nadie se ha
+sentado**, su QR cambia cada 3 minutos para que una foto de la tablet deje de servir (diseño en
+`socket-server/docs/rotacion-qr.md`, opción A). El socket-server firma el QR nuevo y le pide al
+backend que lo guarde como el vigente; solo si recibe `200` lo anuncia a la tablet con
+`qr:actualizado`. El backend **no** llama a `/internal/qr-rotado`.
+
+```http
+POST /api/mesas/5/token-qr/interno
+x-internal-key: <INTERNAL_API_KEY>
+Content-Type: application/json
+
+{ "token_qr": "v1.<datos>.<firma>", "token_anterior": "v1.<datos>.<firma>" }
+```
+
+- **Clave interna** (`requireInternalKey`, comparación en tiempo constante): sin ella o con una
+  equivocada, **401**; sin `INTERNAL_API_KEY` configurada, 503.
+- **Cuerpo** (zod `.strict()`): `token_qr` con la forma `v1.<datos>.<firma>` en base64url y
+  hasta 255 caracteres (el tamaño de la columna); `token_anterior` con la misma forma o
+  `null`, **obligatorio** aunque sea null; distintos entre sí. La **firma no se valida aquí**:
+  es del socket-server, que tiene `QR_SECRET`. Cualquier fallo es **400**
+  `{ "error", "motivo": "cuerpo_invalido" }`.
+
+En **una transacción**, con la mesa bloqueada (`FOR UPDATE`):
+
+| Paso | Si no se cumple |
+|---|---|
+| La mesa existe | **404** |
+| Está `ocupada` | **409** `{ "motivo": "mesa_no_ocupada", "estado" }` |
+| **Compare-and-swap**: `token_anterior` es el `token_qr` vigente | **409** `{ "motivo": "token_anterior_distinto" }`: alguien rotó a mano o liberó la mesa mientras tanto |
+| **Guarda de continuidad**: la sesión de mesa no tiene comensales | **409** `{ "motivo": "mesa_con_comensales" }` |
+| Se pueden leer las reservas de alias | **503** `{ "motivo": "alias_no_disponible" }` |
+
+Si todo se cumple: guarda el token anterior en `token_qr_historico`, cambia `mesas.token_qr`,
+`COMMIT` y **200** `{ "ok": true }`. Desde ese momento el QR viejo ya no abre sesión
+(`POST /mesas/qr/:token/sesion` responde 401 `no_es_el_vigente`) y el nuevo sí.
+
+**`token_anterior: null` es 409, no un comodín.** El socket-server arranca la rotación siempre
+con el token que acaba de firmar en `/qr/generar`, que es el mismo que guarda el backend al abrir
+o rotar a mano, así que hoy nunca manda `null`. Si algún día lo hiciera, sería un rotador que no
+sabe qué QR está vigente, y pisarlo a ciegas podría deshacer una rotación manual. Con el 409 deja
+de rotar esa mesa.
+
+**La guarda de continuidad, y por qué.** El middleware de sesión compara el `sid` del JWT del
+comensal con el `token_qr` vigente, así que rotar dejaría sin sesión a quien ya entró con el QR
+anterior. El diseño quiere que el QR quede **fijo** en cuanto entra alguien; el socket-server lo
+decide con los sockets de la sala, pero puede haber alguien que escaneó y todavía no abrió su
+socket. Por eso el backend también mira, y **no rota** si la sesión de mesa ya tiene:
+
+- **pedidos** de la sesión actual (misma regla de `sesion_iniciada_en` que la liberación
+  automática), o
+- **reservas de alias**: todo el que entra por QR reserva su alias, y el personal reserva el de
+  quien no tiene celular. Abrir la mesa las borra, así que lo que haya es de esta sesión.
+
+El 409 hace que el socket-server deje de rotar: el QR queda fijo hasta que la mesa se libere. Si
+las reservas **no se pueden leer** (Redis no responde) se elige lo seguro, **no rotar**: el QR
+anterior sigue valiendo y nadie pierde su sesión. Se responde **503** (y no 409) para que el
+socket-server lo reintente en el siguiente ciclo en vez de dejar la mesa fija para siempre.
+
+**Logs:** el id de la mesa y el motivo; **nunca** un token, porque quien lo tenga abre sesión
+en esa mesa.
+
+Cobertura: `tests/mesas-rotacion-interna.test.js` y `tests/integracion/mesas-rotacion-sql.test.js`
+(contra PostgreSQL, con QR firmados por el servicio real del socket-server y una vuelta de punta a
+punta con su rotador).
 
 ### POST /mesas/:id/liberar — mesero, admin
 
@@ -2833,6 +2901,7 @@ Contrato: `socket-server/EVENTS.md` §8.2, §8.4 y §8.5. Ningún frontend las u
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | /mesas/:id/cuenta/interno | Cuenta de la mesa en centavos, con el saldo de cada comensal |
+| **POST** | **/mesas/:id/token-qr/interno** | **Rotación automática del QR de una mesa abierta y vacía (socket-server/docs/rotacion-qr.md)** |
 | POST | /transacciones/internal | Registra un pago ya cobrado por la pasarela y lo reparte entre los pedidos de la mesa |
 | POST | /pagos/intentos-fallidos/interno | Bitácora de un pago rechazado o descartado al reverificarlo |
 
