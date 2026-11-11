@@ -65,6 +65,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `push:unsubscribe` | `comensal` | — | Estable | [§4](#pushunsubscribe) |
 | `mesa:llamar_mesero` | `comensal` | Obligatorio | Estable | [§4](#mesallamar_mesero) |
 | `cuenta:solicitada` | `comensal` | Obligatorio | Estable | [§4](#cuentasolicitada) |
+| `mesa:presencia:solicitar` | `admin`, `mesero`, `cajero` | — | Estable (nuevo) | [§4](#mesapresenciasolicitar) |
 
 `pantalla` no puede emitir ningún evento: solo escucha.
 
@@ -128,7 +129,7 @@ motivo exacto) va solo al log del servidor.
 | `PAYLOAD_INVALIDO` | Falta un campo o tiene un tipo/valor inválido |
 | `NO_AUTORIZADO` | El rol no puede emitir ese evento o tocar esa mesa; o el comensal manda otro alias que el de su JWT, o toca una línea de otro comensal |
 | `SIN_SALA` | El comensal no hizo `join:table` antes de emitir |
-| `RATE_LIMIT` | 20 eventos/s por socket, o 1 llamada al mesero por mesa cada 60 s |
+| `RATE_LIMIT` | 20 eventos/s por socket, 1 llamada al mesero por mesa cada 60 s, o 1 `mesa:presencia:solicitar` por socket cada 2 s |
 | `ERROR_INTERNO` | Fallo inesperado del servidor o de Redis; reenviar con el **mismo** `eventId` |
 
 ### Respuestas HTTP (`{ ok: false, codigo, mensaje }`)
@@ -530,6 +531,42 @@ hasta que se libere.
 
 ---
 
+### `mesa:presencia:solicitar`
+
+El panel pide la presencia de **todas** las mesas con algo y la recibe **en el ack**: no se
+emiten eventos sueltos, así que funciona aunque sus listeners todavía no estén registrados.
+Solo `admin`, `mesero` y `cajero`. No lleva payload ni `eventId` (es una lectura).
+
+```js
+socket.emit('mesa:presencia:solicitar', {}, (r) => { /* … */ })
+```
+
+| ack | Cuándo |
+|---|---|
+| `{ ok: true, mesas: [ <mesa:presencia>, … ] }` | Siempre que se pueda calcular. Cada elemento tiene el payload de [§5.2](#52-mesapresencia), ordenados por `id_mesa`. La lista es **completa**: una mesa que no aparece no tiene nadie |
+| `{ ok: false, codigo: 'NO_AUTORIZADO' }` | Lo pide un comensal, una tablet o la cocina |
+| `{ ok: false, codigo: 'RATE_LIMIT' }` | Otra solicitud del mismo socket hace menos de 2 s; no se calcula nada. Basta con usar la respuesta anterior |
+| `{ ok: false, codigo: 'ERROR_INTERNO' }` | Redis no responde. La conexión sigue y el panel puede reintentar más tarde |
+
+**Recomendado en el panel:** pedirla en cada `connect` (al abrir, al recargar y al
+reconectar), **después** de registrar los listeners. Por ejemplo, en `TablesContext.jsx`,
+debajo de los `useSocketListener`:
+
+```jsx
+useEffect(() => {
+  const pedir = () => socket.emit('mesa:presencia:solicitar', {}, (r) => {
+    if (!r?.ok) return // RATE_LIMIT o ERROR_INTERNO: queda el envío automático de respaldo
+    setPresenciaPorMesa(Object.fromEntries(r.mesas.map((p) => [Number(p.id_mesa), p])))
+  })
+  if (socket.connected) pedir()
+  socket.on('connect', pedir)
+  return () => socket.off('connect', pedir)
+}, [socket])
+```
+
+Como la lista es completa, **reemplaza** `presenciaPorMesa` en lugar de mezclarla. Sin este
+cambio el panel funciona igual, con el envío automático de 500 ms como respaldo (§5.2).
+
 ## 5. Eventos servidor → cliente
 
 | Evento | Destino | Payload |
@@ -612,24 +649,36 @@ recibe) cada vez que:
 Máximo **un aviso por mesa cada 500 ms**: el primero sale al instante y, si hubo más cambios
 dentro de esa ventana, se envía uno más al cerrarla (el último estado siempre llega).
 
-**Al conectar el panel.** Cuando un socket de personal (`admin`, `mesero`, `cajero`) se
-conecta y entra a `room:admin`, también al recargar la página, recibe **solo él** un
-`mesa:presencia` por cada mesa que tenga algo: comensales conectados, personas sin celular o
-pagos anotados en la sesión. Así no tiene que esperar al siguiente cambio. Es el mismo evento
-con el mismo payload, así que **el panel no necesita cambios**: basta con guardar el último
-por `id_mesa`.
+**Al conectar el panel.** El panel tiene dos formas de saber, al conectar o al recargar la
+página, quién está en cada mesa, sin esperar al siguiente cambio:
 
-- No se envía a nadie más: ni a los otros paneles, ni a las mesas, ni a la cocina, ni a las
+1. **Recomendada: [`mesa:presencia:solicitar`](#mesapresenciasolicitar)** en cada `connect`,
+   después de registrar los listeners. La lista llega **en el ack**, así que no depende de
+   que haya listeners.
+2. **Respaldo automático, sin cambios en el panel:** **500 ms** después de que un socket de
+   personal (`admin`, `mesero`, `cajero`) se conecta, el servidor le envía **solo a él** un
+   `mesa:presencia` por cada mesa con algo, con el mismo evento y el mismo payload. Basta con
+   guardar el último por `id_mesa`, como ya hace el panel. Si el socket se desconecta antes,
+   no se calcula ni se envía nada.
+
+¿Por qué el retraso? El panel crea el socket al renderizar y registra los listeners después,
+en un `useEffect`. Si la presencia sale justo al conectar y el handshake gana, Socket.io la
+descarta en el cliente porque nadie la escucha todavía. Pasó en una prueba local: conectó a
+los 13 ms y el listener se registró a los 16 ms. Los 500 ms dan margen de sobra, pero no
+garantizan nada si el primer render tarda más. Por eso se recomienda la opción 1.
+
+En los dos casos:
+
+- No llega a nadie más: ni a los otros paneles, ni a las mesas, ni a la cocina, ni a las
   tablets.
-- Las mesas sin nada (una tablet sola en su sala, o una mesa cerrada) no se envían. Para el
-  panel, que no llegue evento de una mesa equivale a 0 comensales.
-- Incluye las mesas **sin ningún socket**, por ejemplo un grupo de personas sin celular con la
-  tablet apagada. Para eso el servidor lleva el índice `sd:mesas:con-estado` (en memoria si no
-  hay Redis), que vence a las 24 h de la última anotación y se borra al liberar la mesa.
-- Registra el listener de `mesa:presencia` **antes** de conectar: el servidor lo envía justo
-  después del `connect`.
-- **Limitación conocida:** si una mesa cambia justo mientras se arma este envío, el panel
-  puede recibir primero el estado nuevo (el aviso normal) y después el inicial, un poco más
+- Las mesas sin nada (una tablet sola en su sala, o una mesa cerrada) no se incluyen. Para el
+  panel, que no llegue una mesa equivale a 0 comensales.
+- Se incluyen las mesas **sin ningún socket**, por ejemplo un grupo de personas sin celular
+  con la tablet apagada. Para eso el servidor lleva el índice `sd:mesas:con-estado` (en
+  memoria si no hay Redis), que vence a las 24 h de la última anotación y se borra al liberar
+  la mesa.
+- **Limitación conocida:** si una mesa cambia justo mientras se arma la lista, el panel puede
+  recibir primero el estado nuevo (el aviso normal) y después el de la lista, un poco más
   viejo. El evento no lleva versión y la ventana dura milisegundos. Queda corregido en el
   siguiente cambio de esa mesa.
 
@@ -1460,4 +1509,5 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Estable (R-19.2) · `POST /internal/mesa-comensal` · `mesa:presencia.sin_celular` | Propuesta (v1.1): sin implementar; el backend (D-18) ya la llamaba y recibía `404`, y la persona sin celular no contaba en «igual» | Implementada según §6.4 y §5.2: `sin_celular` siempre presente; `comensales` y `total` lo incluyen; misma regla de alias que el backend, con paridad probada; además rechaza la clave reservada `general` (D-18c) con `400` | Nadie: backend (D-18) y PWA ya usan este contrato |
 | `POST /internal/payment-confirmed` · `comensal` en `pagaron` (R-19.2) | Se anotaba en `pagaron` el texto tal cual («Abuela » no coincidía con «Abuela») | Se anota normalizado con la regla del alias; si no es válido, tal cual (§8.6). `payment:confirmed` no cambia | Nadie: compatible hacia atrás |
 | `pago:alerta` · cuánto y quién (pedido del panel) | Solo `eventId`, `id_mesa`, referencias, `motivo` y `emitidoEn`: el panel no podía mostrar cuánto ni quién | Agrega `comensal` (alias de la intención o `null`), `monto_centavos` (lo cobrado, según la API o el evento) y `monto_esperado_centavos` (de la intención o `null`). Sin datos de tarjeta ni del pagador; sigue yendo solo a `room:admin` (§8.5) | Panel: mostrarlos si quiere; los campos nuevos no rompen nada |
-| `mesa:presencia` · al conectar el panel | El panel recibía la presencia solo cuando cambiaba algo: al conectar o recargar no sabía quién estaba sentado | El socket de personal que entra a `room:admin` recibe, solo él, un `mesa:presencia` por cada mesa con algo, incluidas las mesas sin ningún socket (índice `sd:mesas:con-estado`, 24 h). Mismo evento y payload (§5.2) | Nadie: el panel ya lo guarda por `id_mesa`. Registrar el listener antes de conectar |
+| `mesa:presencia` · al conectar el panel | El panel recibía la presencia solo cuando cambiaba algo: al conectar o recargar no sabía quién estaba sentado | **500 ms** después de que un socket de personal entra a `room:admin`, recibe solo él un `mesa:presencia` por cada mesa con algo, incluidas las mesas sin ningún socket (índice `sd:mesas:con-estado`, 24 h). Si se desconecta antes, no se envía. Mismo evento y payload (§5.2) | Nadie: el panel ya lo guarda por `id_mesa`. Es el respaldo de `mesa:presencia:solicitar` |
+| `mesa:presencia:solicitar` (nuevo) | — | El personal pide la presencia de todas las mesas con algo y la recibe en el ack `{ ok, mesas }`, sin depender de listeners. Comensal, tablet y cocina → `NO_AUTORIZADO`; 1 por socket cada 2 s (`RATE_LIMIT`) (§4) | Panel (recomendado): pedirla en cada `connect`, después de registrar los listeners (ejemplo en §4) |
