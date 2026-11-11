@@ -151,7 +151,8 @@ Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "123456", "
 
 `rol` es obligatorio y solo acepta `admin`, `mesero`, `cajero`, `cocina`.
 
-`password`: mínimo **6 caracteres** y como mucho **72 bytes** en UTF-8 (ver
+`password`: mínimo **8 caracteres** (antes 6; el mismo que el cambio de clave y el que exige el
+panel) y como mucho **72 bytes** en UTF-8 (ver
 [La clave máxima: 72 bytes](#la-clave-máxima-72-bytes)).
 
 201: `{ "usuario": { "id_usuario": 1, "nombre": "Ana Ríos", "email": "ana@mail.com", "rol": "mesero", "activo": true } }`
@@ -177,7 +178,11 @@ dos únicos sitios que llaman a `bcrypt.hash`) se rechaza si pasa de 72 bytes en
   textos.
 - **El login no lleva tope**, a propósito: quien creó una clave más larga antes de esta regla
   sigue entrando con ella (bcrypt la compara truncada, igual que la guardó).
-- Los mínimos **no** son iguales: 6 caracteres al registrar y 8 al cambiar la clave.
+- **El mínimo es el mismo en las dos rutas: 8 caracteres** (`CARACTERES_MINIMOS_CLAVE`, en el
+  mismo módulo), con 400 `{ "error": "La contraseña debe tener al menos 8 caracteres" }`. Se
+  mide en **caracteres**, que es lo que la persona escribe y cuenta. Antes el registro pedía 6.
+- **El login tampoco aplica el mínimo**: una clave de 6 o 7 caracteres creada antes sigue
+  entrando.
 - La regla vive en un solo sitio: `src/utils/clave-bcrypt.js`.
 
 ### POST /auth/login
@@ -299,8 +304,7 @@ Body, **todos los campos opcionales** pero al menos uno:
 
 Body: `{ "password": "clave-nueva-larga" }`, `.strict()`.
 
-- **Mínimo 8 caracteres** (400 si no). Más que los 6 de `/auth/register`, cuyo mínimo ya
-  está publicado en este contrato: bajarlo aquí para igualarlo sería empeorar a propósito.
+- **Mínimo 8 caracteres** (400 si no), el mismo que `/auth/register` desde que se igualaron.
   El mínimo se mide en **caracteres**, que es lo que la persona escribe y cuenta.
 - **Máximo 72 BYTES** (no 72 caracteres), medidos con `Buffer.byteLength(clave, 'utf8')`.
   Es por bytes como trunca bcrypt: a partir del byte 72 ignora el resto **en silencio**. Y

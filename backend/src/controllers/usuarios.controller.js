@@ -3,7 +3,7 @@ const { z } = require('zod');
 const usuariosService = require('../services/usuarios.service');
 const usuarioActivo = require('../services/usuario-activo');
 const { ROLES_STAFF } = require('../middleware/auth.middleware');
-const { conTopeDeBcrypt, cuerpoDel400 } = require('../utils/clave-bcrypt');
+const { esquemaClaveNueva, cuerpoDel400 } = require('../utils/clave-bcrypt');
 // El MISMO costo con el que hashea el registro. Importado y no copiado: dos
 // costos distintos en el proyecto producen hashes que el login sí reconoce pero
 // que cuestan tiempos distintos, y eso es justo lo que H-12 quiere evitar.
@@ -47,9 +47,8 @@ const actualizarSchema = z
 /**
  * Cuerpo de POST /usuarios/:id/clave.
  *
- * Mínimo 8 CARACTERES, más que los 6 del registro: en el registro el mínimo lo
- * fija un contrato que ya está publicado, y bajarlo aquí para igualarlo sería
- * empeorar a propósito.
+ * Mínimo 8 CARACTERES, el mismo que el registro desde que se igualaron
+ * (CARACTERES_MINIMOS_CLAVE en utils/clave-bcrypt.js).
  *
  * Máximo 72 BYTES, no 72 caracteres, porque es por bytes como trunca bcrypt: a
  * partir del byte 72 ignora el resto en silencio. Y la diferencia no es teórica
@@ -61,9 +60,9 @@ const actualizarSchema = z
  */
 const claveSchema = z
   .object({
-    // El tope de 72 bytes es la regla común de utils/clave-bcrypt.js, la misma
-    // que usa el registro.
-    password: conTopeDeBcrypt(z.string().min(8, 'La clave debe tener al menos 8 caracteres')),
+    // Mínimo 8 caracteres y tope de 72 bytes: la regla común de
+    // utils/clave-bcrypt.js, la misma que usa el registro.
+    password: esquemaClaveNueva(),
   })
   .strict();
 
