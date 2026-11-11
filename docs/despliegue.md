@@ -318,28 +318,117 @@ alias dc='docker compose -f docker-compose.prod.yml --env-file infra/.env'
 
 Los logs de cada contenedor rotan solos (5 archivos de 10 MB).
 
-### Respaldo de la base
+### Respaldos de la base (R-18)
+
+> El repositorio es **público**: los respaldos **jamás** van a GitHub. Viven
+> fuera de los clones (`/srv/respaldos`) y `.gitignore` ignora `*.dump`.
+
+[`infra/scripts/respaldo.sh`](../infra/scripts/respaldo.sh) hace un
+`pg_dump -Fc` (ya comprimido) del postgres que esté corriendo: `smartdining` o
+`smartdining-staging`. Si están los dos o ninguno, falla. Solo guarda el
+archivo si `pg_dump` terminó bien, no está vacío y `pg_restore --list` lo lee
+con `schema_migraciones`.
+
+| Tipo | Cuándo | Dónde | Se conservan |
+| :--- | :--- | :--- | :--- |
+| `predeploy` | En cada despliegue (Deploy y Deploy staging), **antes** de `migrar.sh`. Si falla, el despliegue se aborta sin levantar el backend nuevo. | `/srv/respaldos/<proyecto>/predeploy/predeploy-AAAAMMDD-HHMMSS-<sha7>.dump` | 5 |
+| `diario` | Timer `smartdining-respaldo`, 03:30 de Bogotá. Si el VPS estaba apagado, corre al arrancar. | `/srv/respaldos/<proyecto>/diario/diario-AAAAMMDD-HHMMSS.dump` | 7 |
+
+Permisos: archivos 640 y carpetas 750, de `deploy` con el grupo `sd-respaldos`.
+En ese grupo solo está el usuario `respaldos`, que los lee por SFTP. Nadie más.
+
+#### Instalación (una vez por VPS, y otra vez si cambia `respaldo.sh` o `infra/systemd/`)
+
+Desde la raíz de cualquier clon, con un usuario con sudo:
 
 ```bash
-mkdir -p ~/respaldos
-dc exec -T postgres pg_dump -U smartdining -d smartdining -Fc > ~/respaldos/smartdining-$(date +%F).dump
+sudo sh infra/scripts/instalar-respaldos.sh --llave-lectura 'ssh-ed25519 AAAA... sd-respaldos-pc'
 ```
 
-Para hacerlo a diario, en `crontab -e` del usuario `deploy` (en cron hay que
-escapar los `%`):
+Crea el grupo y el usuario `respaldos` y las carpetas. Configura el SFTP de
+solo lectura (`sshd_config.d/10-respaldos.conf`, con chroot en `/srv/respaldos`,
+`internal-sftp -R` y la llave con `restrict`; antes de recargar comprueba que
+`roberto` y `deploy` siguen entrando). Instala el timer. Sin `--llave-lectura`
+hace todo menos la llave.
 
-```
-0 4 * * * cd ~/smartdining && docker compose -f docker-compose.prod.yml --env-file infra/.env exec -T postgres pg_dump -U smartdining -d smartdining -Fc > ~/respaldos/smartdining-$(date +\%F).dump && find ~/respaldos -name '*.dump' -mtime +14 -delete
-```
+Mientras no esté instalado, **cada despliegue falla** en el respaldo previo con
+un mensaje que remite aquí.
 
-Copia los respaldos fuera del VPS con cierta frecuencia: si el VPS se pierde,
-los respaldos que estaban en él se pierden con él.
-
-Restaurar (sobrescribe los datos actuales):
+#### Respaldo a mano y registro
 
 ```bash
-dc exec -T postgres pg_restore -U smartdining -d smartdining --clean --if-exists < ~/respaldos/ARCHIVO.dump
+sudo systemctl start smartdining-respaldo.service     # el diario, ahora
+journalctl -u smartdining-respaldo -n 20 --no-pager    # qué pasó
+systemctl list-timers smartdining-respaldo.timer       # próxima corrida
+sudo ls -l /srv/respaldos/*/*/
 ```
+
+#### Aviso si el respaldo diario no llega (healthchecks.io)
+
+1. En healthchecks.io crea un check con *Schedule* `Cron`, expresión
+   `30 3 * * *`, zona `America/Bogota` y *Grace time* de 1 hora. Agrega los
+   correos del equipo en *Integrations*.
+2. Copia su *Ping URL* y guárdala en el VPS (se pega por la entrada estándar,
+   así no queda en el historial):
+
+   ```bash
+   sudo sh -c 'umask 077; read -r url; printf "HEALTHCHECKS_URL=%s\n" "$url" > /etc/smartdining/respaldo.env'
+   ```
+
+`/etc/smartdining/respaldo.env` es 600 de root y **nunca** va en el repo. El
+timer avisa a la URL al terminar bien y a `<URL>/fail` si falla. Si no se
+avisa nada a tiempo, healthchecks.io manda el correo.
+
+#### Copia fuera del VPS
+
+Si el VPS se pierde, los respaldos que estaban en él se pierden con él. Una
+tarea programada en el PC del responsable baja los diarios nuevos por SFTP con
+el usuario `respaldos`, que solo puede leer `/srv/respaldos`: no tiene
+terminal, no puede escribir y no ve nada más del servidor. La llave privada de
+ese usuario solo existe en ese PC.
+
+#### Simulacro de restauración (antes de cada release y una vez al mes)
+
+```bash
+sudo -iu deploy
+cd /srv/smartdining-staging        # o ~/smartdining en producción
+sh infra/scripts/simulacro-restauracion.sh                 # el diario más reciente
+sh infra/scripts/simulacro-restauracion.sh /srv/respaldos/smartdining/predeploy/ARCHIVO.dump
+```
+
+[`simulacro-restauracion.sh`](../infra/scripts/simulacro-restauracion.sh)
+levanta un postgres **temporal** sin red ni volumen con nombre, con la misma
+imagen que el de producción. Restaura ahí el respaldo (`pg_restore
+--exit-on-error`) y compara con la base en vivo la cantidad de tablas en
+`public` y la cantidad y última fila de `schema_migraciones`, que deben ser
+iguales. `usuarios` y `pedidos` se muestran como referencia. Al final borra
+el contenedor, también si algo falla. No toca la base real.
+
+#### Restaurar de verdad (sobrescribe los datos actuales)
+
+1. Haz antes un respaldo del estado actual: `sudo systemctl start smartdining-respaldo.service`.
+2. Pasa el simulacro con el archivo que vas a restaurar.
+3. Detén lo que escribe en la base, restaura y vuelve a levantar:
+
+```bash
+dc stop backend socket-server
+dc exec -T postgres pg_restore -U smartdining -d smartdining --clean --if-exists < /srv/respaldos/smartdining/diario/ARCHIVO.dump
+dc up -d --wait
+```
+
+### Monitoreo externo (UptimeRobot)
+
+Tres monitores HTTP(s) cada 5 minutos, con aviso por correo al equipo:
+
+| Monitor | URL | Debe responder |
+| :--- | :--- | :--- |
+| API | `https://api.<DOMINIO>/api/health` | 2xx |
+| Tiempo real | `https://rt.<DOMINIO>/health` | 2xx |
+| App del comensal | `https://app.<DOMINIO>/` | 2xx |
+
+Con `DOMINIO=staging.smartdining.com.co` hasta el cambio a producción. Ese
+día se cambian las tres URL al `DOMINIO` de producción (§6.5). Mide desde fuera de
+GitHub y del VPS. Además, cada despliegue comprueba lo mismo al terminar.
 
 ### Cambios de esquema
 
@@ -348,7 +437,8 @@ carga la línea base (`00_ejecutar_todo.sql`) y los scripts 26 en adelante. En
 una base que ya tiene datos, **cada despliegue** (Deploy, Deploy staging y
 `primer-certificado.sh`) corre `migrar.sh` antes de levantar el backend: aplica
 solo los scripts de `database/scripts/` que falten en `schema_migraciones`, cada
-uno en su propia transacción. Haz un respaldo antes de fusionar un script nuevo.
+uno en su propia transacción. Justo antes, el despliegue hace un respaldo
+`predeploy`, y si ese respaldo falla no migra.
 
 A mano (no publica puertos: corre dentro del contenedor de Postgres):
 
