@@ -1503,10 +1503,11 @@ comensal conectado.
 
 #### El aviso interno `POST /internal/mesa-comensal`
 
-> **Depende de R-19 y del PR #99, que todavía es una PROPUESTA.** El contrato está en
-> `socket-server/EVENTS.md` §6.4 de la rama `docs/socket-contratos-v11`, **sin fusionar**, y
-> la ruta puede **no existir aún** en el socket-server. Nada de la API REST depende de que
-> funcione.
+> **El contrato es `socket-server/EVENTS.md` §6.4, Estable desde R-19.2** (ruta implementada
+> en `socket-server/src/mesa-comensal.js`). Aun así, nada de la API REST depende de que
+> funcione: si el socket-server responde 404 o no hay nadie escuchando, el aviso falla y la
+> respuesta HTTP del mesero sigue siendo correcta, porque la reserva del alias ya está hecha
+> en el backend, que es la fuente de verdad.
 
 Tras reservar o soltar el alias, el backend manda:
 
@@ -3559,7 +3560,7 @@ El backend los escucha en `src/services/inventario-avisos.js` y los reenvía al 
 |---|---|---|
 | `disponibilidad` de un plato | `POST /internal/plato-disponibilidad` | lo que viaja es el **efectivo** (`disponible AND stock_suficiente`) |
 | `disponibilidad` de una opción | `POST /internal/ingrediente-disponibilidad` | igual |
-| `stock_bajo` | `POST /internal/inventario-alerta` | contrato de EVENTS.md §5.5 (propuesta v1.1) |
+| `stock_bajo` | `POST /internal/inventario-alerta` | contrato de EVENTS.md §5.5 (Estable, R-20.2) |
 
 - **Conexión dedicada, no una del pool.** `LISTEN` vive en la conexión: una del pool se
   devuelve en cuanto acaba la consulta y la siguiente petición la usaría —con su `LISTEN`

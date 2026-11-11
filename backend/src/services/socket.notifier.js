@@ -501,8 +501,8 @@ async function notificarPlatoDisponibilidad(id_plato, disponible, { conReintento
 }
 
 /**
- * POST /internal/inventario-alerta (D-17 · EVENTS.md §5.5, propuesta v1.1 de
- * Roberto) — un insumo cruzó su stock mínimo hacia abajo.
+ * POST /internal/inventario-alerta (D-17 · EVENTS.md §5.5, ESTABLE desde
+ * R-20.2) — un insumo cruzó su stock mínimo hacia abajo.
  *
  * El socket-server lo emite como `inventario:alerta` SOLO a `room:admin` (admin,
  * cajero y mesero: el mesero necesita saber qué se está agotando); nunca a las
@@ -697,11 +697,12 @@ function encolarPorMesa(idMesa, aviso) {
  * `mesa:presencia` (EVENTS.md §6.4 y §5.2), así cuenta como persona para "igual"
  * y puede pagar en caja con su alias.
  *
- * PROPUESTA, NO ESTABLE: §6.4 llega con el PR #99 de Roberto, que todavía no
- * está fusionado, y la ruta es R-19, que puede no existir aún en el
- * socket-server. Si responde 404 o no hay nadie escuchando, el aviso falla y no
- * pasa nada más: la reserva del alias ya está hecha en el backend, que es la
- * fuente de verdad, y la respuesta HTTP del mesero sigue siendo correcta.
+ * El contrato es §6.4 de socket-server/EVENTS.md, ESTABLE desde R-19.2 (ruta
+ * implementada en socket-server/src/mesa-comensal.js). Aun así el aviso no
+ * manda sobre la respuesta: si el socket-server responde 404 o no hay nadie
+ * escuchando, el aviso falla y no pasa nada más, porque la reserva del alias ya
+ * está hecha en el backend, que es la fuente de verdad, y la respuesta HTTP del
+ * mesero sigue siendo correcta.
  *
  * El `alias` que viaja es SIEMPRE el normalizado que se reservó, tanto al
  * agregar como al quitar. El socket-server compara `quitar` por CLAVE (§6.4,
