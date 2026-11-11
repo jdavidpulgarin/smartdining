@@ -19,6 +19,7 @@ import {
   accionErrorEnvio,
   itemTieneFaltante,
   reemplazarAlias,
+  totalesPorComensal,
 } from '../../utils/tomarPedido'
 
 export function ResumenPedido({
@@ -38,34 +39,10 @@ export function ResumenPedido({
   const [reintentandoComensal, setReintentandoComensal] = useState(false)
   const [reintentoHecho, setReintentoHecho] = useState(false)
 
-  // Agrupar ítems por comensal
-  const agrupadoPorComensal = useMemo(() => {
-    const grupos = new Map()
-
-    carrito.forEach((item, index) => {
-      const alias = item.comensal || 'Sin comensal'
-      if (!grupos.has(alias)) {
-        grupos.set(alias, [])
-      }
-      grupos.get(alias).push({ ...item, indiceOriginal: index })
-    })
-
-    return Array.from(grupos.entries()).map(([comensal, items]) => {
-      const subtotalComensal = items.reduce(
-        (acc, it) => acc + (Number(it.precio) || 0) * (it.cantidad || 1),
-        0
-      )
-      return { comensal, items, subtotalComensal }
-    })
-  }, [carrito])
-
-  // Total acumulado
-  const totalPedido = useMemo(() => {
-    return carrito.reduce(
-      (acc, it) => acc + (Number(it.precio) || 0) * (it.cantidad || 1),
-      0
-    )
-  }, [carrito])
+  const { grupos: agrupadoPorComensal, total: totalPedido } = useMemo(
+    () => totalesPorComensal(carrito),
+    [carrito]
+  )
 
   // Enviar el pedido a la API
   const handleEnviarPedido = async (itemsParaEnviar = carrito) => {

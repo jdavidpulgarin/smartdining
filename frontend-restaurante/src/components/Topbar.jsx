@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Bell, LogOut } from 'lucide-react'
 import { useAuth, useTables } from '../hooks'
+import { ROLES_CAJA } from '../utils/caja'
 
 const navLinks = [
   { label: 'MESAS', path: '/mesas' },
   { label: 'PEDIDOS', path: '/pedidos' },
-  { label: 'CAJA', path: '/caja' },
+  // Solo admin y cajero (el backend da 403 al mesero y a cocina).
+  { label: 'CAJA', path: '/caja', roles: ROLES_CAJA },
   { label: 'MENÚ', path: '/menu' },
   { label: 'REPORTES', path: '/reportes' },
   // P-21: solo para admin (el backend también lo exige).
@@ -49,7 +51,7 @@ export function Topbar() {
 
       {/* 2. Menú de navegación principal en el centro */}
       <nav className="sd-topbar-nav" aria-label="Navegación principal del restaurante">
-        {navLinks.filter((item) => !item.soloAdmin || user?.rol === 'admin').map((item) => {
+        {navLinks.filter((item) => (item.roles ? item.roles.includes(user?.rol) : !item.soloAdmin || user?.rol === 'admin')).map((item) => {
           const isActive =
             location.pathname === item.path ||
             (item.path === '/mesas' && location.pathname === '/')
