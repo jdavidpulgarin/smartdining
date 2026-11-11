@@ -170,6 +170,7 @@ export function CarritoProvider({ children }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!mesa) return undefined;
     let activo = true;
     obtenerMenuRaw()
       .then((menu) => {
@@ -181,7 +182,7 @@ export function CarritoProvider({ children }) {
     return () => {
       activo = false;
     };
-  }, []);
+  }, [mesa]);
 
   // Escuchar ingrediente:disponibilidad y plato:disponibilidad en tiempo real para actualizar el menú en memoria
   const socketOn = mesaSocket?.on;

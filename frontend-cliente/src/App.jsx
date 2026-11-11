@@ -1,10 +1,11 @@
-import { Suspense, lazy } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { Suspense, lazy, useEffect } from 'react'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { SesionProvider } from './context/SesionContext'
 import { MesaSocketProvider } from './context/MesaSocketContext'
 import { CarritoProvider } from './context/CarritoContext'
 import Layout from './components/layout/Layout'
 import Inicio from './pages/Inicio'
+import { obtenerMetadatosRuta } from './utils/metadatosRuta'
 import './styles/seguimiento.css'
 import './styles/cuenta.css'
 
@@ -30,9 +31,28 @@ function CargandoRuta() {
   )
 }
 
+function MetadatosRuta() {
+  const { pathname } = useLocation()
+
+  useEffect(() => {
+    const { titulo, robots } = obtenerMetadatosRuta(pathname)
+    document.title = titulo
+    let metaRobots = document.querySelector('meta[name="robots"]')
+    if (!metaRobots) {
+      metaRobots = document.createElement('meta')
+      metaRobots.setAttribute('name', 'robots')
+      document.head.appendChild(metaRobots)
+    }
+    metaRobots.setAttribute('content', robots)
+  }, [pathname])
+
+  return null
+}
+
 function App() {
   return (
     <BrowserRouter>
+      <MetadatosRuta />
       <SesionProvider>
         <MesaSocketProvider>
           <CarritoProvider>

@@ -9,8 +9,10 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'icons/pwa-192x192.png', 'icons/pwa-512x512.png', 'icons/pwa-maskable-512x512.png'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'robots.txt', 'icons/pwa-192x192.png', 'icons/pwa-512x512.png', 'icons/pwa-maskable-512x512.png'],
       manifest: {
+        id: '/',
+        lang: 'es',
         name: 'SmartDining',
         short_name: 'SmartDining',
         description: 'Aplicación cliente para comensales SmartDining - Menú digital, pedidos y pago.',
@@ -18,6 +20,7 @@ export default defineConfig({
         background_color: '#0B0B0B',
         display: 'standalone',
         orientation: 'portrait',
+        categories: ['food', 'restaurant'],
         scope: '/',
         start_url: '/',
         icons: [
