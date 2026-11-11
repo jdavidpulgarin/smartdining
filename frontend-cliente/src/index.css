@@ -10,8 +10,8 @@
   --color-primario-hover: #C81E24;
   --color-primario-texto: #FF5A5F;
   --color-texto: #FFFFFF;
-  --color-texto-suave: #A3A3A3;
-  --color-texto-tenue: #6B6B6B;
+  --color-texto-suave: #B5B5B5;
+  --color-texto-tenue: #969696;
   --color-acento: #F2B705;
   --color-exito: #2FA35A;
 
@@ -46,5 +46,16 @@
   :focus-visible {
     outline: 2px solid #FF5A5F;
     outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

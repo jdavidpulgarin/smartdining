@@ -98,6 +98,12 @@ function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-fondo text-texto flex flex-col relative">
+      <a
+        href="#contenido-principal"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:px-4 focus:py-2 focus:rounded-xl focus:bg-primario focus:text-white focus:font-etiqueta focus:font-bold focus:text-sm"
+      >
+        Saltar al contenido
+      </a>
       <Header
         numeroMesa={mesa}
         comensal={comensal}
@@ -130,7 +136,7 @@ function Layout({ children }) {
           <button
             type="button"
             onClick={() => setToastPedido(null)}
-            className="text-texto-suave hover:text-texto p-1 -mr-1 rounded-lg cursor-pointer"
+            className="min-w-11 min-h-11 inline-flex items-center justify-center text-texto-suave hover:text-texto p-2 -mr-2 rounded-lg cursor-pointer"
             aria-label="Cerrar notificación"
           >
             ✕
@@ -138,7 +144,7 @@ function Layout({ children }) {
         </div>
       )}
 
-      <main className="flex-1 w-full max-w-md mx-auto px-4 pb-8">{children}</main>
+      <main id="contenido-principal" tabIndex={-1} className="flex-1 w-full max-w-md mx-auto px-4 pb-8 focus:outline-none">{children}</main>
     </div>
   );
 }

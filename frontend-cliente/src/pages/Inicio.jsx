@@ -122,8 +122,9 @@ function Inicio() {
           </div>
         </header>
 
-        {/* Centro de la pantalla: ESTÁS EN LA / MESA N o ¡BIENVENIDO! */}
-        <div className="my-auto py-8 text-center select-none">
+        <main id="contenido-principal" className="flex-1 flex flex-col justify-between">
+          {/* Centro de la pantalla: ESTÁS EN LA / MESA N o ¡BIENVENIDO! */}
+          <div className="my-auto py-8 text-center select-none">
           {numeroMesaQr !== null ? (
             <div className="space-y-1">
               <p className="font-etiqueta uppercase text-sm sm:text-base font-bold text-white tracking-widest">
@@ -272,7 +273,7 @@ function Inicio() {
                       variante="secundario"
                       disabled={!validacion.valido || enviando}
                       onClick={manejarReintentar}
-                      className="w-full min-h-10 text-xs"
+                      className="w-full min-h-11 text-xs"
                     >
                       REINTENTAR
                     </Button>
@@ -364,6 +365,7 @@ function Inicio() {
             )}
           </Card>
         </div>
+        </main>
       </div>
     </div>
   );

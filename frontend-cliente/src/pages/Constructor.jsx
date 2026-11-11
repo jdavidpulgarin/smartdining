@@ -174,9 +174,12 @@ function Constructor() {
 
   if (error) {
     return (
-      <div className="text-center py-12 px-4 space-y-4">
+      <div role="alert" className="text-center py-12 px-4 space-y-4">
+        <h1 className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto">
+          No pudimos cargar el plato
+        </h1>
         <p className="text-primario-texto font-medium">
-          {error.mensaje || error.message || 'No pudimos cargar el plato'}
+          {error.mensaje || error.message || 'Ocurrió un problema inesperado.'}
         </p>
         <Button variante="secundario" onClick={manejarReintentar}>
           Reintentar
@@ -188,9 +191,9 @@ function Constructor() {
   if (!plato || plato.disponible === false) {
     return (
       <Card className="text-center space-y-4 py-8">
-        <p className="text-texto font-semibold text-base">
+        <h1 className="text-texto font-semibold text-base">
           Este plato ya no está disponible
-        </p>
+        </h1>
         <Button variante="secundario" onClick={() => navigate('/menu')}>
           Volver al menú
         </Button>
@@ -263,7 +266,7 @@ function Constructor() {
           <button
             type="button"
             onClick={() => navigate('/menu')}
-            className="text-xs font-semibold text-primario-texto hover:underline inline-flex items-center gap-1 mb-1.5 cursor-pointer"
+            className="min-h-11 text-xs font-semibold text-primario-texto hover:underline inline-flex items-center gap-1 mb-1 cursor-pointer"
           >
             ← Volver al menú
           </button>

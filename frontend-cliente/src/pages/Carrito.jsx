@@ -129,9 +129,9 @@ function Carrito() {
         >
           🛒
         </div>
-        <h2 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
+        <h1 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
           Tu carrito está vacío
-        </h2>
+        </h1>
         <p className="text-sm text-texto-suave max-w-xs mb-6">
           Aún no has agregado ningún plato a tu pedido. Revisa nuestro menú para
           elegir tus favoritos.
@@ -280,7 +280,7 @@ function Carrito() {
             </p>
             <Link
               to="/menu"
-              className="inline-block text-xs font-bold text-primario-texto hover:underline"
+              className="min-h-11 inline-flex items-center justify-center px-3 text-xs font-bold text-primario-texto hover:underline"
             >
               + Agregar platos desde el menú
             </Link>

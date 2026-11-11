@@ -77,10 +77,10 @@ function Header({ numeroMesa, comensal, cantidadCarrito = 0 }) {
         <div className="flex items-center gap-2.5 min-w-0">
           <Link
             to="/menu"
-            className="w-9 h-9 shrink-0 rounded-lg bg-primario flex items-center justify-center text-white font-etiqueta font-bold text-lg tracking-wider focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+            className="min-w-11 min-h-11 shrink-0 rounded-lg bg-primario flex items-center justify-center text-white font-etiqueta font-bold text-lg tracking-wider focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
             aria-label="Inicio SmartDining"
           >
-            SD
+            <span aria-hidden="true">SD</span>
           </Link>
           <div className="min-w-0">
             <p className="font-etiqueta font-bold text-base text-texto uppercase tracking-wide truncate leading-tight">
@@ -99,7 +99,11 @@ function Header({ numeroMesa, comensal, cantidadCarrito = 0 }) {
           {mostrarBotonSeguimiento && (
             <Link
               to="/seguimiento"
-              aria-label="Mis pedidos"
+              aria-label={
+                resumen.cantidad > 0
+                  ? `Mis pedidos (${resumen.cantidad} ${pluralizar(resumen.cantidad, 'activo', 'activos')})`
+                  : 'Mis pedidos'
+              }
               className="relative min-w-11 min-h-11 p-2.5 rounded-full border border-borde bg-superficie-2 hover:bg-superficie text-texto transition-colors inline-flex items-center justify-center cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
             >
               {/* Ícono de línea tipo comanda / recibo */}
