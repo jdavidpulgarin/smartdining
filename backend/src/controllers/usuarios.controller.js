@@ -3,6 +3,7 @@ const { z } = require('zod');
 const usuariosService = require('../services/usuarios.service');
 const usuarioActivo = require('../services/usuario-activo');
 const { ROLES_STAFF } = require('../middleware/auth.middleware');
+const { conTopeDeBcrypt, cuerpoDel400 } = require('../utils/clave-bcrypt');
 // El MISMO costo con el que hashea el registro. Importado y no copiado: dos
 // costos distintos en el proyecto producen hashes que el login sí reconoce pero
 // que cuestan tiempos distintos, y eso es justo lo que H-12 quiere evitar.
@@ -60,12 +61,9 @@ const actualizarSchema = z
  */
 const claveSchema = z
   .object({
-    password: z
-      .string()
-      .min(8, 'La clave debe tener al menos 8 caracteres')
-      .refine((clave) => Buffer.byteLength(clave, 'utf8') <= 72, {
-        message: 'La clave no puede pasar de 72 bytes (una ñ o una tilde cuentan dos)',
-      }),
+    // El tope de 72 bytes es la regla común de utils/clave-bcrypt.js, la misma
+    // que usa el registro.
+    password: conTopeDeBcrypt(z.string().min(8, 'La clave debe tener al menos 8 caracteres')),
   })
   .strict();
 
@@ -139,7 +137,7 @@ async function cambiarClave(req, res, next) {
   if (id === null) return res.status(400).json({ error: 'El id debe ser un entero positivo' });
 
   const parsed = claveSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
+  if (!parsed.success) return res.status(400).json(cuerpoDel400(parsed.error));
 
   try {
     const password_hash = await bcrypt.hash(parsed.data.password, COSTO_BCRYPT);
