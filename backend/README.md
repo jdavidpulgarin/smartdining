@@ -125,7 +125,29 @@ script nuevo— y **no se corren dos migraciones a la vez** sobre la misma base.
 
 Usuarios demo (todos con `Admin123!`): `admin@smartdining.com`,
 `cocina@smartdining.com`, `mesero@smartdining.com`, `caja@smartdining.com`.
-Token QR de la mesa 1 recién sembrada: `qr-token-mesa-01-a1b2c3d4`.
+### Cómo conseguir un QR válido en local
+
+Desde R-13 los QR van **firmados por el socket-server** (`v1.<datos>.<firma>`, con su
+`QR_SECRET`), y el backend los valida con él al abrir la sesión del comensal
+(`POST /api/mesas/qr/:token/sesion`). El valor `token_qr` que trae `database/seed.sql`
+(`qr-token-mesa-…`) es **solo un dato de relleno**: no está firmado, así que con él el cliente
+responde 401 «Token de mesa inválido». Hace falta el socket-server corriendo y uno de estos dos
+caminos:
+
+- **Desde el panel** (`http://localhost:5173`), como mesero o admin: **Mesas** → la mesa →
+  **«Abrir Mesa y Generar QR»** → en el modal del QR, el botón **«Copiar»** (el del enlace,
+  no «Copiar URL Tablet», que es la pantalla de la mesa) y abrir ese enlace en el navegador, o
+  escanear el QR con el celular. El enlace es `http://<host>:5174/?token=…`; si trae la IP de
+  la Wi-Fi y lo abres en el mismo PC, cambia la IP por `localhost` (o elige «Localhost» en
+  «Destino del Escaneo» antes de copiarlo).
+- **Por API**: `POST /api/mesas/:id/abrir` con el JWT de un mesero o admin responde 201 con
+  `token` y `url` (ese `url` es el enlace del comensal). Es la única respuesta que trae el
+  token de la mesa.
+
+**Mientras nadie entre a la mesa, el QR rota cada 3 minutos** (lo rota el socket-server; el
+modal lo actualiza solo): un enlace copiado hace rato deja de valer y el cliente muestra
+«Este QR ya no es válido». Copia o genera uno nuevo. En cuanto entra el primer comensal, el QR
+queda fijo hasta que la mesa se libere.
 
 ## Requisitos previos
 
