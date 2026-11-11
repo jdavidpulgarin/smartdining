@@ -24,6 +24,10 @@ router.post('/:id/rotar-qr', requireAuth, requireRole('mesero', 'admin'), ctrl.r
 // x-internal-key y sin JWT (EVENTS.md §8.2). Va ANTES de GET /:id para que no
 // la capture la ruta pública de la mesa.
 router.get('/:id/cuenta/interno', requireInternalKey, ctrl.cuentaInterna);
+// Rotación AUTOMÁTICA del QR (socket-server/docs/rotacion-qr.md): la pide el
+// socket-server cada 3 minutos con la mesa abierta y vacía. Interna como la de
+// arriba, y también antes de las rutas /:id.
+router.post('/:id/token-qr/interno', requireInternalKey, ctrl.rotarQrInterno);
 
 // D-18: comensales SIN CELULAR de la mesa. Los da de alta el personal de sala,
 // no el comensal: la persona no tiene teléfono con el que escanear el QR. Van

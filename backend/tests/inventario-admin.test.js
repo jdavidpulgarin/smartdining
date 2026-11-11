@@ -181,7 +181,8 @@ test('d-17b: activo y q llegan a la consulta como parametros', async () => {
 
     const consulta = db.buscar('FROM insumos s');
     assert.strictEqual(consulta.params[0], false);
-    assert.strictEqual(consulta.params[1], 'queso');
+    // q viaja como el patron literal (%…%, comodines del usuario escapados).
+    assert.strictEqual(consulta.params[1], '%queso%');
   } finally {
     db.restaurar();
   }

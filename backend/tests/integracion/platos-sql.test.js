@@ -51,11 +51,28 @@ test.before(async () => {
 });
 
 test.after(async () => {
-  if (hayBase && creados.length) {
-    await sonda.query('DELETE FROM platos WHERE id_plato = ANY($1::int[])', [creados]);
+  try {
+    if (hayBase && creados.length) {
+      await sonda.query('DELETE FROM platos WHERE id_plato = ANY($1::int[])', [creados]);
+      // Lo que el DELETE no se lleva (review de #146): historial_precios no
+      // tiene clave ajena hacia platos (es polimorfica: tipo + id_referencia),
+      // asi que los cambios de precio de estas pruebas quedaban huerfanos; y
+      // tr_auditar_platos anota cada INSERT, UPDATE y el propio DELETE en
+      // auditoria_cambios. Se borran DESPUES de los platos, para llevarse
+      // tambien la fila que deja el DELETE.
+      await sonda.query(
+        `DELETE FROM historial_precios WHERE tipo = 'plato' AND id_referencia = ANY($1::int[])`,
+        [creados]
+      );
+      await sonda.query(
+        `DELETE FROM auditoria_cambios WHERE tabla_afectada = 'platos' AND registro_id = ANY($1::int[])`,
+        [creados]
+      );
+    }
+  } finally {
+    if (sonda) await sonda.end();
+    await pool.end();
   }
-  if (sonda) await sonda.end();
-  await pool.end();
 });
 
 test('issue-132: crear un plato SIN tiempo no da 500 y queda con el default de la columna', async (t) => {
