@@ -121,6 +121,28 @@ test('suplantación: un segundo comensal no puede tomar el mismo alias (ni con o
   }
 });
 
+test('#119: el 409 de la sesión por QR NO trae el alias guardado', async () => {
+  // A diferencia del alta del personal (que sí lo trae): quien escanea el QR no
+  // es personal, y devolverle el texto exacto le daría el nombre de otra
+  // persona de la mesa para entrar como ella.
+  const id = mesaNueva();
+  const { token } = construirTokenQr(id);
+  const e = escenario(token, id);
+  try {
+    assert.strictEqual((await e.abrir('Abuela')).status, 201);
+
+    const res = await e.abrir('abuela');
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, 'alias_en_uso');
+    assert.ok(!('alias' in res.body), 'sin el campo alias');
+    assert.ok(!JSON.stringify(res.body).includes('Abuela'), 'el texto guardado no aparece en ningún campo');
+    assert.strictEqual(res.body.token, undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
 test('el mismo alias en OTRA mesa no choca', async () => {
   const a = mesaNueva();
   const b = mesaNueva();

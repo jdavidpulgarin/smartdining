@@ -1402,6 +1402,24 @@ puede no ser el que escribió el mesero.
 { "error": "No se pudo agregar al comensal, intenta de nuevo en unos segundos", "motivo": "alias_no_disponible" }
 ```
 
+**El 409 `alias_en_uso` trae el alias guardado** (revisión del #119), en un campo `alias`
+**opcional**:
+
+```json
+{ "error": "Ese nombre ya lo usa otra persona en la mesa, elige otro", "motivo": "alias_en_uso", "alias": "Abuela" }
+```
+
+- Es el texto **tal como está guardado**, no el que se envió: con «Abuela» ya reservada, un
+  `POST` con `abuela` devuelve `"alias": "Abuela"`. Sirve para que el panel ofrezca pedir
+  para esa persona en vez de inventar otro nombre.
+- **Puede faltar.** Si la reserva no se puede leer (Redis no responde, el valor guardado no
+  tiene texto legible, o la lectura falla), el 409 sale igual que antes, **sin** `alias`. Nunca
+  se convierte en 500 ni en 503 por esto: el cliente tiene que tratar `alias` como opcional.
+- No se registra en el log.
+- **El 409 de la sesión por QR (`POST /mesas/qr/:token/sesion`) NO lo trae**, a propósito:
+  quien escanea el QR no es personal, y devolverle el texto exacto le daría el nombre de otra
+  persona de la mesa para entrar como ella.
+
 El **503 `alias_no_disponible`** es el mismo comportamiento que las sesiones de QR: sin
 Redis no hay unicidad garantizada, y una mesa sin unicidad de alias permite cargarle los
 platos a otra persona, así que **falla cerrada** y no se da de alta a nadie.
@@ -1817,7 +1835,9 @@ comensal de su mesa.
 **400** `{ "error": "...", "campo": "comensal" }` si falta el alias o no cumple las reglas.
 
 **409** `{ "motivo": "alias_en_uso" }` si otro comensal de la sesión ya tiene ese alias:
-la PWA debe pedir otro nombre.
+la PWA debe pedir otro nombre. **Sin campo `alias`**, a diferencia del alta del personal
+(`POST /mesas/:id/comensales`): devolver el texto guardado le daría a quien escanea el nombre
+exacto de otra persona de la mesa para entrar como ella.
 
 **503** si el socket-server no responde (sin validar no se puede dejar entrar a nadie) o,
 con `motivo: "alias_no_disponible"`, si no se pudo reservar el alias.
