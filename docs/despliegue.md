@@ -56,12 +56,24 @@ lleva secretos ni IPs; solo recibe tu llave **pública**.
 Desde tu máquina, con el VPS recién creado y entrando como `root` con tu llave:
 
 ```bash
-ssh root@IP_DEL_VPS 'bash -s -- "$(cat ~/.ssh/id_ed25519.pub)" roberto' \
+ssh root@IP_DEL_VPS "bash -s -- '$(cat ~/.ssh/id_ed25519.pub)' roberto" \
   < infra/scripts/preparar-servidor.sh
 ```
 
-> En Windows usa `C:\Windows\System32\OpenSSH\ssh.exe` (es el que lee el
-> `ssh-agent` de Windows). Si el VPS ya tiene tu usuario, córrelo con `sudo`.
+Las comillas importan: las **dobles por fuera** hacen que `$(cat …)` se expanda
+en **tu** máquina, y las **simples por dentro** protegen la llave (lleva espacios)
+en el VPS. Al revés (simples por fuera), `$(cat …)` viaja literal, se ejecuta en
+el VPS, donde root no tiene tu `.pub`, y el script recibe una llave vacía.
+
+Si el VPS ya tiene tu usuario, igual pero con `sudo`:
+
+```bash
+ssh roberto@IP_DEL_VPS "sudo bash -s -- '$(cat ~/.ssh/id_ed25519.pub)' roberto" \
+  < infra/scripts/preparar-servidor.sh
+```
+
+> En Windows usa Git Bash para que `$(cat …)` funcione, con
+> `C:\Windows\System32\OpenSSH\ssh.exe` (es el que lee el `ssh-agent` de Windows).
 
 | Paso | Qué deja |
 | :--- | :--- |
