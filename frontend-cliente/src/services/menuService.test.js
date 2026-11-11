@@ -11,6 +11,7 @@ import {
   marcarFaltantesEnCache,
   normalizarCategorias,
   obtenerCategorias,
+  obtenerMenuPublico,
   obtenerPlatos,
   obtenerPlatosArmables,
   obtenerPlatoArmable,
@@ -241,6 +242,21 @@ describe('menuService', () => {
       expect(spyPedirJson).not.toHaveBeenCalled();
       expect(categorias.length).toBeGreaterThan(0);
       expect(platos.length).toBeGreaterThan(0);
+    });
+
+    it('obtenerMenuPublico pide /menu sin token y ordena los pasos de los armables', async () => {
+      const spyPedirJson = vi
+        .spyOn(apiModule, 'pedirJson')
+        .mockResolvedValue(mockMenuApi);
+
+      const carta = await obtenerMenuPublico({ forzar: true });
+
+      expect(spyPedirJson).toHaveBeenCalledTimes(1);
+      expect(spyPedirJson).toHaveBeenCalledWith('/menu');
+      expect(carta.categorias).toHaveLength(2);
+      expect(carta.platos).toHaveLength(2);
+      expect(carta.armables).toHaveLength(2);
+      expect(carta.armables[0].pasos.map((p) => p.id_paso)).toEqual([1, 2]);
     });
   });
 

@@ -1,0 +1,17 @@
+{
+  "nombre": "SmartDining",
+  "telefono": "+57 604 321 4567",
+  "direccion": "Calle 10 #43E-25, El Poblado, Medellín",
+  "url_logo": null,
+  "horario": {
+    "lunes": { "abre": "12:00", "cierra": "22:00" },
+    "martes": { "abre": "12:00", "cierra": "22:00" },
+    "miercoles": { "abre": "12:00", "cierra": "22:00" },
+    "jueves": { "abre": "12:00", "cierra": "23:00" },
+    "viernes": { "abre": "12:00", "cierra": "23:30" },
+    "sabado": { "abre": "12:00", "cierra": "23:30" },
+    "domingo": { "abre": "12:00", "cierra": "21:00" }
+  },
+  "propina_sugerida_pct": 10,
+  "moneda": "COP"
+}

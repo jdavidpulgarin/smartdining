@@ -6,17 +6,23 @@ export function recargarMenu() {
   cacheMenuPromise = null;
 }
 
-async function fetchMenuRaw() {
+async function fetchMenuRaw({ publico = false } = {}) {
   if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
     const modulo = await import('../mocks/menu-simulado.json');
     return modulo.default || modulo;
   }
+  if (publico) {
+    return pedirJson('/menu');
+  }
   return pedirJson('/menu');
 }
 
-export function obtenerMenuRaw() {
+export function obtenerMenuRaw(opciones = {}) {
+  if (opciones?.forzar) {
+    cacheMenuPromise = null;
+  }
   if (!cacheMenuPromise) {
-    cacheMenuPromise = fetchMenuRaw().catch((err) => {
+    cacheMenuPromise = fetchMenuRaw(opciones).catch((err) => {
       cacheMenuPromise = null;
       throw err;
     });
@@ -183,24 +189,36 @@ export function adaptarPlatoArmable(rawMenu, idPlato) {
   };
 }
 
-export const obtenerCategorias = async () => {
-  const raw = await obtenerMenuRaw();
+export const obtenerCategorias = async (opciones = {}) => {
+  const raw = await obtenerMenuRaw(opciones);
   return adaptarCategorias(raw);
 };
 
-export const obtenerPlatos = async () => {
-  const raw = await obtenerMenuRaw();
+export const obtenerPlatos = async (opciones = {}) => {
+  const raw = await obtenerMenuRaw(opciones);
   return adaptarPlatos(raw);
 };
 
-export const obtenerPlatosArmables = async () => {
-  const raw = await obtenerMenuRaw();
+export const obtenerPlatosArmables = async (opciones = {}) => {
+  const raw = await obtenerMenuRaw(opciones);
   return adaptarPlatosArmables(raw);
 };
 
-export const obtenerPlatoArmable = async (idPlato) => {
-  const raw = await obtenerMenuRaw();
+export const obtenerPlatoArmable = async (idPlato, opciones = {}) => {
+  const raw = await obtenerMenuRaw(opciones);
   return adaptarPlatoArmable(raw, idPlato);
+};
+
+export const obtenerMenuPublico = async (opciones = {}) => {
+  const raw = await obtenerMenuRaw({ ...opciones, publico: true });
+  const armablesCrudos = adaptarPlatosArmables(raw);
+  return {
+    categorias: adaptarCategorias(raw),
+    platos: adaptarPlatos(raw),
+    armables: armablesCrudos.map(
+      (p) => adaptarPlatoArmable(raw, p.id_plato) || p
+    ),
+  };
 };
 
 export default {
@@ -208,6 +226,7 @@ export default {
   obtenerPlatos,
   obtenerPlatosArmables,
   obtenerPlatoArmable,
+  obtenerMenuPublico,
   recargarMenu,
   obtenerMenuRaw,
   normalizarCategorias,
