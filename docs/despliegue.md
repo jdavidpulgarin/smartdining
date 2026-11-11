@@ -67,7 +67,7 @@ ssh root@IP_DEL_VPS 'bash -s -- "$(cat ~/.ssh/id_ed25519.pub)" roberto' \
 | :--- | :--- |
 | 1. Sistema base | Paquetes al día; `ufw`, `fail2ban`, `unattended-upgrades`; zona `America/Bogota`; hostname `smartdining`; 2 GB de swap **solo si no hay swap** (Vultr ya trae `/swapfile`); `vm.swappiness=10`. |
 | Actualizaciones | Solo parches de **seguridad**, con `Automatic-Reboot "false"`: el servidor nunca se reinicia solo (por ejemplo, durante la feria). |
-| 2. Usuarios | `roberto`: sudo sin contraseña, entra solo con llave. `deploy`: sin contraseña y **sin sudo**, en el grupo `docker`; su llave se agrega en 3.1. |
+| 2. Usuarios | `roberto`: sudo sin contraseña, entra solo con llave. `deploy`: sin contraseña y **sin sudo**, en el grupo `docker`; su llave se agrega en 3.1. Borra `linuxuser` (el usuario con sudo que trae la imagen de Vultr) si existe y no tiene procesos ni crontab; otro nombre con `USUARIO_NUBE=...`. |
 | 3. SSH | `/etc/ssh/sshd_config.d/00-smartdining.conf`: sin root, sin contraseñas, `MaxAuthTries 3`, `AllowUsers roberto deploy`. |
 | 4. Firewall | UFW: entrante denegado salvo 22, 80 y 443. fail2ban: cárcel `sshd` (backend systemd, 5 intentos en 10 min → 1 h de bloqueo). |
 | 5. Docker | Docker Engine + `compose` del repositorio **oficial** de Docker (no `docker.io`), habilitado al arranque, logs rotados (10 MB × 3). |

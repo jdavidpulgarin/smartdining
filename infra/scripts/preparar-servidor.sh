@@ -8,14 +8,16 @@
 # Argumentos:
 #   1. Llave PÚBLICA del administrador (la línea completa, o la ruta a un .pub).
 #   2. Usuario administrador (opcional, por defecto "roberto").
-# Variables opcionales: ZONA_HORARIA (America/Bogota), NOMBRE_HOST (smartdining).
+# Variables opcionales: ZONA_HORARIA (America/Bogota), NOMBRE_HOST (smartdining),
+#   USUARIO_NUBE (linuxuser: usuario de la imagen del proveedor que se borra).
 #
 # Qué hace, en orden:
 #   1. Sistema base: actualiza, instala ufw/fail2ban/unattended-upgrades, zona
 #      horaria, hostname, swap de 2 GB si no hay ninguna, vm.swappiness=10 y
 #      actualizaciones automáticas SOLO de seguridad y SIN reinicio automático.
 #   2. Usuarios: ADMIN (sudo sin contraseña, solo llave) y deploy (sin sudo;
-#      su llave se agrega aparte, ver docs/despliegue.md).
+#      su llave se agrega aparte, ver docs/despliegue.md). Borra el usuario de
+#      la imagen del proveedor (linuxuser) si existe y no está en uso.
 #   3. SSH: sin root, sin contraseñas, AllowUsers ADMIN deploy.
 #   4. Firewall (22, 80, 443) y fail2ban para sshd.
 #   5. Docker Engine + compose desde el repositorio oficial, con rotación de logs.
@@ -38,6 +40,7 @@ LLAVE_ARG=$1
 ADMIN=${2:-roberto}
 ZONA_HORARIA=${ZONA_HORARIA:-America/Bogota}
 NOMBRE_HOST=${NOMBRE_HOST:-smartdining}
+USUARIO_NUBE=${USUARIO_NUBE:-linuxuser}
 DEPLOY=deploy
 
 if [ -f "$LLAVE_ARG" ]; then LLAVE=$(head -n 1 "$LLAVE_ARG"); else LLAVE=$LLAVE_ARG; fi
@@ -128,6 +131,17 @@ fi
 AK="/home/$ADMIN/.ssh/authorized_keys"
 grep -qxF "$LLAVE" "$AK" || printf '%s\n' "$LLAVE" >> "$AK"
 chown "$ADMIN:$ADMIN" "$AK"; chmod 600 "$AK"
+
+# Usuario que trae la imagen del proveedor (Vultr: linuxuser). Tiene sudo y no lo
+# usamos: se borra si existe y no está en uso.
+if [ "$USUARIO_NUBE" != "$ADMIN" ] && [ "$USUARIO_NUBE" != "$DEPLOY" ] && id "$USUARIO_NUBE" >/dev/null 2>&1; then
+  if pgrep -u "$USUARIO_NUBE" >/dev/null || crontab -l -u "$USUARIO_NUBE" >/dev/null 2>&1; then
+    echo "AVISO: $USUARIO_NUBE tiene procesos o crontab; no se borra. Revísalo a mano." >&2
+  else
+    userdel -r "$USUARIO_NUBE" 2>/dev/null || userdel "$USUARIO_NUBE"
+    echo "Usuario $USUARIO_NUBE eliminado."
+  fi
+fi
 
 # ------------------------------------------------------- 3. SSH
 paso "3. SSH endurecido"
