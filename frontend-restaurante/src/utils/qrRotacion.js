@@ -46,6 +46,17 @@ export function tokenDeUrl(url) {
   }
 }
 
+/**
+ * ¿La presencia del socket-server (mesa:presencia: { total, comensales,
+ * sin_celular }) dice que hay alguien en la mesa?
+ */
+export function hayPresencia(presencia) {
+  if (!presencia || typeof presencia !== 'object') return false
+  return Number(presencia.total) > 0
+    || (Array.isArray(presencia.comensales) && presencia.comensales.length > 0)
+    || (Array.isArray(presencia.sin_celular) && presencia.sin_celular.length > 0)
+}
+
 /** ¿Se puede rotar SOLO (al abrir el modal o por tiempo)? Mesa abierta y vacía. */
 export function puedeRotarSolo({ ocupada, tieneComensales, token }) {
   return Boolean(ocupada && token && !tieneComensales)

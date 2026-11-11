@@ -31,6 +31,7 @@ import {
   REINTENTO_SEGUNDOS,
   puedeRotarSolo,
   errorDeRotacion,
+  hayPresencia,
 } from '../utils/qrRotacion'
 import {
   extraerHostDeUrl,
@@ -71,7 +72,7 @@ export function QRModal({
   const [fijadoPorBackend, setFijadoPorBackend] = useState(false)
 
   const qrRef = useRef(null)
-  const { pedidosActivos } = useTables()
+  const { pedidosActivos, presenciaPorMesa } = useTables()
 
   const tableId = Number(table?.id || table?.number)
   const isDisponible = (table?.status || '').toLowerCase() === 'disponible'
@@ -83,10 +84,14 @@ export function QRModal({
       (Number(p.id_mesa) === tableId || Number(p.mesa) === tableId) &&
       p.estado !== 'cancelado'
   )
+  // Presencia en vivo del socket-server (mesa:presencia, room:admin): quién está
+  // conectado y quién está sin celular. No ve a quien entró y apagó el
+  // teléfono sin pedir nada: eso lo cuida el backend (solo_si_vacia).
   const tieneComensalesOpedidos =
     fijadoPorBackend ||
     pedidosMesa.length > 0 ||
-    Boolean(table?.comensales && table.comensales.length > 0)
+    Boolean(table?.comensales && table.comensales.length > 0) ||
+    hayPresencia(presenciaPorMesa?.[tableId])
 
   // Cuándo se obtuvo el token que se muestra. 0 = no se sabe (el que había en
   // memoria al abrir el modal): con la mesa vacía, el socket-server pudo haberlo
@@ -144,7 +149,10 @@ export function QRModal({
       clearTimeout(temporizadorReintento.current)
       setLoadingAction(true)
       try {
-        const res = await onUpdateToken(tableId, { silencioso: motivo !== 'manual' })
+        // Las rotaciones automáticas piden además que el backend se niegue (409
+        // mesa_con_comensales) si la mesa tiene pedidos o nombres reservados.
+        const automatica = motivo !== 'manual'
+        const res = await onUpdateToken(tableId, { silencioso: automatica, soloSiVacia: automatica })
         if (!res?.token) throw new Error('El servidor no devolvió el nuevo código QR de la mesa')
         setToken(res.token)
         if (res?.url) setQrUrl(res.url)

@@ -31,6 +31,30 @@ describe('utils/qrRotacion', () => {
   })
 })
 
+describe('hayPresencia', () => {
+  it('total, comensales o sin_celular cuentan; vacío o nada, no', async () => {
+    const { hayPresencia } = await import('../qrRotacion')
+    expect(hayPresencia({ total: 1 })).toBe(true)
+    expect(hayPresencia({ total: 0, comensales: ['Ana'] })).toBe(true)
+    expect(hayPresencia({ total: 0, comensales: [], sin_celular: ['Abuela'] })).toBe(true)
+    expect(hayPresencia({ total: 0, comensales: [], sin_celular: [] })).toBe(false)
+    expect(hayPresencia(undefined)).toBe(false)
+  })
+})
+
+describe('mesasApi.rotarQr', () => {
+  it('solo las rotaciones automáticas mandan { solo_si_vacia: true }', async () => {
+    vi.resetModules()
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, status: 201, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ url: 'http://x/?token=v1.a.b' }) })
+    const { mesasApi } = await import('../../services/api')
+    await mesasApi.rotarQr(5)
+    await mesasApi.rotarQr(5, { soloSiVacia: true })
+    expect(spy.mock.calls[0][1].body).toBeUndefined()
+    expect(JSON.parse(spy.mock.calls[1][1].body)).toEqual({ solo_si_vacia: true })
+    spy.mockRestore()
+  })
+})
+
 describe('qrService.rotarTokenQrMesa', () => {
   it('toma el token del url, que es lo que devuelve rotar-qr', async () => {
     vi.resetModules()

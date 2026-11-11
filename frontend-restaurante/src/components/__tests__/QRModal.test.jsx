@@ -3,9 +3,10 @@ import { render, screen, act, fireEvent } from '@testing-library/react'
 
 // Sin socket ni contexto real: el modal solo lee pedidosActivos y escucha qr:actualizado.
 let pedidosActivos = []
+let presenciaPorMesa = {}
 vi.mock('../../hooks', () => ({
   useSocketListener: () => {},
-  useTables: () => ({ pedidosActivos }),
+  useTables: () => ({ pedidosActivos, presenciaPorMesa }),
 }))
 
 import { QRModal } from '../QRModal'
@@ -33,6 +34,7 @@ describe('QRModal: QR vigente (rotación del socket-server cada 3 min)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     pedidosActivos = []
+    presenciaPorMesa = {}
   })
   afterEach(() => vi.useRealTimers())
 
@@ -40,7 +42,7 @@ describe('QRModal: QR vigente (rotación del socket-server cada 3 min)', () => {
     let soltar
     const onUpdateToken = vi.fn(() => new Promise((r) => { soltar = () => r({ token: T1, url: url(T1) }) }))
     montar(mesa(), onUpdateToken)
-    expect(onUpdateToken).toHaveBeenCalledWith(5, { silencioso: true })
+    expect(onUpdateToken).toHaveBeenCalledWith(5, { silencioso: true, soloSiVacia: true })
     expect(screen.getByText('Generando QR vigente…')).toBeInTheDocument()
     expect(enlace()).toBe('')
     expect(copiar()).toBeDisabled()
@@ -57,6 +59,23 @@ describe('QRModal: QR vigente (rotación del socket-server cada 3 min)', () => {
     expect(enlace()).toContain(T0)
     expect(screen.getByRole('button', { name: /Nuevo QR/ })).toBeDisabled()
     expect(screen.getByText(/el QR queda fijo/)).toBeInTheDocument()
+  })
+
+  it('con presencia en vivo (mesa:presencia) tampoco rota: el caso de la e2e con Carla dentro', async () => {
+    presenciaPorMesa = { 5: { id_mesa: 5, comensales: ['Carla'], total: 1, pagaron: [], sin_celular: [] } }
+    const onUpdateToken = vi.fn()
+    montar(mesa(), onUpdateToken)
+    await avanzar(400)
+    expect(onUpdateToken).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /Nuevo QR/ })).toBeDisabled()
+  })
+
+  it('con alguien sin celular registrado (sin_celular) tampoco rota', async () => {
+    presenciaPorMesa = { 5: { id_mesa: 5, comensales: [], total: 0, pagaron: [], sin_celular: ['Abuela'] } }
+    const onUpdateToken = vi.fn()
+    montar(mesa(), onUpdateToken)
+    await avanzar(30)
+    expect(onUpdateToken).not.toHaveBeenCalled()
   })
 
   it('con un pedido activo de la mesa tampoco rota', async () => {
@@ -78,7 +97,7 @@ describe('QRModal: QR vigente (rotación del socket-server cada 3 min)', () => {
     expect(onUpdateToken).toHaveBeenCalledTimes(1)
     await avanzar(6)
     expect(onUpdateToken).toHaveBeenCalledTimes(2)
-    expect(onUpdateToken).toHaveBeenLastCalledWith(5, { silencioso: true })
+    expect(onUpdateToken).toHaveBeenLastCalledWith(5, { silencioso: true, soloSiVacia: true })
     expect(enlace()).toContain(T2)
   })
 
@@ -110,7 +129,7 @@ describe('QRModal: QR vigente (rotación del socket-server cada 3 min)', () => {
     expect(copiar()).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Generar nuevo' }))
     await avanzar(1)
-    expect(onUpdateToken).toHaveBeenLastCalledWith(5, { silencioso: false })
+    expect(onUpdateToken).toHaveBeenLastCalledWith(5, { silencioso: false, soloSiVacia: false })
     expect(enlace()).toContain(T2)
     expect(screen.queryByText('QR vencido')).not.toBeInTheDocument()
   })
