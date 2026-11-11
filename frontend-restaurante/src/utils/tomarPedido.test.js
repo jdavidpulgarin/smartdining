@@ -303,6 +303,24 @@ describe('tomarPedido - lógica pura (J-16)', () => {
       ).toBe('Doña Rosa')
     })
 
+    it('prioriza error.alias sobre la búsqueda en lista y el texto escrito (" abuela " -> "Abuela")', () => {
+      const error = {
+        status: 409,
+        data: {
+          motivo: 'alias_en_uso',
+          alias: 'Abuela',
+        },
+      }
+      expect(
+        opcionPedirExistente({
+          error,
+          lista: ['ABUELA'],
+          texto: ' abuela ',
+          backendCanoniza: true,
+        })
+      ).toBe('Abuela')
+    })
+
     it('si el error no trae alias, busca por clave en la lista recargada', () => {
       const error = {
         status: 409,
