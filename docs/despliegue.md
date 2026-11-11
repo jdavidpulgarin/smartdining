@@ -9,7 +9,7 @@ diaria. Para desarrollo local, ver el [README](../README.md#-levantar-smartdinin
 ```
 Internet ──► :80 / :443  nginx ──┬─► app.DOMINIO     PWA del comensal (estático)
                                  ├─► staff.DOMINIO   panel del restaurante (estático)
-                                 ├─► cocina.DOMINIO  pantalla de cocina (estático, provisional)
+                                 ├─► cocina.DOMINIO  pantalla de cocina (estático: frontend-kds)
                                  ├─► api.DOMINIO  ──► backend:4000
                                  └─► rt.DOMINIO   ──► socket-server:4001 (WebSocket, QR, push, pagos)
 
@@ -189,10 +189,14 @@ funcionan con HTTPS válido.
 ## 3. Despliegue automático (GitHub Actions)
 
 Al fusionar en `main`, el workflow **CI** corre sobre `main`; si pasa, el
-workflow **Deploy** entra por SSH al VPS, deja el clon en ese commit exacto y
-corre `docker compose up -d --build --wait`. Si algún servicio no queda
-*healthy* en 3 minutos, el despliegue falla en rojo. También se puede lanzar a
-mano: Actions → Deploy → Run workflow.
+workflow **Deploy** entra por SSH al VPS, deja el clon en ese commit exacto,
+levanta Postgres y Redis, aplica las migraciones pendientes
+(`database/migrar.sh`) y después `docker compose up -d --build --wait`. Si algún
+servicio no queda *healthy* en 3 minutos, el despliegue falla en rojo. También
+se puede lanzar a mano: Actions → Deploy → Run workflow.
+
+Si staging (`smartdining-staging`) está corriendo, Deploy se niega y no toca
+nada: ver [6. Staging](#6-staging).
 
 ### 3.1 Llave SSH solo para despliegues
 
@@ -273,13 +277,22 @@ dc exec -T postgres pg_restore -U smartdining -d smartdining --clean --if-exists
 
 ### Cambios de esquema
 
-`00_ejecutar_todo.sql` corre **solo** con el volumen vacío. En una base que ya
-tiene datos, cada script nuevo de `database/scripts/` se aplica a mano después
-del despliegue (y con un respaldo recién hecho):
+Con el volumen vacío, `database/docker-init.sh` corre `database/migrar.sh`, que
+carga la línea base (`00_ejecutar_todo.sql`) y los scripts 26 en adelante. En
+una base que ya tiene datos, **cada despliegue** (Deploy, Deploy staging y
+`primer-certificado.sh`) corre `migrar.sh` antes de levantar el backend: aplica
+solo los scripts de `database/scripts/` que falten en `schema_migraciones`, cada
+uno en su propia transacción. Haz un respaldo antes de fusionar un script nuevo.
+
+A mano (no publica puertos: corre dentro del contenedor de Postgres):
 
 ```bash
-dc exec -T postgres psql -v ON_ERROR_STOP=1 -U smartdining -d smartdining < database/scripts/NN_nuevo.sql
+dc exec -T postgres sh /smartdining-db/migrar.sh
+dc exec -T postgres psql -U smartdining -d smartdining -c "SELECT count(*) FROM schema_migraciones"
 ```
+
+Un script ya aplicado **nunca** se edita: `migrar.sh` compara checksums y se
+detiene sin aplicar nada si alguno cambió.
 
 `dc down -v` borra la base entera. No lo uses en producción.
 
@@ -297,3 +310,128 @@ dc exec -T postgres psql -v ON_ERROR_STOP=1 -U smartdining -d smartdining < data
 | Los logs del socket-server muestran `172.31.250.10` como IP de todos | `TRUST_PROXY` no coincide con la IP de nginx. |
 | Deploy en rojo: `Hay cuentas con contraseña conocida`; el sitio no responde | La compuerta de 2.4 detuvo nginx. En el VPS: `sh infra/scripts/passwords-demo.sh cambiar` y vuelve a lanzar Deploy. |
 | Deploy: `Host key verification failed` | `VPS_KNOWN_HOSTS` no coincide con la huella actual del VPS. |
+| Deploy: `Staging (proyecto smartdining-staging) está corriendo` | Apaga staging con `down` **sin** `-v` (ver 6.5) y vuelve a lanzar Deploy. |
+| Deploy staging: `Producción (proyecto smartdining) está corriendo` | Es lo esperado después del cambio a producción (R-21). No arranques staging encima. |
+| `Pool overlaps` justo después de apagar el otro entorno | Se apagó con `stop`: la red sigue creada. Usa `down` (sin `-v`). |
+| `migrar: ERROR: estos scripts ya aplicados cambiaron` | Alguien editó un script ya aplicado. Deshaz el cambio y pon la corrección en un script nuevo. |
+
+## 6. Staging
+
+Staging es **la misma pila** (`docker-compose.prod.yml`) con otro dominio, otro
+archivo de variables y otro nombre de proyecto de compose. Sigue la rama
+`develop`.
+
+| | Producción | Staging |
+| :--- | :--- | :--- |
+| Dominio | `smartdining.com.co` | `staging.smartdining.com.co` (`app.staging.…`, `api.staging.…`, etc.) |
+| Rama | `main` | `develop` |
+| Carpeta en el VPS | `/home/deploy/smartdining` | `/srv/smartdining-staging` |
+| Variables | `infra/.env` | `infra/.env.staging` (plantilla: [`infra/.env.staging.example`](../infra/.env.staging.example)) |
+| Proyecto compose | `smartdining` (`name:` del compose) | `smartdining-staging` (`COMPOSE_PROJECT_NAME` dentro de `infra/.env.staging`) |
+| Workflow | `Deploy` (`deploy.yml`) | `Deploy staging` (`deploy-staging.yml`, llamado desde `ci.yml`) |
+| Environment de GitHub | `produccion` | `staging` |
+
+Volúmenes, redes y contenedores quedan como `smartdining-staging_*`: la base,
+Redis y los certificados de staging no se mezclan con los de producción.
+
+### 6.1 Staging y producción NO corren a la vez
+
+Los dos publican 80/443 y usan la misma subred fija `172.31.250.0/24` (la IP de
+nginx en la que confía `TRUST_PROXY`). Por eso:
+
+- `Deploy staging` aborta si el proyecto `smartdining` está corriendo, y
+  `Deploy` aborta si `smartdining-staging` está corriendo. Ninguno toca nada.
+- Para pasar de uno a otro se apaga con **`down` SIN `-v`**: `stop` deja la red
+  creada (y producción no podría crear la suya: `Pool overlaps`), y `-v`
+  borraría la base y los certificados.
+
+### 6.2 Primera instalación
+
+Igual que la [sección 2](#2-primera-instalación), con estas diferencias:
+
+```bash
+# como un usuario con sudo
+sudo install -d -o deploy -g deploy -m 750 /srv/smartdining-staging
+sudo -iu deploy
+git clone https://github.com/jdavidpulgarin/smartdining.git /srv/smartdining-staging
+cd /srv/smartdining-staging && git checkout develop
+cp infra/.env.staging.example infra/.env.staging && chmod 600 infra/.env.staging
+```
+
+En `infra/.env.staging`: los secretos se generan **en el VPS** con
+`openssl rand -hex 32` (uno distinto para cada uno), las llaves VAPID también
+(`npx web-push generate-vapid-keys`), y Wompi usa las llaves de **sandbox**
+(`WOMPI_API_URL=https://sandbox.wompi.co/v1`). Ningún secreto se repite entre
+staging y producción.
+
+```bash
+alias dcs='docker compose -f docker-compose.prod.yml --env-file infra/.env.staging'
+ENV_FILE=infra/.env.staging STAGING=1 SEED_DEMO=1 sh infra/scripts/primer-certificado.sh   # ensayo
+ENV_FILE=infra/.env.staging sh infra/scripts/primer-certificado.sh                         # certificado real
+ENV_FILE=infra/.env.staging sh infra/scripts/passwords-demo.sh cambiar                     # si el paso 2 lo pide
+```
+
+La corrida sin `STAGING` reemplaza el certificado de prueba del ensayo (lo
+reconoce por el emisor `(STAGING)`); un certificado real nunca se toca.
+
+### 6.3 Datos de inventario de la demo (solo staging)
+
+`database/seed_inventario_demo.sql` (insumos, stock y recetas) **no** lo carga
+`SEED_DEMO` ni ningún despliegue, para que nunca llegue a producción. En
+staging se carga a mano, una vez, después del primer arranque:
+
+```bash
+dcs exec -T postgres sh -c 'psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < database/seed_inventario_demo.sql
+```
+
+Es idempotente: una segunda corrida no duplica stock ni recetas.
+
+### 6.4 Despliegue automático desde `develop`
+
+Cada push a `develop` corre el **CI**; si todos los jobs pasan, el job
+`staging · desplegar` llama a `deploy-staging.yml`, que entra al VPS como
+`deploy`, deja `/srv/smartdining-staging` en ese commit, migra y levanta todo
+con `--wait`. Al final comprueba desde fuera `api.`, `rt.`, `app.` y `cocina.`.
+
+No usa `workflow_run` (como `Deploy`) porque GitHub solo ejecuta `workflow_run`
+y `workflow_dispatch` desde la rama por defecto (`main`). Mientras el archivo
+no esté en `main`, para redesplegar a mano se vuelve a correr el último CI de
+`develop`: `gh run rerun <id>`.
+
+Lo configura el **dueño del repositorio** (requiere permisos de administrador):
+
+| Dónde | Nombre | Valor |
+| :--- | :--- | :--- |
+| Variable de **repositorio** | `DEPLOY_STAGING` | `true`. Sin ella (o con otro valor) el job queda *skipped* y el CI sigue en verde: es el interruptor. |
+| Environment `staging` → secreto | `VPS_HOST` | IP del VPS |
+| | `VPS_USER` | `deploy` |
+| | `VPS_RUTA` | `/srv/smartdining-staging` |
+| | `VPS_SSH_KEY` | llave **privada** de CI para staging (ver abajo) |
+| | `VPS_KNOWN_HOSTS` | línea de `ssh-keyscan -t ed25519 IP_DEL_VPS`, con la huella verificada |
+| Environment `staging` → variable | `DOMINIO` | `staging.smartdining.com.co` (activa la comprobación desde fuera) |
+
+Recomendado en el environment: *Deployment branches* = solo `develop`.
+
+La llave de CI la genera **el dueño del repo en su máquina**: carga la privada
+como `VPS_SSH_KEY` y la borra; al responsable del VPS solo le pasa la
+**pública**, que se agrega a `/home/deploy/.ssh/authorized_keys` con `restrict`
+delante (sin terminal ni reenvíos):
+
+```
+restrict ssh-ed25519 AAAA... github-deploy-staging
+```
+
+Para apagar el despliegue automático sin tocar nada más: borra la variable
+`DEPLOY_STAGING` o ponle `false`.
+
+### 6.5 Cambio de staging a producción (R-21)
+
+```bash
+cd /srv/smartdining-staging
+docker compose -f docker-compose.prod.yml --env-file infra/.env.staging down   # SIN -v
+```
+
+Después, poner `DEPLOY_STAGING` en `false` (si no, cada push a `develop`
+fallaría en la guarda) y seguir la [sección 2](#2-primera-instalación) para
+producción. Para volver a staging: `down` de producción (también sin `-v`) y
+`dcs up -d --wait`.
