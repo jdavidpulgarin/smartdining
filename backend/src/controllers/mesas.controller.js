@@ -269,6 +269,103 @@ async function rotarQr(req, res, next) {
 }
 
 /**
+ * Un token de mesa como lo firma el socket-server: v1.<datos>.<firma>, en
+ * base64url. Aquí solo se mira la FORMA: la firma es del socket-server, que es
+ * quien tiene QR_SECRET. 255 es el tamaño de mesas.token_qr y de
+ * token_qr_historico.token_antiguo.
+ */
+const tokenDeMesa = z
+  .string()
+  .max(255, 'El token no puede pasar de 255 caracteres')
+  .regex(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, 'El token debe tener la forma v1.<datos>.<firma>');
+
+const rotacionInternaSchema = z
+  .object({
+    token_qr: tokenDeMesa,
+    // Obligatorio aunque pueda ser null: así un cuerpo sin él es 400, no un
+    // swap a ciegas.
+    token_anterior: z.union([tokenDeMesa, z.null()]),
+  })
+  .strict()
+  .refine((c) => c.token_qr !== c.token_anterior, {
+    message: 'token_qr tiene que ser distinto de token_anterior',
+  });
+
+const MOTIVOS_ROTACION = {
+  noOcupada: 'mesa_no_ocupada',
+  cambioDeToken: 'token_anterior_distinto',
+  conComensales: 'mesa_con_comensales',
+  reservasNoDisponibles: 'alias_no_disponible',
+};
+
+/**
+ * POST /api/mesas/:id/token-qr/interno — la ROTACIÓN AUTOMÁTICA del QR que pide
+ * el socket-server (socket-server/docs/rotacion-qr.md). Canal interno: solo
+ * x-internal-key, sin JWT. Las reglas viven en mesasService.rotarQrInterno.
+ *
+ * Respuestas que lee el rotador del socket-server: 200 rota y anuncia; 404 y
+ * 409 dejan de rotar esa mesa (el QR queda fijo); cualquier otra cosa (el 503
+ * de Redis caído) reintenta en el siguiente ciclo.
+ *
+ * Los logs llevan el id de la mesa y el motivo, NUNCA un token: quien lo tenga
+ * puede abrir sesión en esa mesa.
+ */
+async function rotarQrInterno(req, res, next) {
+  const idMesa = Number(req.params.id);
+  if (!Number.isInteger(idMesa) || idMesa <= 0) {
+    return res.status(400).json({ error: 'id de mesa inválido', motivo: 'cuerpo_invalido' });
+  }
+  const parsed = rotacionInternaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0].message, motivo: 'cuerpo_invalido' });
+  }
+
+  try {
+    const r = await mesasService.rotarQrInterno(idMesa, {
+      tokenQr: parsed.data.token_qr,
+      tokenAnterior: parsed.data.token_anterior,
+    });
+
+    if (r.ok) return res.status(200).json({ ok: true });
+    if (r.noExiste) return res.status(404).json({ error: 'Mesa no encontrada' });
+
+    const avisar = (motivo) => console.info(`[mesas] rotación del QR no aplicada en la mesa ${idMesa}: ${motivo}`);
+    if (r.noOcupada) {
+      avisar(MOTIVOS_ROTACION.noOcupada);
+      return res.status(409).json({
+        error: 'La mesa no está abierta: no hay QR que rotar',
+        motivo: MOTIVOS_ROTACION.noOcupada,
+        estado: r.estado,
+      });
+    }
+    if (r.cambioDeToken) {
+      avisar(MOTIVOS_ROTACION.cambioDeToken);
+      return res.status(409).json({
+        error: 'El QR de la mesa ya no es el que conocías: se rotó o se liberó por otro lado',
+        motivo: MOTIVOS_ROTACION.cambioDeToken,
+      });
+    }
+    if (r.conComensales) {
+      avisar(`${MOTIVOS_ROTACION.conComensales} (${r.motivo})`);
+      return res.status(409).json({
+        error: 'La mesa ya tiene comensales: el QR queda fijo',
+        motivo: MOTIVOS_ROTACION.conComensales,
+      });
+    }
+    if (r.reservasNoDisponibles) {
+      avisar(MOTIVOS_ROTACION.reservasNoDisponibles);
+      return res.status(503).json({
+        error: 'No se pudo comprobar si la mesa tiene comensales; se conserva el QR actual',
+        motivo: MOTIVOS_ROTACION.reservasNoDisponibles,
+      });
+    }
+    return next(new Error('Resultado inesperado de rotarQrInterno'));
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
  * POST /api/mesas/:id/liberar — el mesero cierra la mesa.
  *
  * Deja la mesa 'disponible' y token_qr en NULL, con lo que el QR anterior deja
@@ -741,6 +838,8 @@ module.exports = {
   obtener,
   abrir,
   rotarQr,
+  rotarQrInterno,
+  MOTIVOS_ROTACION,
   cuentaInterna,
   cuenta,
   liberar,
