@@ -14,6 +14,9 @@
 //    8. Un 2.º celular («Beto») no puede pedirla.
 //    9. En Inventario el admin ve la Carne Angus en 0 y registra una entrada de 10.
 //   10. Sin recargar, la Hamburguesa vuelve en el panel, el KDS y el cliente, y Ana la pide (201).
+//  10b. Caja: en otra mesa (MESA_COBRO), dos pedidos entregados se cobran con «Toda
+//       la mesa»; «Recaudado hoy» sube exactamente lo cobrado sin recargar y coincide
+//       con la suma del Historial y con GET /transacciones?desde=hoy.
 //   11. Limpieza: se cancelan los pedidos de la prueba, la mesa queda libre y la Carne
 //       Angus vuelve a su stock inicial. Se comprueba que todo quedó como estaba.
 //
@@ -38,6 +41,10 @@ const CLIENTE = (process.env.CLIENTE_URL || 'http://localhost:5174').replace(/\/
 const KDS = (process.env.KDS_URL || 'http://localhost:5175').replace(/\/+$/, '')
 const CLAVE = process.env.DEMO_PASSWORD || 'Admin123!'
 const MESA = Number(process.env.MESA_DEMO || 1)
+// Mesa del paso 10b (cobro en Caja). Distinta de la de la demo.
+const MESA_COBRO = Number(process.env.MESA_COBRO || 2)
+/** 12000 → "12\\.000": como lo pinta formatCOP (es-CO), escapado para un RegExp. */
+const pesos = (n) => new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(n).replace(/\./g, '\\.')
 const PLATO = 'Hamburguesa Smart Angus'
 const INSUMO = 'Carne Angus 200 g'
 const STOCK_DEMO = 4
@@ -392,6 +399,59 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
     })
 
     for (const c of [ana?.ctx, beto?.ctx, kds?.context(), ctxAdmin]) await c?.close()
+  })
+
+  test('10b. Caja: después de un cobro, «Recaudado hoy» sube exactamente lo cobrado y cuadra con el Historial', async ({ browser }) => {
+    // Mesa propia (MESA_COBRO, 2 por omisión) y un plato que no use la Carne
+    // Angus: así no toca la mesa ni el stock que compara la limpieza. El cobro
+    // libera la mesa solo; las transacciones quedan (son dinero cobrado de
+    // verdad, no hay ruta para borrarlas).
+    const caja = await login('caja@smartdining.com')
+    if ((await pedidosAbiertosDeMesa(admin, MESA_COBRO)).length > 0) {
+      throw new Error(`la mesa ${MESA_COBRO} tiene pedidos abiertos: ciérralos o usa otra MESA_COBRO`)
+    }
+    const platos = (await api(null, '/platos')).data?.platos || []
+    // Ni personalizable (pide opciones del constructor) ni sin stock.
+    const otro = platos.find((p) => !/Angus/i.test(p.nombre) && !p.personalizable
+      && p.disponible !== false && p.stock_suficiente !== false && Number(p.precio) > 0)
+    expect(otro, 'un plato sin Carne Angus para cobrar').toBeTruthy()
+    expect([200, 201]).toContain((await api(admin, `/mesas/${MESA_COBRO}/abrir`, { method: 'POST' })).status)
+    for (const cantidad of [1, 2]) {
+      const r = await api(admin, '/pedidos', { method: 'POST', body: { id_mesa: MESA_COBRO, items: [{ id_plato: otro.id_plato, cantidad }] } })
+      expect(r.status).toBe(201)
+      for (const estado of ['en_preparacion', 'listo', 'entregado']) {
+        expect((await api(admin, `/pedidos/${r.data.id_pedido}/estado`, { method: 'PATCH', body: { estado } })).status).toBe(200)
+      }
+    }
+    const saldo = Number((await api(caja, `/mesas/${MESA_COBRO}/cuenta`)).data.saldo_mesa)
+    const totalAntes = (await api(caja, '/transacciones?desde=hoy')).data.total
+
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+    const page = await ctx.newPage()
+    await entrarPanel(page, 'caja@smartdining.com')
+    await page.goto(`/caja?mesa=${MESA_COBRO}`)
+    const recaudado = page.getByTestId('recaudado-hoy')
+    await expect(recaudado).toHaveText(new RegExp(`^\\$\\s?${pesos(totalAntes)} RECAUDADO HOY$`))
+
+    // "Toda la mesa": un solo cobro repartido entre los dos pedidos.
+    await page.getByRole('button', { name: /TODA LA MESA/ }).click()
+    await page.getByLabel(/EFECTIVO RECIBIDO/).fill(String(Math.ceil(saldo / 1000) * 1000))
+    await page.getByRole('button', { name: /^Cobrar/ }).click()
+    await expect(page.getByText('Pago Procesado con Éxito')).toBeVisible()
+    await page.getByRole('button', { name: 'Cerrar recibo' }).click()
+
+    // Sube EXACTAMENTE lo cobrado, sin recargar la página.
+    await expect(recaudado).toHaveText(new RegExp(`^\\$\\s?${pesos(totalAntes + saldo)} RECAUDADO HOY$`))
+    expect((await api(caja, '/transacciones?desde=hoy')).data.total).toBe(totalAntes + saldo)
+
+    // Y cuadra con la suma del Historial de hoy (una fila por cobro).
+    await page.getByRole('button', { name: /HISTORIAL DE PAGOS/ }).click()
+    const montos = await page.locator('.history-panel tbody tr td:nth-child(6)').allInnerTexts()
+    const sumaHistorial = montos.reduce((acc, t) => acc + Number(t.replace(/[^\d]/g, '')), 0)
+    expect(sumaHistorial).toBe(totalAntes + saldo)
+    await expect(page.getByTestId('total-historial')).toHaveText(new RegExp(pesos(totalAntes + saldo)))
+    await expect(page.locator('.history-panel tbody tr').first()).toContainText(`Mesa ${MESA_COBRO}`)
+    await ctx.close()
   })
 
   test('11. Limpieza: todo queda como estaba', async () => {

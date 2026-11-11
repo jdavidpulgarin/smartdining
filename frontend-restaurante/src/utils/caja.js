@@ -57,6 +57,49 @@ export function idCobroParaEnviar(pendiente, datos, generar = nuevoIdCobro) {
 }
 
 /**
+ * Filas de GET /transacciones?desde=hoy → una fila por COBRO para el Historial.
+ *
+ * Un cobro de mesa repartido entre varios pedidos son varias filas con el mismo
+ * `referencia_pago` (`caja:<id_cobro>`, o la referencia de Wompi): se juntan en
+ * una, con la suma de sus montos y todos sus id. Una fila sin referencia es un
+ * cobro por sí sola. Lo más reciente primero, como lo devuelve el backend.
+ * Los montos se suman en centavos para no arrastrar coma flotante.
+ */
+export function agruparCobros(transacciones = []) {
+  const grupos = new Map()
+  for (const t of transacciones) {
+    const clave = t.referencia_pago ? `ref:${t.referencia_pago}` : `tx:${t.id_transaccion}`
+    const g = grupos.get(clave)
+    const centavos = Math.round(Number(t.monto) * 100) || 0
+    if (!g) {
+      grupos.set(clave, {
+        clave,
+        ids: [t.id_transaccion],
+        numero_mesa: t.numero_mesa,
+        comensal: t.comensal ?? null,
+        metodo_pago: t.metodo_pago,
+        centavos,
+        fecha: t.fecha,
+      })
+    } else {
+      g.ids.push(t.id_transaccion)
+      g.centavos += centavos
+      if (t.fecha > g.fecha) g.fecha = t.fecha
+    }
+  }
+  return [...grupos.values()]
+    .map(({ centavos, ids, ...g }) => ({ ...g, ids: [...ids].sort((a, b) => a - b), monto: centavos / 100 }))
+    .sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0))
+}
+
+/** "15:11" en hora de Bogotá (la del restaurante), venga de donde venga el navegador. */
+export function horaBogota(iso) {
+  const f = new Date(iso)
+  if (Number.isNaN(f.getTime())) return ''
+  return f.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Bogota' })
+}
+
+/**
  * ¿Hay que descartar el id_cobro pendiente tras este error? Solo con
  * `id_cobro_en_uso` (409): ese id ya pertenece a un cobro de OTRA mesa y
  * repetirlo daría el mismo 409 para siempre. En cualquier otro error se
