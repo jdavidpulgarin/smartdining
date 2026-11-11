@@ -483,7 +483,9 @@ export function TablesProvider({ children }) {
   /**
    * Regenera el token QR de una mesa en curso (rotación de seguridad).
    */
-  const regenerarQr = useCallback(async (idMesa, ttlMinutos = 240) => {
+  // `silencioso`: la renovación automática del modal (cada ~3 min) no avisa con
+  // un toast ni en el éxito ni en el error; el modal muestra su propio estado.
+  const regenerarQr = useCallback(async (idMesa, ttlMinutos = 240, { silencioso = false } = {}) => {
     const numId = Number(idMesa)
     const tableActual = tables.find((t) => t.id === numId || t.number === numId)
     const tableName = tableActual?.name || `Mesa ${numId}`
@@ -507,10 +509,10 @@ export function TablesProvider({ children }) {
         })
       )
 
-      showNotification(`QR regenerado para ${tableName}. Sesión actualizada.`, 'success')
+      if (!silencioso) showNotification(`QR regenerado para ${tableName}. Sesión actualizada.`, 'success')
       return qrResult
     } catch (err) {
-      showNotification(err.message || `Error al rotar QR en ${tableName}`, 'error')
+      if (!silencioso) showNotification(err.message || `Error al rotar QR en ${tableName}`, 'error')
       throw err
     }
   }, [tables, showNotification])

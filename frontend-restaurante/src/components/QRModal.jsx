@@ -25,13 +25,19 @@ import {
 import { decodificarTokenQr } from '../services/qrService'
 import { useSocketListener, useTables } from '../hooks'
 import {
+  ROTACION_SOCKET_SEGUNDOS,
+  RENOVAR_CADA_SEGUNDOS,
+  REINTENTOS_MAXIMOS,
+  REINTENTO_SEGUNDOS,
+  puedeRotarSolo,
+  errorDeRotacion,
+} from '../utils/qrRotacion'
+import {
   extraerHostDeUrl,
   esHostLocal,
   obtenerHostPorDefecto,
   resolverDiningUrl,
 } from '../utils/qrUrl'
-
-const ROTACION_INTERVALO_SEGUNDOS = 180 // 3 minutos
 
 export function QRModal({
   table,
@@ -58,8 +64,11 @@ export function QRModal({
 
   const [loadingAction, setLoadingAction] = useState(false)
   const [justRotated, setJustRotated] = useState(false)
-  const [segundosRestantes, setSegundosRestantes] = useState(ROTACION_INTERVALO_SEGUNDOS)
   const [autoRotacionHabilitada, setAutoRotacionHabilitada] = useState(true)
+  const [errorRotacion, setErrorRotacion] = useState(null)
+  // El backend dijo 409 mesa_con_comensales: el QR queda fijo aunque el panel
+  // todavía no sepa de esos comensales.
+  const [fijadoPorBackend, setFijadoPorBackend] = useState(false)
 
   const qrRef = useRef(null)
   const { pedidosActivos } = useTables()
@@ -75,79 +84,155 @@ export function QRModal({
       p.estado !== 'cancelado'
   )
   const tieneComensalesOpedidos =
+    fijadoPorBackend ||
     pedidosMesa.length > 0 ||
     Boolean(table?.comensales && table.comensales.length > 0)
+
+  // Cuándo se obtuvo el token que se muestra. 0 = no se sabe (el que había en
+  // memoria al abrir el modal): con la mesa vacía, el socket-server pudo haberlo
+  // rotado ya, así que se pide uno nuevo antes de mostrarlo.
+  const [renovadoEn, setRenovadoEn] = useState(0)
+  const [ahora, setAhora] = useState(() => Date.now())
+  // Al abrir el modal con la mesa abierta y vacía: QR nuevo antes de mostrar nada.
+  const [pendienteApertura, setPendienteApertura] = useState(() =>
+    puedeRotarSolo({ ocupada: isOcupada, tieneComensales: tieneComensalesOpedidos, token })
+  )
+  const reintentos = useRef(0)
+  const temporizadorReintento = useRef(null)
+  const enCurso = useRef(false)
+  // La versión más reciente de ejecutarRotacion, para el reintento diferido.
+  const rotarRef = useRef(null)
+
+  // Copia inmediata de renovadoEn para el reloj: el estado llega un render tarde
+  // y un tic justo después de renovar vería la hora vieja y volvería a rotar.
+  const renovadoRef = useRef(0)
+  const marcarRenovado = useCallback(() => {
+    renovadoRef.current = Date.now()
+    setRenovadoEn(renovadoRef.current)
+    setAhora(Date.now())
+    setErrorRotacion(null)
+    setPendienteApertura(false)
+    reintentos.current = 0
+  }, [])
 
   // Escuchar en vivo si el backend o la tablet rota el QR de esta mesa (evento qr:actualizado)
   useSocketListener('qr:actualizado', (data) => {
     if (data?.id_mesa && Number(data.id_mesa) === tableId && data.token_qr) {
       setToken(data.token_qr)
       if (data?.url) setQrUrl(data.url)
-      setSegundosRestantes(ROTACION_INTERVALO_SEGUNDOS)
+      marcarRenovado()
       setJustRotated(true)
       setTimeout(() => setJustRotated(false), 2000)
     }
   })
 
-  // Función para ejecutar la rotación de QR (manual o automática)
+  /**
+   * Pide un QR nuevo (POST /mesas/:id/rotar-qr). `motivo`: 'manual' (Nuevo QR),
+   * 'apertura' (al abrir el modal), 'tiempo' (antes de que lo rote el
+   * socket-server) o 'reintento'. Solo 'manual' avisa con un toast; nunca rota
+   * solo con comensales dentro. Si falla, no se inventa ningún QR: se dice por
+   * qué y, si es pasajero (503, sin conexión), se reintenta.
+   */
   const ejecutarRotacion = useCallback(
-    async (esAutomatica = false) => {
-      if (loadingAction) return
+    async (motivo = 'manual') => {
+      if (enCurso.current || !onUpdateToken) return
+      if (tieneComensalesOpedidos) {
+        setPendienteApertura(false)
+        return
+      }
+      enCurso.current = true
+      clearTimeout(temporizadorReintento.current)
       setLoadingAction(true)
       try {
-        if (onUpdateToken) {
-          const res = await onUpdateToken(tableId)
-          if (res?.token) {
-            setToken(res.token)
-            if (res?.url) setQrUrl(res.url)
-          }
-        }
-        setSegundosRestantes(ROTACION_INTERVALO_SEGUNDOS)
+        const res = await onUpdateToken(tableId, { silencioso: motivo !== 'manual' })
+        if (!res?.token) throw new Error('El servidor no devolvió el nuevo código QR de la mesa')
+        setToken(res.token)
+        if (res?.url) setQrUrl(res.url)
+        marcarRenovado()
         setJustRotated(true)
         setTimeout(() => setJustRotated(false), 2500)
       } catch (err) {
-        console.warn(
-          `Aviso: rotación ${esAutomatica ? 'automática' : 'manual'} no completada:`,
-          err.message
-        )
+        const e = errorDeRotacion(err)
+        setPendienteApertura(false)
+        if (e.conComensales) {
+          // El aviso de "QR fijo" ya sale en la tarjeta de rotación.
+          setFijadoPorBackend(true)
+          setErrorRotacion(null)
+        } else {
+          setErrorRotacion(e.texto)
+        }
+        if (e.reintentar && reintentos.current < REINTENTOS_MAXIMOS) {
+          reintentos.current += 1
+          temporizadorReintento.current = setTimeout(() => rotarRef.current?.('reintento'), REINTENTO_SEGUNDOS * 1000)
+        } else {
+          // Sin más intentos automáticos: a los 3 minutos sale "QR vencido ·
+          // Generar nuevo" y lo pide el personal.
+          reintentos.current = REINTENTOS_MAXIMOS
+        }
       } finally {
+        enCurso.current = false
         setLoadingAction(false)
       }
     },
-    [loadingAction, onUpdateToken, tableId]
+    [onUpdateToken, tableId, tieneComensalesOpedidos, marcarRenovado]
   )
 
-  // Temporizador de 3 minutos (180s)
-  // Rota automáticamente solo mientras la mesa esté abierta y NO tenga comensales/pedidos
   useEffect(() => {
-    if (!token || !isOcupada || tieneComensalesOpedidos || !autoRotacionHabilitada) {
-      return
+    rotarRef.current = ejecutarRotacion
+  }, [ejecutarRotacion])
+
+  // Al abrir el modal con la mesa abierta y vacía, un QR nuevo.
+  const pidioAlAbrir = useRef(false)
+  useEffect(() => {
+    if (pidioAlAbrir.current || !pendienteApertura) return
+    pidioAlAbrir.current = true
+    ejecutarRotacion('apertura')
+  }, [pendienteApertura, ejecutarRotacion])
+
+  useEffect(() => () => clearTimeout(temporizadorReintento.current), [])
+
+  // Reloj de 1 s mientras la mesa está abierta: renueva antes de los 3 minutos
+  // del socket-server (si la auto-renovación está activa y la mesa vacía).
+  const rotaSola = puedeRotarSolo({ ocupada: isOcupada, tieneComensales: tieneComensalesOpedidos, token })
+
+  // Lo que mira cada tic del reloj, siempre con los valores del último render.
+  // Tras agotar los reintentos no vuelve a intentar solo: queda "QR vencido ·
+  // Generar nuevo" hasta que alguien lo pida.
+  const revisarRef = useRef(null)
+  useEffect(() => {
+    revisarRef.current = () => {
+      const desde = renovadoRef.current
+      if (!rotaSola || !autoRotacionHabilitada || !desde || enCurso.current) return
+      if (reintentos.current > 0) return
+      if ((Date.now() - desde) / 1000 >= RENOVAR_CADA_SEGUNDOS) ejecutarRotacion('tiempo')
     }
+  }, [rotaSola, autoRotacionHabilitada, ejecutarRotacion])
 
+  useEffect(() => {
+    if (!isOcupada || !token) return undefined
     const interval = setInterval(() => {
-      setSegundosRestantes((prev) => {
-        if (prev <= 1) {
-          ejecutarRotacion(true)
-          return ROTACION_INTERVALO_SEGUNDOS
-        }
-        return prev - 1
-      })
+      setAhora(Date.now())
+      revisarRef.current?.()
     }, 1000)
-
     return () => clearInterval(interval)
-  }, [
-    token,
-    isOcupada,
-    tieneComensalesOpedidos,
-    autoRotacionHabilitada,
-    ejecutarRotacion,
-  ])
+  }, [isOcupada, token])
 
-  // Formato mm:ss para el temporizador
+  const edadSegundos = renovadoEn ? Math.floor((ahora - renovadoEn) / 1000) : null
+
+  // Vencido: mesa vacía y el token tiene (o puede tener) más de 3 minutos, o
+  // falló pedir uno nuevo al abrir. Con comensales el QR queda fijo y no vence.
+  const qrVencido =
+    rotaSola &&
+    !pendienteApertura &&
+    (renovadoEn === 0 || edadSegundos >= ROTACION_SOCKET_SEGUNDOS)
+  const qrVigente = Boolean(token) && !pendienteApertura && !qrVencido
+
+  // Formato mm:ss para la próxima renovación
+  const segundosRestantes = Math.max(0, RENOVAR_CADA_SEGUNDOS - (edadSegundos ?? 0))
   const minutos = Math.floor(segundosRestantes / 60)
   const segundos = segundosRestantes % 60
   const tiempoFormateado = `${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`
-  const porcentajeTiempo = ((ROTACION_INTERVALO_SEGUNDOS - segundosRestantes) / ROTACION_INTERVALO_SEGUNDOS) * 100
+  const porcentajeTiempo = ((RENOVAR_CADA_SEGUNDOS - segundosRestantes) / RENOVAR_CADA_SEGUNDOS) * 100
 
   // Extraer host de la url del backend (qr_url) o del navegador si se accede por red
   const backendUrl = qrUrl || table?.qr_url || ''
@@ -190,7 +275,8 @@ export function QRModal({
       : `/pantalla/mesa/${table.number || table.id}`
 
   const handleCopy = () => {
-    if (!diningUrl) return
+    // Un enlace vencido o que todavía no se renovó no se copia.
+    if (!diningUrl || !qrVigente) return
     navigator.clipboard.writeText(diningUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -207,7 +293,9 @@ export function QRModal({
         if (res?.url) {
           setQrUrl(res.url)
         }
-        setSegundosRestantes(ROTACION_INTERVALO_SEGUNDOS)
+        // Recién abierta con /abrir: el token es nuevo, no hace falta rotarlo.
+        pidioAlAbrir.current = true
+        marcarRenovado()
       }
     } finally {
       setLoadingAction(false)
@@ -309,7 +397,30 @@ export function QRModal({
                 position: 'relative',
               }}
             >
-              {token ? (
+              {token && pendienteApertura ? (
+                <div className="qr-placeholder-box" role="status" style={{ padding: '20px 12px', textAlign: 'center' }}>
+                  <RefreshCw size={40} className="spin" style={{ margin: '0 auto 12px auto', color: '#8E827B' }} />
+                  <p style={{ margin: 0, fontSize: '0.9rem', color: '#334155' }}>Generando QR vigente…</p>
+                </div>
+              ) : token && qrVencido ? (
+                <div className="qr-placeholder-box" role="alert" style={{ padding: '20px 12px', textAlign: 'center' }}>
+                  <AlertCircle size={44} style={{ margin: '0 auto 10px auto', color: 'var(--sd-red)' }} />
+                  <p style={{ margin: '0 0 6px 0', fontSize: '1rem', fontWeight: 800, color: '#120E0D' }}>QR vencido</p>
+                  <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', lineHeight: 1.4, color: '#334155' }}>
+                    {errorRotacion || 'El código rota cada 3 minutos mientras la mesa esté vacía; este ya no sirve.'}
+                  </p>
+                  <button
+                    type="button"
+                    className="sd-qr-btn sd-qr-btn-gold"
+                    onClick={() => ejecutarRotacion('manual')}
+                    disabled={loadingAction}
+                    style={{ margin: '0 auto' }}
+                  >
+                    <RefreshCw size={14} className={loadingAction ? 'spin' : ''} />
+                    <span>{loadingAction ? 'Generando...' : 'Generar nuevo'}</span>
+                  </button>
+                </div>
+              ) : token ? (
                 <QRCodeSVG
                   value={diningUrl}
                   size={210}
@@ -327,8 +438,9 @@ export function QRModal({
                   <button
                     type="button"
                     className="sd-qr-btn sd-qr-btn-gold"
-                    onClick={() => ejecutarRotacion(false)}
-                    disabled={loadingAction}
+                    onClick={() => ejecutarRotacion('manual')}
+                    disabled={loadingAction || tieneComensalesOpedidos}
+                    title={tieneComensalesOpedidos ? 'La mesa ya tiene comensales: rotar el QR los sacaría de la mesa' : undefined}
                     style={{ margin: '0 auto' }}
                   >
                     <RefreshCw size={14} className={loadingAction ? 'spin' : ''} />
@@ -505,13 +617,18 @@ export function QRModal({
                     )}
                   </div>
 
-                  {/* Botón Nuevo QR oficial de P-07 */}
+                  {/* Botón Nuevo QR oficial de P-07. Con comensales no se rota:
+                      invalidaría la sesión de quien ya entró. */}
                   <button
                     type="button"
-                    onClick={() => ejecutarRotacion(false)}
-                    disabled={loadingAction}
+                    onClick={() => ejecutarRotacion('manual')}
+                    disabled={loadingAction || tieneComensalesOpedidos}
                     className="sd-qr-btn sd-qr-btn-secondary"
-                    title="Rotar inmediatamente el QR de la mesa (POST /api/mesas/:id/rotar-qr)"
+                    title={
+                      tieneComensalesOpedidos
+                        ? 'La mesa ya tiene comensales: el QR queda fijo'
+                        : 'Rotar inmediatamente el QR de la mesa (POST /api/mesas/:id/rotar-qr)'
+                    }
                     style={{
                       padding: '4px 12px',
                       fontSize: '0.8rem',
@@ -530,9 +647,15 @@ export function QRModal({
                   }}
                 >
                   {tieneComensalesOpedidos
-                    ? '🔒 Hay pedidos en curso. Los comensales conservan su sesión de mesa sin ser interrumpidos.'
+                    ? '🔒 La mesa ya tiene comensales: el QR queda fijo y nadie pierde su sesión. Si este enlace no sirve, usa el QR de la pantalla de la mesa.'
                     : '🛡️ Seguridad: El código rota cada 3 min mientras no haya comensales para invalidar fotos o capturas viejas.'}
                 </div>
+
+                {errorRotacion && !qrVencido && (
+                  <div role="alert" style={{ fontSize: '0.75rem', color: 'var(--sd-red)', lineHeight: 1.35 }}>
+                    {errorRotacion}
+                  </div>
+                )}
               </div>
             )}
 
@@ -688,11 +811,20 @@ export function QRModal({
                   Enlace codificado en el QR:
                 </label>
                 <div className="qr-url-input-group" style={{ display: 'flex', marginTop: 4 }}>
-                  <input type="text" readOnly value={diningUrl} className="sd-input" style={{ borderRadius: '6px 0 0 6px' }} />
+                  <input
+                    type="text"
+                    readOnly
+                    value={qrVigente ? diningUrl : ''}
+                    placeholder={pendienteApertura ? 'Generando QR vigente…' : 'QR vencido: genera uno nuevo'}
+                    aria-label="Enlace del comensal"
+                    className="sd-input"
+                    style={{ borderRadius: '6px 0 0 6px' }}
+                  />
                   <button
                     type="button"
                     className={`sd-qr-btn sd-qr-btn-secondary qr-btn-icon ${copied ? 'copied' : ''}`}
                     onClick={handleCopy}
+                    disabled={!qrVigente}
                     title="Copiar enlace"
                     style={{ borderRadius: '0 6px 6px 0', borderLeft: 'none', minWidth: 90 }}
                   >
