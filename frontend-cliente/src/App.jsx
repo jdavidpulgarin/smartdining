@@ -4,6 +4,7 @@ import { MesaSocketProvider } from './context/MesaSocketContext'
 import { CarritoProvider } from './context/CarritoContext'
 import Layout from './components/layout/Layout'
 import Inicio from './pages/Inicio'
+import Carta from './pages/Carta'
 import Menu from './pages/Menu'
 import Constructor from './pages/Constructor'
 import Carrito from './pages/Carrito'
@@ -14,12 +15,11 @@ import UiShowcase from './pages/dev/UiShowcase'
 import './styles/seguimiento.css'
 import './styles/cuenta.css'
 
-function App() {
+function RutasMesa() {
   return (
-    <BrowserRouter>
-      <SesionProvider>
-        <MesaSocketProvider>
-          <CarritoProvider>
+    <SesionProvider>
+      <MesaSocketProvider>
+        <CarritoProvider>
           <Routes>
             <Route path="/" element={<Inicio />} />
             <Route
@@ -70,7 +70,17 @@ function App() {
         </CarritoProvider>
       </MesaSocketProvider>
     </SesionProvider>
-  </BrowserRouter>
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/carta" element={<Carta />} />
+        <Route path="/*" element={<RutasMesa />} />
+      </Routes>
+    </BrowserRouter>
   )
 }
 
