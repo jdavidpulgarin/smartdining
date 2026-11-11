@@ -1402,6 +1402,24 @@ puede no ser el que escribió el mesero.
 { "error": "No se pudo agregar al comensal, intenta de nuevo en unos segundos", "motivo": "alias_no_disponible" }
 ```
 
+**El 409 `alias_en_uso` trae el alias guardado** (revisión del #119), en un campo `alias`
+**opcional**:
+
+```json
+{ "error": "Ese nombre ya lo usa otra persona en la mesa, elige otro", "motivo": "alias_en_uso", "alias": "Abuela" }
+```
+
+- Es el texto **tal como está guardado**, no el que se envió: con «Abuela» ya reservada, un
+  `POST` con `abuela` devuelve `"alias": "Abuela"`. Sirve para que el panel ofrezca pedir
+  para esa persona en vez de inventar otro nombre.
+- **Puede faltar.** Si la reserva no se puede leer (Redis no responde, el valor guardado no
+  tiene texto legible, o la lectura falla), el 409 sale igual que antes, **sin** `alias`. Nunca
+  se convierte en 500 ni en 503 por esto: el cliente tiene que tratar `alias` como opcional.
+- No se registra en el log.
+- **El 409 de la sesión por QR (`POST /mesas/qr/:token/sesion`) NO lo trae**, a propósito:
+  quien escanea el QR no es personal, y devolverle el texto exacto le daría el nombre de otra
+  persona de la mesa para entrar como ella.
+
 El **503 `alias_no_disponible`** es el mismo comportamiento que las sesiones de QR: sin
 Redis no hay unicidad garantizada, y una mesa sin unicidad de alias permite cargarle los
 platos a otra persona, así que **falla cerrada** y no se da de alta a nadie.
@@ -1503,10 +1521,11 @@ comensal conectado.
 
 #### El aviso interno `POST /internal/mesa-comensal`
 
-> **Depende de R-19 y del PR #99, que todavía es una PROPUESTA.** El contrato está en
-> `socket-server/EVENTS.md` §6.4 de la rama `docs/socket-contratos-v11`, **sin fusionar**, y
-> la ruta puede **no existir aún** en el socket-server. Nada de la API REST depende de que
-> funcione.
+> **El contrato es `socket-server/EVENTS.md` §6.4, Estable desde R-19.2** (ruta implementada
+> en `socket-server/src/mesa-comensal.js`). Aun así, nada de la API REST depende de que
+> funcione: si el socket-server responde 404 o no hay nadie escuchando, el aviso falla y la
+> respuesta HTTP del mesero sigue siendo correcta, porque la reserva del alias ya está hecha
+> en el backend, que es la fuente de verdad.
 
 Tras reservar o soltar el alias, el backend manda:
 
@@ -1518,18 +1537,20 @@ El socket-server lo suma a `sd:mesa:{id}:sin_celular` y lo incluye en `mesa:pres
 (§6.4 y §5.2), así cuenta para «igual» y puede pagar en caja con su alias.
 
 - **`accion`** es `"agregar"` o `"quitar"`.
-- **El `alias` que viaja es SIEMPRE el texto con el que se reservó**, en las dos acciones:
-  §6.4 compara **texto idéntico** para quitar, así que mandar lo que escribió el mesero
-  —con otra capitalización, una tilde de más o un espacio doble— dejaría a la persona
-  sentada para siempre.
+- **El `alias` que viaja es SIEMPRE el texto con el que se reservó**, en las dos acciones.
+  El socket-server compara `quitar` por **clave** (§6.4, R-19.2), con la misma normalización
+  de [`alias-comensal.js`](../src/services/alias-comensal.js) —sin tildes, en minúsculas y
+  sin espacios ni `. _ ' -`—: busca en `sin_celular` el alias guardado cuya clave coincida y
+  quita **ese**. Por eso el backend puede mandar el alias tal como está guardado, sin que
+  importen la capitalización, una tilde o un espacio doble.
 
   Al **agregar** es el alias que acaba de normalizarse y reservarse. Al **quitar** es el que
   la reserva tenía **guardado**, no el de la URL: el `DELETE` libera la reserva por
-  **clave**, así que `DELETE …/comensales/abuela` sobre la reserva de «Abuela» responde 204 y
-  suelta la reserva, pero el socket-server solo quita a «Abuela» si recibe ese mismo texto.
-  Mandando el de la URL, la persona se quedaba **24 h** en la presencia de la mesa. Así, el
-  par `agregar`/`quitar` de una misma persona siempre viaja con el mismo texto, letra por
-  letra.
+  **clave**, así que `DELETE …/comensales/abuela` sobre la reserva de «Abuela» responde 204,
+  suelta la reserva y el socket-server quita a «Abuela» igual, porque la clave es la misma.
+  Se manda el guardado porque es el texto real de esa persona: así el par
+  `agregar`/`quitar` de una misma persona viaja con el mismo texto, y repetir un `agregar`
+  es «sin cambio» en vez de un `409 ALIAS_EN_USO` por un alias distinto con la misma clave.
 
   La única excepción es un alias que **no está reservado** (el 204 idempotente): ahí se
   manda el **normalizado de la URL**, porque no hay otro texto de donde sacarlo.
@@ -1817,7 +1838,9 @@ comensal de su mesa.
 **400** `{ "error": "...", "campo": "comensal" }` si falta el alias o no cumple las reglas.
 
 **409** `{ "motivo": "alias_en_uso" }` si otro comensal de la sesión ya tiene ese alias:
-la PWA debe pedir otro nombre.
+la PWA debe pedir otro nombre. **Sin campo `alias`**, a diferencia del alta del personal
+(`POST /mesas/:id/comensales`): devolver el texto guardado le daría a quien escanea el nombre
+exacto de otra persona de la mesa para entrar como ella.
 
 **503** si el socket-server no responde (sin validar no se puede dejar entrar a nadie) o,
 con `motivo: "alias_no_disponible"`, si no se pudo reservar el alias.
@@ -3654,7 +3677,7 @@ El backend los escucha en `src/services/inventario-avisos.js` y los reenvía al 
 |---|---|---|
 | `disponibilidad` de un plato | `POST /internal/plato-disponibilidad` | lo que viaja es el **efectivo** (`disponible AND stock_suficiente`) |
 | `disponibilidad` de una opción | `POST /internal/ingrediente-disponibilidad` | igual |
-| `stock_bajo` | `POST /internal/inventario-alerta` | contrato de EVENTS.md §5.5 (propuesta v1.1) |
+| `stock_bajo` | `POST /internal/inventario-alerta` | contrato de EVENTS.md §5.5 (Estable, R-20.2) |
 
 - **Conexión dedicada, no una del pool.** `LISTEN` vive en la conexión: una del pool se
   devuelve en cuanto acaba la consulta y la siguiente petición la usaría —con su `LISTEN`
