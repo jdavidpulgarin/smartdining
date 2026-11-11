@@ -151,9 +151,34 @@ Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "123456", "
 
 `rol` es obligatorio y solo acepta `admin`, `mesero`, `cajero`, `cocina`.
 
+`password`: mínimo **6 caracteres** y como mucho **72 bytes** en UTF-8 (ver
+[La clave máxima: 72 bytes](#la-clave-máxima-72-bytes)).
+
 201: `{ "usuario": { "id_usuario": 1, "nombre": "Ana Ríos", "email": "ana@mail.com", "rol": "mesero", "activo": true } }`
 
-400: `{ "error": "Ese email ya está registrado" }` · 401 sin token · 403 si el token no es de un admin
+400: `{ "error": "Ese email ya está registrado" }` · 400 `{ "error", "motivo": "clave_demasiado_larga" }` · 401 sin token · 403 si el token no es de un admin
+
+#### La clave máxima: 72 bytes
+
+bcrypt solo usa los **primeros 72 BYTES** de una contraseña y descarta el resto **en
+silencio**: con una clave más larga, cualquier texto con el mismo comienzo entraría. Por eso
+toda clave que se **fija o cambia** (`POST /auth/register` y `POST /usuarios/:id/clave`, los
+dos únicos sitios que llaman a `bcrypt.hash`) se rechaza si pasa de 72 bytes en UTF-8:
+
+```json
+400 { "error": "La contraseña no puede pasar de 72 bytes; las letras con tilde y los emojis ocupan más de uno", "motivo": "clave_demasiado_larga" }
+```
+
+- Se cuentan **bytes**, no caracteres: una `ñ` o una tilde son 2 bytes y un emoji, 4. 72 `a`
+  entran; 25 `ñ` (50 bytes) entran; 37 `ñ` (74 bytes) no; 69 letras y un emoji (73 bytes, 70
+  caracteres) no.
+- Los **demás** 400 de validación de esas rutas no cambian de forma: `{ "error" }` sin
+  `motivo`. El `motivo` solo acompaña a este caso, para que el panel lo distinga sin comparar
+  textos.
+- **El login no lleva tope**, a propósito: quien creó una clave más larga antes de esta regla
+  sigue entrando con ella (bcrypt la compara truncada, igual que la guardó).
+- Los mínimos **no** son iguales: 6 caracteres al registrar y 8 al cambiar la clave.
+- La regla vive en un solo sitio: `src/utils/clave-bcrypt.js`.
 
 ### POST /auth/login
 
@@ -283,10 +308,9 @@ Body: `{ "password": "clave-nueva-larga" }`, `.strict()`.
   UTF-8, así que una clave de 40 caracteres puede pasarse de 72 bytes. Contando caracteres,
   esa clave entraría, bcrypt la cortaría por la mitad y el usuario acabaría con una
   contraseña que no es la que escribió. Rechazarla es mejor que cortarla sin avisar.
-
-  > `POST /auth/register` **no** valida igual: pide `password` de **mínimo 6 caracteres y
-  > sin máximo**, así que por ahí una clave larga sí se trunca en silencio. No se cambia en
-  > este PR para no tocar un contrato ya publicado; queda anotado.
+  Responde 400 `{ "error", "motivo": "clave_demasiado_larga" }`; es la misma regla que
+  `POST /auth/register` (ver [La clave máxima: 72 bytes](#la-clave-máxima-72-bytes)), que
+  antes no la tenía.
 - Se guarda con el **mismo bcrypt y el mismo costo** que `/auth/register` (`COSTO_BCRYPT`,
   importado y no copiado): dos costos distintos en el proyecto producen hashes que el login
   reconoce pero que cuestan tiempos distintos, y eso es justo lo que evita H-12.
