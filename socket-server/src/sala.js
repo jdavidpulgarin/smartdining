@@ -2,7 +2,9 @@ const { exito, fallo, manejar } = require('./ack');
 const { log } = require('./log');
 const { ROL_COMENSAL } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
-const { salaMesa, SALA_ADMIN, estaEnMesa } = require('./salas');
+const {
+  salaMesa, SALA_ADMIN, ROLES_ADMIN, estaEnMesa,
+} = require('./salas');
 const {
   ErrorHttp, enviarJson, leerCuerpoCrudo, parsearJson, exigirClaveInterna,
 } = require('./http');
@@ -12,6 +14,12 @@ const MAX_MOTIVO = 100;
 // de 6 y todos escanean a la vez, el panel recibe 1-2 avisos y no 6.
 const VENTANA_PRESENCIA_MS = 500;
 const PREFIJO_SALA_MESA = 'room:mesa-';
+// La presencia inicial sale 500 ms después de conectar: el panel crea el
+// socket al renderizar y registra sus listeners después (useEffect). Si sale
+// antes, Socket.io la descarta en el cliente porque nadie la escucha todavía.
+const RETRASO_PRESENCIA_INICIAL_MS = 500;
+// mesa:presencia:solicitar: como mucho una por socket cada 2 s.
+const LIMITE_SOLICITUD_PRESENCIA_MS = 2000;
 
 /**
  * Presencia de comensales por mesa, calculada de los sockets que de verdad
@@ -30,7 +38,9 @@ const PREFIJO_SALA_MESA = 'room:mesa-';
  * mesa al instante si no hubo aviso reciente; si lo hubo, deja uno pendiente
  * para el final de la ventana, así el último estado siempre llega.
  */
-function crearPresencia({ io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS }) {
+function crearPresencia({
+  io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS, retrasoInicialMs = RETRASO_PRESENCIA_INICIAL_MS,
+}) {
   const ventanas = new Map(); // idMesa -> { pendiente: boolean, temporizador }
 
   async function calcular(idMesa) {
@@ -83,10 +93,7 @@ function crearPresencia({ io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS }) {
   }
 
   /**
-   * Presencia de cada mesa con algo, SOLO a `socket`: el personal que acaba de
-   * conectarse (o recargó el panel) la tiene al instante, sin esperar al
-   * siguiente cambio. No pasa por programar(): ni los demás paneles ni las
-   * mesas reciben nada.
+   * Presencia de cada mesa con algo, ordenada por id_mesa.
    *
    * Mesas candidatas, sin consultar al backend:
    * - las salas room:mesa-N de este proceso (hay una sola instancia y no hay
@@ -94,26 +101,49 @@ function crearPresencia({ io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS }) {
    * - el índice de mesas con pagos o sin celular anotados, que cubre una mesa
    *   sin ningún socket conectado.
    * Se omiten las vacías (una tablet sola en su sala, o una mesa cerrada):
-   * para el panel, que no llegue evento es lo mismo que 0 comensales.
+   * para el panel, que no llegue una mesa es lo mismo que 0 comensales.
    */
-  async function enviarInicial(socket) {
+  async function listarConEstado() {
     const candidatas = new Set(await estadoMesas.mesasConEstado());
     for (const sala of io.of('/').adapter.rooms.keys()) {
       const m = /^room:mesa-(\d+)$/.exec(sala);
       if (m) candidatas.add(Number(m[1]));
     }
     const presencias = await Promise.all([...candidatas].sort((a, b) => a - b).map(calcular));
-    let enviadas = 0;
-    for (const p of presencias) {
-      if (p.total > 0 || p.pagaron.length > 0 || p.sin_celular.length > 0) {
-        socket.emit('mesa:presencia', p);
-        enviadas += 1;
-      }
-    }
-    return enviadas;
+    return presencias.filter((p) => p.total > 0 || p.pagaron.length > 0 || p.sin_celular.length > 0);
   }
 
-  return { calcular, programar, enviarInicial };
+  /**
+   * Envía esa presencia SOLO a `socket` (personal que acaba de conectarse o
+   * recargó el panel), un mesa:presencia por mesa. No pasa por programar():
+   * ni los demás paneles ni las mesas reciben nada.
+   */
+  async function enviarInicial(socket) {
+    const presencias = await listarConEstado();
+    if (!socket.connected) return 0;
+    for (const p of presencias) socket.emit('mesa:presencia', p);
+    return presencias.length;
+  }
+
+  /**
+   * Programa enviarInicial a `retrasoInicialMs` de la conexión, para que el
+   * panel ya tenga registrados sus listeners. Si el socket se desconecta antes,
+   * no se envía nada (ni se calcula). Es el respaldo de quien no usa
+   * mesa:presencia:solicitar (EVENTS.md §5.2).
+   */
+  function programarInicial(socket) {
+    const h = setTimeout(() => {
+      if (!socket.connected) return;
+      enviarInicial(socket)
+        .catch((err) => log.error('presencia: no se pudo enviar la inicial', { socket: socket.id, error: err }));
+    }, retrasoInicialMs);
+    if (h.unref) h.unref(); // no impide el cierre ordenado del proceso
+    socket.once('disconnect', () => clearTimeout(h));
+  }
+
+  return {
+    calcular, programar, listarConEstado, enviarInicial, programarInicial,
+  };
 }
 // Una mesa puede llamar al mesero una vez por minuto: suficiente para pedir
 // ayuda de verdad y corta el abuso de un comensal que pulsa sin parar.
@@ -215,6 +245,27 @@ function registrarSala(socket, ctx) {
   socket.on('disconnect', () => {
     for (const idMesa of mesasAlSalir) ctx.presencia.programar(idMesa);
   });
+
+  /**
+   * mesa:presencia:solicitar — el panel pide la presencia de todas las mesas
+   * con algo y la recibe EN EL ACK ({ ok, mesas: [...] }), sin eventos sueltos:
+   * no depende de que sus listeners estén registrados. Se recomienda en cada
+   * 'connect' (EVENTS.md §5.2). Solo personal (admin, mesero, cajero), y como
+   * mucho una vez cada 2 s por socket: si se excede, no se calcula nada.
+   */
+  let ultimaSolicitudPresencia = 0;
+  socket.on('mesa:presencia:solicitar', manejar('mesa:presencia:solicitar', async () => {
+    const { rol } = socket.data.identidad;
+    if (!ROLES_ADMIN.includes(rol)) {
+      return fallo('NO_AUTORIZADO', 'Solo el personal de sala puede pedir la presencia de las mesas');
+    }
+    const ahora = Date.now();
+    if (ahora - ultimaSolicitudPresencia < LIMITE_SOLICITUD_PRESENCIA_MS) {
+      return fallo('RATE_LIMIT', `Máximo una solicitud de presencia cada ${LIMITE_SOLICITUD_PRESENCIA_MS / 1000} s`);
+    }
+    ultimaSolicitudPresencia = ahora;
+    return exito({ mesas: await ctx.presencia.listarConEstado() });
+  }));
 
   /**
    * mesa:llamar_mesero — el comensal pide atención. Va solo al panel.
@@ -395,5 +446,5 @@ const rutasSala = {
 
 module.exports = {
   rutasSala, MAX_NOMBRE_INSUMO, MAX_UNIDAD_INSUMO,
-  registrarSala, crearEstadoMesasMemoria, crearPresencia, VENTANA_PRESENCIA_MS, validarComensalEnSala, LIMITE_LLAMADA_SEG, MAX_MOTIVO,
+  registrarSala, crearEstadoMesasMemoria, crearPresencia, VENTANA_PRESENCIA_MS, RETRASO_PRESENCIA_INICIAL_MS, LIMITE_SOLICITUD_PRESENCIA_MS, validarComensalEnSala, LIMITE_LLAMADA_SEG, MAX_MOTIVO,
 };
