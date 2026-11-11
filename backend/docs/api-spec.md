@@ -147,7 +147,7 @@ desde `recibido` o `en_preparacion` (ver *Transiciones válidas* arriba).
 Da de alta personal del restaurante. El comensal no se registra.
 El primer `admin` sale del `seed.sql` de Jarrison, no de este endpoint.
 
-Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "123456", "rol": "mesero" }`
+Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "12345678", "rol": "mesero" }`
 
 `rol` es obligatorio y solo acepta `admin`, `mesero`, `cajero`, `cocina`.
 
