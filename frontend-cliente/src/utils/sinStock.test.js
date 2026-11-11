@@ -3,6 +3,8 @@ import {
   faltantesDelItem,
   resumenFaltantes,
   accionErrorPedido,
+  marcasAgotadoTrasRecarga,
+  actualizarMarcasPorDisponibilidad,
   estadoStockPlato,
   MENSAJE_CRUCE_PEDIDO,
   MENSAJE_ERROR_PEDIDO_GENERICO,
@@ -280,6 +282,82 @@ describe('sinStock - logica pura de faltantes de inventario (J-17)', () => {
       const accionTimeout = accionErrorPedido(err503Timeout);
       expect(accionTimeout.tipo).toBe(503);
       expect(accionTimeout.mensaje).toContain('tardó demasiado');
+    });
+  });
+
+  describe('marcasAgotadoTrasRecarga y actualizarMarcasPorDisponibilidad', () => {
+    const menuNuevo = {
+      categorias: [
+        {
+          id_categoria: 1,
+          categoria: 'Bebidas',
+          platos: [{ id_plato: 1008, nombre: 'Limonada de Coco' }],
+        },
+        {
+          id_categoria: 2,
+          categoria: 'Arma tu plato',
+          platos: [
+            {
+              id_plato: 1001,
+              nombre: 'Bowl Personalizado',
+              personalizable: true,
+              pasos: [
+                {
+                  id_paso: 103,
+                  nombre: 'Toppings',
+                  ingredientes: [
+                    { id_ingrediente: 10, nombre: 'Aguacate', disponible: true },
+                    { id_ingrediente: 7, nombre: 'Panceta Crujiente', disponible: false },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    it('limpia la marca local si el plato vuelve a aparecer en GET /menu y conserva los que no aparecen', () => {
+      const marcasObjetos = [
+        { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
+        { tipo: 'plato', id: 1099, nombre: 'Plato Sin Stock' },
+      ];
+      expect(marcasAgotadoTrasRecarga(marcasObjetos, menuNuevo)).toEqual([
+        { tipo: 'plato', id: 1099, nombre: 'Plato Sin Stock' },
+      ]);
+
+      const marcasIds = [1008, 1099];
+      expect(marcasAgotadoTrasRecarga(marcasIds, menuNuevo)).toEqual([1099]);
+
+      const marcasSet = new Set([1008, 1099]);
+      expect(marcasAgotadoTrasRecarga(marcasSet, menuNuevo)).toEqual(
+        new Set([1099])
+      );
+    });
+
+    it('limpia ingrediente que vuelve disponible en GET /menu y conserva el que sigue disponible: false', () => {
+      const marcasIng = [
+        { tipo: 'ingrediente', id: 10, nombre: 'Aguacate' },
+        { tipo: 'ingrediente', id: 7, nombre: 'Panceta Crujiente' },
+      ];
+      expect(marcasAgotadoTrasRecarga(marcasIng, menuNuevo)).toEqual([
+        { tipo: 'ingrediente', id: 7, nombre: 'Panceta Crujiente' },
+      ]);
+    });
+
+    it('limpia la marca local cuando llega plato:disponibilidad con disponible: true', () => {
+      const marcas = [
+        { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
+        { tipo: 'plato', id: 1099, nombre: 'Otro Plato' },
+      ];
+      const trasReponer = actualizarMarcasPorDisponibilidad(marcas, {
+        tipo: 'plato',
+        id_plato: 1008,
+        disponible: true,
+      });
+      expect(trasReponer).toEqual([
+        { tipo: 'plato', id: 1099, nombre: 'Otro Plato' },
+      ]);
     });
   });
 
