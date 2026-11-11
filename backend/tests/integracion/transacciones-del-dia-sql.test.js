@@ -94,6 +94,16 @@ async function limpiar() {
     await pedidosService.actualizarEstado(id_pedido, 'cancelado', 'limpieza de la prueba de caja', null);
   }
 
+  // 2b. Los que ya no se pueden cancelar (entregados o pagados, de la prueba de
+  //     referencia_pago): cerrar su reserva con fn_cerrar_reserva_detalle(id,
+  //     false), que DEVUELVE el stock y no hace nada si ya estaba cerrada.
+  await sonda.query(
+    `SELECT fn_cerrar_reserva_detalle(dp.id_detalle, false)
+       FROM detalles_pedido dp JOIN pedidos p ON p.id_pedido = dp.id_pedido
+      WHERE p.id_mesa = $1 ORDER BY dp.id_detalle`,
+    [idMesa]
+  );
+
   // 3. El libro de sus detalles (reserva + devolución, ya neteadas), el pedido
   //    (detalles e historial caen en cascada) y la mesa.
   await sonda.query(
@@ -374,4 +384,88 @@ test('caja: a las 20:00 de Bogota (ya mañana en UTC) "hoy" y el tope son los de
   const fuera = await transaccionesService.listarDelDia({ desde: '2026-02-07', ahora });
   assert.strictEqual(fuera.invalido, 'antigua');
   assert.strictEqual(fuera.minimo, '2026-02-08');
+});
+
+// ---------------------------------------------------------------------------
+// referencia_pago: las filas de un mismo pago repartido se agrupan
+// ---------------------------------------------------------------------------
+
+test('referencia_pago: un pago en linea repartido en 3 pedidos sale con la misma referencia; un cobro por pedido, null', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const crypto = require('node:crypto');
+  const { rows: pl } = await sonda.query(
+    `SELECT id_plato FROM platos
+      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
+      ORDER BY id_plato LIMIT 1`
+  );
+  const { rows: us } = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
+  const idUsuario = us[0].id_usuario;
+
+  // Dos pedidos más, entregados, y un cuarto en 'recibido' (el más nuevo).
+  const nuevos = [];
+  for (let i = 0; i < 3; i++) {
+    const p = await pedidosService.crearConDetalles({
+      id_mesa: mesa.id_mesa, id_usuario: idUsuario, items: [{ id_plato: pl[0].id_plato, cantidad: 1 }],
+    });
+    if (i < 2) {
+      for (const e of ['en_preparacion', 'listo', 'entregado']) {
+        await pedidosService.actualizarEstado(p.id_pedido, e, null, idUsuario);
+      }
+    }
+    nuevos.push(p.id_pedido);
+  }
+
+  // Cobro POR PEDIDO, sin referencia, sobre el cuarto: abono de 100.
+  const porPedido = await transaccionesService.registrarPago({
+    id_pedido: nuevos[2], metodo_pago: 'efectivo', monto: 100, id_usuario: idUsuario,
+  });
+  const idPorPedido = porPedido.transaccion.id_transaccion;
+
+  // Pago EN LÍNEA por el saldo exacto de los 3 pedidos más viejos de la mesa
+  // (el principal de la suite y los dos nuevos entregados): 3 filas, 'ref',
+  // 'ref#2', 'ref#3'. La referencia lleva un '#' en medio a propósito.
+  const ref = `PRUEBA-9#A-${crypto.randomUUID()}`;
+  const ids = [pedido.id_pedido, nuevos[0], nuevos[1]];
+  const { rows: s } = await sonda.query(
+    `SELECT SUM(ROUND(obtener_saldo_pendiente(id_pedido) * 100))::bigint AS c
+       FROM pedidos WHERE id_pedido = ANY($1::int[])`,
+    [ids]
+  );
+  const interno = await transaccionesService.registrarPagoInterno({
+    referencia_externa: ref, id_mesa: mesa.id_mesa, comensal: null,
+    monto_centavos: Number(s[0].c), metodo_pago: 'online',
+  });
+  assert.strictEqual(interno.duplicado, false);
+
+  const { rows: guardadas } = await sonda.query(
+    `SELECT id_pedido, referencia_externa FROM transacciones
+      WHERE referencia_externa LIKE $1::text ORDER BY referencia_externa`,
+    [`${ref}%`]
+  );
+  assert.deepStrictEqual(
+    guardadas.map((g) => g.referencia_externa),
+    [ref, `${ref}#2`, `${ref}#3`],
+    'en la base: la referencia y sus sufijos'
+  );
+
+  const resumen = await transaccionesService.listarDelDia({ desde: 'hoy' });
+  const delPago = resumen.transacciones.filter((x) => guardadas.some((g) => g.id_pedido === x.id_pedido && x.metodo_pago === 'online'));
+  assert.strictEqual(delPago.length, 3, 'las 3 filas del pago repartido');
+  assert.deepStrictEqual(delPago.map((x) => x.referencia_pago), [ref, ref, ref], 'la misma referencia, sin #n, con su # de en medio');
+  assert.deepStrictEqual(delPago.map((x) => x.id_pedido).sort((a, b) => a - b), [...ids].sort((a, b) => a - b));
+
+  const caja = resumen.transacciones.find((x) => x.id_transaccion === idPorPedido);
+  assert.ok(caja, 'el cobro por pedido sale');
+  assert.strictEqual(caja.referencia_pago, null);
+
+  for (const x of resumen.transacciones) {
+    assert.ok(!('referencia_externa' in x), 'la referencia en crudo no sale');
+  }
+
+  // Agrupar por referencia_pago da UN pago de 3 filas.
+  const grupos = new Map();
+  for (const x of delPago) grupos.set(x.referencia_pago, (grupos.get(x.referencia_pago) || 0) + x.monto);
+  assert.strictEqual(grupos.size, 1);
+  assert.strictEqual(Math.round(grupos.get(ref) * 100), Number(s[0].c));
 });
