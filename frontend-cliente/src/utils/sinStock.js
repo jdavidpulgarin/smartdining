@@ -247,12 +247,7 @@ export function faltantesDelItem(item, faltantes) {
       }
       if (f.nombre) {
         const buscado = f.nombre.toLowerCase();
-        if (nombresIngredientes.length > 0) {
-          return nombresIngredientes.some((n) => n.toLowerCase() === buscado);
-        }
-        if (f.id == null && idsIngredientes.length > 0) {
-          return true;
-        }
+        return nombresIngredientes.some((n) => n.toLowerCase() === buscado);
       }
       return false;
     }

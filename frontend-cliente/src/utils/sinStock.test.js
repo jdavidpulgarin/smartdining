@@ -321,26 +321,41 @@ describe('sinStock - logica pura de faltantes de inventario (J-17)', () => {
       expect(faltantesDelItem(carrito[2], accion.faltantes)).toEqual([]);
     });
 
-    it('409 ingrediente_agotado marca la linea armable incluso si el item no trae detalle con nombres', () => {
+    it('con dos platos armables (Bowl CON Aguacate y Wrap SIN Aguacate), 409 ingrediente_agotado de Aguacate solo marca el Bowl y no el Wrap', () => {
       const carrito = [
         {
           id_linea: 'l-bowl',
           id_plato: 1001,
           nombre: 'Bowl Personalizado',
           cantidad: 1,
-          ingredientes: [{ id_ingrediente: 7, porcion: 'normal' }],
+          ingredientes: [
+            { id_ingrediente: 1, porcion: 'normal' },
+            { id_ingrediente: 10, porcion: 'normal' },
+          ],
+          detalle: [
+            { paso: 'Elige tu Base', nombre: 'Arroz Integral', porcion: 'normal' },
+            { paso: 'Añade Toppings', nombre: 'Aguacate', porcion: 'normal' },
+          ],
         },
         {
-          id_linea: 'l-limonada',
-          id_plato: 1008,
-          nombre: 'Limonada de Coco',
+          id_linea: 'l-wrap',
+          id_plato: 1002,
+          nombre: 'Wrap Personalizado',
           cantidad: 1,
+          ingredientes: [
+            { id_ingrediente: 17, porcion: 'normal' },
+            { id_ingrediente: 19, porcion: 'normal' },
+          ],
+          detalle: [
+            { paso: 'Tipo de Tortilla', nombre: 'Tortilla de Harina', porcion: 'normal' },
+            { paso: 'Elige tu Proteína', nombre: 'Pollo a la Plancha', porcion: 'normal' },
+          ],
         },
       ];
       const err = {
         status: 409,
         motivo: 'ingrediente_agotado',
-        error: 'El ingrediente "Panceta Crujiente" está agotado',
+        error: 'El ingrediente "Aguacate" está agotado',
       };
 
       const accion = accionErrorPedido(err, carrito);
@@ -348,13 +363,57 @@ describe('sinStock - logica pura de faltantes de inventario (J-17)', () => {
       expect(accion.tipo).toBe('sin_stock');
       expect(accion.motivo).toBe('ingrediente_agotado');
       expect(accion.idsLineasAfectadas).toEqual(['l-bowl']);
-      expect(accion.faltantes).toEqual([
-        { tipo: 'ingrediente', id: null, nombre: 'Panceta Crujiente' },
-      ]);
-      expect(faltantesDelItem(carrito[0], accion.faltantes)).toEqual([
-        { tipo: 'ingrediente', id: null, nombre: 'Panceta Crujiente' },
-      ]);
+      expect(faltantesDelItem(carrito[0], accion.faltantes)).toHaveLength(1);
+      expect(faltantesDelItem(carrito[0], accion.faltantes)[0].nombre).toBe(
+        'Aguacate'
+      );
       expect(faltantesDelItem(carrito[1], accion.faltantes)).toEqual([]);
+    });
+
+    it('en carrito compartido con lineas de dos comensales distintos, 409 ingrediente_agotado marca solo la linea que lleva ese ingrediente', () => {
+      const carritoCompartido = [
+        {
+          id_linea: 'l-ana-wrap',
+          comensal: 'Ana',
+          esMia: true,
+          id_plato: 1002,
+          nombre: 'Wrap Personalizado',
+          cantidad: 1,
+          ingredientes: [{ id_ingrediente: 17, porcion: 'normal' }],
+          detalle: [
+            { paso: 'Tipo de Tortilla', nombre: 'Tortilla de Harina', porcion: 'normal' },
+          ],
+        },
+        {
+          id_linea: 'l-luis-bowl',
+          comensal: 'Luis',
+          esMia: false,
+          id_plato: 1001,
+          nombre: 'Bowl Personalizado',
+          cantidad: 1,
+          ingredientes: [
+            { id_ingrediente: 1, porcion: 'normal' },
+            { id_ingrediente: 7, porcion: 'normal' },
+          ],
+          detalle: [
+            { paso: 'Elige tu Base', nombre: 'Arroz Integral', porcion: 'normal' },
+            { paso: 'Elige tu Proteína', nombre: 'Panceta Crujiente', porcion: 'normal' },
+          ],
+        },
+      ];
+      const err = new ErrorApi({
+        status: 409,
+        motivo: 'ingrediente_agotado',
+        mensaje: 'El ingrediente "Panceta Crujiente" está agotado',
+      });
+
+      const accion = accionErrorPedido(err, carritoCompartido);
+
+      expect(accion.idsLineasAfectadas).toEqual(['l-luis-bowl']);
+      expect(faltantesDelItem(carritoCompartido[0], accion.faltantes)).toEqual([]);
+      expect(faltantesDelItem(carritoCompartido[1], accion.faltantes)).toEqual([
+        { tipo: 'ingrediente', id: 7, nombre: 'Panceta Crujiente' },
+      ]);
     });
 
     it('503 reintentar devuelve el mensaje exacto de cruce de pedidos', () => {
