@@ -266,17 +266,43 @@ nada: ver [6. Staging](#6-staging).
 
 ### 3.1 Llave SSH solo para despliegues
 
-En tu máquina (no en el VPS):
+Es el mismo flujo que el de la llave de staging ([6.4](#64-despliegue-automático-desde-develop)),
+pero con una llave **propia** de producción. Nunca reutilices la de staging.
+`ssh-copy-id` no sirve aquí: `deploy` no tiene contraseña, y la llave quedaría
+sin `restrict`.
 
-```bash
-ssh-keygen -t ed25519 -N "" -C "github-deploy-smartdining" -f deploy_smartdining
-ssh-copy-id -i deploy_smartdining.pub deploy@IP_DEL_VPS
-ssh-keyscan -t ed25519 IP_DEL_VPS        # huella del servidor para VPS_KNOWN_HOSTS
-```
+1. El **dueño del repositorio**, en su máquina (Git Bash), crea el environment
+   `produccion` (3.2) y luego:
 
-Verifica que la huella de `ssh-keyscan` coincide con la del VPS
-(`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` en el VPS). Después borra
-`deploy_smartdining` de tu máquina: queda solo en GitHub.
+   ```bash
+   ssh-keygen -t ed25519 -N "" -C "github-deploy-produccion-smartdining" -f deploy_produccion
+   gh secret set VPS_SSH_KEY --env produccion --repo jdavidpulgarin/smartdining < deploy_produccion
+   rm -f deploy_produccion            # la privada queda SOLO en GitHub
+   cat deploy_produccion.pub          # esta línea (la pública) es la que pasa al responsable del VPS
+   ```
+
+2. El **responsable del VPS** la agrega al usuario `deploy` con `restrict`
+   delante (sin terminal ni reenvíos), sin duplicarla ni tocar las otras:
+
+   ```bash
+   LLAVE='ssh-ed25519 AAAA... github-deploy-produccion-smartdining'
+   printf '%s\n' "$LLAVE" | ssh-keygen -lf -     # la huella: compárala con la del dueño
+   sudo -u deploy sh -c 'f=/home/deploy/.ssh/authorized_keys; grep -qF "$1" "$f" || printf "restrict %s\n" "$1" >> "$f"' sh "$LLAVE"
+   sudo stat -c '%a %U:%G' /home/deploy/.ssh /home/deploy/.ssh/authorized_keys   # 700 y 600, deploy:deploy
+   ```
+
+   `restrict` no limita los comandos: ver "⚠️ `deploy` en el grupo `docker`
+   equivale a root" en [Preparar el servidor](#preparar-el-servidor).
+
+3. Huella del servidor para `VPS_KNOWN_HOSTS`, desde Git Bash (el
+   `ssh-keyscan` de Windows no negocia con este servidor):
+
+   ```bash
+   ssh-keyscan -t ed25519 IP_DEL_VPS
+   ```
+
+   Verifica que coincide con la del VPS
+   (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` en el VPS).
 
 ### 3.2 Environment y secretos
 
@@ -288,7 +314,7 @@ quieres aprobar cada despliegue.
 | :--- | :--- |
 | `VPS_HOST` | IP o nombre del VPS |
 | `VPS_USER` | `deploy` |
-| `VPS_SSH_KEY` | contenido completo de `deploy_smartdining` (la privada) |
+| `VPS_SSH_KEY` | la llave **privada** de 3.1 (la carga el dueño con `gh secret set` y la borra) |
 | `VPS_KNOWN_HOSTS` | la línea que imprimió `ssh-keyscan` |
 | `VPS_RUTA` | `/home/deploy/smartdining` |
 
