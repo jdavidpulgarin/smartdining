@@ -22,6 +22,7 @@ red "datos" (interna, sin Internet): postgres:5432, redis:6379
 | Variables y secretos (plantilla) | [`infra/.env.example`](../infra/.env.example) |
 | Imágenes de backend y socket-server | [`infra/docker/`](../infra/docker/) |
 | Nginx + frontends compilados | [`infra/nginx/`](../infra/nginx/) |
+| Preparar un VPS nuevo | [`infra/scripts/preparar-servidor.sh`](../infra/scripts/preparar-servidor.sh) |
 | Primer certificado HTTPS | [`infra/scripts/primer-certificado.sh`](../infra/scripts/primer-certificado.sh) |
 | Despliegue automático | [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) |
 
@@ -42,51 +43,98 @@ Reglas que no se rompen:
   `DOMINIO`, `app.`, `staff.`, `cocina.`, `api.` y `rt.`.
 - Firewall: abiertos solo 22, 80 y 443.
 
-```bash
-sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
-```
+Todo lo que no es la aplicación (usuarios, SSH, firewall, fail2ban, Docker) lo
+deja listo [`preparar-servidor.sh`](../infra/scripts/preparar-servidor.sh), en
+la siguiente sección.
 
-> Docker publica puertos saltándose `ufw`. Por eso el compose no publica nada
-> salvo nginx: no confíes en el firewall para ocultar un puerto publicado.
+## Preparar el servidor
 
-### SSH y fail2ban
+Se hace **una vez** por VPS, antes de la primera instalación. El script es
+idempotente: si se corta o se vuelve a correr, deja el mismo resultado. No
+lleva secretos ni IPs; solo recibe tu llave **pública**.
 
-Nada se opera como `root`. Antes de cerrar la sesión de root, confirma que
-entras con tu usuario y tu llave (ver 2.1), y luego:
-
-```bash
-# /etc/ssh/sshd_config.d/10-smartdining.conf
-PermitRootLogin no
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-```
+Desde tu máquina, con el VPS recién creado y entrando como `root` con tu llave:
 
 ```bash
-sudo systemctl reload ssh
-sudo apt install -y fail2ban unattended-upgrades
-sudo tee /etc/fail2ban/jail.local > /dev/null <<'EOF'
-[DEFAULT]
-bantime  = 1h
-findtime = 10m
-maxretry = 5
-backend  = systemd
-
-[sshd]
-enabled = true
-EOF
-sudo systemctl enable --now fail2ban
-sudo fail2ban-client status sshd      # debe listar la cárcel sshd activa
+ssh root@IP_DEL_VPS 'bash -s -- "$(cat ~/.ssh/id_ed25519.pub)" roberto' \
+  < infra/scripts/preparar-servidor.sh
 ```
 
-`unattended-upgrades` instala solo los parches de seguridad de Ubuntu.
+> En Windows usa `C:\Windows\System32\OpenSSH\ssh.exe` (es el que lee el
+> `ssh-agent` de Windows). Si el VPS ya tiene tu usuario, córrelo con `sudo`.
+
+| Paso | Qué deja |
+| :--- | :--- |
+| 1. Sistema base | Paquetes al día; `ufw`, `fail2ban`, `unattended-upgrades`; zona `America/Bogota`; hostname `smartdining`; 2 GB de swap **solo si no hay swap** (Vultr ya trae `/swapfile`); `vm.swappiness=10`. |
+| Actualizaciones | Solo parches de **seguridad**, con `Automatic-Reboot "false"`: el servidor nunca se reinicia solo (por ejemplo, durante la feria). |
+| 2. Usuarios | `roberto`: sudo sin contraseña, entra solo con llave. `deploy`: sin contraseña y **sin sudo**, en el grupo `docker`; su llave se agrega en 3.1. Borra `linuxuser` (el usuario con sudo que trae la imagen de Vultr) si existe y no tiene procesos ni crontab; otro nombre con `USUARIO_NUBE=...`. |
+| 3. SSH | `/etc/ssh/sshd_config.d/00-smartdining.conf`: sin root, sin contraseñas, `MaxAuthTries 3`, `AllowUsers roberto deploy`. |
+| 4. Firewall | UFW: entrante denegado salvo 22, 80 y 443. fail2ban: cárcel `sshd` (backend systemd, 5 intentos en 10 min → 1 h de bloqueo). |
+| 5. Docker | Docker Engine + `compose` del repositorio **oficial** de Docker (no `docker.io`), habilitado al arranque, logs rotados (10 MB × 3). |
+
+**Por qué `00-`**: en `sshd_config` gana el **primer** valor que se lee, y las
+imágenes de nube traen `50-cloud-init.conf` o `50-cloudimg-settings.conf` con
+`PasswordAuthentication yes`. Con `00-`, lo nuestro se lee primero.
+
+### Anti-bloqueo (no te saltes esto)
+
+Cuando el script cambia la configuración de SSH, programa una **reversión
+automática en 10 minutos**. Sin cerrar la sesión actual:
+
+```bash
+# 1. En una terminal NUEVA: tu usuario entra y tiene sudo
+ssh roberto@IP_DEL_VPS "sudo -n true && echo sudo-ok"
+# 2. Solo si eso funcionó, cancela la reversión
+ssh roberto@IP_DEL_VPS "sudo systemctl stop sd-revert-ssh.timer"
+# 3. root ya no entra
+ssh root@IP_DEL_VPS true      # Permission denied (publickey)
+```
+
+Si el paso 1 falla, no hagas nada: a los 10 minutos se borra
+`00-smartdining.conf` y vuelves a entrar como antes.
+
+### Comprobar
+
+```bash
+sudo sshd -T | grep -Ei 'permitrootlogin|passwordauthentication|kbdinteractive|allowusers'
+sudo ufw status verbose
+sudo fail2ban-client status sshd
+docker run --rm hello-world
+ls /var/run/reboot-required   # si existe, reinicia cuando convenga (el script no reinicia)
+```
+
+Para no escribir la IP, en tu `~/.ssh/config`:
+
+```
+Host smartdining
+    HostName IP_DEL_VPS
+    User roberto
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+```
+
+### ⚠️ Docker se salta UFW
+
+Docker escribe sus propias reglas de iptables, y un puerto publicado con
+`ports:` queda abierto a Internet **aunque UFW diga lo contrario**. Por eso:
+
+- en `docker-compose.prod.yml`, **Postgres (5432) y Redis (6379) no publican
+  puertos al host**: solo se alcanzan por la red interna `datos`;
+- el único servicio con `ports:` es nginx (80 y 443);
+- si alguna vez necesitas entrar a Postgres desde tu máquina, publica en
+  `127.0.0.1:5432:5432` y usa un túnel (`ssh -L 5432:127.0.0.1:5432 smartdining`),
+  nunca `5432:5432`.
+
+No confíes en el firewall para ocultar un puerto publicado.
 
 ## 2. Primera instalación
 
 ### 2.1 Usuario de despliegue y código
 
+El usuario `deploy` ya existe y está en el grupo `docker` (lo creó
+`preparar-servidor.sh`).
+
 ```bash
-sudo adduser --disabled-password deploy
-sudo usermod -aG docker deploy
 sudo -iu deploy
 git clone https://github.com/jdavidpulgarin/smartdining.git ~/smartdining
 cd ~/smartdining && git checkout main

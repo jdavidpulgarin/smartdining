@@ -78,7 +78,16 @@ jobs:
         with:
           node-version: 22
       - name: Sintaxis de los scripts de shell
-        run: for f in infra/scripts/*.sh; do sh -n "$f"; done
+        # Cada script con el intérprete de su shebang: sh es dash en ubuntu y
+        # no entiende la sintaxis de bash (arreglos, [[ ]]).
+        run: |
+          for f in infra/scripts/*.sh; do
+            if head -n 1 "$f" | grep -q bash; then
+              echo "bash -n $f"; bash -n "$f"
+            else
+              echo "sh -n   $f"; sh -n "$f"
+            fi
+          done
       - name: Pruebas (contraseñas del personal)
         run: node --test "infra/scripts/*.test.cjs"
 
