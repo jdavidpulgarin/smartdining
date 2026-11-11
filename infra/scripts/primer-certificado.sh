@@ -5,6 +5,14 @@
 #   sh infra/scripts/primer-certificado.sh            # certificado real
 #   STAGING=1 sh infra/scripts/primer-certificado.sh  # prueba (sin límite de Let's Encrypt)
 #   SEED_DEMO=1 sh infra/scripts/primer-certificado.sh # además carga los datos de la demo
+#   ENV_FILE=infra/.env.staging sh infra/scripts/primer-certificado.sh  # staging
+#
+# ENV_FILE (por defecto infra/.env) elige el entorno. El nombre del proyecto
+# de compose sale de COMPOSE_PROJECT_NAME dentro de ese archivo (staging:
+# smartdining-staging); si no está, es "smartdining" (docker-compose.prod.yml).
+#
+# Si ya hay un certificado de PRUEBA (de una corrida con STAGING=1), la corrida
+# sin STAGING lo reemplaza por el real. Un certificado real no se toca.
 #
 # Problema que resuelve: nginx no arranca sin los archivos del certificado, y
 # certbot necesita a nginx sirviendo /.well-known/acme-challenge/ para emitirlo.
@@ -19,7 +27,9 @@
 set -eu
 
 cd "$(dirname "$0")/../.."
-ENV_FILE=infra/.env
+ENV_FILE=${ENV_FILE:-infra/.env}
+# passwords-demo.sh (pasos 1 y 2) debe usar el mismo entorno.
+export ENV_FILE
 [ -f "$ENV_FILE" ] || { echo "Falta $ENV_FILE (cp infra/.env.example infra/.env)"; exit 1; }
 
 DOMINIO=$(sed -n 's/^DOMINIO=//p' "$ENV_FILE" | tr -d '\r')
@@ -34,12 +44,22 @@ certbot() { dc run --rm --no-deps --entrypoint "$1" certbot -c "$2"; }
 VIVO=/etc/letsencrypt/live/$DOMINIO
 
 if certbot sh "test -f $VIVO/fullchain.pem && ! test -f $VIVO/.temporal"; then
-  echo "Ya existe un certificado para $DOMINIO; certbot del compose lo renueva."
-  exit 0
+  # Un certificado de prueba de Let's Encrypt lo emite "(STAGING) ...". Sin
+  # STAGING=1 se reemplaza por el real; cualquier otro caso ya está listo.
+  if [ "${STAGING:-0}" != "1" ] && certbot sh "openssl x509 -in $VIVO/fullchain.pem -noout -issuer | grep -q STAGING"; then
+    echo "Hay un certificado de PRUEBA para $DOMINIO: se reemplaza por el real."
+  else
+    echo "Ya existe un certificado para $DOMINIO; certbot del compose lo renueva."
+    exit 0
+  fi
 fi
 
 echo "1/6 Servicios internos (sin nginx: todavía nada es público)"
-dc up -d --build --wait postgres redis backend socket-server
+dc up -d --build --wait postgres redis
+# Con la base recién creada, docker-init.sh ya migró y esto no hace nada; con
+# un volumen que ya existía, aplica los scripts que falten antes del backend.
+dc exec -T postgres sh /smartdining-db/migrar.sh
+dc up -d --build --wait backend socket-server
 # docker-init.sh solo corre 00_ejecutar_todo.sql, que NO crea usuarios, mesas
 # ni platos de ejemplo: están en database/seed.sql (idempotente: WHERE NOT
 # EXISTS). Se cargan ANTES del paso 2 para que sus contraseñas pasen el control.
