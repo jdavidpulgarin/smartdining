@@ -1,7 +1,7 @@
 import { formatearPrecio } from '../../utils/formato';
 import { ETIQUETAS_MAP } from '../../constants/dieta';
 
-function PlatoCard({ plato, onSeleccionar }) {
+function PlatoCard({ plato, onSeleccionar, soloLectura = false }) {
   const { nombre, descripcion, precio, imagen, etiquetas, disponible = true } = plato;
 
   const handleKeyDown = (event) => {
@@ -10,6 +10,87 @@ function PlatoCard({ plato, onSeleccionar }) {
       onSeleccionar?.(plato);
     }
   };
+
+  if (soloLectura) {
+    return (
+      <article
+        role="button"
+        tabIndex={0}
+        aria-haspopup="dialog"
+        aria-label={`Ver detalle de ${nombre}`}
+        onClick={() => onSeleccionar?.(plato)}
+        onKeyDown={handleKeyDown}
+        className={`bg-superficie-2 rounded-2xl border border-borde overflow-hidden flex flex-col justify-between transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto group ${
+          !disponible
+            ? 'opacity-50 grayscale-[25%]'
+            : 'hover:border-acento/60 hover:-translate-y-0.5'
+        }`}
+      >
+        <div>
+          <div className="relative w-full aspect-[4/3] overflow-hidden bg-superficie border-b border-borde">
+            {imagen ? (
+              <img
+                src={imagen}
+                alt={nombre}
+                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                loading="lazy"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-texto-tenue font-etiqueta text-sm uppercase tracking-wider">
+                Sin foto
+              </div>
+            )}
+            {!disponible && (
+              <span className="absolute top-3 right-3 bg-black/80 text-primario-texto text-xs font-etiqueta font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border border-primario/40">
+                AGOTADO
+              </span>
+            )}
+          </div>
+
+          <div className="p-4 space-y-2">
+            <h3 className="font-etiqueta font-bold text-texto text-xl leading-snug uppercase tracking-wide">
+              {nombre}
+            </h3>
+
+            {descripcion && (
+              <p className="text-sm text-texto-suave font-cuerpo line-clamp-2 leading-relaxed">
+                {descripcion}
+              </p>
+            )}
+
+            {etiquetas && etiquetas.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {etiquetas.map((tag) => {
+                  const conf = ETIQUETAS_MAP[tag] || {
+                    label: tag.replace('_', ' '),
+                    style:
+                      'bg-superficie text-texto-suave border border-borde font-etiqueta text-[10px] uppercase font-semibold',
+                  };
+                  return (
+                    <span
+                      key={tag}
+                      className={`px-1.5 py-0.5 rounded ${conf.style}`}
+                    >
+                      {conf.label}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="px-4 pb-4 pt-2 flex items-center justify-between border-t border-borde/60 mt-2">
+          <span className="font-etiqueta font-bold text-acento text-2xl tracking-wide">
+            {formatearPrecio(precio)}
+          </span>
+          <span className="text-xs font-etiqueta uppercase tracking-wider text-texto-suave group-hover:text-texto transition-colors">
+            Ver detalle →
+          </span>
+        </div>
+      </article>
+    );
+  }
 
   return (
     <div

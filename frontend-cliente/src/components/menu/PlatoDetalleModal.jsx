@@ -13,7 +13,13 @@ const NOTAS_MAX = 150;
 const CANTIDAD_MIN = 1;
 const CANTIDAD_MAX = 20;
 
-function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
+function PlatoDetalleModal({
+  plato,
+  abierto,
+  onCerrar,
+  onAgregar,
+  soloLectura = false,
+}) {
   const [selecciones, setSelecciones] = useState({});
   const [notas, setNotas] = useState('');
   const [cantidad, setCantidad] = useState(CANTIDAD_MIN);
@@ -95,6 +101,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
             <img
               src={plato.imagen}
               alt={plato.nombre}
+              loading="lazy"
               className="w-full h-full object-cover"
             />
           </div>
@@ -179,7 +186,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
                     grupo={grupo}
                     seleccionadas={selecciones[grupo.id] ?? []}
                     onCambiar={(ids) => manejarCambio(grupo.id, ids)}
-                    deshabilitado={plato.disponible === false}
+                    deshabilitado={soloLectura || plato.disponible === false}
                   />
                 ))}
               </div>
@@ -187,68 +194,86 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
           )}
 
           {/* 8. Sección Notas para la cocina */}
-          <div className="border-t border-borde pt-4 space-y-2">
-            <label
-              htmlFor={notasId}
-              className="block text-xs font-etiqueta uppercase tracking-wider font-bold text-texto"
-            >
-              Notas para la cocina
-            </label>
-            <textarea
-              id={notasId}
-              value={notas}
-              onChange={(e) => setNotas(e.target.value)}
-              maxLength={NOTAS_MAX}
-              rows={3}
-              placeholder="Ej: sin cebolla"
-              disabled={plato.disponible === false}
-              className="w-full text-base text-texto placeholder:text-texto-tenue bg-superficie-2 border border-borde rounded-xl p-2.5 resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto disabled:opacity-40 disabled:cursor-not-allowed"
-            />
-            <div className="text-right text-xs text-texto-tenue font-cuerpo">
-              {notas.length}/{NOTAS_MAX}
+          {!soloLectura && (
+            <div className="border-t border-borde pt-4 space-y-2">
+              <label
+                htmlFor={notasId}
+                className="block text-xs font-etiqueta uppercase tracking-wider font-bold text-texto"
+              >
+                Notas para la cocina
+              </label>
+              <textarea
+                id={notasId}
+                value={notas}
+                onChange={(e) => setNotas(e.target.value)}
+                maxLength={NOTAS_MAX}
+                rows={3}
+                placeholder="Ej: sin cebolla"
+                disabled={plato.disponible === false}
+                className="w-full text-base text-texto placeholder:text-texto-tenue bg-superficie-2 border border-borde rounded-xl p-2.5 resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto disabled:opacity-40 disabled:cursor-not-allowed"
+              />
+              <div className="text-right text-xs text-texto-tenue font-cuerpo">
+                {notas.length}/{NOTAS_MAX}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* Barra inferior fija con selector de cantidad y botón añadir */}
-        <div className="sticky bottom-0 bg-superficie border-t border-borde px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 shrink-0">
-            <button
+        {/* Barra inferior fija */}
+        {soloLectura ? (
+          <div className="sticky bottom-0 bg-superficie border-t border-borde px-4 py-3 flex items-center justify-between gap-3">
+            <p className="text-xs text-texto-suave font-cuerpo leading-snug">
+              Para pedir este plato, escanea el código QR en tu mesa o pídelo al mesero.
+            </p>
+            <Button
               type="button"
-              onClick={() => setCantidad((c) => Math.max(CANTIDAD_MIN, c - 1))}
-              disabled={plato.disponible === false || cantidad === CANTIDAD_MIN}
-              aria-label="Disminuir cantidad"
-              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-xl border border-borde bg-superficie-2 text-texto text-lg font-bold hover:bg-superficie active:bg-superficie-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              variante="secundario"
+              onClick={onCerrar}
+              className="shrink-0"
             >
-              −
-            </button>
-            <span
-              aria-live="polite"
-              className="min-w-8 text-center font-etiqueta font-bold text-texto text-xl"
-            >
-              {cantidad}
-            </span>
-            <button
-              type="button"
-              onClick={() => setCantidad((c) => Math.min(CANTIDAD_MAX, c + 1))}
-              disabled={plato.disponible === false || cantidad === CANTIDAD_MAX}
-              aria-label="Aumentar cantidad"
-              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-xl border border-borde bg-superficie-2 text-texto text-lg font-bold hover:bg-superficie active:bg-superficie-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            >
-              +
-            </button>
+              Cerrar
+            </Button>
           </div>
+        ) : (
+          <div className="sticky bottom-0 bg-superficie border-t border-borde px-4 py-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setCantidad((c) => Math.max(CANTIDAD_MIN, c - 1))}
+                disabled={plato.disponible === false || cantidad === CANTIDAD_MIN}
+                aria-label="Disminuir cantidad"
+                className="w-12 h-12 min-h-12 flex items-center justify-center rounded-xl border border-borde bg-superficie-2 text-texto text-lg font-bold hover:bg-superficie active:bg-superficie-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                −
+              </button>
+              <span
+                aria-live="polite"
+                className="min-w-8 text-center font-etiqueta font-bold text-texto text-xl"
+              >
+                {cantidad}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCantidad((c) => Math.min(CANTIDAD_MAX, c + 1))}
+                disabled={plato.disponible === false || cantidad === CANTIDAD_MAX}
+                aria-label="Aumentar cantidad"
+                className="w-12 h-12 min-h-12 flex items-center justify-center rounded-xl border border-borde bg-superficie-2 text-texto text-lg font-bold hover:bg-superficie active:bg-superficie-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                +
+              </button>
+            </div>
 
-          <Button
-            type="button"
-            variante="primario"
-            onClick={manejarAgregar}
-            disabled={!puedeAgregar}
-            className="flex-1"
-          >
-            {textoBoton}
-          </Button>
-        </div>
+            <Button
+              type="button"
+              variante="primario"
+              onClick={manejarAgregar}
+              disabled={!puedeAgregar}
+              className="flex-1"
+            >
+              {textoBoton}
+            </Button>
+          </div>
+        )}
       </div>
     </Modal>
   );
