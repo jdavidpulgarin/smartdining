@@ -1,0 +1,29 @@
+# SmartDining · respaldo diario de la base (R-18). Lo instala
+# infra/scripts/instalar-respaldos.sh; guía en docs/despliegue.md §4.
+#
+# Respalda el proyecto que esté corriendo (smartdining o smartdining-staging) en
+# /srv/respaldos/<proyecto>/diario/ y conserva 7.
+#   A mano:   sudo systemctl start smartdining-respaldo.service
+#   Registro: journalctl -u smartdining-respaldo
+#
+# healthchecks.io: si /etc/smartdining/respaldo.env (600 root, NUNCA en el repo)
+# define HEALTHCHECKS_URL, avisa al terminar bien y a <url>/fail si falla.
+# Si el aviso no llega (sin red), el respaldo no se da por fallido.
+[Unit]
+Description=SmartDining: respaldo diario de la base (R-18)
+Documentation=https://github.com/jdavidpulgarin/smartdining/blob/develop/docs/despliegue.md
+After=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+UMask=0027
+EnvironmentFile=-/etc/smartdining/respaldo.env
+ExecStart=/bin/sh /usr/local/lib/smartdining/respaldo.sh diario
+# $$ = un $ literal para el shell (systemd no expande ${VAR:-}).
+ExecStartPost=-/bin/sh -c '[ -z "$${HEALTHCHECKS_URL:-}" ] || curl -fsS -m 10 --retry 3 -o /dev/null "$$HEALTHCHECKS_URL"'
+ExecStopPost=-/bin/sh -c '[ "$$SERVICE_RESULT" = success ] || [ -z "$${HEALTHCHECKS_URL:-}" ] || curl -fsS -m 10 --retry 3 -o /dev/null "$$HEALTHCHECKS_URL/fail"'
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
