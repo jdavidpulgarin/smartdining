@@ -15,6 +15,10 @@ const ctrl = require('../src/controllers/transacciones.controller');
 /** La unica fila que devuelve la consulta del servicio, como la arma la base. */
 const RESUMEN = {
   desde: '2026-11-10',
+  hasta: '2026-11-10',
+  minimo: '2026-10-11',
+  futura: false,
+  antigua: false,
   total: '58000.00', // NUMERIC: pg lo entrega como texto
   cantidad: 2,
   transacciones: [
@@ -83,7 +87,8 @@ for (const rol of ['admin', 'cajero']) {
       const res = await pedir(tokenStaff(1, rol));
 
       assert.strictEqual(res.status, 200);
-      assert.deepStrictEqual(Object.keys(res.body).sort(), ['cantidad', 'desde', 'total', 'transacciones']);
+      assert.deepStrictEqual(Object.keys(res.body).sort(), ['cantidad', 'desde', 'hasta', 'total', 'transacciones']);
+      assert.strictEqual(res.body.hasta, res.body.desde, 'con desde=hoy, desde y hasta coinciden');
       assert.match(res.body.desde, /^\d{4}-\d{2}-\d{2}$/, 'el dia en AAAA-MM-DD');
       assert.strictEqual(res.body.cantidad, 2);
       assert.strictEqual(res.body.transacciones.length, 2);
@@ -116,10 +121,14 @@ test('caja: la consulta filtra por estado completada y por el dia de Bogota', as
 
     const q = db.buscar('FROM transacciones t');
     assert.ok(q, 'consulto las transacciones');
-    assert.deepStrictEqual(q.params, ['America/Bogota', 'completada'], 'zona y estado van como parametros');
-    assert.match(q.sql, /date_trunc\('day', now\(\) AT TIME ZONE \$1\)/, 'el dia se recorta en la zona del restaurante');
-    assert.match(q.sql, /t\.creado_en >= l\.desde/, 'limite inferior sobre la columna, sin funciones');
-    assert.match(q.sql, /t\.creado_en < {2}l\.hasta|t\.creado_en < l\.hasta/, 'limite superior exclusivo');
+    // zona, estado, fecha (null = hoy), "ahora" (null = now() de la base) y el tope.
+    assert.deepStrictEqual(q.params, ['America/Bogota', 'completada', null, null, 30], 'todo va como parametro');
+    assert.match(q.sql, /COALESCE\(\$4::timestamptz, now\(\)\) AT TIME ZONE \$1::text\)::date AS hoy/, 'hoy es el dia de la zona del restaurante');
+    assert.match(q.sql, /t\.creado_en >= l\.desde_ts/, 'limite inferior sobre la columna, sin funciones');
+    assert.match(q.sql, /t\.creado_en < {2}l\.hasta_ts|t\.creado_en < l\.hasta_ts/, 'limite superior exclusivo');
+    // El filtro usa el alias `t.`; `f.creado_en AT TIME ZONE 'UTC'` es la
+    // proyeccion de la fecha ISO, que no afecta al indice.
+    assert.ok(!/t\.creado_en AT TIME ZONE|date\(t\.creado_en|t\.creado_en::date/.test(q.sql), 'ninguna funcion sobre creado_en en el filtro');
     assert.match(q.sql, /ORDER BY f\.creado_en DESC, f\.id_transaccion DESC/, 'mas reciente primero');
     assert.ok(!/referencia_externa/.test(q.sql), 'no se lee la referencia de la pasarela');
   } finally {
@@ -128,12 +137,12 @@ test('caja: la consulta filtra por estado completada y por el dia de Bogota', as
 });
 
 test('caja: sin transacciones hoy responde 200 con total 0 y lista vacia', async () => {
-  const db = fakeCaja({ resumen: { desde: '2026-11-10', total: '0', cantidad: 0, transacciones: [] } });
+  const db = fakeCaja({ resumen: { desde: '2026-11-10', hasta: '2026-11-10', total: '0', cantidad: 0, transacciones: [] } });
   try {
     const res = await pedir(tokenStaff(1, 'admin'));
 
     assert.strictEqual(res.status, 200);
-    assert.deepStrictEqual(res.body, { desde: '2026-11-10', total: 0, cantidad: 0, transacciones: [] });
+    assert.deepStrictEqual(res.body, { desde: '2026-11-10', hasta: '2026-11-10', total: 0, cantidad: 0, transacciones: [] });
   } finally {
     db.restaurar();
   }
@@ -141,7 +150,12 @@ test('caja: sin transacciones hoy responde 200 con total 0 y lista vacia', async
 
 for (const [caso, url] of [
   ['desde=ayer', '/api/transacciones?desde=ayer'],
-  ['una fecha (todavia no)', '/api/transacciones?desde=2026-11-10'],
+  ['una fecha inexistente (30 de febrero)', '/api/transacciones?desde=2026-02-30'],
+  ['un mes inexistente (13)', '/api/transacciones?desde=2026-13-01'],
+  ['el dia 00', '/api/transacciones?desde=2026-11-00'],
+  ['formato D/M/A', '/api/transacciones?desde=10/11/2026'],
+  ['sin ceros a la izquierda', '/api/transacciones?desde=2026-1-5'],
+  ['fecha con hora', '/api/transacciones?desde=2026-11-10T00:00'],
   ['sin desde', '/api/transacciones'],
   ['un parametro extra', '/api/transacciones?desde=hoy&estado=fallida'],
 ]) {
@@ -155,6 +169,85 @@ for (const [caso, url] of [
       assert.strictEqual(res.body.motivo, ctrl.MOTIVO_CONSULTA_INVALIDA);
       assert.strictEqual(res.body.codigo, undefined, 'la convencion es { error, motivo }');
       assert.strictEqual(db.todas('FROM transacciones t').length, 0);
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// desde=AAAA-MM-DD: un rango de dias, desde ese dia hasta el final de hoy
+//
+// La forma y la existencia de la fecha las valida zod aqui. Si es FUTURA o
+// demasiado ANTIGUA lo decide la base con el mismo "hoy de Bogota" que usa la
+// consulta: aqui se prueba que el controller pasa la fecha y traduce esa
+// respuesta a 400. El borde de las 20:00 de Bogota se prueba con PostgreSQL
+// real y un reloj fijado, en tests/integracion/transacciones-del-dia-sql.test.js.
+// ---------------------------------------------------------------------------
+
+test('caja: desde=AAAA-MM-DD valida responde 200 con desde y hasta del rango', async () => {
+  const db = fakeCaja({ resumen: { ...RESUMEN, desde: '2026-11-08', hasta: '2026-11-10' } });
+  try {
+    const res = await pedir(tokenStaff(1, 'cajero'), '/api/transacciones?desde=2026-11-08');
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.desde, '2026-11-08');
+    assert.strictEqual(res.body.hasta, '2026-11-10', 'hasta es hoy: el dia final incluido');
+    assert.strictEqual(typeof res.body.total, 'number');
+    assert.ok(!('futura' in res.body) && !('antigua' in res.body) && !('minimo' in res.body), 'las banderas internas no salen');
+
+    const q = db.buscar('FROM transacciones t');
+    assert.deepStrictEqual(q.params, ['America/Bogota', 'completada', '2026-11-08', null, 30], 'la fecha viaja como texto');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('caja: el 29 de febrero de un bisiesto existe; el de un año normal no', async () => {
+  const db = fakeCaja();
+  try {
+    assert.strictEqual(ctrl.fechaExiste('2028-02-29'), true);
+    assert.strictEqual(ctrl.fechaExiste('2026-02-29'), false);
+    assert.strictEqual(ctrl.fechaExiste('2026-02-28'), true);
+    assert.strictEqual(ctrl.fechaExiste('2026-04-31'), false);
+    assert.strictEqual(ctrl.fechaExiste('2026-12-31'), true);
+
+    const malo = await pedir(tokenStaff(1, 'cajero'), '/api/transacciones?desde=2026-02-29');
+    assert.strictEqual(malo.status, 400);
+    assert.match(malo.body.error, /2026-02-29 no existe/);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('caja: fechaExiste no depende de la zona del servidor', () => {
+  // Construye con Date.UTC y lee con getUTC*: la TZ del proceso no entra.
+  const tz = process.env.TZ;
+  try {
+    for (const zona of ['America/Bogota', 'Asia/Tokyo', 'UTC', 'Pacific/Kiritimati']) {
+      process.env.TZ = zona;
+      assert.strictEqual(ctrl.fechaExiste('2026-03-01'), true, zona);
+      assert.strictEqual(ctrl.fechaExiste('2026-02-30'), false, zona);
+    }
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
+});
+
+for (const [caso, marca, patron] of [
+  ['futura', { futura: true }, /no puede ser posterior a hoy \(2026-11-10, hora de Bogot/],
+  ['mas de 31 dias atras', { antigua: true }, /como mucho 30 d.as atr.s: la fecha m.s antigua permitida hoy es 2026-10-11/],
+]) {
+  test(`caja: si la base marca la fecha como ${caso}, responde 400 consulta_invalida con el limite`, async () => {
+    const db = fakeCaja({ resumen: { ...RESUMEN, ...marca, desde: '2026-12-01', hasta: '2026-11-10', minimo: '2026-10-11' } });
+    try {
+      const res = await pedir(tokenStaff(1, 'cajero'), '/api/transacciones?desde=2026-12-01');
+
+      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.body.motivo, ctrl.MOTIVO_CONSULTA_INVALIDA);
+      assert.match(res.body.error, patron);
+      assert.ok(!('transacciones' in res.body), 'un 400 no lista nada');
     } finally {
       db.restaurar();
     }

@@ -412,37 +412,80 @@ async function obtenerPorPedido(idPedido) {
 }
 
 /**
- * Las transacciones COMPLETADAS de hoy, para la caja (GET /transacciones?desde=hoy).
+ * Cuántos días hacia atrás admite `desde`, sin contar hoy: `desde >= hoy - 30`,
+ * o sea como mucho 31 días de Bogotá contando hoy. Un tope defensivo para que
+ * la caja no pida meses de una vez, no una regla contable.
+ */
+const DIAS_ATRAS_MAXIMOS = 30;
+
+/** Valor de `desde` que significa "solo hoy". */
+const DESDE_HOY = 'hoy';
+
+/**
+ * Las transacciones COMPLETADAS de un rango de días, para la caja
+ * (GET /transacciones?desde=hoy | AAAA-MM-DD).
  *
- * "Hoy" es el día calendario en la zona del restaurante (`ZONA`, la misma
- * constante de reportes.service.js: America/Bogota, no hay zona configurable
- * en configuracion_restaurante), calculado en SQL:
+ * El rango va desde las 00:00 del día `desde` hasta el FINAL de hoy, siempre en
+ * días de Bogotá (`ZONA`, la misma constante de reportes.service.js; no hay
+ * zona configurable en configuracion_restaurante). `desde = 'hoy'` es el caso
+ * hoy..hoy. Todo se calcula en SQL con la misma ZONA:
  *
- *   desde = date_trunc('day', now() AT TIME ZONE $1) AT TIME ZONE $1
- *   hasta = desde + 1 día
+ *   hoy        = (ahora AT TIME ZONE zona)::date
+ *   dia_desde  = la fecha pedida, o hoy
+ *   desde_ts   = dia_desde::timestamp AT TIME ZONE zona      (00:00 de ese día)
+ *   hasta_ts   = (hoy + 1)::timestamp AT TIME ZONE zona      (00:00 de mañana)
  *
- * Primero se lleva `now()` a hora local de Bogotá, se recorta al inicio de ese
- * día y se vuelve a TIMESTAMPTZ. Así una venta a las 20:00 de Bogotá (01:00
- * UTC del día siguiente) cae en HOY, y una a las 23:30 de Bogotá de ayer no.
- * Los dos límites son constantes dentro de la consulta y la condición es
- * `creado_en >= desde AND creado_en < hasta` sobre la columna sin funciones,
- * para que `idx_transacciones_estado_fecha` (estado_transaccion, creado_en
- * DESC, monto) pueda servirla; `(creado_en AT TIME ZONE …)::date = hoy` no lo
- * permitiría.
+ * Así una venta a las 20:00 de Bogotá (01:00 UTC del día siguiente) cae en
+ * HOY, y una a las 23:30 de Bogotá del día anterior a `desde` no entra. La
+ * condición es `creado_en >= desde_ts AND creado_en < hasta_ts` sobre la
+ * columna sin funciones, para que `idx_transacciones_estado_fecha`
+ * (estado_transaccion, creado_en DESC, monto) pueda servirla.
+ *
+ * LOS LÍMITES DEL RANGO también los decide la base, en la misma consulta y con
+ * el mismo `hoy`: una fecha FUTURA o más antigua que `hoy - DIAS_ATRAS_MAXIMOS`
+ * no lista nada y vuelve marcada (`invalido: 'futura' | 'antigua'`), y el
+ * controller la responde como 400. Hacerlo en JavaScript obligaría a calcular
+ * "hoy en Bogotá" en dos sitios, y a las 20:00 de Bogotá, cuando en UTC ya es
+ * mañana, cualquier diferencia entre los dos daría un 400 o un 200 de más.
+ *
+ * Que la fecha tenga forma AAAA-MM-DD y EXISTA lo comprueba antes el
+ * controller (zod): aquí llega ya válida o como `'hoy'`.
  *
  * `total` y `cantidad` salen de la misma consulta. `monto` y `total` se
  * devuelven como NÚMERO: `pg` entrega los NUMERIC como texto y el panel no
  * tiene por qué parsearlos. La fila expone solo lo que la caja necesita: nada
  * de `referencia_externa` ni de la pasarela.
  *
- * @returns {Promise<{desde: string|null, total: number, cantidad: number, transacciones: object[]}>}
+ * @param {object} [opciones]
+ * @param {string} [opciones.desde] `'hoy'` o una fecha `AAAA-MM-DD` ya validada.
+ * @param {Date|string|null} [opciones.ahora] instante que hace de "ahora";
+ *        `null` = `now()` de la base. Solo lo fijan las pruebas, para probar el
+ *        borde de las 20:00 de Bogotá sin depender de la hora real.
+ * @returns {Promise<{invalido: 'futura'|'antigua', hoy: string, minimo: string}
+ *   | {desde: string, hasta: string, total: number, cantidad: number, transacciones: object[]}>}
  */
-async function listarDelDia({ zona = ZONA } = {}) {
+async function listarDelDia({ desde = DESDE_HOY, zona = ZONA, ahora = null } = {}) {
+  // 'hoy' viaja como NULL y no como texto: así ninguna rama de la consulta
+  // tiene que convertir 'hoy' a fecha (PostgreSQL puede evaluar un CASE con
+  // parámetros al planificar, y '::date' de 'hoy' fallaría).
+  const fecha = desde === DESDE_HOY ? null : desde;
   const result = await pool.query(
-    `WITH limites AS (
-       SELECT date_trunc('day', now() AT TIME ZONE $1)                         AS dia_local,
-              date_trunc('day', now() AT TIME ZONE $1) AT TIME ZONE $1          AS desde,
-              (date_trunc('day', now() AT TIME ZONE $1) + interval '1 day') AT TIME ZONE $1 AS hasta
+    `WITH base AS (
+       SELECT (COALESCE($4::timestamptz, now()) AT TIME ZONE $1::text)::date AS hoy
+     ),
+     limites AS (
+       SELECT b.hoy,
+              COALESCE($3::text::date, b.hoy)                              AS dia_desde,
+              b.hoy - $5::int                                              AS dia_minimo,
+              COALESCE($3::text::date, b.hoy)::timestamp AT TIME ZONE $1::text AS desde_ts,
+              (b.hoy + 1)::timestamp AT TIME ZONE $1::text                 AS hasta_ts
+         FROM base b
+     ),
+     validez AS (
+       SELECT l.*,
+              l.dia_desde > l.hoy        AS futura,
+              l.dia_desde < l.dia_minimo AS antigua
+         FROM limites l
      ),
      filas AS (
        SELECT t.id_transaccion, t.id_pedido, p.codigo_pedido, p.id_mesa, m.numero AS numero_mesa,
@@ -450,12 +493,17 @@ async function listarDelDia({ zona = ZONA } = {}) {
          FROM transacciones t
          JOIN pedidos p ON p.id_pedido = t.id_pedido
          JOIN mesas   m ON m.id_mesa   = p.id_mesa
-         CROSS JOIN limites l
-        WHERE t.estado_transaccion = $2
-          AND t.creado_en >= l.desde
-          AND t.creado_en <  l.hasta
+         CROSS JOIN validez l
+        WHERE t.estado_transaccion = $2::text
+          AND NOT l.futura AND NOT l.antigua
+          AND t.creado_en >= l.desde_ts
+          AND t.creado_en <  l.hasta_ts
      )
-     SELECT to_char(l.dia_local, 'YYYY-MM-DD')                      AS desde,
+     SELECT to_char(l.dia_desde, 'YYYY-MM-DD')                      AS desde,
+            to_char(l.hoy, 'YYYY-MM-DD')                            AS hasta,
+            to_char(l.dia_minimo, 'YYYY-MM-DD')                     AS minimo,
+            l.futura,
+            l.antigua,
             COALESCE((SELECT SUM(monto) FROM filas), 0)             AS total,
             (SELECT count(*) FROM filas)::int                       AS cantidad,
             COALESCE((
@@ -472,13 +520,16 @@ async function listarDelDia({ zona = ZONA } = {}) {
                      ) ORDER BY f.creado_en DESC, f.id_transaccion DESC)
                 FROM filas f
             ), '[]'::json)                                          AS transacciones
-       FROM limites l`,
-    [zona, ESTADO_COBRADO]
+       FROM validez l`,
+    [zona, ESTADO_COBRADO, fecha, ahora, DIAS_ATRAS_MAXIMOS]
   );
   const fila = result.rows[0];
-  if (!fila) return { desde: null, total: 0, cantidad: 0, transacciones: [] };
+  if (!fila) return { desde: null, hasta: null, total: 0, cantidad: 0, transacciones: [] };
+  if (fila.futura) return { invalido: 'futura', hoy: fila.hasta, minimo: fila.minimo };
+  if (fila.antigua) return { invalido: 'antigua', hoy: fila.hasta, minimo: fila.minimo };
   return {
     desde: fila.desde,
+    hasta: fila.hasta,
     total: Number(fila.total),
     cantidad: Number(fila.cantidad),
     // json_agg ya trae `monto` como número JSON; Number() solo asegura el tipo
@@ -492,6 +543,8 @@ module.exports = {
   registrarPagoInterno,
   obtenerPorPedido,
   listarDelDia,
+  DIAS_ATRAS_MAXIMOS,
+  DESDE_HOY,
   referenciaDeFila,
   ESTADO_COBRADO,
   ESTADO_ENTREGADO,
