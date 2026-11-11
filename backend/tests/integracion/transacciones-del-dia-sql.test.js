@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 /**
- * GET /transacciones?desde=hoy contra PostgreSQL real: el cierre de caja.
+ * GET /transacciones?desde=hoy|AAAA-MM-DD contra PostgreSQL real: el cierre de caja.
  *
  * Lo que un doble no puede comprobar: que "hoy" es el día calendario de
  * BOGOTÁ calculado por la base, que solo entran las completadas y que el total
@@ -161,6 +161,22 @@ test.before(async () => {
     });
     await insertar('hoy_fallida', { monto: 500, estado: 'fallida', creadoEn: 'now()' });
     await insertar('hoy_reembolsada', { monto: 600, estado: 'reembolsada', creadoEn: 'now()' });
+    // Para el rango desde=<ayer>: el borde inferior exacto (00:00 de ayer, que
+    // entra), las 23:30 de ANTEAYER (el día anterior a `desde`, que no entra)
+    // y una de hace dos días al mediodía (tampoco). Suma de las completadas:
+    // 3.400, que sigue cabiendo en el total del pedido.
+    await insertar('ayer_0000', {
+      monto: 900, estado: 'completada',
+      creadoEn: `(${INICIO_HOY} - interval '1 day') AT TIME ZONE $3::text`,
+    });
+    await insertar('anteayer_2330', {
+      monto: 800, estado: 'completada',
+      creadoEn: `(${INICIO_HOY} - interval '1 day' - interval '30 minutes') AT TIME ZONE $3::text`,
+    });
+    await insertar('hace2_mediodia', {
+      monto: 700, estado: 'completada',
+      creadoEn: `(${INICIO_HOY} - interval '2 days' + interval '12 hours') AT TIME ZONE $3::text`,
+    });
   } catch (err) {
     if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
     hayBase = false;
@@ -252,4 +268,101 @@ test('caja: mas reciente primero', async (t) => {
   const iA = resumen.transacciones.indexOf(a);
   const iB = resumen.transacciones.indexOf(b);
   assert.strictEqual(iA < iB, Date.parse(a.fecha) > Date.parse(b.fecha));
+});
+
+// ---------------------------------------------------------------------------
+// desde=AAAA-MM-DD: desde las 00:00 de ESE día en Bogotá hasta el final de hoy
+// ---------------------------------------------------------------------------
+
+/** Un día de Bogotá relativo a hoy, como texto AAAA-MM-DD, calculado por la base. */
+async function diaBogota(desplazamiento) {
+  const { rows } = await sonda.query(
+    `SELECT to_char((now() AT TIME ZONE $1::text)::date + $2::int, 'YYYY-MM-DD') AS d`,
+    [ZONA, desplazamiento]
+  );
+  return rows[0].d;
+}
+
+test('caja: desde=<ayer> trae ayer y hoy, y deja fuera anteayer (incluidas sus 23:30)', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const ayer = await diaBogota(-1);
+  const hoy = await diaBogota(0);
+  const resumen = await transaccionesService.listarDelDia({ desde: ayer });
+
+  assert.strictEqual(resumen.desde, ayer);
+  assert.strictEqual(resumen.hasta, hoy, 'hasta es hoy en Bogota, el dia final incluido');
+
+  const ids = new Set(resumen.transacciones.map((x) => x.id_transaccion));
+  for (const entra of ['hoy_ahora', 'hoy_20h', 'ayer_2330', 'ayer_mediodia', 'ayer_0000']) {
+    assert.ok(ids.has(creadas[entra]), `${entra} entra en el rango`);
+  }
+  for (const fuera of ['anteayer_2330', 'hace2_mediodia', 'hoy_fallida', 'hoy_reembolsada']) {
+    assert.ok(!ids.has(creadas[fuera]), `${fuera} no entra`);
+  }
+
+  // total y cantidad cuadran con la lista de la misma consulta.
+  assert.strictEqual(resumen.cantidad, resumen.transacciones.length);
+  const suma = resumen.transacciones.reduce((acc, x) => acc + x.monto, 0);
+  assert.strictEqual(Math.round(resumen.total * 100), Math.round(suma * 100));
+  const nuestras = resumen.transacciones.filter((x) => x.id_pedido === pedido.id_pedido);
+  assert.strictEqual(nuestras.reduce((acc, x) => acc + x.monto, 0), 1900, '100 + 200 + 300 + 400 + 900');
+});
+
+test('caja: desde=hoy y desde=<fecha de hoy> son lo mismo, con desde = hasta', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const hoy = await diaBogota(0);
+  const a = await transaccionesService.listarDelDia({ desde: 'hoy' });
+  const b = await transaccionesService.listarDelDia({ desde: hoy });
+
+  assert.strictEqual(a.desde, hoy);
+  assert.strictEqual(a.hasta, hoy);
+  assert.strictEqual(b.desde, hoy);
+  assert.strictEqual(b.hasta, hoy);
+  const nuestrasA = a.transacciones.filter((x) => x.id_pedido === pedido.id_pedido).map((x) => x.id_transaccion).sort();
+  const nuestrasB = b.transacciones.filter((x) => x.id_pedido === pedido.id_pedido).map((x) => x.id_transaccion).sort();
+  assert.deepStrictEqual(nuestrasA, nuestrasB);
+});
+
+test('caja: con el reloj real, 30 dias atras entra y 31 no; mañana es futura', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const tope = await transaccionesService.listarDelDia({ desde: await diaBogota(-30) });
+  assert.ok(!tope.invalido, 'hoy - 30 es el limite y entra (31 dias contando hoy)');
+
+  const pasado = await transaccionesService.listarDelDia({ desde: await diaBogota(-31) });
+  assert.strictEqual(pasado.invalido, 'antigua');
+  assert.strictEqual(pasado.minimo, await diaBogota(-30), 'informa el limite');
+
+  const manana = await transaccionesService.listarDelDia({ desde: await diaBogota(1) });
+  assert.strictEqual(manana.invalido, 'futura');
+});
+
+test('caja: a las 20:00 de Bogota (ya mañana en UTC) "hoy" y el tope son los de Bogota', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  // 2026-03-10 20:00 en Bogotá = 2026-03-11 01:00 UTC. Bogotá no tiene horario
+  // de verano, así que el desfase es siempre -05:00.
+  const ahora = '2026-03-11T01:00:00Z';
+
+  const hoyBogota = await transaccionesService.listarDelDia({ desde: '2026-03-10', ahora });
+  assert.ok(!hoyBogota.invalido, 'el 10 es HOY en Bogota, aunque en UTC ya sea el 11');
+  assert.strictEqual(hoyBogota.desde, '2026-03-10');
+  assert.strictEqual(hoyBogota.hasta, '2026-03-10');
+
+  const conHoy = await transaccionesService.listarDelDia({ desde: 'hoy', ahora });
+  assert.strictEqual(conHoy.desde, '2026-03-10', 'desde=hoy tambien usa el dia de Bogota');
+
+  const manana = await transaccionesService.listarDelDia({ desde: '2026-03-11', ahora });
+  assert.strictEqual(manana.invalido, 'futura', 'el 11 es futuro en Bogota, aunque sea "hoy" en UTC');
+  assert.strictEqual(manana.hoy, '2026-03-10');
+
+  // El tope tambien se cuenta desde el hoy de Bogota: 10/03 - 30 = 08/02. Con
+  // el dia de UTC (11/03) el limite seria 09/02 y el 08 se rechazaria.
+  const tope = await transaccionesService.listarDelDia({ desde: '2026-02-08', ahora });
+  assert.ok(!tope.invalido, '2026-02-08 es exactamente hoy - 30 en Bogota: entra');
+  const fuera = await transaccionesService.listarDelDia({ desde: '2026-02-07', ahora });
+  assert.strictEqual(fuera.invalido, 'antigua');
+  assert.strictEqual(fuera.minimo, '2026-02-08');
 });
