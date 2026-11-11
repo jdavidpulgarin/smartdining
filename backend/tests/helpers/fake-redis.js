@@ -91,6 +91,15 @@ function instalarFakeRedis(opciones = {}) {
       almacen.set(clave, { ...guardado, valor: JSON.stringify(hash) });
       return 1;
     },
+    // hLen(clave): cuántos campos tiene el hash; 0 si la clave no existe, como
+    // el real. alias-comensal.hayReservas lo usa para saber si alguien ya entró.
+    async hLen(clave) {
+      operaciones.push({ op: 'hLen', clave });
+      fallar('hLen');
+      const guardado = almacen.get(clave);
+      if (!guardado) return 0;
+      return Object.keys(JSON.parse(guardado.valor)).length;
+    },
     async expire(clave, ttlSegundos) {
       operaciones.push({ op: 'expire', clave, ttl: ttlSegundos });
       fallar('expire');

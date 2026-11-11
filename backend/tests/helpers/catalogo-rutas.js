@@ -66,6 +66,14 @@ const TABLA = [
     url: `/api/mesas/${MESA}/cuenta/interno`,
     acceso: INTERNA,
   },
+  // Rotación automática del QR que pide el socket-server.
+  {
+    metodo: 'POST',
+    patron: '/api/mesas/:id/token-qr/interno',
+    url: `/api/mesas/${MESA}/token-qr/interno`,
+    acceso: INTERNA,
+    cuerpo: {},
+  },
   {
     metodo: 'POST',
     patron: '/api/transacciones/internal',
@@ -389,6 +397,13 @@ const TABLA = [
     metodo: 'GET',
     patron: '/api/transacciones/pedido/:id_pedido',
     url: '/api/transacciones/pedido/87',
+    roles: ['admin', 'cajero'],
+  },
+  // Cierre de caja: las completadas de hoy (P1, propuesta de Roberto).
+  {
+    metodo: 'GET',
+    patron: '/api/transacciones',
+    url: '/api/transacciones?desde=hoy',
     roles: ['admin', 'cajero'],
   },
   // Cobro de MESA en caja: reparte el monto entre los pedidos de la mesa.
