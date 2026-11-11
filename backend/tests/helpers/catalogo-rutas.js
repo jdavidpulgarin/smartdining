@@ -391,6 +391,13 @@ const TABLA = [
     url: '/api/transacciones/pedido/87',
     roles: ['admin', 'cajero'],
   },
+  // Cierre de caja: las completadas de hoy (P1, propuesta de Roberto).
+  {
+    metodo: 'GET',
+    patron: '/api/transacciones',
+    url: '/api/transacciones?desde=hoy',
+    roles: ['admin', 'cajero'],
+  },
   // Cobro de MESA en caja: reparte el monto entre los pedidos de la mesa.
   {
     metodo: 'POST',

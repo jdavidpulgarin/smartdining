@@ -392,11 +392,94 @@ async function obtenerPorPedido(req, res, next) {
   }
 }
 
+/** Motivo del 400 cuando la query de GET /transacciones no es la esperada. */
+const MOTIVO_CONSULTA_INVALIDA = 'consulta_invalida';
+
+/** Forma de una fecha de calendario en la query: AAAA-MM-DD, nada más. */
+const FORMATO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * ¿Existe esa fecha en el calendario? (2026-02-30 y 2026-13-01 no.)
+ *
+ * Se construye con `Date.UTC` y se comprueba que año, mes y día no se
+ * "desbordaron" (JavaScript convierte el 30 de febrero en el 2 de marzo sin
+ * avisar). Todo en UTC, así que el resultado no depende de la zona del
+ * servidor: aquí no se pregunta qué día es hoy, solo si la fecha existe.
+ */
+function fechaExiste(texto) {
+  const [anio, mes, dia] = texto.split('-').map(Number);
+  const f = new Date(Date.UTC(anio, mes - 1, dia));
+  return f.getUTCFullYear() === anio && f.getUTCMonth() === mes - 1 && f.getUTCDate() === dia;
+}
+
+/**
+ * Query de GET /transacciones (cierre de caja, propuesta de Roberto).
+ *
+ * `desde` es `hoy` o una fecha `AAAA-MM-DD` que exista; `.strict()` rechaza
+ * cualquier otro parámetro. Si la fecha es futura o demasiado antigua NO se
+ * decide aquí sino en la base, con el mismo "hoy de Bogotá" que usa la
+ * consulta (ver transaccionesService.listarDelDia).
+ */
+const transaccionesDelDiaSchema = z
+  .object({
+    desde: z
+      .string({ required_error: 'desde es obligatorio: "hoy" o una fecha AAAA-MM-DD' })
+      .superRefine((valor, ctx) => {
+        if (valor === transaccionesService.DESDE_HOY) return;
+        if (!FORMATO_FECHA.test(valor)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'desde debe ser "hoy" o una fecha AAAA-MM-DD',
+          });
+        } else if (!fechaExiste(valor)) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `La fecha ${valor} no existe` });
+        }
+      }),
+  })
+  .strict();
+
+/** Mensajes de los límites que decide la base. */
+const MENSAJES_RANGO = {
+  futura: (r) => `desde no puede ser posterior a hoy (${r.hoy}, hora de Bogotá)`,
+  antigua: (r) =>
+    `desde admite como mucho ${transaccionesService.DIAS_ATRAS_MAXIMOS} días atrás: `
+    + `la fecha más antigua permitida hoy es ${r.minimo}`,
+};
+
+/**
+ * GET /transacciones?desde=hoy|AAAA-MM-DD — las transacciones completadas
+ * desde ese día hasta el final de hoy, para el cierre de caja. Los días son de
+ * Bogotá; los calcula la base, ver transaccionesService.listarDelDia.
+ */
+async function listarDelDia(req, res, next) {
+  const parsed = transaccionesDelDiaSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: parsed.error.errors[0].message,
+      motivo: MOTIVO_CONSULTA_INVALIDA,
+    });
+  }
+
+  try {
+    const resumen = await transaccionesService.listarDelDia({ desde: parsed.data.desde });
+    if (resumen.invalido) {
+      return res.status(400).json({
+        error: MENSAJES_RANGO[resumen.invalido](resumen),
+        motivo: MOTIVO_CONSULTA_INVALIDA,
+      });
+    }
+    return res.json(resumen);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   crear,
   crearInterno,
   aliasDelComensal,
   obtenerPorPedido,
+  listarDelDia,
   cobrarMesa,
   montoACentavos,
   METODOS_CAJA,
@@ -406,4 +489,6 @@ module.exports = {
   METODOS_PAGO,
   ESTADOS_TRANSACCION,
   MONEDA,
+  MOTIVO_CONSULTA_INVALIDA,
+  fechaExiste,
 };
