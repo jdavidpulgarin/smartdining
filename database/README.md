@@ -98,10 +98,16 @@ database/scripts/
 ├── 26_configuracion.sql                # Configuración del local, mesas.activa e historial de precios (P-18; lo aplica migrar.sh)
 ├── 27_inventario.sql                   # Inventario real: insumos, recetas, reserva al pedir, devoluciones y avisos (P-19)
 ├── 28_aviso_insumo_agotado.sql         # Aviso stock_bajo también al llegar a 0 aunque ya estuviera bajo (G-06)
-└── 29_configuracion_contacto.sql       # correo y redes (instagram, facebook, tiktok, whatsapp) del local (P-21)
+├── 29_configuracion_contacto.sql       # correo y redes (instagram, facebook, tiktok, whatsapp) del local (P-21)
+└── 30_fix_auditoria_registro_id.sql    # registro_id de la auditoría = llave primaria real (en transacciones guardaba el id_pedido)
 ```
 
-> El 30 queda para el script de "menú con agotados" que se decida en la G-06.
+> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente (31).
+
+> **Auditoría de transacciones antes del script 30:** las filas de `auditoria_cambios` con
+> `tabla_afectada = 'transacciones'` escritas antes del 30 tienen el **id del pedido** en
+> `registro_id`. No se corrigen (el `hash_verificacion` de cada fila incluye `registro_id`).
+> La transacción de esas filas es `COALESCE(datos_nuevos, datos_anteriores)->>'id_transaccion'`.
 
 ### ⚠️ Regla: un script aplicado NUNCA se edita
 
@@ -190,7 +196,13 @@ Cada archivo de `database/tests/` es un bloque `DO` que lanza una excepción si 
 cd database/tests
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p18_configuracion.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p21_configuracion_contacto.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_30_auditoria_registro_id.sql
 ```
+
+Auditoría (script 30): `test_30_auditoria_registro_id.sql` hace INSERT, UPDATE y DELETE en
+`transacciones`, `usuarios` y `platos` y exige que `registro_id` sea la llave primaria de cada
+fila (10 filas). Sin el script 30 falla en las 4 de `transacciones`. Lo deshace todo, también
+sus filas de auditoría.
 
 Contacto del local (P-21, script 29): `test_p21_configuracion_contacto.sql` prueba los CHECK de
 `correo` y `redes` (8 correos y 16 formas de redes que se rechazan) y deja la fila como estaba.
