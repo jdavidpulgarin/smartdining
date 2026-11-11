@@ -21,6 +21,11 @@ permissions:
 jobs:
   vps:
     name: vps · docker compose up (staging)
+    # Guarda propia, además de la de ci.yml: aunque alguien llame a este
+    # workflow desde otro lado (otro workflow o workflow_dispatch sobre otra
+    # rama), solo despliega con el interruptor encendido y desde develop.
+    # A mano: "Run workflow" eligiendo la rama develop.
+    if: vars.DEPLOY_STAGING == 'true' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # El environment limita quién ve los secretos (y permite exigir aprobación).
