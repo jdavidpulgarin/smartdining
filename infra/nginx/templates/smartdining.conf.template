@@ -10,6 +10,15 @@
 
 server_tokens off;
 
+# Compresión (informe Lighthouse de #173). text/html se comprime siempre que
+# gzip está activo; el resto se lista. Sin brotli: no viene en la imagen
+# oficial de nginx. Por debajo de 1 KB no compensa.
+gzip on;
+gzip_comp_level 5;
+gzip_min_length 1024;
+gzip_vary on;
+gzip_types text/css application/javascript text/javascript application/json image/svg+xml application/manifest+json;
+
 # Límites de frecuencia por IP: el login y los pagos son los blancos típicos
 # de fuerza bruta. El resto lo cubren los límites propios de cada servicio.
 limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
@@ -66,17 +75,24 @@ server {
     root /usr/share/nginx/html/app;
     client_max_body_size 64k;
 
-    include /etc/nginx/snippets/seguridad.conf;
-    include /etc/nginx/snippets/bloqueo-interno.conf;
     # CSP básica: solo código propio y el widget de Wompi; la app solo habla
     # con la API y el tiempo real de este dominio. 'unsafe-inline' en estilos
-    # porque React y Tailwind los usan; revisar al endurecer.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://checkout.wompi.co; frame-src https://checkout.wompi.co https://*.wompi.co; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO} https://*.wompi.co; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self' https://checkout.wompi.co; frame-ancestors 'none'" always;
+    # porque React y Tailwind los usan; revisar al endurecer. Las fuentes de
+    # Google (index.css las importa) necesitan fonts.googleapis.com (la hoja)
+    # y fonts.gstatic.com (los archivos).
+    set $csp "default-src 'self'; script-src 'self' https://checkout.wompi.co; frame-src https://checkout.wompi.co https://*.wompi.co; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO} https://*.wompi.co; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self' https://checkout.wompi.co; frame-ancestors 'none'";
+    include /etc/nginx/snippets/cabeceras-sitio.conf;
+    include /etc/nginx/snippets/bloqueo-interno.conf;
 
-    # El service worker y el HTML no se cachean: una versión nueva llega al instante.
-    location = /sw.js { add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/seguridad.conf; }
-    location /assets/ { expires 1y; add_header Cache-Control "public, immutable" always; include /etc/nginx/snippets/seguridad.conf; }
-    location / { try_files $uri $uri/ /index.html; }
+    # El service worker, el HTML y el manifest no se cachean: una versión nueva
+    # llega al instante. /assets lleva hash en el nombre: un año, inmutable.
+    location = /sw.js { add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
+    # El mime.types de nginx 1.27 no conoce .webmanifest (salía como
+    # application/octet-stream). default_type y no `types {}`, que reemplazaría
+    # todos los tipos del server.
+    location = /manifest.webmanifest { default_type application/manifest+json; add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
+    location /assets/ { expires 1y; add_header Cache-Control "public, immutable" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
+    location / { try_files $uri $uri/ /index.html; add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
 }
 
 # --- Panel del restaurante
@@ -88,12 +104,13 @@ server {
     root /usr/share/nginx/html/staff;
     client_max_body_size 64k;
 
-    include /etc/nginx/snippets/seguridad.conf;
+    # El panel también carga fuentes de Google (<link> en index.html).
+    set $csp "default-src 'self'; script-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+    include /etc/nginx/snippets/cabeceras-sitio.conf;
     include /etc/nginx/snippets/bloqueo-interno.conf;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
 
-    location /assets/ { expires 1y; add_header Cache-Control "public, immutable" always; include /etc/nginx/snippets/seguridad.conf; }
-    location / { try_files $uri $uri/ /index.html; }
+    location /assets/ { expires 1y; add_header Cache-Control "public, immutable" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
+    location / { try_files $uri $uri/ /index.html; add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
 }
 
 # --- Pantalla de cocina
@@ -105,11 +122,15 @@ server {
     root /usr/share/nginx/html/cocina;
     client_max_body_size 64k;
 
-    include /etc/nginx/snippets/seguridad.conf;
+    # La pantalla de cocina no carga fuentes externas.
+    set $csp "default-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'";
+    include /etc/nginx/snippets/cabeceras-sitio.conf;
     include /etc/nginx/snippets/bloqueo-interno.conf;
-    add_header Content-Security-Policy "default-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'" always;
 
-    location / { try_files $uri $uri/ /index.html; }
+    # Igual que app. y staff.: /assets con hash, inmutable; el HTML, no-cache.
+    # (Antes todo salía por location / sin Cache-Control.)
+    location /assets/ { expires 1y; add_header Cache-Control "public, immutable" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
+    location / { try_files $uri $uri/ /index.html; add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
 }
 
 # --- API REST
