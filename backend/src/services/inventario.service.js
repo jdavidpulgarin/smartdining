@@ -83,6 +83,26 @@ const COLUMNAS_INSUMO = `
  *
  * @param {{estado?: 'todos'|'bajo', activo?: boolean, q?: string, limite?: number}} filtros
  */
+/**
+ * El patrón de ILIKE para buscar `q` como TEXTO LITERAL, o null si no hay `q`.
+ *
+ * Sin esto, lo que escribe el usuario se usaba como patrón: `q=%` traía todo,
+ * `q=_` cualquier nombre de un carácter o más, y una barra invertida podía
+ * romper el patrón. Aquí se escapan `\`, `%` y `_` —la barra PRIMERO, para no
+ * volver a escapar las que se añaden— y se envuelve en `%…%`. Las consultas lo
+ * usan con `ILIKE $n::text ESCAPE '\'`, así que el escape es explícito y no
+ * depende de la configuración de la base. Es el ÚNICO sitio con esta lógica:
+ * las cuatro búsquedas de inventario reciben ya el patrón.
+ *
+ * @param {string|null|undefined} q
+ * @returns {string|null}
+ */
+function patronDeBusqueda(q) {
+  if (q === null || q === undefined || q === '') return null;
+  const literal = String(q).replace(/[\\%_]/g, (c) => `\\${c}`);
+  return `%${literal}%`;
+}
+
 async function listarInsumos({ estado = 'todos', activo, q, limite } = {}) {
   const tope = Math.min(Math.max(Number(limite) || LIMITE_INSUMOS_POR_OMISION, 1), MAX_INSUMOS);
 
@@ -93,10 +113,10 @@ async function listarInsumos({ estado = 'todos', activo, q, limite } = {}) {
     const result = await pool.query(
       `SELECT id_insumo, nombre, unidad, stock_actual, stock_minimo, agotado
          FROM v_stock_bajo
-        WHERE ($1::TEXT IS NULL OR nombre ILIKE '%' || $1 || '%')
+        WHERE ($1::TEXT IS NULL OR nombre ILIKE $1::TEXT ESCAPE '\\')
         ORDER BY agotado DESC, nombre ASC
         LIMIT $2`,
-      [q || null, tope]
+      [patronDeBusqueda(q), tope]
     );
     return result.rows;
   }
@@ -105,10 +125,10 @@ async function listarInsumos({ estado = 'todos', activo, q, limite } = {}) {
     `SELECT ${COLUMNAS_INSUMO}
        FROM insumos s
       WHERE ($1::BOOLEAN IS NULL OR s.activo = $1)
-        AND ($2::TEXT IS NULL OR s.nombre ILIKE '%' || $2 || '%')
+        AND ($2::TEXT IS NULL OR s.nombre ILIKE $2::TEXT ESCAPE '\\')
       ORDER BY s.nombre ASC
       LIMIT $3`,
-    [activo === undefined ? null : activo, q || null, tope]
+    [activo === undefined ? null : activo, patronDeBusqueda(q), tope]
   );
   return result.rows;
 }
@@ -408,7 +428,8 @@ async function reemplazarReceta(receta, id, insumos, { idUsuario = null } = {}) 
  * Las dos consultas están escritas completas y los filtros van como parámetros
  * ($1, $2): ninguna sentencia de este repo se arma pegando texto, y los
  * identificadores nunca son dinámicos (lo vigila `tests/inyeccion-sql.test.js`).
- * `q` entra por `ILIKE`, con los comodines puestos en SQL.
+ * `q` entra por `ILIKE … ESCAPE '\'` como texto LITERAL: el patrón lo arma
+ * patronDeBusqueda, que escapa los comodines del usuario.
  */
 const SQL_CARTA_PLATOS = `
   SELECT v.id, v.nombre, c.nombre AS categoria, p.personalizable,
@@ -418,7 +439,7 @@ const SQL_CARTA_PLATOS = `
     LEFT JOIN categorias c ON c.id_categoria = p.id_categoria
    WHERE v.tipo = 'plato'
      AND ($1::BOOLEAN IS NULL OR v.tiene_receta = $1)
-     AND ($2::TEXT IS NULL OR v.nombre ILIKE '%' || $2 || '%')
+     AND ($2::TEXT IS NULL OR v.nombre ILIKE $2::TEXT ESCAPE '\\')
    ORDER BY c.nombre ASC NULLS FIRST, v.nombre ASC`;
 
 const SQL_CARTA_INGREDIENTES = `
@@ -431,7 +452,7 @@ const SQL_CARTA_INGREDIENTES = `
     JOIN platos pl ON pl.id_plato = pc.id_plato
    WHERE v.tipo = 'ingrediente'
      AND ($1::BOOLEAN IS NULL OR v.tiene_receta = $1)
-     AND ($2::TEXT IS NULL OR v.nombre ILIKE '%' || $2 || '%')
+     AND ($2::TEXT IS NULL OR v.nombre ILIKE $2::TEXT ESCAPE '\\')
    ORDER BY pl.nombre ASC, pc.orden ASC, v.nombre ASC`;
 
 /** Los ids pueden llegar como texto según el tipo de la columna: a número. */
@@ -505,7 +526,7 @@ async function obtenerCarta({ tipo, sinReceta, q } = {}) {
   // configurar" de la pestaña. Sin el filtro, null, que la consulta lee como
   // "no filtres".
   const tieneReceta = sinReceta === undefined ? null : !sinReceta;
-  const parametros = [tieneReceta, q || null];
+  const parametros = [tieneReceta, patronDeBusqueda(q)];
 
   const platos = tipo === 'ingrediente'
     ? []
@@ -622,6 +643,7 @@ async function deshacer(client) {
 }
 
 module.exports = {
+  patronDeBusqueda,
   listarInsumos,
   obtenerInsumo,
   crearInsumo,

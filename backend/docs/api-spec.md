@@ -3033,8 +3033,15 @@ constructor. Las tablas, la función y las vistas son de `database/scripts/27_in
 |---|---|---|
 | `estado` | `todos`, `bajo` | `todos` |
 | `activo` | `true`, `false` (sin él, todos) | — |
-| `q` | Texto, busca por nombre sin distinguir mayúsculas ni acentos | — |
+| `q` | Texto **literal**, busca por nombre sin distinguir mayúsculas (ver abajo) | — |
 | `limite` | 1–200 | 100 |
+
+**`q` es texto literal, sin comodines** (aquí, en `?estado=bajo` y en `GET /inventario/carta`).
+Lo que escribe el usuario no se usa como patrón: `%`, `_` y `\` se escapan y la consulta lleva
+`ILIKE … ESCAPE '\'` explícito. Así `q=%` solo trae nombres que contienen un `%`, `q=_` solo
+los que tienen un guion bajo, y una barra invertida se busca tal cual en vez de romper el
+patrón. Antes `q=%` devolvía todo. Distingue **acentos**: `costeno` no encuentra «Queso
+costeño» (es un `ILIKE`, sin `unaccent`); las mayúsculas, no.
 
 `?estado=bajo` lee la vista **`v_stock_bajo`** (`activo AND stock_actual <= stock_minimo`), que
 trae su propio `agotado`:
@@ -3390,7 +3397,7 @@ distinguir dos pasos homónimos de platos distintos.
 |---|---|---|
 | `tipo` | `plato`, `ingrediente` | Devuelve solo esa lista; la otra viaja **vacía**, no se omite |
 | `sin_receta` | `true`, `false` | Con `true`, solo lo que **no tiene receta**: es la lista de "falta configurar" de la pestaña |
-| `q` | Texto, hasta 80 | Busca por **nombre**, sin distinguir mayúsculas. Va parametrizado (`ILIKE $1`), nunca pegado al SQL |
+| `q` | Texto, hasta 80 | Busca por **nombre** como texto **literal** (sin comodines: `%`, `_` y `\` se escapan, con `ESCAPE '\'`), sin distinguir mayúsculas pero sí acentos. Va parametrizado, nunca pegado al SQL |
 
 ```http
 GET /api/inventario/carta?sin_receta=true&tipo=plato
