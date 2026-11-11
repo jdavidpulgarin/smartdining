@@ -64,7 +64,9 @@ function entorno(extra = {}) {
     const d = path.join(respaldos, proyecto, tipo);
     return fs.existsSync(d) ? fs.readdirSync(d).sort() : [];
   };
-  return { raiz, respaldos, correr, archivos };
+  return {
+    raiz, respaldos, correr, archivos, env,
+  };
 }
 
 test('diario: respalda el proyecto que esté corriendo y lo valida', () => {
@@ -118,12 +120,44 @@ test('falla si el contenedor no es de smartdining ni de staging', () => {
   assert.match(r.stderr, /proyecto 'otra-cosa'/);
 });
 
-test('falla con un mensaje claro si falta la carpeta del proyecto (instalar-respaldos.sh)', () => {
+test('proyecto sin carpeta preparada: falla con el comando exacto (desde el clon) y sin dejar nada', () => {
   const e = entorno({ RESPALDO_CONTENEDOR: 'pg-prod-1' });
   fs.rmSync(path.join(e.respaldos, 'smartdining'), { recursive: true });
-  const r = e.correr('diario');
+  const r = e.correr('predeploy', '95ca756');
   assert.strictEqual(r.status, 1);
-  assert.match(r.stderr, /instalar-respaldos\.sh/);
+  const raiz = path.resolve(__dirname, '..', '..');
+  assert.match(r.stderr, /no existe .*smartdining: no se respaldó nada/);
+  assert.ok(r.stderr.includes('sudo sh infra/scripts/instalar-respaldos.sh'), r.stderr);
+  // La ruta real del clon desde el que corre (en Git Bash llega como /c/...).
+  const rutaSh = raiz.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, l) => `/${l.toLowerCase()}`);
+  assert.ok(r.stderr.includes(`cd ${rutaSh} &&`) || r.stderr.includes(`cd ${raiz} &&`), r.stderr);
+  assert.ok(!fs.existsSync(path.join(e.respaldos, 'smartdining')), 'no crea la carpeta del proyecto');
+});
+
+test('proyecto sin carpeta, corriendo desde la copia instalada (timer): da los dos clones del VPS', () => {
+  const e = entorno({ RESPALDO_CONTENEDOR: 'pg-stg-1' });
+  fs.rmSync(path.join(e.respaldos, 'smartdining-staging'), { recursive: true });
+  // Como /usr/local/lib/smartdining/respaldo.sh: fuera de cualquier clon.
+  const copia = path.join(e.raiz, 'lib', 'respaldo.sh');
+  fs.mkdirSync(path.dirname(copia));
+  fs.copyFileSync(SCRIPT, copia);
+  const r = spawnSync('sh', [copia, 'diario'], { env: e.env, encoding: 'utf8' });
+  assert.strictEqual(r.status, 1);
+  assert.ok(r.stderr.includes('cd /home/deploy/smartdining && sudo sh infra/scripts/instalar-respaldos.sh'), r.stderr);
+  assert.ok(r.stderr.includes('/srv/smartdining-staging'), r.stderr);
+});
+
+test('predeploy/ y diario/ se crean solos y heredan setgid y grupo de la carpeta del proyecto', { skip: !POSIX && 'sin permisos POSIX en Windows' }, () => {
+  const e = entorno({ RESPALDO_CONTENEDOR: 'pg-prod-1' });
+  const proyecto = path.join(e.respaldos, 'smartdining');
+  fs.chmodSync(proyecto, 0o2750); // como la deja instalar-respaldos.sh
+  for (const [tipo, args] of [['predeploy', ['predeploy', '95ca756']], ['diario', ['diario']]]) {
+    const r = e.correr(...args);
+    assert.strictEqual(r.status, 0, r.stderr);
+    const st = fs.statSync(path.join(proyecto, tipo));
+    assert.strictEqual(st.mode & 0o7777, 0o2750, `${tipo}: 2750`);
+    assert.strictEqual(st.gid, fs.statSync(proyecto).gid, `${tipo}: mismo grupo que el proyecto`);
+  }
 });
 
 for (const [caso, variable, mensaje] of [
