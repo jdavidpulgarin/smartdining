@@ -97,8 +97,11 @@ database/scripts/
 ├── 25_schema_migraciones.sql          # Registro de scripts aplicados (P-17); fin de la línea base
 ├── 26_configuracion.sql                # Configuración del local, mesas.activa e historial de precios (P-18; lo aplica migrar.sh)
 ├── 27_inventario.sql                   # Inventario real: insumos, recetas, reserva al pedir, devoluciones y avisos (P-19)
-└── 28_aviso_insumo_agotado.sql         # Aviso stock_bajo también al llegar a 0 aunque ya estuviera bajo (G-06)
+├── 28_aviso_insumo_agotado.sql         # Aviso stock_bajo también al llegar a 0 aunque ya estuviera bajo (G-06)
+└── 29_configuracion_contacto.sql       # correo y redes (instagram, facebook, tiktok, whatsapp) del local (P-21)
 ```
+
+> El 30 queda para el script de "menú con agotados" que se decida en la G-06.
 
 ### ⚠️ Regla: un script aplicado NUNCA se edita
 
@@ -186,7 +189,11 @@ Cada archivo de `database/tests/` es un bloque `DO` que lanza una excepción si 
 ```bash
 cd database/tests
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p18_configuracion.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p21_configuracion_contacto.sql
 ```
+
+Contacto del local (P-21, script 29): `test_p21_configuracion_contacto.sql` prueba los CHECK de
+`correo` y `redes` (8 correos y 16 formas de redes que se rechazan) y deja la fila como estaba.
 
 Inventario (P-19): `test_p19_inventario.sql` corre dentro de `BEGIN … ROLLBACK` (no deja
 nada). La concurrencia y `pg_notify` necesitan `COMMIT` de verdad, así que van en un script
