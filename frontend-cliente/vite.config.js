@@ -33,7 +33,9 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api\//]
       },
       devOptions: {
-        enabled: true
+        enabled: process.env.PWA_DEV === '1',
+        type: 'classic',
+        navigateFallback: 'index.html'
       }
     })
   ],
