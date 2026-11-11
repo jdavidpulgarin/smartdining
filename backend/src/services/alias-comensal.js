@@ -342,6 +342,51 @@ async function liberar(idMesa, clave) {
  * se llama después del commit y no debe deshacer nada. Si Redis falla, la
  * reserva vence sola con el JWT.
  */
+/**
+ * ¿Hay ALGUNA reserva de alias vigente en la mesa? La usa la rotación interna
+ * del QR (POST /mesas/:id/token-qr/interno) como señal de que la sesión de
+ * mesa ya tiene comensales: todo el que entra por QR reserva su alias, y a
+ * quien no tiene celular lo reserva el personal.
+ *
+ * Abrir la mesa llama a `olvidarMesa`, así que lo que haya son reservas de ESTA
+ * sesión. En Redis la llave entera caduca con su TTL, así que `HLEN` ya solo
+ * cuenta las vigentes; en el respaldo en memoria se mira el vencimiento.
+ *
+ *   - `{hay: true}` / `{hay: false}`
+ *   - `{noDisponible: true}` Redis no responde (o producción sin Redis): no se
+ *     sabe, y quien llama decide qué es lo seguro.
+ *
+ * @returns {Promise<{hay: boolean} | {noDisponible: true}>}
+ */
+async function hayReservas(idMesa, { ahora = Date.now } = {}) {
+  let cliente;
+  try {
+    cliente = await clienteRedis();
+  } catch (err) {
+    console.error('[alias] Redis no está disponible:', err.message);
+    return { noDisponible: true };
+  }
+
+  if (!cliente) {
+    if (process.env.NODE_ENV === 'production') return { noDisponible: true };
+    const mesa = memoria.get(idMesa);
+    if (!mesa) return { hay: false };
+    const t = ahora();
+    for (const guardado of mesa.values()) {
+      if (guardado.vence > t) return { hay: true };
+    }
+    return { hay: false };
+  }
+
+  try {
+    const n = await cliente.hLen(llave(idMesa));
+    return { hay: Number(n) > 0 };
+  } catch (err) {
+    console.error('[alias] no se pudieron contar los alias de la mesa:', err.message);
+    return { noDisponible: true };
+  }
+}
+
 async function olvidarMesa(idMesa) {
   memoria.delete(idMesa);
   try {
@@ -354,6 +399,6 @@ async function olvidarMesa(idMesa) {
 
 module.exports = {
   normalizarAlias, reservar, leerReserva, esSinCelular, aliasReservado, liberar,
-  olvidarMesa, segundos, llave, MIN, MAX, VIGENCIA_SIN_CELULAR, MARCA_SIN_CELULAR,
+  hayReservas, olvidarMesa, segundos, llave, MIN, MAX, VIGENCIA_SIN_CELULAR, MARCA_SIN_CELULAR,
   CLAVE_RESERVADA, MENSAJE_RESERVADA,
 };

@@ -66,6 +66,14 @@ const TABLA = [
     url: `/api/mesas/${MESA}/cuenta/interno`,
     acceso: INTERNA,
   },
+  // Rotación automática del QR que pide el socket-server.
+  {
+    metodo: 'POST',
+    patron: '/api/mesas/:id/token-qr/interno',
+    url: `/api/mesas/${MESA}/token-qr/interno`,
+    acceso: INTERNA,
+    cuerpo: {},
+  },
   {
     metodo: 'POST',
     patron: '/api/transacciones/internal',
