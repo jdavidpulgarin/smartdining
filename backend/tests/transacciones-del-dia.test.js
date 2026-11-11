@@ -26,11 +26,14 @@ const RESUMEN = {
       id_transaccion: 41, id_pedido: 87, codigo_pedido: 'PED-261110-7K2Q9', id_mesa: 5,
       numero_mesa: 5, monto: 34000, metodo_pago: 'efectivo', comensal: 'Ana',
       fecha: '2026-11-11T01:12:40.512Z',
+      // Como lo arma la base: la fila de un pago repartido lleva el sufijo.
+      referencia_externa: 'SD-5-1760212345678-Qm9#2',
     },
     {
       id_transaccion: 40, id_pedido: 86, codigo_pedido: 'PED-261110-3M8ZT', id_mesa: 2,
       numero_mesa: 2, monto: 24000, metodo_pago: 'tarjeta_debito', comensal: null,
       fecha: '2026-11-10T18:03:11.004Z',
+      referencia_externa: null,
     },
   ],
 };
@@ -100,7 +103,7 @@ for (const rol of ['admin', 'cajero']) {
         assert.strictEqual(typeof t.monto, 'number', 'monto es numero');
         assert.deepStrictEqual(
           Object.keys(t).sort(),
-          ['codigo_pedido', 'comensal', 'fecha', 'id_mesa', 'id_pedido', 'id_transaccion', 'metodo_pago', 'monto', 'numero_mesa'],
+          ['codigo_pedido', 'comensal', 'fecha', 'id_mesa', 'id_pedido', 'id_transaccion', 'metodo_pago', 'monto', 'numero_mesa', 'referencia_pago'],
           'solo los campos del contrato: nada de la pasarela'
         );
         assert.ok(!('referencia_externa' in t));
@@ -130,7 +133,9 @@ test('caja: la consulta filtra por estado completada y por el dia de Bogota', as
     // proyeccion de la fecha ISO, que no afecta al indice.
     assert.ok(!/t\.creado_en AT TIME ZONE|date\(t\.creado_en|t\.creado_en::date/.test(q.sql), 'ninguna funcion sobre creado_en en el filtro');
     assert.match(q.sql, /ORDER BY f\.creado_en DESC, f\.id_transaccion DESC/, 'mas reciente primero');
-    assert.ok(!/referencia_externa/.test(q.sql), 'no se lee la referencia de la pasarela');
+    // La referencia se LEE (para calcular referencia_pago), pero no sale en
+    // crudo: eso lo vigila la prueba de la forma de la respuesta.
+    assert.match(q.sql, /t\.referencia_externa/, 'se lee para calcular referencia_pago');
   } finally {
     db.restaurar();
   }
@@ -253,3 +258,52 @@ for (const [caso, marca, patron] of [
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// referencia_pago: la referencia del pago SIN el sufijo #n de referenciaDeFila
+// ---------------------------------------------------------------------------
+
+const servicio = require('../src/services/transacciones.service');
+
+test('referencia_pago: referenciaDelPago es la inversa exacta de referenciaDeFila', () => {
+  const { referenciaDelPago, referenciaDeFila } = servicio;
+  assert.strictEqual(referenciaDelPago('ref'), 'ref');
+  assert.strictEqual(referenciaDelPago('ref#2'), 'ref');
+  assert.strictEqual(referenciaDelPago('ref#3'), 'ref');
+  assert.strictEqual(referenciaDelPago('ref#10'), 'ref');
+  assert.strictEqual(referenciaDelPago(null), null);
+  assert.strictEqual(referenciaDelPago(undefined), null);
+  // Ida y vuelta, con referencias que ya traen '#' en medio.
+  for (const ref of ['SD-5-1760212345678-Qm9vX2E', 'caja:3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f', 'SD-9#A-xyz', 'a#b#c']) {
+    for (let i = 0; i < 12; i++) {
+      assert.strictEqual(referenciaDelPago(referenciaDeFila(ref, i)), ref, `${ref} fila ${i}`);
+    }
+  }
+});
+
+test('referencia_pago: un # que no es el sufijo de referenciaDeFila se respeta', () => {
+  const { referenciaDelPago } = servicio;
+  assert.strictEqual(referenciaDelPago('SD-9#A-xyz'), 'SD-9#A-xyz', '# en medio');
+  assert.strictEqual(referenciaDelPago('ref#1'), 'ref#1', 'referenciaDeFila nunca escribe #1');
+  assert.strictEqual(referenciaDelPago('ref#02'), 'ref#02', 'ni ceros a la izquierda');
+  assert.strictEqual(referenciaDelPago('ref#'), 'ref#', 'sin numero');
+  assert.strictEqual(referenciaDelPago('ref#2a'), 'ref#2a', 'no es un entero final');
+  assert.strictEqual(referenciaDelPago('ref#-2'), 'ref#-2');
+  assert.strictEqual(referenciaDelPago('#2'), '#2', 'sin referencia delante no hay nada que quitar');
+  assert.strictEqual(referenciaDelPago('ref#2#3'), 'ref#2', 'solo el sufijo FINAL');
+});
+
+test('referencia_pago: sale en cada fila y referencia_externa no sale en crudo', async () => {
+  const db = fakeCaja();
+  try {
+    const res = await pedir(tokenStaff(1, 'cajero'));
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.transacciones[0].referencia_pago, 'SD-5-1760212345678-Qm9', 'sin el #2');
+    assert.strictEqual(res.body.transacciones[1].referencia_pago, null, 'un cobro sin referencia sale null');
+    assert.ok(!JSON.stringify(res.body).includes('referencia_externa'), 'el campo crudo no sale');
+    assert.ok(!JSON.stringify(res.body).includes('Qm9#2'), 'ni su valor con sufijo');
+  } finally {
+    db.restaurar();
+  }
+});

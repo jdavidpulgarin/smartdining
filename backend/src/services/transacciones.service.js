@@ -249,6 +249,22 @@ function referenciaDeFila(referencia, indice) {
 }
 
 /**
+ * La INVERSA exacta de referenciaDeFila: la referencia del pago, sin el sufijo
+ * de almacenamiento. 'ref', 'ref#2' y 'ref#3' -> 'ref'; null -> null.
+ *
+ * Solo se quita un sufijo FINAL `#<entero ≥ 2>` escrito como lo escribe
+ * referenciaDeFila (sin ceros a la izquierda): un '#' en otra posición, o un
+ * '#1' / '#02' final, es parte de la referencia original y se respeta. Es lo
+ * que permite agrupar las filas de un mismo pago repartido entre pedidos.
+ */
+function referenciaDelPago(referenciaExterna) {
+  if (referenciaExterna === null || referenciaExterna === undefined) return null;
+  const m = /^([\s\S]*)#([1-9]\d*)$/.exec(referenciaExterna);
+  if (!m || Number(m[2]) < 2 || m[1] === '') return referenciaExterna;
+  return m[1];
+}
+
+/**
  * Registra un pago de la pasarela (lo llama el socket-server, EVENTS.md §8.4).
  *
  * El pago es **de la mesa**, no de un pedido: Wompi cobra un monto y aquí se
@@ -489,7 +505,7 @@ async function listarDelDia({ desde = DESDE_HOY, zona = ZONA, ahora = null } = {
      ),
      filas AS (
        SELECT t.id_transaccion, t.id_pedido, p.codigo_pedido, p.id_mesa, m.numero AS numero_mesa,
-              t.monto, t.metodo_pago, t.comensal, t.creado_en
+              t.monto, t.metodo_pago, t.comensal, t.creado_en, t.referencia_externa
          FROM transacciones t
          JOIN pedidos p ON p.id_pedido = t.id_pedido
          JOIN mesas   m ON m.id_mesa   = p.id_mesa
@@ -516,6 +532,8 @@ async function listarDelDia({ desde = DESDE_HOY, zona = ZONA, ahora = null } = {
                        'monto',          f.monto,
                        'metodo_pago',    f.metodo_pago,
                        'comensal',       f.comensal,
+                       -- Solo para calcular referencia_pago en JS; no sale tal cual.
+                       'referencia_externa', f.referencia_externa,
                        'fecha',          to_char(f.creado_en AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
                      ) ORDER BY f.creado_en DESC, f.id_transaccion DESC)
                 FROM filas f
@@ -534,7 +552,14 @@ async function listarDelDia({ desde = DESDE_HOY, zona = ZONA, ahora = null } = {
     cantidad: Number(fila.cantidad),
     // json_agg ya trae `monto` como número JSON; Number() solo asegura el tipo
     // si algún día la columna cambiara a texto.
-    transacciones: (fila.transacciones || []).map((t) => ({ ...t, monto: Number(t.monto) })),
+    // referencia_pago agrupa las filas de un mismo pago repartido entre pedidos
+    // ('ref', 'ref#2' -> 'ref'). La referencia_externa en crudo NO sale: se
+    // quita del objeto antes de devolverlo.
+    transacciones: (fila.transacciones || []).map(({ referencia_externa, ...t }) => ({
+      ...t,
+      monto: Number(t.monto),
+      referencia_pago: referenciaDelPago(referencia_externa),
+    })),
   };
 }
 
@@ -546,6 +571,7 @@ module.exports = {
   DIAS_ATRAS_MAXIMOS,
   DESDE_HOY,
   referenciaDeFila,
+  referenciaDelPago,
   ESTADO_COBRADO,
   ESTADO_ENTREGADO,
 };
