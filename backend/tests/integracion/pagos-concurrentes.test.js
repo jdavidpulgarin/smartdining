@@ -20,6 +20,8 @@ require('dotenv').config({ path: `${B}/.env` });
 
 const { Pool } = require('pg');
 const transaccionesService = require('../../src/services/transacciones.service');
+// Rango de números de mesa propio de esta suite (#165).
+const conNumeroDeMesa = require('../helpers/mesa-prueba').numerosDeMesa('pagos-concurrentes');
 
 const PRECIO_PEDIDO = 34000;
 const MONTO_POR_PAGO = 20000;
@@ -46,10 +48,12 @@ test.after(async () => {
 /** Crea una mesa, un plato y un pedido 'entregado' por PRECIO_PEDIDO. */
 async function prepararPedidoEntregado() {
   const mesa = (
-    await pool.query(
-      `INSERT INTO mesas (numero, capacidad, ubicacion, estado)
-       VALUES ($1, 4, 'h-01', 'ocupada') RETURNING id_mesa`,
-      [9000 + Math.floor(Math.random() * 900)]
+    await conNumeroDeMesa((numero) =>
+      pool.query(
+        `INSERT INTO mesas (numero, capacidad, ubicacion, estado)
+         VALUES ($1::int, 4, 'h-01', 'ocupada') RETURNING id_mesa`,
+        [numero]
+      )
     )
   ).rows[0].id_mesa;
 

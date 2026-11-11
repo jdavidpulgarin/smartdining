@@ -27,7 +27,8 @@ const mesasService = require('../../src/services/mesas.service');
 let sonda = null;
 let hayBase = false;
 const creadas = [];
-const numeroLibre = () => 9000 + Math.floor(Math.random() * 900);
+// Rango de números de mesa propio de esta suite (#165).
+const conNumeroDeMesa = require('../helpers/mesa-prueba').numerosDeMesa('mesas-sql');
 
 test.before(async () => {
   try {
@@ -50,7 +51,8 @@ test.after(async () => {
 test('crear una mesa libre: PostgreSQL acepta el INSERT y no abre visita', async (t) => {
   if (!hayBase) return t.skip('sin base de datos');
 
-  const mesa = await mesasService.crear({ numero: numeroLibre(), capacidad: 4, ubicacion: 'Prueba integración' });
+  const mesa = await conNumeroDeMesa((numero) =>
+    mesasService.crear({ numero, capacidad: 4, ubicacion: 'Prueba integración' }));
   creadas.push(mesa.id_mesa);
 
   assert.strictEqual(mesa.estado, 'disponible');
@@ -61,7 +63,7 @@ test('crear una mesa libre: PostgreSQL acepta el INSERT y no abre visita', async
 test('crear una mesa ya ocupada: arranca con su sesion_iniciada_en', async (t) => {
   if (!hayBase) return t.skip('sin base de datos');
 
-  const mesa = await mesasService.crear({ numero: numeroLibre(), estado: 'ocupada' });
+  const mesa = await conNumeroDeMesa((numero) => mesasService.crear({ numero, estado: 'ocupada' }));
   creadas.push(mesa.id_mesa);
 
   assert.strictEqual(mesa.estado, 'ocupada');
