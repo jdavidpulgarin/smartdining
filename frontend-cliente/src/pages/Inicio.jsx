@@ -8,7 +8,7 @@ import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 
 const FOTO_PORTADA_INICIO =
-  'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1200&q=80&auto=format';
+  'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=75&auto=format';
 
 function Inicio() {
   const navigate = useNavigate();
@@ -101,6 +101,10 @@ function Inicio() {
           src={FOTO_PORTADA_INICIO}
           alt=""
           aria-hidden="true"
+          width={800}
+          height={533}
+          fetchPriority="high"
+          decoding="async"
           className="w-full h-full object-cover opacity-35"
         />
         <div className="absolute inset-0 bg-gradient-to-b from-fondo/60 via-fondo/80 to-fondo" />

@@ -1,18 +1,34 @@
+import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { SesionProvider } from './context/SesionContext'
 import { MesaSocketProvider } from './context/MesaSocketContext'
 import { CarritoProvider } from './context/CarritoContext'
 import Layout from './components/layout/Layout'
 import Inicio from './pages/Inicio'
-import Menu from './pages/Menu'
-import Constructor from './pages/Constructor'
-import Carrito from './pages/Carrito'
-import Seguimiento from './pages/Seguimiento'
-import Pago from './pages/Pago'
-import Despedida from './pages/Despedida'
-import UiShowcase from './pages/dev/UiShowcase'
 import './styles/seguimiento.css'
 import './styles/cuenta.css'
+
+const Menu = lazy(() => import('./pages/Menu'))
+const Constructor = lazy(() => import('./pages/Constructor'))
+const Carrito = lazy(() => import('./pages/Carrito'))
+const Seguimiento = lazy(() => import('./pages/Seguimiento'))
+const Pago = lazy(() => import('./pages/Pago'))
+const Despedida = lazy(() => import('./pages/Despedida'))
+const UiShowcase = lazy(() => import('./pages/dev/UiShowcase'))
+
+function CargandoRuta() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="min-h-screen bg-fondo text-texto flex items-center justify-center p-6"
+    >
+      <span className="text-sm font-etiqueta uppercase tracking-wider text-texto-suave">
+        Cargando vista...
+      </span>
+    </div>
+  )
+}
 
 function App() {
   return (
@@ -20,6 +36,7 @@ function App() {
       <SesionProvider>
         <MesaSocketProvider>
           <CarritoProvider>
+          <Suspense fallback={<CargandoRuta />}>
           <Routes>
             <Route path="/" element={<Inicio />} />
             <Route
@@ -67,6 +84,7 @@ function App() {
               <Route path="/dev/ui" element={<UiShowcase />} />
             )}
           </Routes>
+          </Suspense>
         </CarritoProvider>
       </MesaSocketProvider>
     </SesionProvider>

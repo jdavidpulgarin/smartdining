@@ -257,6 +257,10 @@ function Constructor() {
             <img
               src={plato.url_imagen}
               alt={plato.nombre}
+              width={800}
+              height={533}
+              fetchPriority="high"
+              decoding="async"
               className="w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />

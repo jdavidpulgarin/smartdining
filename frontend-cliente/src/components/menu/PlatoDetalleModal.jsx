@@ -95,6 +95,10 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
             <img
               src={plato.imagen}
               alt={plato.nombre}
+              width={640}
+              height={480}
+              loading="lazy"
+              decoding="async"
               className="w-full h-full object-cover"
             />
           </div>
