@@ -423,7 +423,7 @@ sh infra/scripts/simulacro-restauracion.sh /srv/respaldos/smartdining/predeploy/
 ```
 
 [`simulacro-restauracion.sh`](../infra/scripts/simulacro-restauracion.sh)
-levanta un postgres **temporal** sin red ni volumen con nombre, con la misma
+levanta un postgres **temporal** sin red y sin volúmenes (los datos van en un `tmpfs`, en RAM), con la misma
 imagen que el de producción. Restaura ahí el respaldo (`pg_restore
 --exit-on-error`) y compara con la base en vivo la cantidad de tablas en
 `public` y la cantidad y última fila de `schema_migraciones`, que deben ser
