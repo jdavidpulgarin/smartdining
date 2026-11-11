@@ -189,6 +189,31 @@ test('un PUT valido de correo y redes se guarda y se lee igual', async (t) => {
 const NBSP = ' ';
 const EM_SPACE = ' ';
 
+/*
+ * Espacios Unicode que NO son ASCII (U+00A0, U+2003...): cualquier \s de JS
+ * salvo espacio, tabulador, salto de línea, \r, \f y \v.
+ *
+ * Por qué se tratan aparte: [[:space:]] de PostgreSQL depende del LC_CTYPE de
+ * la base. En postgres:16-alpine (dev y prod, ctype C) no cuenta U+00A0 y la
+ * base ACEPTA lo que zod rechaza; en la base de Windows sí lo cuenta. Para
+ * estos casos se exige que zod rechace y se tolera SOLO "zod rechaza y la base
+ * acepta" (zod más estricto), nunca al revés. Los espacios ASCII y todo lo
+ * demás siguen exigiendo el mismo veredicto. La regla de la base la revisa
+ * Jarrison después de la feria.
+ */
+const ESPACIO_UNICODE = /[^\S \t\n\r\f\v]/u;
+const conEspacioUnicode = (valor) =>
+  ESPACIO_UNICODE.test(typeof valor === 'string' ? valor : JSON.stringify(valor) ?? '');
+
+/** null si cuadran; si no, por qué. `valor` es lo que se probó. */
+function discrepancia(valor, zod, base) {
+  if (conEspacioUnicode(valor)) {
+    if (zod) return 'zod acepta un espacio Unicode';
+    return null; // zod rechaza; la base, según su locale, puede aceptar
+  }
+  return zod === base ? null : 'distinto';
+}
+
 /** [clave, valor, nota] de una sola red. */
 const CASOS_RED = [
   ['instagram', 'https://instagram.com/smartdining', 'perfil'],
@@ -266,14 +291,14 @@ test('cada patron de red: zod y fn_redes_contacto_validas dan el mismo veredicto
   for (const [clave, valor, nota] of CASOS_RED) {
     const zod = configuracionSchema.safeParse({ redes: { [clave]: valor } }).success;
     const base = await veredictoRedesBase({ [clave]: valor });
-    tabla.push({ campo: `redes.${clave}`, nota, zod, base });
-    if (zod !== base) distintos.push(`${clave} ${nota}: zod=${zod} base=${base}`);
+    tabla.push({ campo: `redes.${clave}`, nota, zod, base, valor });
+    if (discrepancia(valor, zod, base)) distintos.push(`${clave} ${nota}: zod=${zod} base=${base}`);
   }
   for (const [objeto, nota] of CASOS_OBJETO) {
     const zod = configuracionSchema.safeParse({ redes: objeto }).success;
     const base = await veredictoRedesBase(objeto);
-    tabla.push({ campo: 'redes', nota, zod, base });
-    if (zod !== base) distintos.push(`redes ${nota}: zod=${zod} base=${base}`);
+    tabla.push({ campo: 'redes', nota, zod, base, valor: objeto });
+    if (discrepancia(objeto, zod, base)) distintos.push(`redes ${nota}: zod=${zod} base=${base}`);
   }
   assert.deepStrictEqual(distintos, [], 'zod y la base discrepan');
 });
@@ -295,8 +320,8 @@ test('correo: zod y el CHECK (y el VARCHAR(254)) de la base dan el mismo veredic
         base = false;
       }
       await c.query('ROLLBACK TO SAVEPOINT caso');
-      tabla.push({ campo: 'correo', nota, zod, base });
-      if (zod !== base) distintos.push(`correo ${nota}: zod=${zod} base=${base}`);
+      tabla.push({ campo: 'correo', nota, zod, base, valor });
+      if (discrepancia(valor, zod, base)) distintos.push(`correo ${nota}: zod=${zod} base=${base}`);
     }
   } finally {
     await c.query('ROLLBACK');
@@ -307,7 +332,8 @@ test('correo: zod y el CHECK (y el VARCHAR(254)) de la base dan el mismo veredic
   if (process.env.VER_TABLA) {
     console.log('\nCAMPO               CASO                          ZOD    BASE');
     for (const f of tabla) {
-      console.log(`${f.campo.padEnd(20)}${f.nota.padEnd(30)}${String(f.zod).padEnd(7)}${f.base}${f.zod === f.base ? '' : '   <- DISTINTO'}`);
+      const marca = f.zod === f.base ? '' : discrepancia(f.valor, f.zod, f.base) ? '   <- DISTINTO' : '   (zod mas estricto: locale)';
+      console.log(`${f.campo.padEnd(20)}${f.nota.padEnd(30)}${String(f.zod).padEnd(7)}${f.base}${marca}`);
     }
   }
 });
