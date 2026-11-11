@@ -147,11 +147,12 @@ desde `recibido` o `en_preparacion` (ver *Transiciones válidas* arriba).
 Da de alta personal del restaurante. El comensal no se registra.
 El primer `admin` sale del `seed.sql` de Jarrison, no de este endpoint.
 
-Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "123456", "rol": "mesero" }`
+Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "12345678", "rol": "mesero" }`
 
 `rol` es obligatorio y solo acepta `admin`, `mesero`, `cajero`, `cocina`.
 
-`password`: mínimo **6 caracteres** y como mucho **72 bytes** en UTF-8 (ver
+`password`: mínimo **8 caracteres** (antes 6; el mismo que el cambio de clave y el que exige el
+panel) y como mucho **72 bytes** en UTF-8 (ver
 [La clave máxima: 72 bytes](#la-clave-máxima-72-bytes)).
 
 201: `{ "usuario": { "id_usuario": 1, "nombre": "Ana Ríos", "email": "ana@mail.com", "rol": "mesero", "activo": true } }`
@@ -177,7 +178,11 @@ dos únicos sitios que llaman a `bcrypt.hash`) se rechaza si pasa de 72 bytes en
   textos.
 - **El login no lleva tope**, a propósito: quien creó una clave más larga antes de esta regla
   sigue entrando con ella (bcrypt la compara truncada, igual que la guardó).
-- Los mínimos **no** son iguales: 6 caracteres al registrar y 8 al cambiar la clave.
+- **El mínimo es el mismo en las dos rutas: 8 caracteres** (`CARACTERES_MINIMOS_CLAVE`, en el
+  mismo módulo), con 400 `{ "error": "La contraseña debe tener al menos 8 caracteres" }`. Se
+  mide en **caracteres**, que es lo que la persona escribe y cuenta. Antes el registro pedía 6.
+- **El login tampoco aplica el mínimo**: una clave de 6 o 7 caracteres creada antes sigue
+  entrando.
 - La regla vive en un solo sitio: `src/utils/clave-bcrypt.js`.
 
 ### POST /auth/login
@@ -299,8 +304,7 @@ Body, **todos los campos opcionales** pero al menos uno:
 
 Body: `{ "password": "clave-nueva-larga" }`, `.strict()`.
 
-- **Mínimo 8 caracteres** (400 si no). Más que los 6 de `/auth/register`, cuyo mínimo ya
-  está publicado en este contrato: bajarlo aquí para igualarlo sería empeorar a propósito.
+- **Mínimo 8 caracteres** (400 si no), el mismo que `/auth/register` desde que se igualaron.
   El mínimo se mide en **caracteres**, que es lo que la persona escribe y cuenta.
 - **Máximo 72 BYTES** (no 72 caracteres), medidos con `Buffer.byteLength(clave, 'utf8')`.
   Es por bytes como trunca bcrypt: a partir del byte 72 ignora el resto **en silencio**. Y
@@ -758,7 +762,7 @@ Si no se envían, **el comportamiento no cambia**: el plato conserva lo que ten�
 |---|---|
 | Falta un campo, o un tipo o rango no es el declarado | **400** con el campo que falla (zod) |
 | `id_categoria` que no existe | **409** `{ "error": "Esa categoria no existe", "motivo": "categoria_inexistente" }` |
-| **El usuario del token ya no existe** | **409** `autor_inexistente` (ver [El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)) |
+| **El usuario del token ya no existe** (solo en el `PUT`, y solo si cambia el precio) | **409** `autor_inexistente` (ver [El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)) |
 | Un valor que no cabe en la columna (precio enorme) | **422** con el mensaje genérico de "dato fuera de rango" |
 | Un `CHECK` de la base (precio negativo llamando al servicio suelto) | **422** |
 
@@ -853,7 +857,7 @@ mostrando el plato como disponible.
 > plato volverá solo cuando haya inventario. Antes se mandaba el interruptor a secas, y la PWA
 > y el KDS lo mostraban disponible mientras pedirlo daba **409 `sin_stock`**.
 >
-> La cuenta vive en un solo sitio (`src/services/disponibilidad-efectiva.js`) para que los
+> La cuenta vive en un solo sitio (`src/services/disponibilidad-efectiva.js`) para que todos los
 > tres caminos no puedan discrepar otra vez. El **cuerpo de la respuesta** sigue siendo la
 > fila de la base, con sus dos columnas por separado: el panel necesita saber cuál de las dos
 > apagó el plato.
@@ -1191,7 +1195,7 @@ está en §[La frontera entre 400 y 422](#la-frontera-entre-400-y-422-h-11)):
 
 ### Regla de borrado: lo vendido no se borra
 
-`detalles_ingredientes.id_ingrediente` es `ON DELETE RESTRICT` a propósito, para que los
+`detalles_ingredientes.id_ingrediente` es `ON DELETE RESTRICT` a propósito, para que todos los
 pedidos históricos conserven su composición. Por eso:
 
 - Un ingrediente que ya se usó en algún pedido **no se borra**: responde **409**. Para
@@ -1742,7 +1746,75 @@ responde (no se guarda nada). Si falla solo el aviso a la tablet, responde 201 i
 
 > Hoy el middleware de sesión compara el `sid` del JWT del comensal con el `token_qr`
 > vigente, así que **rotar cierra las sesiones de quienes ya estaban sentados**. Si se quiere
-> que conserven su sesión tras una rotación, hay que cambiar ese criterio (pendiente).
+> que conserven su sesión tras una rotación, hay que cambiar ese criterio (pendiente). La
+> rotación **automática** (abajo) no tiene ese problema: no rota si alguien ya entró.
+
+### POST /mesas/:id/token-qr/interno — interna (rotación automática del QR)
+
+La llama **el socket-server**, no un frontend: mientras una mesa está abierta y **nadie se ha
+sentado**, su QR cambia cada 3 minutos para que una foto de la tablet deje de servir (diseño en
+`socket-server/docs/rotacion-qr.md`, opción A). El socket-server firma el QR nuevo y le pide al
+backend que lo guarde como el vigente; solo si recibe `200` lo anuncia a la tablet con
+`qr:actualizado`. El backend **no** llama a `/internal/qr-rotado`.
+
+```http
+POST /api/mesas/5/token-qr/interno
+x-internal-key: <INTERNAL_API_KEY>
+Content-Type: application/json
+
+{ "token_qr": "v1.<datos>.<firma>", "token_anterior": "v1.<datos>.<firma>" }
+```
+
+- **Clave interna** (`requireInternalKey`, comparación en tiempo constante): sin ella o con una
+  equivocada, **401**; sin `INTERNAL_API_KEY` configurada, 503.
+- **Cuerpo** (zod `.strict()`): `token_qr` con la forma `v1.<datos>.<firma>` en base64url y
+  hasta 255 caracteres (el tamaño de la columna); `token_anterior` con la misma forma o
+  `null`, **obligatorio** aunque sea null; distintos entre sí. La **firma no se valida aquí**:
+  es del socket-server, que tiene `QR_SECRET`. Cualquier fallo es **400**
+  `{ "error", "motivo": "cuerpo_invalido" }`.
+
+En **una transacción**, con la mesa bloqueada (`FOR UPDATE`):
+
+| Paso | Si no se cumple |
+|---|---|
+| La mesa existe | **404** |
+| Está `ocupada` | **409** `{ "motivo": "mesa_no_ocupada", "estado" }` |
+| **Compare-and-swap**: `token_anterior` es el `token_qr` vigente | **409** `{ "motivo": "token_anterior_distinto" }`: alguien rotó a mano o liberó la mesa mientras tanto |
+| **Guarda de continuidad**: la sesión de mesa no tiene comensales | **409** `{ "motivo": "mesa_con_comensales" }` |
+| Se pueden leer las reservas de alias | **503** `{ "motivo": "alias_no_disponible" }` |
+
+Si todo se cumple: guarda el token anterior en `token_qr_historico`, cambia `mesas.token_qr`,
+`COMMIT` y **200** `{ "ok": true }`. Desde ese momento el QR viejo ya no abre sesión
+(`POST /mesas/qr/:token/sesion` responde 401 `no_es_el_vigente`) y el nuevo sí.
+
+**`token_anterior: null` es 409, no un comodín.** El socket-server arranca la rotación siempre
+con el token que acaba de firmar en `/qr/generar`, que es el mismo que guarda el backend al abrir
+o rotar a mano, así que hoy nunca manda `null`. Si algún día lo hiciera, sería un rotador que no
+sabe qué QR está vigente, y pisarlo a ciegas podría deshacer una rotación manual. Con el 409 deja
+de rotar esa mesa.
+
+**La guarda de continuidad, y por qué.** El middleware de sesión compara el `sid` del JWT del
+comensal con el `token_qr` vigente, así que rotar dejaría sin sesión a quien ya entró con el QR
+anterior. El diseño quiere que el QR quede **fijo** en cuanto entra alguien; el socket-server lo
+decide con los sockets de la sala, pero puede haber alguien que escaneó y todavía no abrió su
+socket. Por eso el backend también mira, y **no rota** si la sesión de mesa ya tiene:
+
+- **pedidos** de la sesión actual (misma regla de `sesion_iniciada_en` que la liberación
+  automática), o
+- **reservas de alias**: todo el que entra por QR reserva su alias, y el personal reserva el de
+  quien no tiene celular. Abrir la mesa las borra, así que lo que haya es de esta sesión.
+
+El 409 hace que el socket-server deje de rotar: el QR queda fijo hasta que la mesa se libere. Si
+las reservas **no se pueden leer** (Redis no responde) se elige lo seguro, **no rotar**: el QR
+anterior sigue valiendo y nadie pierde su sesión. Se responde **503** (y no 409) para que el
+socket-server lo reintente en el siguiente ciclo en vez de dejar la mesa fija para siempre.
+
+**Logs:** el id de la mesa y el motivo; **nunca** un token, porque quien lo tenga abre sesión
+en esa mesa.
+
+Cobertura: `tests/mesas-rotacion-interna.test.js` y `tests/integracion/mesas-rotacion-sql.test.js`
+(contra PostgreSQL, con QR firmados por el servicio real del socket-server y una vuelta de punta a
+punta con su rotador).
 
 ### POST /mesas/:id/liberar — mesero, admin
 
@@ -2437,6 +2509,7 @@ cuenta y los alias de otra mesa.
 |---|---|---|---|
 | POST | /transacciones | admin, cajero | Registra un pago: crea la transacción, marca el pedido `pagado` y **libera la mesa automáticamente** |
 | GET | /transacciones/pedido/:id_pedido | admin, cajero | Lista las transacciones de un pedido |
+| **GET** | **/transacciones?desde=hoy\|AAAA-MM-DD** | **admin, cajero** | **Las transacciones completadas desde ese día hasta el final de hoy (días de Bogotá), con total y cantidad: el cierre de caja** |
 | **POST** | **/transacciones/mesa** | **admin, cajero** | **Cobra un monto a la MESA y lo reparte entre sus pedidos, del más viejo al más nuevo** |
 
 ### POST /transacciones
@@ -2617,6 +2690,126 @@ propia consulta con el `JOIN pedidos` y el filtro del rango.
 sería un promedio de promedios: cada día pesaría igual, tenga 2 pedidos u 80.
 
 **`tiempoCocinaPromedio` va ponderado** por `platos_preparados`, por lo mismo.
+
+### GET /transacciones?desde=hoy|AAAA-MM-DD — el cierre de caja
+
+**Roles:** `admin`, `cajero` (los mismos que registran pagos). Sin token **401**; `mesero`,
+`cocina` o un comensal, **403**.
+
+**Query**, validada con zod `.strict()`:
+
+| Parámetro | Obligatorio | Valores |
+|---|---|---|
+| `desde` | Sí | `hoy`, o una fecha `AAAA-MM-DD` |
+
+**Qué significa `desde`:** un **rango de días de Bogotá**, desde las 00:00 de ese día hasta el
+**final de hoy**. No es un solo día: `desde=2026-11-08` con hoy 10 de noviembre trae el 8, el 9
+y el 10. `desde=hoy` es el caso hoy..hoy (igual que `desde=<la fecha de hoy>`).
+
+**Límites**, todos en días de **Bogotá**, no del servidor ni de UTC:
+
+- La fecha tiene que **existir**: `2026-02-30`, `2026-13-01` o `2026-11-00` son 400. Se comprueba
+  sin depender de la zona del servidor (con `Date.UTC`, mirando que año, mes y día no cambien).
+- **No puede ser futura**: posterior a hoy en Bogotá → 400.
+- **Como mucho 31 días contando hoy**: `desde >= hoy - 30` (`DIAS_ATRAS_MAXIMOS = 30`). Más
+  antigua → 400, y el mensaje dice la fecha más antigua permitida ese día.
+- A las 20:00 de Bogotá, cuando en UTC ya es el día siguiente, "hoy" sigue siendo el de Bogotá:
+  la fecha de Bogotá de ese día es válida, la del día siguiente es futura, y el tope se cuenta
+  desde el hoy de Bogotá.
+
+Errores, todos **400** `{ "error": "...", "motivo": "consulta_invalida" }`:
+
+| Caso | `error` (ejemplo) |
+|---|---|
+| Sin `desde` | `desde es obligatorio: "hoy" o una fecha AAAA-MM-DD` |
+| Otro valor o formato (`ayer`, `10/11/2026`, `2026-1-5`, `2026-11-10T00:00`) | `desde debe ser "hoy" o una fecha AAAA-MM-DD` |
+| Fecha que no existe | `La fecha 2026-02-30 no existe` |
+| Futura | `desde no puede ser posterior a hoy (2026-11-10, hora de Bogotá)` |
+| Más de 31 días atrás | `desde admite como mucho 30 días atrás: la fecha más antigua permitida hoy es 2026-10-11` |
+| Un parámetro extra | el mensaje de zod |
+
+**Respuesta 200:**
+
+```json
+{
+  "desde": "2026-11-10",
+  "hasta": "2026-11-10",
+  "total": 58000,
+  "cantidad": 2,
+  "transacciones": [
+    {
+      "id_transaccion": 41, "id_pedido": 87, "codigo_pedido": "PED-261110-7K2Q9",
+      "id_mesa": 5, "numero_mesa": 5, "monto": 34000, "metodo_pago": "efectivo",
+      "comensal": "Ana", "fecha": "2026-11-11T01:12:40.512Z",
+      "referencia_pago": null
+    },
+    { "id_transaccion": 40, "id_pedido": 86, "codigo_pedido": "PED-261110-3M8ZT",
+      "id_mesa": 2, "numero_mesa": 2, "monto": 24000, "metodo_pago": "tarjeta_debito",
+      "comensal": null, "fecha": "2026-11-10T18:03:11.004Z", "referencia_pago": null }
+  ]
+}
+```
+
+- `desde` y `hasta` son los días del rango, ambos **incluidos**, en `AAAA-MM-DD`: `hasta` es
+  siempre hoy en Bogotá. Con `desde=hoy` coinciden. (`hasta` es nuevo; los campos que ya
+  había no cambian.)
+- Solo `estado_transaccion = 'completada'`: ni pendientes, ni fallidas, ni reembolsadas.
+- **Más reciente primero** (`creado_en` descendente; a igual instante, id descendente).
+- `monto` y `total` son **números**, no texto (los `NUMERIC` se convierten); `cantidad` es un
+  entero. `total` y `cantidad` los calcula la base en la misma consulta que la lista.
+- `fecha` es el instante en ISO 8601 UTC (`Z`); el cliente lo muestra en su hora local.
+- `comensal` es quien pagó cuando la mesa dividió la cuenta; `null` en un cobro de la mesa
+  completa.
+- **`referencia_pago`** identifica el **pago** al que pertenece la fila, para agrupar. Un
+  pago a la mesa se reparte entre varios pedidos y deja **una fila por pedido**; todas llevan
+  el mismo `referencia_pago`. Pasa con los dos pagos de mesa: el de Wompi (la referencia de la
+  pasarela) y el **cobro de mesa en caja** (`POST /transacciones/mesa`), cuyas filas salen
+  todas con `referencia_pago = "caja:<id_cobro>"`, el mismo `id_cobro` que mandó la caja. Es la referencia del pago
+  sin el sufijo interno de almacenamiento (`ref`, `ref#2`, `ref#3` → `ref`; solo se quita un
+  `#<entero ≥ 2>` final, nunca un `#` que forme parte de la referencia original). Es `null`
+  en un cobro por pedido sin referencia (`POST /transacciones`). Agrupar para la caja:
+
+  ```js
+  const pagos = new Map();
+  for (const t of respuesta.transacciones) {
+    // Sin referencia, cada fila es su propio cobro.
+    const clave = t.referencia_pago ?? `fila-${t.id_transaccion}`;
+    const p = pagos.get(clave) ?? { referencia_pago: t.referencia_pago, monto: 0, pedidos: [] };
+    p.monto += t.monto;
+    p.pedidos.push(t.id_pedido);
+    pagos.set(clave, p);
+  }
+  // Un pago de Wompi de 72.000 repartido en 3 pedidos sale como UN pago de 72.000.
+  ```
+
+  Suma en pesos con cuidado de la coma flotante si se muestran muchos decimales; con montos
+  en pesos enteros o con centavos no hay problema práctico, y el `total` de arriba ya viene
+  de la base.
+- **No expone nada más** de la transacción: `referencia_externa` en crudo (con su sufijo) no
+  sale, ni ningún otro dato de la pasarela (Wompi).
+
+**Los días son de América/Bogotá**, no del servidor ni UTC, y los calcula la base, con la misma
+zona para el rango y para los límites:
+
+```
+hoy       = (now() AT TIME ZONE 'America/Bogota')::date
+desde_ts  = <fecha de desde>::timestamp AT TIME ZONE 'America/Bogota'   -- 00:00 de ese día
+hasta_ts  = (hoy + 1)::timestamp AT TIME ZONE 'America/Bogota'          -- 00:00 de mañana
+filtro    = creado_en >= desde_ts AND creado_en < hasta_ts
+```
+
+Por eso una venta a las 20:00 de Bogotá (01:00 UTC del día siguiente) cuenta como de hoy, y una
+a las 23:30 de Bogotá del día anterior a `desde` no. Que la fecha sea futura o demasiado antigua
+también lo decide esa consulta, con el mismo `hoy`, así no hay dos cálculos de "hoy en Bogotá"
+que puedan discrepar. Es la misma zona que usan los reportes (`ZONA` en
+`reportes.service.js`); no hay zona configurable en `configuracion_restaurante`. La condición
+va sobre `creado_en` sin funciones encima, así que `idx_transacciones_estado_fecha`
+(`estado_transaccion, creado_en DESC, monto`) puede servir la consulta.
+
+Cobertura: `tests/transacciones-del-dia.test.js` (roles, query, formato y existencia de la
+fecha, forma, mapeo de los límites a 400) y `tests/integracion/transacciones-del-dia-sql.test.js`
+contra PostgreSQL (estados, el rango desde ayer, el tope de 30/31 días, y los bordes del día de
+Bogotá, incluido un reloj fijado a las 20:00 de Bogotá).
 
 ### Agrupación de `metodosPago`
 
@@ -2833,6 +3026,7 @@ Contrato: `socket-server/EVENTS.md` §8.2, §8.4 y §8.5. Ningún frontend las u
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | /mesas/:id/cuenta/interno | Cuenta de la mesa en centavos, con el saldo de cada comensal |
+| **POST** | **/mesas/:id/token-qr/interno** | **Rotación automática del QR de una mesa abierta y vacía (socket-server/docs/rotacion-qr.md)** |
 | POST | /transacciones/internal | Registra un pago ya cobrado por la pasarela y lo reparte entre los pedidos de la mesa |
 | POST | /pagos/intentos-fallidos/interno | Bitácora de un pago rechazado o descartado al reverificarlo |
 
@@ -2984,6 +3178,15 @@ Un cobro nuevo (otro monto, otra persona) lleva un `id_cobro` nuevo. Por dentro 
 usa el mismo índice único (`uq_transacciones_referencia_externa`) e idempotencia que el pago en
 línea, incluida la carrera de dos peticiones simultáneas: una cobra, la otra es duplicado.
 
+**Un `id_cobro` ya usado en OTRA mesa no es un duplicado**: es **409** `id_cobro_en_uso`. El
+backend mira a qué mesa pertenece la transacción que ya tiene `caja:<id_cobro>` (por su pedido):
+si es la misma mesa, es el reintento de este cobro y responde `duplicado`; si es otra, contestar
+`duplicado` haría creer a la caja que cobró sin haber cobrado nada, así que responde 409 y no
+escribe nada. Pasa también en la carrera: dos peticiones a la vez con el mismo `id_cobro` en
+mesas distintas → una cobra y la otra recibe 409, no `duplicado`. Si llega este 409, la caja
+tiene que generar un `id_cobro` nuevo. (El pago en línea, `/transacciones/internal`, no cambia:
+una referencia de Wompi ya registrada sigue siendo duplicado.)
+
 **El reparto**, en una sola transacción:
 
 - Se bloquea la mesa y después sus pedidos por `id_pedido`: el mismo orden que el cobro por
@@ -3021,7 +3224,8 @@ línea, incluida la carrera de dos peticiones simultáneas: una cobra, la otra e
 
 | Status | Cuerpo | Cuándo |
 |---|---|---|
-| **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró: no se cobra ni se avisa otra vez |
+| **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró **en esta mesa**: no se cobra ni se avisa otra vez |
+| **409** | `{ "error": "Ese id_cobro ya se usó en otra mesa; genera uno nuevo", "motivo": "id_cobro_en_uso" }` | Ese `id_cobro` ya se usó en **otra** mesa. No se escribe nada |
 | **400** | `{ "error", "motivo": "cuerpo_invalido" }` | Cuerpo inválido (tabla de arriba) |
 | **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
 | **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
@@ -3792,25 +3996,31 @@ y **no** siguen todos el mismo patrón: el de `movimientos_inventario` lo gener�
 
 | Ruta | Qué lo escribe | Clave ajena |
 |---|---|---|
-| `POST` y `PUT /platos/:id` (cuando cambia el precio) | `tr_historial_precio_plato` → `historial_precios.id_usuario` | `fk_historial_precios_usuario` |
+| `PUT /platos/:id` (cuando cambia el precio) | `tr_historial_precio_plato` → `historial_precios.id_usuario` | `fk_historial_precios_usuario` |
 | `PUT /ingredientes/:id` (cuando cambia `precio_extra`) | `tr_historial_precio_ingrediente` → la misma tabla | `fk_historial_precios_usuario` |
 | `PUT /configuracion` | `tr_configuracion_actualizada` → `configuracion_restaurante.actualizado_por` | `fk_configuracion_actualizado_por` |
 | `POST /inventario/insumos/:id/movimientos` y `POST /inventario/insumos` con `stock_inicial` | `registrar_movimiento_inventario` → `movimientos_inventario.id_usuario` | `movimientos_inventario_id_usuario_fkey` |
+| `POST /pedidos` | el INSERT de `historial_estados` que deja el pedido en `recibido` | `fk_historial_usuario` |
+| `PATCH /pedidos/:id/estado` y `PATCH /kds/comandas/:id/estado` | la línea de `historial_estados` de cada cambio de estado (el KDS pasa por el mismo servicio) | `fk_historial_usuario` |
+| `POST /transacciones`, cuando el cobro liquida un pedido ya entregado | la línea de `historial_estados` del paso a `pagado` | `fk_historial_usuario` |
+| `POST /transacciones/mesa`, cuando el reparto liquida algún pedido entregado | la línea de `historial_estados` del paso a `pagado` (`Pago en caja`, con el id de quien cobra) | `fk_historial_usuario` |
 
 - **La transacción se deshace entera**: el precio no cambia, la configuración se queda como
-  estaba y el stock no se mueve (el libro de inventario sigue cuadrando).
+  estaba, el stock no se mueve (el libro de inventario sigue cuadrando) y del pedido no queda
+  nada: ni la fila de `pedidos`, ni sus detalles, ni el descuento de insumos.
 - Se mira el **nombre del constraint**, no solo el SQLSTATE: un 23503 de otra cosa —una
   categoría que no existe, un insumo que no existe— significa algo distinto y conserva su
   propio motivo. La cuenta vive en un solo sitio,
-  [`src/services/autor-inexistente.js`](../src/services/autor-inexistente.js), para que los
-  cuatro caminos no puedan discrepar.
+  [`src/services/autor-inexistente.js`](../src/services/autor-inexistente.js), para que ningún
+  camino pueda discrepar de otro.
 - `id_usuario` **en `null` es válido** y no da este error: así quedan los movimientos que
   genera un pedido de un comensal, que no tiene usuario.
-
-> **Queda uno fuera, a propósito.** `POST /pedidos` escribe `historial_estados.id_usuario`
-> (`fk_historial_usuario`) con el id del JWT, así que un usuario borrado da el mismo 23503 sin
-> traducir. No entró en este cambio para no mezclarlo con el review; es una línea con el mismo
-> helper cuando se decida.
+- **`POST /platos` no entra en la lista**, aunque comparta sección con el `PUT`:
+  `tr_historial_precio_plato` es `AFTER UPDATE OF precio`, así que **crear** un plato nunca
+  escribe en `historial_precios` y no hay autor que validar. Comprobado contra PostgreSQL: un
+  `POST /platos` —y un `INSERT` a pelo con `app.id_usuario` apuntando a un usuario que no
+  existe— pasan sin error. El `tr_auditar_platos` del INSERT sí corre, pero
+  `auditoria_cambios.usuario_id` no recibe el id del JWT.
 
 ### La frontera entre 400 y 422 (H-11)
 

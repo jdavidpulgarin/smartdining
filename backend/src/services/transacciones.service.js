@@ -1,10 +1,9 @@
 const pool = require('../config/db');
 const mesasService = require('./mesas.service');
-const {
-  traducirAutorInexistente,
-  MOTIVO_AUTOR_INEXISTENTE,
-  MENSAJE_AUTOR_INEXISTENTE,
-} = require('./autor-inexistente');
+// La zona del restaurante vive en reportes.service.js (America/Bogota). Una
+// sola constante para que el corte de caja y los reportes digan el mismo "hoy".
+const { ZONA } = require('./reportes.service');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 // Tabla transacciones (docs/modelo-er.md): id_transaccion, id_pedido,
 // metodo_pago, monto, estado_transaccion, referencia_externa, creado_en.
@@ -186,7 +185,13 @@ async function registrarPago({
     };
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    // El AUTOR, otra vez por la misma clave ajena: cuando el cobro liquida la
+    // cuenta de un pedido ya entregado, este servicio escribe la linea de
+    // historial_estados del paso a 'pagado' con el id del cajero. Si ese
+    // usuario ya se borro, el 23503 de fk_historial_usuario salia como el 409
+    // generico. Lo demas no cambia: el P0001 de tr_validar_transaccion_financiera
+    // -pagar de mas- sigue llegando con el mensaje del trigger.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }
@@ -248,6 +253,23 @@ async function saldoDeLaMesaEnCentavos(ejecutor, idMesa) {
  */
 function referenciaDeFila(referencia, indice) {
   return indice === 0 ? referencia : `${referencia}#${indice + 1}`;
+}
+
+/**
+ * La INVERSA exacta de referenciaDeFila: la referencia del pago, sin el sufijo
+ * de almacenamiento. 'ref', 'ref#2' y 'ref#3' -> 'ref'; null -> null.
+ *
+ * Solo se quita un sufijo FINAL `#<entero ≥ 2>` escrito como lo escribe
+ * referenciaDeFila (sin ceros a la izquierda): un '#' en otra posición, o un
+ * '#1' / '#02' final, es parte de la referencia original y se respeta. Es lo
+ * que permite agrupar las filas de un mismo pago repartido entre pedidos (de
+ * Wompi o un cobro de mesa en caja, 'caja:<id_cobro>').
+ */
+function referenciaDelPago(referenciaExterna) {
+  if (referenciaExterna === null || referenciaExterna === undefined) return null;
+  const m = /^([\s\S]*)#([1-9]\d*)$/.exec(referenciaExterna);
+  if (!m || Number(m[2]) < 2 || m[1] === '') return referenciaExterna;
+  return m[1];
 }
 
 /** Observación del historial cuando el pago de la mesa llega por Wompi. */
@@ -324,6 +346,27 @@ function sqlHistorialPagado(idUsuario, observacion) {
  *        | { sinCuenta: true } | { excede: true, saldo_centavos }
  *        | { duplicado: false, saldo_restante_centavos, mesa_liberada, pagados, transacciones }
  */
+/**
+ * ¿La transacción que ya tiene esta referencia es de OTRA mesa? Se mira por su
+ * pedido: transacciones -> pedidos.id_mesa. La referencia es única
+ * (uq_transacciones_referencia_externa), así que hay como mucho una fila; las
+ * filas siguientes de un mismo pago llevan '#2', '#3'… y son de la misma mesa.
+ *
+ * Si no se encuentra la fila (no debería pasar: la consulta anterior la vio) se
+ * responde `false`, que es el comportamiento de siempre: duplicado.
+ */
+async function referenciaEsDeOtraMesa(ejecutor, referencia, idMesa) {
+  const r = await ejecutor.query(
+    `SELECT p.id_mesa
+       FROM transacciones t
+       JOIN pedidos p ON p.id_pedido = t.id_pedido
+      WHERE t.referencia_externa = $1::text
+      LIMIT 1`,
+    [referencia]
+  );
+  return r.rows.length > 0 && Number(r.rows[0].id_mesa) !== Number(idMesa);
+}
+
 async function repartirPagoDeMesa(client, {
   referencia_externa,
   id_mesa,
@@ -350,7 +393,10 @@ async function repartirPagoDeMesa(client, {
   );
   if (yaRegistrada.rows.length > 0) {
     const saldo = await saldoDeLaMesaEnCentavos(client, id_mesa);
-    return { duplicado: true, saldo_restante_centavos: saldo };
+    // ¿Esa referencia es de ESTA mesa? Quien decide qué hacer si es de otra
+    // es el camino de la caja (cobrarMesaEnCaja); el núcleo solo lo informa.
+    const otraMesa = await referenciaEsDeOtraMesa(client, referencia_externa, id_mesa);
+    return { duplicado: true, saldo_restante_centavos: saldo, otraMesa };
   }
 
   // H-01: los pedidos entre los que se va a repartir también se bloquean,
@@ -443,18 +489,6 @@ async function repartirPagoDeMesa(client, {
 }
 
 /**
- * ¿Es el 23503 del autor del historial? `fk_historial_usuario` todavía no está
- * en FK_AUTOR de autor-inexistente.js en develop: lo añade la rama de #146
- * (fix/api-autor-inexistente-pedidos-2), sin fusionar. Para no chocar con ella
- * se reconoce aquí con los MISMOS mensaje y motivo del helper; cuando #146
- * entre, traducirAutorInexistente ya lo atrapa antes y esto queda redundante.
- */
-function traducirAutorDelHistorial(err) {
-  if (!err || err.code !== '23503' || err.constraint !== 'fk_historial_usuario') return null;
-  return { status: 409, message: MENSAJE_AUTOR_INEXISTENTE, motivo: MOTIVO_AUTOR_INEXISTENTE };
-}
-
-/**
  * La TRANSACCIÓN alrededor del núcleo: BEGIN, reparto, COMMIT solo si se cobró,
  * y ROLLBACK en cualquier otro caso. Una carrera con el mismo pago (23505 del
  * índice único de la referencia) cuenta como duplicado; el 23503 del autor del
@@ -479,9 +513,14 @@ async function cobrarMesa(pago) {
       return {
         duplicado: true,
         saldo_restante_centavos: await saldoDeLaMesaEnCentavos(pool, pago.id_mesa),
+        // La otra petición ya hizo COMMIT (por eso chocó el índice): aquí se
+        // ve su fila y se sabe de qué mesa es.
+        otraMesa: await referenciaEsDeOtraMesa(pool, pago.referencia_externa, pago.id_mesa),
       };
     }
-    throw traducirAutorInexistente(err) || traducirAutorDelHistorial(err) || err;
+    // El 23503 de fk_historial_usuario (la caja, con un autor ya borrado) lo
+    // atrapa el helper compartido, como en el resto de rutas.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }
@@ -516,6 +555,13 @@ async function registrarPagoInterno({
     id_usuario: null,
     observacion: OBSERVACION_PAGO_EN_LINEA,
   });
+  // El pago en línea NO cambia de contrato: una referencia ya registrada es
+  // duplicado sea de la mesa que sea (`otraMesa` es solo para la caja y no
+  // sale por aquí).
+  if (r.duplicado === true) {
+    const { otraMesa, ...igualQueAntes } = r;
+    return igualQueAntes;
+  }
   if (r.duplicado !== false) return r;
   const { transacciones, ...igualQueAntes } = r;
   return igualQueAntes;
@@ -532,7 +578,7 @@ async function registrarPagoInterno({
  * sin chocar nunca con una de Wompi.
  */
 async function cobrarMesaEnCaja({ id_mesa, monto_centavos, metodo_pago, comensal = null, id_cobro, id_usuario }) {
-  return cobrarMesa({
+  const r = await cobrarMesa({
     referencia_externa: PREFIJO_REFERENCIA_CAJA + id_cobro,
     id_mesa,
     comensal,
@@ -541,6 +587,14 @@ async function cobrarMesaEnCaja({ id_mesa, monto_centavos, metodo_pago, comensal
     id_usuario,
     observacion: OBSERVACION_PAGO_EN_CAJA,
   });
+  // Un id_cobro ya usado en OTRA mesa no es un reintento de este cobro: si se
+  // contestara "duplicado", la caja creería que cobró sin haber cobrado nada.
+  if (r.duplicado === true && r.otraMesa) return { idCobroEnUso: true };
+  if (r.duplicado === true) {
+    const { otraMesa, ...duplicado } = r;
+    return duplicado;
+  }
+  return r;
 }
 
 async function obtenerPorPedido(idPedido) {
@@ -551,16 +605,156 @@ async function obtenerPorPedido(idPedido) {
   return result.rows;
 }
 
+/**
+ * Cuántos días hacia atrás admite `desde`, sin contar hoy: `desde >= hoy - 30`,
+ * o sea como mucho 31 días de Bogotá contando hoy. Un tope defensivo para que
+ * la caja no pida meses de una vez, no una regla contable.
+ */
+const DIAS_ATRAS_MAXIMOS = 30;
+
+/** Valor de `desde` que significa "solo hoy". */
+const DESDE_HOY = 'hoy';
+
+/**
+ * Las transacciones COMPLETADAS de un rango de días, para la caja
+ * (GET /transacciones?desde=hoy | AAAA-MM-DD).
+ *
+ * El rango va desde las 00:00 del día `desde` hasta el FINAL de hoy, siempre en
+ * días de Bogotá (`ZONA`, la misma constante de reportes.service.js; no hay
+ * zona configurable en configuracion_restaurante). `desde = 'hoy'` es el caso
+ * hoy..hoy. Todo se calcula en SQL con la misma ZONA:
+ *
+ *   hoy        = (ahora AT TIME ZONE zona)::date
+ *   dia_desde  = la fecha pedida, o hoy
+ *   desde_ts   = dia_desde::timestamp AT TIME ZONE zona      (00:00 de ese día)
+ *   hasta_ts   = (hoy + 1)::timestamp AT TIME ZONE zona      (00:00 de mañana)
+ *
+ * Así una venta a las 20:00 de Bogotá (01:00 UTC del día siguiente) cae en
+ * HOY, y una a las 23:30 de Bogotá del día anterior a `desde` no entra. La
+ * condición es `creado_en >= desde_ts AND creado_en < hasta_ts` sobre la
+ * columna sin funciones, para que `idx_transacciones_estado_fecha`
+ * (estado_transaccion, creado_en DESC, monto) pueda servirla.
+ *
+ * LOS LÍMITES DEL RANGO también los decide la base, en la misma consulta y con
+ * el mismo `hoy`: una fecha FUTURA o más antigua que `hoy - DIAS_ATRAS_MAXIMOS`
+ * no lista nada y vuelve marcada (`invalido: 'futura' | 'antigua'`), y el
+ * controller la responde como 400. Hacerlo en JavaScript obligaría a calcular
+ * "hoy en Bogotá" en dos sitios, y a las 20:00 de Bogotá, cuando en UTC ya es
+ * mañana, cualquier diferencia entre los dos daría un 400 o un 200 de más.
+ *
+ * Que la fecha tenga forma AAAA-MM-DD y EXISTA lo comprueba antes el
+ * controller (zod): aquí llega ya válida o como `'hoy'`.
+ *
+ * `total` y `cantidad` salen de la misma consulta. `monto` y `total` se
+ * devuelven como NÚMERO: `pg` entrega los NUMERIC como texto y el panel no
+ * tiene por qué parsearlos. La fila expone solo lo que la caja necesita: nada
+ * de `referencia_externa` ni de la pasarela.
+ *
+ * @param {object} [opciones]
+ * @param {string} [opciones.desde] `'hoy'` o una fecha `AAAA-MM-DD` ya validada.
+ * @param {Date|string|null} [opciones.ahora] instante que hace de "ahora";
+ *        `null` = `now()` de la base. Solo lo fijan las pruebas, para probar el
+ *        borde de las 20:00 de Bogotá sin depender de la hora real.
+ * @returns {Promise<{invalido: 'futura'|'antigua', hoy: string, minimo: string}
+ *   | {desde: string, hasta: string, total: number, cantidad: number, transacciones: object[]}>}
+ */
+async function listarDelDia({ desde = DESDE_HOY, zona = ZONA, ahora = null } = {}) {
+  // 'hoy' viaja como NULL y no como texto: así ninguna rama de la consulta
+  // tiene que convertir 'hoy' a fecha (PostgreSQL puede evaluar un CASE con
+  // parámetros al planificar, y '::date' de 'hoy' fallaría).
+  const fecha = desde === DESDE_HOY ? null : desde;
+  const result = await pool.query(
+    `WITH base AS (
+       SELECT (COALESCE($4::timestamptz, now()) AT TIME ZONE $1::text)::date AS hoy
+     ),
+     limites AS (
+       SELECT b.hoy,
+              COALESCE($3::text::date, b.hoy)                              AS dia_desde,
+              b.hoy - $5::int                                              AS dia_minimo,
+              COALESCE($3::text::date, b.hoy)::timestamp AT TIME ZONE $1::text AS desde_ts,
+              (b.hoy + 1)::timestamp AT TIME ZONE $1::text                 AS hasta_ts
+         FROM base b
+     ),
+     validez AS (
+       SELECT l.*,
+              l.dia_desde > l.hoy        AS futura,
+              l.dia_desde < l.dia_minimo AS antigua
+         FROM limites l
+     ),
+     filas AS (
+       SELECT t.id_transaccion, t.id_pedido, p.codigo_pedido, p.id_mesa, m.numero AS numero_mesa,
+              t.monto, t.metodo_pago, t.comensal, t.creado_en, t.referencia_externa
+         FROM transacciones t
+         JOIN pedidos p ON p.id_pedido = t.id_pedido
+         JOIN mesas   m ON m.id_mesa   = p.id_mesa
+         CROSS JOIN validez l
+        WHERE t.estado_transaccion = $2::text
+          AND NOT l.futura AND NOT l.antigua
+          AND t.creado_en >= l.desde_ts
+          AND t.creado_en <  l.hasta_ts
+     )
+     SELECT to_char(l.dia_desde, 'YYYY-MM-DD')                      AS desde,
+            to_char(l.hoy, 'YYYY-MM-DD')                            AS hasta,
+            to_char(l.dia_minimo, 'YYYY-MM-DD')                     AS minimo,
+            l.futura,
+            l.antigua,
+            COALESCE((SELECT SUM(monto) FROM filas), 0)             AS total,
+            (SELECT count(*) FROM filas)::int                       AS cantidad,
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                       'id_transaccion', f.id_transaccion,
+                       'id_pedido',      f.id_pedido,
+                       'codigo_pedido',  f.codigo_pedido,
+                       'id_mesa',        f.id_mesa,
+                       'numero_mesa',    f.numero_mesa,
+                       'monto',          f.monto,
+                       'metodo_pago',    f.metodo_pago,
+                       'comensal',       f.comensal,
+                       -- Solo para calcular referencia_pago en JS; no sale tal cual.
+                       'referencia_externa', f.referencia_externa,
+                       'fecha',          to_char(f.creado_en AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                     ) ORDER BY f.creado_en DESC, f.id_transaccion DESC)
+                FROM filas f
+            ), '[]'::json)                                          AS transacciones
+       FROM validez l`,
+    [zona, ESTADO_COBRADO, fecha, ahora, DIAS_ATRAS_MAXIMOS]
+  );
+  const fila = result.rows[0];
+  if (!fila) return { desde: null, hasta: null, total: 0, cantidad: 0, transacciones: [] };
+  if (fila.futura) return { invalido: 'futura', hoy: fila.hasta, minimo: fila.minimo };
+  if (fila.antigua) return { invalido: 'antigua', hoy: fila.hasta, minimo: fila.minimo };
+  return {
+    desde: fila.desde,
+    hasta: fila.hasta,
+    total: Number(fila.total),
+    cantidad: Number(fila.cantidad),
+    // json_agg ya trae `monto` como número JSON; Number() solo asegura el tipo
+    // si algún día la columna cambiara a texto.
+    // referencia_pago agrupa las filas de un mismo pago repartido entre pedidos
+    // ('ref', 'ref#2' -> 'ref'). La referencia_externa en crudo NO sale: se
+    // quita del objeto antes de devolverlo.
+    transacciones: (fila.transacciones || []).map(({ referencia_externa, ...t }) => ({
+      ...t,
+      monto: Number(t.monto),
+      referencia_pago: referenciaDelPago(referencia_externa),
+    })),
+  };
+}
+
 module.exports = {
   registrarPago,
   registrarPagoInterno,
   cobrarMesaEnCaja,
   repartirPagoDeMesa,
   obtenerPorPedido,
+  listarDelDia,
+  DIAS_ATRAS_MAXIMOS,
+  DESDE_HOY,
   OBSERVACION_PAGO_EN_LINEA,
   OBSERVACION_PAGO_EN_CAJA,
   PREFIJO_REFERENCIA_CAJA,
   referenciaDeFila,
+  referenciaDelPago,
   ESTADO_COBRADO,
   ESTADO_ENTREGADO,
 };

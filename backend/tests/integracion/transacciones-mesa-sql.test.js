@@ -332,3 +332,69 @@ test("el pago en linea sigue escribiendo su historial como siempre: sin autor y 
     `SELECT id_usuario, observaciones FROM historial_estados WHERE id_pedido = $1 AND estado_nuevo = 'pagado'`, [pedidos[0]]);
   assert.deepStrictEqual(rows, [{ id_usuario: null, observaciones: 'Pago en linea' }]);
 });
+
+// ---------------------------------------------------------------------------
+// id_cobro de OTRA mesa: 409 id_cobro_en_uso, no un duplicado
+// ---------------------------------------------------------------------------
+
+test('id_cobro usado en la mesa A y reusado en la mesa B: 409 id_cobro_en_uso y B no cambia', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const P = plato.precio_centavos;
+  const a = await mesaConPedidos(1);
+  const b = await mesaConPedidos(1);
+  const idCobro = crypto.randomUUID();
+
+  const enA = await cobro(a.idMesa, P, { id_cobro: idCobro });
+  assert.strictEqual(enA.duplicado, false);
+
+  const antesB = { cobrado: await cobradoEnMesa(b.idMesa), estados: await estados(b.pedidos), mesa: await estadoMesa(b.idMesa) };
+  const enB = await cobro(b.idMesa, P, { id_cobro: idCobro });
+  assert.deepStrictEqual(enB, { idCobroEnUso: true }, 'ni duplicado ni cobro');
+  assert.deepStrictEqual(await cobradoEnMesa(b.idMesa), antesB.cobrado, 'B no tiene ninguna transaccion nueva');
+  assert.deepStrictEqual(await estados(b.pedidos), antesB.estados);
+  assert.deepStrictEqual(await estadoMesa(b.idMesa), antesB.mesa);
+
+  // Y en la misma mesa A, el mismo id_cobro sigue siendo un duplicado.
+  const otraVezEnA = await cobro(a.idMesa, P, { id_cobro: idCobro });
+  assert.strictEqual(otraVezEnA.duplicado, true);
+  assert.ok(!('otraMesa' in otraVezEnA), 'el flag interno no sale');
+  assert.strictEqual((await cobradoEnMesa(a.idMesa)).centavos, P, 'A se cobro una sola vez');
+});
+
+test('el mismo id_cobro a la vez en dos mesas distintas: una cobra y la otra 409 (no duplicado)', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const P = plato.precio_centavos;
+  const a = await mesaConPedidos(1);
+  const b = await mesaConPedidos(1);
+  const idCobro = crypto.randomUUID();
+
+  const [ra, rb] = await Promise.all([
+    cobro(a.idMesa, P, { id_cobro: idCobro }),
+    cobro(b.idMesa, P, { id_cobro: idCobro }),
+  ]);
+  const cobraron = [ra, rb].filter((r) => r.duplicado === false);
+  const rechazados = [ra, rb].filter((r) => r.idCobroEnUso === true);
+  assert.strictEqual(cobraron.length, 1, 'una cobra');
+  assert.strictEqual(rechazados.length, 1, 'la otra es 409 id_cobro_en_uso, no duplicado');
+  assert.ok(![ra, rb].some((r) => r.duplicado === true), 'ninguna contesta duplicado');
+
+  const total = (await cobradoEnMesa(a.idMesa)).centavos + (await cobradoEnMesa(b.idMesa)).centavos;
+  assert.strictEqual(total, P, 'entre las dos mesas se cobro una sola vez');
+});
+
+test('el pago en linea con una referencia de otra mesa sigue siendo duplicado (contrato de /internal)', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const P = plato.precio_centavos;
+  const a = await mesaConPedidos(1);
+  const b = await mesaConPedidos(1);
+  const ref = `PRUEBA-${crypto.randomUUID()}`;
+  const pagar = (idMesa) => transaccionesService.registrarPagoInterno({
+    referencia_externa: ref, id_mesa: idMesa, comensal: null, monto_centavos: P, metodo_pago: 'online',
+  });
+
+  assert.strictEqual((await pagar(a.idMesa)).duplicado, false);
+  const enB = await pagar(b.idMesa);
+  assert.deepStrictEqual(Object.keys(enB).sort(), ['duplicado', 'saldo_restante_centavos'], 'las mismas claves de siempre');
+  assert.strictEqual(enB.duplicado, true);
+  assert.deepStrictEqual(await cobradoEnMesa(b.idMesa), { centavos: 0, filas: 0 });
+});

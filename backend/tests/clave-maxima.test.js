@@ -173,3 +173,69 @@ test('login: una clave de más de 72 bytes creada antes del tope sigue entrando'
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// El MÍNIMO: 8 caracteres en las dos rutas que fijan una clave (decidido con
+// Jarrison; el panel ya exige 8). El login NO lo aplica.
+// ---------------------------------------------------------------------------
+
+test('mínimo: una sola constante para el registro y el cambio de clave', () => {
+  assert.strictEqual(claveBcrypt.CARACTERES_MINIMOS_CLAVE, 8);
+  assert.match(claveBcrypt.MENSAJE_CLAVE_CORTA, /al menos 8 caracteres/);
+});
+
+for (const [caso, clave, esperado] of [
+  ['7 caracteres', '1234567', 400],
+  ['8 caracteres', '12345678', 201],
+  ['6 (el mínimo de antes)', '123456', 400],
+  ['8 caracteres con tildes (más bytes, mismos caracteres)', 'ñandúñañ', 201],
+]) {
+  test(`register: mínimo, ${caso} -> ${esperado}`, async () => {
+    const db = fakeRegistro();
+    try {
+      const res = await registrar(clave);
+      assert.strictEqual(res.status, esperado);
+      if (esperado === 400) {
+        assert.strictEqual(res.body.error, claveBcrypt.MENSAJE_CLAVE_CORTA);
+        assert.strictEqual(res.body.motivo, undefined, 'el 400 de siempre: { error } sin motivo');
+        assert.strictEqual(db.todas('INSERT INTO usuarios').length, 0);
+      }
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+for (const [caso, clave, esperado] of [
+  ['7 caracteres', '1234567', 400],
+  ['8 caracteres', '12345678', 200],
+]) {
+  test(`cambio de clave: mínimo, ${caso} -> ${esperado}`, async () => {
+    const db = fakeCambioClave();
+    try {
+      const res = await cambiar(clave);
+      assert.strictEqual(res.status, esperado);
+      if (esperado === 400) assert.strictEqual(res.body.error, claveBcrypt.MENSAJE_CLAVE_CORTA);
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+test('login: una clave de 6 caracteres creada antes del mínimo de 8 sigue entrando', async () => {
+  const corta = 'abc123';
+  const hash = await bcrypt.hash(corta, 4);
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT * FROM usuarios WHERE email')) {
+      return { rows: [{ id_usuario: 9, nombre: 'Antigua', email: 'antigua@mail.com', rol: 'mesero', activo: true, password_hash: hash }] };
+    }
+    return undefined;
+  });
+  try {
+    const res = await request(app).post('/api/auth/login').send({ email: 'antigua@mail.com', password: corta });
+    assert.strictEqual(res.status, 200, 'el login no aplica el mínimo de las claves nuevas');
+    assert.ok(res.body.token);
+  } finally {
+    db.restaurar();
+  }
+});
