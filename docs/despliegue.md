@@ -127,6 +127,24 @@ Docker escribe sus propias reglas de iptables, y un puerto publicado con
 
 No confíes en el firewall para ocultar un puerto publicado.
 
+### ⚠️ `deploy` en el grupo `docker` equivale a root
+
+`deploy` no tiene sudo, pero quien controla Docker controla el servidor: puede
+levantar un contenedor que monte `/` del host y hacer en él lo que quiera.
+Trata cualquier acceso como `deploy` igual que un acceso como root. Se
+mitiga así:
+
+- **Solo se entra con llave**: sin contraseñas ni root, y
+  `AllowUsers roberto deploy` (paso 3 de la preparación).
+- **La llave de CI de staging lleva `restrict`** en `authorized_keys`: sin
+  terminal ni reenvíos (6.4). No limita los comandos, así que la privada vive
+  solo en los secretos de GitHub y se borra del runner al terminar.
+- **El environment `staging` solo acepta la rama `develop`**: un PR o una rama
+  cualquiera no recibe `VPS_SSH_KEY` (6.4).
+- **Las guardas impiden desplegar sobre producción**: `deploy-staging.yml`
+  aborta si el `.env` no es el de staging o si producción está corriendo, y
+  `deploy.yml` aborta si staging está corriendo (6.1).
+
 ## 2. Primera instalación
 
 ### 2.1 Usuario de despliegue y código
