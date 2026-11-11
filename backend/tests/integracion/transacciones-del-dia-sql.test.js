@@ -469,3 +469,69 @@ test('referencia_pago: un pago en linea repartido en 3 pedidos sale con la misma
   assert.strictEqual(grupos.size, 1);
   assert.strictEqual(Math.round(grupos.get(ref) * 100), Number(s[0].c));
 });
+
+test('referencia_pago: un cobro de mesa en caja repartido sale con "caja:<id_cobro>" en todas sus filas', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const crypto = require('node:crypto');
+  const { rows: pl } = await sonda.query(
+    `SELECT id_plato FROM platos
+      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
+      ORDER BY id_plato LIMIT 1`
+  );
+  const { rows: us } = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
+  const idUsuario = us[0].id_usuario;
+
+  // Dos pedidos entregados más en la mesa propia, para que el cobro se reparta
+  // seguro entre varios (también entre los que hayan quedado con saldo de las
+  // pruebas anteriores de esta suite).
+  for (let i = 0; i < 2; i++) {
+    const p = await pedidosService.crearConDetalles({
+      id_mesa: mesa.id_mesa, id_usuario: idUsuario, items: [{ id_plato: pl[0].id_plato, cantidad: 1 }],
+    });
+    for (const e of ['en_preparacion', 'listo', 'entregado']) {
+      await pedidosService.actualizarEstado(p.id_pedido, e, null, idUsuario);
+    }
+  }
+
+  // La caja cobra TODO el saldo de la mesa: una fila por pedido con saldo.
+  const { rows: s } = await sonda.query(
+    `SELECT count(*)::int AS con_saldo,
+            COALESCE(SUM(ROUND(obtener_saldo_pendiente(id_pedido) * 100)), 0)::bigint AS centavos
+       FROM pedidos
+      WHERE id_mesa = $1::int AND estado <> 'cancelado'
+        AND obtener_saldo_pendiente(id_pedido) > 0`,
+    [mesa.id_mesa]
+  );
+  const conSaldo = s[0].con_saldo;
+  const montoCentavos = Number(s[0].centavos);
+  assert.ok(conSaldo >= 2, `el cobro se reparte entre varios pedidos (${conSaldo})`);
+
+  const idCobro = crypto.randomUUID();
+  const cobro = await transaccionesService.cobrarMesaEnCaja({
+    id_mesa: mesa.id_mesa, monto_centavos: montoCentavos, metodo_pago: 'efectivo',
+    id_cobro: idCobro, id_usuario: idUsuario,
+  });
+  assert.strictEqual(cobro.duplicado, false);
+  assert.strictEqual(cobro.transacciones.length, conSaldo, 'una fila por pedido con saldo');
+
+  const resumen = await transaccionesService.listarDelDia({ desde: 'hoy' });
+  const idsDelCobro = new Set(cobro.transacciones.map((x) => x.id_transaccion));
+  const filas = resumen.transacciones.filter((x) => idsDelCobro.has(x.id_transaccion));
+
+  assert.strictEqual(filas.length, conSaldo, 'todas las filas del cobro salen en GET /transacciones');
+  assert.deepStrictEqual(
+    [...new Set(filas.map((x) => x.referencia_pago))],
+    [`caja:${idCobro}`],
+    'todas con el mismo referencia_pago, sin el sufijo #n'
+  );
+  assert.ok(filas.every((x) => !('referencia_externa' in x)), 'la referencia en crudo no sale');
+
+  // El total cuadra: las filas del cobro suman el monto cobrado, y el total de
+  // la respuesta es la suma de todo lo listado.
+  const sumaCobro = filas.reduce((acc, x) => acc + Math.round(x.monto * 100), 0);
+  assert.strictEqual(sumaCobro, montoCentavos);
+  const sumaTodo = resumen.transacciones.reduce((acc, x) => acc + Math.round(x.monto * 100), 0);
+  assert.strictEqual(Math.round(resumen.total * 100), sumaTodo);
+  assert.strictEqual(resumen.cantidad, resumen.transacciones.length);
+});

@@ -2689,9 +2689,10 @@ Errores, todos **400** `{ "error": "...", "motivo": "consulta_invalida" }`:
 - `comensal` es quien pagó cuando la mesa dividió la cuenta; `null` en un cobro de la mesa
   completa.
 - **`referencia_pago`** identifica el **pago** al que pertenece la fila, para agrupar. Un
-  pago a la mesa (Wompi y, cuando se fusione, el cobro de mesa en caja de
-  `feature/api-cobro-de-mesa`, con referencia `caja:<id_cobro>`) se reparte entre varios pedidos y deja
-  **una fila por pedido**; todas llevan el mismo `referencia_pago`. Es la referencia del pago
+  pago a la mesa se reparte entre varios pedidos y deja **una fila por pedido**; todas llevan
+  el mismo `referencia_pago`. Pasa con los dos pagos de mesa: el de Wompi (la referencia de la
+  pasarela) y el **cobro de mesa en caja** (`POST /transacciones/mesa`), cuyas filas salen
+  todas con `referencia_pago = "caja:<id_cobro>"`, el mismo `id_cobro` que mandó la caja. Es la referencia del pago
   sin el sufijo interno de almacenamiento (`ref`, `ref#2`, `ref#3` → `ref`; solo se quita un
   `#<entero ≥ 2>` final, nunca un `#` que forme parte de la referencia original). Es `null`
   en un cobro por pedido sin referencia (`POST /transacciones`). Agrupar para la caja:
