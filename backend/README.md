@@ -144,10 +144,14 @@ caminos:
   `token` y `url` (ese `url` es el enlace del comensal). Es la única respuesta que trae el
   token de la mesa.
 
-**Mientras nadie entre a la mesa, el QR rota cada 3 minutos** (lo rota el socket-server; el
-modal lo actualiza solo): un enlace copiado hace rato deja de valer y el cliente muestra
-«Este QR ya no es válido». Copia o genera uno nuevo. En cuanto entra el primer comensal, el QR
-queda fijo hasta que la mesa se libere.
+**Mientras nadie haya entrado a la mesa, el QR rota cada 3 minutos** (lo rota el
+socket-server y la tablet de la mesa se actualiza sola; el modal del panel **no**: guarda el
+enlace que tenía, y cerrarlo y volver a abrirlo muestra el mismo). Un enlace copiado hace rato
+deja de valer y el cliente muestra «Este QR ya no es válido»: pulsa **«Nuevo QR»** en el modal
+y copia el enlace nuevo. «Nadie ha entrado» significa que no hay ningún comensal que haya
+entrado por QR, ningún alias reservado (tampoco de alguien sin celular) ni ningún pedido de esa
+sesión; en cuanto hay alguno, el backend deja de aceptar la rotación y el QR queda **fijo**
+hasta que la mesa se libere.
 
 ## Requisitos previos
 
