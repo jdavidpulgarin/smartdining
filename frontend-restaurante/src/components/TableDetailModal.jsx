@@ -13,6 +13,7 @@ import {
 import { StateBadge, StatusBadge } from './ui/Badge'
 import { decodificarTokenQr } from '../services/qrService'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../hooks'
 
 export function TableDetailModal({
   table,
@@ -23,6 +24,9 @@ export function TableDetailModal({
   onDeliverOrder,
 }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const userRole = (user?.rol || user?.role || '').toLowerCase()
+  const canTakeOrder = userRole === 'mesero' || userRole === 'admin'
 
   const idMesa = Number(table?.id || table?.number)
   const tableName = table?.name || `Mesa ${idMesa}`
@@ -311,10 +315,26 @@ export function TableDetailModal({
             </button>
           )}
 
-          {isOcupada && (
+          {isOcupada && canTakeOrder && (
             <button
               type="button"
               className="table-btn-primary"
+              style={{ background: 'var(--sd-red)', borderColor: 'var(--sd-red)' }}
+              onClick={() => {
+                onClose()
+                navigate(`/mesas/${idMesa}/tomar-pedido`)
+              }}
+            >
+              <Utensils size={18} />
+              <span>Tomar Pedido</span>
+              <ArrowRight size={16} />
+            </button>
+          )}
+
+          {isOcupada && (
+            <button
+              type="button"
+              className="table-btn-secondary"
               onClick={() => {
                 onClose()
                 navigate(`/caja?mesa=${idMesa}`)

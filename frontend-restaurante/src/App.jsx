@@ -10,6 +10,7 @@ import {
   Reportes,
   Login,
   PantallaMesa,
+  TomarPedido,
   Configuracion,
   Inventario,
 } from './pages'
@@ -53,6 +54,7 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/mesas" element={<Mesas />} />
+          <Route path="/mesas/:id/tomar-pedido" element={<TomarPedido />} />
           <Route path="/pedidos" element={<Pedidos />} />
           <Route path="/menu" element={<Menu />} />
           <Route path="/caja" element={<Caja />} />

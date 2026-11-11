@@ -25,7 +25,7 @@ test('join: el panel recibe los comensales presentes (alias del JWT) y el total'
   const ana = await s.conectar(tokenComensal(5, '  Ana '));
   await emitir(ana, 'join:table', {});
   assert.deepStrictEqual(await llega, {
-    id_mesa: 5, comensales: ['Ana'], total: 1, pagaron: [],
+    id_mesa: 5, comensales: ['Ana'], total: 1, pagaron: [], sin_celular: [],
   });
 });
 
@@ -38,7 +38,7 @@ test('leave y disconnect actualizan la presencia (último estado siempre llega)'
   await emitir(beto, 'join:table', { comensal: 'Beto' });
   await pausa(250);
   assert.deepStrictEqual(vistos.at(-1), {
-    id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: [],
+    id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: [], sin_celular: [],
   });
   await emitir(beto, 'leave:table', {});
   await pausa(250);
@@ -46,7 +46,7 @@ test('leave y disconnect actualizan la presencia (último estado siempre llega)'
   ana.close();
   await pausa(250);
   assert.deepStrictEqual(vistos.at(-1), {
-    id_mesa: 5, comensales: [], total: 0, pagaron: [],
+    id_mesa: 5, comensales: [], total: 0, pagaron: [], sin_celular: [],
   });
 });
 
@@ -72,7 +72,7 @@ test('dos pestañas del mismo comensal cuentan como una persona', async (t) => {
   }
   await pausa(250);
   assert.deepStrictEqual(vistos.at(-1), {
-    id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: [],
+    id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: [], sin_celular: [],
   });
   assert.deepStrictEqual(await s.presencia.calcular(5), vistos.at(-1));
 });
@@ -113,7 +113,7 @@ test('la mesa recibe su propia presencia (y la pantalla de esa mesa); otra mesa 
   await emitir(beto, 'join:table', {});
   await pausa(250);
   const esperado = {
-    id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: [],
+    id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: [], sin_celular: [],
   };
   assert.deepStrictEqual(enAna.at(-1), esperado);
   assert.deepStrictEqual(enPantalla.at(-1), esperado);

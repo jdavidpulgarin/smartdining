@@ -7,6 +7,8 @@ import {
   adaptarPlatoArmable,
   aplicarDisponibilidad,
   aplicarDisponibilidadPlato,
+  aplicarFaltantesMenu,
+  marcarFaltantesEnCache,
   normalizarCategorias,
   obtenerCategorias,
   obtenerPlatos,
@@ -353,6 +355,63 @@ describe('menuService', () => {
 
     it('retorna null si recibe menu null', () => {
       expect(aplicarDisponibilidadPlato(null, 10, false)).toBeNull();
+    });
+  });
+
+  describe('aplicarFaltantesMenu y marcarFaltantesEnCache (J-17)', () => {
+    it('marca como no disponibles en el menu tanto platos como ingredientes de faltantes', async () => {
+      const menuConAmbos = {
+        categorias: [
+          {
+            id_categoria: 1,
+            categoria: 'Bebidas',
+            platos: [{ id_plato: 1008, nombre: 'Limonada de Coco' }],
+          },
+          {
+            id_categoria: 2,
+            categoria: 'Arma tu plato',
+            platos: [
+              {
+                id_plato: 1001,
+                nombre: 'Bowl Personalizado',
+                personalizable: true,
+                pasos: [
+                  {
+                    id_paso: 103,
+                    nombre: 'Toppings',
+                    ingredientes: [
+                      { id_ingrediente: 10, nombre: 'Aguacate', disponible: true },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      const faltantes = [
+        { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
+        { tipo: 'ingrediente', id: 10, nombre: 'Aguacate' },
+      ];
+
+      const actualizado = aplicarFaltantesMenu(menuConAmbos, faltantes);
+      expect(actualizado.categorias[0].platos[0].disponible).toBe(false);
+      expect(
+        actualizado.categorias[1].platos[0].pasos[0].ingredientes[0].disponible
+      ).toBe(false);
+
+      // Tambien sobre la cache en memoria
+      vi.spyOn(apiModule, 'pedirJson').mockResolvedValue(menuConAmbos);
+      await obtenerPlatos();
+
+      marcarFaltantesEnCache(faltantes);
+
+      const platosDespues = await obtenerPlatos();
+      expect(platosDespues[0].disponible).toBe(false);
+
+      const bowlDespues = await obtenerPlatoArmable(1001);
+      expect(bowlDespues.pasos[0].ingredientes[0].disponible).toBe(false);
     });
   });
 });

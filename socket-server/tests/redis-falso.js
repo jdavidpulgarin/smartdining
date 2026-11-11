@@ -74,6 +74,16 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
       escribir(k, h, e ? e.expira : null);
       return nuevo ? 1 : 0;
     },
+    async hSetNX(k, campo, valor) {
+      verificar();
+      const e = vigente(k);
+      if (e && e.valor.has(campo)) return false;
+      const h = e ? new Map(e.valor) : new Map();
+      h.set(campo, String(valor));
+      escribir(k, h, e ? e.expira : null);
+      return true;
+    },
+    async hGetAll(k) { verificar(); const e = vigente(k); return e ? Object.fromEntries(e.valor) : {}; },
     async hGet(k, campo) { verificar(); const e = vigente(k); return e && e.valor.has(campo) ? e.valor.get(campo) : null; },
     async hDel(k, campo) {
       verificar();

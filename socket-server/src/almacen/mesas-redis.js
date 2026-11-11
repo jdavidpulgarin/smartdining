@@ -21,7 +21,7 @@ function crearEstadoMesasRedis({ cliente }) {
     },
     /** La sesión de mesa terminó: nada de su estado de sala pasa al grupo siguiente. */
     async limpiarMesa(idMesa) {
-      await cliente.del([llave(idMesa, 'cuenta'), llave(idMesa, 'llamada'), llave(idMesa, 'pagaron')]);
+      await cliente.del([llave(idMesa, 'cuenta'), llave(idMesa, 'llamada'), llave(idMesa, 'pagaron'), llave(idMesa, 'sin_celular')]);
     },
     /** Anota que `alias` pagó en esta sesión (hash sd:mesa:{ID}:pagaron, idempotente). */
     async marcarPago(idMesa, alias) {
@@ -32,6 +32,26 @@ function crearEstadoMesasRedis({ cliente }) {
     /** Alias que ya pagaron en esta sesión, ordenados. */
     async pagaron(idMesa) {
       return (await cliente.hVals(llave(idMesa, 'pagaron'))).sort((a, b) => a.localeCompare(b));
+    },
+    /**
+     * Comensales sin celular (EVENTS.md §6.4): hash sd:mesa:{ID}:sin_celular,
+     * clave del alias -> alias guardado, TTL de 24 h como pagaron.
+     */
+    async sinCelular(idMesa) {
+      // node-redis arma la respuesta de HGETALL con Object.create(null): se
+      // copia a un objeto normal para devolver lo mismo que el almacén en memoria.
+      return { ...(await cliente.hGetAll(llave(idMesa, 'sin_celular'))) };
+    },
+    /** HSETNX: false si esa clave ya estaba (otro alias con la misma clave). */
+    async agregarSinCelular(idMesa, clave, alias) {
+      const k = llave(idMesa, 'sin_celular');
+      const nuevo = await cliente.hSetNX(k, clave, alias);
+      if (nuevo) await cliente.expire(k, TTL_CUENTA_SEG);
+      return Boolean(nuevo);
+    },
+    /** true si había un alias con esa clave y se quitó. */
+    async quitarSinCelular(idMesa, clave) {
+      return (await cliente.hDel(llave(idMesa, 'sin_celular'), clave)) > 0;
     },
     /** true si la mesa puede llamar ahora (y deja la marca por `segundos`). */
     async reservarLlamada(idMesa, segundos) {

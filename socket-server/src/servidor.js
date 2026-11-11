@@ -35,6 +35,7 @@ const { crearDuenosMemoria, crearDuenosRedis } = require('./almacen/duenos');
 const {
   registrarSala, crearEstadoMesasMemoria, crearPresencia, rutasSala,
 } = require('./sala');
+const { rutasMesaComensal } = require('./mesa-comensal');
 
 const rutasBase = {
   /**
@@ -66,7 +67,7 @@ function crearServidor(config, deps = {}) {
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
   const ctx = { config, ipCliente: crearIpCliente(config.proxiesConfiables) };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala }, ctx);
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala, ...rutasMesaComensal }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));
@@ -144,6 +145,10 @@ function crearServidor(config, deps = {}) {
   const mesasLiberadas = new Set();
   // Una mesa vuelve a tener sesión cuando el personal le genera un QR nuevo.
   ctx.reabrirMesa = (idMesa) => mesasLiberadas.delete(idMesa);
+  // Guardia de /internal/mesa-comensal (409 MESA_LIBERADA). Sigue en memoria:
+  // tras un reinicio no hay marca y la ruta no la exige (el backend valida la
+  // sesión de la mesa antes del COMMIT).
+  ctx.mesaLiberada = (idMesa) => mesasLiberadas.has(idMesa);
 
   // Cuando el backend libera la mesa (al pagar o a mano) termina la sesión de
   // mesa: se invalidan sus QR, se avisa en vivo y se borra el estado de esa

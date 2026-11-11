@@ -6,6 +6,7 @@ function LineaCarrito({
   onEliminar,
   soloLectura = false,
   mostrarComensal = false,
+  faltantes = [],
 }) {
   const subtotal =
     linea.subtotal !== undefined
@@ -13,8 +14,26 @@ function LineaCarrito({
       : (Number(linea.precioUnitario) || 0) * (Number(linea.cantidad) || 0);
   const imagenUrl = linea.imagen || linea.url_imagen;
 
+  const faltantesLista = Array.isArray(faltantes) ? faltantes : [];
+  const tieneFaltante =
+    linea.disponible === false || faltantesLista.length > 0;
+  const ingredientesFaltantes = faltantesLista.filter(
+    (f) => f?.tipo === 'ingrediente'
+  );
+  const nombresIngFaltantes = ingredientesFaltantes
+    .map((f) => f.nombre || `ingrediente #${f.id}`)
+    .filter(Boolean);
+  const esPlatoConstructorConFaltante =
+    ingredientesFaltantes.length > 0 || Boolean(linea.ingredienteAgotado);
+
   return (
-    <article className="bg-superficie rounded-2xl p-3.5 sm:p-4 border border-borde shadow-sm flex flex-col gap-3">
+    <article
+      className={`bg-superficie rounded-2xl p-3.5 sm:p-4 border shadow-sm flex flex-col gap-3 transition-colors ${
+        tieneFaltante
+          ? 'border-primario bg-primario/5'
+          : 'border-borde'
+      }`}
+    >
       {/* Cabecera y cuerpo de la línea */}
       <div className="flex items-start gap-3">
         {imagenUrl && (
@@ -31,9 +50,9 @@ function LineaCarrito({
                 <h3 className="font-etiqueta uppercase text-base font-bold text-texto leading-tight">
                   {linea.nombre}
                 </h3>
-                {linea.disponible === false && (
+                {tieneFaltante && (
                   <span className="inline-flex items-center text-[11px] font-etiqueta uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-superficie-2 text-primario border border-primario">
-                    Agotado
+                    {faltantesLista.length > 0 ? 'Se acabó' : 'Agotado'}
                   </span>
                 )}
               </div>
@@ -50,7 +69,7 @@ function LineaCarrito({
                 type="button"
                 onClick={() => onEliminar(linea.id_linea)}
                 aria-label={`Eliminar ${linea.nombre} del carrito`}
-                className="w-9 h-9 min-h-9 flex items-center justify-center text-texto-suave hover:text-primario hover:bg-superficie-2 active:bg-superficie-2/80 rounded-lg transition-colors shrink-0 -mr-1 -mt-1 cursor-pointer"
+                className="w-11 h-11 min-h-11 min-w-11 flex items-center justify-center text-texto-suave hover:text-primario hover:bg-superficie-2 active:bg-superficie-2/80 rounded-lg transition-colors shrink-0 -mr-1 -mt-1 cursor-pointer"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -78,6 +97,11 @@ function LineaCarrito({
                 .join(' · ')}
             </p>
           )}
+          {esPlatoConstructorConFaltante && nombresIngFaltantes.length > 0 && (
+            <p className="text-xs font-semibold text-primario-texto mt-1">
+              Ingrediente agotado: {nombresIngFaltantes.join(', ')}
+            </p>
+          )}
           {linea.notas && (
             <p className="text-xs text-texto-tenue italic leading-snug mt-0.5">
               {linea.notas}
@@ -85,6 +109,24 @@ function LineaCarrito({
           )}
         </div>
       </div>
+
+      {/* Acción rápida para quitar plato cuando se agotó el plato o un ingrediente del constructor */}
+      {!soloLectura && onEliminar && tieneFaltante && (
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-borde/60">
+          <span className="text-xs text-primario-texto font-medium">
+            {esPlatoConstructorConFaltante
+              ? 'Un ingrediente de este plato se acabó'
+              : 'Este plato se acabó'}
+          </span>
+          <button
+            type="button"
+            onClick={() => onEliminar(linea.id_linea)}
+            className="min-h-11 px-3.5 py-2 rounded-xl bg-primario hover:bg-primario-hover text-white font-etiqueta uppercase tracking-wider font-bold text-xs transition-colors cursor-pointer shrink-0"
+          >
+            Quitar plato
+          </button>
+        </div>
+      )}
 
       {/* Pie de la línea: selector de cantidad y precios */}
       <div className="flex items-center justify-between pt-2 border-t border-borde gap-2">
@@ -102,7 +144,7 @@ function LineaCarrito({
               }
               disabled={linea.cantidad <= 1}
               aria-label={`Disminuir cantidad de ${linea.nombre}`}
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-texto hover:text-primario hover:bg-superficie active:bg-superficie/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer font-bold text-base"
+              className="w-11 h-11 min-h-11 min-w-11 flex items-center justify-center rounded-lg text-texto hover:text-primario hover:bg-superficie active:bg-superficie/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer font-bold text-base"
             >
               −
             </button>
@@ -117,9 +159,9 @@ function LineaCarrito({
               onClick={() =>
                 onActualizarCantidad?.(linea.id_linea, linea.cantidad + 1)
               }
-              disabled={linea.cantidad >= 20 || linea.disponible === false}
+              disabled={linea.cantidad >= 20 || tieneFaltante}
               aria-label={`Aumentar cantidad de ${linea.nombre}`}
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-texto hover:text-primario hover:bg-superficie active:bg-superficie/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer font-bold text-base"
+              className="w-11 h-11 min-h-11 min-w-11 flex items-center justify-center rounded-lg text-texto hover:text-primario hover:bg-superficie active:bg-superficie/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer font-bold text-base"
             >
               +
             </button>

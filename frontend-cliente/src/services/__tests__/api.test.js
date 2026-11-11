@@ -97,4 +97,42 @@ describe('Interceptor HTTP en frontend-cliente (pedirJson)', () => {
     expect(errorCapturado.retryAfter).toBe(60);
     expect(errorCapturado.mensaje).toBe('Demasiados intentos. Espera un minuto e inténtalo de nuevo');
   });
+
+  it('debe conservar motivo y faltantes en ErrorApi ante 409 sin_stock y 503 reintentar', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        error: 'Sin stock suficiente',
+        motivo: 'sin_stock',
+        faltantes: [{ tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' }],
+      }),
+    });
+
+    await expect(
+      pedirJson('/pedidos', { method: 'POST', body: { items: [] } })
+    ).rejects.toMatchObject({
+      status: 409,
+      motivo: 'sin_stock',
+      faltantes: [{ tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' }],
+    });
+
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        error: 'intenta de nuevo',
+        motivo: 'reintentar',
+      }),
+    });
+
+    await expect(
+      pedirJson('/pedidos', { method: 'POST', body: { items: [] } })
+    ).rejects.toMatchObject({
+      status: 503,
+      motivo: 'reintentar',
+    });
+  });
 });

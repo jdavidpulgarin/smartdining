@@ -1,10 +1,12 @@
 import { ErrorApi } from '../services/api';
+import { accionErrorPedido } from './sinStock';
 
 /**
  * Traduce un error producido al intentar crear un pedido (de red, ErrorApi o local)
  * a una estructura de estado legible y manejable por la UI del carrito.
  *
  * @param {Error|ErrorApi|unknown} err
+ * @param {Array<object>} [carrito=[]]
  * @returns {{
  *   tipo: number|string,
  *   mensaje: string,
@@ -12,10 +14,21 @@ import { ErrorApi } from '../services/api';
  *   esConexion?: boolean,
  *   bloquearSegundos?: number,
  *   recargarMenu?: boolean,
- *   ignorar?: boolean
+ *   ignorar?: boolean,
+ *   faltantes?: Array<object>,
+ *   itemsAfectados?: Array<object>,
+ *   idsLineasAfectadas?: string[],
+ *   idsPlatosAgotados?: number[],
+ *   idsIngredientesAgotados?: number[],
+ *   esReintentable?: boolean
  * }}
  */
-export function traducirErrorPedido(err) {
+export function traducirErrorPedido(err, carrito = []) {
+  const motivo = String(err?.motivo ?? err?.data?.motivo ?? '').toLowerCase();
+  if (motivo === 'sin_stock' || motivo === 'reintentar') {
+    return accionErrorPedido(err, carrito);
+  }
+
   if (err?.status === 401) {
     // 401 es manejado centralmente por api.js para limpiar la sesión y redirigir
     return {
