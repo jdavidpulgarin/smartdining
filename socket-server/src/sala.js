@@ -82,7 +82,38 @@ function crearPresencia({ io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS }) {
     emitir(idMesa).catch((err) => log.error('presencia: no se pudo emitir', { id_mesa: idMesa, error: err }));
   }
 
-  return { calcular, programar };
+  /**
+   * Presencia de cada mesa con algo, SOLO a `socket`: el personal que acaba de
+   * conectarse (o recargó el panel) la tiene al instante, sin esperar al
+   * siguiente cambio. No pasa por programar(): ni los demás paneles ni las
+   * mesas reciben nada.
+   *
+   * Mesas candidatas, sin consultar al backend:
+   * - las salas room:mesa-N de este proceso (hay una sola instancia y no hay
+   *   adaptador de Redis para Socket.io);
+   * - el índice de mesas con pagos o sin celular anotados, que cubre una mesa
+   *   sin ningún socket conectado.
+   * Se omiten las vacías (una tablet sola en su sala, o una mesa cerrada):
+   * para el panel, que no llegue evento es lo mismo que 0 comensales.
+   */
+  async function enviarInicial(socket) {
+    const candidatas = new Set(await estadoMesas.mesasConEstado());
+    for (const sala of io.of('/').adapter.rooms.keys()) {
+      const m = /^room:mesa-(\d+)$/.exec(sala);
+      if (m) candidatas.add(Number(m[1]));
+    }
+    const presencias = await Promise.all([...candidatas].sort((a, b) => a - b).map(calcular));
+    let enviadas = 0;
+    for (const p of presencias) {
+      if (p.total > 0 || p.pagaron.length > 0 || p.sin_celular.length > 0) {
+        socket.emit('mesa:presencia', p);
+        enviadas += 1;
+      }
+    }
+    return enviadas;
+  }
+
+  return { calcular, programar, enviarInicial };
 }
 // Una mesa puede llamar al mesero una vez por minuto: suficiente para pedir
 // ayuda de verdad y corta el abuso de un comensal que pulsa sin parar.
@@ -96,6 +127,10 @@ function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
   const cuentas = new Set(); // mesas que pidieron la cuenta
   const pagos = new Map(); // idMesa -> Set de alias que ya pagaron
   const sinCelular = new Map(); // idMesa -> { ms en que vence, Map(clave -> alias) }
+  // Como sd:mesas:con-estado en Redis: idMesa -> ms en que vence (24 h desde la
+  // última vez que se anotó un pago o un sin celular).
+  const conEstado = new Map();
+  const anotarEnIndice = (idMesa) => conEstado.set(idMesa, ahora() + TTL_SIN_CELULAR_MS);
   const listaSinCelular = (idMesa) => {
     const e = sinCelular.get(idMesa);
     if (e && e.vence <= ahora()) sinCelular.delete(idMesa);
@@ -109,6 +144,12 @@ function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
       llamadas.delete(idMesa);
       pagos.delete(idMesa);
       sinCelular.delete(idMesa);
+      conEstado.delete(idMesa);
+    },
+    /** Mesas con pagos o sin celular anotados que no han vencido, en orden. */
+    mesasConEstado() {
+      for (const [id, vence] of conEstado) if (vence <= ahora()) conEstado.delete(id);
+      return [...conEstado.keys()].sort((a, b) => a - b);
     },
     sinCelular(idMesa) {
       const e = listaSinCelular(idMesa);
@@ -120,6 +161,7 @@ function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
       if (!e) { e = { vence: 0, alias: new Map() }; sinCelular.set(idMesa, e); }
       e.alias.set(clave, alias);
       e.vence = ahora() + TTL_SIN_CELULAR_MS; // como EXPIRE en Redis: se renueva al agregar
+      anotarEnIndice(idMesa);
       return true;
     },
     quitarSinCelular(idMesa, clave) {
@@ -131,6 +173,7 @@ function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
     marcarPago(idMesa, alias) {
       if (!pagos.has(idMesa)) pagos.set(idMesa, new Set());
       pagos.get(idMesa).add(alias);
+      anotarEnIndice(idMesa);
     },
     pagaron(idMesa) { return [...(pagos.get(idMesa) || [])].sort((a, b) => a.localeCompare(b)); },
     reservarLlamada(idMesa, segundos) {

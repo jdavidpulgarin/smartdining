@@ -2,7 +2,9 @@ const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
 const { autenticarSocket } = require('./auth');
-const { registrarSalas, salaMesa, SALA_ADMIN } = require('./salas');
+const {
+  registrarSalas, salaMesa, SALA_ADMIN, ROLES_ADMIN,
+} = require('./salas');
 const { ROL_COMENSAL } = require('./auth');
 const { crearRegistroIdempotencia } = require('./idempotencia');
 const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
@@ -208,6 +210,13 @@ function crearServidor(config, deps = {}) {
       // Con el primer comensal en la sala, el QR de la mesa deja de rotar.
       alEntrarComensal: ctx.rotador.fijar,
     });
+    // El personal que entra a room:admin (o recarga el panel) recibe al
+    // instante la presencia de todas las mesas con algo, solo en ESTE socket
+    // (EVENTS.md §5.2). Si Redis falla, la conexión sigue igual.
+    if (ROLES_ADMIN.includes(rol)) {
+      ctx.presencia.enviarInicial(socket)
+        .catch((err) => log.error('presencia: no se pudo enviar la inicial', { socket: socket.id, error: err }));
+    }
     registrarCarrito(socket, ctx);
     registrarPedidos(socket, ctx);
     registrarSuscripcionesSocket(socket, ctx);
