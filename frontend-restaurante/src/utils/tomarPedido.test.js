@@ -9,6 +9,8 @@ import {
   opcionPedirExistente,
   reemplazarAlias,
   armarPedido,
+  agruparPorComensal,
+  totalesPorComensal,
 } from './tomarPedido'
 
 describe('tomarPedido - lógica pura (J-16)', () => {
@@ -441,6 +443,47 @@ describe('tomarPedido - lógica pura (J-16)', () => {
     it('falla si falta id_mesa o items', () => {
       expect(() => armarPedido({ idMesa: null, items: [{ id_plato: 1 }] })).toThrow('id_mesa')
       expect(() => armarPedido({ idMesa: 5, items: [] })).toThrow('al menos un ítem')
+    })
+  })
+
+  describe('agruparPorComensal y totalesPorComensal', () => {
+    it('agrupa ítems por comensal manteniendo el orden e indiceOriginal', () => {
+      const items = [
+        { id_plato: 1, nombre: 'Ajiaco', comensal: 'Ana', precio: 20000, cantidad: 1 },
+        { id_plato: 2, nombre: 'Jugo', comensal: 'Beto', precio: 5000, cantidad: 2 },
+        { id_plato: 3, nombre: 'Postre', comensal: 'Ana', precio: 8000, cantidad: 1 },
+        { id_plato: 4, nombre: 'Agua', precio: 3000 },
+      ]
+
+      const grupos = agruparPorComensal(items)
+
+      expect(grupos.map((g) => g.comensal)).toEqual(['Ana', 'Beto', 'Sin comensal'])
+      expect(grupos[0].items.map((it) => it.indiceOriginal)).toEqual([0, 2])
+      expect(grupos[1].items.map((it) => it.indiceOriginal)).toEqual([1])
+      expect(grupos[2].items.map((it) => it.indiceOriginal)).toEqual([3])
+    })
+
+    it('calcula subtotales por comensal y el total acumulado', () => {
+      const items = [
+        { id_plato: 1, comensal: 'Ana', precio: 20000, cantidad: 1 },
+        { id_plato: 2, comensal: 'Beto', precio: 5000, cantidad: 2 },
+        { id_plato: 3, comensal: 'Ana', precio: 8000, cantidad: 2 },
+      ]
+
+      const { grupos, total } = totalesPorComensal(items)
+
+      expect(grupos[0].comensal).toBe('Ana')
+      expect(grupos[0].subtotalComensal).toBe(36000)
+      expect(grupos[1].comensal).toBe('Beto')
+      expect(grupos[1].subtotalComensal).toBe(10000)
+      expect(total).toBe(46000)
+    })
+
+    it('maneja arreglos vacíos o entradas no válidas sin fallar', () => {
+      expect(agruparPorComensal([])).toEqual([])
+      expect(agruparPorComensal(null)).toEqual([])
+      expect(totalesPorComensal([])).toEqual({ grupos: [], total: 0 })
+      expect(totalesPorComensal(undefined)).toEqual({ grupos: [], total: 0 })
     })
   })
 })
