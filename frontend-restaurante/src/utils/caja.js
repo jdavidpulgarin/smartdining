@@ -56,6 +56,16 @@ export function idCobroParaEnviar(pendiente, datos, generar = nuevoIdCobro) {
   return { clave, id_cobro: generar() }
 }
 
+/**
+ * ¿Hay que descartar el id_cobro pendiente tras este error? Solo con
+ * `id_cobro_en_uso` (409): ese id ya pertenece a un cobro de OTRA mesa y
+ * repetirlo daría el mismo 409 para siempre. En cualquier otro error se
+ * conserva, para que un reintento del MISMO cobro no cobre dos veces.
+ */
+export function descartarIdCobro(err) {
+  return err?.motivo === 'id_cobro_en_uso'
+}
+
 /** El error del cobro en palabras del cajero, según el `motivo` del contrato. */
 export function mensajeDeErrorCobro(err, formatear = (n) => String(n)) {
   if (err?.sinConexion) {
@@ -66,6 +76,8 @@ export function mensajeDeErrorCobro(err, formatear = (n) => String(n)) {
       return `El monto supera lo que debe la mesa${err.data?.saldo !== undefined ? ` (saldo actual ${formatear(err.data.saldo)})` : ''}. Actualiza las cuentas: alguien pudo pagar mientras tanto.`
     case 'sin_cuenta':
       return 'Esta mesa ya no tiene nada por cobrar. Actualiza las cuentas.'
+    case 'id_cobro_en_uso':
+      return 'No se cobró: ese número de cobro ya se usó en otra mesa. Se generó uno nuevo; pulsa COBRAR otra vez.'
     case 'mesa_inexistente':
       return 'La mesa ya no existe.'
     case 'autor_inexistente':

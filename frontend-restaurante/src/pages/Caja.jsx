@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
 import { useAuth, useSocketListener, useTables } from '../hooks'
-import { puedeUsarCaja, comensalDelCobro, idCobroParaEnviar, mensajeDeErrorCobro } from '../utils/caja'
+import { puedeUsarCaja, comensalDelCobro, idCobroParaEnviar, mensajeDeErrorCobro, descartarIdCobro } from '../utils/caja'
 
 function formatCOP(monto) {
   const num = Number(monto) || 0
@@ -415,6 +415,9 @@ function CajaRegistradora() {
       await cargarCuentas()
       await cargarMesas()
     } catch (err) {
+      // 409 id_cobro_en_uso: no se cobró nada y ese id es de otro cobro; el
+      // siguiente clic lleva un id_cobro nuevo.
+      if (descartarIdCobro(err)) cobroPendiente.current = null
       setErrorCobro(mensajeDeErrorCobro(err, formatCOP))
       // El saldo cambió por otro lado: se recarga para que el cajero vea el real.
       if (err?.motivo === 'excede' || err?.motivo === 'sin_cuenta') await cargarCuentas()

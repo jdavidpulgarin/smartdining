@@ -176,6 +176,25 @@ describe('Caja: cobro de mesa (POST /transacciones/mesa)', () => {
     expect(cobros[2].id_cobro).not.toBe(cobros[0].id_cobro)
   })
 
+  it('409 id_cobro_en_uso: aviso, nada cobrado, y el siguiente clic lleva un id_cobro NUEVO', async () => {
+    const { cobros } = backend({
+      cobro: (_b, n) => (n === 1
+        ? json({ error: 'Ese id_cobro ya se usó en otra mesa; genera uno nuevo', motivo: 'id_cobro_en_uso' }, 409)
+        : json({ duplicado: false, saldo_restante: 0, mesa_liberada: true, pagados: [10, 11], transacciones: [{ id_transaccion: 7, id_pedido: 10, monto: 60000, comensal: null }] }, 201)),
+    })
+    montar()
+    await elegirMesa1YEfectivo()
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/ya se usó en otra mesa/))
+    expect(screen.queryByText('Pago Procesado con Éxito')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(screen.getByText('Pago Procesado con Éxito')).toBeInTheDocument())
+    expect(cobros).toHaveLength(2)
+    expect(cobros[1].id_cobro).toMatch(UUID)
+    expect(cobros[1].id_cobro).not.toBe(cobros[0].id_cobro)
+  })
+
   it('200 duplicado: recibo que avisa que no se cobró otra vez', async () => {
     backend({ cobro: () => json({ duplicado: true, saldo_restante: 0 }, 200) })
     montar()

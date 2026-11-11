@@ -6,6 +6,7 @@ import {
   claveDeCobro,
   idCobroParaEnviar,
   mensajeDeErrorCobro,
+  descartarIdCobro,
 } from '../caja'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -54,5 +55,13 @@ describe('utils/caja', () => {
     expect(mensajeDeErrorCobro({ motivo: 'mesa_inexistente' })).toMatch(/ya no existe/)
     expect(mensajeDeErrorCobro({ motivo: 'cuerpo_invalido', message: 'monto inválido' })).toMatch(/monto inválido/)
     expect(mensajeDeErrorCobro({ message: 'boom' })).toMatch(/boom/)
+    expect(mensajeDeErrorCobro({ motivo: 'id_cobro_en_uso' })).toMatch(/otra mesa.*COBRAR otra vez/)
+  })
+
+  it('descartarIdCobro: solo con id_cobro_en_uso; un error de red o un excede conservan el id (reintento seguro)', () => {
+    expect(descartarIdCobro({ motivo: 'id_cobro_en_uso' })).toBe(true)
+    for (const err of [{ sinConexion: true }, { motivo: 'excede' }, { motivo: 'sin_cuenta' }, {}, null]) {
+      expect(descartarIdCobro(err)).toBe(false)
+    }
   })
 })
