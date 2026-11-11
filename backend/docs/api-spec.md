@@ -147,11 +147,12 @@ desde `recibido` o `en_preparacion` (ver *Transiciones válidas* arriba).
 Da de alta personal del restaurante. El comensal no se registra.
 El primer `admin` sale del `seed.sql` de Jarrison, no de este endpoint.
 
-Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "123456", "rol": "mesero" }`
+Body: `{ "nombre": "Ana Ríos", "email": "ana@mail.com", "password": "12345678", "rol": "mesero" }`
 
 `rol` es obligatorio y solo acepta `admin`, `mesero`, `cajero`, `cocina`.
 
-`password`: mínimo **6 caracteres** y como mucho **72 bytes** en UTF-8 (ver
+`password`: mínimo **8 caracteres** (antes 6; el mismo que el cambio de clave y el que exige el
+panel) y como mucho **72 bytes** en UTF-8 (ver
 [La clave máxima: 72 bytes](#la-clave-máxima-72-bytes)).
 
 201: `{ "usuario": { "id_usuario": 1, "nombre": "Ana Ríos", "email": "ana@mail.com", "rol": "mesero", "activo": true } }`
@@ -177,7 +178,11 @@ dos únicos sitios que llaman a `bcrypt.hash`) se rechaza si pasa de 72 bytes en
   textos.
 - **El login no lleva tope**, a propósito: quien creó una clave más larga antes de esta regla
   sigue entrando con ella (bcrypt la compara truncada, igual que la guardó).
-- Los mínimos **no** son iguales: 6 caracteres al registrar y 8 al cambiar la clave.
+- **El mínimo es el mismo en las dos rutas: 8 caracteres** (`CARACTERES_MINIMOS_CLAVE`, en el
+  mismo módulo), con 400 `{ "error": "La contraseña debe tener al menos 8 caracteres" }`. Se
+  mide en **caracteres**, que es lo que la persona escribe y cuenta. Antes el registro pedía 6.
+- **El login tampoco aplica el mínimo**: una clave de 6 o 7 caracteres creada antes sigue
+  entrando.
 - La regla vive en un solo sitio: `src/utils/clave-bcrypt.js`.
 
 ### POST /auth/login
@@ -299,8 +304,7 @@ Body, **todos los campos opcionales** pero al menos uno:
 
 Body: `{ "password": "clave-nueva-larga" }`, `.strict()`.
 
-- **Mínimo 8 caracteres** (400 si no). Más que los 6 de `/auth/register`, cuyo mínimo ya
-  está publicado en este contrato: bajarlo aquí para igualarlo sería empeorar a propósito.
+- **Mínimo 8 caracteres** (400 si no), el mismo que `/auth/register` desde que se igualaron.
   El mínimo se mide en **caracteres**, que es lo que la persona escribe y cuenta.
 - **Máximo 72 BYTES** (no 72 caracteres), medidos con `Buffer.byteLength(clave, 'utf8')`.
   Es por bytes como trunca bcrypt: a partir del byte 72 ignora el resto **en silencio**. Y
@@ -3174,6 +3178,15 @@ Un cobro nuevo (otro monto, otra persona) lleva un `id_cobro` nuevo. Por dentro 
 usa el mismo índice único (`uq_transacciones_referencia_externa`) e idempotencia que el pago en
 línea, incluida la carrera de dos peticiones simultáneas: una cobra, la otra es duplicado.
 
+**Un `id_cobro` ya usado en OTRA mesa no es un duplicado**: es **409** `id_cobro_en_uso`. El
+backend mira a qué mesa pertenece la transacción que ya tiene `caja:<id_cobro>` (por su pedido):
+si es la misma mesa, es el reintento de este cobro y responde `duplicado`; si es otra, contestar
+`duplicado` haría creer a la caja que cobró sin haber cobrado nada, así que responde 409 y no
+escribe nada. Pasa también en la carrera: dos peticiones a la vez con el mismo `id_cobro` en
+mesas distintas → una cobra y la otra recibe 409, no `duplicado`. Si llega este 409, la caja
+tiene que generar un `id_cobro` nuevo. (El pago en línea, `/transacciones/internal`, no cambia:
+una referencia de Wompi ya registrada sigue siendo duplicado.)
+
 **El reparto**, en una sola transacción:
 
 - Se bloquea la mesa y después sus pedidos por `id_pedido`: el mismo orden que el cobro por
@@ -3211,7 +3224,8 @@ línea, incluida la carrera de dos peticiones simultáneas: una cobra, la otra e
 
 | Status | Cuerpo | Cuándo |
 |---|---|---|
-| **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró: no se cobra ni se avisa otra vez |
+| **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró **en esta mesa**: no se cobra ni se avisa otra vez |
+| **409** | `{ "error": "Ese id_cobro ya se usó en otra mesa; genera uno nuevo", "motivo": "id_cobro_en_uso" }` | Ese `id_cobro` ya se usó en **otra** mesa. No se escribe nada |
 | **400** | `{ "error", "motivo": "cuerpo_invalido" }` | Cuerpo inválido (tabla de arriba) |
 | **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
 | **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
