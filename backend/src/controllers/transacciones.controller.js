@@ -238,6 +238,151 @@ async function crearInterno(req, res, next) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// POST /transacciones/mesa — cobro de MESA en caja (pedido de Jarrison tras la
+// prueba de punta a punta: la Caja cobraba siempre al primer pedido).
+// ---------------------------------------------------------------------------
+
+/** Métodos de la caja: los de la tabla menos 'online', que es solo de Wompi. */
+const METODOS_CAJA = METODOS_PAGO.filter((m) => m !== 'online');
+
+/** Tope de DECIMAL(10,2) en centavos: 99.999.999,99 pesos. */
+const MAX_CENTAVOS = 9999999999;
+
+const MOTIVO_CUERPO_INVALIDO = 'cuerpo_invalido';
+const MOTIVO_MESA_INEXISTENTE = 'mesa_inexistente';
+const MOTIVO_SIN_CUENTA = 'sin_cuenta';
+const MOTIVO_EXCEDE = 'excede';
+
+/**
+ * Pesos con como mucho 2 decimales -> centavos ENTEROS, sin coma flotante.
+ *
+ * `Math.round(monto * 100)` falla en casos reales: 1.15 * 100 es
+ * 114.99999999999999 en coma flotante. Aquí se trabaja sobre el TEXTO del
+ * número: la parte entera por 100 más los decimales rellenados a dos cifras.
+ * Devuelve null si tiene más de 2 decimales, exponente, o no cabe en
+ * DECIMAL(10,2).
+ */
+function montoACentavos(monto) {
+  if (typeof monto !== 'number' || !Number.isFinite(monto) || monto <= 0) return null;
+  const m = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(monto));
+  if (!m) return null; // más de 2 decimales, o notación con exponente
+  const centavos = Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0'));
+  if (!Number.isSafeInteger(centavos) || centavos < 1 || centavos > MAX_CENTAVOS) return null;
+  return centavos;
+}
+
+/** Centavos enteros -> pesos como número (12500050 -> 125000.5). */
+const aPesos = (centavos) => Number(centavos) / 100;
+
+const cobroMesaSchema = z
+  .object({
+    id_mesa: z.number().int().positive(),
+    monto: z
+      .number()
+      .positive()
+      .refine((v) => montoACentavos(v) !== null, {
+        message: 'monto debe tener como mucho 2 decimales y caber en 99.999.999,99',
+      }),
+    metodo_pago: z.enum(METODOS_CAJA, {
+      errorMap: () => ({ message: `metodo_pago debe ser uno de: ${METODOS_CAJA.join(', ')}` }),
+    }),
+    // Las mismas reglas que el comensal de POST /transacciones.
+    comensal: z.string().min(1).max(40).nullish(),
+    id_cobro: z.string().uuid({ message: 'id_cobro debe ser un UUID' }),
+  })
+  .strict();
+
+/**
+ * POST /transacciones/mesa — la caja cobra un monto A LA MESA y la base lo
+ * reparte entre sus pedidos con saldo, del más viejo al más nuevo (el mismo
+ * núcleo que el pago en línea). `id_cobro` hace el reintento seguro: con el
+ * mismo id_cobro no se cobra dos veces.
+ */
+async function cobrarMesa(req, res, next) {
+  const parsed = cobroMesaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0].message, motivo: MOTIVO_CUERPO_INVALIDO });
+  }
+  const { id_mesa, monto, metodo_pago, id_cobro } = parsed.data;
+  const monto_centavos = montoACentavos(monto);
+  const comensal = aliasDelComensal(req, parsed.data);
+
+  try {
+    const r = await transaccionesService.cobrarMesaEnCaja({
+      id_mesa,
+      monto_centavos,
+      metodo_pago,
+      comensal,
+      id_cobro,
+      id_usuario: req.user.id_usuario,
+    });
+
+    if (r.noExiste) {
+      return res.status(404).json({ error: 'Mesa no encontrada', motivo: MOTIVO_MESA_INEXISTENTE });
+    }
+    if (r.sinCuenta) {
+      return res.status(409).json({
+        error: 'La mesa no tiene una cuenta abierta por pagar',
+        motivo: MOTIVO_SIN_CUENTA,
+      });
+    }
+    if (r.excede) {
+      return res.status(409).json({
+        error: 'El pago excede el saldo de la mesa',
+        motivo: MOTIVO_EXCEDE,
+        saldo: aPesos(r.saldo_centavos),
+      });
+    }
+    // El reintento con el mismo id_cobro no cobra ni avisa otra vez: los avisos
+    // ya salieron con el primero.
+    if (r.duplicado) {
+      return res.status(200).json({ duplicado: true, saldo_restante: aPesos(r.saldo_restante_centavos) });
+    }
+
+    // Los mismos avisos que el cobro en caja de POST /transacciones, en orden y
+    // después del COMMIT (el notifier nunca lanza): primero el pago, luego cada
+    // pedido que quedó pagado y al final la mesa liberada.
+    const avisos = [
+      () => socketNotifier.notificarPagoConfirmado({
+        id_mesa,
+        monto_centavos,
+        saldo_restante_centavos: r.saldo_restante_centavos,
+        comensal,
+        referencia_externa: transaccionesService.PREFIJO_REFERENCIA_CAJA + id_cobro,
+        // La primera fila del reparto: es la guardia de idempotencia del
+        // socket-server para este cobro.
+        id_transaccion: r.transacciones[0] ? r.transacciones[0].id_transaccion : null,
+      }),
+      ...r.pagados.map((p) => () => socketNotifier.notificarCambioEstado({
+        id_pedido: p.id_pedido,
+        id_mesa,
+        estado_anterior: p.estado_anterior,
+        estado: 'pagado',
+      })),
+    ];
+    if (r.mesa_liberada) avisos.push(() => socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA));
+    socketNotifier.encadenarAvisos(avisos);
+
+    if (r.mesa_liberada) aliasComensal.olvidarMesa(id_mesa);
+
+    return res.status(201).json({
+      duplicado: false,
+      saldo_restante: aPesos(r.saldo_restante_centavos),
+      mesa_liberada: r.mesa_liberada,
+      pagados: r.pagados.map((p) => p.id_pedido),
+      transacciones: r.transacciones.map((t) => ({
+        id_transaccion: t.id_transaccion,
+        id_pedido: t.id_pedido,
+        monto: aPesos(t.monto_centavos),
+        comensal: t.comensal,
+      })),
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function obtenerPorPedido(req, res, next) {
   try {
     const transacciones = await transaccionesService.obtenerPorPedido(req.params.id_pedido);
@@ -335,6 +480,12 @@ module.exports = {
   aliasDelComensal,
   obtenerPorPedido,
   listarDelDia,
+  cobrarMesa,
+  montoACentavos,
+  METODOS_CAJA,
+  MOTIVO_CUERPO_INVALIDO,
+  MOTIVO_SIN_CUENTA,
+  MOTIVO_EXCEDE,
   METODOS_PAGO,
   ESTADOS_TRANSACCION,
   MONEDA,

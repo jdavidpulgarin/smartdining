@@ -18,4 +18,12 @@ router.get('/pedido/:id_pedido', requireAuth, requireRole('admin', 'cajero'), ct
 // Mismos roles que registrar un pago: es la misma caja mirando su propio día.
 router.get('/', requireAuth, requireRole('admin', 'cajero'), ctrl.listarDelDia);
 
+// Cobro de MESA en caja: el monto se reparte entre los pedidos de la mesa, del
+// más viejo al más nuevo (el mismo núcleo que el pago en línea).
+//
+// Ninguna ruta de este router tapa a otra: todas son literales salvo
+// GET /pedido/:id_pedido, que lleva su prefijo fijo; y GET '/' y POST '/mesa'
+// no comparten método con nada que pueda capturarlas.
+router.post('/mesa', requireAuth, requireRole('admin', 'cajero'), ctrl.cobrarMesa);
+
 module.exports = router;

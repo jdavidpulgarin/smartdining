@@ -398,6 +398,19 @@ const TABLA = [
     url: '/api/transacciones?desde=hoy',
     roles: ['admin', 'cajero'],
   },
+  // Cobro de MESA en caja: reparte el monto entre los pedidos de la mesa.
+  {
+    metodo: 'POST',
+    patron: '/api/transacciones/mesa',
+    url: '/api/transacciones/mesa',
+    roles: ['admin', 'cajero'],
+    cuerpo: {
+      id_mesa: 5,
+      monto: 10000,
+      metodo_pago: 'efectivo',
+      id_cobro: '3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f',
+    },
+  },
 
   // --- Reportes (D-07): cifras de negocio, solo admin -----------------------
   { metodo: 'GET', patron: '/api/reportes', url: '/api/reportes?rango=hoy', roles: ['admin'] },
