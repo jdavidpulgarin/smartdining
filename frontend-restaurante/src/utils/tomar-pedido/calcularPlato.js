@@ -1,5 +1,5 @@
-// Copiado desde frontend-cliente/src/utils/calcularPlato.js
-// Adaptado para frontend-restaurante en J-16
+// Copiado de frontend-cliente; candidato a packages/core (R-22)
+// Origen: frontend-cliente/src/utils/calcularPlato.js (adaptado en J-16)
 
 export const PORCIONES = ['ligera', 'normal', 'extra']
 

@@ -1,5 +1,5 @@
-// Copiado desde frontend-cliente/src/components/constructor/constructorReducer.js
-// Adaptado para frontend-restaurante en J-16
+// Copiado de frontend-cliente; candidato a packages/core (R-22)
+// Origen: frontend-cliente/src/components/constructor/constructorReducer.js (adaptado en J-16)
 
 const PORCIONES_VALIDAS = ['ligera', 'normal', 'extra']
 
