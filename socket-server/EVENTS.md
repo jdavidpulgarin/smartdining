@@ -538,7 +538,7 @@ hasta que se libere.
 | `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, emitidoEn }` |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, emitidoEn }` (mismo payload para Wompi, §8.3, y caja, §8.6) |
-| `pago:alerta` | `room:admin` | `{ eventId, id_mesa, referencia_externa, id_transaccion_pasarela, motivo, emitidoEn }` (§8.5) |
+| `pago:alerta` | `room:admin` | `{ eventId, id_mesa, comensal, monto_centavos, monto_esperado_centavos, referencia_externa, id_transaccion_pasarela, motivo, emitidoEn }` (§8.5) |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
@@ -611,6 +611,27 @@ recibe) cada vez que:
 
 Máximo **un aviso por mesa cada 500 ms**: el primero sale al instante y, si hubo más cambios
 dentro de esa ventana, se envía uno más al cerrarla (el último estado siempre llega).
+
+**Al conectar el panel.** Cuando un socket de personal (`admin`, `mesero`, `cajero`) se
+conecta y entra a `room:admin`, también al recargar la página, recibe **solo él** un
+`mesa:presencia` por cada mesa que tenga algo: comensales conectados, personas sin celular o
+pagos anotados en la sesión. Así no tiene que esperar al siguiente cambio. Es el mismo evento
+con el mismo payload, así que **el panel no necesita cambios**: basta con guardar el último
+por `id_mesa`.
+
+- No se envía a nadie más: ni a los otros paneles, ni a las mesas, ni a la cocina, ni a las
+  tablets.
+- Las mesas sin nada (una tablet sola en su sala, o una mesa cerrada) no se envían. Para el
+  panel, que no llegue evento de una mesa equivale a 0 comensales.
+- Incluye las mesas **sin ningún socket**, por ejemplo un grupo de personas sin celular con la
+  tablet apagada. Para eso el servidor lleva el índice `sd:mesas:con-estado` (en memoria si no
+  hay Redis), que vence a las 24 h de la última anotación y se borra al liberar la mesa.
+- Registra el listener de `mesa:presencia` **antes** de conectar: el servidor lo envía justo
+  después del `connect`.
+- **Limitación conocida:** si una mesa cambia justo mientras se arma este envío, el panel
+  puede recibir primero el estado nuevo (el aviso normal) y después el inicial, un poco más
+  viejo. El evento no lleva versión y la ventana dura milisegundos. Queda corregido en el
+  siguiente cambio de esa mesa.
 
 ```json
 { "id_mesa": 5, "comensales": ["Ana", "Beto"], "total": 2, "pagaron": ["Ana"], "sin_celular": [] }
@@ -1230,15 +1251,33 @@ x-internal-key: <INTERNAL_API_KEY>
 
 ### 8.5. `pago:alerta` e intentos fallidos
 
-`pago:alerta` → `room:admin`, para que el personal revise. Sin datos del pagador:
+`pago:alerta` → **solo** `room:admin`, para que el personal revise. Lleva cuánto y quién,
+pero no datos de tarjeta ni del pagador: la pasarela no nos los entrega y no se agrega ninguno.
+`comensal` es el alias de la mesa, el mismo que el panel ya ve en `payment:confirmed`.
 
 ```json
-{ "eventId": "1132-903100443-27458:monto_distinto", "id_mesa": 5, "referencia_externa": "SD-5-…", "id_transaccion_pasarela": "1132-903100443-27458", "motivo": "monto_distinto", "emitidoEn": "…" }
+{ "eventId": "1132-903100443-27458:monto_distinto", "id_mesa": 5, "comensal": "Ana",
+  "monto_centavos": 100, "monto_esperado_centavos": 3333300,
+  "referencia_externa": "SD-5-…", "id_transaccion_pasarela": "1132-903100443-27458",
+  "motivo": "monto_distinto", "emitidoEn": "…" }
 ```
 
-`motivo`: `monto_distinto`, `moneda_distinta`, `estado_no_aprobado`, `transaccion_inexistente`,
-`transaccion_distinta`, `referencia_distinta`, `referencia_desconocida`,
-`intencion_no_pendiente`, `backend_rechazo_<status>`.
+- `comensal`: alias firmado en el JWT de quien creó la intención de pago; `null` si no hay
+  intención.
+- `monto_centavos`: lo **cobrado**, según la API de la pasarela. Si la API no conoce la
+  transacción (`transaccion_inexistente`), lo que dice el evento: está firmado, pero la API no
+  lo confirmó. `null` si no es un entero.
+- `monto_esperado_centavos`: lo que este servidor esperaba cobrar (la intención); `null` si
+  no hay intención.
+
+| `motivo` | `id_mesa` | `comensal` | `monto_centavos` | `monto_esperado_centavos` |
+| :--- | :--- | :--- | :--- | :--- |
+| `monto_distinto`, `moneda_distinta` | sí | sí | API | sí |
+| `estado_no_aprobado`, `transaccion_distinta`, `referencia_distinta` | si hay intención | si hay intención | API | si hay intención |
+| `transaccion_inexistente` | si hay intención | si hay intención | **evento** | si hay intención |
+| `referencia_desconocida` (o vencida) | `null` | `null` | API | `null` |
+| `intencion_no_pendiente` (por ejemplo, un aprobado después de un rechazo) | sí | sí | API | sí |
+| `backend_rechazo_<status>` (por ejemplo, `409` por una reemplazada pagada dos veces, §8.3) | sí | sí | API | sí |
 
 Contrato (el backend lo expone desde PR #33):
 
@@ -1420,3 +1459,5 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Estable (R-20.2) · `POST /internal/inventario-alerta` · `inventario:alerta` | Propuesta (v1.1): sin implementar; el backend (D-17) ya la llamaba y recibía `404` y el aviso se perdía | Implementada según §5.5 sin cambios de contrato: validación estricta, solo `room:admin`, idempotencia `backend:inventario-alerta:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`) | Nadie: backend (D-17) y panel (P-22) ya usan este contrato |
 | Estable (R-19.2) · `POST /internal/mesa-comensal` · `mesa:presencia.sin_celular` | Propuesta (v1.1): sin implementar; el backend (D-18) ya la llamaba y recibía `404`, y la persona sin celular no contaba en «igual» | Implementada según §6.4 y §5.2: `sin_celular` siempre presente; `comensales` y `total` lo incluyen; misma regla de alias que el backend, con paridad probada; además rechaza la clave reservada `general` (D-18c) con `400` | Nadie: backend (D-18) y PWA ya usan este contrato |
 | `POST /internal/payment-confirmed` · `comensal` en `pagaron` (R-19.2) | Se anotaba en `pagaron` el texto tal cual («Abuela » no coincidía con «Abuela») | Se anota normalizado con la regla del alias; si no es válido, tal cual (§8.6). `payment:confirmed` no cambia | Nadie: compatible hacia atrás |
+| `pago:alerta` · cuánto y quién (pedido del panel) | Solo `eventId`, `id_mesa`, referencias, `motivo` y `emitidoEn`: el panel no podía mostrar cuánto ni quién | Agrega `comensal` (alias de la intención o `null`), `monto_centavos` (lo cobrado, según la API o el evento) y `monto_esperado_centavos` (de la intención o `null`). Sin datos de tarjeta ni del pagador; sigue yendo solo a `room:admin` (§8.5) | Panel: mostrarlos si quiere; los campos nuevos no rompen nada |
+| `mesa:presencia` · al conectar el panel | El panel recibía la presencia solo cuando cambiaba algo: al conectar o recargar no sabía quién estaba sentado | El socket de personal que entra a `room:admin` recibe, solo él, un `mesa:presencia` por cada mesa con algo, incluidas las mesas sin ningún socket (índice `sd:mesas:con-estado`, 24 h). Mismo evento y payload (§5.2) | Nadie: el panel ya lo guarda por `id_mesa`. Registrar el listener antes de conectar |
