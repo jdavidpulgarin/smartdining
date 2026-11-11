@@ -18,7 +18,7 @@ const assert = require('node:assert');
 const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const transaccionesService = require('../../src/services/transacciones.service');
 // Rango de números de mesa propio de esta suite (#165).
 const conNumeroDeMesa = require('../helpers/mesa-prueba').numerosDeMesa('pagos-concurrentes');
@@ -32,13 +32,9 @@ let pool = null;
 let hayBase = false;
 
 test.before(async () => {
-  try {
-    pool = new Pool({ connectionTimeoutMillis: 2000 });
-    await pool.query('SELECT 1');
-    hayBase = true;
-  } catch {
-    hayBase = false;
-  }
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  pool = await abrirSonda();
+  hayBase = pool !== null;
 });
 
 test.after(async () => {

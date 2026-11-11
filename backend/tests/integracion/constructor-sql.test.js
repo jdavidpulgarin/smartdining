@@ -22,7 +22,7 @@ const assert = require('node:assert');
 const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const constructorService = require('../../src/services/constructor.service');
 const autorInexistente = require('../../src/services/autor-inexistente');
@@ -36,24 +36,21 @@ let historialDesde = 0;
 const insumosCreados = [];
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    const r = await sonda.query(
-      'SELECT id_ingrediente, nombre, precio_extra FROM ingredientes ORDER BY id_ingrediente LIMIT 1'
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  const r = await sonda.query(
+    'SELECT id_ingrediente, nombre, precio_extra FROM ingredientes ORDER BY id_ingrediente LIMIT 1'
+  );
+  opcion = r.rows[0] || null;
+  hayBase = opcion !== null;
+  if (hayBase) {
+    const h = await sonda.query(
+      `SELECT COALESCE(MAX(id), 0) AS ultimo FROM historial_precios
+        WHERE tipo = 'ingrediente' AND id_referencia = $1`,
+      [opcion.id_ingrediente]
     );
-    opcion = r.rows[0] || null;
-    hayBase = opcion !== null;
-    if (hayBase) {
-      const h = await sonda.query(
-        `SELECT COALESCE(MAX(id), 0) AS ultimo FROM historial_precios
-          WHERE tipo = 'ingrediente' AND id_referencia = $1`,
-        [opcion.id_ingrediente]
-      );
-      historialDesde = Number(h.rows[0].ultimo);
-    }
-  } catch {
-    hayBase = false;
+    historialDesde = Number(h.rows[0].ultimo);
   }
 });
 

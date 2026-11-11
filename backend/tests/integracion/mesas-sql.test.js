@@ -20,7 +20,7 @@ const assert = require('node:assert');
 const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const mesasService = require('../../src/services/mesas.service');
 
@@ -31,13 +31,9 @@ const creadas = [];
 const conNumeroDeMesa = require('../helpers/mesa-prueba').numerosDeMesa('mesas-sql');
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    hayBase = true;
-  } catch {
-    hayBase = false;
-  }
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  hayBase = sonda !== null;
 });
 
 test.after(async () => {

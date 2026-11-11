@@ -22,7 +22,7 @@ const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
 const crypto = require('node:crypto');
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const inventario = require('../../src/services/inventario.service');
 
@@ -42,20 +42,17 @@ const NOMBRES = {
 };
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    hayBase = true;
-    // Uno de ellos bajo el minimo, para la busqueda de estado=bajo.
-    for (const [clave, nombre] of Object.entries(NOMBRES)) {
-      const { insumo } = await inventario.crearInsumo(
-        { nombre, unidad: 'g', stock_minimo: clave === 'guion' ? 100 : 0, stock_inicial: clave === 'guion' ? undefined : 10 },
-        { idUsuario: null }
-      );
-      creados.push(insumo.id_insumo);
-    }
-  } catch {
-    hayBase = false;
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  hayBase = true;
+  // Uno de ellos bajo el minimo, para la busqueda de estado=bajo.
+  for (const [clave, nombre] of Object.entries(NOMBRES)) {
+    const { insumo } = await inventario.crearInsumo(
+      { nombre, unidad: 'g', stock_minimo: clave === 'guion' ? 100 : 0, stock_inicial: clave === 'guion' ? undefined : 10 },
+      { idUsuario: null }
+    );
+    creados.push(insumo.id_insumo);
   }
 });
 
