@@ -1,0 +1,105 @@
+name: Deploy staging
+
+# Despliega develop en el VPS de STAGING (staging.DOMINIO). Guía: docs/despliegue.md
+#
+# Cómo se dispara: lo llama el job deploy-staging de ci.yml cuando el CI pasa
+# en un push a develop y la variable de repositorio DEPLOY_STAGING es 'true'.
+# No usa workflow_run como deploy.yml porque GitHub solo ejecuta workflow_run
+# y workflow_dispatch desde la rama por defecto (main), y staging sigue develop.
+# workflow_dispatch funciona cuando este archivo ya esté en main.
+#
+# Staging y producción NO corren a la vez (los dos publican 80/443 y usan la
+# subred fija de TRUST_PROXY): si el proyecto de producción "smartdining" está
+# corriendo, este despliegue se niega y no toca nada.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vps:
+    name: vps · docker compose up (staging)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # El environment limita quién ve los secretos (y permite exigir aprobación).
+    environment: staging
+    # Nunca dos despliegues a la vez, y uno en curso no se cancela a la mitad.
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    env:
+      # Desde ci.yml: el commit de develop que acaba de pasar el CI.
+      # A mano (workflow_dispatch): lo último de develop.
+      SHA: ${{ github.event_name == 'workflow_dispatch' && 'origin/develop' || github.sha }}
+    steps:
+      - name: Preparar llave SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Huella fija del servidor (nada de StrictHostKeyChecking=no).
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Desplegar ${{ env.SHA }}
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_RUTA: ${{ secrets.VPS_RUTA }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$VPS_USER@$VPS_HOST" sh -s -- "$VPS_RUTA" "$SHA" <<'REMOTO'
+          set -eu
+          cd "$1"
+          ENV_FILE=infra/.env.staging
+          export ENV_FILE
+          # Guardas ANTES de tocar nada: el .env debe ser el de staging y
+          # producción no puede estar corriendo.
+          grep -qx 'COMPOSE_PROJECT_NAME=smartdining-staging' "$ENV_FILE" || {
+            echo "::error::$ENV_FILE no define COMPOSE_PROJECT_NAME=smartdining-staging. No se desplegó nada."
+            exit 1
+          }
+          if [ -n "$(docker ps -q --filter label=com.docker.compose.project=smartdining)" ]; then
+            echo "::error::Producción (proyecto smartdining) está corriendo; staging y producción no corren a la vez. No se desplegó nada."
+            exit 1
+          fi
+          git fetch --quiet origin develop
+          # Copia de despliegue: nadie edita aquí. infra/.env.staging está
+          # ignorado y no se toca.
+          git reset --hard --quiet "$2"
+          # El script llega por stdin: < /dev/null evita que un comando se
+          # coma el resto. --wait: falla si un servicio no llega a healthy.
+          dc() { docker compose -f docker-compose.prod.yml --env-file "$ENV_FILE" "$@" < /dev/null; }
+          dc up -d --build --remove-orphans --wait --wait-timeout 180 postgres redis
+          # Migraciones (R-18.1) antes de que el backend nuevo use el esquema.
+          dc exec -T postgres sh /smartdining-db/migrar.sh
+          dc up -d --build --remove-orphans --wait --wait-timeout 180 backend socket-server
+          # nginx (lo único público) solo si ninguna cuenta del personal tiene
+          # una contraseña conocida o publicada.
+          if ! sh infra/scripts/passwords-demo.sh verificar < /dev/null; then
+            dc stop nginx
+            echo "::error::Hay cuentas con contraseña conocida (Admin123!). Staging detenido: corre 'ENV_FILE=infra/.env.staging sh infra/scripts/passwords-demo.sh cambiar' en el VPS."
+            exit 1
+          fi
+          dc up -d --build --remove-orphans --wait --wait-timeout 180
+          docker image prune -f > /dev/null
+          echo "Desplegado en staging $(git rev-parse --short HEAD)"
+          REMOTO
+
+      - name: Comprobar desde fuera
+        env:
+          DOMINIO: ${{ vars.DOMINIO }}
+        if: env.DOMINIO != ''
+        run: |
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "https://api.$DOMINIO/api/health"
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "https://rt.$DOMINIO/health"
+          curl -fsS -o /dev/null "https://app.$DOMINIO/"
+          curl -fsS -o /dev/null "https://cocina.$DOMINIO/"
+
+      - name: Borrar llave SSH
+        if: always()
+        run: rm -f ~/.ssh/id_deploy

@@ -12,6 +12,9 @@ pnpm-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+# Variables del VPS por entorno (infra/.env.staging). Las plantillas sí se versionan.
+.env.staging
+.env.produccion
 
 # Compilación y builds
 dist/

@@ -560,10 +560,13 @@ Notas para el frontend:
 - `payment:confirmed` trae el **mismo payload** venga de Wompi (§8.3) o de la caja (§8.6):
   el panel y la mesa no necesitan distinguir el origen. Deduplica por `eventId`.
 - `mesa:liberada`: la sesión de mesa terminó (pago o liberación manual). Ver §5.1.
-- `qr:actualizado` no lleva `eventId` (no lo dispara un cliente, lo dispara el backend al
-  rotar el token en la base). La pantalla de la mesa simplemente **redibuja el QR** con el
-  `token_qr` recibido; no hace falta deduplicar porque redibujar con el mismo valor es
-  inofensivo.
+- `qr:actualizado` no lleva `eventId` (no lo dispara un cliente). Llega en dos casos: cuando
+  el backend rota el token en la base y avisa por `/internal/qr-rotado` (§6.2), y en la
+  **rotación automática** de una mesa abierta y vacía, que el socket-server emite solo
+  después de que el backend guarde el QR nuevo (`POST /api/mesas/:id/token-qr/interno`, #168;
+  ver [docs/rotacion-qr.md](docs/rotacion-qr.md)). La pantalla de la mesa simplemente
+  **redibuja el QR** con el `token_qr` recibido; no hace falta deduplicar porque redibujar con
+  el mismo valor es inofensivo.
 
 ### 5.1. `mesa:liberada`
 
@@ -797,6 +800,12 @@ Se llama cada vez que cambia el `token_qr` vigente de una mesa: al sembrarla, y 
 que el trigger `tr_regenerar_token_qr` lo rota (pago o cancelación). Responde
 `200 { "ok": true }`. La pantalla de esa mesa recibe `qr:actualizado` y redibuja el QR
 sin que nadie tenga que ir a cambiar ningún papel.
+
+La **rotación automática** (mesa abierta y sin comensales, cada 3 min) va en el sentido
+contrario: el socket-server firma el QR y llama a `POST /api/mesas/:id/token-qr/interno` del
+backend (implementado en #168). Ese endpoint **no** llama a `/internal/qr-rotado`: el
+socket-server emite `qr:actualizado` cuando recibe el `200`. Contrato y respuestas en
+[docs/rotacion-qr.md](docs/rotacion-qr.md).
 
 ### 6.3. Cómo emite el backend `order:created` / `order:status`
 
