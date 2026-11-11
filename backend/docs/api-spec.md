@@ -3799,6 +3799,7 @@ y **no** siguen todos el mismo patrón: el de `movimientos_inventario` lo gener�
 | `POST /pedidos` | el INSERT de `historial_estados` que deja el pedido en `recibido` | `fk_historial_usuario` |
 | `PATCH /pedidos/:id/estado` y `PATCH /kds/comandas/:id/estado` | la línea de `historial_estados` de cada cambio de estado (el KDS pasa por el mismo servicio) | `fk_historial_usuario` |
 | `POST /transacciones`, cuando el cobro liquida un pedido ya entregado | la línea de `historial_estados` del paso a `pagado` | `fk_historial_usuario` |
+| `POST /transacciones/mesa`, cuando el reparto liquida algún pedido entregado | la línea de `historial_estados` del paso a `pagado` (`Pago en caja`, con el id de quien cobra) | `fk_historial_usuario` |
 
 - **La transacción se deshace entera**: el precio no cambia, la configuración se queda como
   estaba, el stock no se mueve (el libro de inventario sigue cuadrando) y del pedido no queda

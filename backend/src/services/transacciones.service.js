@@ -1,10 +1,6 @@
 const pool = require('../config/db');
 const mesasService = require('./mesas.service');
-const {
-  traducirAutorInexistente,
-  MOTIVO_AUTOR_INEXISTENTE,
-  MENSAJE_AUTOR_INEXISTENTE,
-} = require('./autor-inexistente');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 // Tabla transacciones (docs/modelo-er.md): id_transaccion, id_pedido,
 // metodo_pago, monto, estado_transaccion, referencia_externa, creado_en.
@@ -449,18 +445,6 @@ async function repartirPagoDeMesa(client, {
 }
 
 /**
- * ¿Es el 23503 del autor del historial? `fk_historial_usuario` todavía no está
- * en FK_AUTOR de autor-inexistente.js en develop: lo añade la rama de #146
- * (fix/api-autor-inexistente-pedidos-2), sin fusionar. Para no chocar con ella
- * se reconoce aquí con los MISMOS mensaje y motivo del helper; cuando #146
- * entre, traducirAutorInexistente ya lo atrapa antes y esto queda redundante.
- */
-function traducirAutorDelHistorial(err) {
-  if (!err || err.code !== '23503' || err.constraint !== 'fk_historial_usuario') return null;
-  return { status: 409, message: MENSAJE_AUTOR_INEXISTENTE, motivo: MOTIVO_AUTOR_INEXISTENTE };
-}
-
-/**
  * La TRANSACCIÓN alrededor del núcleo: BEGIN, reparto, COMMIT solo si se cobró,
  * y ROLLBACK en cualquier otro caso. Una carrera con el mismo pago (23505 del
  * índice único de la referencia) cuenta como duplicado; el 23503 del autor del
@@ -487,7 +471,9 @@ async function cobrarMesa(pago) {
         saldo_restante_centavos: await saldoDeLaMesaEnCentavos(pool, pago.id_mesa),
       };
     }
-    throw traducirAutorInexistente(err) || traducirAutorDelHistorial(err) || err;
+    // El 23503 de fk_historial_usuario (la caja, con un autor ya borrado) lo
+    // atrapa el helper compartido, como en el resto de rutas.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }

@@ -40,7 +40,8 @@ const PG_FK = '23503';
  *   - `fk_historial_usuario` → `historial_estados.id_usuario`, que escribe el
  *     backend a mano (no un trigger) cada vez que un pedido nace o cambia de
  *     estado: `POST /pedidos`, `PATCH /pedidos/:id/estado`, el tablero del KDS
- *     —que pasa por el mismo servicio— y el cobro que liquida la cuenta.
+ *     —que pasa por el mismo servicio—, el cobro por pedido que liquida la
+ *     cuenta y el cobro de mesa en caja (POST /transacciones/mesa).
  *
  * Las tres primeras leen el id con `fn_usuario_de_sesion()`, o sea de
  * `set_config('app.id_usuario', …)`, salvo la de movimientos, que además lo
