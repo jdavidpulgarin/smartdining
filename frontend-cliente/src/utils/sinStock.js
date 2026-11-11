@@ -7,13 +7,55 @@ export const MENSAJE_ERROR_PEDIDO_GENERICO =
 export const MENSAJE_SIN_STOCK_GENERICO =
   'Algo de tu pedido se acabó. Revisa el carrito e inténtalo de nuevo.';
 
+const RE_INGREDIENTE_AGOTADO = /^El ingrediente "([^"]+)" está agotado$/i;
+
+/**
+ * Extrae el nombre del ingrediente cuando el backend responde 409
+ * `ingrediente_agotado` (`{ error: 'El ingrediente "X" está agotado', motivo: 'ingrediente_agotado' }`).
+ *
+ * @param {any} error
+ * @returns {string|null}
+ */
+export function extraerNombreIngredienteAgotado(error) {
+  if (!error || typeof error !== 'object') return null;
+
+  const candidatosTexto = [
+    error.mensaje,
+    error.error,
+    error.message,
+    error?.data?.error,
+    error?.data?.mensaje,
+  ];
+
+  for (const texto of candidatosTexto) {
+    if (typeof texto !== 'string' || !texto.trim()) continue;
+    const matchExacto = RE_INGREDIENTE_AGOTADO.exec(texto.trim());
+    if (matchExacto?.[1]?.trim()) {
+      return matchExacto[1].trim();
+    }
+    const matchComillas = /El ingrediente "([^"]+)"/i.exec(texto.trim());
+    if (matchComillas?.[1]?.trim()) {
+      return matchComillas[1].trim();
+    }
+  }
+
+  if (typeof error.nombre === 'string' && error.nombre.trim()) {
+    return error.nombre.trim();
+  }
+  if (typeof error.ingrediente === 'string' && error.ingrediente.trim()) {
+    return error.ingrediente.trim();
+  }
+
+  return null;
+}
+
 /**
  * Normaliza y filtra la lista de faltantes al formato real de D-17:
- * `[{ tipo: 'plato' | 'ingrediente', id: number, nombre: string | null }]`.
- * Ignora objetos con la forma vieja (`{ id_plato }` o `{ id_ingrediente }`).
+ * `[{ tipo: 'plato' | 'ingrediente', id: number | null, nombre: string | null }]`.
+ * Ignora objetos con la forma vieja (`{ id_plato }` o `{ id_ingrediente }` sin `tipo`).
  *
  * @param {Array<object>} faltantes
- * @returns {Array<{ tipo: 'plato'|'ingrediente', id: number, nombre: string|null }>}
+ * @returns {Array<{ tipo: 'plato'|'ingrediente', id: number|null, nombre: string|null }>}
  */
 export function normalizarFaltantes(faltantes) {
   if (!Array.isArray(faltantes)) return [];
@@ -25,19 +67,26 @@ export function normalizarFaltantes(faltantes) {
     if (!f || typeof f !== 'object') continue;
     if (f.tipo !== 'plato' && f.tipo !== 'ingrediente') continue;
 
-    const idNum = Number(f.id);
-    if (!Number.isInteger(idNum) || idNum <= 0) continue;
-
-    const clave = `${f.tipo}:${idNum}`;
-    if (vistos.has(clave)) continue;
-    vistos.add(clave);
-
     const nombre =
       typeof f.nombre === 'string' && f.nombre.trim() ? f.nombre.trim() : null;
 
+    const idRaw = f.id;
+    const idNum = idRaw !== null && idRaw !== undefined && idRaw !== '' ? Number(idRaw) : NaN;
+    const tieneIdValido = Number.isInteger(idNum) && idNum > 0;
+
+    if (f.tipo === 'plato' && !tieneIdValido) continue;
+    if (f.tipo === 'ingrediente' && !tieneIdValido && !nombre) continue;
+
+    const idFinal = tieneIdValido ? idNum : null;
+    const clave = tieneIdValido
+      ? `${f.tipo}:${idFinal}`
+      : `${f.tipo}:nombre:${nombre.toLowerCase()}`;
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+
     resultado.push({
       tipo: f.tipo,
-      id: idNum,
+      id: idFinal,
       nombre,
     });
   }
@@ -86,15 +135,97 @@ function obtenerIdsIngredientesItem(item) {
 }
 
 /**
+ * Extrae los nombres de ingredientes presentes en una línea del carrito
+ * (desde `detalle`, `ingredientes` o `selecciones`).
+ *
+ * @param {object} item
+ * @returns {string[]}
+ */
+function obtenerNombresIngredientesItem(item) {
+  if (!item || typeof item !== 'object') return [];
+
+  const nombres = new Set();
+  const fuentes = [];
+
+  if (Array.isArray(item.detalle)) {
+    fuentes.push(...item.detalle);
+  }
+  if (Array.isArray(item.ingredientes)) {
+    fuentes.push(...item.ingredientes);
+  }
+  if (Array.isArray(item.selecciones)) {
+    fuentes.push(...item.selecciones);
+  }
+
+  for (const entry of fuentes) {
+    if (entry && typeof entry === 'object' && typeof entry.nombre === 'string') {
+      const limpio = entry.nombre.trim();
+      if (limpio) nombres.add(limpio);
+    }
+  }
+
+  return Array.from(nombres);
+}
+
+/**
+ * Busca el `id_ingrediente` en las líneas del carrito cuando solo se conoce el
+ * nombre del ingrediente (caso 409 `ingrediente_agotado`).
+ *
+ * @param {Array<object>} carrito
+ * @param {string|null} nombreIngrediente
+ * @returns {number|null}
+ */
+function buscarIdIngredientePorNombreEnCarrito(carrito, nombreIngrediente) {
+  if (!Array.isArray(carrito) || !nombreIngrediente) return null;
+  const buscado = nombreIngrediente.trim().toLowerCase();
+
+  for (const linea of carrito) {
+    if (!linea || typeof linea !== 'object') continue;
+
+    if (Array.isArray(linea.ingredientes)) {
+      for (const ing of linea.ingredientes) {
+        if (
+          ing &&
+          typeof ing === 'object' &&
+          typeof ing.nombre === 'string' &&
+          ing.nombre.trim().toLowerCase() === buscado
+        ) {
+          const id = Number(ing.id_ingrediente ?? ing.idIngrediente ?? ing.id);
+          if (Number.isInteger(id) && id > 0) return id;
+        }
+      }
+    }
+
+    if (
+      Array.isArray(linea.detalle) &&
+      Array.isArray(linea.ingredientes) &&
+      linea.detalle.length === linea.ingredientes.length
+    ) {
+      for (let i = 0; i < linea.detalle.length; i++) {
+        const nom = linea.detalle[i]?.nombre;
+        if (typeof nom === 'string' && nom.trim().toLowerCase() === buscado) {
+          const ing = linea.ingredientes[i];
+          const id = Number(ing?.id_ingrediente ?? ing?.idIngrediente ?? ing?.id);
+          if (Number.isInteger(id) && id > 0) return id;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Devuelve los faltantes que afectan a un ítem concreto del carrito:
  * - plato si `f.tipo === 'plato' && f.id === item.id_plato`
- * - ingrediente si `f.tipo === 'ingrediente'` y `f.id` está entre los ingredientes del ítem.
+ * - ingrediente si `f.tipo === 'ingrediente'` y coincide por `f.id` o por `f.nombre`
+ *   (caso 409 `ingrediente_agotado`).
  *
  * NO marca nada si `faltantes` viene con la forma vieja (`{ id_plato }` sin `tipo` ni `id`).
  *
  * @param {object} item
  * @param {Array<object>} faltantes
- * @returns {Array<{ tipo: 'plato'|'ingrediente', id: number, nombre: string|null }>}
+ * @returns {Array<{ tipo: 'plato'|'ingrediente', id: number|null, nombre: string|null }>}
  */
 export function faltantesDelItem(item, faltantes) {
   if (!item || typeof item !== 'object') return [];
@@ -104,13 +235,26 @@ export function faltantesDelItem(item, faltantes) {
 
   const idPlatoItem = Number(item.id_plato ?? item.idPlato ?? item.id);
   const idsIngredientes = obtenerIdsIngredientesItem(item);
+  const nombresIngredientes = obtenerNombresIngredientesItem(item);
 
   return listaFaltantes.filter((f) => {
     if (f.tipo === 'plato') {
       return Number.isInteger(idPlatoItem) && idPlatoItem > 0 && f.id === idPlatoItem;
     }
     if (f.tipo === 'ingrediente') {
-      return idsIngredientes.includes(f.id);
+      if (f.id != null && idsIngredientes.includes(f.id)) {
+        return true;
+      }
+      if (f.nombre) {
+        const buscado = f.nombre.toLowerCase();
+        if (nombresIngredientes.length > 0) {
+          return nombresIngredientes.some((n) => n.toLowerCase() === buscado);
+        }
+        if (f.id == null && idsIngredientes.length > 0) {
+          return true;
+        }
+      }
+      return false;
     }
     return false;
   });
@@ -190,7 +334,7 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
     .map((f) => f.id);
 
   const idsIngredientesAgotados = faltantesLimpios
-    .filter((f) => f.tipo === 'ingrediente')
+    .filter((f) => f.tipo === 'ingrediente' && f.id != null)
     .map((f) => f.id);
 
   // Construir texto legible con f.nombre
@@ -214,7 +358,13 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
   for (const ing of faltantesIng) {
     const nombreIng = ing.nombre || `ingrediente #${ing.id}`;
     const itemConIng = itemsAfectados.find((it) =>
-      it.ingredientesAgotados.some((x) => x.id === ing.id)
+      it.ingredientesAgotados.some(
+        (x) =>
+          (ing.id != null && x.id === ing.id) ||
+          (ing.nombre &&
+            x.nombre &&
+            x.nombre.toLowerCase() === ing.nombre.toLowerCase())
+      )
     );
     if (itemConIng?.nombre) {
       frases.push(
@@ -277,6 +427,38 @@ export function accionErrorPedido(error, carrito = []) {
       tipo: 'sin_stock',
       status: 409,
       motivo: 'sin_stock',
+      hayFaltantes: resumen.hayFaltantes,
+      puedeEnviar: resumen.idsLineasAfectadas.length === 0,
+      faltantes: resumen.faltantes,
+      itemsAfectados: resumen.itemsAfectados,
+      idsLineasAfectadas: resumen.idsLineasAfectadas,
+      idsPlatosAgotados: resumen.idsPlatosAgotados,
+      idsIngredientesAgotados: resumen.idsIngredientesAgotados,
+      mensaje,
+      ayuda: resumen.hayFaltantes
+        ? 'Quita lo que se acabó para poder enviar el resto de tu pedido.'
+        : null,
+      recargarMenu: true,
+    };
+  }
+
+  // 409 ingrediente_agotado (D-17: interruptor manual de ingrediente en constructor)
+  if ((status === 409 || status === 0) && motivo === 'ingrediente_agotado') {
+    const nombreIng = extraerNombreIngredienteAgotado(error);
+    const idIngResuelto = buscarIdIngredientePorNombreEnCarrito(
+      carrito,
+      nombreIng
+    );
+    const rawFaltantes = nombreIng
+      ? [{ tipo: 'ingrediente', id: idIngResuelto, nombre: nombreIng }]
+      : (error?.faltantes ?? error?.data?.faltantes);
+    const resumen = resumenFaltantes(carrito, rawFaltantes);
+    const mensaje = resumen.texto || MENSAJE_SIN_STOCK_GENERICO;
+
+    return {
+      tipo: 'sin_stock',
+      status: 409,
+      motivo: 'ingrediente_agotado',
       hayFaltantes: resumen.hayFaltantes,
       puedeEnviar: resumen.idsLineasAfectadas.length === 0,
       faltantes: resumen.faltantes,
@@ -656,6 +838,7 @@ export default {
   MENSAJE_CRUCE_PEDIDO,
   MENSAJE_ERROR_PEDIDO_GENERICO,
   MENSAJE_SIN_STOCK_GENERICO,
+  extraerNombreIngredienteAgotado,
   normalizarFaltantes,
   faltantesDelItem,
   resumenFaltantes,

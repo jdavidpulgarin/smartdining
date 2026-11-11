@@ -25,7 +25,11 @@ import { accionErrorPedido } from './sinStock';
  */
 export function traducirErrorPedido(err, carrito = []) {
   const motivo = String(err?.motivo ?? err?.data?.motivo ?? '').toLowerCase();
-  if (motivo === 'sin_stock' || motivo === 'reintentar') {
+  if (
+    motivo === 'sin_stock' ||
+    motivo === 'ingrediente_agotado' ||
+    motivo === 'reintentar'
+  ) {
     return accionErrorPedido(err, carrito);
   }
 

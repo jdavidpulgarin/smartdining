@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extraerNombreIngredienteAgotado,
   faltantesDelItem,
   resumenFaltantes,
   accionErrorPedido,
@@ -248,6 +249,112 @@ describe('sinStock - logica pura de faltantes de inventario (J-17)', () => {
         'Algo de tu pedido se acabó. Revisa el carrito e inténtalo de nuevo.'
       );
       expect(accion.ayuda).toBeNull();
+    });
+
+    it('409 ingrediente_agotado con la forma real del backend marca la linea del carrito con el ingrediente agotado', () => {
+      const carrito = [
+        {
+          id_linea: 'l-bowl-1',
+          id_plato: 1001,
+          nombre: 'Bowl Personalizado',
+          cantidad: 1,
+          ingredientes: [
+            { id_ingrediente: 1, porcion: 'normal' },
+            { id_ingrediente: 10, porcion: 'extra' },
+          ],
+          detalle: [
+            { paso: 'Elige tu Base', nombre: 'Arroz Integral', porcion: 'normal' },
+            { paso: 'Añade Toppings', nombre: 'Aguacate', porcion: 'extra' },
+          ],
+        },
+        {
+          id_linea: 'l-bowl-2',
+          id_plato: 1001,
+          nombre: 'Bowl Personalizado',
+          cantidad: 1,
+          ingredientes: [
+            { id_ingrediente: 1, porcion: 'normal' },
+            { id_ingrediente: 4, porcion: 'normal' },
+          ],
+          detalle: [
+            { paso: 'Elige tu Base', nombre: 'Arroz Integral', porcion: 'normal' },
+            { paso: 'Elige tu Proteína', nombre: 'Pollo a la Plancha', porcion: 'normal' },
+          ],
+        },
+        {
+          id_linea: 'l-hamb',
+          id_plato: 1006,
+          nombre: 'Hamburguesa Smart Angus',
+          cantidad: 1,
+        },
+      ];
+
+      // Forma real de backend/src/middleware/inventario-errores.js:
+      // 409 { error: 'El ingrediente "Aguacate" está agotado', motivo: 'ingrediente_agotado' }
+      const err = new ErrorApi({
+        status: 409,
+        motivo: 'ingrediente_agotado',
+        mensaje: 'El ingrediente "Aguacate" está agotado',
+      });
+
+      expect(extraerNombreIngredienteAgotado(err)).toBe('Aguacate');
+
+      const accion = accionErrorPedido(err, carrito);
+
+      expect(accion.tipo).toBe('sin_stock');
+      expect(accion.motivo).toBe('ingrediente_agotado');
+      expect(accion.hayFaltantes).toBe(true);
+      expect(accion.puedeEnviar).toBe(false);
+      expect(accion.idsLineasAfectadas).toEqual(['l-bowl-1']);
+      expect(accion.faltantes).toEqual([
+        { tipo: 'ingrediente', id: 10, nombre: 'Aguacate' },
+      ]);
+      expect(accion.mensaje).toBe(
+        'Se acabó el ingrediente Aguacate en tu Bowl Personalizado. Quítalo para enviar el resto.'
+      );
+
+      // Verifica que faltantesDelItem marque la linea afectada igual que sin_stock de ingrediente
+      expect(faltantesDelItem(carrito[0], accion.faltantes)).toEqual([
+        { tipo: 'ingrediente', id: 10, nombre: 'Aguacate' },
+      ]);
+      expect(faltantesDelItem(carrito[1], accion.faltantes)).toEqual([]);
+      expect(faltantesDelItem(carrito[2], accion.faltantes)).toEqual([]);
+    });
+
+    it('409 ingrediente_agotado marca la linea armable incluso si el item no trae detalle con nombres', () => {
+      const carrito = [
+        {
+          id_linea: 'l-bowl',
+          id_plato: 1001,
+          nombre: 'Bowl Personalizado',
+          cantidad: 1,
+          ingredientes: [{ id_ingrediente: 7, porcion: 'normal' }],
+        },
+        {
+          id_linea: 'l-limonada',
+          id_plato: 1008,
+          nombre: 'Limonada de Coco',
+          cantidad: 1,
+        },
+      ];
+      const err = {
+        status: 409,
+        motivo: 'ingrediente_agotado',
+        error: 'El ingrediente "Panceta Crujiente" está agotado',
+      };
+
+      const accion = accionErrorPedido(err, carrito);
+
+      expect(accion.tipo).toBe('sin_stock');
+      expect(accion.motivo).toBe('ingrediente_agotado');
+      expect(accion.idsLineasAfectadas).toEqual(['l-bowl']);
+      expect(accion.faltantes).toEqual([
+        { tipo: 'ingrediente', id: null, nombre: 'Panceta Crujiente' },
+      ]);
+      expect(faltantesDelItem(carrito[0], accion.faltantes)).toEqual([
+        { tipo: 'ingrediente', id: null, nombre: 'Panceta Crujiente' },
+      ]);
+      expect(faltantesDelItem(carrito[1], accion.faltantes)).toEqual([]);
     });
 
     it('503 reintentar devuelve el mensaje exacto de cruce de pedidos', () => {

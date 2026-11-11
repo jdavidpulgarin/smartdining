@@ -165,8 +165,40 @@ export function aplicarFaltantesMenu(menu, faltantes = []) {
     if (!f || typeof f !== 'object') continue;
     if (f.tipo === 'plato' && f.id != null) {
       actual = aplicarDisponibilidadPlato(actual, f.id, false);
-    } else if (f.tipo === 'ingrediente' && f.id != null) {
-      actual = aplicarDisponibilidad(actual, f.id, false);
+    } else if (f.tipo === 'ingrediente') {
+      if (f.id != null) {
+        actual = aplicarDisponibilidad(actual, f.id, false);
+      } else if (typeof f.nombre === 'string' && f.nombre.trim()) {
+        const buscado = f.nombre.trim().toLowerCase();
+        const esArray = Array.isArray(actual);
+        const categorias = esArray ? actual : actual.categorias;
+        if (Array.isArray(categorias)) {
+          const nuevasCategorias = categorias.map((cat) => {
+            if (!Array.isArray(cat.platos)) return cat;
+            const nuevosPlatos = cat.platos.map((plato) => {
+              if (!Array.isArray(plato.pasos)) return plato;
+              const nuevosPasos = plato.pasos.map((paso) => {
+                if (!Array.isArray(paso.ingredientes)) return paso;
+                const nuevosIngredientes = paso.ingredientes.map((ing) => {
+                  if (
+                    typeof ing?.nombre === 'string' &&
+                    ing.nombre.trim().toLowerCase() === buscado
+                  ) {
+                    return { ...ing, disponible: false };
+                  }
+                  return ing;
+                });
+                return { ...paso, ingredientes: nuevosIngredientes };
+              });
+              return { ...plato, pasos: nuevosPasos };
+            });
+            return { ...cat, platos: nuevosPlatos };
+          });
+          actual = esArray
+            ? nuevasCategorias
+            : { ...actual, categorias: nuevasCategorias };
+        }
+      }
     }
   }
   return actual;
@@ -179,16 +211,31 @@ export function marcarFaltantesEnCache(faltantes = []) {
   for (const f of faltantes) {
     if (!f || typeof f !== 'object') continue;
     if (f.tipo !== 'plato' && f.tipo !== 'ingrediente') continue;
-    const idNum = Number(f.id);
-    if (!Number.isInteger(idNum) || idNum <= 0) continue;
-    const yaExiste = marcasAgotadoLocal.some(
-      (m) => m.tipo === f.tipo && Number(m.id) === idNum
+    const idRaw = f.id;
+    const idNum =
+      idRaw !== null && idRaw !== undefined && idRaw !== ''
+        ? Number(idRaw)
+        : NaN;
+    const tieneIdValido = Number.isInteger(idNum) && idNum > 0;
+    const nombre =
+      typeof f.nombre === 'string' && f.nombre.trim() ? f.nombre.trim() : null;
+    if (f.tipo === 'plato' && !tieneIdValido) continue;
+    if (f.tipo === 'ingrediente' && !tieneIdValido && !nombre) continue;
+
+    const idFinal = tieneIdValido ? idNum : null;
+    const yaExiste = marcasAgotadoLocal.some((m) =>
+      idFinal != null
+        ? m.tipo === f.tipo && Number(m.id) === idFinal
+        : m.tipo === f.tipo &&
+          m.id == null &&
+          typeof m.nombre === 'string' &&
+          m.nombre.toLowerCase() === nombre.toLowerCase()
     );
     if (!yaExiste) {
       marcasAgotadoLocal.push({
         tipo: f.tipo,
-        id: idNum,
-        nombre: typeof f.nombre === 'string' ? f.nombre : null,
+        id: idFinal,
+        nombre,
       });
     }
   }
