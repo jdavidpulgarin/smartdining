@@ -4,6 +4,8 @@ export const MENSAJE_CRUCE_PEDIDO =
   'Hubo un cruce con otro pedido, vuelve a enviarlo.';
 export const MENSAJE_ERROR_PEDIDO_GENERICO =
   'Ocurrió un error al enviar el pedido';
+export const MENSAJE_SIN_STOCK_GENERICO =
+  'Algo de tu pedido se acabó. Revisa el carrito e inténtalo de nuevo.';
 
 /**
  * Normaliza y filtra la lista de faltantes al formato real de D-17:
@@ -226,6 +228,7 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
   }
 
   const texto = frases.join(' ');
+  const mensaje = texto || MENSAJE_SIN_STOCK_GENERICO;
 
   return {
     hayFaltantes: itemsAfectados.length > 0 || faltantesLimpios.length > 0,
@@ -235,7 +238,7 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
     idsPlatosAgotados,
     idsIngredientesAgotados,
     texto,
-    mensaje: texto,
+    mensaje,
   };
 }
 
@@ -266,24 +269,25 @@ export function accionErrorPedido(error, carrito = []) {
 
   // 409 sin_stock (D-17)
   if ((status === 409 || status === 0) && motivo === 'sin_stock') {
-    const rawFaltantes =
-      error?.faltantes ?? error?.data?.faltantes ?? [];
+    const rawFaltantes = error?.faltantes ?? error?.data?.faltantes;
     const resumen = resumenFaltantes(carrito, rawFaltantes);
-    const mensaje =
-      resumen.texto ||
-      'Algunos platos o ingredientes de tu pedido se agotaron. Quítalos para enviar el resto.';
+    const mensaje = resumen.texto || MENSAJE_SIN_STOCK_GENERICO;
 
     return {
       tipo: 'sin_stock',
       status: 409,
       motivo: 'sin_stock',
+      hayFaltantes: resumen.hayFaltantes,
+      puedeEnviar: resumen.idsLineasAfectadas.length === 0,
       faltantes: resumen.faltantes,
       itemsAfectados: resumen.itemsAfectados,
       idsLineasAfectadas: resumen.idsLineasAfectadas,
       idsPlatosAgotados: resumen.idsPlatosAgotados,
       idsIngredientesAgotados: resumen.idsIngredientesAgotados,
       mensaje,
-      ayuda: 'Quita lo que se acabó para poder enviar el resto de tu pedido.',
+      ayuda: resumen.hayFaltantes
+        ? 'Quita lo que se acabó para poder enviar el resto de tu pedido.'
+        : null,
       recargarMenu: true,
     };
   }
@@ -385,6 +389,7 @@ export function estadoStockPlato(plato) {
 export default {
   MENSAJE_CRUCE_PEDIDO,
   MENSAJE_ERROR_PEDIDO_GENERICO,
+  MENSAJE_SIN_STOCK_GENERICO,
   normalizarFaltantes,
   faltantesDelItem,
   resumenFaltantes,

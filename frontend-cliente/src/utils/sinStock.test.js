@@ -6,6 +6,7 @@ import {
   estadoStockPlato,
   MENSAJE_CRUCE_PEDIDO,
   MENSAJE_ERROR_PEDIDO_GENERICO,
+  MENSAJE_SIN_STOCK_GENERICO,
 } from './sinStock';
 import { ErrorApi } from '../services/api';
 
@@ -131,6 +132,25 @@ describe('sinStock - logica pura de faltantes de inventario (J-17)', () => {
         'Se acabó el ingrediente Aguacate en tu Bowl Personalizado. Quítalo para enviar el resto.'
       );
     });
+
+    it('cuando faltantes viene vacio ([]), ausente o null deja el carrito intacto y expone el aviso generico', () => {
+      const carrito = [
+        { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 1 },
+      ];
+
+      for (const caso of [[], undefined, null]) {
+        const res = resumenFaltantes(carrito, caso);
+        expect(res.hayFaltantes).toBe(false);
+        expect(res.faltantes).toEqual([]);
+        expect(res.itemsAfectados).toEqual([]);
+        expect(res.idsLineasAfectadas).toEqual([]);
+        expect(res.texto).toBe('');
+        expect(res.mensaje).toBe(
+          'Algo de tu pedido se acabó. Revisa el carrito e inténtalo de nuevo.'
+        );
+        expect(res.mensaje).toBe(MENSAJE_SIN_STOCK_GENERICO);
+      }
+    });
   });
 
   describe('accionErrorPedido', () => {
@@ -153,6 +173,79 @@ describe('sinStock - logica pura de faltantes de inventario (J-17)', () => {
       ]);
       expect(accion.mensaje).toContain('Limonada de Coco');
       expect(accion.idsLineasAfectadas).toEqual(['l-1']);
+      expect(accion.puedeEnviar).toBe(false);
+    });
+
+    it('409 sin_stock con faltantes [] muestra el aviso generico, no marca lineas y deja enviar', () => {
+      const carrito = [
+        { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 1 },
+      ];
+      const err = new ErrorApi({
+        status: 409,
+        motivo: 'sin_stock',
+        mensaje: 'Sin stock suficiente para el pedido',
+        faltantes: [],
+      });
+
+      const accion = accionErrorPedido(err, carrito);
+
+      expect(accion.tipo).toBe('sin_stock');
+      expect(accion.hayFaltantes).toBe(false);
+      expect(accion.puedeEnviar).toBe(true);
+      expect(accion.faltantes).toEqual([]);
+      expect(accion.itemsAfectados).toEqual([]);
+      expect(accion.idsLineasAfectadas).toEqual([]);
+      expect(accion.mensaje).toBe(
+        'Algo de tu pedido se acabó. Revisa el carrito e inténtalo de nuevo.'
+      );
+      expect(accion.ayuda).toBeNull();
+    });
+
+    it('409 sin_stock con faltantes ausente muestra el aviso generico, no marca lineas y deja enviar', () => {
+      const carrito = [
+        { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 1 },
+      ];
+      const err = {
+        status: 409,
+        motivo: 'sin_stock',
+        mensaje: 'Sin stock suficiente para el pedido',
+      };
+
+      const accion = accionErrorPedido(err, carrito);
+
+      expect(accion.tipo).toBe('sin_stock');
+      expect(accion.hayFaltantes).toBe(false);
+      expect(accion.puedeEnviar).toBe(true);
+      expect(accion.faltantes).toEqual([]);
+      expect(accion.idsLineasAfectadas).toEqual([]);
+      expect(accion.mensaje).toBe(
+        'Algo de tu pedido se acabó. Revisa el carrito e inténtalo de nuevo.'
+      );
+      expect(accion.ayuda).toBeNull();
+    });
+
+    it('409 sin_stock con faltantes null muestra el aviso generico, no marca lineas y deja enviar', () => {
+      const carrito = [
+        { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 1 },
+      ];
+      const err = new ErrorApi({
+        status: 409,
+        motivo: 'sin_stock',
+        mensaje: 'Sin stock suficiente para el pedido',
+        faltantes: null,
+      });
+
+      const accion = accionErrorPedido(err, carrito);
+
+      expect(accion.tipo).toBe('sin_stock');
+      expect(accion.hayFaltantes).toBe(false);
+      expect(accion.puedeEnviar).toBe(true);
+      expect(accion.faltantes).toEqual([]);
+      expect(accion.idsLineasAfectadas).toEqual([]);
+      expect(accion.mensaje).toBe(
+        'Algo de tu pedido se acabó. Revisa el carrito e inténtalo de nuevo.'
+      );
+      expect(accion.ayuda).toBeNull();
     });
 
     it('503 reintentar devuelve el mensaje exacto de cruce de pedidos', () => {

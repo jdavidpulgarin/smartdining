@@ -47,8 +47,11 @@ function Carrito() {
     [misLineas, faltantesStock]
   );
   const tieneFaltantesPendientes = resumenStock.idsLineasAfectadas.length > 0;
+  const errorMarcabaLineas =
+    (errorPedido?.idsLineasAfectadas?.length ?? 0) > 0;
   const errorPedidoVisible =
     errorPedido?.tipo === 'sin_stock' &&
+    errorMarcabaLineas &&
     !tieneFaltantesPendientes &&
     validacionEnvio.ok
       ? null
@@ -99,8 +102,12 @@ function Carrito() {
       if (infoError.tipo === 'sin_stock') {
         const listaFaltantes = infoError.faltantes || [];
         setFaltantesStock(listaFaltantes);
-        marcarFaltantesEnCache(listaFaltantes);
-        marcarFaltantesEnMenu?.(listaFaltantes);
+        if (listaFaltantes.length > 0) {
+          marcarFaltantesEnCache(listaFaltantes);
+          marcarFaltantesEnMenu?.(listaFaltantes);
+        } else {
+          recargarMenu();
+        }
         setModalConfirmarAbierto(false);
         setErrorPedido(infoError);
         return;
