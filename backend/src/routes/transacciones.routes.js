@@ -13,4 +13,8 @@ router.post('/internal', requireInternalKey, ctrl.crearInterno);
 
 router.get('/pedido/:id_pedido', requireAuth, requireRole('admin', 'cajero'), ctrl.obtenerPorPedido);
 
+// Cierre de caja (P1, propuesta de Roberto): las completadas de hoy en Bogotá.
+// Mismos roles que registrar un pago: es la misma caja mirando su propio día.
+router.get('/', requireAuth, requireRole('admin', 'cajero'), ctrl.listarDelDia);
+
 module.exports = router;

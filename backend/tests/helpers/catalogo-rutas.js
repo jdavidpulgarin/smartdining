@@ -391,6 +391,13 @@ const TABLA = [
     url: '/api/transacciones/pedido/87',
     roles: ['admin', 'cajero'],
   },
+  // Cierre de caja: las completadas de hoy (P1, propuesta de Roberto).
+  {
+    metodo: 'GET',
+    patron: '/api/transacciones',
+    url: '/api/transacciones?desde=hoy',
+    roles: ['admin', 'cajero'],
+  },
 
   // --- Reportes (D-07): cifras de negocio, solo admin -----------------------
   { metodo: 'GET', patron: '/api/reportes', url: '/api/reportes?rango=hoy', roles: ['admin'] },

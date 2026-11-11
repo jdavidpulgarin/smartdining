@@ -247,12 +247,57 @@ async function obtenerPorPedido(req, res, next) {
   }
 }
 
+/** Motivo del 400 cuando la query de GET /transacciones no es la esperada. */
+const MOTIVO_CONSULTA_INVALIDA = 'consulta_invalida';
+
+/**
+ * Query de GET /transacciones (P1 de la caja, propuesta de Roberto).
+ *
+ * Por ahora SOLO `desde=hoy`: `.strict()` rechaza cualquier otro parámetro y
+ * cualquier otro valor, con `{ error, motivo }` como el resto de la API. El
+ * esquema está pensado para aceptar después una fecha `AAAA-MM-DD`
+ * (`z.union([z.literal('hoy'), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)])`),
+ * pero esa fecha necesita decidir en qué zona se interpreta y cómo se valida
+ * que exista (2026-02-30), así que no entra en este cambio.
+ */
+const transaccionesDelDiaSchema = z
+  .object({
+    desde: z.literal('hoy', {
+      errorMap: () => ({ message: 'desde solo admite "hoy" por ahora' }),
+    }),
+  })
+  .strict();
+
+/**
+ * GET /transacciones?desde=hoy — las transacciones completadas del día, para
+ * el cierre de caja. "Hoy" es el día calendario en la zona del restaurante
+ * (America/Bogota); lo calcula la base, ver transaccionesService.listarDelDia.
+ */
+async function listarDelDia(req, res, next) {
+  const parsed = transaccionesDelDiaSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: parsed.error.errors[0].message,
+      motivo: MOTIVO_CONSULTA_INVALIDA,
+    });
+  }
+
+  try {
+    const resumen = await transaccionesService.listarDelDia();
+    return res.json(resumen);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   crear,
   crearInterno,
   aliasDelComensal,
   obtenerPorPedido,
+  listarDelDia,
   METODOS_PAGO,
   ESTADOS_TRANSACCION,
   MONEDA,
+  MOTIVO_CONSULTA_INVALIDA,
 };

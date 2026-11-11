@@ -1,5 +1,8 @@
 const pool = require('../config/db');
 const mesasService = require('./mesas.service');
+// La zona del restaurante vive en reportes.service.js (America/Bogota). Una
+// sola constante para que el corte de caja y los reportes digan el mismo "hoy".
+const { ZONA } = require('./reportes.service');
 
 // Tabla transacciones (docs/modelo-er.md): id_transaccion, id_pedido,
 // metodo_pago, monto, estado_transaccion, referencia_externa, creado_en.
@@ -408,10 +411,87 @@ async function obtenerPorPedido(idPedido) {
   return result.rows;
 }
 
+/**
+ * Las transacciones COMPLETADAS de hoy, para la caja (GET /transacciones?desde=hoy).
+ *
+ * "Hoy" es el día calendario en la zona del restaurante (`ZONA`, la misma
+ * constante de reportes.service.js: America/Bogota, no hay zona configurable
+ * en configuracion_restaurante), calculado en SQL:
+ *
+ *   desde = date_trunc('day', now() AT TIME ZONE $1) AT TIME ZONE $1
+ *   hasta = desde + 1 día
+ *
+ * Primero se lleva `now()` a hora local de Bogotá, se recorta al inicio de ese
+ * día y se vuelve a TIMESTAMPTZ. Así una venta a las 20:00 de Bogotá (01:00
+ * UTC del día siguiente) cae en HOY, y una a las 23:30 de Bogotá de ayer no.
+ * Los dos límites son constantes dentro de la consulta y la condición es
+ * `creado_en >= desde AND creado_en < hasta` sobre la columna sin funciones,
+ * para que `idx_transacciones_estado_fecha` (estado_transaccion, creado_en
+ * DESC, monto) pueda servirla; `(creado_en AT TIME ZONE …)::date = hoy` no lo
+ * permitiría.
+ *
+ * `total` y `cantidad` salen de la misma consulta. `monto` y `total` se
+ * devuelven como NÚMERO: `pg` entrega los NUMERIC como texto y el panel no
+ * tiene por qué parsearlos. La fila expone solo lo que la caja necesita: nada
+ * de `referencia_externa` ni de la pasarela.
+ *
+ * @returns {Promise<{desde: string|null, total: number, cantidad: number, transacciones: object[]}>}
+ */
+async function listarDelDia({ zona = ZONA } = {}) {
+  const result = await pool.query(
+    `WITH limites AS (
+       SELECT date_trunc('day', now() AT TIME ZONE $1)                         AS dia_local,
+              date_trunc('day', now() AT TIME ZONE $1) AT TIME ZONE $1          AS desde,
+              (date_trunc('day', now() AT TIME ZONE $1) + interval '1 day') AT TIME ZONE $1 AS hasta
+     ),
+     filas AS (
+       SELECT t.id_transaccion, t.id_pedido, p.codigo_pedido, p.id_mesa, m.numero AS numero_mesa,
+              t.monto, t.metodo_pago, t.comensal, t.creado_en
+         FROM transacciones t
+         JOIN pedidos p ON p.id_pedido = t.id_pedido
+         JOIN mesas   m ON m.id_mesa   = p.id_mesa
+         CROSS JOIN limites l
+        WHERE t.estado_transaccion = $2
+          AND t.creado_en >= l.desde
+          AND t.creado_en <  l.hasta
+     )
+     SELECT to_char(l.dia_local, 'YYYY-MM-DD')                      AS desde,
+            COALESCE((SELECT SUM(monto) FROM filas), 0)             AS total,
+            (SELECT count(*) FROM filas)::int                       AS cantidad,
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                       'id_transaccion', f.id_transaccion,
+                       'id_pedido',      f.id_pedido,
+                       'codigo_pedido',  f.codigo_pedido,
+                       'id_mesa',        f.id_mesa,
+                       'numero_mesa',    f.numero_mesa,
+                       'monto',          f.monto,
+                       'metodo_pago',    f.metodo_pago,
+                       'comensal',       f.comensal,
+                       'fecha',          to_char(f.creado_en AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                     ) ORDER BY f.creado_en DESC, f.id_transaccion DESC)
+                FROM filas f
+            ), '[]'::json)                                          AS transacciones
+       FROM limites l`,
+    [zona, ESTADO_COBRADO]
+  );
+  const fila = result.rows[0];
+  if (!fila) return { desde: null, total: 0, cantidad: 0, transacciones: [] };
+  return {
+    desde: fila.desde,
+    total: Number(fila.total),
+    cantidad: Number(fila.cantidad),
+    // json_agg ya trae `monto` como número JSON; Number() solo asegura el tipo
+    // si algún día la columna cambiara a texto.
+    transacciones: (fila.transacciones || []).map((t) => ({ ...t, monto: Number(t.monto) })),
+  };
+}
+
 module.exports = {
   registrarPago,
   registrarPagoInterno,
   obtenerPorPedido,
+  listarDelDia,
   referenciaDeFila,
   ESTADO_COBRADO,
   ESTADO_ENTREGADO,
