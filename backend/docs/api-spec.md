@@ -2390,7 +2390,7 @@ cuenta y los alias de otra mesa.
 |---|---|---|---|
 | POST | /transacciones | admin, cajero | Registra un pago: crea la transacción, marca el pedido `pagado` y **libera la mesa automáticamente** |
 | GET | /transacciones/pedido/:id_pedido | admin, cajero | Lista las transacciones de un pedido |
-| **GET** | **/transacciones?desde=hoy** | **admin, cajero** | **Las transacciones completadas de hoy (día de Bogotá), con total y cantidad: el cierre de caja** |
+| **GET** | **/transacciones?desde=hoy\|AAAA-MM-DD** | **admin, cajero** | **Las transacciones completadas desde ese día hasta el final de hoy (días de Bogotá), con total y cantidad: el cierre de caja** |
 
 ### POST /transacciones
 
@@ -2571,7 +2571,7 @@ sería un promedio de promedios: cada día pesaría igual, tenga 2 pedidos u 80.
 
 **`tiempoCocinaPromedio` va ponderado** por `platos_preparados`, por lo mismo.
 
-### GET /transacciones?desde=hoy — el cierre de caja
+### GET /transacciones?desde=hoy|AAAA-MM-DD — el cierre de caja
 
 **Roles:** `admin`, `cajero` (los mismos que registran pagos). Sin token **401**; `mesero`,
 `cocina` o un comensal, **403**.
@@ -2580,18 +2580,40 @@ sería un promedio de promedios: cada día pesaría igual, tenga 2 pedidos u 80.
 
 | Parámetro | Obligatorio | Valores |
 |---|---|---|
-| `desde` | Sí | Solo `hoy` por ahora |
+| `desde` | Sí | `hoy`, o una fecha `AAAA-MM-DD` |
 
-Cualquier otro valor (`desde=ayer`, `desde=2026-11-10`) o cualquier parámetro extra responde
-**400** `{ "error": "...", "motivo": "consulta_invalida" }`. El esquema está preparado para
-aceptar después una fecha `AAAA-MM-DD`; no se implementa todavía porque exige decidir en qué
-zona se interpreta y cómo se valida que exista.
+**Qué significa `desde`:** un **rango de días de Bogotá**, desde las 00:00 de ese día hasta el
+**final de hoy**. No es un solo día: `desde=2026-11-08` con hoy 10 de noviembre trae el 8, el 9
+y el 10. `desde=hoy` es el caso hoy..hoy (igual que `desde=<la fecha de hoy>`).
+
+**Límites**, todos en días de **Bogotá**, no del servidor ni de UTC:
+
+- La fecha tiene que **existir**: `2026-02-30`, `2026-13-01` o `2026-11-00` son 400. Se comprueba
+  sin depender de la zona del servidor (con `Date.UTC`, mirando que año, mes y día no cambien).
+- **No puede ser futura**: posterior a hoy en Bogotá → 400.
+- **Como mucho 31 días contando hoy**: `desde >= hoy - 30` (`DIAS_ATRAS_MAXIMOS = 30`). Más
+  antigua → 400, y el mensaje dice la fecha más antigua permitida ese día.
+- A las 20:00 de Bogotá, cuando en UTC ya es el día siguiente, "hoy" sigue siendo el de Bogotá:
+  la fecha de Bogotá de ese día es válida, la del día siguiente es futura, y el tope se cuenta
+  desde el hoy de Bogotá.
+
+Errores, todos **400** `{ "error": "...", "motivo": "consulta_invalida" }`:
+
+| Caso | `error` (ejemplo) |
+|---|---|
+| Sin `desde` | `desde es obligatorio: "hoy" o una fecha AAAA-MM-DD` |
+| Otro valor o formato (`ayer`, `10/11/2026`, `2026-1-5`, `2026-11-10T00:00`) | `desde debe ser "hoy" o una fecha AAAA-MM-DD` |
+| Fecha que no existe | `La fecha 2026-02-30 no existe` |
+| Futura | `desde no puede ser posterior a hoy (2026-11-10, hora de Bogotá)` |
+| Más de 31 días atrás | `desde admite como mucho 30 días atrás: la fecha más antigua permitida hoy es 2026-10-11` |
+| Un parámetro extra | el mensaje de zod |
 
 **Respuesta 200:**
 
 ```json
 {
   "desde": "2026-11-10",
+  "hasta": "2026-11-10",
   "total": 58000,
   "cantidad": 2,
   "transacciones": [
@@ -2607,6 +2629,9 @@ zona se interpreta y cómo se valida que exista.
 }
 ```
 
+- `desde` y `hasta` son los días del rango, ambos **incluidos**, en `AAAA-MM-DD`: `hasta` es
+  siempre hoy en Bogotá. Con `desde=hoy` coinciden. (`hasta` es nuevo; los campos que ya
+  había no cambian.)
 - Solo `estado_transaccion = 'completada'`: ni pendientes, ni fallidas, ni reembolsadas.
 - **Más reciente primero** (`creado_en` descendente; a igual instante, id descendente).
 - `monto` y `total` son **números**, no texto (los `NUMERIC` se convierten); `cantidad` es un
@@ -2617,18 +2642,28 @@ zona se interpreta y cómo se valida que exista.
 - **No expone nada más** de la transacción: ni `referencia_externa` ni ningún dato de la
   pasarela (Wompi) salen por aquí.
 
-**"Hoy" es el día calendario en América/Bogotá**, no el del servidor ni UTC, y lo calcula la
-base: `desde = date_trunc('day', now() AT TIME ZONE 'America/Bogota') AT TIME ZONE
-'America/Bogota'` y `hasta = desde + 1 día`, con `creado_en >= desde AND creado_en < hasta`.
+**Los días son de América/Bogotá**, no del servidor ni UTC, y los calcula la base, con la misma
+zona para el rango y para los límites:
+
+```
+hoy       = (now() AT TIME ZONE 'America/Bogota')::date
+desde_ts  = <fecha de desde>::timestamp AT TIME ZONE 'America/Bogota'   -- 00:00 de ese día
+hasta_ts  = (hoy + 1)::timestamp AT TIME ZONE 'America/Bogota'          -- 00:00 de mañana
+filtro    = creado_en >= desde_ts AND creado_en < hasta_ts
+```
+
 Por eso una venta a las 20:00 de Bogotá (01:00 UTC del día siguiente) cuenta como de hoy, y una
-a las 23:30 de Bogotá de ayer no. Es la misma zona que usan los reportes (`ZONA` en
+a las 23:30 de Bogotá del día anterior a `desde` no. Que la fecha sea futura o demasiado antigua
+también lo decide esa consulta, con el mismo `hoy`, así no hay dos cálculos de "hoy en Bogotá"
+que puedan discrepar. Es la misma zona que usan los reportes (`ZONA` en
 `reportes.service.js`); no hay zona configurable en `configuracion_restaurante`. La condición
 va sobre `creado_en` sin funciones encima, así que `idx_transacciones_estado_fecha`
 (`estado_transaccion, creado_en DESC, monto`) puede servir la consulta.
 
-Cobertura: `tests/transacciones-del-dia.test.js` (roles, query, forma) y
-`tests/integracion/transacciones-del-dia-sql.test.js` contra PostgreSQL (estados, ayer/hoy y
-los dos bordes del día de Bogotá).
+Cobertura: `tests/transacciones-del-dia.test.js` (roles, query, formato y existencia de la
+fecha, forma, mapeo de los límites a 400) y `tests/integracion/transacciones-del-dia-sql.test.js`
+contra PostgreSQL (estados, el rango desde ayer, el tope de 30/31 días, y los bordes del día de
+Bogotá, incluido un reloj fijado a las 20:00 de Bogotá).
 
 ### Agrupación de `metodosPago`
 
