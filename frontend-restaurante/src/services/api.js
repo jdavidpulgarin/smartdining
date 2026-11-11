@@ -588,6 +588,21 @@ export const transaccionesApi = {
   },
 
   /**
+   * Cobro de MESA en caja (admin/cajero): POST /api/transacciones/mesa.
+   * El backend reparte el monto entre los pedidos de la mesa, del más viejo al
+   * más nuevo. `id_cobro` (UUID) se genera una vez por cobro y se repite en los
+   * reintentos: con el mismo id_cobro no se cobra dos veces (200 { duplicado }).
+   * @param {{ id_mesa: number, monto: number, metodo_pago: string, comensal?: string|null, id_cobro: string }} datos
+   * @returns {Promise<{ duplicado: boolean, saldo_restante: number, mesa_liberada?: boolean, pagados?: number[], transacciones?: Array<{ id_transaccion: number, id_pedido: number, monto: number, comensal: string|null }> }>}
+   */
+  async cobrarMesa({ id_mesa, monto, metodo_pago, comensal = null, id_cobro }) {
+    return apiFetch('/transacciones/mesa', {
+      method: 'POST',
+      body: JSON.stringify({ id_mesa, monto, metodo_pago, comensal, id_cobro }),
+    })
+  },
+
+  /**
    * Obtiene las transacciones registradas para un pedido: GET /api/transacciones/pedido/:id_pedido
    */
   async obtenerPorPedido(idPedido) {
