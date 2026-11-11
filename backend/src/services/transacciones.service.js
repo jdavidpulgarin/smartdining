@@ -3,11 +3,7 @@ const mesasService = require('./mesas.service');
 // La zona del restaurante vive en reportes.service.js (America/Bogota). Una
 // sola constante para que el corte de caja y los reportes digan el mismo "hoy".
 const { ZONA } = require('./reportes.service');
-const {
-  traducirAutorInexistente,
-  MOTIVO_AUTOR_INEXISTENTE,
-  MENSAJE_AUTOR_INEXISTENTE,
-} = require('./autor-inexistente');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 // Tabla transacciones (docs/modelo-er.md): id_transaccion, id_pedido,
 // metodo_pago, monto, estado_transaccion, referencia_externa, creado_en.
@@ -189,7 +185,13 @@ async function registrarPago({
     };
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    // El AUTOR, otra vez por la misma clave ajena: cuando el cobro liquida la
+    // cuenta de un pedido ya entregado, este servicio escribe la linea de
+    // historial_estados del paso a 'pagado' con el id del cajero. Si ese
+    // usuario ya se borro, el 23503 de fk_historial_usuario salia como el 409
+    // generico. Lo demas no cambia: el P0001 de tr_validar_transaccion_financiera
+    // -pagar de mas- sigue llegando con el mensaje del trigger.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }
@@ -463,18 +465,6 @@ async function repartirPagoDeMesa(client, {
 }
 
 /**
- * ¿Es el 23503 del autor del historial? `fk_historial_usuario` todavía no está
- * en FK_AUTOR de autor-inexistente.js en develop: lo añade la rama de #146
- * (fix/api-autor-inexistente-pedidos-2), sin fusionar. Para no chocar con ella
- * se reconoce aquí con los MISMOS mensaje y motivo del helper; cuando #146
- * entre, traducirAutorInexistente ya lo atrapa antes y esto queda redundante.
- */
-function traducirAutorDelHistorial(err) {
-  if (!err || err.code !== '23503' || err.constraint !== 'fk_historial_usuario') return null;
-  return { status: 409, message: MENSAJE_AUTOR_INEXISTENTE, motivo: MOTIVO_AUTOR_INEXISTENTE };
-}
-
-/**
  * La TRANSACCIÓN alrededor del núcleo: BEGIN, reparto, COMMIT solo si se cobró,
  * y ROLLBACK en cualquier otro caso. Una carrera con el mismo pago (23505 del
  * índice único de la referencia) cuenta como duplicado; el 23503 del autor del
@@ -501,7 +491,9 @@ async function cobrarMesa(pago) {
         saldo_restante_centavos: await saldoDeLaMesaEnCentavos(pool, pago.id_mesa),
       };
     }
-    throw traducirAutorInexistente(err) || traducirAutorDelHistorial(err) || err;
+    // El 23503 de fk_historial_usuario (la caja, con un autor ya borrado) lo
+    // atrapa el helper compartido, como en el resto de rutas.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }

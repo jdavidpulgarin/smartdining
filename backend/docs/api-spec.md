@@ -758,7 +758,7 @@ Si no se envían, **el comportamiento no cambia**: el plato conserva lo que ten�
 |---|---|
 | Falta un campo, o un tipo o rango no es el declarado | **400** con el campo que falla (zod) |
 | `id_categoria` que no existe | **409** `{ "error": "Esa categoria no existe", "motivo": "categoria_inexistente" }` |
-| **El usuario del token ya no existe** | **409** `autor_inexistente` (ver [El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)) |
+| **El usuario del token ya no existe** (solo en el `PUT`, y solo si cambia el precio) | **409** `autor_inexistente` (ver [El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)) |
 | Un valor que no cabe en la columna (precio enorme) | **422** con el mensaje genérico de "dato fuera de rango" |
 | Un `CHECK` de la base (precio negativo llamando al servicio suelto) | **422** |
 
@@ -853,7 +853,7 @@ mostrando el plato como disponible.
 > plato volverá solo cuando haya inventario. Antes se mandaba el interruptor a secas, y la PWA
 > y el KDS lo mostraban disponible mientras pedirlo daba **409 `sin_stock`**.
 >
-> La cuenta vive en un solo sitio (`src/services/disponibilidad-efectiva.js`) para que los
+> La cuenta vive en un solo sitio (`src/services/disponibilidad-efectiva.js`) para que todos los
 > tres caminos no puedan discrepar otra vez. El **cuerpo de la respuesta** sigue siendo la
 > fila de la base, con sus dos columnas por separado: el panel necesita saber cuál de las dos
 > apagó el plato.
@@ -1191,7 +1191,7 @@ está en §[La frontera entre 400 y 422](#la-frontera-entre-400-y-422-h-11)):
 
 ### Regla de borrado: lo vendido no se borra
 
-`detalles_ingredientes.id_ingrediente` es `ON DELETE RESTRICT` a propósito, para que los
+`detalles_ingredientes.id_ingrediente` es `ON DELETE RESTRICT` a propósito, para que todos los
 pedidos históricos conserven su composición. Por eso:
 
 - Un ingrediente que ya se usó en algún pedido **no se borra**: responde **409**. Para
@@ -3913,25 +3913,31 @@ y **no** siguen todos el mismo patrón: el de `movimientos_inventario` lo gener�
 
 | Ruta | Qué lo escribe | Clave ajena |
 |---|---|---|
-| `POST` y `PUT /platos/:id` (cuando cambia el precio) | `tr_historial_precio_plato` → `historial_precios.id_usuario` | `fk_historial_precios_usuario` |
+| `PUT /platos/:id` (cuando cambia el precio) | `tr_historial_precio_plato` → `historial_precios.id_usuario` | `fk_historial_precios_usuario` |
 | `PUT /ingredientes/:id` (cuando cambia `precio_extra`) | `tr_historial_precio_ingrediente` → la misma tabla | `fk_historial_precios_usuario` |
 | `PUT /configuracion` | `tr_configuracion_actualizada` → `configuracion_restaurante.actualizado_por` | `fk_configuracion_actualizado_por` |
 | `POST /inventario/insumos/:id/movimientos` y `POST /inventario/insumos` con `stock_inicial` | `registrar_movimiento_inventario` → `movimientos_inventario.id_usuario` | `movimientos_inventario_id_usuario_fkey` |
+| `POST /pedidos` | el INSERT de `historial_estados` que deja el pedido en `recibido` | `fk_historial_usuario` |
+| `PATCH /pedidos/:id/estado` y `PATCH /kds/comandas/:id/estado` | la línea de `historial_estados` de cada cambio de estado (el KDS pasa por el mismo servicio) | `fk_historial_usuario` |
+| `POST /transacciones`, cuando el cobro liquida un pedido ya entregado | la línea de `historial_estados` del paso a `pagado` | `fk_historial_usuario` |
+| `POST /transacciones/mesa`, cuando el reparto liquida algún pedido entregado | la línea de `historial_estados` del paso a `pagado` (`Pago en caja`, con el id de quien cobra) | `fk_historial_usuario` |
 
 - **La transacción se deshace entera**: el precio no cambia, la configuración se queda como
-  estaba y el stock no se mueve (el libro de inventario sigue cuadrando).
+  estaba, el stock no se mueve (el libro de inventario sigue cuadrando) y del pedido no queda
+  nada: ni la fila de `pedidos`, ni sus detalles, ni el descuento de insumos.
 - Se mira el **nombre del constraint**, no solo el SQLSTATE: un 23503 de otra cosa —una
   categoría que no existe, un insumo que no existe— significa algo distinto y conserva su
   propio motivo. La cuenta vive en un solo sitio,
-  [`src/services/autor-inexistente.js`](../src/services/autor-inexistente.js), para que los
-  cuatro caminos no puedan discrepar.
+  [`src/services/autor-inexistente.js`](../src/services/autor-inexistente.js), para que ningún
+  camino pueda discrepar de otro.
 - `id_usuario` **en `null` es válido** y no da este error: así quedan los movimientos que
   genera un pedido de un comensal, que no tiene usuario.
-
-> **Queda uno fuera, a propósito.** `POST /pedidos` escribe `historial_estados.id_usuario`
-> (`fk_historial_usuario`) con el id del JWT, así que un usuario borrado da el mismo 23503 sin
-> traducir. No entró en este cambio para no mezclarlo con el review; es una línea con el mismo
-> helper cuando se decida.
+- **`POST /platos` no entra en la lista**, aunque comparta sección con el `PUT`:
+  `tr_historial_precio_plato` es `AFTER UPDATE OF precio`, así que **crear** un plato nunca
+  escribe en `historial_precios` y no hay autor que validar. Comprobado contra PostgreSQL: un
+  `POST /platos` —y un `INSERT` a pelo con `app.id_usuario` apuntando a un usuario que no
+  existe— pasan sin error. El `tr_auditar_platos` del INSERT sí corre, pero
+  `auditoria_cambios.usuario_id` no recibe el id del JWT.
 
 ### La frontera entre 400 y 422 (H-11)
 

@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const pool = require('../config/db');
 const mesasService = require('./mesas.service');
+const { traducirAutorInexistente } = require('./autor-inexistente');
 
 /**
  * Dominio del CHECK de pedidos.estado. Se usa solo para validar que el body
@@ -183,7 +184,14 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     } catch (errRollback) {
       console.error('[pedidos] el ROLLBACK fallo tras un error:', errRollback && errRollback.message);
     }
-    throw err;
+    // El AUTOR (review de #144): el INSERT de historial_estados de más arriba
+    // guarda el id del JWT, y la columna tiene su `fk_historial_usuario` contra
+    // `usuarios`. Si ese usuario ya se borró, el 23503 salía como el 409
+    // genérico de clave ajena, que no dice que el problema sea la sesión del
+    // mesero. Solo se traduce ESA clave ajena: el 23505 del `codigo_pedido` ya
+    // se reintentó más arriba, y el 40P01 lo convierte en 503 `reintentar` el
+    // controller, que mira `err.code` y aquí no se toca.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }
@@ -375,7 +383,12 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
     return { ...pedido, estado_anterior: estadoAnterior, mesaLiberada, cerradoPorPago };
   } catch (err) {
     await client.query('ROLLBACK');
-    throw err;
+    // El mismo AUTOR que al crear: cada cambio de estado deja su linea en
+    // historial_estados con el id del JWT (fk_historial_usuario). Pasa por aqui
+    // tanto PATCH /pedidos/:id/estado como el tablero del KDS, que llama a este
+    // mismo servicio. El P0001 de una transicion ilegal no se toca: ese lo
+    // traduce el manejador central con el mensaje del trigger.
+    throw traducirAutorInexistente(err) || err;
   } finally {
     client.release();
   }
