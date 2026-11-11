@@ -11,10 +11,12 @@ on:
 permissions:
   contents: read
 
-# Un push nuevo al mismo PR cancela la corrida anterior.
+# Un push nuevo al mismo PR cancela la corrida anterior. En develop y main no:
+# la corrida puede llevar dentro el despliegue de staging, y un despliegue no
+# se corta a la mitad.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:
@@ -101,3 +103,14 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+  # Despliegue a staging: solo en un push a develop, si TODO lo anterior pasó y
+  # el dueño del repo activó la variable DEPLOY_STAGING=true (mientras no exista
+  # el environment "staging" con sus secretos, el job queda "skipped" y el CI
+  # sigue en verde). Ver docs/despliegue.md, sección "Staging".
+  deploy-staging:
+    name: staging · desplegar
+    needs: [backend, socket-server, infra, frontends]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && vars.DEPLOY_STAGING == 'true'
+    uses: ./.github/workflows/deploy-staging.yml
+    secrets: inherit
