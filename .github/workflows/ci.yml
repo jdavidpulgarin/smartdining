@@ -100,4 +100,18 @@ jobs:
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
       - run: npm ci
       - run: npm run lint
+      # Pruebas unitarias. No necesitan servicios ni variables (la suite e2e de
+      # Playwright del panel queda fuera: frontend-restaurante/vite.config.js).
+      # El KDS usa node --test: el script falla también si quedan pruebas
+      # CANCELADAS, que node --test no cuenta como fallidas. Vitest (cliente y
+      # panel) sí falla solo, y ese script no entiende su resumen.
+      - name: npm test
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          if [ "$APP" = "frontend-kds" ]; then
+            bash "$GITHUB_WORKSPACE/.github/scripts/npm-test-sin-canceladas.sh"
+          else
+            npm test
+          fi
       - run: npm run build
