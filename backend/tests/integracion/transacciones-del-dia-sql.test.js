@@ -69,8 +69,17 @@ async function limpiar() {
   );
   const ids = t.rows.map((f) => f.id_transaccion);
   if (ids.length) {
+    // OJO con registro_id: para `transacciones` NO es el id_transaccion.
+    // fn_tr_auditar_cambios (08_triggers.sql) busca 'id_' || TG_TABLE_NAME
+    // ('id_transacciones', que no existe) y cae en su lista de respaldo, que
+    // para esta tabla da el id_PEDIDO. Filtrar registro_id por ids de
+    // transacción borraba filas ajenas o dejaba las propias. Se identifica la
+    // fila por el id_transaccion que lleva dentro el JSON (datos_nuevos en el
+    // INSERT, datos_anteriores en el DELETE).
     await sonda.query(
-      `DELETE FROM auditoria_cambios WHERE tabla_afectada = 'transacciones' AND registro_id = ANY($1::int[])`,
+      `DELETE FROM auditoria_cambios
+        WHERE tabla_afectada = 'transacciones'
+          AND COALESCE(datos_nuevos->>'id_transaccion', datos_anteriores->>'id_transaccion')::int = ANY($1::int[])`,
       [ids]
     );
   }
