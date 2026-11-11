@@ -704,9 +704,13 @@ function encolarPorMesa(idMesa, aviso) {
  * fuente de verdad, y la respuesta HTTP del mesero sigue siendo correcta.
  *
  * El `alias` que viaja es SIEMPRE el normalizado que se reservó, tanto al
- * agregar como al quitar: el socket-server compara texto idéntico para quitar
- * (§6.4), así que mandar lo que escribió el mesero —con otra capitalización o un
- * espacio doble— dejaría a la persona sentada para siempre.
+ * agregar como al quitar. El socket-server compara `quitar` por CLAVE (§6.4,
+ * R-19.2): la misma normalización de alias-comensal.js —sin tildes, en
+ * minúsculas y sin espacios ni `. _ ' -`—, busca en `sin_celular` el alias
+ * guardado con esa clave y quita ese. Por eso el backend puede mandar el alias
+ * tal como está guardado, sin preocuparse de la capitalización o de un espacio
+ * doble; y al agregar, mandar siempre el mismo texto hace que repetir el aviso
+ * sea "sin cambio" y no un 409 ALIAS_EN_USO.
  *
  * @param {number} id_mesa
  * @param {string} alias Forma normalizada (`normalizarAlias().alias`).

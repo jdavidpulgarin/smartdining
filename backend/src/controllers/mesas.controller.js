@@ -593,9 +593,12 @@ async function agregarComensal(req, res, next) {
 
     const aviso = await socketNotifier.notificarMesaComensal(
       idMesa,
-      // El alias RESERVADO, no lo que escribió el mesero: es el texto con el que
-      // habrá que quitarlo después (§6.4 compara idéntico) y, si venía de la
-      // cuenta, el que ya tienen sus platos.
+      // El alias RESERVADO, no lo que escribió el mesero: si venía de la cuenta,
+      // es el que ya tienen sus platos, y es el que el socket-server guarda en
+      // sin_celular. Para quitarlo después no hace falta el texto exacto: §6.4
+      // compara por CLAVE (la normalización de alias-comensal.js), pero mandar
+      // siempre el guardado hace que repetir el aviso sea "sin cambio" y no un
+      // 409 ALIAS_EN_USO por un alias distinto con la misma clave.
       aRegistrar.alias,
       'agregar',
       aRegistrar.clave
@@ -698,11 +701,12 @@ async function quitarComensal(req, res, next) {
       });
     }
 
-    // EL ALIAS GUARDADO, no el de la URL: la reserva se libera por clave, pero
-    // el socket-server compara 'quitar' por TEXTO IDÉNTICO (EVENTS.md §6.4). Si
-    // se mandara lo que escribió el mesero, un DELETE de «abuela» sobre la
-    // reserva de «Abuela» respondería 204 y soltaría la reserva, pero la
-    // persona se quedaría 24 h en la presencia de la mesa.
+    // EL ALIAS GUARDADO, no el de la URL. La reserva se libera por clave y el
+    // socket-server también compara 'quitar' por CLAVE (EVENTS.md §6.4, la
+    // misma normalización de alias-comensal.js: sin tildes, en minúsculas y sin
+    // espacios ni . _ ' -), así que un DELETE de «abuela» sobre la reserva de
+    // «Abuela» quita a la persona de la presencia igual. Se manda el guardado
+    // porque es el texto real de esa persona, el mismo que viajó al agregar.
     socketNotifier.notificarMesaComensal(idMesa, reserva.alias, 'quitar', alias.clave);
 
     return res.status(204).send();

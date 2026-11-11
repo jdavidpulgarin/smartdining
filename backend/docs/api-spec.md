@@ -1518,18 +1518,20 @@ El socket-server lo suma a `sd:mesa:{id}:sin_celular` y lo incluye en `mesa:pres
 (§6.4 y §5.2), así cuenta para «igual» y puede pagar en caja con su alias.
 
 - **`accion`** es `"agregar"` o `"quitar"`.
-- **El `alias` que viaja es SIEMPRE el texto con el que se reservó**, en las dos acciones:
-  §6.4 compara **texto idéntico** para quitar, así que mandar lo que escribió el mesero
-  —con otra capitalización, una tilde de más o un espacio doble— dejaría a la persona
-  sentada para siempre.
+- **El `alias` que viaja es SIEMPRE el texto con el que se reservó**, en las dos acciones.
+  El socket-server compara `quitar` por **clave** (§6.4, R-19.2), con la misma normalización
+  de [`alias-comensal.js`](../src/services/alias-comensal.js) —sin tildes, en minúsculas y
+  sin espacios ni `. _ ' -`—: busca en `sin_celular` el alias guardado cuya clave coincida y
+  quita **ese**. Por eso el backend puede mandar el alias tal como está guardado, sin que
+  importen la capitalización, una tilde o un espacio doble.
 
   Al **agregar** es el alias que acaba de normalizarse y reservarse. Al **quitar** es el que
   la reserva tenía **guardado**, no el de la URL: el `DELETE` libera la reserva por
-  **clave**, así que `DELETE …/comensales/abuela` sobre la reserva de «Abuela» responde 204 y
-  suelta la reserva, pero el socket-server solo quita a «Abuela» si recibe ese mismo texto.
-  Mandando el de la URL, la persona se quedaba **24 h** en la presencia de la mesa. Así, el
-  par `agregar`/`quitar` de una misma persona siempre viaja con el mismo texto, letra por
-  letra.
+  **clave**, así que `DELETE …/comensales/abuela` sobre la reserva de «Abuela» responde 204,
+  suelta la reserva y el socket-server quita a «Abuela» igual, porque la clave es la misma.
+  Se manda el guardado porque es el texto real de esa persona: así el par
+  `agregar`/`quitar` de una misma persona viaja con el mismo texto, y repetir un `agregar`
+  es «sin cambio» en vez de un `409 ALIAS_EN_USO` por un alias distinto con la misma clave.
 
   La única excepción es un alias que **no está reservado** (el 204 idempotente): ahí se
   manda el **normalizado de la URL**, porque no hay otro texto de donde sacarlo.
