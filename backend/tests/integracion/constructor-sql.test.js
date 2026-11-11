@@ -30,6 +30,10 @@ const autorInexistente = require('../../src/services/autor-inexistente');
 let sonda = null;
 let hayBase = false;
 let opcion = null;
+/** Ultimo id de historial_precios de la opcion al empezar: lo de despues es nuestro. */
+let historialDesde = 0;
+/** Insumos que crean las pruebas (b), para borrarlos aunque una falle. */
+const insumosCreados = [];
 
 test.before(async () => {
   try {
@@ -40,21 +44,49 @@ test.before(async () => {
     );
     opcion = r.rows[0] || null;
     hayBase = opcion !== null;
+    if (hayBase) {
+      const h = await sonda.query(
+        `SELECT COALESCE(MAX(id), 0) AS ultimo FROM historial_precios
+          WHERE tipo = 'ingrediente' AND id_referencia = $1`,
+        [opcion.id_ingrediente]
+      );
+      historialDesde = Number(h.rows[0].ultimo);
+    }
   } catch {
     hayBase = false;
   }
 });
 
 test.after(async () => {
-  // Se deja el precio_extra como estaba: la prueba del caso bueno lo cambia.
-  if (hayBase && opcion) {
-    await sonda.query('UPDATE ingredientes SET precio_extra = $1 WHERE id_ingrediente = $2', [
-      opcion.precio_extra,
-      opcion.id_ingrediente,
-    ]);
+  try {
+    if (hayBase && opcion) {
+      // Se deja el precio_extra como estaba: la prueba del caso bueno lo cambia.
+      await sonda.query('UPDATE ingredientes SET precio_extra = $1 WHERE id_ingrediente = $2', [
+        opcion.precio_extra,
+        opcion.id_ingrediente,
+      ]);
+      // Y el historial que dejaron el cambio y esta misma restauracion (review
+      // de #146): tr_historial_precio_ingrediente escribe una fila por cada
+      // UPDATE del precio, tambien por el de la linea de arriba. Solo lo que
+      // vino despues de la marca del before: lo anterior no es nuestro.
+      await sonda.query(
+        `DELETE FROM historial_precios
+          WHERE tipo = 'ingrediente' AND id_referencia = $1 AND id > $2`,
+        [opcion.id_ingrediente, historialDesde]
+      );
+    }
+    if (hayBase && insumosCreados.length) {
+      // Los insumos de las pruebas (b), con su libro: antes se borraban al
+      // final de la propia prueba, asi que una asercion fallida los dejaba.
+      await sonda.query('DELETE FROM movimientos_inventario WHERE id_insumo = ANY($1::int[])', [
+        insumosCreados,
+      ]);
+      await sonda.query('DELETE FROM insumos WHERE id_insumo = ANY($1::int[])', [insumosCreados]);
+    }
+  } finally {
+    if (sonda) await sonda.end();
+    await pool.end();
   }
-  if (sonda) await sonda.end();
-  await pool.end();
 });
 
 /** Un id de usuario que seguro no existe. */
@@ -170,6 +202,7 @@ test('review-144 (b): un movimiento con el autor borrado da 409 autor_inexistent
     { nombre: `AUTOR144 ${Date.now()}`, stock_inicial: 10 },
     { idUsuario: null }
   );
+  insumosCreados.push(insumo.id_insumo);
 
   await assert.rejects(
     () => inventarioService.registrarMovimiento(
@@ -192,9 +225,7 @@ test('review-144 (b): un movimiento con el autor borrado da 409 autor_inexistent
     [insumo.id_insumo]
   );
   assert.strictEqual(Number(rows[0].suma), 10, 'SUM(cantidad) = stock_actual');
-
-  await sonda.query('DELETE FROM movimientos_inventario WHERE id_insumo = $1', [insumo.id_insumo]);
-  await sonda.query('DELETE FROM insumos WHERE id_insumo = $1', [insumo.id_insumo]);
+  // El insumo y su libro los borra el after, falle o no esta prueba.
 });
 
 test('review-144 (b): crear un insumo con stock inicial y autor borrado, igual', async (t) => {
