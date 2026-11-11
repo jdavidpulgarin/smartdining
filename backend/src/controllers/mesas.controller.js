@@ -367,6 +367,9 @@ async function crearSesionPorToken(req, res, next) {
     // Al final, con el QR ya validado: un QR inválido no gasta alias.
     const reserva = await aliasComensal.reservar(mesa.id_mesa, alias, { vigencia: COMENSAL_EXPIRES_IN });
     if (reserva.enUso) {
+      // SIN `alias`, a propósito (a diferencia del alta del personal): quien
+      // escanea el QR no es personal, y devolverle el texto guardado le daría el
+      // nombre exacto de otra persona de la mesa para entrar como ella.
       return res.status(409).json({
         error: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
         motivo: 'alias_en_uso',
@@ -576,10 +579,25 @@ async function agregarComensal(req, res, next) {
       extra: { [aliasComensal.MARCA_SIN_CELULAR]: true },
     });
     if (reserva.enUso) {
-      return res.status(409).json({
+      // Revisión del #119: el personal recibe además el alias TAL COMO ESTÁ
+      // GUARDADO («Abuela» aunque haya escrito «abuela»), para que el panel
+      // ofrezca pedir para esa persona en vez de inventar otro nombre. Es
+      // opcional: si la lectura no da texto, o falla, el 409 sale como siempre,
+      // sin `alias`; nunca se convierte en 500 ni en 503 por esto.
+      const cuerpo = {
         error: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
         motivo: 'alias_en_uso',
-      });
+      };
+      try {
+        const guardado = await aliasComensal.aliasReservado(idMesa, aRegistrar.clave);
+        if (guardado && typeof guardado.alias === 'string' && guardado.alias) {
+          cuerpo.alias = guardado.alias;
+        }
+      } catch {
+        // Sin alias: el 409 ya dice lo importante. Sin log, para no tener que
+        // decidir qué alias dejar fuera de él.
+      }
+      return res.status(409).json(cuerpo);
     }
     if (reserva.noDisponible) {
       // Mismo comportamiento que las sesiones de QR: sin reserva fiable no se

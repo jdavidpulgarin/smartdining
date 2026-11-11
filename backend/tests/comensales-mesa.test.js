@@ -1746,3 +1746,66 @@ test('d-18: la cuenta de la mesa muestra al comensal sin celular', async () => {
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Revisión del #119: el 409 alias_en_uso del alta trae el alias GUARDADO
+//
+// El panel necesita saber cómo se llama de verdad la persona que ya ocupa ese
+// nombre, para ofrecer pedir para ella en vez de inventar otro. Es un campo
+// opcional: si la lectura no da texto, el 409 sale como antes, sin `alias`.
+// ---------------------------------------------------------------------------
+
+test('#119: con «Abuela» reservada, POST «abuela» → 409 con alias «Abuela» (el guardado)', async () => {
+  const id = mesaNueva();
+  const db = fakeMesa({ mesa: mesaOcupada(id), cuenta: { id_mesa: id, comensales: [] } });
+  const redis = instalarFakeRedis();
+  const socket = instalarFakeSocket(() => ({ ok: true }));
+  try {
+    assert.strictEqual((await agregar(mesero(), { alias: 'Abuela' }, id)).status, 201);
+
+    const repetido = await agregar(mesero(), { alias: 'abuela' }, id);
+
+    assert.strictEqual(repetido.status, 409);
+    assert.strictEqual(repetido.body.motivo, 'alias_en_uso');
+    assert.strictEqual(repetido.body.alias, 'Abuela', 'el texto guardado, no el enviado');
+    assert.strictEqual(typeof repetido.body.error, 'string');
+  } finally {
+    socket.restaurar();
+    redis.restaurar();
+    db.restaurar();
+  }
+});
+
+for (const [caso, sustituto] of [
+  ['la lectura lanza', async () => { throw new Error('se cayó la lectura'); }],
+  ['Redis no responde a la lectura', async () => ({ noDisponible: true })],
+  ['la reserva ya no tiene texto legible', async () => ({ noExiste: true })],
+]) {
+  test(`#119: si ${caso}, el 409 sale igual, SIN alias (ni 500 ni 503)`, async () => {
+    const id = mesaNueva();
+    const db = fakeMesa({ mesa: mesaOcupada(id), cuenta: { id_mesa: id, comensales: [] } });
+    const redis = instalarFakeRedis();
+    const socket = instalarFakeSocket(() => ({ ok: true }));
+    const original = alias.aliasReservado;
+    let lecturas = 0;
+    try {
+      assert.strictEqual((await agregar(mesero(), { alias: 'Abuela' }, id)).status, 201);
+
+      alias.aliasReservado = (...args) => {
+        lecturas += 1;
+        return sustituto(...args);
+      };
+      const repetido = await agregar(mesero(), { alias: 'abuela' }, id);
+
+      assert.strictEqual(lecturas, 1, 'se intentó leer el alias guardado');
+      assert.strictEqual(repetido.status, 409);
+      assert.strictEqual(repetido.body.motivo, 'alias_en_uso');
+      assert.ok(!('alias' in repetido.body), 'sin el campo alias');
+    } finally {
+      alias.aliasReservado = original;
+      socket.restaurar();
+      redis.restaurar();
+      db.restaurar();
+    }
+  });
+}
