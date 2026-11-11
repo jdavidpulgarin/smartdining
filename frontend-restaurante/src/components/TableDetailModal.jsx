@@ -14,6 +14,7 @@ import { StateBadge, StatusBadge } from './ui/Badge'
 import { decodificarTokenQr } from '../services/qrService'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks'
+import { puedeUsarCaja } from '../utils/caja'
 
 export function TableDetailModal({
   table,
@@ -331,7 +332,7 @@ export function TableDetailModal({
             </button>
           )}
 
-          {isOcupada && (
+          {isOcupada && puedeUsarCaja(userRole) && (
             <button
               type="button"
               className="table-btn-secondary"

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import {
   CreditCard,
   DollarSign,
@@ -13,7 +14,8 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
-import { useSocketEmit, useSocketListener, useTables } from '../hooks'
+import { useAuth, useSocketListener, useTables } from '../hooks'
+import { puedeUsarCaja, comensalDelCobro, idCobroParaEnviar, mensajeDeErrorCobro } from '../utils/caja'
 
 function formatCOP(monto) {
   const num = Number(monto) || 0
@@ -24,25 +26,43 @@ function formatCOP(monto) {
   }).format(num)
 }
 
-function generateRef() {
-  return 'POS-' + Date.now().toString().slice(-6)
-}
-
 function getCurrentTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+/**
+ * La Caja es de admin y cajero (el backend da 403 al resto). Al mesero ni se le
+ * muestra el enlace; si llega por la URL, vuelve al inicio.
+ */
 export function Caja() {
-  const emit = useSocketEmit()
+  const { user } = useAuth()
+  if (!puedeUsarCaja(user?.rol)) return <Navigate to="/" replace />
+  return <CajaRegistradora />
+}
+
+function CajaRegistradora() {
   const { cargarMesas } = useTables()
+  const [searchParams] = useSearchParams()
 
   const [loading, setLoading] = useState(() => Boolean(getAuthToken()))
   const [errorMessage, setErrorMessage] = useState(null)
   const [processingPayment, setProcessingPayment] = useState(false)
+  const [errorCobro, setErrorCobro] = useState(null)
+
+  // El cobro en curso: { clave, id_cobro }. Se guarda ANTES de enviar y solo se
+  // borra cuando el backend confirma (201 o 200 duplicado). Así un doble clic o
+  // un reintento tras un error de red repite el MISMO id_cobro y el backend no
+  // cobra dos veces; un cobro distinto (otra mesa, persona, monto o método)
+  // lleva un id nuevo.
+  const cobroPendiente = useRef(null)
+  // Bloqueo síncrono: el estado `processingPayment` tarda un render en llegar,
+  // y un doble clic dispara dos submit antes.
+  const enviando = useRef(false)
 
   // Cuentas reales cargadas desde el backend
   const [cuentasMesas, setCuentasMesas] = useState([])
-  const [selectedMesaId, setSelectedMesaId] = useState(null)
+  // "Cobrar en Caja" desde el detalle de una mesa llega con ?mesa=ID.
+  const [selectedMesaId, setSelectedMesaId] = useState(() => Number(searchParams.get('mesa')) || null)
   const [selectedComensal, setSelectedComensal] = useState('TOTAL')
 
   // Detalles de ítems del pedido activo
@@ -139,6 +159,7 @@ export function Caja() {
   const handleSelectMesa = useCallback((mesaId) => {
     setSelectedMesaId(mesaId)
     setSelectedComensal('TOTAL')
+    setErrorCobro(null)
   }, [])
 
   // Cargar cuentas al montar de forma asíncrona
@@ -233,7 +254,7 @@ export function Caja() {
     return cuentasMesas.find((c) => c.id_mesa === selectedMesaId) || null
   }, [cuentasMesas, selectedMesaId])
 
-  // Cargar detalle de ítems del pedido activo cuando se selecciona una mesa
+  // Ítems de TODOS los pedidos de la mesa (antes solo los del primero)
   useEffect(() => {
     let cancel = false
 
@@ -243,13 +264,12 @@ export function Caja() {
         return
       }
 
-      const primerPedido = selectedCuenta.pedidos[0]
       setLoadingDetalles(true)
       try {
-        const pedData = await pedidosApi.obtener(primerPedido.id_pedido)
-        if (!cancel && pedData?.detalles) {
-          setDetallesPedido(pedData.detalles)
-        }
+        const respuestas = await Promise.all(
+          selectedCuenta.pedidos.map((p) => pedidosApi.obtener(p.id_pedido).catch(() => null))
+        )
+        if (!cancel) setDetallesPedido(respuestas.flatMap((r) => r?.detalles || []))
       } catch {
         if (!cancel) setDetallesPedido([])
       } finally {
@@ -313,100 +333,93 @@ export function Caja() {
   const numericCash = parseFloat(cashGiven) || 0
   const changeDue = Math.max(0, numericCash - financialDetails.total)
 
-  // Procesar registro de pago en el backend
+  // Cobro de MESA: un solo POST /api/transacciones/mesa; el backend reparte el
+  // monto entre los pedidos de la mesa (antes iba entero al primer pedido).
   const handleProcessPayment = async (e) => {
     e.preventDefault()
-    if (!selectedCuenta) return
+    if (!selectedCuenta || enviando.current) return
+    setErrorCobro(null)
 
     if (paymentMethod === 'efectivo' && numericCash < financialDetails.total) {
-      alert(
-        `El efectivo recibido (${formatCOP(numericCash)}) es menor al total a pagar (${formatCOP(
-          financialDetails.total
-        )})`
+      setErrorCobro(
+        `El efectivo recibido (${formatCOP(numericCash)}) es menor al total a pagar (${formatCOP(financialDetails.total)}).`
       )
       return
     }
 
-    // Identificar el pedido activo con saldo en la mesa
-    const pedidoTarget = selectedCuenta.pedidos?.[0]
-    if (!pedidoTarget) {
-      alert('No se encontró un pedido activo para liquidar en esta mesa.')
-      return
+    // La propina no entra en el monto: el backend solo cubre el saldo de los
+    // pedidos (un monto mayor es 409 excede). Queda en el recibo.
+    const datos = {
+      id_mesa: selectedCuenta.id_mesa,
+      comensal: comensalDelCobro(selectedComensal),
+      monto: financialDetails.subtotal,
+      metodo_pago: paymentMethod,
     }
-
+    // Mismo cobro que el intento anterior sin confirmar → mismo id_cobro.
+    const cobro = idCobroParaEnviar(cobroPendiente.current, datos)
+    cobroPendiente.current = cobro
+    enviando.current = true
     setProcessingPayment(true)
-    const refOperacion = authCode.trim() || generateRef()
 
     try {
-      // 1. Llamar al backend real: POST /api/transacciones
-      const resTx = await transaccionesApi.registrarPago({
-        id_pedido: pedidoTarget.id_pedido,
-        monto: financialDetails.subtotal,
-        metodo_pago: paymentMethod,
-        referencia_externa: refOperacion,
-        comensal: selectedComensal === 'TOTAL' ? null : selectedComensal,
-      })
+      const res = await transaccionesApi.cobrarMesa({ ...datos, id_cobro: cobro.id_cobro })
+      // Confirmado (201, o 200 si ya se había cobrado): el próximo cobro es otro.
+      cobroPendiente.current = null
 
-      // 2. Construir comprobante de pago
+      const transacciones = res?.transacciones || []
+      const codigos = transacciones
+        .map((t) => selectedCuenta.pedidos?.find((p) => p.id_pedido === t.id_pedido)?.codigo_pedido || `#${t.id_pedido}`)
       const receipt = {
-        id_transaccion: resTx?.id_transaccion ? `TRX-${resTx.id_transaccion}` : generateRef(),
-        id_pedido: pedidoTarget.codigo_pedido || `#${pedidoTarget.id_pedido}`,
+        id_transaccion: transacciones.length
+          ? transacciones.map((t) => `TRX-${t.id_transaccion}`).join(' · ')
+          : `COBRO ${cobro.id_cobro.slice(0, 8).toUpperCase()}`,
+        duplicado: Boolean(res?.duplicado),
+        pedidos: codigos,
         mesa: `Mesa ${selectedCuenta.numero || selectedCuenta.numero_mesa}`,
         comensal: financialDetails.comensalNombre,
         metodo_pago: paymentMethod,
-        items: detallesPedido.length > 0 ? detallesPedido : [
-          {
-            nombre: 'Consumo registrado',
-            cantidad: selectedCuenta.items_totales || 1,
-            subtotal: financialDetails.subtotal,
-          },
-        ],
         subtotal: financialDetails.subtotal,
         tip: financialDetails.tip,
         total: financialDetails.total,
         cashGiven: paymentMethod === 'efectivo' ? numericCash : null,
         changeDue: paymentMethod === 'efectivo' ? changeDue : null,
-        referencia: refOperacion,
+        voucher: authCode.trim() || null,
+        saldoRestante: Number(res?.saldo_restante) || 0,
+        mesaLiberada: Boolean(res?.mesa_liberada),
         hora: getCurrentTime(),
       }
 
-      // 3. Emitir evento por WebSockets
-      emit('payment:confirmed', {
-        id_pedido: pedidoTarget.id_pedido,
-        id_mesa: selectedCuenta.id_mesa,
-        monto: financialDetails.total,
-        comensal: selectedComensal === 'TOTAL' ? null : selectedComensal,
-        metodo_pago: paymentMethod,
-        timestamp: new Date().toISOString(),
-      })
+      // Historial de la sesión (hasta que llegue GET /transacciones, #158). Un
+      // duplicado no se suma: ese dinero ya estaba contado.
+      if (!receipt.duplicado) {
+        setHistory((prev) => [
+          {
+            id_transaccion: receipt.id_transaccion,
+            mesa: receipt.mesa,
+            comensal: receipt.comensal,
+            metodo_pago: receipt.metodo_pago,
+            monto: receipt.total,
+            hora: receipt.hora,
+            estado: 'completada',
+            referencia: receipt.voucher,
+          },
+          ...prev,
+        ])
+      }
 
-      // 4. Agregar al historial local
-      setHistory((prev) => [
-        {
-          id_transaccion: receipt.id_transaccion,
-          id_pedido: pedidoTarget.id_pedido,
-          mesa: receipt.mesa,
-          comensal: receipt.comensal,
-          metodo_pago: receipt.metodo_pago,
-          monto: receipt.total,
-          hora: receipt.hora,
-          estado: 'completada',
-          referencia: receipt.referencia,
-        },
-        ...prev,
-      ])
-
-      // 5. Mostrar recibo y limpiar inputs
       setPaidReceipt(receipt)
       setCashGiven('')
       setAuthCode('')
-
-      // 6. Recargar mesas y cuentas
+      // Los avisos de tiempo real (payment:confirmed, order:status,
+      // mesa:liberada) los manda el backend después del COMMIT.
       await cargarCuentas()
       await cargarMesas()
     } catch (err) {
-      alert(`Error al registrar el cobro en caja: ${err.message}`)
+      setErrorCobro(mensajeDeErrorCobro(err, formatCOP))
+      // El saldo cambió por otro lado: se recarga para que el cajero vea el real.
+      if (err?.motivo === 'excede' || err?.motivo === 'sin_cuenta') await cargarCuentas()
     } finally {
+      enviando.current = false
       setProcessingPayment(false)
     }
   }
@@ -543,7 +556,11 @@ export function Caja() {
                       COBRAR / MESA {selectedCuenta.numero || selectedCuenta.numero_mesa}
                     </h2>
                     <span style={{ fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-text-muted)', fontSize: 16 }}>
-                      {selectedCuenta.pedidos?.[0]?.codigo_pedido ? `PEDIDO ${selectedCuenta.pedidos[0].codigo_pedido} · ` : ''}
+                      {selectedCuenta.pedidos?.length === 1 && selectedCuenta.pedidos[0].codigo_pedido
+                        ? `PEDIDO ${selectedCuenta.pedidos[0].codigo_pedido} · `
+                        : selectedCuenta.pedidos?.length > 1
+                        ? `${selectedCuenta.pedidos.length} PEDIDOS · `
+                        : ''}
                       UBICACIÓN: {(selectedCuenta.ubicacion || selectedCuenta.ubicacion_mesa || 'PRINCIPAL').toUpperCase()}
                     </span>
                   </header>
@@ -751,6 +768,12 @@ export function Caja() {
                       </div>
                     )}
 
+                    {errorCobro && (
+                      <div className="table-toast-banner error" role="alert" style={{ marginBottom: 16 }}>
+                        <span>{errorCobro}</span>
+                      </div>
+                    )}
+
                     {/* Botón rojo REGISTRAR PAGO / COBRAR */}
                     <button
                       type="submit"
@@ -853,7 +876,11 @@ export function Caja() {
                   <h3 className="sd-card-title" style={{ margin: 0, fontSize: 24 }}>
                     Pago Procesado con Éxito
                   </h3>
-                  <small style={{ color: 'var(--sd-text-muted)' }}>Transacción guardada en base de datos</small>
+                  <small style={{ color: 'var(--sd-text-muted)' }}>
+                    {paidReceipt.duplicado
+                      ? 'Este cobro ya estaba registrado: no se cobró otra vez'
+                      : 'Transacción guardada en base de datos'}
+                  </small>
                 </div>
               </div>
               <button
@@ -878,6 +905,16 @@ export function Caja() {
                 <div><span style={{ color: 'var(--sd-text-muted)' }}>Comensal:</span> {paidReceipt.comensal}</div>
                 <div><span style={{ color: 'var(--sd-text-muted)' }}>Método:</span> {paidReceipt.metodo_pago.toUpperCase()}</div>
                 <div><span style={{ color: 'var(--sd-text-muted)' }}>Hora:</span> {paidReceipt.hora}</div>
+                {paidReceipt.pedidos?.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--sd-text-muted)' }}>Pedidos:</span> {paidReceipt.pedidos.join(', ')}</div>
+                )}
+                {paidReceipt.voucher && (
+                  <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--sd-text-muted)' }}>Voucher:</span> {paidReceipt.voucher}</div>
+                )}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <span style={{ color: 'var(--sd-text-muted)' }}>Saldo de la mesa:</span>{' '}
+                  <strong>{paidReceipt.mesaLiberada ? 'PAGADA · mesa liberada' : formatCOP(paidReceipt.saldoRestante)}</strong>
+                </div>
               </div>
 
               <div style={{ borderTop: '1px solid var(--sd-border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14 }}>

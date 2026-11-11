@@ -1,8 +1,13 @@
 import { Utensils, CheckCircle2, Flame, User, Clock, ArrowRight } from 'lucide-react'
+import { useContext } from 'react'
 import { Link } from 'react-router-dom'
 import { StateBadge } from './ui/Badge'
+import { AuthContext } from '../context/authContextDef'
+import { puedeUsarCaja } from '../utils/caja'
 
 export function OrderPanel({ order, onDeliver }) {
+  // Sin AuthProvider (algunas pruebas) no hay rol: el enlace a Caja no se muestra.
+  const rol = useContext(AuthContext)?.user?.rol
   if (!order) {
     return (
       <div className="panel order-panel empty-selection">
@@ -100,9 +105,11 @@ export function OrderPanel({ order, onDeliver }) {
             </button>
           )}
 
-          <Link to="/caja" className="ghost-button small flex-1 text-center">
-            <span>Cobrar en Caja</span>
-          </Link>
+          {puedeUsarCaja(rol) && (
+            <Link to="/caja" className="ghost-button small flex-1 text-center">
+              <span>Cobrar en Caja</span>
+            </Link>
+          )}
           <Link to="/pedidos" className="ghost-button small text-center">
             <Flame size={15} />
             <span>KDS Cocina</span>
