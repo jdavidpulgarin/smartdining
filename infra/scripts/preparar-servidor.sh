@@ -148,6 +148,9 @@ paso "3. SSH endurecido"
 # Prefijo 00: sshd usa el PRIMER valor que lee, así que este archivo gana sobre
 # 50-cloud-init.conf / 50-cloudimg-settings.conf (que traen PasswordAuthentication yes).
 SSHD_CONF=/etc/ssh/sshd_config.d/00-smartdining.conf
+# respaldos (solo SFTP de lectura, instalar-respaldos.sh): se conserva si existe.
+USUARIOS_EXTRA=
+if id respaldos >/dev/null 2>&1; then USUARIOS_EXTRA=" respaldos"; fi
 if escribir_si_cambia "$SSHD_CONF" <<EOF
 # SmartDining (infra/scripts/preparar-servidor.sh)
 PermitRootLogin no
@@ -156,7 +159,7 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 MaxAuthTries 3
 X11Forwarding no
-AllowUsers $ADMIN $DEPLOY
+AllowUsers $ADMIN $DEPLOY$USUARIOS_EXTRA
 EOF
 then
   if ! sshd -t; then

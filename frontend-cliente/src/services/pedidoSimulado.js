@@ -8,6 +8,7 @@ export const FALTANTES_SIMULADOS_DEFAULT = [
   { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
   { tipo: 'ingrediente', id: 10, nombre: 'Aguacate' },
 ];
+export const INGREDIENTE_AGOTADO_SIMULADO = 'Aguacate';
 
 /**
  * Obtiene la lista de pedidos simulados guardados en sessionStorage.
@@ -50,6 +51,37 @@ export async function crearPedidoSimulado({ lineas = [], notasGenerales = '' } =
         motivo: 'reintentar',
         mensaje: 'intenta de nuevo',
       });
+    }
+
+    if (simPedido === 'sin_stock_vacio') {
+      throw new ErrorApi({
+        status: 409,
+        motivo: 'sin_stock',
+        mensaje: 'No alcanza el inventario para completar el pedido',
+        faltantes: [],
+      });
+    }
+
+    if (simPedido === 'ingrediente_agotado') {
+      const faltantesIngSimulados = [
+        { tipo: 'ingrediente', id: 10, nombre: INGREDIENTE_AGOTADO_SIMULADO },
+        { tipo: 'ingrediente', id: 34, nombre: INGREDIENTE_AGOTADO_SIMULADO },
+        { tipo: 'ingrediente', id: null, nombre: INGREDIENTE_AGOTADO_SIMULADO },
+      ];
+      const tieneIngredienteEnCarrito = lineas.some(
+        (l) => faltantesDelItem(l, faltantesIngSimulados).length > 0
+      );
+      const sonPlatosDelMenuSimulado =
+        lineas.length > 0 &&
+        lineas.every((l) => Number(l.id_plato || l.idPlato) >= 1000);
+
+      if (tieneIngredienteEnCarrito || !sonPlatosDelMenuSimulado) {
+        throw new ErrorApi({
+          status: 409,
+          motivo: 'ingrediente_agotado',
+          mensaje: `El ingrediente "${INGREDIENTE_AGOTADO_SIMULADO}" está agotado`,
+        });
+      }
     }
 
     if (simPedido === 'sin_stock') {

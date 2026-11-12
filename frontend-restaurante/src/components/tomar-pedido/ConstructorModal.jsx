@@ -3,9 +3,9 @@
 
 import { useReducer, useMemo } from 'react'
 import { X, Plus, AlertCircle } from 'lucide-react'
-import { constructorReducer, estadoInicial } from './constructorReducer'
+import { constructorReducer, estadoInicial } from '../../utils/tomar-pedido/constructorReducer'
 import { PasoConstructor } from './PasoConstructor'
-import { calcularPlato, pasosPendientes } from './calcularPlato'
+import { calcularPlato, pasosPendientes } from '../../utils/tomar-pedido/calcularPlato'
 
 export function ConstructorModal({ plato, comensal, onAgregar, onClose }) {
   const [estado, despachador] = useReducer(constructorReducer, estadoInicial)

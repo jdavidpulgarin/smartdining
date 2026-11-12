@@ -5,6 +5,7 @@ import {
   actualizarDisponibilidadPlatoEnCache,
   obtenerPlatoArmable,
   recargarMenu,
+  tieneMarcasAgotadoLocal,
 } from '../services/menuService';
 import { useMesaSocketContext } from '../context/MesaSocketContext';
 import {
@@ -57,6 +58,9 @@ function Constructor() {
 
     async function cargarPlato() {
       try {
+        if (tieneMarcasAgotadoLocal()) {
+          recargarMenu();
+        }
         const resultado = await obtenerPlatoArmable(idPlato);
         if (activo) {
           setEstadoCarga({ idCargado: idPlato, plato: resultado });

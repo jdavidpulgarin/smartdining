@@ -5,6 +5,7 @@ import {
   obtenerPlatos,
   obtenerPlatosArmables,
   recargarMenu,
+  tieneMarcasAgotadoLocal,
   actualizarDisponibilidadPlatoEnCache,
 } from '../services/menuService';
 import CategoriaFiltro from '../components/menu/CategoriaFiltro';
@@ -91,9 +92,12 @@ function Menu() {
     }
   }, []);
 
-  // Carga inicial al montar el componente
+  // Carga inicial al montar el componente (si había marcas locales de 409, recarga GET /menu)
   useEffect(() => {
     let activo = true;
+    if (tieneMarcasAgotadoLocal()) {
+      recargarMenu();
+    }
     (async () => {
       try {
         const [cats, plats, armables] = await Promise.all([
