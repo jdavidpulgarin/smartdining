@@ -14,8 +14,10 @@ const assert = require('node:assert');
  * libro (27_inventario.sql), eso es exactamente "el stock vuelve igual".
  *
  * MESAS PROPIAS (criterio de #146): una por caso, desde MESA_NUMERO_QUITA (960
- * por omisión, rango de 20), marcadas en `ubicacion`. El `after` lo deja todo
- * como estaba aunque una prueba falle: borra las transacciones y su auditoría,
+ * por omisión, rango de 20), marcadas en `ubicacion`. Se limpia después de
+ * CADA caso (y otra vez en el `after`), para no retener stock reservado
+ * mientras corren las otras suites; lo deja todo como estaba aunque una prueba
+ * falle: borra las transacciones y su auditoría,
  * cierra la reserva de cada detalle con fn_cerrar_reserva_detalle(id, false)
  * (devuelve el stock; no hace nada si ya estaba cerrada), borra el libro de esos
  * detalles, los pedidos y las mesas.
@@ -129,11 +131,24 @@ test.before(async () => {
   try {
     sonda = new Pool({ connectionTimeoutMillis: 2000 });
     await sonda.query('SELECT 1');
+    // Un plato con receta, pero NO el que eligen las otras suites (el primero
+    // disponible por id): corren en paralelo y comparten su stock, que en el
+    // seed alcanza para pocas unidades. Entre los demás, el que más unidades
+    // deja servir con el stock de hoy.
     const p = await sonda.query(
-      `SELECT p.id_plato FROM platos p
+      `WITH comun AS (
+         SELECT id_plato FROM platos
+          WHERE disponible AND stock_suficiente AND NOT personalizable
+          ORDER BY id_plato LIMIT 1
+       )
+       SELECT p.id_plato FROM platos p
         WHERE p.disponible AND p.stock_suficiente AND NOT p.personalizable AND p.precio >= 1000
+          AND p.id_plato NOT IN (SELECT id_plato FROM comun)
           AND EXISTS (SELECT 1 FROM recetas_plato rp WHERE rp.id_plato = p.id_plato)
-        ORDER BY p.id_plato LIMIT 1`
+        ORDER BY (SELECT min(floor(s.stock_actual / rp.cantidad)) FROM recetas_plato rp
+                    JOIN insumos s ON s.id_insumo = rp.id_insumo WHERE rp.id_plato = p.id_plato) DESC,
+                 p.id_plato
+        LIMIT 1`
     );
     plato = p.rows[0] || null;
     constructor = await seleccionConstructor();
@@ -144,6 +159,12 @@ test.before(async () => {
     if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
     hayBase = false;
   }
+});
+
+// Después de CADA caso, no solo al final: así las líneas que quedan vivas no
+// retienen stock reservado mientras corren las otras suites.
+test.afterEach(async () => {
+  if (hayBase) await limpiar();
 });
 
 test.after(async () => {
