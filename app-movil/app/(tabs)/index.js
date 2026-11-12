@@ -32,6 +32,12 @@ export default function InicioScreen() {
             <Button onPress={() => router.push('/(tabs)/menu')}>
               Explorar menú
             </Button>
+            <Button
+              variante="secundario"
+              onPress={() => router.push('/seguimiento')}
+            >
+              Ver seguimiento (demo)
+            </Button>
           </View>
         </Card>
 
@@ -116,6 +122,7 @@ const styles = StyleSheet.create({
   },
   acciones: {
     marginTop: espaciado.xs,
+    gap: espaciado.sm,
   },
   grid: {
     gap: espaciado.md,

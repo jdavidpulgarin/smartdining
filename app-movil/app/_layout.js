@@ -27,6 +27,14 @@ export default function RootLayout() {
             name="armar/[id]"
             options={{ title: 'Armar mi plato', headerBackTitle: 'Menú' }}
           />
+          <Stack.Screen
+            name="checkout"
+            options={{ title: 'Finalizar pedido', headerBackTitle: 'Carrito' }}
+          />
+          <Stack.Screen
+            name="seguimiento"
+            options={{ title: 'Seguimiento', headerBackTitle: 'Volver' }}
+          />
         </Stack>
       </CarritoProvider>
     </SafeAreaProvider>
