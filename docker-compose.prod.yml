@@ -76,6 +76,21 @@ services:
       CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO}
       # Solo de nginx (IP fija abajo) se cree X-Forwarded-For; de cualquier otro contenedor no (backend/server.js).
       TRUST_PROXY: 172.31.250.10
+      # Límites por IP (backend/src/middleware/limites.middleware.js). Un local
+      # o una feria comparten UNA IP pública (el Wi-Fi), así que el cupo es de
+      # todos a la vez. Los valores por defecto van aquí para que funcionen sin
+      # tocar los .env; se cambian en infra/.env (ver docs/despliegue.md,
+      # "Límites de peticiones") y se aplican con `up -d backend`.
+      #   QR: apertura de sesión por QR (150/min por IP; en la feria, 10 a 15
+      #       mesas y ~10 celulares a la vez caben con mucho margen).
+      #   LOGIN: login del personal, 5 intentos FALLIDOS/min por IP + email.
+      #   GLOBAL: techo de toda la API por IP.
+      RATE_LIMIT_QR_MAX: ${RATE_LIMIT_QR_MAX:-150}
+      RATE_LIMIT_QR_VENTANA_MS: ${RATE_LIMIT_QR_VENTANA_MS:-60000}
+      RATE_LIMIT_LOGIN_MAX: ${RATE_LIMIT_LOGIN_MAX:-5}
+      RATE_LIMIT_LOGIN_VENTANA_MS: ${RATE_LIMIT_LOGIN_VENTANA_MS:-60000}
+      RATE_LIMIT_GLOBAL_MAX: ${RATE_LIMIT_GLOBAL_MAX:-4000}
+      RATE_LIMIT_GLOBAL_VENTANA_MS: ${RATE_LIMIT_GLOBAL_VENTANA_MS:-60000}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -130,6 +145,15 @@ services:
         DOMINIO: ${DOMINIO:?Define DOMINIO en infra/.env}
     environment:
       DOMINIO: ${DOMINIO}
+      # Zonas limit_req de nginx (infra/nginx/templates/smartdining.conf.template),
+      # por IP. Se ajustan en infra/.env (docs/despliegue.md, "Límites de
+      # peticiones"). Un valor mal escrito impide arrancar nginx: valídalo antes.
+      NGINX_LIMITE_LOGIN: ${NGINX_LIMITE_LOGIN:-30r/m}
+      NGINX_RAFAGA_LOGIN: ${NGINX_RAFAGA_LOGIN:-20}
+      NGINX_LIMITE_PAGOS: ${NGINX_LIMITE_PAGOS:-120r/m}
+      NGINX_RAFAGA_PAGOS: ${NGINX_RAFAGA_PAGOS:-60}
+      NGINX_LIMITE_WEBHOOK: ${NGINX_LIMITE_WEBHOOK:-300r/m}
+      NGINX_RAFAGA_WEBHOOK: ${NGINX_RAFAGA_WEBHOOK:-100}
     ports:
       - "80:80"
       - "443:443"
