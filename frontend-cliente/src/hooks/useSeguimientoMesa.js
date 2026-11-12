@@ -5,6 +5,7 @@ import { listarPedidosMesa, cancelarItem } from '../services/pedidoService';
 import {
   normalizarPedido,
   aplicarCambioEstado,
+  aplicarItemCancelado,
   reemplazarPedido,
   separarPedidos,
   pedidoPrincipal,
@@ -145,7 +146,7 @@ export function useSeguimientoMesa(pedidoInicial = null) {
     estadoAnteriorRef.current = estadoSocket;
   }, [estadoSocket, recargar]);
 
-  // Escuchar eventos del socket: order:status y order:created
+  // Escuchar eventos del socket: order:status, order:created e item:cancelado
   useEffect(() => {
     if (!socketOn) return undefined;
 
@@ -171,9 +172,15 @@ export function useSeguimientoMesa(pedidoInicial = null) {
       });
     });
 
+    const bajaItemCancelado = socketOn('item:cancelado', (data) => {
+      if (!data || esDuplicado(data.eventId)) return;
+      setPedidos((prev) => aplicarItemCancelado(prev, data));
+    });
+
     return () => {
       bajaStatus?.();
       bajaCreated?.();
+      bajaItemCancelado?.();
     };
   }, [socketOn, esDuplicado, comensal]);
 

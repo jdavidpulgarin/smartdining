@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   extraerEmisorPedido,
   formatearMensajePedidoCreado,
+  formatearMensajeItemCancelado,
 } from './notificacionesMesa';
 
 describe('extraerEmisorPedido', () => {
@@ -60,5 +61,29 @@ describe('formatearMensajePedidoCreado', () => {
   it('devuelve null si no hay datos de pedido', () => {
     expect(formatearMensajePedidoCreado(null, 'Ana')).toBeNull();
     expect(formatearMensajePedidoCreado({}, 'Ana')).toBeNull();
+  });
+});
+
+describe('formatearMensajeItemCancelado (J-14)', () => {
+  it('muestra "<comensal> quitó <nombre>" cuando lo quita otro comensal', () => {
+    expect(
+      formatearMensajeItemCancelado(
+        { comensal: 'Ana', nombre: 'Bandeja paisa' },
+        'Beto'
+      )
+    ).toBe('Ana quitó Bandeja paisa');
+  });
+
+  it('devuelve null si el comensal del evento soy yo (comparando por clave)', () => {
+    expect(
+      formatearMensajeItemCancelado(
+        { comensal: 'Ána María', nombre: 'Bandeja paisa' },
+        'ana  maria'
+      )
+    ).toBeNull();
+  });
+
+  it('devuelve null si evento es nulo', () => {
+    expect(formatearMensajeItemCancelado(null, 'Beto')).toBeNull();
   });
 });

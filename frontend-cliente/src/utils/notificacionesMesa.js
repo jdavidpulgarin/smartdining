@@ -1,6 +1,7 @@
 /**
  * Utilidades puras para procesar y formatear eventos de la mesa en tiempo real.
  */
+import { claveAlias } from './apodo';
 
 /**
  * Extrae el nombre o alias del comensal emisor de un evento de pedido.
@@ -62,7 +63,39 @@ export function formatearMensajePedidoCreado(data, miAlias) {
   return 'Se envió un pedido de la mesa';
 }
 
+/**
+ * Formatea el aviso breve cuando otro comensal de la mesa quita un plato (`item:cancelado`).
+ * Si el evento corresponde al comensal actual (por clave normalizada), devuelve `null`.
+ *
+ * @param {object} evento - Payload `{ comensal, nombre, ... }`
+ * @param {string|null} [miAlias]
+ * @returns {string|null}
+ */
+export function formatearMensajeItemCancelado(evento, miAlias = null) {
+  if (!evento || typeof evento !== 'object') return null;
+
+  const actor = typeof evento.comensal === 'string' ? evento.comensal.trim() : '';
+  const claveActor = claveAlias(actor);
+  const claveMio = claveAlias(miAlias);
+
+  if (claveActor && claveMio && claveActor === claveMio) {
+    return null;
+  }
+
+  const plato =
+    typeof evento.nombre === 'string' && evento.nombre.trim()
+      ? evento.nombre.trim()
+      : 'un plato';
+
+  if (actor) {
+    return `${actor} quitó ${plato}`;
+  }
+
+  return `Se quitó ${plato}`;
+}
+
 export default {
   extraerEmisorPedido,
   formatearMensajePedidoCreado,
+  formatearMensajeItemCancelado,
 };
