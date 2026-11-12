@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCarrito } from '../context/CarritoContext';
+import { useMesaSocket } from '../context/MesaSocketContext';
 import { formatearPrecio } from '../utils/formato';
 import { obtenerApodo } from '../utils/apodo';
 import { pluralizar } from '../utils/pluralizar';
@@ -14,6 +15,7 @@ import {
   faltantesDelItem,
   resumenFaltantes,
   accionErrorPedido,
+  actualizarMarcasPorDisponibilidad,
 } from '../utils/sinStock';
 
 function Carrito() {
@@ -31,6 +33,7 @@ function Carrito() {
     vaciarCarrito,
     marcarFaltantesEnMenu,
   } = useCarrito();
+  const { on: socketOn } = useMesaSocket();
 
   const [confirmandoVaciar, setConfirmandoVaciar] = useState(false);
   const [modalConfirmarAbierto, setModalConfirmarAbierto] = useState(false);
@@ -47,12 +50,47 @@ function Carrito() {
     [misLineas, faltantesStock]
   );
   const tieneFaltantesPendientes = resumenStock.idsLineasAfectadas.length > 0;
+  const errorMarcabaLineas =
+    (errorPedido?.idsLineasAfectadas?.length ?? 0) > 0;
   const errorPedidoVisible =
     errorPedido?.tipo === 'sin_stock' &&
+    errorMarcabaLineas &&
     !tieneFaltantesPendientes &&
     validacionEnvio.ok
       ? null
       : errorPedido;
+
+  useEffect(() => {
+    if (!socketOn) return undefined;
+    const bajaPlato = socketOn('plato:disponibilidad', (data) => {
+      const idPlato = Number(data?.id_plato ?? data?.idPlato);
+      const disponible = Boolean(data?.disponible);
+      if (!idPlato || !disponible) return;
+      setFaltantesStock((prev) =>
+        actualizarMarcasPorDisponibilidad(prev, {
+          tipo: 'plato',
+          id: idPlato,
+          disponible: true,
+        })
+      );
+    });
+    const bajaIng = socketOn('ingrediente:disponibilidad', (data) => {
+      const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
+      const disponible = Boolean(data?.disponible);
+      if (!idIng || !disponible) return;
+      setFaltantesStock((prev) =>
+        actualizarMarcasPorDisponibilidad(prev, {
+          tipo: 'ingrediente',
+          id: idIng,
+          disponible: true,
+        })
+      );
+    });
+    return () => {
+      bajaPlato?.();
+      bajaIng?.();
+    };
+  }, [socketOn]);
 
   useEffect(() => {
     if (bloqueoSegundos <= 0) return;
@@ -99,8 +137,12 @@ function Carrito() {
       if (infoError.tipo === 'sin_stock') {
         const listaFaltantes = infoError.faltantes || [];
         setFaltantesStock(listaFaltantes);
-        marcarFaltantesEnCache(listaFaltantes);
-        marcarFaltantesEnMenu?.(listaFaltantes);
+        if (listaFaltantes.length > 0) {
+          marcarFaltantesEnCache(listaFaltantes);
+          marcarFaltantesEnMenu?.(listaFaltantes);
+        } else {
+          recargarMenu();
+        }
         setModalConfirmarAbierto(false);
         setErrorPedido(infoError);
         return;
