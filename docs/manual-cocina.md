@@ -83,7 +83,7 @@ Cada tarjeta es un pedido. De arriba abajo:
 
 Arriba, grande: **Mesa 3**. Es a dónde va el pedido.
 
-Debajo, más pequeño, va el número del pedido (por ejemplo `ORD-001`). Sirve
+Debajo, más pequeño, va el número del pedido (por ejemplo `PED-261117-3F9A1`). Sirve
 para nombrarlo si tienes que preguntarle algo al mesero.
 
 ### 4.2 Los platos y las cantidades
