@@ -674,14 +674,14 @@ async function cancelarItem(req, res, next) {
 const MENSAJES_QUITAR_ITEM = {
   item_ya_cancelado: 'Ese plato ya estaba quitado del pedido',
   item_en_preparacion: 'Ese plato ya se está preparando: pídeselo al mesero',
-  pago_registrado: 'El pedido ya tiene un pago que quedaría por encima del total: pídeselo al mesero',
+  pago_registrado: 'El pedido ya tiene un pago registrado: pídeselo al mesero',
 };
 
 const MENSAJES_QUITAR_ITEM_PERSONAL = {
   item_ya_cancelado: 'Esa línea ya estaba cancelada',
   item_no_cancelable: 'Esa línea ya no se puede cancelar: ya se sirvió, o el pedido está entregado, pagado o '
     + 'cancelado, o es la última línea de un pedido que no puede pasar a cancelado desde su estado',
-  pago_registrado: 'El pedido tiene pagos que quedarían por encima del total nuevo: hay que reembolsar primero',
+  pago_registrado: 'El pedido ya tiene un pago registrado: hay que reembolsarlo antes de cancelar una línea',
 };
 
 /**

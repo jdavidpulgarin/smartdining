@@ -181,7 +181,7 @@ for (const [motivo, opcionesDb, nota] of [
   ['item_no_cancelable', { pedido: pedidoEn('entregado'), linea: lineaEn('pendiente') }, 'pedido entregado'],
   ['item_no_cancelable', { pedido: pedidoEn('pagado'), linea: lineaEn('pendiente') }, 'pedido pagado'],
   ['item_no_cancelable', { pedido: pedidoEn('cancelado'), linea: lineaEn('pendiente') }, 'pedido cancelado'],
-  ['pago_registrado', { pagoBloquea: true }, 'pago por encima del total nuevo'],
+  ['pago_registrado', { pagoBloquea: true }, 'con cualquier pago completado'],
 ]) {
   test(`personal cancela plato: ${nota} -> 409 ${motivo} y no se toca nada`, async () => {
     const e = escenario(opcionesDb);

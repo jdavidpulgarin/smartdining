@@ -552,12 +552,15 @@ async function cancelarItem(idPedido, idDetalle, actor) {
     } else if (pedido.estado !== 'recibido' || linea.estado_item !== 'pendiente') {
       return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.enPreparacion });
     }
+    // pago_registrado ESTRICTO (revisión de Jarrison): CUALQUIER transacción
+    // completada bloquea, al comensal y al personal. Ya no se mira si el total
+    // nuevo quedaría por debajo de lo pagado: estado_pago (script 22) no se
+    // recalcula al bajar el total, así que tocar un pedido con pagos dejaría
+    // su estado financiero mal hasta que se arregle eso en la base.
     const pago = await client.query(
-      `SELECT COALESCE(SUM(t.monto), 0) > 0
-              AND ($2::numeric - $3::numeric) < COALESCE(SUM(t.monto), 0) AS bloquea
-         FROM transacciones t
-        WHERE t.id_pedido = $1::int AND t.estado_transaccion = 'completada'`,
-      [idPedido, pedido.total, linea.subtotal]
+      `SELECT EXISTS (SELECT 1 FROM transacciones t
+                       WHERE t.id_pedido = $1::int AND t.estado_transaccion = 'completada') AS bloquea`,
+      [idPedido]
     );
     if (pago.rows[0].bloquea) return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado });
 

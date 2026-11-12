@@ -299,13 +299,13 @@ test('d2. última línea con el pedido en "listo": 409 item_no_cancelable (listo
   assert.deepStrictEqual(await filaPedido(idPedido), antes);
 });
 
-test('e. pago registrado que quedaría por encima del total nuevo: 409 pago_registrado y nada cambia', async (t) => {
+test('e. con CUALQUIER pago completado (uno parcial pequeño): 409 pago_registrado y nada cambia', async (t) => {
   if (!hayBase) return t.skip('sin base de datos');
   const idMesa = await mesaAbierta();
   const { idPedido, detalles: [primera] } = await pedidoCon(idMesa, dos());
-  const total = (await filaPedido(idPedido)).total;
-  const monto = total - primera.subtotal + 500;
-  assert.ok(monto <= total);
+  // Regla estricta (revisión de Jarrison): basta un pago, aunque el total
+  // nuevo siguiera cubriéndolo de sobra.
+  const monto = 100;
   await sonda.query(
     `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion)
      VALUES ($1::int, 'efectivo', $2::numeric, 'completada')`,
