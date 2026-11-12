@@ -2394,10 +2394,15 @@ cada uno con su `estado_item`. `total` es un número:
 **Tiempo real, después del COMMIT** (la respuesta no los espera):
 
 1. `POST /internal/item-cancelado` con `{ id_pedido, id_mesa, codigo_pedido, id_detalle,
-   id_plato, nombre, comensal, total, estado_pedido, eventId }`, con los mismos reintentos
-   que los demás avisos (solo 500/502/503 `ERROR_INTERNO`, mismo `eventId`).
+   id_plato, nombre, comensal, total, estado_pedido, origen, eventId }`, con los mismos
+   reintentos que los demás avisos (solo 500/502/503 `ERROR_INTERNO`, mismo `eventId`).
    **Pendiente de Roberto:** la ruta aún no existe en el socket-server; mientras tanto
    responde 404, que queda en el log y no cambia la respuesta.
+
+   `origen` dice **quién** quitó el plato: `"comensal"` (su sesión de QR; es lo que manda
+   esta ruta) o `"personal"` (la cancelación del personal). Lo pidió Juan y lo aceptó
+   Roberto en su #181. **Un consumidor que no lo reciba debe asumir `"comensal"`**, el
+   único origen que existía antes de este campo.
 2. Si el pedido quedó `cancelado`, además el `POST /internal/order-status` de siempre
    (`order:status` → `cancelado`).
 

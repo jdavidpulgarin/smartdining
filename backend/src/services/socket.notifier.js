@@ -320,10 +320,22 @@ async function notificarCambioEstado({ id_pedido, id_mesa, codigo_pedido, estado
  *
  * Con reintento, igual que los demás avisos que lo usan: solo ante 500/502/503
  * `ERROR_INTERNO`, siempre con el mismo eventId. `total` va como NÚMERO JSON.
+ *
+ * `origen` dice quién quitó el plato: 'comensal' (su sesión de QR) o 'personal'
+ * (pedido de Juan, aceptado por Roberto en su #181). Un consumidor que no lo
+ * reciba debe asumir 'comensal', que era el único origen antes de este campo.
  */
+const ORIGENES_ITEM_CANCELADO = Object.freeze(['comensal', 'personal']);
+
 async function notificarItemCancelado({
-  id_pedido, id_mesa, codigo_pedido, id_detalle, id_plato, nombre, comensal, total, estado_pedido,
+  id_pedido, id_mesa, codigo_pedido, id_detalle, id_plato, nombre, comensal, total, estado_pedido, origen,
 }) {
+  // Como el resto del módulo, no lanza: un origen fuera del contrato es un error
+  // de programación y se registra sin mandar un aviso que el socket rechazaría.
+  if (!ORIGENES_ITEM_CANCELADO.includes(origen)) {
+    console.error(`[socket] /internal/item-cancelado: origen no valido (${origen}), no se envia`);
+    return { ok: false, motivo: 'ORIGEN_INVALIDO' };
+  }
   const resultado = await enviarConReintento('/internal/item-cancelado', {
     id_pedido,
     id_mesa,
@@ -334,6 +346,7 @@ async function notificarItemCancelado({
     comensal: comensal ?? null,
     total: Number(total),
     estado_pedido,
+    origen,
     eventId: nuevoEventId(),
   });
   if (!resultado.ok && resultado.motivo === 'HTTP_404') {

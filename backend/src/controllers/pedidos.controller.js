@@ -608,6 +608,7 @@ async function cancelarItem(req, res, next) {
       comensal: linea.comensal,
       total: pedido.total,
       estado_pedido: pedido.estado,
+      origen: 'comensal',
     })];
     if (pedidoCancelado) {
       pasos.push(() => socketNotifier.notificarCambioEstado({ ...pedido, estado_anterior: estadoAnterior }));

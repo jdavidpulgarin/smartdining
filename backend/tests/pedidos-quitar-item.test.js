@@ -261,8 +261,9 @@ test('quitar plato: 200 con el pedido; bloquea pedido y después línea; cancela
     assert.match(eventId, /^[0-9a-f-]{36}$/);
     assert.deepStrictEqual(resto, {
       id_pedido: PEDIDO, id_mesa: MESA, codigo_pedido: 'PED-261111-ABCDE', id_detalle: DETALLE, id_plato: 12,
-      nombre: 'Bandeja', comensal: 'Ana', total: 20000, estado_pedido: 'recibido',
+      nombre: 'Bandeja', comensal: 'Ana', total: 20000, estado_pedido: 'recibido', origen: 'comensal',
     });
+    assert.strictEqual(aviso.cuerpo.origen, 'comensal', 'el aviso del comensal dice que lo quitó el comensal');
     assert.strictEqual(e.socket.buscar('/internal/order-status'), undefined, 'el pedido sigue vivo');
   } finally {
     e.restaurar();
