@@ -11,6 +11,7 @@
  */
 
 import { mesasApi } from './api'
+import { tokenDeUrl } from '../utils/qrRotacion'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
 
@@ -116,16 +117,19 @@ export async function generarTokenQrMesa(idMesa, ttlMinutos = 240) {
  * Rota el token QR de una mesa en curso: POST /api/mesas/:id/rotar-qr.
  * Sin respaldo (P-13): si el backend falla, el error sube a la pantalla.
  */
-export async function rotarTokenQrMesa(idMesa, ttlMinutos = 240) {
+export async function rotarTokenQrMesa(idMesa, ttlMinutos = 240, { soloSiVacia = false } = {}) {
   const numId = Number(idMesa)
 
-  const data = await mesasApi.rotarQr(numId)
-  if (!data?.token) {
+  const data = await mesasApi.rotarQr(numId, { soloSiVacia })
+  // rotar-qr responde { url, expira_en, mesa }: el token NO viaja suelto (el
+  // contrato solo lo da en /abrir), pero va dentro del url del comensal.
+  const token = data?.token || tokenDeUrl(data?.url)
+  if (!token) {
     throw new Error('El servidor no devolvió el nuevo código QR de la mesa')
   }
-  const decodificado = decodificarTokenQr(data.token)
+  const decodificado = decodificarTokenQr(token)
   return {
-    token: data.token,
+    token,
     url: data.url,
     id_mesa: numId,
     emitido_en: decodificado.emitido_en || Date.now(),
