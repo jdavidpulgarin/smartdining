@@ -422,6 +422,13 @@ const TABLA = [
 
   // --- Reportes (D-07): cifras de negocio, solo admin -----------------------
   { metodo: 'GET', patron: '/api/reportes', url: '/api/reportes?rango=hoy', roles: ['admin'] },
+  // Consumo de inventario (plan v1.1, D-17 P3).
+  {
+    metodo: 'GET',
+    patron: '/api/reportes/consumo',
+    url: '/api/reportes/consumo?desde=2026-11-01&hasta=2026-11-02',
+    roles: ['admin'],
+  },
 ];
 
 /** Clave con la que se compara contra `rutasRegistradas()`. */
