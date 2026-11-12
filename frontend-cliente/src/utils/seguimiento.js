@@ -1,6 +1,9 @@
 /**
  * Utilidades puras para el estado, formato y seguimiento del pedido.
  */
+import { claveAlias } from './apodo';
+
+export { claveAlias };
 
 const ESTADOS_INFO = {
   recibido: {
@@ -144,7 +147,7 @@ export function infoEstado(estado, numeroMesa = null) {
 export function normalizarPedido(pedido, miAlias = null) {
   if (!pedido || typeof pedido !== 'object') return null;
 
-  const aliasNormalizado = String(miAlias || '').trim().toLowerCase();
+  const miClave = claveAlias(miAlias);
 
   const rawItems = Array.isArray(pedido.detalles)
     ? pedido.detalles
@@ -162,19 +165,31 @@ export function normalizarPedido(pedido, miAlias = null) {
       item.subtotal ?? (precioUnitario * cantidad)
     );
     const comensal = item.comensal ? String(item.comensal).trim() : null;
+    const estadoItem = item.estado_item
+      ? String(item.estado_item).trim().toLowerCase()
+      : null;
+    const origenRaw = item.origen_cancelacion ?? item.origen ?? null;
+    const origenCancelacion =
+      typeof origenRaw === 'string' && origenRaw.trim()
+        ? origenRaw.trim().toLowerCase()
+        : null;
+    const claveComensal = claveAlias(comensal);
     const esMio = Boolean(
-      aliasNormalizado &&
-        comensal &&
-        comensal.toLowerCase() === aliasNormalizado
+      miClave &&
+        claveComensal &&
+        claveComensal === miClave
     );
 
     return {
       id_detalle: item.id_detalle ?? item.id ?? idx,
+      id_plato: item.id_plato ?? null,
       plato_nombre: nombre,
       nombre,
       cantidad,
       precio_unitario: precioUnitario,
       subtotal,
+      estado_item: estadoItem,
+      ...(origenCancelacion ? { origen_cancelacion: origenCancelacion } : {}),
       notas: item.notas || null,
       comensal,
       esMio,
@@ -182,17 +197,17 @@ export function normalizarPedido(pedido, miAlias = null) {
     };
   });
 
-  const pedidoComensal = pedido.comensal
-    ? String(pedido.comensal).trim().toLowerCase()
-    : null;
+  const clavePedidoComensal = claveAlias(pedido.comensal);
   const algunItemEsMio = detalles.some((d) => d.esMio);
   const raizEsMio = Boolean(
-    (aliasNormalizado && pedidoComensal && pedidoComensal === aliasNormalizado) ||
+    (miClave && clavePedidoComensal && clavePedidoComensal === miClave) ||
       pedido.esMio === true
   );
   const esMio = algunItemEsMio || raizEsMio;
 
-  const totalCalculado = detalles.reduce((acc, d) => acc + d.subtotal, 0);
+  const totalCalculado = detalles
+    .filter((d) => d.estado_item !== 'cancelado')
+    .reduce((acc, d) => acc + d.subtotal, 0);
   const total = Number(pedido.total ?? totalCalculado);
 
   const id_pedido = pedido.id_pedido ?? pedido.id ?? null;
@@ -205,6 +220,7 @@ export function normalizarPedido(pedido, miAlias = null) {
     codigo_pedido: pedido.codigo_pedido ?? pedido.codigo ?? '',
     id_mesa: pedido.id_mesa ?? null,
     estado: String(pedido.estado || 'recibido').toLowerCase(),
+    ...(pedido.cancelado_por ? { cancelado_por: pedido.cancelado_por } : {}),
     total,
     creado_en: pedido.creado_en || pedido.fecha || new Date().toISOString(),
     detalles,
@@ -226,13 +242,27 @@ export function aplicarCambioEstado(pedidos, evento) {
   }
 
   const idBuscado = String(evento.id_pedido);
-  const nuevoEstado = String(evento.estado || '').toLowerCase();
+  const nuevoEstado = String(evento.estado || '').trim().toLowerCase();
+  const origenEvento =
+    typeof evento.origen === 'string' && evento.origen.trim()
+      ? evento.origen.trim().toLowerCase()
+      : null;
+  const origenCancelacion =
+    origenEvento === 'comensal' ? 'comensal' : 'personal';
 
   return pedidos.map((p) => {
     if (String(p.id_pedido) === idBuscado) {
+      const yaCancelado = String(p.estado || '').toLowerCase() === 'cancelado';
+      const canceladoPor =
+        nuevoEstado === 'cancelado'
+          ? (yaCancelado
+              ? p.cancelado_por
+              : (origenCancelacion === 'comensal' ? 'comensal' : 'restaurante'))
+          : p.cancelado_por;
       return {
         ...p,
         estado: nuevoEstado,
+        ...(canceladoPor ? { cancelado_por: canceladoPor } : {}),
         actualizado_en: evento.emitidoEn || new Date().toISOString(),
       };
     }
@@ -252,16 +282,16 @@ export function separarPedidos(pedidos, miAlias = null) {
     return { misPedidos: [], otrosPedidos: [] };
   }
 
-  const aliasNorm = String(miAlias || '').trim().toLowerCase();
+  const miClave = claveAlias(miAlias);
   const misPedidos = [];
   const otrosPedidos = [];
 
   for (const p of pedidos) {
-    const esMio = aliasNorm
+    const esMio = miClave
       ? Boolean(
           p.esMio ||
-          p.detalles?.some((d) => d.comensal?.toLowerCase() === aliasNorm) ||
-          p.comensal?.toLowerCase() === aliasNorm
+          p.detalles?.some((d) => claveAlias(d.comensal) === miClave) ||
+          claveAlias(p.comensal) === miClave
         )
       : Boolean(p.esMio);
 
@@ -428,12 +458,324 @@ export function resumenPedidosActivos(mios) {
   };
 }
 
+/**
+ * Indica si el comensal actual puede quitar una línea de un pedido (J-14).
+ *
+ * Solo es true cuando el pedido sigue en `recibido`, la línea está `pendiente`
+ * y la clave normalizada del comensal de la línea coincide con `yo` (`null` → `false`).
+ *
+ * @param {object|null|undefined} item - Línea del pedido
+ * @param {{ yo?: string|null, estadoPedido?: string|null }} [contexto]
+ * @returns {boolean}
+ */
+export function puedeQuitar(item, { yo, estadoPedido } = {}) {
+  if (!item || typeof item !== 'object') return false;
+  if (String(estadoPedido || '').trim().toLowerCase() !== 'recibido') {
+    return false;
+  }
+  if (String(item.estado_item || '').trim().toLowerCase() !== 'pendiente') {
+    return false;
+  }
+  const claveItem = claveAlias(item.comensal);
+  const claveYo = claveAlias(yo);
+  if (!claveItem || !claveYo) return false;
+  return claveItem === claveYo;
+}
+
+/**
+ * Traduce un error de POST /pedidos/:id/items/:id_detalle/cancelar a la acción de UI (J-14).
+ *
+ * @param {unknown} error
+ * @returns {{ tipo: string, mensaje: string|null, refrescar: boolean }}
+ */
+export function accionErrorQuitar(error) {
+  const motivo = String(error?.motivo ?? error?.data?.motivo ?? '')
+    .trim()
+    .toLowerCase();
+  const status = Number(error?.status ?? 0);
+
+  if (motivo === 'item_ya_cancelado') {
+    return { tipo: 'silencioso', mensaje: null, refrescar: true };
+  }
+  if (motivo === 'item_en_preparacion') {
+    return {
+      tipo: 'en_preparacion',
+      mensaje: 'Cocina ya empezó a preparar este plato.',
+      refrescar: true,
+    };
+  }
+  if (motivo === 'pago_registrado') {
+    return {
+      tipo: 'pago_registrado',
+      mensaje: 'Ya hay un pago registrado; pídele ayuda al mesero.',
+      refrescar: false,
+    };
+  }
+  if (
+    motivo === 'no_es_tuyo' ||
+    motivo === 'no_encontrado' ||
+    status === 403 ||
+    status === 404
+  ) {
+    return {
+      tipo: 'no_disponible',
+      mensaje: 'No pudimos quitar este plato.',
+      refrescar: true,
+    };
+  }
+
+  return {
+    tipo: 'error',
+    mensaje: 'No pudimos quitar el plato. Inténtalo de nuevo.',
+    refrescar: false,
+  };
+}
+
+/**
+ * Aplica de forma idempotente un evento `item:cancelado` sobre la lista de pedidos (J-14).
+ * Marca la línea como `cancelado` y actualiza el total y estado del pedido.
+ *
+ * @param {Array<object>} pedidos
+ * @param {object} evento - `{ id_pedido, id_detalle, total, estado_pedido, emitidoEn }`
+ * @returns {Array<object>}
+ */
+export function aplicarItemCancelado(pedidos, evento) {
+  if (!Array.isArray(pedidos)) return [];
+  if (!evento || evento.id_pedido == null || evento.id_detalle == null) {
+    return pedidos;
+  }
+
+  const idPedidoBuscado = String(evento.id_pedido);
+  const idDetalleBuscado = String(evento.id_detalle);
+
+  return pedidos.map((pedido) => {
+    if (String(pedido.id_pedido) !== idPedidoBuscado) return pedido;
+
+    const rawDetalles = Array.isArray(pedido.detalles)
+      ? pedido.detalles
+      : Array.isArray(pedido.items)
+        ? pedido.items
+        : [];
+
+    const origenEvento =
+      typeof evento.origen === 'string' && evento.origen.trim()
+        ? evento.origen.trim().toLowerCase()
+        : null;
+
+    const detallesActualizados = rawDetalles.map((detalle) => {
+      if (String(detalle.id_detalle ?? detalle.id) !== idDetalleBuscado) {
+        return detalle;
+      }
+      const origenCancelacion =
+        origenEvento === 'personal'
+          ? 'personal'
+          : origenEvento === 'comensal'
+            ? 'comensal'
+            : detalle.origen_cancelacion || 'comensal';
+      return {
+        ...detalle,
+        estado_item: 'cancelado',
+        origen_cancelacion: origenCancelacion,
+      };
+    });
+
+    const estadoEvento = evento.estado_pedido ?? evento.estado;
+    const estadoNuevo = estadoEvento
+      ? String(estadoEvento).trim().toLowerCase()
+      : detallesActualizados.length > 0 &&
+          detallesActualizados.every(
+            (d) => String(d.estado_item || '').trim().toLowerCase() === 'cancelado'
+          )
+        ? 'cancelado'
+        : pedido.estado;
+
+    const tieneTotalEvento =
+      evento.total != null &&
+      evento.total !== '' &&
+      Number.isFinite(Number(evento.total));
+    const totalNuevo = tieneTotalEvento
+      ? Number(evento.total)
+      : detallesActualizados
+          .filter((d) => d.estado_item !== 'cancelado')
+          .reduce((acc, d) => acc + (Number(d.subtotal) || 0), 0);
+
+    const huboPersonal = detallesActualizados.some(
+      (d) =>
+        String(d.estado_item || '').trim().toLowerCase() === 'cancelado' &&
+        String(d.origen_cancelacion ?? d.origen ?? '').trim().toLowerCase() === 'personal'
+    );
+    const canceladoPor =
+      estadoNuevo === 'cancelado'
+        ? (huboPersonal || origenEvento === 'personal' ? 'restaurante' : 'comensal')
+        : pedido.cancelado_por;
+
+    return {
+      ...pedido,
+      estado: estadoNuevo,
+      ...(canceladoPor ? { cancelado_por: canceladoPor } : {}),
+      total: totalNuevo,
+      detalles: detallesActualizados,
+      items: detallesActualizados,
+      ...(evento.emitidoEn ? { actualizado_en: evento.emitidoEn } : {}),
+    };
+  });
+}
+
+/**
+ * Incorpora un pedido crudo en la lista solo si no existe aún ese `id_pedido`,
+ * preservando la misma referencia si ya está presente (J-07, J-14).
+ *
+ * @param {Array<object>} pedidos
+ * @param {object|null|undefined} pedidoCrudo
+ * @param {string|null} [miAlias]
+ * @returns {Array<object>}
+ */
+export function incorporarPedido(pedidos, pedidoCrudo, miAlias = null) {
+  const lista = Array.isArray(pedidos) ? pedidos : [];
+  const normalizado = normalizarPedido(pedidoCrudo, miAlias);
+  if (!normalizado || normalizado.id_pedido == null) return lista;
+
+  const idBuscado = String(normalizado.id_pedido);
+  if (lista.some((p) => String(p.id_pedido) === idBuscado)) {
+    return lista;
+  }
+
+  return [normalizado, ...lista];
+}
+
+/**
+ * Reemplaza en la lista un pedido con la respuesta completa devuelta por la API
+ * (por ejemplo el `pedido` del 200 al cancelar un ítem).
+ *
+ * @param {Array<object>} pedidos
+ * @param {object} pedidoCrudo
+ * @param {string|null} [miAlias]
+ * @returns {Array<object>}
+ */
+export function reemplazarPedido(pedidos, pedidoCrudo, miAlias = null) {
+  if (!Array.isArray(pedidos)) return [];
+  const normalizado = normalizarPedido(pedidoCrudo, miAlias);
+  if (!normalizado || normalizado.id_pedido == null) return pedidos;
+
+  const idBuscado = String(normalizado.id_pedido);
+  const existe = pedidos.some((p) => String(p.id_pedido) === idBuscado);
+  if (!existe) return [normalizado, ...pedidos];
+
+  return pedidos.map((p) => {
+    if (String(p.id_pedido) !== idBuscado) return p;
+    const canceladoPor =
+      normalizado.estado === 'cancelado'
+        ? (normalizado.cancelado_por || p.cancelado_por || 'comensal')
+        : normalizado.cancelado_por;
+    return {
+      ...p,
+      ...normalizado,
+      ...(canceladoPor ? { cancelado_por: canceladoPor } : {}),
+      creado_en: pedidoCrudo.creado_en || p.creado_en,
+      esMio: p.esMio || normalizado.esMio,
+    };
+  });
+}
+
+/**
+ * Devuelve el mensaje que debe mostrar la tarjeta principal de seguimiento para un pedido.
+ * Si quedó `cancelado` porque el propio comensal quitó todos los platos (todas las líneas
+ * canceladas con origen `'comensal'` o sin origen, y no fue cancelado por el restaurante),
+ * devuelve `"Quitaste todos los platos de este pedido."`.
+ *
+ * @param {object|null|undefined} pedido
+ * @param {number|string|null} [numeroMesa]
+ * @returns {string}
+ */
+export function mensajeEstadoTarjeta(pedido, numeroMesa = null) {
+  const info = infoEstado(pedido?.estado, numeroMesa);
+  if (!pedido || info.clave !== 'cancelado') {
+    return info.mensaje;
+  }
+
+  if (pedido.esMio === false) {
+    return info.mensaje;
+  }
+
+  if (pedido.cancelado_por === 'restaurante') {
+    return 'Cancelado por el restaurante';
+  }
+
+  if (pedido.cancelado_por === 'comensal') {
+    return 'Quitaste todos los platos de este pedido.';
+  }
+
+  const lineas = Array.isArray(pedido.detalles)
+    ? pedido.detalles
+    : Array.isArray(pedido.items)
+      ? pedido.items
+      : [];
+
+  if (lineas.length === 0) {
+    return 'Este pedido fue cancelado.';
+  }
+
+  const origenes = lineas.map((d) => {
+    const raw = d?.origen_cancelacion ?? d?.origen;
+    return typeof raw === 'string' && raw.trim() ? raw.trim().toLowerCase() : null;
+  });
+
+  const hayPersonal = origenes.some((o) => o === 'personal');
+  const todasComensal = origenes.every((o) => o === 'comensal');
+
+  if (hayPersonal) {
+    return 'Cancelado por el restaurante';
+  }
+
+  if (todasComensal) {
+    return 'Quitaste todos los platos de este pedido.';
+  }
+
+  return 'Este pedido fue cancelado.';
+}
+
+/**
+ * Devuelve la etiqueta visual para una línea cancelada según su origen (J-14).
+ * - Si `origen` / `origen_cancelacion` === `'personal'` → `"Cancelado por el restaurante"`.
+ * - Si `origen` / `origen_cancelacion` === `'comensal'` → `"Quitado"`.
+ * - Si el origen es desconocido (null/undefined/otro) → `"Cancelado"`.
+ * - Si la línea no está cancelada → `null`.
+ *
+ * @param {object|null|undefined} item
+ * @returns {'Cancelado por el restaurante'|'Quitado'|'Cancelado'|null}
+ */
+export function etiquetaItemCancelado(item) {
+  if (!item || String(item.estado_item || '').trim().toLowerCase() !== 'cancelado') {
+    return null;
+  }
+  const raw = item.origen_cancelacion ?? item.origen;
+  if (raw == null || (typeof raw === 'string' && !raw.trim())) {
+    return 'Cancelado';
+  }
+  const origen = String(raw).trim().toLowerCase();
+  if (origen === 'personal') {
+    return 'Cancelado por el restaurante';
+  }
+  if (origen === 'comensal') {
+    return 'Quitado';
+  }
+  return 'Cancelado';
+}
+
 export default {
   CLAVE_MIS_PEDIDOS_IDS,
   CLAVE_ULTIMO_PEDIDO,
+  claveAlias,
   infoEstado,
   normalizarPedido,
   aplicarCambioEstado,
+  aplicarItemCancelado,
+  incorporarPedido,
+  reemplazarPedido,
+  puedeQuitar,
+  accionErrorQuitar,
+  etiquetaItemCancelado,
+  mensajeEstadoTarjeta,
   separarPedidos,
   pedidoPrincipal,
   haceCuanto,

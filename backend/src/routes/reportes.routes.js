@@ -8,5 +8,7 @@ const { requireAuth, requireRole } = require('../middleware/auth.middleware');
 const router = express.Router();
 
 router.get('/', requireAuth, requireRole('admin'), ctrl.obtener);
+// Consumo de inventario por insumo y día (plan v1.1, D-17 P3). Solo admin.
+router.get('/consumo', requireAuth, requireRole('admin'), ctrl.consumo);
 
 module.exports = router;

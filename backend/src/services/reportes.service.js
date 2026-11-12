@@ -384,7 +384,184 @@ async function obtenerReporte(rango) {
   return { reporte, desdeCache: false };
 }
 
+/* -------------------------------------------------------------------------- *
+ * Consumo de inventario (plan v1.1, D-17 P3): GET /api/reportes/consumo
+ * -------------------------------------------------------------------------- */
+
+/** Rango máximo, contando los dos extremos: del 1 al 31 de un mes cabe. */
+const DIAS_MAXIMOS_CONSUMO = 31;
+
+/**
+ * SIGNOS de movimientos_inventario (comprobados en 27_inventario.sql, no
+ * supuestos):
+ *   reserva     -X  con id_detalle   (fn_tr_reservar_inventario)
+ *   devolucion  +X  con id_detalle   (fn_cerrar_reserva_detalle: EXACTAMENTE lo reservado)
+ *   merma        0  con id_detalle   (fn_cerrar_reserva_detalle en una cancelación en
+ *                                     cocina: la reserva NO vuelve)
+ *   merma       -X  sin id_detalle   (registrar_movimiento_inventario: merma manual)
+ *   entrada     +X                   (registrar_movimiento_inventario)
+ *   ajuste      ±X                   (registrar_movimiento_inventario, con su signo)
+ * Los índices únicos uq_movimiento_reserva y uq_movimiento_cierre garantizan UNA
+ * reserva y UN cierre (devolución o merma) por (id_detalle, id_insumo).
+ *
+ * Cómo sale cada columna, en positivo y en la unidad del insumo:
+ *   - consumo: lo reservado por las reservas del día cuya línea NO tiene cierre.
+ *     Es "reservas menos devoluciones" sin días negativos: una devolución vuelve
+ *     exactamente su reserva, así que esa reserva no se cuenta. Y tampoco las de
+ *     líneas cerradas con MERMA (canceladas en cocina): eso no se vendió.
+ *     Día: el de la reserva.
+ *   - merma: las mermas manuales (-X) más lo reservado de las líneas canceladas
+ *     en cocina (la merma de cierre va en 0; la cantidad se toma de su reserva,
+ *     misma id_detalle e id_insumo). Día: el de la merma.
+ *   - entradas: +X. ajustes: ±X (puede ser negativo).
+ *
+ * Los días son de Bogotá y los calcula la base, como GET /transacciones (#158):
+ * desde_ts = 00:00 de `desde` y hasta_ts = 00:00 del día siguiente a `hasta`,
+ * en `zona`, y el filtro es `creado_en >= desde_ts AND creado_en < hasta_ts`,
+ * sin funciones sobre la columna (así sirven idx_movimientos_fecha e
+ * idx_movimientos_insumo_fecha).
+ *
+ * Todo en UNA transacción de solo lectura (REPEATABLE READ, así las dos
+ * consultas ven la misma foto): la validación contra "hoy" e id_insumo, y los
+ * datos. Los totales salen de la base (SUM ... OVER), no de sumar en
+ * JavaScript, para no arrastrar errores de coma flotante.
+ *
+ * @param {{desde: string, hasta: string, idInsumo?: number|null, zona?: string, ahora?: Date|string|null}} opciones
+ *   `desde` y `hasta` AAAA-MM-DD ya validados (existen, hasta >= desde, rango
+ *   <= DIAS_MAXIMOS_CONSUMO). `ahora` solo lo fijan las pruebas.
+ * @returns {Promise<{invalido: 'futura', hoy: string} | {insumoNoExiste: true}
+ *   | {desde: string, hasta: string, insumos: object[]}>}
+ */
+async function consumoInventario({ desde, hasta, idInsumo = null, zona = ZONA, ahora = null }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+
+    const v = await client.query(
+      `SELECT to_char((COALESCE($2::timestamptz, now()) AT TIME ZONE $1::text)::date, 'YYYY-MM-DD') AS hoy,
+              $3::text::date > (COALESCE($2::timestamptz, now()) AT TIME ZONE $1::text)::date AS futura,
+              ($4::int IS NULL OR EXISTS (SELECT 1 FROM insumos WHERE id_insumo = $4::int)) AS insumo_existe`,
+      [zona, ahora, hasta, idInsumo]
+    );
+    const validez = v.rows[0];
+    if (validez.futura) {
+      await client.query('ROLLBACK');
+      return { invalido: 'futura', hoy: validez.hoy };
+    }
+    if (!validez.insumo_existe) {
+      await client.query('ROLLBACK');
+      return { insumoNoExiste: true };
+    }
+
+    const { rows } = await client.query(
+      `WITH lim AS (
+         SELECT $2::text::date::timestamp AT TIME ZONE $1::text       AS desde_ts,
+                ($3::text::date + 1)::timestamp AT TIME ZONE $1::text AS hasta_ts
+       ),
+       mov AS (
+         SELECT m.* FROM movimientos_inventario m, lim l
+          WHERE m.creado_en >= l.desde_ts AND m.creado_en < l.hasta_ts
+            AND ($4::int IS NULL OR m.id_insumo = $4::int)
+       ),
+       partes AS (
+         -- consumo: reservas del rango sin cierre (ni devolución ni merma)
+         SELECT r.id_insumo, (r.creado_en AT TIME ZONE $1::text)::date AS dia,
+                -r.cantidad AS consumo, 0::numeric AS merma, 0::numeric AS entradas, 0::numeric AS ajustes
+           FROM mov r
+          WHERE r.tipo = 'reserva'
+            AND NOT EXISTS (SELECT 1 FROM movimientos_inventario c
+                             WHERE c.tipo IN ('devolucion', 'merma')
+                               AND c.id_detalle = r.id_detalle AND c.id_insumo = r.id_insumo)
+         UNION ALL
+         -- merma de cocina: el cierre va en 0; lo perdido es lo que se reservó
+         SELECT m.id_insumo, (m.creado_en AT TIME ZONE $1::text)::date, 0, -r.cantidad, 0, 0
+           FROM mov m
+           JOIN movimientos_inventario r
+             ON r.tipo = 'reserva' AND r.id_detalle = m.id_detalle AND r.id_insumo = m.id_insumo
+          WHERE m.tipo = 'merma' AND m.id_detalle IS NOT NULL
+         UNION ALL
+         -- merma manual (sin línea): cantidad negativa
+         SELECT m.id_insumo, (m.creado_en AT TIME ZONE $1::text)::date, 0, -m.cantidad, 0, 0
+           FROM mov m WHERE m.tipo = 'merma' AND m.id_detalle IS NULL
+         UNION ALL
+         SELECT m.id_insumo, (m.creado_en AT TIME ZONE $1::text)::date, 0, 0, m.cantidad, 0
+           FROM mov m WHERE m.tipo = 'entrada'
+         UNION ALL
+         SELECT m.id_insumo, (m.creado_en AT TIME ZONE $1::text)::date, 0, 0, 0, m.cantidad
+           FROM mov m WHERE m.tipo = 'ajuste'
+       ),
+       dias AS (
+         SELECT id_insumo, dia, SUM(consumo) AS consumo, SUM(merma) AS merma,
+                SUM(entradas) AS entradas, SUM(ajustes) AS ajustes
+           FROM partes GROUP BY id_insumo, dia
+       ),
+       elegidos AS (
+         SELECT id_insumo FROM dias
+         UNION
+         SELECT $4::int WHERE $4::int IS NOT NULL
+       )
+       SELECT i.id_insumo, i.nombre, i.unidad,
+              to_char(d.dia, 'YYYY-MM-DD') AS fecha,
+              d.consumo, d.merma, d.entradas, d.ajustes,
+              COALESCE(SUM(d.consumo)  OVER w, 0) AS total_consumo,
+              COALESCE(SUM(d.merma)    OVER w, 0) AS total_merma,
+              COALESCE(SUM(d.entradas) OVER w, 0) AS total_entradas,
+              COALESCE(SUM(d.ajustes)  OVER w, 0) AS total_ajustes
+         FROM elegidos e
+         JOIN insumos i ON i.id_insumo = e.id_insumo
+         LEFT JOIN dias d ON d.id_insumo = i.id_insumo
+       WINDOW w AS (PARTITION BY i.id_insumo)
+        ORDER BY i.nombre, i.id_insumo, d.dia`,
+      [zona, desde, hasta, idInsumo]
+    );
+
+    await client.query('COMMIT');
+    return { desde, hasta, insumos: agruparConsumo(rows) };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Filas (insumo x día, ya ordenadas) -> la forma de la respuesta. Sin sumar nada. */
+function agruparConsumo(rows) {
+  const insumos = [];
+  let actual = null;
+  for (const f of rows) {
+    if (!actual || actual.id_insumo !== f.id_insumo) {
+      actual = {
+        id_insumo: f.id_insumo,
+        nombre: f.nombre,
+        unidad: f.unidad,
+        total: {
+          consumo: Number(f.total_consumo),
+          merma: Number(f.total_merma),
+          entradas: Number(f.total_entradas),
+          ajustes: Number(f.total_ajustes),
+        },
+        dias: [],
+      };
+      insumos.push(actual);
+    }
+    if (f.fecha) {
+      actual.dias.push({
+        fecha: f.fecha,
+        consumo: Number(f.consumo),
+        merma: Number(f.merma),
+        entradas: Number(f.entradas),
+        ajustes: Number(f.ajustes),
+      });
+    }
+  }
+  return insumos;
+}
+
 module.exports = {
+  consumoInventario,
+  agruparConsumo,
+  DIAS_MAXIMOS_CONSUMO,
   obtenerReporte,
   consultarBase,
   RANGOS,

@@ -11,6 +11,7 @@ import { setManejadorSesionInvalida } from '../services/api';
 import { crearSesion } from '../services/sesionService';
 import { aliasDelToken } from '../services/clienteMesa';
 import { CLAVE_SESION, leerExpiracionJwt, validarNombre } from '../utils/sesion';
+import { CLAVE_ULTIMO_PEDIDO } from '../utils/seguimiento';
 
 const SesionContext = createContext(null);
 
@@ -141,6 +142,11 @@ export function SesionProvider({ children }) {
       const idMesaActual = prev.sesion?.idMesa;
       try {
         sessionStorage.removeItem(CLAVE_SESION);
+      } catch {
+        // Ignorar errores de sessionStorage
+      }
+      try {
+        sessionStorage.removeItem(CLAVE_ULTIMO_PEDIDO);
       } catch {
         // Ignorar errores de sessionStorage
       }
