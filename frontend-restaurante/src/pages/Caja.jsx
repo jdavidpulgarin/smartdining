@@ -15,7 +15,15 @@ import {
 } from 'lucide-react'
 import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
 import { useAuth, useSocketListener, useTables } from '../hooks'
-import { puedeUsarCaja, comensalDelCobro, idCobroParaEnviar, mensajeDeErrorCobro, descartarIdCobro } from '../utils/caja'
+import {
+  puedeUsarCaja,
+  comensalDelCobro,
+  idCobroParaEnviar,
+  mensajeDeErrorCobro,
+  descartarIdCobro,
+  agruparCobros,
+  horaBogota,
+} from '../utils/caja'
 
 function formatCOP(monto) {
   const num = Number(monto) || 0
@@ -77,24 +85,48 @@ function CajaRegistradora() {
   const [paidReceipt, setPaidReceipt] = useState(null)
   const [activeTab, setActiveTab] = useState('pendientes')
 
-  // Historial de transacciones de la jornada
-  const [history, setHistory] = useState(() => {
-    try {
-      const stored = sessionStorage.getItem('smartdining_caja_history')
-      return stored ? JSON.parse(stored) : []
-    } catch {
-      return []
-    }
-  })
+  // Lo cobrado hoy, del BACKEND (GET /transacciones?desde=hoy, #158): "Recaudado
+  // hoy" es su `total` y el Historial sus filas. Antes salían de sessionStorage,
+  // así que en otra pestaña, otro equipo, otro cajero o al reabrir la Caja se
+  // veía $0 aunque ya se hubiera cobrado. null = todavía no se sabe.
+  const [dia, setDia] = useState(null)
+  const [errorDia, setErrorDia] = useState(null)
 
-  // Sincronizar historial con sessionStorage
-  useEffect(() => {
+  const cargarDia = useCallback(async () => {
     try {
-      sessionStorage.setItem('smartdining_caja_history', JSON.stringify(history))
-    } catch {
-      // Ignorar error de almacenamiento
+      const d = await transaccionesApi.delDia('hoy')
+      setDia(d)
+      setErrorDia(null)
+    } catch (err) {
+      setErrorDia(err?.message || 'error desconocido')
     }
-  }, [history])
+  }, [])
+
+  useEffect(() => {
+    let cancel = false
+    // El historial viejo de la pestaña ya no se usa.
+    try {
+      sessionStorage.removeItem('smartdining_caja_history')
+    } catch {
+      // Sin almacenamiento no hay nada que borrar.
+    }
+    transaccionesApi
+      .delDia('hoy')
+      .then((d) => {
+        if (!cancel) {
+          setDia(d)
+          setErrorDia(null)
+        }
+      })
+      .catch((err) => {
+        if (!cancel) setErrorDia(err?.message || 'error desconocido')
+      })
+    return () => {
+      cancel = true
+    }
+  }, [])
+
+  const cobrosDelDia = useMemo(() => agruparCobros(dia?.transacciones || []), [dia])
 
   /**
    * Carga las cuentas activas directamente desde la API para todas las mesas ocupadas
@@ -232,6 +264,8 @@ function CajaRegistradora() {
   useSocketListener('order:status', () => cargarCuentas())
   useSocketListener('payment:confirmed', (data) => {
     cargarCuentas()
+    // Cualquier cobro (esta caja, otra, o un pago en línea) cambia lo recaudado.
+    cargarDia()
     if (data?.id_mesa) cargarMesas()
   })
   useSocketListener('mesa:liberada', () => {
@@ -389,30 +423,14 @@ function CajaRegistradora() {
         hora: getCurrentTime(),
       }
 
-      // Historial de la sesión (hasta que llegue GET /transacciones, #158). Un
-      // duplicado no se suma: ese dinero ya estaba contado.
-      if (!receipt.duplicado) {
-        setHistory((prev) => [
-          {
-            id_transaccion: receipt.id_transaccion,
-            mesa: receipt.mesa,
-            comensal: receipt.comensal,
-            metodo_pago: receipt.metodo_pago,
-            monto: receipt.total,
-            hora: receipt.hora,
-            estado: 'completada',
-            referencia: receipt.voucher,
-          },
-          ...prev,
-        ])
-      }
-
       setPaidReceipt(receipt)
       setCashGiven('')
       setAuthCode('')
       // Los avisos de tiempo real (payment:confirmed, order:status,
-      // mesa:liberada) los manda el backend después del COMMIT.
-      await cargarCuentas()
+      // mesa:liberada) los manda el backend después del COMMIT. "Recaudado hoy"
+      // y el Historial se vuelven a pedir aquí también, sin esperar al aviso
+      // (también tras un duplicado: no cambia nada, pero queda al día).
+      await Promise.all([cargarCuentas(), cargarDia()])
       await cargarMesas()
     } catch (err) {
       // 409 id_cobro_en_uso: no se cobró nada y ese id es de otro cobro; el
@@ -427,10 +445,9 @@ function CajaRegistradora() {
     }
   }
 
-  // Métricas acumuladas del turno
-  const totalRecaudadoHoy = useMemo(() => {
-    return history.reduce((acc, h) => acc + (Number(h.monto) || 0), 0)
-  }, [history])
+  // "Recaudado hoy": el total que da el backend (la propina no se registra, así
+  // que no entra). Mientras carga, "…"; si no se pudo, "—" y no un $0 engañoso.
+  const textoRecaudadoHoy = dia ? formatCOP(dia.total) : errorDia ? '—' : '…'
 
   const totalSaldoSalon = useMemo(() => {
     return cuentasMesas.reduce((acc, c) => acc + (Number(c.saldo_mesa) || 0), 0)
@@ -454,7 +471,7 @@ function CajaRegistradora() {
               className={`sd-red-band-btn ${activeTab === 'historial' ? 'active' : ''}`}
               onClick={() => setActiveTab('historial')}
             >
-              HISTORIAL DE PAGOS <span>{history.length}</span>
+              HISTORIAL DE PAGOS <span>{cobrosDelDia.length}</span>
             </button>
           </div>
 
@@ -465,9 +482,9 @@ function CajaRegistradora() {
             <button
               type="button"
               className="sd-red-band-btn"
-              onClick={cargarCuentas}
+              onClick={() => { cargarCuentas(); cargarDia() }}
               disabled={loading}
-              title="Actualizar cuentas"
+              title="Actualizar cuentas y lo recaudado hoy"
             >
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
               <span>ACTUALIZAR</span>
@@ -484,7 +501,9 @@ function CajaRegistradora() {
             REGISTRADORA
           </h1>
           <div className="sd-tables-counters">
-            <span>{formatCOP(totalRecaudadoHoy)} RECAUDADO HOY</span>
+            <span data-testid="recaudado-hoy" title={errorDia ? `No se pudo cargar lo recaudado hoy: ${errorDia}` : undefined}>
+              {textoRecaudadoHoy} RECAUDADO HOY
+            </span>
             <span className="sd-counter-sep">·</span>
             <span>{cuentasMesas.length} CUENTAS PENDIENTES</span>
             <span className="sd-counter-sep">·</span>
@@ -724,15 +743,19 @@ function CajaRegistradora() {
                           <label htmlFor="efectivo-input" className="sd-input-label">
                             EFECTIVO RECIBIDO (COP):
                           </label>
+                          {/* Sin min/step/required: con step=1000 y min=total, un total
+                              que no es múltiplo de 1.000 (con propina, o un saldo de
+                              34.500) hacía que el navegador rechazara 50.000 en
+                              silencio. El mínimo lo comprueba handleProcessPayment. */}
                           <input
                             id="efectivo-input"
                             type="number"
-                            step="1000"
-                            min={financialDetails.total}
+                            inputMode="numeric"
+                            min="0"
+                            step="any"
                             placeholder={financialDetails.total.toString()}
                             value={cashGiven}
                             onChange={(e) => setCashGiven(e.target.value)}
-                            required
                             className="sd-input"
                           />
                         </div>
@@ -840,22 +863,43 @@ function CajaRegistradora() {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((tx, idx) => (
-                    <tr key={tx.id_transaccion || idx} style={{ borderBottom: '1px solid var(--sd-border)' }}>
-                      <td style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', fontWeight: 700, color: 'var(--sd-white)' }}>
-                        {tx.id_transaccion}
+                  {errorDia && !dia && (
+                    <tr>
+                      <td colSpan={7} role="alert" style={{ padding: '12px 14px', color: 'var(--sd-red)' }}>
+                        No se pudo cargar el historial de hoy: {errorDia}. Pulsa ACTUALIZAR.
                       </td>
-                      <td style={{ padding: '12px 14px' }}>{tx.hora}</td>
-                      <td style={{ padding: '12px 14px', fontWeight: 700 }}>{tx.mesa}</td>
-                      <td style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>{tx.comensal || tx.cliente || 'Mesa'}</td>
-                      <td style={{ padding: '12px 14px', textTransform: 'uppercase' }}>{tx.metodo_pago.replace('_', ' ')}</td>
-                      <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700 }}>{formatCOP(tx.monto)}</td>
+                    </tr>
+                  )}
+                  {dia && cobrosDelDia.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>Todavía no hay cobros hoy.</td>
+                    </tr>
+                  )}
+                  {cobrosDelDia.map((cobro) => (
+                    <tr key={cobro.clave} style={{ borderBottom: '1px solid var(--sd-border)' }}>
+                      <td style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', fontWeight: 700, color: 'var(--sd-white)' }}>
+                        {cobro.ids.map((id) => `TRX-${id}`).join(' · ')}
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>{horaBogota(cobro.fecha)}</td>
+                      <td style={{ padding: '12px 14px', fontWeight: 700 }}>Mesa {cobro.numero_mesa}</td>
+                      <td style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>{cobro.comensal || 'Mesa'}</td>
+                      <td style={{ padding: '12px 14px', textTransform: 'uppercase' }}>{String(cobro.metodo_pago || '').replace('_', ' ')}</td>
+                      <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700 }}>{formatCOP(cobro.monto)}</td>
                       <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                         <span className="sd-badge sd-badge-white">Completada</span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
+                {dia && cobrosDelDia.length > 0 && (
+                  <tfoot>
+                    <tr>
+                      <td colSpan={5} style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', textTransform: 'uppercase' }}>Total del día</td>
+                      <td data-testid="total-historial" style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800 }}>{formatCOP(dia.total)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </section>

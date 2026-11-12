@@ -3,6 +3,7 @@ import useSeguimientoMesa from '../hooks/useSeguimientoMesa';
 import TarjetaEstado from '../components/seguimiento/TarjetaEstado';
 import LineaTiempo from '../components/seguimiento/LineaTiempo';
 import OtrosPedidos from '../components/seguimiento/OtrosPedidos';
+import TarjetaPermisoPush from '../components/seguimiento/TarjetaPermisoPush';
 import { infoEstado } from '../utils/seguimiento';
 import { formatearPrecio } from '../utils/formato';
 
@@ -148,6 +149,9 @@ function Seguimiento() {
 
       {/* Tarjeta principal con halo y animación */}
       <TarjetaEstado pedido={pedidoActivo} numeroMesa={mesa} />
+
+      {/* Solicitud discreta de notificaciones push tras confirmar pedido */}
+      <TarjetaPermisoPush tienePedidoConfirmado={misPedidos.length > 0} />
 
       {/* Línea de tiempo de 4 pasos */}
       <LineaTiempo estado={pedidoActivo.estado} />

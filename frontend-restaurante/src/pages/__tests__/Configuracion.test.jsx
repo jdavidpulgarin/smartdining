@@ -361,6 +361,55 @@ describe('P-21 · Configuración', () => {
       expect(escriturasDe(spy)).toEqual([])
     })
 
+    it('correo y redes (script 29): se cargan, se validan y viajan solo si cambiaron', async () => {
+      sesionComo('admin')
+      const conContacto = {
+        ...configBase,
+        correo: 'contacto@smartdining.com.co',
+        redes: { instagram: 'https://instagram.com/smartdining' },
+      }
+      const guardada = {
+        ...conContacto,
+        correo: 'reservas@smartdining.com.co',
+        redes: { instagram: 'https://instagram.com/smartdining', whatsapp: '+573001234567' },
+      }
+      const spy = backend({
+        mesas: mesasBase,
+        usuarios: personal,
+        configuracion: conContacto,
+        escrituras: (url, metodo) => (url.endsWith('/configuracion') && metodo === 'PUT' ? json(guardada) : json({}, 404)),
+      })
+      montar()
+      const form = await abrirRestaurante()
+
+      expect(within(form).getByLabelText('CORREO')).toHaveValue('contacto@smartdining.com.co')
+      expect(within(form).getByLabelText('INSTAGRAM')).toHaveValue('https://instagram.com/smartdining')
+      expect(within(form).getByLabelText('WHATSAPP')).toHaveValue('')
+
+      // Un WhatsApp sin indicativo no llega al servidor.
+      fireEvent.change(within(form).getByLabelText('WHATSAPP'), { target: { value: '300 123 4567' } })
+      fireEvent.click(within(form).getByRole('button', { name: /GUARDAR CAMBIOS/ }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('WhatsApp: escribe el número con el indicativo del país')
+      expect(escriturasDe(spy)).toEqual([])
+
+      fireEvent.change(within(form).getByLabelText('WHATSAPP'), { target: { value: '+57 300 123 4567' } })
+      fireEvent.change(within(form).getByLabelText('CORREO'), { target: { value: 'reservas@smartdining.com.co' } })
+      fireEvent.click(within(form).getByRole('button', { name: /GUARDAR CAMBIOS/ }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Datos del restaurante guardados.')
+      expect(escriturasDe(spy)).toEqual([
+        {
+          url: expect.stringMatching(/\/configuracion$/),
+          metodo: 'PUT',
+          cuerpo: {
+            correo: 'reservas@smartdining.com.co',
+            redes: { instagram: 'https://instagram.com/smartdining', whatsapp: '+573001234567' },
+          },
+        },
+      ])
+      expect(within(form).getByLabelText('WHATSAPP')).toHaveValue('+573001234567')
+    })
+
     it('si el servidor rechaza el cambio, muestra su mensaje y conserva lo escrito', async () => {
       sesionComo('admin')
       backend({

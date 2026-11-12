@@ -347,3 +347,61 @@ export function armarPedido({ idMesa, items = [], notasGenerales = '' } = {}) {
 
   return payload
 }
+
+function calcularSubtotalItem(item) {
+  if (!item || typeof item !== 'object') return 0
+  const precio = Number(item.precio) || 0
+  const cantidad = Number(item.cantidad) || 1
+  return precio * cantidad
+}
+
+/**
+ * Agrupa los ítems de un carrito por comensal conservando el orden de aparición
+ * y preservando `indiceOriginal` para modificar o eliminar líneas sin ambigüedad.
+ *
+ * @param {Array<object>} items
+ * @returns {Array<{ comensal: string, items: Array<object> }>}
+ */
+export function agruparPorComensal(items = []) {
+  if (!Array.isArray(items) || items.length === 0) return []
+  const grupos = new Map()
+
+  items.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return
+    const alias = item.comensal || 'Sin comensal'
+    if (!grupos.has(alias)) {
+      grupos.set(alias, [])
+    }
+    grupos.get(alias).push({ ...item, indiceOriginal: index })
+  })
+
+  return Array.from(grupos.entries()).map(([comensal, itemsGrupo]) => ({
+    comensal,
+    items: itemsGrupo,
+  }))
+}
+
+/**
+ * Calcula el subtotal por cada comensal agrupado y el total acumulado del pedido.
+ *
+ * @param {Array<object>} items
+ * @returns {{ grupos: Array<{ comensal: string, items: Array<object>, subtotalComensal: number }>, total: number }}
+ */
+export function totalesPorComensal(items = []) {
+  const gruposBase = agruparPorComensal(items)
+  let total = 0
+
+  const grupos = gruposBase.map((grupo) => {
+    const subtotalComensal = grupo.items.reduce(
+      (acc, it) => acc + calcularSubtotalItem(it),
+      0
+    )
+    total += subtotalComensal
+    return {
+      ...grupo,
+      subtotalComensal,
+    }
+  })
+
+  return { grupos, total }
+}

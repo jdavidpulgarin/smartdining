@@ -56,12 +56,24 @@ lleva secretos ni IPs; solo recibe tu llave **pública**.
 Desde tu máquina, con el VPS recién creado y entrando como `root` con tu llave:
 
 ```bash
-ssh root@IP_DEL_VPS 'bash -s -- "$(cat ~/.ssh/id_ed25519.pub)" roberto' \
+ssh root@IP_DEL_VPS "bash -s -- '$(cat ~/.ssh/id_ed25519.pub)' roberto" \
   < infra/scripts/preparar-servidor.sh
 ```
 
-> En Windows usa `C:\Windows\System32\OpenSSH\ssh.exe` (es el que lee el
-> `ssh-agent` de Windows). Si el VPS ya tiene tu usuario, córrelo con `sudo`.
+Las comillas importan: las **dobles por fuera** hacen que `$(cat …)` se expanda
+en **tu** máquina, y las **simples por dentro** protegen la llave (lleva espacios)
+en el VPS. Al revés (simples por fuera), `$(cat …)` viaja literal, se ejecuta en
+el VPS, donde root no tiene tu `.pub`, y el script recibe una llave vacía.
+
+Si el VPS ya tiene tu usuario, igual pero con `sudo`:
+
+```bash
+ssh roberto@IP_DEL_VPS "sudo bash -s -- '$(cat ~/.ssh/id_ed25519.pub)' roberto" \
+  < infra/scripts/preparar-servidor.sh
+```
+
+> En Windows usa Git Bash para que `$(cat …)` funcione, con
+> `C:\Windows\System32\OpenSSH\ssh.exe` (es el que lee el `ssh-agent` de Windows).
 
 | Paso | Qué deja |
 | :--- | :--- |
@@ -266,17 +278,43 @@ nada: ver [6. Staging](#6-staging).
 
 ### 3.1 Llave SSH solo para despliegues
 
-En tu máquina (no en el VPS):
+Es el mismo flujo que el de la llave de staging ([6.4](#64-despliegue-automático-desde-develop)),
+pero con una llave **propia** de producción. Nunca reutilices la de staging.
+`ssh-copy-id` no sirve aquí: `deploy` no tiene contraseña, y la llave quedaría
+sin `restrict`.
 
-```bash
-ssh-keygen -t ed25519 -N "" -C "github-deploy-smartdining" -f deploy_smartdining
-ssh-copy-id -i deploy_smartdining.pub deploy@IP_DEL_VPS
-ssh-keyscan -t ed25519 IP_DEL_VPS        # huella del servidor para VPS_KNOWN_HOSTS
-```
+1. El **dueño del repositorio**, en su máquina (Git Bash), crea el environment
+   `produccion` (3.2) y luego:
 
-Verifica que la huella de `ssh-keyscan` coincide con la del VPS
-(`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` en el VPS). Después borra
-`deploy_smartdining` de tu máquina: queda solo en GitHub.
+   ```bash
+   ssh-keygen -t ed25519 -N "" -C "github-deploy-produccion-smartdining" -f deploy_produccion
+   gh secret set VPS_SSH_KEY --env produccion --repo jdavidpulgarin/smartdining < deploy_produccion
+   rm -f deploy_produccion            # la privada queda SOLO en GitHub
+   cat deploy_produccion.pub          # esta línea (la pública) es la que pasa al responsable del VPS
+   ```
+
+2. El **responsable del VPS** la agrega al usuario `deploy` con `restrict`
+   delante (sin terminal ni reenvíos), sin duplicarla ni tocar las otras:
+
+   ```bash
+   LLAVE='ssh-ed25519 AAAA... github-deploy-produccion-smartdining'
+   printf '%s\n' "$LLAVE" | ssh-keygen -lf -     # la huella: compárala con la del dueño
+   sudo -u deploy sh -c 'f=/home/deploy/.ssh/authorized_keys; grep -qF "$1" "$f" || printf "restrict %s\n" "$1" >> "$f"' sh "$LLAVE"
+   sudo stat -c '%a %U:%G' /home/deploy/.ssh /home/deploy/.ssh/authorized_keys   # 700 y 600, deploy:deploy
+   ```
+
+   `restrict` no limita los comandos: ver "⚠️ `deploy` en el grupo `docker`
+   equivale a root" en [Preparar el servidor](#preparar-el-servidor).
+
+3. Huella del servidor para `VPS_KNOWN_HOSTS`, desde Git Bash (el
+   `ssh-keyscan` de Windows no negocia con este servidor):
+
+   ```bash
+   ssh-keyscan -t ed25519 IP_DEL_VPS
+   ```
+
+   Verifica que coincide con la del VPS
+   (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` en el VPS).
 
 ### 3.2 Environment y secretos
 
@@ -288,7 +326,7 @@ quieres aprobar cada despliegue.
 | :--- | :--- |
 | `VPS_HOST` | IP o nombre del VPS |
 | `VPS_USER` | `deploy` |
-| `VPS_SSH_KEY` | contenido completo de `deploy_smartdining` (la privada) |
+| `VPS_SSH_KEY` | la llave **privada** de 3.1 (la carga el dueño con `gh secret set` y la borra) |
 | `VPS_KNOWN_HOSTS` | la línea que imprimió `ssh-keyscan` |
 | `VPS_RUTA` | `/home/deploy/smartdining` |
 
@@ -318,28 +356,193 @@ alias dc='docker compose -f docker-compose.prod.yml --env-file infra/.env'
 
 Los logs de cada contenedor rotan solos (5 archivos de 10 MB).
 
-### Respaldo de la base
+### Respaldos de la base (R-18)
+
+> El repositorio es **público**: los respaldos **jamás** van a GitHub. Viven
+> fuera de los clones (`/srv/respaldos`) y `.gitignore` ignora `*.dump`.
+
+[`infra/scripts/respaldo.sh`](../infra/scripts/respaldo.sh) hace un
+`pg_dump -Fc` (ya comprimido) del postgres que esté corriendo: `smartdining` o
+`smartdining-staging`. Si están los dos o ninguno, falla. Solo guarda el
+archivo si `pg_dump` terminó bien, no está vacío y `pg_restore --list` lo lee
+con `schema_migraciones`.
+
+| Tipo | Cuándo | Dónde | Se conservan |
+| :--- | :--- | :--- | :--- |
+| `predeploy` | En cada despliegue (Deploy y Deploy staging), **antes** de `migrar.sh`. Si falla, el despliegue se aborta sin levantar el backend nuevo. | `/srv/respaldos/<proyecto>/predeploy/predeploy-AAAAMMDD-HHMMSS-<sha7>.dump` | 5 |
+| `diario` | Timer `smartdining-respaldo`, 03:30 de Bogotá. Si el VPS estaba apagado, corre al arrancar. | `/srv/respaldos/<proyecto>/diario/diario-AAAAMMDD-HHMMSS.dump` | 7 |
+
+Permisos: archivos 640 y carpetas 750, de `deploy` con el grupo `sd-respaldos`.
+En ese grupo solo está el usuario `respaldos`, que los lee por SFTP. Nadie más.
+
+#### Instalación (una vez por VPS, y otra vez si cambia `respaldo.sh` o `infra/systemd/`)
+
+Desde la raíz de cualquier clon, con un usuario con sudo:
 
 ```bash
-mkdir -p ~/respaldos
-dc exec -T postgres pg_dump -U smartdining -d smartdining -Fc > ~/respaldos/smartdining-$(date +%F).dump
+sudo sh infra/scripts/instalar-respaldos.sh --llave-lectura 'ssh-ed25519 AAAA... sd-respaldos-pc'
 ```
 
-Para hacerlo a diario, en `crontab -e` del usuario `deploy` (en cron hay que
-escapar los `%`):
+Crea el grupo y el usuario `respaldos` y las carpetas. Configura el SFTP de
+solo lectura (`sshd_config.d/10-respaldos.conf`, con chroot en `/srv/respaldos`,
+`internal-sftp -R` y la llave con `restrict`; antes de recargar comprueba que
+`roberto` y `deploy` siguen entrando). Instala el timer. Sin `--llave-lectura`
+hace todo menos la llave.
 
-```
-0 4 * * * cd ~/smartdining && docker compose -f docker-compose.prod.yml --env-file infra/.env exec -T postgres pg_dump -U smartdining -d smartdining -Fc > ~/respaldos/smartdining-$(date +\%F).dump && find ~/respaldos -name '*.dump' -mtime +14 -delete
-```
+Mientras no esté instalado, **cada despliegue falla** en el respaldo previo con
+un mensaje que remite aquí.
 
-Copia los respaldos fuera del VPS con cierta frecuencia: si el VPS se pierde,
-los respaldos que estaban en él se pierden con él.
-
-Restaurar (sobrescribe los datos actuales):
+#### Respaldo a mano y registro
 
 ```bash
-dc exec -T postgres pg_restore -U smartdining -d smartdining --clean --if-exists < ~/respaldos/ARCHIVO.dump
+sudo systemctl start smartdining-respaldo.service     # el diario, ahora
+journalctl -u smartdining-respaldo -n 20 --no-pager    # qué pasó
+systemctl list-timers smartdining-respaldo.timer       # próxima corrida
+sudo ls -l /srv/respaldos/*/*/
 ```
+
+#### Aviso si el respaldo diario no llega (healthchecks.io)
+
+1. En healthchecks.io crea un check con *Schedule* `Cron`, expresión
+   `30 3 * * *`, zona `America/Bogota` y *Grace time* de 1 hora. Agrega los
+   correos del equipo en *Integrations*.
+2. Copia su *Ping URL* y guárdala en el VPS (se pega por la entrada estándar,
+   así no queda en el historial):
+
+   ```bash
+   sudo sh -c 'umask 077; read -r url; printf "HEALTHCHECKS_URL=%s\n" "$url" > /etc/smartdining/respaldo.env'
+   ```
+
+`/etc/smartdining/respaldo.env` es 600 de root y **nunca** va en el repo. El
+timer avisa a la URL al terminar bien y a `<URL>/fail` si falla. Si no se
+avisa nada a tiempo, healthchecks.io manda el correo.
+
+#### Copia fuera del VPS
+
+Si el VPS se pierde, los respaldos que estaban en él se pierden con él. Una
+tarea programada en el PC del responsable baja los diarios nuevos por SFTP con
+el usuario `respaldos`, que solo puede leer `/srv/respaldos`: no tiene
+terminal, no puede escribir y no ve nada más del servidor. La llave privada de
+ese usuario solo existe en ese PC.
+
+#### Simulacro de restauración (antes de cada release y una vez al mes)
+
+```bash
+sudo -iu deploy
+cd /srv/smartdining-staging        # o ~/smartdining en producción
+sh infra/scripts/simulacro-restauracion.sh                 # el diario más reciente
+sh infra/scripts/simulacro-restauracion.sh /srv/respaldos/smartdining/predeploy/ARCHIVO.dump
+```
+
+[`simulacro-restauracion.sh`](../infra/scripts/simulacro-restauracion.sh)
+levanta un postgres **temporal** sin red y sin volúmenes (los datos van en un `tmpfs`, en RAM), con la misma
+imagen que el de producción. Restaura ahí el respaldo (`pg_restore
+--exit-on-error`) y compara con la base en vivo la cantidad de tablas en
+`public` y la cantidad y última fila de `schema_migraciones`, que deben ser
+iguales. `usuarios` y `pedidos` se muestran como referencia. Al final borra
+el contenedor, también si algo falla. No toca la base real.
+
+#### Restaurar de verdad (sobrescribe los datos actuales)
+
+1. Haz antes un respaldo del estado actual: `sudo systemctl start smartdining-respaldo.service`.
+2. Pasa el simulacro con el archivo que vas a restaurar.
+3. Detén lo que escribe en la base, restaura y vuelve a levantar:
+
+```bash
+dc stop backend socket-server
+dc exec -T postgres pg_restore -U smartdining -d smartdining --clean --if-exists < /srv/respaldos/smartdining/diario/ARCHIVO.dump
+dc up -d --wait
+```
+
+### Monitoreo externo (UptimeRobot)
+
+Tres monitores HTTP(s) cada 5 minutos, con aviso por correo al equipo:
+
+| Monitor | URL | Debe responder |
+| :--- | :--- | :--- |
+| API | `https://api.<DOMINIO>/api/health` | 2xx |
+| Tiempo real | `https://rt.<DOMINIO>/health` | 2xx |
+| App del comensal | `https://app.<DOMINIO>/` | 2xx |
+
+Con `DOMINIO=staging.smartdining.com.co` hasta el cambio a producción. Ese
+día se cambian las tres URL al `DOMINIO` de producción (§6.5). Mide desde fuera de
+GitHub y del VPS. Además, cada despliegue comprueba lo mismo al terminar.
+
+### Límites de peticiones
+
+Un local, o la feria, sale a Internet con **una sola IP pública** (el Wi-Fi). Todo
+límite «por IP» es el cupo de **todos los celulares y del personal a la vez**. Los
+valores de abajo están pensados para la feria: de 10 a 15 mesas con QR, unos 10
+celulares a la vez como máximo y el personal en el mismo Wi-Fi.
+
+En nginx, `N/min + ráfaga R` significa que pasan `R + 1` peticiones seguidas y luego
+una cada `60/N` segundos; las que sobran reciben `429`.
+
+| Límite | Dónde actúa | Clave | Valor | Variable en `infra/.env` | Se aplica con |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Sesión por QR | backend, `POST /api/mesas/qr/:token/sesion` | IP | 150/min (cuenta todos los intentos) | `RATE_LIMIT_QR_MAX`, `RATE_LIMIT_QR_VENTANA_MS` | `dc up -d backend` |
+| Login del personal | backend, `POST /api/auth/login` | IP + email | 5 intentos **fallidos**/min | `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS` | `dc up -d backend` |
+| Global de la API | backend, toda `/api` menos `health` e `internal` | IP | 4000/min | `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS` | `dc up -d backend` |
+| Login, nginx | `api.`, `/api/auth/login` | IP | 30/min + ráfaga de 20 | `NGINX_LIMITE_LOGIN`, `NGINX_RAFAGA_LOGIN` | validar y `dc up -d nginx` |
+| Pagos, nginx | `rt.`, `/pagos/` (la intención de pago) | IP | 120/min + ráfaga de 60 | `NGINX_LIMITE_PAGOS`, `NGINX_RAFAGA_PAGOS` | validar y `dc up -d nginx` |
+| Webhook, nginx | `rt.`, `/pagos/webhook` (zona propia: las IPs de Wompi) | IP | 300/min + ráfaga de 100 | `NGINX_LIMITE_WEBHOOK`, `NGINX_RAFAGA_WEBHOOK` | validar y `dc up -d nginx` |
+| Conexiones por mesa | socket-server, al conectar | mesa | capacidad de la mesa + 4 | `mesas.capacidad` en la base | `infra/scripts/mesas-feria.sh` |
+| Intención de pago | socket-server | mesa + comensal | 5/min | no se cambia sin código (`socket-server/src/pagos.js`) | — |
+| Eventos de socket | socket-server | socket | 20/s | no se cambia sin código (`socket-server/src/limites.js`) | — |
+| Por mesa | socket-server | mesa | 20 suscripciones push, 20 sin celular, una llamada al mesero cada 60 s | no se cambia sin código | — |
+
+Los valores por defecto están en `docker-compose.prod.yml` (`${VAR:-valor}`), así que
+funcionan sin tocar los `.env`. `infra/.env` no está en git: lo que pongas ahí
+**sobrevive a los despliegues**.
+
+Las IPs son las reales: el backend confía en el `X-Forwarded-For` y el socket-server en
+el `X-Real-IP`, en los dos casos solo si vienen de nginx (`TRUST_PROXY`). Una cabecera
+falsa que mande un cliente no cambia su contador.
+
+**Ajustar el día de la feria, sin desplegar código** (en el VPS, dentro del clon; en
+staging, `ENV_FILE=infra/.env.staging` y `--env-file infra/.env.staging`):
+
+1. Agrega o cambia en `infra/.env` solo las variables que necesites, por ejemplo
+   `RATE_LIMIT_QR_MAX=300` o `NGINX_LIMITE_PAGOS=240r/m`. El formato de nginx es
+   `<n>r/m` o `<n>r/s`; las ráfagas son un entero.
+2. **Backend:** `dc up -d backend`. Recrea el contenedor con el entorno nuevo en unos
+   segundos; los contadores empiezan de cero.
+3. **nginx:** valida primero; un valor mal escrito deja a nginx sin arrancar y **caen
+   todos los sitios**:
+
+   ```bash
+   sh infra/scripts/validar-nginx.sh   # nginx -t con los valores nuevos, sin reiniciar nada
+   dc up -d nginx                      # solo si dijo OK; corta las conexiones 1-2 s
+   ```
+
+4. **Mesas de la demo:** las conexiones por mesa dependen de la capacidad guardada en la
+   base, y una mesa `ocupada` sin nadie no se puede abrir desde el panel.
+   `mesas-feria.sh` deja las mesas 1 a 15, todo en una transacción e idempotente:
+   - **Capacidad:** crea las que falten con capacidades de 2, 4, 4, 6 y 8 por número
+     (las mesas 1-5 del seed ya son así) y sube la de las que tengan menos. **Nunca la baja.**
+   - **Ocupada sin sesión real** (sin pedidos abiertos ni alias reservados en Redis): la
+     pasa a `disponible` sin QR, como la libera el backend.
+   - **Ocupada con sesión real:** no la toca y avisa. Un pedido `entregado` sin pagar
+     cuenta como abierto.
+   - Si Redis no responde, no cambia nada.
+
+   El socket-server toma las capacidades nuevas en máximo 5 minutos.
+
+   ```bash
+   sh infra/scripts/mesas-feria.sh ver       # qué cambiaría, sin cambiar nada
+   sh infra/scripts/mesas-feria.sh aplicar   # lo aplica
+   FERIA_MESAS=20 sh infra/scripts/mesas-feria.sh ver   # más mesas
+   ```
+
+5. Comprueba que nadie esté recibiendo 429:
+
+   ```bash
+   dc logs --since 10m nginx | grep -c '" 429 '
+   ```
+
+Para volver a los valores por defecto, borra esas líneas de `infra/.env` y repite los
+pasos 2 y 3. Las capacidades de las mesas no se revierten solas: cámbialas desde el panel
+si hace falta.
 
 ### Cambios de esquema
 
@@ -348,7 +551,8 @@ carga la línea base (`00_ejecutar_todo.sql`) y los scripts 26 en adelante. En
 una base que ya tiene datos, **cada despliegue** (Deploy, Deploy staging y
 `primer-certificado.sh`) corre `migrar.sh` antes de levantar el backend: aplica
 solo los scripts de `database/scripts/` que falten en `schema_migraciones`, cada
-uno en su propia transacción. Haz un respaldo antes de fusionar un script nuevo.
+uno en su propia transacción. Justo antes, el despliegue hace un respaldo
+`predeploy`, y si ese respaldo falla no migra.
 
 A mano (no publica puertos: corre dentro del contenedor de Postgres):
 

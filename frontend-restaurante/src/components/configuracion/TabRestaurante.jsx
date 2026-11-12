@@ -5,6 +5,7 @@ import { mensajeDeCarga } from '../../utils/configuracion'
 import {
   DIAS,
   LIMITES,
+  REDES,
   formDesdeConfig,
   validarConfig,
   cambiosDeConfig,
@@ -79,6 +80,7 @@ export function TabRestaurante() {
   }, [])
 
   const cambiar = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }))
+  const cambiarRed = (clave, valor) => setForm((f) => ({ ...f, redes: { ...f.redes, [clave]: valor } }))
   const cambiarDia = (clave, cambios) =>
     setForm((f) => ({ ...f, horario: { ...f.horario, [clave]: { ...f.horario[clave], ...cambios } } }))
 
@@ -137,6 +139,10 @@ export function TabRestaurante() {
           TELÉFONO
           <input className="sd-input" type="tel" maxLength={LIMITES.telefono} value={form.telefono} onChange={(e) => cambiar('telefono', e.target.value)} />
         </label>
+        <label className="sd-input-label" style={{ flex: '1 1 240px' }}>
+          CORREO
+          <input className="sd-input" type="email" autoComplete="email" maxLength={LIMITES.correo} placeholder="contacto@turestaurante.com" value={form.correo} onChange={(e) => cambiar('correo', e.target.value)} />
+        </label>
         <label className="sd-input-label" style={{ flex: '1 1 320px' }}>
           DIRECCIÓN
           <input className="sd-input" maxLength={LIMITES.direccion} value={form.direccion} onChange={(e) => cambiar('direccion', e.target.value)} />
@@ -154,6 +160,26 @@ export function TabRestaurante() {
           <input className="sd-input" maxLength={3} value={form.moneda} onChange={(e) => cambiar('moneda', e.target.value.toUpperCase())} />
         </label>
       </div>
+
+      <fieldset className="sd-card" style={{ marginBottom: 20, border: '1px solid var(--sd-border)' }}>
+        <legend className="sd-input-label" style={{ padding: '0 6px' }}>REDES</legend>
+        <p style={{ color: 'var(--sd-text-muted)', margin: '0 0 12px' }}>Todas opcionales: una red vacía no se publica.</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          {REDES.map(({ clave, etiqueta, ejemplo }) => (
+            <label key={clave} className="sd-input-label" style={{ flex: '1 1 260px' }}>
+              {etiqueta}
+              <input
+                className="sd-input"
+                type={clave === 'whatsapp' ? 'tel' : 'url'}
+                maxLength={LIMITES.red}
+                placeholder={ejemplo}
+                value={form.redes[clave]}
+                onChange={(e) => cambiarRed(clave, e.target.value)}
+              />
+            </label>
+          ))}
+        </div>
+      </fieldset>
 
       <fieldset className="sd-card" style={{ marginBottom: 20, border: '1px solid var(--sd-border)' }}>
         <legend className="sd-input-label" style={{ padding: '0 6px' }}>HORARIO</legend>

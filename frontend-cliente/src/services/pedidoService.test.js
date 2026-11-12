@@ -317,4 +317,47 @@ describe('pedidoService (H-05, H-06, J-05)', () => {
       motivo: 'reintentar',
     });
   });
+
+  it('J-17: en modo simulado fuerza 409 ingrediente_agotado con la forma real cuando smartdining_sim_pedido = ingrediente_agotado', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    globalThis.sessionStorage.setItem(
+      'smartdining_sim_pedido',
+      'ingrediente_agotado'
+    );
+
+    await expect(
+      crearPedido({
+        lineas: [
+          {
+            id_plato: 1001,
+            cantidad: 1,
+            nombre: 'Bowl Personalizado',
+            ingredientes: [{ id_ingrediente: 10, porcion: 'normal' }],
+          },
+        ],
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      motivo: 'ingrediente_agotado',
+      mensaje: 'El ingrediente "Aguacate" está agotado',
+    });
+  });
+
+  it('J-17: en modo simulado fuerza 409 sin_stock con faltantes [] cuando smartdining_sim_pedido = sin_stock_vacio', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    globalThis.sessionStorage.setItem(
+      'smartdining_sim_pedido',
+      'sin_stock_vacio'
+    );
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1006, cantidad: 1, nombre: 'Hamburguesa Smart Angus' }],
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      motivo: 'sin_stock',
+      faltantes: [],
+    });
+  });
 });

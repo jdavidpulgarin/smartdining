@@ -13,8 +13,10 @@ const assert = require('node:assert');
  * MESA_NUMERO_COBRO (904 por omisión), marcadas en `ubicacion`. El `after` lo
  * deja todo como estaba aunque una prueba falle:
  *   1. borra las transacciones de esas mesas y su rastro en auditoria_cambios,
- *      identificado por el id_transaccion del JSON (registro_id, para esta
- *      tabla, es el id_pedido: ver 08_triggers.sql);
+ *      identificado por el id_transaccion del JSON. Desde el script 30
+ *      (30_fix_auditoria_registro_id.sql) registro_id ya es el id_transaccion,
+ *      pero las filas auditadas antes conservan el id_pedido; el JSON vale
+ *      para las dos;
  *   2. cierra la reserva de inventario de cada detalle con
  *      fn_cerrar_reserva_detalle(id, false), que DEVUELVE el stock (y no hace
  *      nada si ya estaba cerrada), sea cual sea el estado del pedido;
@@ -31,7 +33,7 @@ const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
 const crypto = require('node:crypto');
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const transaccionesService = require('../../src/services/transacciones.service');
@@ -91,23 +93,19 @@ async function limpiar() {
 }
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    const p = await sonda.query(
-      `SELECT id_plato, ROUND(precio * 100)::bigint AS precio_centavos FROM platos
-        WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
-        ORDER BY id_plato LIMIT 1`
-    );
-    const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
-    plato = p.rows[0] ? { id_plato: p.rows[0].id_plato, precio_centavos: Number(p.rows[0].precio_centavos) } : null;
-    usuarioReal = u.rows[0] || null;
-    hayBase = Boolean(plato && usuarioReal);
-    if (hayBase) await limpiar();
-  } catch (err) {
-    if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
-    hayBase = false;
-  }
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  const p = await sonda.query(
+    `SELECT id_plato, ROUND(precio * 100)::bigint AS precio_centavos FROM platos
+      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
+      ORDER BY id_plato LIMIT 1`
+  );
+  const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
+  plato = p.rows[0] ? { id_plato: p.rows[0].id_plato, precio_centavos: Number(p.rows[0].precio_centavos) } : null;
+  usuarioReal = u.rows[0] || null;
+  hayBase = Boolean(plato && usuarioReal);
+  if (hayBase) await limpiar();
 });
 
 test.after(async () => {

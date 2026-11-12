@@ -7,6 +7,8 @@ import {
   idCobroParaEnviar,
   mensajeDeErrorCobro,
   descartarIdCobro,
+  agruparCobros,
+  horaBogota,
 } from '../caja'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -56,6 +58,24 @@ describe('utils/caja', () => {
     expect(mensajeDeErrorCobro({ motivo: 'cuerpo_invalido', message: 'monto inválido' })).toMatch(/monto inválido/)
     expect(mensajeDeErrorCobro({ message: 'boom' })).toMatch(/boom/)
     expect(mensajeDeErrorCobro({ motivo: 'id_cobro_en_uso' })).toMatch(/otra mesa.*COBRAR otra vez/)
+  })
+
+  it('agruparCobros: un cobro repartido es una fila; sin referencia, cada fila es un cobro; montos sin coma flotante', () => {
+    const t = (id, monto, ref, fecha) => ({ id_transaccion: id, numero_mesa: 4, monto, metodo_pago: 'efectivo', comensal: null, fecha, referencia_pago: ref })
+    const g = agruparCobros([
+      t(3, 0.2, 'caja:x', '2026-11-11T20:00:02Z'),
+      t(2, 0.1, 'caja:x', '2026-11-11T20:00:02Z'),
+      t(9, 5000, null, '2026-11-11T19:00:00Z'),
+      t(8, 1000, null, '2026-11-11T21:00:00Z'),
+    ])
+    expect(g.map((c) => [c.ids.join(','), c.monto])).toEqual([['8', 1000], ['2,3', 0.3], ['9', 5000]])
+    expect(agruparCobros([])).toEqual([])
+  })
+
+  it('horaBogota: la hora del restaurante, también después de las 7 p. m. (ya "mañana" en UTC)', () => {
+    expect(horaBogota('2026-11-12T01:30:00.000Z')).toBe('20:30')
+    expect(horaBogota('2026-11-11T20:11:14.981Z')).toBe('15:11')
+    expect(horaBogota('no-es-fecha')).toBe('')
   })
 
   it('descartarIdCobro: solo con id_cobro_en_uso; un error de red o un excede conservan el id (reintento seguro)', () => {

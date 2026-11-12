@@ -5,16 +5,20 @@ import {
   adaptarPlatos,
   adaptarPlatosArmables,
   adaptarPlatoArmable,
+  actualizarDisponibilidadPlatoEnCache,
   aplicarDisponibilidad,
   aplicarDisponibilidadPlato,
   aplicarFaltantesMenu,
+  limpiarMarcasAgotadoLocal,
   marcarFaltantesEnCache,
   normalizarCategorias,
   obtenerCategorias,
+  obtenerMarcasAgotadoLocal,
   obtenerPlatos,
   obtenerPlatosArmables,
   obtenerPlatoArmable,
   recargarMenu,
+  tieneMarcasAgotadoLocal,
 } from './menuService';
 
 const mockMenuApi = {
@@ -96,6 +100,7 @@ describe('menuService', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.stubEnv('VITE_MODO_SIMULADO', 'false');
+    limpiarMarcasAgotadoLocal();
     recargarMenu();
   });
 
@@ -412,6 +417,58 @@ describe('menuService', () => {
 
       const bowlDespues = await obtenerPlatoArmable(1001);
       expect(bowlDespues.pasos[0].ingredientes[0].disponible).toBe(false);
+    });
+
+    it('limpia la marca local de 409 cuando recargarMenu vuelve a traer el plato en GET /menu', async () => {
+      const menuServidor = {
+        categorias: [
+          {
+            id_categoria: 1,
+            categoria: 'Bebidas',
+            platos: [{ id_plato: 1008, nombre: 'Limonada de Coco', precio: 12000 }],
+          },
+        ],
+      };
+
+      vi.spyOn(apiModule, 'pedirJson').mockResolvedValue(menuServidor);
+      await obtenerPlatos();
+
+      marcarFaltantesEnCache([
+        { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
+      ]);
+      expect(tieneMarcasAgotadoLocal()).toBe(true);
+      expect((await obtenerPlatos())[0].disponible).toBe(false);
+
+      // Al recargar el menu, GET /menu sigue trayendo el plato porque aun tiene stock
+      recargarMenu();
+      const platosTrasRecarga = await obtenerPlatos();
+      expect(platosTrasRecarga[0].disponible).toBe(true);
+      expect(obtenerMarcasAgotadoLocal()).toEqual([]);
+      expect(tieneMarcasAgotadoLocal()).toBe(false);
+    });
+
+    it('limpia la marca local de 409 cuando llega plato:disponibilidad con disponible: true', async () => {
+      const menuServidor = {
+        categorias: [
+          {
+            id_categoria: 1,
+            categoria: 'Bebidas',
+            platos: [{ id_plato: 1008, nombre: 'Limonada de Coco', precio: 12000 }],
+          },
+        ],
+      };
+
+      vi.spyOn(apiModule, 'pedirJson').mockResolvedValue(menuServidor);
+      await obtenerPlatos();
+
+      marcarFaltantesEnCache([
+        { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
+      ]);
+      expect((await obtenerPlatos())[0].disponible).toBe(false);
+
+      actualizarDisponibilidadPlatoEnCache(1008, true);
+      expect((await obtenerPlatos())[0].disponible).toBe(true);
+      expect(obtenerMarcasAgotadoLocal()).toEqual([]);
     });
   });
 });

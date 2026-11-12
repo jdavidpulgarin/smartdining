@@ -72,6 +72,22 @@ jobs:
     name: infra · scripts de despliegue
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # PostgreSQL real para las pruebas de datos de mesas-feria.sh (se omiten
+    # en local sin SD_PG_URL). Solo esquemas de prueba; nada de la app.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: prueba
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      SD_PG_URL: postgresql://postgres:prueba@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -88,8 +104,10 @@ jobs:
               echo "sh -n   $f"; sh -n "$f"
             fi
           done
-      - name: Pruebas (contraseñas del personal)
-        run: node --test "infra/scripts/*.test.cjs"
+      - name: Pruebas de los scripts (contraseñas, respaldo, mesas y nginx)
+        run: |
+          psql --version
+          node --test "infra/scripts/*.test.cjs"
 
   frontends:
     name: ${{ matrix.app }} · lint y build

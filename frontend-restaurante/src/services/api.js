@@ -606,6 +606,15 @@ export const transaccionesApi = {
   },
 
   /**
+   * Lo cobrado en el día (admin/cajero): GET /api/transacciones?desde=hoy (#158).
+   * El "hoy" lo calcula el backend en hora de Bogotá; solo trae las completadas.
+   * @returns {Promise<{ desde: string, hasta: string, total: number, cantidad: number, transacciones: Array<{ id_transaccion: number, id_pedido: number, codigo_pedido: string, id_mesa: number, numero_mesa: number, monto: number, metodo_pago: string, comensal: string|null, fecha: string, referencia_pago: string|null }> }>}
+   */
+  async delDia(desde = 'hoy') {
+    return apiFetch(`/transacciones?desde=${encodeURIComponent(desde)}`)
+  },
+
+  /**
    * Obtiene las transacciones registradas para un pedido: GET /api/transacciones/pedido/:id_pedido
    */
   async obtenerPorPedido(idPedido) {

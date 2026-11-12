@@ -267,28 +267,43 @@ async function registrarEnBackend(ctx, { evento, tx, intencion }) {
  * pasarela reintenta (no se pierde la evidencia).
  */
 async function alertarPago(ctx, { evento, tx, intencion, motivo }) {
+  const idMesa = intencion ? intencion.id_mesa : null;
+  // Lo cobrado según la API de la pasarela; si la API no conoce la
+  // transacción, lo que dice el evento (firmado, pero sin confirmar).
+  const monto = tx ? tx.monto_centavos : evento.monto_centavos;
+  // Lo que ESTE servidor esperaba cobrar; null si no hay intención.
+  const montoEsperado = intencion ? intencion.monto_centavos : null;
   const r = await ctx.backend.post('/api/pagos/intentos-fallidos/interno', {
     referencia_externa: evento.referencia,
     id_transaccion_pasarela: evento.id_transaccion,
     pasarela: ctx.pasarela.nombre,
-    id_mesa: intencion ? intencion.id_mesa : null,
+    id_mesa: idMesa,
     motivo,
-    monto_centavos: tx ? tx.monto_centavos : evento.monto_centavos,
-    monto_esperado_centavos: intencion ? intencion.monto_centavos : null,
+    monto_centavos: monto,
+    monto_esperado_centavos: montoEsperado,
     moneda: tx ? tx.moneda : evento.moneda,
     metodo_pago: 'online',
   });
   if (r.status >= 500) throw Object.assign(new Error(`el backend respondió ${r.status}`), { codigo: 'BACKEND_ERROR' });
-  // Al panel: qué pasó y dónde, sin datos del pagador.
+  // Solo al panel (room:admin): qué pasó, dónde, cuánto y quién. `comensal` es
+  // el alias firmado en el JWT de quien creó la intención (el mismo que el
+  // panel ya ve en payment:confirmed); null si no hay intención. La pasarela
+  // no nos entrega datos de tarjeta ni del pagador, y no se agrega ninguno.
   ctx.io.to(SALA_ADMIN).emit('pago:alerta', {
     eventId: `${evento.id_transaccion}:${motivo}`,
-    id_mesa: intencion ? intencion.id_mesa : null,
+    id_mesa: idMesa,
+    comensal: intencion ? intencion.comensal ?? null : null,
+    monto_centavos: centavosONull(monto),
+    monto_esperado_centavos: centavosONull(montoEsperado),
     referencia_externa: evento.referencia,
     id_transaccion_pasarela: evento.id_transaccion,
     motivo,
     emitidoEn: new Date().toISOString(),
   });
 }
+
+/** Al panel no se le muestra un monto que no sea un entero seguro: null. */
+const centavosONull = (v) => (Number.isSafeInteger(v) ? v : null);
 
 /** Un pago rechazado o con error libera al comensal para que pueda reintentar. */
 async function registrarFallo(ctx, evento) {

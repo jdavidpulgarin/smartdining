@@ -267,6 +267,51 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
     })
   })
 
+  it('ante 409 alias_en_uso con { alias: "Abuela" } y texto " abuela ", ofrece "Pedir para «Abuela»"', async () => {
+    let llamadasCuenta = 0
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
+      if (url.includes('/api/mesas/5/cuenta')) {
+        llamadasCuenta++
+        return {
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({ id_mesa: 5, comensales: [] }),
+        }
+      }
+      if (url.includes('/api/mesas/5/comensales') && opts?.method === 'POST') {
+        return {
+          ok: false,
+          status: 409,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({
+            error: 'Ese nombre ya está en la mesa',
+            motivo: 'alias_en_uso',
+            alias: 'Abuela',
+          }),
+        }
+      }
+      return { ok: true, json: async () => ({}) }
+    })
+
+    renderTomarPedido('mesero', 5)
+
+    const input = await screen.findByPlaceholderText(/Ej\. Señora sin celular/i)
+    fireEvent.change(input, { target: { value: ' abuela ' } })
+    fireEvent.click(screen.getByRole('button', { name: /registrar y pedir/i }))
+
+    const btnSugerido = await screen.findByRole('button', { name: /Pedir para «Abuela»/i })
+    expect(btnSugerido).toBeInTheDocument()
+    // Con alias en el 409 no hace falta recargar cuenta
+    expect(llamadasCuenta).toBe(1)
+
+    fireEvent.click(btnSugerido)
+    await waitFor(() => {
+      expect(screen.getAllByText('Abuela').length).toBeGreaterThan(0)
+      expect(screen.getAllByText(/Pidiendo para:/i).length).toBeGreaterThan(0)
+    })
+  })
+
   it('muestra error específico cuando la mesa no tiene sesión abierta (409 mesa_sin_sesion)', async () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
       if (url.includes('/api/mesas/5/cuenta')) {
