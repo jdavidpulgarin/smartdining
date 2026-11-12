@@ -43,6 +43,13 @@ function crearEstadoMesasRedis({ cliente, ahora = Date.now }) {
       await cliente.expire(k, TTL_CUENTA_SEG);
       await anotarEnIndice(idMesa);
     },
+    /** Deshace un marcarPago que llegó tarde a una mesa ya liberada (ver anotarPagoEnSesion en pagos.js). */
+    async desmarcarPago(idMesa, alias) {
+      await cliente.hDel(llave(idMesa, 'pagaron'), alias);
+      // Sin nada anotado, la mesa sale del índice (como al liberarla).
+      const quedan = (await cliente.hLen(llave(idMesa, 'pagaron'))) + (await cliente.hLen(llave(idMesa, 'sin_celular')));
+      if (quedan === 0) await cliente.hDel(INDICE, String(idMesa));
+    },
     /** Alias que ya pagaron en esta sesión, ordenados. */
     async pagaron(idMesa) {
       return (await cliente.hVals(llave(idMesa, 'pagaron'))).sort((a, b) => a.localeCompare(b));

@@ -4,6 +4,7 @@ const { esEventIdValido } = require('./idempotencia');
 const { salaMesa, SALA_KDS, SALA_ADMIN, esIdValido } = require('./salas');
 const { notificarCambioEstado } = require('./suscripciones');
 const { enviarAck, leerCuerpoCrudo, parsearJson, exigirClaveInterna } = require('./http');
+const { ORIGENES } = require('./item-cancelado');
 
 // Mismos valores que el CHECK del backend. Solo se usan para rechazar basura;
 // la validez de la TRANSICIÓN la decide el trigger de la base de datos.
@@ -140,11 +141,29 @@ function validarCambioEstado(p) {
 }
 
 /**
+ * `origen` de POST /internal/order-status (EVENTS.md §6.3): quién causó el
+ * cambio, 'comensal' o 'personal'. Opcional: si no viene, el evento no lleva
+ * la clave y quien lo recibe asume 'personal' (el único origen de los cambios
+ * de estado antes de J-14). Solo tiene sentido con estado 'cancelado' (el
+ * comensal quitó su última línea, #180), pero no se rechaza con otro estado:
+ * se reenvía igual. Devuelve mensaje de error o null.
+ */
+function validarOrigen(p) {
+  if (p && typeof p === 'object' && p.origen !== undefined && !ORIGENES.includes(p.origen)) {
+    return `origen debe ser uno de: ${ORIGENES.join(', ')} (o no venir)`;
+  }
+  return null;
+}
+
+/**
  * Lógica única de order:status (socket y HTTP interno). Reenvía solo los
  * campos conocidos, no el objeto entero: así un emisor no puede colar datos
  * arbitrarios hacia las pantallas de cocina y de los comensales.
+ *
+ * `origen` solo lo pasa el HTTP interno, ya validado: por el socket no se
+ * reenvía aunque venga en el payload (ahí siempre es el personal).
  */
-async function difundirCambioEstado(ctx, p) {
+async function difundirCambioEstado(ctx, p, { origen } = {}) {
   const { io, registro } = ctx;
   if (!esEventIdValido(p.eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
   const errorPayload = validarCambioEstado(p);
@@ -162,6 +181,8 @@ async function difundirCambioEstado(ctx, p) {
     codigo_pedido: p.codigo_pedido ?? null,
     estado_anterior: p.estado_anterior ?? null,
     estado: p.estado,
+    // Solo si vino: sin la clave, quien recibe asume 'personal'.
+    ...(origen !== undefined ? { origen } : {}),
     emitidoEn: new Date().toISOString(),
   };
   io.to(SALA_KDS).to(SALA_ADMIN).to(salaMesa(p.id_mesa)).emit('order:status', cambio);
@@ -206,7 +227,11 @@ const rutasPedidos = {
   'POST /internal/order-status': async (req, res, ctx) => {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    enviarAck(res, await difundirCambioEstado(ctx, cuerpo));
+    // origen se valida ANTES de difundir (que es quien reserva el eventId):
+    // un 400 no consume el eventId y el reintento corregido sí sale.
+    const errorOrigen = validarOrigen(cuerpo);
+    if (errorOrigen) return enviarAck(res, fallo('PAYLOAD_INVALIDO', errorOrigen, { eventId: cuerpo.eventId }));
+    return enviarAck(res, await difundirCambioEstado(ctx, cuerpo, { origen: cuerpo && cuerpo.origen }));
   },
 };
 
