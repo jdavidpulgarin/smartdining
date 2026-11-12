@@ -5,11 +5,14 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
-  Alert,
+  TextInput,
+  Pressable,
   StyleSheet,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { obtenerPlatoPorId } from '../../src/services/menuService';
+import { useCarrito } from '../../src/context/CarritoContext';
+import { generarIdLinea } from '../../src/utils/id';
 import { colores, espaciado, radios } from '../../src/theme';
 import { formatearPrecio } from '../../src/utils/formato';
 import { ALERGENOS_MAP, ETIQUETAS_MAP } from '../../src/constants/dieta';
@@ -20,12 +23,17 @@ import Button from '../../src/components/ui/Button';
 export default function PlatoDetalleScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const { agregarLinea } = useCarrito();
+
   const idClave = String(id ?? '');
   const [estadoCarga, setEstadoCarga] = useState({
     idCargado: null,
     plato: null,
     error: null,
   });
+  const [cantidad, setCantidad] = useState(1);
+  const [notas, setNotas] = useState('');
+  const [agregado, setAgregado] = useState(false);
 
   useEffect(() => {
     let activo = true;
@@ -84,7 +92,18 @@ export default function PlatoDetalleScreen() {
       router.push(`/armar/${plato.id}`);
       return;
     }
-    Alert.alert('Carrito', `${plato.nombre} listo para agregar en la Fase 3.`);
+
+    agregarLinea({
+      id_linea: generarIdLinea(),
+      id_plato: plato.id,
+      nombre: plato.nombre,
+      imagen: plato.imagen || null,
+      precioUnitario: plato.precio,
+      cantidad,
+      notas: notas.trim(),
+      calorias: plato.calorias ?? null,
+    });
+    setAgregado(true);
   };
 
   return (
@@ -150,6 +169,61 @@ export default function PlatoDetalleScreen() {
           )}
         </Card>
 
+        {!plato.personalizable && !agotado && (
+          <Card style={styles.notasCard}>
+            <Text style={styles.seccionTitulo}>NOTAS PARA COCINA (OPCIONAL)</Text>
+            <TextInput
+              value={notas}
+              onChangeText={(txt) => {
+                setNotas(txt);
+                if (agregado) setAgregado(false);
+              }}
+              maxLength={200}
+              multiline
+              placeholder="Ej: Sin cebolla, salsa aparte..."
+              placeholderTextColor={colores.textoTenue}
+              style={styles.inputNotas}
+            />
+
+            <View style={styles.cantidadRow}>
+              <Text style={styles.seccionTitulo}>CANTIDAD</Text>
+              <View style={styles.stepper}>
+                <Pressable
+                  onPress={() => setCantidad((c) => Math.max(1, c - 1))}
+                  accessibilityRole="button"
+                  accessibilityLabel="Disminuir cantidad"
+                  style={styles.stepBtn}
+                >
+                  <Text style={styles.stepTexto}>−</Text>
+                </Pressable>
+                <Text style={styles.cantidadValor}>{cantidad}</Text>
+                <Pressable
+                  onPress={() => setCantidad((c) => Math.min(20, c + 1))}
+                  accessibilityRole="button"
+                  accessibilityLabel="Aumentar cantidad"
+                  style={styles.stepBtn}
+                >
+                  <Text style={styles.stepTexto}>+</Text>
+                </Pressable>
+              </View>
+            </View>
+          </Card>
+        )}
+
+        {agregado && (
+          <Card style={styles.confirmacionCard}>
+            <Text style={styles.confirmacionTexto}>
+              ✓ Agregado al carrito ({cantidad} × {plato.nombre})
+            </Text>
+            <Button
+              variante="secundario"
+              onPress={() => router.push('/(tabs)/carrito')}
+            >
+              Ir al carrito
+            </Button>
+          </Card>
+        )}
+
         <Button
           disabled={agotado}
           onPress={manejarAccionPrincipal}
@@ -159,7 +233,7 @@ export default function PlatoDetalleScreen() {
             ? 'No disponible'
             : plato.personalizable
               ? 'Armar mi plato'
-              : 'Agregar al carrito'}
+              : `Agregar al carrito · ${formatearPrecio(plato.precio * cantidad)}`}
         </Button>
       </View>
     </ScrollView>
@@ -193,12 +267,12 @@ const styles = StyleSheet.create({
   },
   imagenGrande: {
     width: '100%',
-    height: 260,
+    height: 250,
     backgroundColor: colores.superficie2,
   },
   sinImagenGrande: {
     width: '100%',
-    height: 200,
+    height: 190,
     backgroundColor: colores.superficie2,
     alignItems: 'center',
     justifyContent: 'center',
@@ -244,6 +318,9 @@ const styles = StyleSheet.create({
     gap: espaciado.sm,
     borderRadius: radios.lg,
   },
+  notasCard: {
+    gap: espaciado.md,
+  },
   seccionTitulo: {
     color: colores.textoSuave,
     fontSize: 12,
@@ -255,7 +332,59 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontStyle: 'italic',
   },
+  inputNotas: {
+    backgroundColor: colores.superficie2,
+    borderWidth: 1,
+    borderColor: colores.borde,
+    borderRadius: radios.md,
+    padding: espaciado.md,
+    color: colores.texto,
+    fontSize: 14,
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  cantidadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: espaciado.md,
+  },
+  stepBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: radios.md,
+    backgroundColor: colores.superficie2,
+    borderWidth: 1,
+    borderColor: colores.borde,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepTexto: {
+    color: colores.texto,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  cantidadValor: {
+    color: colores.texto,
+    fontSize: 18,
+    fontWeight: '800',
+    minWidth: 24,
+    textAlign: 'center',
+  },
+  confirmacionCard: {
+    gap: espaciado.sm,
+    borderColor: colores.exito,
+  },
+  confirmacionTexto: {
+    color: colores.exito,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   accionBtn: {
-    marginTop: espaciado.sm,
+    marginTop: espaciado.xs,
   },
 });

@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import { Text, StyleSheet } from 'react-native';
 import { colores } from '../../src/theme';
+import { useCarrito } from '../../src/context/CarritoContext';
 
 function TabIcon({ simbolo, focused }) {
   return (
@@ -11,6 +12,8 @@ function TabIcon({ simbolo, focused }) {
 }
 
 export default function TabsLayout() {
+  const { totalUnidades } = useCarrito();
+
   return (
     <Tabs
       screenOptions={{
@@ -54,6 +57,13 @@ export default function TabsLayout() {
         name="carrito"
         options={{
           title: 'Carrito',
+          tabBarBadge: totalUnidades > 0 ? totalUnidades : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: colores.primario,
+            color: colores.texto,
+            fontSize: 11,
+            fontWeight: '800',
+          },
           tabBarIcon: ({ focused }) => <TabIcon simbolo="🛒" focused={focused} />,
         }}
       />
