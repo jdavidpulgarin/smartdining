@@ -13,8 +13,10 @@ const {
 const { eventoWompi } = require('./wompi-eventos');
 const { crearConexionRedis } = require('../src/almacen/redis');
 const { crearRedisFalso } = require('./redis-falso');
+const { crearEstadoMesasRedis } = require('../src/almacen/mesas-redis');
 
 const silencioso = { info() {}, error() {} };
+const REDIS_URL = process.env.REDIS_URL;
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Espera (hasta 2 s) a que se cumpla `cond`, sin depender de la carga de la máquina. */
 async function hasta(cond, ms = 2000) {
@@ -22,12 +24,12 @@ async function hasta(cond, ms = 2000) {
   while (!cond() && Date.now() < fin) await pausa(20); // eslint-disable-line no-await-in-loop
 }
 
-// Mesa 5 con $90.000. El backend cobra y responde el saldo; no libera la mesa
+// Mesa `idMesa` (5 por defecto) con $90.000. El backend cobra y responde el saldo; no libera la mesa
 // por su cuenta (eso lo decide la prueba con /internal/mesa-liberada).
-async function escenario(t, almacen) {
+async function escenario(t, almacen, idMesa = 5) {
   const mesa = { saldo: 9_000_000 };
   const backend = backendFalso({
-    'GET /api/mesas/5/cuenta/interno': () => ({ status: 200, cuerpo: cuenta(5, 9_000_000, mesa.saldo) }),
+    [`GET /api/mesas/${idMesa}/cuenta/interno`]: () => ({ status: 200, cuerpo: cuenta(idMesa, 9_000_000, mesa.saldo) }),
     'POST /api/transacciones/internal': (c) => {
       mesa.saldo -= c.monto_centavos;
       // Saldo 0 con un pedido sin entregar: la mesa sigue ocupada.
@@ -39,6 +41,9 @@ async function escenario(t, almacen) {
   const deps = { backend, pasarela: pasarelaFalsa(transacciones).pasarela, presencia: { ventanaMs: 50 } };
   if (almacen === 'redis') {
     deps.redis = crearConexionRedis({ url: 'redis://falso:6379', crearCliente: crearRedisFalso().crearCliente, log: silencioso });
+  } else if (almacen === 'redis-real') {
+    deps.redis = crearConexionRedis({ url: REDIS_URL, log: silencioso });
+    await deps.redis.conectar();
   }
   const s = await levantar(WOMPI_ENV, deps);
   t.after(() => s.cerrar());
@@ -48,20 +53,20 @@ async function escenario(t, almacen) {
     headers: { 'Content-Type': 'application/json', 'x-internal-key': CLAVE_INTERNA },
     body: JSON.stringify(cuerpo),
   });
-  const liberar = async () => assert.strictEqual((await interno('/internal/mesa-liberada', { id_mesa: 5, motivo: 'pagada' })).status, 200);
+  const liberar = async () => assert.strictEqual((await interno('/internal/mesa-liberada', { id_mesa: idMesa, motivo: 'pagada' })).status, 200);
   /** Sesión nueva: el personal genera el QR y el JWT del comensal es posterior a la liberación. */
   const reabrir = async () => {
     const r = await fetch(`${s.url}/qr/generar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenPersonal('mesero')}` },
-      body: JSON.stringify({ id_mesa: 5 }),
+      body: JSON.stringify({ id_mesa: idMesa }),
     });
     assert.strictEqual(r.status, 201);
     mesa.saldo = 9_000_000;
   };
   // iat 2 s en el futuro: así el JWT de la sesión nueva es posterior a la
   // liberación aunque todo pase en el mismo segundo.
-  const token = (alias, nueva) => tokenComensal(5, alias, nueva ? { iat: Math.floor(Date.now() / 1000) + 2 } : {});
+  const token = (alias, nueva) => tokenComensal(idMesa, alias, nueva ? { iat: Math.floor(Date.now() / 1000) + 2 } : {});
   const sentar = async (alias, nueva = false) => {
     const c = await s.conectar(token(alias, nueva));
     const recibidas = [];
@@ -92,7 +97,7 @@ async function escenario(t, almacen) {
     return r.json();
   };
   const caja = (cuerpo) => interno('/internal/payment-confirmed', {
-    eventId: crypto.randomUUID(), id_mesa: 5, monto_centavos: 9_000_000, saldo_restante_centavos: 0, ...cuerpo,
+    eventId: crypto.randomUUID(), id_mesa: idMesa, monto_centavos: 9_000_000, saldo_restante_centavos: 0, ...cuerpo,
   });
   /** La próxima llamada a marcarPago corre `antes` y/o `despues` alrededor de la escritura real. */
   const alrededorDeMarcar = ({ antes, despues }) => {
@@ -104,9 +109,9 @@ async function escenario(t, almacen) {
       if (despues) await despues();
     };
   };
-  const pagaron = () => s.estadoMesas.pagaron(5);
+  const pagaron = () => s.estadoMesas.pagaron(idMesa);
   return {
-    s, mesa, liberar, reabrir, sentar, pedir, pagar, caja, alrededorDeMarcar, pagaron,
+    s, mesa, liberar, reabrir, sentar, pedir, pagar, caja, alrededorDeMarcar, pagaron, idMesa,
   };
 }
 
@@ -210,3 +215,89 @@ for (const almacen of ['memoria', 'redis']) {
     assert.deepStrictEqual(await e.pagaron(), []);
   });
 }
+
+// --- Contra un Redis real (el job «socket-server · pruebas (con Redis)» del CI
+// levanta redis:7). Se omiten si no hay REDIS_URL. Mesa al azar por prueba: el
+// Redis es compartido y las marcas de revocación duran horas.
+const sinRedis = !REDIS_URL && 'sin REDIS_URL';
+const mesaAlAzar = () => 800000 + Math.floor(Math.random() * 90000);
+
+test('Redis real: desmarcarPago quita solo ese alias y saca la mesa del índice cuando no le queda nada', { skip: sinRedis }, async (t) => {
+  const conexion = crearConexionRedis({ url: REDIS_URL, log: silencioso });
+  await conexion.conectar();
+  t.after(() => conexion.cerrar());
+  const e = crearEstadoMesasRedis({ cliente: conexion.cliente });
+  const [conPagos, conSinCelular] = [mesaAlAzar(), mesaAlAzar() + 1];
+  t.after(async () => { await e.limpiarMesa(conPagos); await e.limpiarMesa(conSinCelular); });
+
+  await e.marcarPago(conPagos, 'Ana');
+  await e.marcarPago(conPagos, 'Beto');
+  await e.desmarcarPago(conPagos, 'Ana');
+  assert.deepStrictEqual(await e.pagaron(conPagos), ['Beto']);
+  assert.ok((await e.mesasConEstado()).includes(conPagos), 'Beto sigue anotado: la mesa sigue en el índice');
+  await e.desmarcarPago(conPagos, 'Beto');
+  assert.deepStrictEqual(await e.pagaron(conPagos), []);
+  assert.ok(!(await e.mesasConEstado()).includes(conPagos), 'sin nada anotado sale del índice');
+
+  await e.agregarSinCelular(conSinCelular, 'abuela', 'Abuela');
+  await e.marcarPago(conSinCelular, 'Ana');
+  await e.desmarcarPago(conSinCelular, 'Ana');
+  assert.ok((await e.mesasConEstado()).includes(conSinCelular), 'con un sin celular la mesa sigue en el índice');
+  // Desmarcar a quien no está es inofensivo.
+  await e.desmarcarPago(conSinCelular, 'Zoe');
+  assert.deepStrictEqual(await e.pagaron(conSinCelular), []);
+});
+
+test('Redis real: saldo 0 con un pedido sin entregar se anota y llega en mesa:presencia', { skip: sinRedis }, async (t) => {
+  const e = await escenario(t, 'redis-real', mesaAlAzar());
+  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
+  const deAna = await e.sentar('Ana');
+  assert.strictEqual((await e.pagar(await e.pedir('Ana'))).registrado, true);
+  assert.deepStrictEqual(await e.pagaron(), ['Ana']);
+  await hasta(() => deAna.some((p) => p.pagaron.length > 0));
+  assert.deepStrictEqual(deAna.find((p) => p.pagaron.length > 0).pagaron, ['Ana']);
+});
+
+test('Redis real: carrera, la liberación termina justo antes de anotar: se deshace y la mesa sale del índice', { skip: sinRedis }, async (t) => {
+  const e = await escenario(t, 'redis-real', mesaAlAzar());
+  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
+  await e.sentar('Ana');
+  const referencia = await e.pedir('Ana');
+  e.alrededorDeMarcar({ antes: e.liberar });
+  assert.strictEqual((await e.pagar(referencia)).registrado, true);
+  assert.deepStrictEqual(await e.pagaron(), []);
+  assert.ok(!(await e.s.estadoMesas.mesasConEstado()).includes(e.idMesa), 'la mesa no queda en el índice');
+});
+
+test('Redis real: carrera, la liberación llega entre la anotación y la comprobación: no queda nada', { skip: sinRedis }, async (t) => {
+  const e = await escenario(t, 'redis-real', mesaAlAzar());
+  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
+  await e.sentar('Ana');
+  const referencia = await e.pedir('Ana');
+  e.alrededorDeMarcar({ despues: e.liberar });
+  assert.strictEqual((await e.pagar(referencia)).registrado, true);
+  assert.deepStrictEqual(await e.pagaron(), []);
+});
+
+test('Redis real: el webhook de una intención vieja con el grupo siguiente sentado no lo ensucia', { skip: sinRedis }, async (t) => {
+  const e = await escenario(t, 'redis-real', mesaAlAzar());
+  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
+  await e.sentar('Ana');
+  const vieja = await e.pedir('Ana');
+  await e.liberar();
+  await e.reabrir();
+  const deZoe = await e.sentar('Zoe', true);
+  assert.strictEqual((await e.pagar(vieja)).registrado, true);
+  assert.deepStrictEqual(await e.pagaron(), []);
+  await pausa(150);
+  assert.ok(deZoe.every((p) => p.pagaron.length === 0), 'Zoe nunca ve a Ana en pagaron');
+});
+
+test('Redis real: caja, la liberación llega entre la anotación y la comprobación: no queda nada', { skip: sinRedis }, async (t) => {
+  const e = await escenario(t, 'redis-real', mesaAlAzar());
+  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
+  await e.sentar('Ana');
+  e.alrededorDeMarcar({ despues: e.liberar });
+  assert.strictEqual((await e.caja({ comensal: 'Caro' })).status, 200);
+  assert.deepStrictEqual(await e.pagaron(), []);
+});
