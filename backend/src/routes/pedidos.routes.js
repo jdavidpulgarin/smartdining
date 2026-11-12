@@ -30,11 +30,12 @@ router.patch('/:id/estado', requireAuth, requireRole('admin', 'cajero', 'mesero'
 // suyo completo. El controller decide por el tipo de sesión.
 router.post('/:id/cancelar', requireAuth, requireRole('admin', 'cajero', 'mesero', 'comensal'), ctrl.cancelar);
 // D-13: quita UNA línea. El comensal (J-14) solo las suyas; el personal de sala
-// y caja cualquiera. Cocina no. El controller decide por el tipo de sesión.
+// cualquiera, pero solo admin y mesero (revisión de Jarrison): cajero y cocina
+// no. El controller decide por el tipo de sesión.
 router.post(
   '/:id/items/:id_detalle/cancelar',
   requireAuth,
-  requireRole('comensal', 'admin', 'mesero', 'cajero'),
+  requireRole('comensal', 'admin', 'mesero'),
   ctrl.cancelarItem
 );
 

@@ -2036,7 +2036,7 @@ Notas de lo que quedó demostrado al escribirlas:
 | GET | /pedidos/:id | **admin, cajero, mesero, comensal** | Detalle con sus ítems; un comensal solo ve los de su mesa y de su visita (403 si no). **`cocina` no entra (S-26)** |
 | PATCH | /pedidos/:id/estado | admin, cajero, mesero | Cambia el estado (cualquiera de los 6 válidos) |
 | POST | /pedidos/:id/cancelar | admin, cajero, mesero, **comensal** | Personal: atajo que fija `estado = cancelado`. **Solo desde `recibido` o `en_preparacion`**; desde `listo`/`entregado` responde 409. **Comensal (D-12): cancela SU pedido completo, solo en `recibido`; no libera la mesa** |
-| **POST** | **/pedidos/:id/items/:id_detalle/cancelar** | **comensal, admin, mesero, cajero** | **D-13: quita UNA línea, entera. El comensal (J-14) solo las suyas y antes de que cocina empiece; el personal cualquiera que no se haya servido (devolución o merma). No libera la mesa** |
+| **POST** | **/pedidos/:id/items/:id_detalle/cancelar** | **comensal, admin, mesero** | **D-13: quita UNA línea, entera. El comensal (J-14) solo las suyas y antes de que cocina empiece; admin y mesero cualquiera que no se haya servido, con `motivo` obligatorio (devolución o merma). Con cualquier pago completado, 409. No libera la mesa** |
 
 ### POST /pedidos
 
@@ -2441,12 +2441,22 @@ en ese orden), y en este orden de comprobación:
 | El pedido es de la **mesa del JWT** (y de su visita actual), y la línea es **del comensal del JWT**, comparando por la **clave** del alias (D-18b: sin tildes, mayúsculas ni separadores; `Ána María` = `ana  maria`). Una línea sin comensal (`NULL`) no la quita ningún comensal | **403** `{ "motivo": "no_es_tuyo" }` |
 | La línea no estaba ya cancelada (se mira **antes** que los otros 409) | **409** `{ "motivo": "item_ya_cancelado" }` |
 | El pedido sigue en `recibido` y la línea en `pendiente` | **409** `{ "motivo": "item_en_preparacion" }` |
-| Si el pedido tiene pagos `completada`, el total nuevo no queda **por debajo** de lo pagado | **409** `{ "motivo": "pago_registrado" }` |
+| El pedido **no tiene ninguna** transacción `completada` (ver abajo) | **409** `{ "motivo": "pago_registrado" }` |
+
+> **`pago_registrado` es estricto** (revisión de Jarrison), en los dos caminos: basta
+> **cualquier** transacción `completada`, aunque el total nuevo siguiera cubriendo lo
+> pagado. El `estado_pago` del pedido (script 22) no se recalcula cuando baja el total, así
+> que tocar un pedido con pagos lo dejaría mal. Se queda así **hasta que se arregle
+> `estado_pago` en la base**; con un pago, hay que reembolsar antes.
+
+> **Doble clic:** el segundo envío sobre la misma línea espera al primero (el bloqueo de la
+> línea) y responde **409** `item_ya_cancelado`; el stock no se devuelve dos veces.
 
 Si pasa:
 
 1. La línea se cancela **completa** (`estado_item = 'cancelado'`), aunque tenga
-   `cantidad > 1`: no se descuenta de a una unidad.
+   `cantidad > 1`: no se descuenta de a una unidad. **Cancelar solo parte de la cantidad de
+   una línea queda para después**; hoy siempre es la línea entera.
 2. Lo demás lo hace **la base**: `tr_devolver_inventario` devuelve al stock lo reservado
    (es **devolución, no merma**: la línea estaba `pendiente` y el pedido `recibido`), también
    las porciones de los ingredientes elegidos de un plato del **constructor**; y
@@ -2503,16 +2513,19 @@ cada uno con su `estado_item`. `total` es un número:
 
 #### Camino del personal (D-13)
 
-> **Contrato pendiente de revisión de Jarrison y Juan.**
+> **Contrato con los ajustes de la revisión de Jarrison** (motivo obligatorio, solo admin y
+> mesero, `pago_registrado` estricto).
 
-El personal de sala y caja cancela **cualquier línea** de **cualquier mesa** (no hay regla de
-dueño), también cuando cocina ya la empezó.
+Admin y mesero cancelan **cualquier línea** de **cualquier mesa** (no hay regla de dueño),
+también cuando cocina ya la empezó.
 
-- **Quién:** **admin, mesero o cajero**. **Cocina no** (403). El autor sale del JWT.
+- **Quién:** **admin o mesero**. **Cajero y cocina no** (403). El autor sale del JWT.
 - **Parámetros:** los mismos que el comensal (400 `parametro_invalido`).
-- **Cuerpo opcional** (zod `.strict()`): `{ "motivo"?: string }`, recortado (trim), de 1 a 200
-  caracteres. Vacío, solo espacios, más de 200, que no sea texto o un campo de más: **400**
-  `{ "motivo": "cuerpo_invalido" }`. El motivo va **solo al historial**, no al aviso.
+- **Cuerpo OBLIGATORIO** (zod `.strict()`): `{ "motivo": string }`, recortado (trim), de 1 a
+  200 caracteres. Sin cuerpo, sin `motivo`, vacío, solo espacios, más de 200 o que no sea
+  texto: **400** `{ "error", "motivo": "motivo_requerido" }`. Un campo de más o un cuerpo
+  que no es un objeto: **400** `{ "motivo": "cuerpo_invalido" }`. El motivo va **solo al
+  historial**, no al aviso.
 
 En la **misma transacción y con los mismos bloqueos** que el comensal (pedido y después línea,
 `FOR UPDATE`), y con `app.id_usuario` fijado (`set_config(..., true)`) para que los
@@ -2523,12 +2536,16 @@ movimientos de inventario que escriben los triggers lleven al usuario:
 | El pedido existe y `id_detalle` es de ese pedido | **404** `{ "motivo": "no_encontrado" }` |
 | La línea no estaba ya cancelada (va **primero**) | **409** `{ "motivo": "item_ya_cancelado" }` |
 | La línea no está `servido` y el pedido no está `entregado`, `pagado` ni `cancelado` | **409** `{ "motivo": "item_no_cancelable" }` |
-| Los pagos `completada` no quedan por encima del total nuevo (igual que el comensal) | **409** `{ "motivo": "pago_registrado" }` |
+| El pedido no tiene **ninguna** transacción `completada` (estricto, igual que el comensal) | **409** `{ "motivo": "pago_registrado" }` |
 | Si es la **última** línea viva: el pedido puede pasar a `cancelado` desde su estado según `transiciones_validas` | **409** `{ "motivo": "item_no_cancelable" }` (ver abajo) |
 | El usuario del JWT existe | **409** `{ "motivo": "autor_inexistente" }` (el helper de siempre) |
 
-Se puede con la línea en `pendiente`, `cocinando` o `listo`, y siempre **completa**. **El stock
-lo decide la base**, no el backend (`tr_devolver_inventario`, script 27):
+Un **doble clic** (segundo envío sobre la misma línea) espera al primero y responde **409**
+`item_ya_cancelado`, sin otro movimiento de stock.
+
+Se puede con la línea en `pendiente`, `cocinando` o `listo`, y siempre **completa** (cancelar
+solo parte de la cantidad queda para después). **El stock lo decide la base**, no el backend
+(`tr_devolver_inventario`, script 27):
 
 - línea `pendiente` y pedido `recibido` → **devolución**: vuelve exactamente lo reservado;
 - en cualquier otro caso (la línea ya en cocina, o el pedido en `en_preparacion`/`listo`) →
@@ -2538,8 +2555,8 @@ lo decide la base**, no el backend (`tr_devolver_inventario`, script 27):
 En los dos casos el movimiento lleva el `id_usuario` de la sesión.
 
 Si era la **última línea viva**, el pedido pasa a `cancelado` con su fila en
-`historial_estados`: `id_usuario` = el de la sesión, observación = el `motivo` o, sin él,
-*"Cancelado por el personal"*. **No libera la mesa.**
+`historial_estados`: `id_usuario` = el de la sesión, observación = el `motivo` (obligatorio).
+**No libera la mesa.**
 
 > **`listo` → `cancelado` no es una transición válida** (`transiciones_validas`, script 11:
 > solo `recibido` y `en_preparacion` pasan a `cancelado`). Una línea de un pedido en `listo`
@@ -2554,9 +2571,10 @@ Si era la **última línea viva**, el pedido pasa a `cancelado` con su fila en
 acepta en su #181). Si el pedido quedó cancelado, también el `order:status` de siempre.
 
 > El `estado_pago` del pedido (script 22) solo lo recalcula un trigger sobre
-> `transacciones`. Si quitar una línea deja el total **igual** a lo ya pagado, el pedido
-> queda cubierto pero `estado_pago` sigue en `parcial` hasta el próximo movimiento de
-> pago. Es de la base; queda anotado para Jarrison.
+> `transacciones`, no cuando baja el total. Por eso `pago_registrado` bloquea con cualquier
+> pago completado: así ninguna cancelación de línea deja un pedido con pagos y su
+> `estado_pago` desfasado. Es de la base; queda anotado para Jarrison, y cuando se arregle
+> se puede volver a permitir quitar líneas que el pago siga cubriendo.
 
 ---
 

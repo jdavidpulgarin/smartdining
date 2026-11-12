@@ -25,7 +25,7 @@ const assert = require('node:assert');
 const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const platosService = require('../../src/services/platos.service');
 const autorInexistente = require('../../src/services/autor-inexistente');
@@ -39,15 +39,12 @@ const creados = [];
 const nombreLibre = () => `ISSUE132 ${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    const categoria = await sonda.query('SELECT id_categoria FROM categorias ORDER BY id_categoria LIMIT 1');
-    idCategoria = categoria.rows[0] ? categoria.rows[0].id_categoria : null;
-    hayBase = idCategoria !== null;
-  } catch {
-    hayBase = false;
-  }
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  const categoria = await sonda.query('SELECT id_categoria FROM categorias ORDER BY id_categoria LIMIT 1');
+  idCategoria = categoria.rows[0] ? categoria.rows[0].id_categoria : null;
+  hayBase = idCategoria !== null;
 });
 
 test.after(async () => {

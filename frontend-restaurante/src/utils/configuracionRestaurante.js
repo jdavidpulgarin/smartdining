@@ -23,15 +23,73 @@ export const DIAS = [
   { clave: 'domingo', etiqueta: 'Domingo' },
 ]
 
-/** Los campos que el PUT acepta. Ni uno más (el cuerpo es `.strict()`). */
-export const CAMPOS_EDITABLES = ['nombre', 'telefono', 'direccion', 'url_logo', 'horario', 'propina_sugerida_pct', 'moneda']
+/**
+ * Los campos que el PUT acepta. Ni uno más (el cuerpo es `.strict()`).
+ *
+ * `correo` y `redes` son del script 29 (P-21). Mientras el backend no los
+ * acepte en el PUT, mandarlos da 400; por eso, igual que el resto, solo viajan
+ * si cambiaron: con los dos vacíos, guardar lo demás sigue funcionando.
+ */
+export const CAMPOS_EDITABLES = ['nombre', 'telefono', 'correo', 'direccion', 'url_logo', 'redes', 'horario', 'propina_sugerida_pct', 'moneda']
 
 /** Largos máximos: los de las columnas de `configuracion_restaurante`. */
-export const LIMITES = { nombre: 120, telefono: 30, direccion: 200, url_logo: 255 }
+export const LIMITES = { nombre: 120, telefono: 30, correo: 254, direccion: 200, url_logo: 255, red: 200 }
+
+/**
+ * Las redes del local (script 29, `fn_redes_contacto_validas`), en el orden en
+ * que se muestran. Las reglas son las mismas que el CHECK de la base: las tres
+ * primeras, un enlace https de su dominio; WhatsApp, el número en E.164.
+ */
+export const REDES = [
+  {
+    clave: 'instagram',
+    etiqueta: 'INSTAGRAM',
+    ejemplo: 'https://instagram.com/smartdining',
+    patron: /^https:\/\/([a-z0-9-]+\.)?instagram\.com\/\S+$/i,
+    error: 'Instagram: pega el enlace completo del perfil (https://instagram.com/…).',
+  },
+  {
+    clave: 'facebook',
+    etiqueta: 'FACEBOOK',
+    ejemplo: 'https://facebook.com/smartdining',
+    patron: /^https:\/\/([a-z0-9-]+\.)?(facebook|fb)\.com\/\S+$/i,
+    error: 'Facebook: pega el enlace completo de la página (https://facebook.com/…).',
+  },
+  {
+    clave: 'tiktok',
+    etiqueta: 'TIKTOK',
+    ejemplo: 'https://tiktok.com/@smartdining',
+    patron: /^https:\/\/([a-z0-9-]+\.)?tiktok\.com\/\S+$/i,
+    error: 'TikTok: pega el enlace completo del perfil (https://tiktok.com/@…).',
+  },
+  {
+    clave: 'whatsapp',
+    etiqueta: 'WHATSAPP',
+    ejemplo: '+57 300 123 4567',
+    patron: /^\+[1-9]\d{6,14}$/,
+    error: 'WhatsApp: escribe el número con el indicativo del país, p. ej. +57 300 123 4567.',
+  },
+]
 
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/
 const MONEDA = /^[A-Z]{3}$/
+/** El mismo CHECK que `ck_configuracion_correo`: algo@algo.algo, sin espacios ni dos arrobas. */
+const CORREO = /^[^@\s]+@[^@\s]+\.[^@\s.]+$/
 const HORARIO_VACIO = { abierto: false, abre: '', cierra: '' }
+
+/** `redes` de la fila → objeto con las cuatro claves en texto ('' = sin esa red). */
+function redesDelForm(redes) {
+  const r = redes && typeof redes === 'object' && !Array.isArray(redes) ? redes : {}
+  return Object.fromEntries(REDES.map(({ clave }) => [clave, typeof r[clave] === 'string' ? r[clave] : '']))
+}
+
+/**
+ * El número de WhatsApp como lo guarda la base: sin espacios, guiones, puntos
+ * ni paréntesis ("+57 300-123 4567" → "+573001234567").
+ */
+export function normalizarWhatsapp(texto) {
+  return String(texto ?? '').replace(/[\s().-]/g, '')
+}
 
 /**
  * Fila de GET /configuracion/completa → estado del formulario (todo texto, como
@@ -42,8 +100,10 @@ export function formDesdeConfig(config = {}) {
   return {
     nombre: config.nombre ?? '',
     telefono: config.telefono ?? '',
+    correo: config.correo ?? '',
     direccion: config.direccion ?? '',
     url_logo: config.url_logo ?? '',
+    redes: redesDelForm(config.redes),
     propina_sugerida_pct: config.propina_sugerida_pct === null || config.propina_sugerida_pct === undefined ? '' : String(config.propina_sugerida_pct),
     moneda: config.moneda ?? '',
     horario: Object.fromEntries(
@@ -62,7 +122,7 @@ function opcional(valor) {
 }
 
 /**
- * Formulario → { datos } con los 7 campos ya en el tipo del contrato, o
+ * Formulario → { datos } con los 9 campos ya en el tipo del contrato, o
  * { error } con el primer problema, en el orden en que se ven en pantalla.
  */
 export function validarConfig(form) {
@@ -72,6 +132,10 @@ export function validarConfig(form) {
 
   const telefono = opcional(form.telefono)
   if (telefono && telefono.length > LIMITES.telefono) return { error: `El teléfono admite hasta ${LIMITES.telefono} caracteres.` }
+
+  const correo = opcional(form.correo)
+  if (correo && correo.length > LIMITES.correo) return { error: `El correo admite hasta ${LIMITES.correo} caracteres.` }
+  if (correo && !CORREO.test(correo)) return { error: 'El correo no tiene la forma nombre@dominio.com.' }
 
   const direccion = opcional(form.direccion)
   if (direccion && direccion.length > LIMITES.direccion) return { error: `La dirección admite hasta ${LIMITES.direccion} caracteres.` }
@@ -88,6 +152,16 @@ export function validarConfig(form) {
   const moneda = String(form.moneda ?? '').trim().toUpperCase()
   if (!MONEDA.test(moneda)) return { error: 'La moneda son 3 letras (código ISO, p. ej. COP o USD).' }
 
+  // Una red vacía no viaja (la base no admite null ni ""): se omite la clave.
+  const redes = {}
+  for (const { clave, patron, error } of REDES) {
+    const crudo = String(form.redes?.[clave] ?? '').trim()
+    if (!crudo) continue
+    const valor = clave === 'whatsapp' ? normalizarWhatsapp(crudo) : crudo
+    if (valor.length > LIMITES.red || !patron.test(valor)) return { error }
+    redes[clave] = valor
+  }
+
   const horario = {}
   for (const { clave, etiqueta } of DIAS) {
     const dia = form.horario?.[clave] || HORARIO_VACIO
@@ -99,7 +173,13 @@ export function validarConfig(form) {
     horario[clave] = { abre: dia.abre, cierra: dia.cierra }
   }
 
-  return { datos: { nombre, telefono, direccion, url_logo, horario, propina_sugerida_pct, moneda } }
+  return { datos: { nombre, telefono, correo, direccion, url_logo, redes, horario, propina_sugerida_pct, moneda } }
+}
+
+/** Las redes en un orden fijo, para comparar sin depender del orden de las claves. */
+function redesCanonicas(redes) {
+  const r = redes && typeof redes === 'object' && !Array.isArray(redes) ? redes : {}
+  return JSON.stringify(REDES.filter(({ clave }) => r[clave]).map(({ clave }) => [clave, r[clave]]))
 }
 
 /** El horario en un orden fijo, para comparar sin depender del orden de las claves. */
@@ -118,6 +198,9 @@ export function cambiosDeConfig(original = {}, datos) {
   for (const campo of CAMPOS_EDITABLES) {
     if (campo === 'horario') {
       if (horarioCanonico(original.horario) !== horarioCanonico(datos.horario)) cambios.horario = datos.horario
+    } else if (campo === 'redes') {
+      // Una fila sin `redes` (backend aún sin el script 29) cuenta como '{}'.
+      if (redesCanonicas(original.redes) !== redesCanonicas(datos.redes)) cambios.redes = datos.redes
     } else if (campo === 'propina_sugerida_pct') {
       if (Number(original.propina_sugerida_pct) !== datos.propina_sugerida_pct) cambios[campo] = datos[campo]
     } else if ((original[campo] ?? null) !== datos[campo]) {

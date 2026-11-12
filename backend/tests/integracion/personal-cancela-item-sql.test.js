@@ -3,7 +3,7 @@ const assert = require('node:assert');
 
 /**
  * D-13 por el PERSONAL: POST /api/pedidos/:id/items/:id_detalle/cancelar con
- * sesión de admin/mesero/cajero, contra PostgreSQL REAL. Lo que se prueba aquí
+ * sesión de admin o mesero, contra PostgreSQL REAL. Lo que se prueba aquí
  * lo decide la base: devolución o MERMA (tr_devolver_inventario), el autor del
  * movimiento (app.id_usuario), el total y la transición del pedido.
  *
@@ -170,12 +170,11 @@ const dos = (comensal = 'Ana') => [
   { id_plato: plato.id_plato, cantidad: 1, comensal },
 ];
 
-const cancelar = (idPedido, idDetalle, cuerpo) => {
-  const r = request(app)
-    .post(`/api/pedidos/${idPedido}/items/${idDetalle}/cancelar`)
-    .set('Authorization', `Bearer ${admin.jwt}`);
-  return cuerpo === undefined ? r : r.send(cuerpo);
-};
+// El motivo es OBLIGATORIO para el personal: por omisión se manda uno.
+const cancelar = (idPedido, idDetalle, cuerpo = { motivo: 'Prueba de integración' }) => request(app)
+  .post(`/api/pedidos/${idPedido}/items/${idDetalle}/cancelar`)
+  .set('Authorization', `Bearer ${admin.jwt}`)
+  .send(cuerpo);
 
 /** El libro de un detalle: tipo -> { insumos, suma, filas, usuarios }. */
 async function libroDe(idDetalle) {
@@ -300,13 +299,13 @@ test('d2. última línea con el pedido en "listo": 409 item_no_cancelable (listo
   assert.deepStrictEqual(await filaPedido(idPedido), antes);
 });
 
-test('e. pago registrado que quedaría por encima del total nuevo: 409 pago_registrado y nada cambia', async (t) => {
+test('e. con CUALQUIER pago completado (uno parcial pequeño): 409 pago_registrado y nada cambia', async (t) => {
   if (!hayBase) return t.skip('sin base de datos');
   const idMesa = await mesaAbierta();
   const { idPedido, detalles: [primera] } = await pedidoCon(idMesa, dos());
-  const total = (await filaPedido(idPedido)).total;
-  const monto = total - primera.subtotal + 500;
-  assert.ok(monto <= total);
+  // Regla estricta (revisión de Jarrison): basta un pago, aunque el total
+  // nuevo siguiera cubriéndolo de sobra.
+  const monto = 100;
   await sonda.query(
     `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion)
      VALUES ($1::int, 'efectivo', $2::numeric, 'completada')`,

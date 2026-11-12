@@ -88,7 +88,7 @@ test('quitar plato: sin sesión -> 401', async () => {
   }
 });
 
-// Desde D-13 por el personal la ruta también acepta admin, mesero y cajero (sus
+// Desde D-13 por el personal la ruta también acepta admin y mesero (sus
 // pruebas están en pedidos-personal-cancela-item.test.js). Cocina sigue fuera.
 test('quitar plato: cocina no entra en esta ruta -> 403', async () => {
   const e = escenario();
@@ -195,6 +195,19 @@ for (const [motivo, opcionesDb] of [
     }
   });
 }
+
+test('quitar plato: pago_registrado es ESTRICTO, cualquier transacción completada (no compara con el total)', async () => {
+  const e = escenario('Ana', { pagoBloquea: true });
+  try {
+    assert.strictEqual((await quitar(e.jwtComensal)).status, 409);
+    const pago = e.db.buscar('FROM transacciones t');
+    assert.ok(pago.sql.includes('EXISTS'), 'basta con que exista una');
+    assert.ok(pago.sql.includes("estado_transaccion = 'completada'"));
+    assert.deepStrictEqual(pago.params, [PEDIDO], 'ni el total ni el subtotal entran en la regla');
+  } finally {
+    e.restaurar();
+  }
+});
 
 for (const [caso, cuerpo] of [['un campo', { motivo: 'no lo quiero' }], ['un arreglo', [1]]]) {
   test(`quitar plato: cuerpo con ${caso} -> 400 cuerpo_invalido`, async () => {

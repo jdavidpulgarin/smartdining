@@ -40,7 +40,7 @@ process.env.INTERNAL_API_KEY = crypto.randomBytes(32).toString('hex');
 const CLAVE = process.env.INTERNAL_API_KEY;
 
 const request = require('supertest');
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const app = require('../../server');
 const pool = require('../../src/config/db');
 const socketNotifier = require('../../src/services/socket.notifier');
@@ -97,34 +97,30 @@ async function limpiar() {
 }
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' AND activo ORDER BY id_usuario LIMIT 1");
-    const p = await sonda.query(
-      `SELECT id_plato FROM platos WHERE disponible AND stock_suficiente AND NOT personalizable ORDER BY id_plato LIMIT 1`
-    );
-    admin = u.rows[0] ? tokenStaff(u.rows[0].id_usuario, 'admin') : null;
-    plato = p.rows[0] || null;
-    hayBase = Boolean(admin && plato);
-    if (!hayBase) return;
-    await limpiar();
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' AND activo ORDER BY id_usuario LIMIT 1");
+  const p = await sonda.query(
+    `SELECT id_plato FROM platos WHERE disponible AND stock_suficiente AND NOT personalizable ORDER BY id_plato LIMIT 1`
+  );
+  admin = u.rows[0] ? tokenStaff(u.rows[0].id_usuario, 'admin') : null;
+  plato = p.rows[0] || null;
+  hayBase = Boolean(admin && plato);
+  if (!hayBase) return;
+  await limpiar();
 
-    // Los dos puntos backend <-> socket-server, contra el servicio QR real.
-    socketNotifier.generarTokenQr = async (idMesa) => {
-      const q = servicioQr.generar(idMesa);
-      return { alcanzado: true, token: q.token, expira_en: q.expira_en };
-    };
-    socketNotifier.validarTokenQr = async (token) => {
-      const r = await servicioQr.validar(token);
-      return r.valido
-        ? { alcanzado: true, valido: true, id_mesa: r.id_mesa, expira_en: r.expira_en }
-        : { alcanzado: true, valido: false, motivo: r.motivo };
-    };
-  } catch (err) {
-    if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
-    hayBase = false;
-  }
+  // Los dos puntos backend <-> socket-server, contra el servicio QR real.
+  socketNotifier.generarTokenQr = async (idMesa) => {
+    const q = servicioQr.generar(idMesa);
+    return { alcanzado: true, token: q.token, expira_en: q.expira_en };
+  };
+  socketNotifier.validarTokenQr = async (token) => {
+    const r = await servicioQr.validar(token);
+    return r.valido
+      ? { alcanzado: true, valido: true, id_mesa: r.id_mesa, expira_en: r.expira_en }
+      : { alcanzado: true, valido: false, motivo: r.motivo };
+  };
 });
 
 test.after(async () => {
