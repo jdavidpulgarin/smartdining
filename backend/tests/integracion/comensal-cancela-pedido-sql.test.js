@@ -32,7 +32,7 @@ process.env.REDIS_URL = '';
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const app = require('../../server');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
@@ -122,35 +122,31 @@ async function seleccionConstructor() {
 }
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    // Un plato con receta que NO es el que eligen las otras suites (el primero
-    // disponible por id), y entre los demás el que más unidades deja servir.
-    const p = await sonda.query(
-      `WITH comun AS (
-         SELECT id_plato FROM platos
-          WHERE disponible AND stock_suficiente AND NOT personalizable
-          ORDER BY id_plato LIMIT 1
-       )
-       SELECT p.id_plato FROM platos p
-        WHERE p.disponible AND p.stock_suficiente AND NOT p.personalizable AND p.precio >= 1000
-          AND p.id_plato NOT IN (SELECT id_plato FROM comun)
-          AND EXISTS (SELECT 1 FROM recetas_plato rp WHERE rp.id_plato = p.id_plato)
-        ORDER BY (SELECT min(floor(s.stock_actual / rp.cantidad)) FROM recetas_plato rp
-                    JOIN insumos s ON s.id_insumo = rp.id_insumo WHERE rp.id_plato = p.id_plato) DESC,
-                 p.id_plato
-        LIMIT 1`
-    );
-    plato = p.rows[0] || null;
-    constructor = await seleccionConstructor();
-    hayBase = Boolean(plato);
-    if (!hayBase) return;
-    await limpiar();
-  } catch (err) {
-    if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
-    hayBase = false;
-  }
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  // Un plato con receta que NO es el que eligen las otras suites (el primero
+  // disponible por id), y entre los demás el que más unidades deja servir.
+  const p = await sonda.query(
+    `WITH comun AS (
+       SELECT id_plato FROM platos
+        WHERE disponible AND stock_suficiente AND NOT personalizable
+        ORDER BY id_plato LIMIT 1
+     )
+     SELECT p.id_plato FROM platos p
+      WHERE p.disponible AND p.stock_suficiente AND NOT p.personalizable AND p.precio >= 1000
+        AND p.id_plato NOT IN (SELECT id_plato FROM comun)
+        AND EXISTS (SELECT 1 FROM recetas_plato rp WHERE rp.id_plato = p.id_plato)
+      ORDER BY (SELECT min(floor(s.stock_actual / rp.cantidad)) FROM recetas_plato rp
+                  JOIN insumos s ON s.id_insumo = rp.id_insumo WHERE rp.id_plato = p.id_plato) DESC,
+               p.id_plato
+      LIMIT 1`
+  );
+  plato = p.rows[0] || null;
+  constructor = await seleccionConstructor();
+  hayBase = Boolean(plato);
+  if (!hayBase) return;
+  await limpiar();
 });
 
 test.afterEach(async () => {
