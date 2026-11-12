@@ -99,10 +99,11 @@ database/scripts/
 ├── 27_inventario.sql                   # Inventario real: insumos, recetas, reserva al pedir, devoluciones y avisos (P-19)
 ├── 28_aviso_insumo_agotado.sql         # Aviso stock_bajo también al llegar a 0 aunque ya estuviera bajo (G-06)
 ├── 29_configuracion_contacto.sql       # correo y redes (instagram, facebook, tiktok, whatsapp) del local (P-21)
-└── 30_fix_auditoria_registro_id.sql    # registro_id de la auditoría = llave primaria real (en transacciones guardaba el id_pedido)
+├── 30_fix_auditoria_registro_id.sql    # registro_id de la auditoría = llave primaria real (en transacciones guardaba el id_pedido)
+└── 31_transicion_listo_cancelado.sql   # transición listo → cancelado (lo cocinado es merma); cancelar_pedido() lee transiciones_validas
 ```
 
-> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente (31).
+> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (32).
 
 > **Auditoría de transacciones antes del script 30:** las filas de `auditoria_cambios` con
 > `tabla_afectada = 'transacciones'` escritas antes del 30 tienen el **id del pedido** en
@@ -197,7 +198,14 @@ cd database/tests
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p18_configuracion.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p21_configuracion_contacto.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_30_auditoria_registro_id.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_31_listo_cancelado.sql
 ```
+
+Pedido en `listo` que se cancela (script 31): `test_31_listo_cancelado.sql` crea su propia mesa,
+insumo y plato con receta (no depende del seed) y comprueba que `listo → cancelado` se permite por
+`UPDATE` y por `cancelar_pedido()`, que lo cocinado queda como merma sin devolver stock, que desde
+`recibido` se sigue devolviendo y que `entregado` y `pagado` siguen sin poder cancelarse. Corre en
+`BEGIN … ROLLBACK`: no deja nada.
 
 Auditoría (script 30): `test_30_auditoria_registro_id.sql` hace INSERT, UPDATE y DELETE en
 `transacciones`, `usuarios` y `platos` y exige que `registro_id` sea la llave primaria de cada
