@@ -19,8 +19,12 @@
 //  10b. Caja: en otra mesa (MESA_COBRO), dos pedidos entregados se cobran con «Toda
 //       la mesa»; «Recaudado hoy» sube exactamente lo cobrado sin recargar y coincide
 //       con la suma del Historial y con GET /transacciones?desde=hoy.
-//   11. Limpieza: se cancelan los pedidos de la prueba, la mesa queda libre y la Carne
-//       Angus vuelve a su stock inicial. Se comprueba que todo quedó como estaba.
+//   11. Limpieza: se cancelan los pedidos de la prueba, la mesa queda libre y TODOS los
+//       insumos vuelven al stock que tenían antes de empezar (la Carne Angus y también lo
+//       que gastó el cobro del 10b, que no se puede cancelar). Se comprueba que todo
+//       quedó como estaba, así la prueba se puede correr muchas veces seguidas.
+//       Queda el historial, que no se borra: pedidos cancelados y pagados, el cobro
+//       del 10b y los movimientos del libro (la entrada del paso 9 y los ajustes).
 //
 // "Sin recargar" se comprueba con una marca en `window` que tiene que seguir ahí al final.
 // La carta pública (GET /menu) se comprueba al empezar, al agotarse y al reponer, con
@@ -118,6 +122,12 @@ async function pedidosAbiertosDeMesa(token, idMesa) {
   return (r.data?.pedidos || []).filter((p) => Number(p.id_mesa) === idMesa)
 }
 
+/** { id_insumo: stock_actual } de todos los insumos. */
+async function stockDeInsumos(token) {
+  const insumos = (await api(token, '/inventario/insumos?limite=500')).data?.insumos || []
+  return Object.fromEntries(insumos.map((i) => [i.id_insumo, Number(i.stock_actual)]))
+}
+
 /** Lo que la demo enseña. Se toma antes y se compara al final. */
 async function fotografiar(token, ids) {
   const insumo = await leerInsumo(token, ids.insumo)
@@ -130,6 +140,8 @@ async function fotografiar(token, ids) {
     mesa: mesa?.estado,
     pedidosAbiertos: (await pedidosAbiertosDeMesa(token, MESA)).length,
     libroCuadra: await libroCuadra(token, insumo),
+    mesaCobro: (Array.isArray(mesas) ? mesas : mesas?.mesas || []).find((m) => Number(m.id_mesa) === MESA_COBRO)?.estado,
+    stockInsumos: await stockDeInsumos(token),
   }
 }
 
@@ -210,12 +222,17 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
     // hasta 60 s a que caducara la caché).
     await esperarMenu(true, 'al empezar, con la carne en 4,')
     antes = await fotografiar(admin, ids)
-    expect(antes).toEqual({ stock: STOCK_DEMO, platoDisponible: true, mesa: 'disponible', pedidosAbiertos: 0, libroCuadra: true })
+    const { stockInsumos, ...resumen } = antes
+    expect(resumen).toEqual({ stock: STOCK_DEMO, platoDisponible: true, mesa: 'disponible', pedidosAbiertos: 0, libroCuadra: true, mesaCobro: 'disponible' })
+    expect(Object.keys(stockInsumos).length).toBeGreaterThan(0)
   })
 
   /**
    * Cancela lo que creó la prueba (la base devuelve las porciones), libera la
-   * mesa y deja la carne en su stock de demo con un ajuste. Idempotente: el
+   * mesa y deja CADA insumo en el stock que tenía al empezar, con un ajuste.
+   * Hace falta para todos y no solo para la carne: el cobro del 10b gasta
+   * insumos de otro plato y un pedido pagado no se cancela, así que sin esto
+   * cada corrida dejaba menos stock hasta agotar ese plato. Idempotente: el
    * test 11 la llama y comprueba; afterAll la repite por si la prueba se cortó.
    */
   async function limpiar() {
@@ -226,13 +243,16 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
       if (r.status !== 200) console.warn(`AVISO cancelar pedido ${id}: ${r.status} ${r.data?.error || ''}`)
     }
     await api(admin, `/mesas/${MESA}/liberar`, { method: 'POST' })
-    const insumo = await leerInsumo(admin, ids.insumo)
-    const diferencia = STOCK_DEMO - Number(insumo.stock_actual)
-    if (diferencia !== 0) {
-      await api(admin, `/inventario/insumos/${ids.insumo}/movimientos`, {
+    if (!antes?.stockInsumos) return
+    const ahora = await stockDeInsumos(admin)
+    for (const [id, stock] of Object.entries(antes.stockInsumos)) {
+      const diferencia = Math.round((stock - (ahora[id] ?? stock)) * 1000) / 1000
+      if (diferencia === 0) continue
+      const r = await api(admin, `/inventario/insumos/${id}/movimientos`, {
         method: 'POST',
-        body: { tipo: 'ajuste', cantidad: diferencia, motivo: 'E2E demo: volver a 4' },
+        body: { tipo: 'ajuste', cantidad: diferencia, motivo: 'E2E demo: volver al stock de antes' },
       })
+      if (r.status !== 201) console.warn(`AVISO ajuste insumo ${id}: ${r.status} ${r.data?.error || ''}`)
     }
   }
 
@@ -433,9 +453,10 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
 
   test('10b. Caja: después de un cobro, «Recaudado hoy» sube exactamente lo cobrado y cuadra con el Historial', async ({ browser }) => {
     // Mesa propia (MESA_COBRO, 2 por omisión) y un plato que no use la Carne
-    // Angus: así no toca la mesa ni el stock que compara la limpieza. El cobro
-    // libera la mesa solo; las transacciones quedan (son dinero cobrado de
-    // verdad, no hay ruta para borrarlas).
+    // Angus: así no toca la mesa ni la carne de la demo. El cobro libera la mesa
+    // solo; las transacciones quedan (son dinero cobrado de verdad, no hay ruta
+    // para borrarlas). Lo que gasta de insumos lo devuelve limpiar() con un
+    // ajuste, porque un pedido pagado ya no se cancela.
     const caja = await login('caja@smartdining.com')
     if ((await pedidosAbiertosDeMesa(admin, MESA_COBRO)).length > 0) {
       throw new Error(`la mesa ${MESA_COBRO} tiene pedidos abiertos: ciérralos o usa otra MESA_COBRO`)
