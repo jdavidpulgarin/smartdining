@@ -558,17 +558,23 @@ const paramsQuitarItemSchema = z.object({ id: idDeUrl, id_detalle: idDeUrl }).st
 /** Sin cuerpo: `{}` o nada. Un campo cualquiera es un 400. (Comensal.) */
 const cuerpoVacioSchema = z.object({}).strict();
 
-/** Cuerpo opcional del PERSONAL: solo `motivo`, para el historial. */
+/**
+ * Cuerpo del PERSONAL: `motivo` OBLIGATORIO (revisión de Jarrison), para el
+ * historial. Un problema con el motivo (falta, vacío, más de 200, no es texto)
+ * es 400 `motivo_requerido`; un campo de más o un cuerpo que no es un objeto,
+ * el `cuerpo_invalido` de siempre.
+ */
 const cuerpoPersonalSchema = z
   .object({
     motivo: z
-      .string({ invalid_type_error: 'motivo debe ser texto' })
+      .string({ required_error: 'motivo es obligatorio', invalid_type_error: 'motivo debe ser texto' })
       .trim()
       .min(1, 'motivo no puede estar vacío')
-      .max(200, 'motivo no puede pasar de 200 caracteres')
-      .optional(),
+      .max(200, 'motivo no puede pasar de 200 caracteres'),
   })
   .strict();
+
+const MOTIVO_REQUERIDO = 'motivo_requerido';
 
 /**
  * POST /api/pedidos/:id/items/:id_detalle/cancelar — D-13: quitar UNA línea de
@@ -604,11 +610,13 @@ async function cancelarItem(req, res, next) {
     } else {
       const cuerpo = cuerpoPersonalSchema.safeParse(req.body ?? {});
       if (!cuerpo.success) {
-        return res.status(400).json({ error: cuerpo.error.errors[0].message, motivo: 'cuerpo_invalido' });
+        const issue = cuerpo.error.errors[0];
+        const delMotivo = issue.path[0] === 'motivo';
+        return res.status(400).json({ error: issue.message, motivo: delMotivo ? MOTIVO_REQUERIDO : 'cuerpo_invalido' });
       }
       r = await pedidosService.cancelarItemPersonal(params.data.id, params.data.id_detalle, {
         idUsuario: req.user.id_usuario,
-        motivo: cuerpo.data.motivo ?? null,
+        motivo: cuerpo.data.motivo,
       });
     }
   } catch (err) {

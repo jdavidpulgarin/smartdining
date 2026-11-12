@@ -170,12 +170,11 @@ const dos = (comensal = 'Ana') => [
   { id_plato: plato.id_plato, cantidad: 1, comensal },
 ];
 
-const cancelar = (idPedido, idDetalle, cuerpo) => {
-  const r = request(app)
-    .post(`/api/pedidos/${idPedido}/items/${idDetalle}/cancelar`)
-    .set('Authorization', `Bearer ${admin.jwt}`);
-  return cuerpo === undefined ? r : r.send(cuerpo);
-};
+// El motivo es OBLIGATORIO para el personal: por omisión se manda uno.
+const cancelar = (idPedido, idDetalle, cuerpo = { motivo: 'Prueba de integración' }) => request(app)
+  .post(`/api/pedidos/${idPedido}/items/${idDetalle}/cancelar`)
+  .set('Authorization', `Bearer ${admin.jwt}`)
+  .send(cuerpo);
 
 /** El libro de un detalle: tipo -> { insumos, suma, filas, usuarios }. */
 async function libroDe(idDetalle) {

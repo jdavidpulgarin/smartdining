@@ -635,7 +635,10 @@ function cancelarItemComensal(idPedido, idDetalle, { idMesa, comensal }) {
   return cancelarItem(idPedido, idDetalle, { tipo: 'comensal', idMesa, comensal });
 }
 
-/** D-13 por el personal. `idUsuario` del JWT; `motivo` opcional para el historial. */
+/**
+ * D-13 por el personal. `idUsuario` del JWT; `motivo` para el historial (la
+ * ruta lo exige; el texto por defecto queda solo como respaldo defensivo).
+ */
 function cancelarItemPersonal(idPedido, idDetalle, { idUsuario, motivo = null }) {
   return cancelarItem(idPedido, idDetalle, { tipo: 'personal', idUsuario, motivo });
 }
