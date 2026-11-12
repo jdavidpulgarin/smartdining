@@ -10,11 +10,11 @@ const BADGE_PUSH = ICONO_PUSH;
 // no puede importar módulos ES de src/.
 const TEXTOS_POR_ESTADO = {
   en_preparacion: {
-    titulo: 'Tu pedido está en preparación 👨🍳',
+    titulo: 'Tu pedido está en preparación \u{1F468}\u200D\u{1F373}',
     cuerpo: (ref) => `${ref}Te avisamos cuando esté listo.`,
   },
   listo: {
-    titulo: '¡Tu plato está listo! 🍽️',
+    titulo: '¡Tu plato está listo! \u{1F37D}\uFE0F',
     cuerpo: (ref) => `${ref}Ya sale de cocina hacia tu mesa.`,
   },
   cancelado: {
