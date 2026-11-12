@@ -711,11 +711,14 @@ En los dos casos:
 - `total`: personas en la mesa = alias distintos (cada JWT de comensal trae el suyo).
 - `pagaron`: alias que ya pagaron algo **en esta sesión de mesa**, en cualquier modo, estén
   sentados o no; ordenados. Se borra al liberarse la mesa. Un cobro de caja sin `comensal`
-  no aparece (no se sabe de quién es). Un pago que deja el saldo en 0 tampoco: el
-  socket-server lo toma como el último pago. Ojo: la mesa solo se libera cuando además todos
-  los pedidos están entregados ([§5.1](#51-mesaliberada)); mientras tanto, quien pagó ese
-  último saldo no figura en `pagaron`. Con saldo 0 «igual» ya responde `409 SIN_SALDO`, así
-  que el reparto no cambia.
+  no aparece (no se sabe de quién es). Un pago que deja el saldo en 0 **sí** aparece: la mesa
+  sigue ocupada mientras quede un pedido sin entregar ([§5.1](#51-mesaliberada)), y el grupo
+  ve quién pagó el último saldo.
+- Un pago que llega cuando su sesión de mesa ya se cerró **no** se anota, para no ensuciar
+  la del grupo siguiente. Pasa con el webhook de una intención creada antes de la liberación,
+  o con un cobro de caja que llega cuando la mesa ya figura liberada. Si `/internal/mesa-liberada`
+  llega a la vez que el pago, el resultado es el mismo: `liberarMesa` revoca y después limpia, y el
+  pago se anota y después comprueba la revocación, deshaciendo la anotación si la ve.
 - El personal y la pantalla no cuentan.
 - No lleva `eventId`: es un estado completo; quédate siempre con el último.
 - La PWA lo usa para mostrar cuánto es «igual» antes de pedir la intención
