@@ -46,7 +46,12 @@ async function escenario(t, almacen, idMesa = 5) {
     await deps.redis.conectar();
   }
   const s = await levantar(WOMPI_ENV, deps);
-  t.after(() => s.cerrar());
+  // Una sola limpieza y en orden: node:test corre los t.after en el orden en que
+  // se registran, y con Redis real hay que borrar la mesa ANTES de cerrar.
+  t.after(async () => {
+    if (almacen === 'redis-real') await s.estadoMesas.limpiarMesa(idMesa);
+    await s.cerrar();
+  });
 
   const interno = (ruta, cuerpo) => fetch(`${s.url}${ruta}`, {
     method: 'POST',
@@ -225,10 +230,13 @@ const mesaAlAzar = () => 800000 + Math.floor(Math.random() * 90000);
 test('Redis real: desmarcarPago quita solo ese alias y saca la mesa del índice cuando no le queda nada', { skip: sinRedis }, async (t) => {
   const conexion = crearConexionRedis({ url: REDIS_URL, log: silencioso });
   await conexion.conectar();
-  t.after(() => conexion.cerrar());
   const e = crearEstadoMesasRedis({ cliente: conexion.cliente });
   const [conPagos, conSinCelular] = [mesaAlAzar(), mesaAlAzar() + 1];
-  t.after(async () => { await e.limpiarMesa(conPagos); await e.limpiarMesa(conSinCelular); });
+  t.after(async () => {
+    await e.limpiarMesa(conPagos);
+    await e.limpiarMesa(conSinCelular);
+    await conexion.cerrar();
+  });
 
   await e.marcarPago(conPagos, 'Ana');
   await e.marcarPago(conPagos, 'Beto');
@@ -250,7 +258,6 @@ test('Redis real: desmarcarPago quita solo ese alias y saca la mesa del índice 
 
 test('Redis real: saldo 0 con un pedido sin entregar se anota y llega en mesa:presencia', { skip: sinRedis }, async (t) => {
   const e = await escenario(t, 'redis-real', mesaAlAzar());
-  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
   const deAna = await e.sentar('Ana');
   assert.strictEqual((await e.pagar(await e.pedir('Ana'))).registrado, true);
   assert.deepStrictEqual(await e.pagaron(), ['Ana']);
@@ -260,7 +267,6 @@ test('Redis real: saldo 0 con un pedido sin entregar se anota y llega en mesa:pr
 
 test('Redis real: carrera, la liberación termina justo antes de anotar: se deshace y la mesa sale del índice', { skip: sinRedis }, async (t) => {
   const e = await escenario(t, 'redis-real', mesaAlAzar());
-  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
   await e.sentar('Ana');
   const referencia = await e.pedir('Ana');
   e.alrededorDeMarcar({ antes: e.liberar });
@@ -271,7 +277,6 @@ test('Redis real: carrera, la liberación termina justo antes de anotar: se desh
 
 test('Redis real: carrera, la liberación llega entre la anotación y la comprobación: no queda nada', { skip: sinRedis }, async (t) => {
   const e = await escenario(t, 'redis-real', mesaAlAzar());
-  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
   await e.sentar('Ana');
   const referencia = await e.pedir('Ana');
   e.alrededorDeMarcar({ despues: e.liberar });
@@ -281,7 +286,6 @@ test('Redis real: carrera, la liberación llega entre la anotación y la comprob
 
 test('Redis real: el webhook de una intención vieja con el grupo siguiente sentado no lo ensucia', { skip: sinRedis }, async (t) => {
   const e = await escenario(t, 'redis-real', mesaAlAzar());
-  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
   await e.sentar('Ana');
   const vieja = await e.pedir('Ana');
   await e.liberar();
@@ -295,7 +299,6 @@ test('Redis real: el webhook de una intención vieja con el grupo siguiente sent
 
 test('Redis real: caja, la liberación llega entre la anotación y la comprobación: no queda nada', { skip: sinRedis }, async (t) => {
   const e = await escenario(t, 'redis-real', mesaAlAzar());
-  t.after(() => e.s.estadoMesas.limpiarMesa(e.idMesa));
   await e.sentar('Ana');
   e.alrededorDeMarcar({ despues: e.liberar });
   assert.strictEqual((await e.caja({ comensal: 'Caro' })).status, 200);
