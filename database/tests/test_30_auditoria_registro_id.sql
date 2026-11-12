@@ -10,6 +10,8 @@
 --   2. usuarios → id_usuario.
 --   3. platos → id_plato (no id_categoria).
 --
+-- No depende del seed: crea su propia mesa, categoría, plato y pedido.
+--
 -- No deja nada: todo se hace dentro de un bloque que termina con una excepción
 -- a propósito, que deshace las filas de prueba Y sus filas de auditoría. Las
 -- variables de PL/pgSQL conservan lo leído, y se comprueban después.
@@ -17,8 +19,10 @@
 
 DO $$
 DECLARE
+    v_mesa INTEGER;
     v_pedido INTEGER;
     v_categoria INTEGER;
+    v_plato_base INTEGER;
     v_tx1 INTEGER;
     v_tx2 INTEGER;
     v_usuario INTEGER;
@@ -33,13 +37,21 @@ DECLARE
 BEGIN
     SELECT count(*) INTO v_auditoria_antes FROM auditoria_cambios;
 
-    SELECT id_pedido INTO v_pedido FROM pedidos ORDER BY id_pedido LIMIT 1;
-    IF v_pedido IS NULL THEN
-        RAISE EXCEPTION 'La prueba necesita al menos un pedido en la base (carga el seed).';
-    END IF;
-    SELECT id_categoria INTO v_categoria FROM categorias ORDER BY id_categoria LIMIT 1;
-
     BEGIN
+        -- 0. Datos propios: la prueba no depende del seed (desde #182 el seed ya
+        --    no trae pedidos). Mesa, categoría, plato y un pedido con una línea,
+        --    para que el total permita las transacciones. Todo se deshace al final.
+        INSERT INTO mesas (numero, capacidad, ubicacion, estado)
+        VALUES (9930, 2, 'T30 prueba', 'disponible') RETURNING id_mesa INTO v_mesa;
+        INSERT INTO categorias (nombre, descripcion, orden_visualizacion)
+        VALUES ('T30 Prueba', 'prueba', 99) RETURNING id_categoria INTO v_categoria;
+        INSERT INTO platos (id_categoria, nombre, precio)
+        VALUES (v_categoria, 'T30 Plato base', 1000) RETURNING id_plato INTO v_plato_base;
+        INSERT INTO pedidos (id_mesa, codigo_pedido, estado, total)
+        VALUES (v_mesa, 'T30-' || substr(md5(clock_timestamp()::text), 1, 10), 'recibido', 0) RETURNING id_pedido INTO v_pedido;
+        INSERT INTO detalles_pedido (id_pedido, id_plato, cantidad, precio_unitario, subtotal)
+        VALUES (v_pedido, v_plato_base, 1, 1000, 1000);
+
         -- 1. transacciones: dos del mismo pedido, luego UPDATE y DELETE de la segunda
         INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion, referencia_externa, creado_en)
         VALUES (v_pedido, 'efectivo', 0.01, 'pendiente', 'test30-' || clock_timestamp()::text, NOW())
