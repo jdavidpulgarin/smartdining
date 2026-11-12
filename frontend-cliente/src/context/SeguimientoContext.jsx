@@ -25,11 +25,49 @@ const MAX_EVENT_IDS = 200;
 
 const SeguimientoContext = createContext(null);
 
-function cargarUltimoPedidoGuardado(comensal) {
+// oxlint-disable-next-line react/only-export-components
+export function extraerIatToken(token) {
+  if (typeof token !== 'string' || !token.trim()) return null;
+  const partes = token.split('.');
+  if (partes.length !== 3 || !partes[1]) return null;
+  try {
+    const base64 = partes[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padLen = (4 - (base64.length % 4)) % 4;
+    const conPadding = base64 + '='.repeat(padLen);
+    const json = atob(conPadding);
+    const payload = JSON.parse(json);
+    return payload?.iat ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// oxlint-disable-next-line react/only-export-components
+export function calcularClaveSesion(idMesa, token) {
+  if (!idMesa) return null;
+  const iat = extraerIatToken(token);
+  return iat != null ? `${idMesa}:${iat}` : String(idMesa);
+}
+
+// oxlint-disable-next-line react/only-export-components
+export function cargarUltimoPedidoGuardado(comensal, claveSesionActual) {
   try {
     const guardado = sessionStorage.getItem(CLAVE_ULTIMO_PEDIDO);
     if (!guardado) return [];
-    const norm = normalizarPedido(JSON.parse(guardado), comensal);
+    const datos = JSON.parse(guardado);
+    if (!datos) return [];
+    // Si viene con metadata de sesión guardada, debe coincidir
+    if (datos.__sesion != null && claveSesionActual != null) {
+      if (String(datos.__sesion) !== String(claveSesionActual)) {
+        return [];
+      }
+    } else if (claveSesionActual != null && datos.__sesion == null) {
+      // Si no tiene metadata de sesión pero tenemos sesión activa, no es verificable
+      return [];
+    }
+    const pedidoLimpio = { ...datos };
+    delete pedidoLimpio.__sesion;
+    const norm = normalizarPedido(pedidoLimpio, comensal);
     return norm ? [norm] : [];
   } catch {
     return [];
@@ -45,12 +83,18 @@ function cargarUltimoPedidoGuardado(comensal) {
  * encabezado sin recargar la página.
  */
 export function SeguimientoProvider({ children }) {
-  const { mesa, idMesa, comensal, valida, cargando: cargandoSesion } = useMesaSession();
+  const { mesa, idMesa, comensal, valida, token, cargando: cargandoSesion } = useMesaSession();
   const { on: socketOn, estado: estadoSocket, enviar } = useMesaSocketContext();
 
+  const claveSesion = useMemo(
+    () => (valida ? calcularClaveSesion(idMesa, token) : null),
+    [valida, idMesa, token]
+  );
+
   const [estadoPedidos, setEstadoPedidos] = useState(() => ({
-    idMesa: null,
-    lista: cargarUltimoPedidoGuardado(comensal),
+    idMesa: idMesa ?? null,
+    claveSesion: valida ? calcularClaveSesion(idMesa, token) : null,
+    lista: cargarUltimoPedidoGuardado(comensal, valida ? calcularClaveSesion(idMesa, token) : null),
   }));
   const [idSeleccionado, setIdSeleccionado] = useState(null);
   const [cargando, setCargando] = useState(false);
@@ -61,26 +105,68 @@ export function SeguimientoProvider({ children }) {
   const eventIdsVistosRef = useRef(new Set());
   const colaIdsRef = useRef([]);
 
+  // Si la clave de sesión cambia o valida pasa a false, vaciar y reiniciar refs
+  useEffect(() => {
+    if (!valida || !claveSesion) {
+      // oxlint-disable-next-line react/set-state-in-effect
+      setEstadoPedidos({
+        idMesa: null,
+        claveSesion: null,
+        lista: [],
+      });
+      setIdSeleccionado(null);
+      setAvisoMesero(null);
+      eventIdsVistosRef.current.clear();
+      colaIdsRef.current = [];
+      return;
+    }
+
+    // oxlint-disable-next-line react/set-state-in-effect
+    setEstadoPedidos((prev) => {
+      if (prev.claveSesion !== claveSesion) {
+        eventIdsVistosRef.current.clear();
+        colaIdsRef.current = [];
+        return {
+          idMesa,
+          claveSesion,
+          lista: cargarUltimoPedidoGuardado(comensal, claveSesion),
+        };
+      }
+      return prev;
+    });
+  }, [valida, claveSesion, idMesa, comensal]);
+
   const actualizarListaPedidos = useCallback(
     (updater) => {
       setEstadoPedidos((prev) => {
-        const base =
+        const sesionCambio =
+          claveSesion != null &&
+          prev.claveSesion != null &&
+          prev.claveSesion !== claveSesion;
+        const mesaCambio =
           prev.idMesa != null &&
           idMesa != null &&
-          String(prev.idMesa) !== String(idMesa)
-            ? []
-            : prev.lista;
+          String(prev.idMesa) !== String(idMesa);
+
+        const base = sesionCambio || mesaCambio ? [] : prev.lista;
         return {
           idMesa: idMesa ?? prev.idMesa,
+          claveSesion: claveSesion ?? prev.claveSesion,
           lista: updater(base),
         };
       });
     },
-    [idMesa]
+    [idMesa, claveSesion]
   );
 
   const pedidos = useMemo(() => {
-    if (!valida || !idMesa) return [];
+    if (!valida || !idMesa || !claveSesion) return [];
+    if (
+      estadoPedidos.claveSesion != null &&
+      estadoPedidos.claveSesion !== claveSesion
+    ) {
+      return [];
+    }
     if (
       estadoPedidos.idMesa != null &&
       String(estadoPedidos.idMesa) !== String(idMesa)
@@ -88,7 +174,7 @@ export function SeguimientoProvider({ children }) {
       return [];
     }
     return estadoPedidos.lista;
-  }, [valida, idMesa, estadoPedidos]);
+  }, [valida, idMesa, claveSesion, estadoPedidos]);
 
   const esDuplicado = useCallback((eventId) => {
     if (!eventId) return false;
@@ -278,15 +364,19 @@ export function SeguimientoProvider({ children }) {
   useEffect(() => {
     if (pedidoActivo) {
       try {
+        const payloadConSesion = {
+          ...pedidoActivo,
+          ...(claveSesion ? { __sesion: claveSesion } : {}),
+        };
         sessionStorage.setItem(
           CLAVE_ULTIMO_PEDIDO,
-          JSON.stringify(pedidoActivo)
+          JSON.stringify(payloadConSesion)
         );
       } catch {
         // Ignorar
       }
     }
-  }, [pedidoActivo]);
+  }, [pedidoActivo, claveSesion]);
 
   const registrarPedido = useCallback(
     (pedidoCrudo, { seleccionar = false } = {}) => {
