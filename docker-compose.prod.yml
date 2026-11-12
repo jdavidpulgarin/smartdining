@@ -145,6 +145,15 @@ services:
         DOMINIO: ${DOMINIO:?Define DOMINIO en infra/.env}
     environment:
       DOMINIO: ${DOMINIO}
+      # Zonas limit_req de nginx (infra/nginx/templates/smartdining.conf.template),
+      # por IP. Se ajustan en infra/.env (docs/despliegue.md, "Límites de
+      # peticiones"). Un valor mal escrito impide arrancar nginx: valídalo antes.
+      NGINX_LIMITE_LOGIN: ${NGINX_LIMITE_LOGIN:-30r/m}
+      NGINX_RAFAGA_LOGIN: ${NGINX_RAFAGA_LOGIN:-20}
+      NGINX_LIMITE_PAGOS: ${NGINX_LIMITE_PAGOS:-120r/m}
+      NGINX_RAFAGA_PAGOS: ${NGINX_RAFAGA_PAGOS:-60}
+      NGINX_LIMITE_WEBHOOK: ${NGINX_LIMITE_WEBHOOK:-300r/m}
+      NGINX_RAFAGA_WEBHOOK: ${NGINX_RAFAGA_WEBHOOK:-100}
     ports:
       - "80:80"
       - "443:443"
