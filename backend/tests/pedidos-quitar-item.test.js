@@ -88,13 +88,13 @@ test('quitar plato: sin sesión -> 401', async () => {
   }
 });
 
-test('quitar plato: el personal no usa esta ruta -> 403 con cualquier rol', async () => {
+// Desde D-13 por el personal la ruta también acepta admin, mesero y cajero (sus
+// pruebas están en pedidos-personal-cancela-item.test.js). Cocina sigue fuera.
+test('quitar plato: cocina no entra en esta ruta -> 403', async () => {
   const e = escenario();
   try {
-    for (const rol of ['admin', 'cajero', 'mesero', 'cocina']) {
-      const res = await quitar(tokenStaff(1, rol));
-      assert.strictEqual(res.status, 403, rol);
-    }
+    const res = await quitar(tokenStaff(1, 'cocina'));
+    assert.strictEqual(res.status, 403);
     assert.strictEqual(e.db.buscar('BEGIN'), undefined);
   } finally {
     e.restaurar();
