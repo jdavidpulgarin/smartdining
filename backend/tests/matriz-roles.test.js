@@ -174,7 +174,11 @@ for (const fila of internas) {
 test('d-11: el comensal no entra en ninguna ruta del catálogo ni de mesas', async () => {
   // Es el único rol que se consigue sin credenciales: basta escanear el QR de
   // la mesa. Por eso se mira en bloque, además de en la matriz.
-  const suyas = ['/api/pedidos', '/api/pedidos/mesa', '/api/pedidos/mesa/cuenta', '/api/pedidos/:id'];
+  const suyas = [
+    '/api/pedidos', '/api/pedidos/mesa', '/api/pedidos/mesa/cuenta', '/api/pedidos/:id',
+    // D-13 por el comensal (J-14): quitar UNA línea suya.
+    '/api/pedidos/:id/items/:id_detalle/cancelar',
+  ];
   const ajenas = protegidas.filter((f) => !suyas.includes(f.patron));
 
   assert.ok(ajenas.length >= 25, `solo se revisaron ${ajenas.length} rutas`);

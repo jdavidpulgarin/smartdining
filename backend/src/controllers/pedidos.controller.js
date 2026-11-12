@@ -546,6 +546,94 @@ async function cancelar(req, res, next) {
   return actualizarEstado(req, res, next);
 }
 
+/** Un id de la URL: entero > 0 que cabe en un INTEGER de PostgreSQL. */
+const idDeUrl = z
+  .string()
+  .regex(/^[1-9]\d{0,9}$/, 'debe ser un entero mayor que 0')
+  .transform(Number)
+  .refine((n) => n <= 2147483647, 'fuera de rango');
+
+const paramsQuitarItemSchema = z.object({ id: idDeUrl, id_detalle: idDeUrl }).strict();
+
+/** Sin cuerpo: `{}` o nada. Un campo cualquiera es un 400. */
+const cuerpoVacioSchema = z.object({}).strict();
+
+/**
+ * POST /api/pedidos/:id/items/:id_detalle/cancelar — D-13 por el comensal
+ * (J-14): el comensal quita UNA línea de su pedido, entera. Solo con sesión de
+ * comensal; la mesa y el alias salen del JWT, nunca del cuerpo. Las reglas viven
+ * en pedidosService.cancelarItemComensal.
+ *
+ * Los avisos salen DESPUÉS del commit y sin esperarlos: primero
+ * /internal/item-cancelado (pendiente de Roberto) y, si el pedido quedó
+ * cancelado, el order:status de siempre.
+ */
+async function cancelarItem(req, res, next) {
+  const params = paramsQuitarItemSchema.safeParse(req.params);
+  if (!params.success) {
+    const issue = params.error.errors[0];
+    return res.status(400).json({ error: `${issue.path.join('.')}: ${issue.message}`, motivo: 'parametro_invalido' });
+  }
+  if (!cuerpoVacioSchema.safeParse(req.body ?? {}).success) {
+    return res.status(400).json({ error: 'Esta ruta no lleva cuerpo', motivo: 'cuerpo_invalido' });
+  }
+
+  try {
+    const r = await pedidosService.cancelarItemComensal(params.data.id, params.data.id_detalle, {
+      idMesa: req.user.id_mesa,
+      comensal: req.user.comensal,
+    });
+
+    if (r.noExiste) {
+      return res.status(404).json({ error: 'Ese plato no está en ese pedido', motivo: 'no_encontrado' });
+    }
+    if (r.noEsTuyo) {
+      return res.status(403).json({
+        error: 'Solo puedes quitar tus propios platos de un pedido de tu mesa',
+        motivo: pedidosService.MOTIVOS_QUITAR_ITEM.noEsTuyo,
+      });
+    }
+    if (r.conflicto) {
+      return res.status(409).json({ error: MENSAJES_QUITAR_ITEM[r.conflicto], motivo: r.conflicto });
+    }
+
+    const { pedido, linea, pedidoCancelado, estadoAnterior } = r;
+    const pasos = [() => socketNotifier.notificarItemCancelado({
+      id_pedido: pedido.id_pedido,
+      id_mesa: pedido.id_mesa,
+      codigo_pedido: pedido.codigo_pedido,
+      id_detalle: linea.id_detalle,
+      id_plato: linea.id_plato,
+      nombre: linea.nombre,
+      comensal: linea.comensal,
+      total: pedido.total,
+      estado_pedido: pedido.estado,
+    })];
+    if (pedidoCancelado) {
+      pasos.push(() => socketNotifier.notificarCambioEstado({ ...pedido, estado_anterior: estadoAnterior }));
+    }
+    socketNotifier.encadenarAvisos(pasos);
+
+    return res.json({
+      pedido: {
+        id_pedido: pedido.id_pedido,
+        codigo_pedido: pedido.codigo_pedido,
+        estado: pedido.estado,
+        total: Number(pedido.total),
+        items: pedido.items,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+const MENSAJES_QUITAR_ITEM = {
+  item_ya_cancelado: 'Ese plato ya estaba quitado del pedido',
+  item_en_preparacion: 'Ese plato ya se está preparando: pídeselo al mesero',
+  pago_registrado: 'El pedido ya tiene un pago que quedaría por encima del total: pídeselo al mesero',
+};
+
 /**
  * GET /api/pedidos/mesa — pedidos de la mesa de la sesión del comensal.
  * Reemplaza al viejo /pedidos/historial: el modelo ER no relaciona pedidos con
@@ -591,6 +679,7 @@ module.exports = {
   obtener,
   actualizarEstado,
   cancelar,
+  cancelarItem,
   listarPorMesa,
   cuentaDeMiMesa,
 };

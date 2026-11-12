@@ -374,6 +374,13 @@ const TABLA = [
     roles: ['admin', 'cajero', 'mesero'],
     cuerpo: {},
   },
+  {
+    // D-13 por el comensal (J-14): quita UNA línea suya. El personal no la usa.
+    metodo: 'POST',
+    patron: '/api/pedidos/:id/items/:id_detalle/cancelar',
+    url: '/api/pedidos/87/items/3/cancelar',
+    roles: ['comensal'],
+  },
 
   // --- KDS ------------------------------------------------------------------
   { metodo: 'GET', patron: '/api/kds/comandas', url: '/api/kds/comandas', roles: ['cocina', 'admin'] },
