@@ -110,4 +110,4 @@ async function rutaItemCancelado(req, res, ctx) {
 
 const rutasItemCancelado = { 'POST /internal/item-cancelado': rutaItemCancelado };
 
-module.exports = { rutasItemCancelado };
+module.exports = { rutasItemCancelado, ORIGENES };
