@@ -8,8 +8,9 @@
 #   sh infra/scripts/simulacro-restauracion.sh ARCHIVO.dump     # uno en concreto
 #
 # Como deploy (o con sudo -u deploy), en el VPS:
-#   1. Levanta un postgres TEMPORAL sin red (--network none) y sin volumen con
-#      nombre, con la misma imagen que el postgres en marcha.
+#   1. Levanta un postgres TEMPORAL sin red (--network none) y sin ningún
+#      volumen: los datos van en un tmpfs (RAM), así no queda nada en disco.
+#      Usa la misma imagen que el postgres en marcha.
 #   2. Restaura el respaldo en una base nueva (pg_restore --exit-on-error).
 #   3. Compara con la base en vivo: tablas en public, cantidad y última fila
 #      de schema_migraciones (deben ser iguales). usuarios y pedidos se
@@ -57,13 +58,18 @@ fi
 # --- Contenedor temporal ----------------------------------------------------------
 nombre=sd-simulacro-$(date +%Y%m%d%H%M%S)-$$
 clave=$(od -An -N 18 -tx1 /dev/urandom | tr -d ' \n')
-limpiar() { "$DOCKER" rm -f "$nombre" >/dev/null 2>&1 || true; }
+# -v: si algún día el contenedor tuviera un volumen anónimo, se borra con él
+# (sin -v, `rm -f` lo dejaba huérfano en cada simulacro).
+limpiar() { "$DOCKER" rm -f -v "$nombre" >/dev/null 2>&1 || true; }
 trap limpiar EXIT
 trap 'exit 1' HUP INT TERM
 
 echo "simulacro: $archivo ($(wc -c < "$archivo" | tr -d ' ') bytes)"
 echo "simulacro: contenedor temporal $nombre ($imagen, sin red)"
+# PGDATA en un tmpfs: la imagen declara VOLUME /var/lib/postgresql/data y,
+# sin esto, Docker crea ahí un volumen anónimo.
 "$DOCKER" run -d --rm --name "$nombre" --network none \
+  --tmpfs /var/lib/postgresql/data:rw \
   -e POSTGRES_PASSWORD="$clave" "$imagen" >/dev/null \
   || fallar "no se pudo levantar el postgres temporal"
 

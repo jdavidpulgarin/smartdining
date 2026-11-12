@@ -87,8 +87,22 @@ case "$proyecto" in
 esac
 
 # --- 2. Carpeta ----------------------------------------------------------------
-[ -d "$RESPALDOS_DIR/$proyecto" ] \
-  || fallar "no existe $RESPALDOS_DIR/$proyecto. Prepáralo una vez en el VPS con: sudo sh infra/scripts/instalar-respaldos.sh (docs/despliegue.md §4)"
+# La carpeta del proyecto la crea instalar-respaldos.sh (root): $RESPALDOS_DIR
+# es el chroot del SFTP de solo lectura y tiene que ser de root, así que deploy
+# no puede crear nada ahí. predeploy/ y diario/ sí se crean aquí, y heredan el
+# grupo sd-respaldos por el setgid de la carpeta del proyecto.
+if [ ! -d "$RESPALDOS_DIR/$proyecto" ]; then
+  raiz=$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)
+  if [ -n "$raiz" ] && [ -f "$raiz/infra/scripts/instalar-respaldos.sh" ]; then
+    comando="cd $raiz && sudo sh infra/scripts/instalar-respaldos.sh"
+  else
+    # Corriendo desde /usr/local/lib/smartdining (timer): desde cualquiera de los clones.
+    comando="cd /home/deploy/smartdining && sudo sh infra/scripts/instalar-respaldos.sh   (o desde /srv/smartdining-staging)"
+  fi
+  fallar "no existe $RESPALDOS_DIR/$proyecto: no se respaldó nada (un despliegue se detiene aquí, antes de migrar). Prepáralo UNA vez en el VPS, con un usuario con sudo:
+  $comando
+y vuelve a lanzar el despliegue (docs/despliegue.md §4)."
+fi
 destino=$RESPALDOS_DIR/$proyecto/$TIPO
 mkdir -p "$destino"
 # Restos de una corrida que murió de golpe (kill -9, apagón).
