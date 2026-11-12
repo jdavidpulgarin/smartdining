@@ -31,7 +31,7 @@ const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
 const crypto = require('node:crypto');
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const transaccionesService = require('../../src/services/transacciones.service');
@@ -91,23 +91,19 @@ async function limpiar() {
 }
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    const p = await sonda.query(
-      `SELECT id_plato, ROUND(precio * 100)::bigint AS precio_centavos FROM platos
-        WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
-        ORDER BY id_plato LIMIT 1`
-    );
-    const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
-    plato = p.rows[0] ? { id_plato: p.rows[0].id_plato, precio_centavos: Number(p.rows[0].precio_centavos) } : null;
-    usuarioReal = u.rows[0] || null;
-    hayBase = Boolean(plato && usuarioReal);
-    if (hayBase) await limpiar();
-  } catch (err) {
-    if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
-    hayBase = false;
-  }
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  const p = await sonda.query(
+    `SELECT id_plato, ROUND(precio * 100)::bigint AS precio_centavos FROM platos
+      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
+      ORDER BY id_plato LIMIT 1`
+  );
+  const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
+  plato = p.rows[0] ? { id_plato: p.rows[0].id_plato, precio_centavos: Number(p.rows[0].precio_centavos) } : null;
+  usuarioReal = u.rows[0] || null;
+  hayBase = Boolean(plato && usuarioReal);
+  if (hayBase) await limpiar();
 });
 
 test.after(async () => {

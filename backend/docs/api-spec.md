@@ -478,11 +478,17 @@ del local.
     "domingo": { "abre": "12:00", "cierra": "21:00" }
   },
   "propina_sugerida_pct": 10,
-  "moneda": "COP"
+  "moneda": "COP",
+  "correo": "hola@smartdining.co",
+  "redes": {
+    "instagram": "https://instagram.com/smartdining",
+    "whatsapp": "+573001234567"
+  }
 }
 ```
 
-Son **exactamente** esos siete campos, en una **lista blanca** y no un `delete` de lo
+Son **exactamente** esos nueve campos (los siete de siempre más `correo` y `redes`, del
+script 29, para la sección "Nuestro restaurante" del sitio público), en una **lista blanca** y no un `delete` de lo
 sensible: así una columna nueva en la tabla **no se publica sola** el día que alguien la
 agregue. **`actualizado_en`, `actualizado_por` e `id` no salen por aquí**: dicen quién tocó
 la configuración del local y cuándo, que es auditoría.
@@ -494,7 +500,10 @@ la configuración del local y cuándo, que es auditoría.
 
 `propina_sugerida_pct` llega como **número** (10, 12.5), no como texto: el backend registra
 un parser para `NUMERIC` (ver `src/config/db.js`). `horario` es un **objeto** por día; un día
-ausente significa cerrado.
+ausente significa cerrado. `correo` es texto o `null` (sin correo publicado). `redes` es
+**siempre un objeto**, `{}` si el local no tiene ninguna; solo trae las redes que tiene, con
+las claves `instagram`, `facebook`, `tiktok` (URL `https`) y `whatsapp` (número E.164: el
+enlace `wa.me` lo arma el frontend).
 
 ### GET /configuracion/completa — admin
 
@@ -510,6 +519,8 @@ Lo mismo más `id`, `actualizado_en` y `actualizado_por`:
   "horario": { "lunes": { "abre": "11:00", "cierra": "22:00" } },
   "propina_sugerida_pct": 10,
   "moneda": "COP",
+  "correo": "hola@smartdining.co",
+  "redes": { "instagram": "https://instagram.com/smartdining" },
   "actualizado_en": "2026-11-08T12:00:00.000Z",
   "actualizado_por": 1
 }
@@ -536,6 +547,43 @@ registrado como autor, sin una segunda llamada.
 | `horario` | **Objeto** JSON. La tabla lo exige con `ck_configuracion_horario_objeto`; un arreglo o un número son **400** aquí, no un 422 de la base |
 | `propina_sugerida_pct` | Número **entre 0 y 30**, con **2 decimales como máximo** |
 | `moneda` | **3 letras mayúsculas** (ISO 4217), como el CHECK `^[A-Z]{3}$` |
+| `correo` | Texto hasta **254** con la forma `nombre@dominio.algo` (sin espacios ni dos arrobas), o **`null` para quitarlo**. Ausente = se conserva |
+| `redes` | **Objeto** `.strict()` con las claves opcionales `instagram`, `facebook`, `tiktok` y `whatsapp`. Si viene, **reemplaza el objeto entero**: `{}` deja al local sin redes. **`null` es 400** (la columna es `NOT NULL`). Ausente = se conservan |
+
+**Reglas de `correo` y `redes`.** Son **las mismas de la base** (script 29:
+`ck_configuracion_correo` y `fn_redes_contacto_validas`), copiadas tal cual, y una prueba de
+integración compara el veredicto de las dos en más de cincuenta casos:
+
+| Red | Valor |
+|---|---|
+| `instagram` | `^https://([a-z0-9-]+\.)?instagram\.com/\S+$` **sin distinguir mayúsculas** (`https://instagram.com/x`, `https://www.instagram.com/x`, `https://m.instagram.com/x`) |
+| `facebook` | `^https://([a-z0-9-]+\.)?(facebook\|fb)\.com/\S+$` sin distinguir mayúsculas (también `https://fb.com/x`) |
+| `tiktok` | `^https://([a-z0-9-]+\.)?tiktok\.com/\S+$` sin distinguir mayúsculas |
+| `whatsapp` | `^\+[1-9][0-9]{6,14}$`: E.164, con `+`, sin espacios, de 7 a 15 dígitos |
+
+- Cada valor es **texto de 1 a 200 caracteres sin espacios**. Una red que no se usa **se
+  omite**: `null` o `""` como valor de una red son **400**, igual que una clave desconocida
+  (`twitter`) o un número en vez de texto.
+- `http://` no vale (solo `https://`), ni un enlace sin perfil (`https://instagram.com/`), ni un
+  dominio parecido (`https://xfacebook.com/…`).
+
+```json
+{ "correo": "hola@smartdining.co",
+  "redes": { "instagram": "https://instagram.com/smartdining", "whatsapp": "+573001234567" } }
+```
+
+Errores de estos dos campos, **400 con `motivo`** (el resto de los 400 de este PUT conserva
+`{ "error" }`):
+
+```json
+{ "error": "whatsapp debe ser el número en formato internacional, con + y sin espacios (+573001234567)", "motivo": "redes_invalidas" }
+{ "error": "correo debe tener la forma nombre@dominio.com", "motivo": "correo_invalido" }
+```
+
+Si aun así la base rechazara el valor (23514 de `ck_configuracion_correo` o
+`ck_configuracion_redes`, si algún día las reglas se separaran), sale el mismo **400** con
+`correo_invalido` o `redes_invalidas`, no un 500. Los **demás** CHECK de la configuración
+siguen yendo al manejador central (422 genérico).
 
 - El cuerpo es `.strict()`: **una clave de más es 400**. En particular `actualizado_en`,
   `actualizado_por` e `id` **no se editan** —los pone el trigger, o el CHECK—, y sin

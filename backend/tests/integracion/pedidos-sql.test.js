@@ -42,7 +42,7 @@ const assert = require('node:assert');
 const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const kdsService = require('../../src/services/kds.service');
@@ -119,35 +119,30 @@ async function limpiarMesaDePrueba() {
 }
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    // Un plato NO personalizable: uno del constructor exigiría elegir opciones
-    // de cada paso y el pedido fallaría por otra razón (P0001).
-    const p = await sonda.query(
-      `SELECT id_plato FROM platos
-        WHERE disponible AND stock_suficiente AND NOT personalizable
-        ORDER BY id_plato LIMIT 1`
-    );
-    const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
-    plato = p.rows[0] || null;
-    usuarioReal = u.rows[0] || null;
-    hayBase = Boolean(plato && usuarioReal);
-    if (!hayBase) return;
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  // Cualquier otro error (la mesa es de otro, por ejemplo) también se ve.
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  // Un plato NO personalizable: uno del constructor exigiría elegir opciones
+  // de cada paso y el pedido fallaría por otra razón (P0001).
+  const p = await sonda.query(
+    `SELECT id_plato FROM platos
+      WHERE disponible AND stock_suficiente AND NOT personalizable
+      ORDER BY id_plato LIMIT 1`
+  );
+  const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
+  plato = p.rows[0] || null;
+  usuarioReal = u.rows[0] || null;
+  hayBase = Boolean(plato && usuarioReal);
+  if (!hayBase) return;
 
-    // Si quedó algo de una corrida interrumpida, se limpia antes de empezar.
-    await limpiarMesaDePrueba();
-    const m = await sonda.query(
-      `INSERT INTO mesas (numero, capacidad, ubicacion) VALUES ($1, 4, $2) RETURNING id_mesa`,
-      [MESA_NUMERO, MARCA_MESA]
-    );
-    mesa = m.rows[0];
-  } catch (err) {
-    // Sin base no hay nada que probar; con base y un problema de verdad (la
-    // mesa es de otro) se quiere ver el error, no un skip silencioso.
-    if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
-    hayBase = false;
-  }
+  // Si quedó algo de una corrida interrumpida, se limpia antes de empezar.
+  await limpiarMesaDePrueba();
+  const m = await sonda.query(
+    `INSERT INTO mesas (numero, capacidad, ubicacion) VALUES ($1, 4, $2) RETURNING id_mesa`,
+    [MESA_NUMERO, MARCA_MESA]
+  );
+  mesa = m.rows[0];
 });
 
 test.after(async () => {

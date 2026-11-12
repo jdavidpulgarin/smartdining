@@ -23,7 +23,7 @@ const assert = require('node:assert');
 const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const reportesService = require('../../src/services/reportes.service');
 
 let sonda = null;
@@ -31,20 +31,17 @@ let hayBase = false;
 let hayVistas = false;
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    hayBase = true;
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  hayBase = true;
 
-    const { rows } = await sonda.query(
-      `SELECT COUNT(*)::int AS n FROM information_schema.views
-        WHERE table_schema = 'public'
-          AND table_name IN ('v_ventas_diarias', 'v_tiempos_kds')`
-    );
-    hayVistas = rows[0].n === 2;
-  } catch {
-    hayBase = false;
-  }
+  const { rows } = await sonda.query(
+    `SELECT COUNT(*)::int AS n FROM information_schema.views
+      WHERE table_schema = 'public'
+        AND table_name IN ('v_ventas_diarias', 'v_tiempos_kds')`
+  );
+  hayVistas = rows[0].n === 2;
 });
 
 test.after(async () => {
