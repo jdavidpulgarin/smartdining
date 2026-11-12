@@ -1,6 +1,7 @@
 /**
  * Utilidades puras para procesar y formatear eventos de la mesa en tiempo real.
  */
+import { claveAlias } from './apodo';
 
 /**
  * Extrae el nombre o alias del comensal emisor de un evento de pedido.
@@ -62,7 +63,45 @@ export function formatearMensajePedidoCreado(data, miAlias) {
   return 'Se envió un pedido de la mesa';
 }
 
+/**
+ * Formatea el aviso breve cuando se quita o cancela un plato (`item:cancelado`).
+ * - Si `origen === 'personal'`, devuelve `"El restaurante canceló <nombre>"` para todos (incluido el dueño).
+ * - Si `origen` falta o es `'comensal'`, devuelve `"<comensal> quitó <nombre>"` solo a los demás (`null` al propio dueño).
+ *
+ * @param {object} evento - Payload `{ comensal, nombre, origen?, ... }`
+ * @param {string|null} [miAlias]
+ * @returns {string|null}
+ */
+export function formatearMensajeItemCancelado(evento, miAlias = null) {
+  if (!evento || typeof evento !== 'object') return null;
+
+  const origen = String(evento.origen || '').trim().toLowerCase();
+  const plato =
+    typeof evento.nombre === 'string' && evento.nombre.trim()
+      ? evento.nombre.trim()
+      : 'un plato';
+
+  if (origen === 'personal') {
+    return `El restaurante canceló ${plato}`;
+  }
+
+  const actor = typeof evento.comensal === 'string' ? evento.comensal.trim() : '';
+  const claveActor = claveAlias(actor);
+  const claveMio = claveAlias(miAlias);
+
+  if (claveActor && claveMio && claveActor === claveMio) {
+    return null;
+  }
+
+  if (actor) {
+    return `${actor} quitó ${plato}`;
+  }
+
+  return `Se quitó ${plato}`;
+}
+
 export default {
   extraerEmisorPedido,
   formatearMensajePedidoCreado,
+  formatearMensajeItemCancelado,
 };

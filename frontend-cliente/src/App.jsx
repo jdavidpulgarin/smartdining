@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { SesionProvider } from './context/SesionContext'
 import { MesaSocketProvider } from './context/MesaSocketContext'
 import { CarritoProvider } from './context/CarritoContext'
+import { SeguimientoProvider } from './context/SeguimientoContext'
 import Layout from './components/layout/Layout'
 import Inicio from './pages/Inicio'
 import Menu from './pages/Menu'
@@ -20,6 +21,7 @@ function App() {
       <SesionProvider>
         <MesaSocketProvider>
           <CarritoProvider>
+            <SeguimientoProvider>
           <Routes>
             <Route path="/" element={<Inicio />} />
             <Route
@@ -67,6 +69,7 @@ function App() {
               <Route path="/dev/ui" element={<UiShowcase />} />
             )}
           </Routes>
+            </SeguimientoProvider>
         </CarritoProvider>
       </MesaSocketProvider>
     </SesionProvider>

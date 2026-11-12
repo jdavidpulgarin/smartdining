@@ -2,6 +2,22 @@ import { CLAVE_SESION } from './sesion';
 import { aliasDelToken } from '../services/clienteMesa';
 
 /**
+ * Calcula la clave comparable de un alias (D-18b): sin tildes, en minúsculas y
+ * sin separadores ni espacios (`Ána María` === `ana  maria`).
+ *
+ * @param {string|null|undefined} valor
+ * @returns {string}
+ */
+export function claveAlias(valor) {
+  if (typeof valor !== 'string') return '';
+  return valor
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[\s._'-]/g, '');
+}
+
+/**
  * Resuelve el apodo o nombre del comensal priorizando el alias firmado
  * dentro del JWT del token si está presente, sobre cualquier valor local
  * o texto escrito por el usuario.

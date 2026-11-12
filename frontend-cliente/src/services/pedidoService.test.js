@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   crearPedido,
   listarPedidosMesa,
+  cancelarItem,
   NOTAS_MAX_SERVIDOR,
   NOTAS_GENERALES_MAX_SERVIDOR,
 } from './pedidoService';
@@ -359,5 +360,156 @@ describe('pedidoService (H-05, H-06, J-05)', () => {
       motivo: 'sin_stock',
       faltantes: [],
     });
+  });
+
+  it('J-14 cancelarItem: envia POST sin cuerpo y con JWT en Authorization', async () => {
+    globalThis.sessionStorage.setItem(
+      CLAVE_SESION,
+      JSON.stringify({ token: 'jwt.comensal.ana', comensal: 'Ana' })
+    );
+
+    const respuesta200 = {
+      pedido: {
+        id_pedido: 87,
+        codigo_pedido: 'PED-87',
+        estado: 'recibido',
+        total: 18000,
+        items: [
+          {
+            id_detalle: 210,
+            plato_nombre: 'Bandeja paisa',
+            estado_item: 'cancelado',
+            comensal: 'Ana',
+            ingredientes: [],
+          },
+        ],
+      },
+    };
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue(respuesta200);
+
+    const res = await cancelarItem(87, 210);
+
+    expect(spyPedirJson).toHaveBeenCalledTimes(1);
+    const [ruta, opciones] = spyPedirJson.mock.calls[0];
+    expect(ruta).toBe('/pedidos/87/items/210/cancelar');
+    expect(opciones.method).toBe('POST');
+    expect(opciones.token).toBe('jwt.comensal.ana');
+    expect(opciones.body).toBeUndefined();
+    expect(res).toEqual(respuesta200);
+  });
+
+  it('J-14 cancelarItem: rechaza identificadores invalidos', async () => {
+    await expect(cancelarItem(0, 10)).rejects.toThrow(/inválidos/);
+    await expect(cancelarItem(10, -1)).rejects.toThrow(/inválidos/);
+  });
+
+  it('J-14 cancelarItem (simulado): devuelve el 200 real y pasa pedido a cancelado al quitar el ultimo plato', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const { CLAVE_PEDIDOS_SIMULADOS } = await import('./pedidoSimulado');
+
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify([
+        {
+          id_pedido: 87,
+          codigo_pedido: 'PED-87',
+          id_mesa: 5,
+          estado: 'recibido',
+          total: 54000,
+          detalles: [
+            {
+              id_detalle: 210,
+              id_plato: 12,
+              plato_nombre: 'Bandeja paisa',
+              cantidad: 2,
+              subtotal: 36000,
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+              ingredientes: [],
+            },
+            {
+              id_detalle: 211,
+              id_plato: 1001,
+              plato_nombre: 'Bowl Personalizado',
+              cantidad: 1,
+              subtotal: 18000,
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+              ingredientes: [{ id_ingrediente: 3, nombre: 'Arroz' }],
+            },
+          ],
+        },
+      ])
+    );
+
+    const primero = await cancelarItem(87, 210);
+    expect(primero.pedido.id_pedido).toBe(87);
+    expect(primero.pedido.codigo_pedido).toBe('PED-87');
+    expect(primero.pedido.estado).toBe('recibido');
+    expect(primero.pedido.total).toBe(18000);
+    expect(primero.pedido.items[0].estado_item).toBe('cancelado');
+    expect(primero.pedido.items[0].plato_nombre).toBe('Bandeja paisa');
+    expect(primero.pedido.items[1].estado_item).toBe('pendiente');
+
+    const segundo = await cancelarItem(87, 211);
+    expect(segundo.pedido.estado).toBe('cancelado');
+    expect(segundo.pedido.total).toBe(0);
+    expect(segundo.pedido.items.every((i) => i.estado_item === 'cancelado')).toBe(true);
+  });
+
+  it('J-14 cancelarItem (simulado): fuerza errores con smartdining_sim_quitar y pasa el pedido a en_preparacion', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const { CLAVE_PEDIDOS_SIMULADOS } = await import('./pedidoSimulado');
+
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify([
+        {
+          id_pedido: 87,
+          codigo_pedido: 'PED-87',
+          id_mesa: 5,
+          estado: 'recibido',
+          total: 36000,
+          detalles: [
+            {
+              id_detalle: 210,
+              plato_nombre: 'Bandeja paisa',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+            {
+              id_detalle: 211,
+              plato_nombre: 'Limonada',
+              estado_item: 'cancelado',
+              comensal: 'Ana',
+            },
+          ],
+        },
+      ])
+    );
+
+    const casos = [
+      ['item_ya_cancelado', 409],
+      ['item_en_preparacion', 409],
+      ['pago_registrado', 409],
+      ['no_es_tuyo', 403],
+    ];
+
+    for (const [motivo, status] of casos) {
+      globalThis.sessionStorage.setItem('smartdining_sim_quitar', motivo);
+      await expect(cancelarItem(87, 210)).rejects.toMatchObject({
+        status,
+        motivo,
+      });
+    }
+
+    const guardados = JSON.parse(
+      globalThis.sessionStorage.getItem(CLAVE_PEDIDOS_SIMULADOS)
+    );
+    expect(guardados[0].estado).toBe('en_preparacion');
+    expect(guardados[0].detalles[0].estado_item).toBe('en_preparacion');
+    expect(guardados[0].detalles[1].estado_item).toBe('cancelado');
   });
 });
