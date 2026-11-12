@@ -27,5 +27,7 @@ router.get(
 );
 router.patch('/:id/estado', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.actualizarEstado);
 router.post('/:id/cancelar', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.cancelar);
+// D-13 por el comensal (J-14): quita UNA línea suya. Solo sesión de comensal.
+router.post('/:id/items/:id_detalle/cancelar', requireAuth, requireRole('comensal'), ctrl.cancelarItem);
 
 module.exports = router;

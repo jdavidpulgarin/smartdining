@@ -109,7 +109,7 @@ export function Login() {
     <div className="sd-login-page">
       {/* Fondo fotográfico con opacidad y capa oscura */}
       <img
-        src="/img/fondo.jpg"
+        src="/img/fondo.webp"
         alt=""
         aria-hidden="true"
         className="sd-bg-photo sd-bg-photo-login"

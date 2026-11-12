@@ -478,11 +478,17 @@ del local.
     "domingo": { "abre": "12:00", "cierra": "21:00" }
   },
   "propina_sugerida_pct": 10,
-  "moneda": "COP"
+  "moneda": "COP",
+  "correo": "hola@smartdining.co",
+  "redes": {
+    "instagram": "https://instagram.com/smartdining",
+    "whatsapp": "+573001234567"
+  }
 }
 ```
 
-Son **exactamente** esos siete campos, en una **lista blanca** y no un `delete` de lo
+Son **exactamente** esos nueve campos (los siete de siempre más `correo` y `redes`, del
+script 29, para la sección "Nuestro restaurante" del sitio público), en una **lista blanca** y no un `delete` de lo
 sensible: así una columna nueva en la tabla **no se publica sola** el día que alguien la
 agregue. **`actualizado_en`, `actualizado_por` e `id` no salen por aquí**: dicen quién tocó
 la configuración del local y cuándo, que es auditoría.
@@ -494,7 +500,10 @@ la configuración del local y cuándo, que es auditoría.
 
 `propina_sugerida_pct` llega como **número** (10, 12.5), no como texto: el backend registra
 un parser para `NUMERIC` (ver `src/config/db.js`). `horario` es un **objeto** por día; un día
-ausente significa cerrado.
+ausente significa cerrado. `correo` es texto o `null` (sin correo publicado). `redes` es
+**siempre un objeto**, `{}` si el local no tiene ninguna; solo trae las redes que tiene, con
+las claves `instagram`, `facebook`, `tiktok` (URL `https`) y `whatsapp` (número E.164: el
+enlace `wa.me` lo arma el frontend).
 
 ### GET /configuracion/completa — admin
 
@@ -510,6 +519,8 @@ Lo mismo más `id`, `actualizado_en` y `actualizado_por`:
   "horario": { "lunes": { "abre": "11:00", "cierra": "22:00" } },
   "propina_sugerida_pct": 10,
   "moneda": "COP",
+  "correo": "hola@smartdining.co",
+  "redes": { "instagram": "https://instagram.com/smartdining" },
   "actualizado_en": "2026-11-08T12:00:00.000Z",
   "actualizado_por": 1
 }
@@ -536,6 +547,43 @@ registrado como autor, sin una segunda llamada.
 | `horario` | **Objeto** JSON. La tabla lo exige con `ck_configuracion_horario_objeto`; un arreglo o un número son **400** aquí, no un 422 de la base |
 | `propina_sugerida_pct` | Número **entre 0 y 30**, con **2 decimales como máximo** |
 | `moneda` | **3 letras mayúsculas** (ISO 4217), como el CHECK `^[A-Z]{3}$` |
+| `correo` | Texto hasta **254** con la forma `nombre@dominio.algo` (sin espacios ni dos arrobas), o **`null` para quitarlo**. Ausente = se conserva |
+| `redes` | **Objeto** `.strict()` con las claves opcionales `instagram`, `facebook`, `tiktok` y `whatsapp`. Si viene, **reemplaza el objeto entero**: `{}` deja al local sin redes. **`null` es 400** (la columna es `NOT NULL`). Ausente = se conservan |
+
+**Reglas de `correo` y `redes`.** Son **las mismas de la base** (script 29:
+`ck_configuracion_correo` y `fn_redes_contacto_validas`), copiadas tal cual, y una prueba de
+integración compara el veredicto de las dos en más de cincuenta casos:
+
+| Red | Valor |
+|---|---|
+| `instagram` | `^https://([a-z0-9-]+\.)?instagram\.com/\S+$` **sin distinguir mayúsculas** (`https://instagram.com/x`, `https://www.instagram.com/x`, `https://m.instagram.com/x`) |
+| `facebook` | `^https://([a-z0-9-]+\.)?(facebook\|fb)\.com/\S+$` sin distinguir mayúsculas (también `https://fb.com/x`) |
+| `tiktok` | `^https://([a-z0-9-]+\.)?tiktok\.com/\S+$` sin distinguir mayúsculas |
+| `whatsapp` | `^\+[1-9][0-9]{6,14}$`: E.164, con `+`, sin espacios, de 7 a 15 dígitos |
+
+- Cada valor es **texto de 1 a 200 caracteres sin espacios**. Una red que no se usa **se
+  omite**: `null` o `""` como valor de una red son **400**, igual que una clave desconocida
+  (`twitter`) o un número en vez de texto.
+- `http://` no vale (solo `https://`), ni un enlace sin perfil (`https://instagram.com/`), ni un
+  dominio parecido (`https://xfacebook.com/…`).
+
+```json
+{ "correo": "hola@smartdining.co",
+  "redes": { "instagram": "https://instagram.com/smartdining", "whatsapp": "+573001234567" } }
+```
+
+Errores de estos dos campos, **400 con `motivo`** (el resto de los 400 de este PUT conserva
+`{ "error" }`):
+
+```json
+{ "error": "whatsapp debe ser el número en formato internacional, con + y sin espacios (+573001234567)", "motivo": "redes_invalidas" }
+{ "error": "correo debe tener la forma nombre@dominio.com", "motivo": "correo_invalido" }
+```
+
+Si aun así la base rechazara el valor (23514 de `ck_configuracion_correo` o
+`ck_configuracion_redes`, si algún día las reglas se separaran), sale el mismo **400** con
+`correo_invalido` o `redes_invalidas`, no un 500. Los **demás** CHECK de la configuración
+siguen yendo al manejador central (422 genérico).
 
 - El cuerpo es `.strict()`: **una clave de más es 400**. En particular `actualizado_en`,
   `actualizado_por` e `id` **no se editan** —los pone el trigger, o el CHECK—, y sin
@@ -1223,7 +1271,7 @@ devuelve `false` y no lanza. **No se avisa al socket-server:** no existe un even
 | GET | /mesas | admin, cajero, mesero | Lista todas |
 | **GET** | **/mesas/:id/cuenta** | **admin, cajero, mesero** | **Cuenta de la mesa por comensal (pesos)** |
 | **POST** | **/mesas/:id/abrir** | **mesero, admin** | **Abre la mesa: obtiene su QR y la marca `ocupada`** |
-| **POST** | **/mesas/:id/rotar-qr** | **mesero, admin** | **Cambia el QR de una mesa `ocupada` y avisa a la tablet** |
+| **POST** | **/mesas/:id/rotar-qr** | **mesero, admin** | **Cambia el QR de una mesa `ocupada` y avisa a la tablet. Con `{ "solo_si_vacia": true }`, 409/503 si ya hay comensales (#174)** |
 | **POST** | **/mesas/:id/liberar** | **mesero, admin** | **Cierra la mesa: `disponible` y `token_qr` a NULL. 409 si tiene pedidos abiertos** |
 | POST | /mesas/qr/:token/sesion | No | Abre la sesión del comensal y devuelve su JWT |
 | GET | /mesas/:id | No | Obtiene una |
@@ -1744,6 +1792,27 @@ El token solo viaja dentro de `url`. 400 id inválido · 404 mesa inexistente ·
 no está `ocupada`** · 403 si el socket-server rechaza el rol · 503 si el socket-server no
 responde (no se guarda nada). Si falla solo el aviso a la tablet, responde 201 igual.
 
+**Cuerpo opcional** (zod `.strict()`, #174):
+
+```json
+{ "solo_si_vacia": true }
+```
+
+Es para la **renovación automática del modal del panel** (#174): el panel renueva el QR que
+muestra sin tumbar la sesión de quien ya entró. Con `solo_si_vacia: true` se aplica, **antes de
+pedir el token** y en la misma transacción con la mesa bloqueada, **la misma guarda de
+continuidad que la rotación interna** (`/token-qr/interno`, abajo):
+
+| Si… | Respuesta | ¿Rota? |
+|---|---|---|
+| la sesión actual tiene pedidos (regla de `sesion_iniciada_en`) o algún nombre reservado (por QR o sin celular) | **409** `{ "error", "motivo": "mesa_con_comensales" }` | No |
+| Redis no responde (no se pueden leer las reservas) | **503** `{ "error", "motivo": "alias_no_disponible" }` | No |
+| la mesa está vacía | `201` como arriba | Sí |
+
+Sin cuerpo, con `{}` o con `solo_si_vacia: false` es el **"Nuevo QR" manual de siempre**: rota
+aunque haya comensales. Un campo de más o un `solo_si_vacia` que no sea booleano es **400**
+`{ "error", "motivo": "cuerpo_invalido" }`, sin tocar la mesa.
+
 > Hoy el middleware de sesión compara el `sid` del JWT del comensal con el `token_qr`
 > vigente, así que **rotar cierra las sesiones de quienes ya estaban sentados**. Si se quiere
 > que conserven su sesión tras una rotación, hay que cambiar ese criterio (pendiente). La
@@ -1988,6 +2057,7 @@ Notas de lo que quedó demostrado al escribirlas:
 | GET | /pedidos/:id | **admin, cajero, mesero, comensal** | Detalle con sus ítems; un comensal solo ve los de su mesa y de su visita (403 si no). **`cocina` no entra (S-26)** |
 | PATCH | /pedidos/:id/estado | admin, cajero, mesero | Cambia el estado (cualquiera de los 6 válidos) |
 | POST | /pedidos/:id/cancelar | admin, cajero, mesero | Atajo que fija `estado = cancelado`. **Solo desde `recibido` o `en_preparacion`**; desde `listo`/`entregado` responde 409 |
+| **POST** | **/pedidos/:id/items/:id_detalle/cancelar** | **comensal** | **D-13 por el comensal (J-14): quita UNA línea suya, entera, antes de que cocina empiece. No libera la mesa** |
 
 ### POST /pedidos
 
@@ -2322,6 +2392,93 @@ ve su pedido cerrado. Con cuenta pendiente o abono parcial, el pedido se queda e
 
 > Punto de integración con Roberto: en el código (marcado con un comentario `NOTA`)
 > es donde se debe emitir `order:created` / `order:status` hacia el socket-server.
+
+### POST /pedidos/:id/items/:id_detalle/cancelar — comensal (D-13, J-14)
+
+El comensal quita **una línea suya** de un pedido de su mesa, mientras cocina no lo haya
+empezado. Contrato aprobado por Juan (J-14).
+
+- **Quién:** solo una **sesión de comensal** (su JWT). El personal no usa esta ruta: con un
+  JWT de personal responde **403**; sin sesión, o con la sesión de un QR que ya no es el
+  vigente, **401**. La mesa y el comensal salen **del JWT**, nunca del cuerpo.
+- **Parámetros:** `:id` y `:id_detalle` enteros > 0 (zod `.strict()`); si no, **400**
+  `{ "motivo": "parametro_invalido" }`.
+- **Sin cuerpo:** nada o `{}`. Un cuerpo con cualquier campo es **400**
+  `{ "motivo": "cuerpo_invalido" }`.
+
+En **una transacción**, con el pedido y después la línea bloqueados (`FOR UPDATE`, siempre
+en ese orden), y en este orden de comprobación:
+
+| Paso | Si no se cumple |
+|---|---|
+| El pedido existe y `id_detalle` es una línea **de ese pedido** | **404** `{ "motivo": "no_encontrado" }` |
+| El pedido es de la **mesa del JWT** (y de su visita actual), y la línea es **del comensal del JWT**, comparando por la **clave** del alias (D-18b: sin tildes, mayúsculas ni separadores; `Ána María` = `ana  maria`). Una línea sin comensal (`NULL`) no la quita ningún comensal | **403** `{ "motivo": "no_es_tuyo" }` |
+| La línea no estaba ya cancelada (se mira **antes** que los otros 409) | **409** `{ "motivo": "item_ya_cancelado" }` |
+| El pedido sigue en `recibido` y la línea en `pendiente` | **409** `{ "motivo": "item_en_preparacion" }` |
+| Si el pedido tiene pagos `completada`, el total nuevo no queda **por debajo** de lo pagado | **409** `{ "motivo": "pago_registrado" }` |
+
+Si pasa:
+
+1. La línea se cancela **completa** (`estado_item = 'cancelado'`), aunque tenga
+   `cantidad > 1`: no se descuenta de a una unidad.
+2. Lo demás lo hace **la base**: `tr_devolver_inventario` devuelve al stock lo reservado
+   (es **devolución, no merma**: la línea estaba `pendiente` y el pedido `recibido`), también
+   las porciones de los ingredientes elegidos de un plato del **constructor**; y
+   `tr_actualizar_total_pedido` recalcula el total sin las líneas canceladas.
+3. Si el pedido se queda **sin líneas vivas**, pasa a `cancelado` por la transición válida,
+   con su fila en `historial_estados` (`id_usuario` NULL, observación *"Cancelado por el
+   comensal"*).
+4. **No libera la mesa**, aunque no le queden pedidos abiertos: el grupo sigue sentado y
+   puede volver a pedir. (La cancelación del personal sí llama a
+   `liberarSiNoQuedanPedidosAbiertos`; esta no.)
+
+Frente al **KDS**: cocina cambia el estado con un `UPDATE` del pedido, que toma el mismo
+bloqueo de fila. Si cocina llega primero, esta ruta espera y responde `409
+item_en_preparacion`; si llega primero el comensal, cocina espera a que la línea quede
+cancelada y el stock devuelto, y después aplica su cambio.
+
+`200`, con los ítems en la **misma forma que el seguimiento del comensal** (`GET
+/pedidos/:id`, `GET /pedidos/mesa`: con `plato_nombre`, `ingredientes` y su personalización),
+cada uno con su `estado_item`. `total` es un número:
+
+```json
+{
+  "pedido": {
+    "id_pedido": 87,
+    "codigo_pedido": "PED-261111-3F9A2",
+    "estado": "recibido",
+    "total": 18000,
+    "items": [
+      { "id_detalle": 210, "id_plato": 12, "plato_nombre": "Bandeja paisa", "cantidad": 2,
+        "subtotal": 36000, "comensal": "Ana", "estado_item": "cancelado", "ingredientes": [], "...": "..." },
+      { "id_detalle": 211, "id_plato": 1001, "plato_nombre": "Bowl Personalizado", "cantidad": 1,
+        "subtotal": 18000, "comensal": "Ana", "estado_item": "pendiente",
+        "ingredientes": [{ "id_ingrediente": 3, "nombre": "Arroz", "porcion": "normal", "precio_aplicado": 0,
+                           "id_paso": 101, "paso": "Elige tu Base" }], "...": "..." }
+    ]
+  }
+}
+```
+
+**Tiempo real, después del COMMIT** (la respuesta no los espera):
+
+1. `POST /internal/item-cancelado` con `{ id_pedido, id_mesa, codigo_pedido, id_detalle,
+   id_plato, nombre, comensal, total, estado_pedido, origen, eventId }`, con los mismos
+   reintentos que los demás avisos (solo 500/502/503 `ERROR_INTERNO`, mismo `eventId`).
+   **Pendiente de Roberto:** la ruta aún no existe en el socket-server; mientras tanto
+   responde 404, que queda en el log y no cambia la respuesta.
+
+   `origen` dice **quién** quitó el plato: `"comensal"` (su sesión de QR; es lo que manda
+   esta ruta) o `"personal"` (la cancelación del personal). Lo pidió Juan y lo aceptó
+   Roberto en su #181. **Un consumidor que no lo reciba debe asumir `"comensal"`**, el
+   único origen que existía antes de este campo.
+2. Si el pedido quedó `cancelado`, además el `POST /internal/order-status` de siempre
+   (`order:status` → `cancelado`).
+
+> El `estado_pago` del pedido (script 22) solo lo recalcula un trigger sobre
+> `transacciones`. Si quitar una línea deja el total **igual** a lo ya pagado, el pedido
+> queda cubierto pero `estado_pago` sigue en `parcial` hasta el próximo movimiento de
+> pago. Es de la base; queda anotado para Jarrison.
 
 ---
 
@@ -2911,6 +3068,7 @@ Contrato completo en [socket-server/EVENTS.md](../../socket-server/EVENTS.md).
 |---|---|
 | Se crea un pedido | `POST /internal/order-created` con el pedido y sus ítems |
 | Cambia el estado (pedidos y KDS) | `POST /internal/order-status` con `estado_anterior` |
+| **Un comensal quita una línea suya** (D-13, J-14) | `POST /internal/item-cancelado` (**pendiente de Roberto**: hoy 404, solo log); si el pedido queda cancelado, además `order-status` |
 | Se abre una mesa con un token **nuevo** | `POST /internal/qr-rotado` → `qr:actualizado` a la tablet |
 | **La caja cobra** (efectivo, datáfono o abono parcial) | `POST /internal/payment-confirmed` → `payment:confirmed` |
 | Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada`, con `motivo` si la cerró un pago |

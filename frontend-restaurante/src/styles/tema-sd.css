@@ -37,7 +37,7 @@
 }
 
 body {
-  background: linear-gradient(rgba(18,14,13,.82), rgba(18,14,13,.82)), url(/img/fondo.jpg) center/cover fixed !important;
+  background: linear-gradient(rgba(18,14,13,.82), rgba(18,14,13,.82)), url(/img/fondo.webp) center/cover fixed !important;
   background-color: var(--sd-bg) !important;
   color: var(--sd-text) !important;
   font-family: var(--sd-font-body) !important;

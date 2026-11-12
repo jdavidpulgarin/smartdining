@@ -3,7 +3,8 @@ const assert = require('node:assert');
 
 /**
  * Rotación AUTOMÁTICA del QR (POST /mesas/:id/token-qr/interno) contra
- * PostgreSQL real, con QR FIRMADOS DE VERDAD.
+ * PostgreSQL real, con QR FIRMADOS DE VERDAD. También la MANUAL con
+ * `solo_si_vacia` (POST /mesas/:id/rotar-qr, #174), que comparte su guarda.
  *
  * El backend habla con el socket-server en dos puntos: le pide el QR al abrir
  * la mesa (generarTokenQr) y le pregunta si un QR es válido al crear la sesión
@@ -40,13 +41,14 @@ process.env.INTERNAL_API_KEY = crypto.randomBytes(32).toString('hex');
 const CLAVE = process.env.INTERNAL_API_KEY;
 
 const request = require('supertest');
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const app = require('../../server');
 const pool = require('../../src/config/db');
 const socketNotifier = require('../../src/services/socket.notifier');
 const aliasComensal = require('../../src/services/alias-comensal');
 const pedidosService = require('../../src/services/pedidos.service');
 const { tokenStaff } = require('../helpers/fake-db');
+const { instalarFakeRedis } = require('../helpers/fake-redis');
 
 const SOCKET = path.resolve(B, '..', 'socket-server', 'src');
 const { crearServicioQr } = require(path.join(SOCKET, 'qr'));
@@ -97,34 +99,30 @@ async function limpiar() {
 }
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' AND activo ORDER BY id_usuario LIMIT 1");
-    const p = await sonda.query(
-      `SELECT id_plato FROM platos WHERE disponible AND stock_suficiente AND NOT personalizable ORDER BY id_plato LIMIT 1`
-    );
-    admin = u.rows[0] ? tokenStaff(u.rows[0].id_usuario, 'admin') : null;
-    plato = p.rows[0] || null;
-    hayBase = Boolean(admin && plato);
-    if (!hayBase) return;
-    await limpiar();
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' AND activo ORDER BY id_usuario LIMIT 1");
+  const p = await sonda.query(
+    `SELECT id_plato FROM platos WHERE disponible AND stock_suficiente AND NOT personalizable ORDER BY id_plato LIMIT 1`
+  );
+  admin = u.rows[0] ? tokenStaff(u.rows[0].id_usuario, 'admin') : null;
+  plato = p.rows[0] || null;
+  hayBase = Boolean(admin && plato);
+  if (!hayBase) return;
+  await limpiar();
 
-    // Los dos puntos backend <-> socket-server, contra el servicio QR real.
-    socketNotifier.generarTokenQr = async (idMesa) => {
-      const q = servicioQr.generar(idMesa);
-      return { alcanzado: true, token: q.token, expira_en: q.expira_en };
-    };
-    socketNotifier.validarTokenQr = async (token) => {
-      const r = await servicioQr.validar(token);
-      return r.valido
-        ? { alcanzado: true, valido: true, id_mesa: r.id_mesa, expira_en: r.expira_en }
-        : { alcanzado: true, valido: false, motivo: r.motivo };
-    };
-  } catch (err) {
-    if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
-    hayBase = false;
-  }
+  // Los dos puntos backend <-> socket-server, contra el servicio QR real.
+  socketNotifier.generarTokenQr = async (idMesa) => {
+    const q = servicioQr.generar(idMesa);
+    return { alcanzado: true, token: q.token, expira_en: q.expira_en };
+  };
+  socketNotifier.validarTokenQr = async (token) => {
+    const r = await servicioQr.validar(token);
+    return r.valido
+      ? { alcanzado: true, valido: true, id_mesa: r.id_mesa, expira_en: r.expira_en }
+      : { alcanzado: true, valido: false, motivo: r.motivo };
+  };
 });
 
 test.after(async () => {
@@ -240,6 +238,94 @@ test('guarda de continuidad: con un comensal dentro, o con un pedido, no se rota
   assert.strictEqual(r2.status, 409);
   assert.strictEqual(r2.body.motivo, 'mesa_con_comensales');
   assert.strictEqual(await tokenGuardado(m2.idMesa), m2.token);
+});
+
+// ---------------------------------------------------------------------------
+// Rotación MANUAL con solo_si_vacia (#174): la misma guarda, en PG real
+// ---------------------------------------------------------------------------
+
+const rotarManual = (idMesa, cuerpo) => {
+  const r = request(app).post(`/api/mesas/${idMesa}/rotar-qr`).set('Authorization', `Bearer ${admin}`);
+  return cuerpo === undefined ? r : r.send(cuerpo);
+};
+
+test('rotar-qr con solo_si_vacia y la mesa vacia: rota (sin historico, como el manual de siempre)', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa, token: viejo } = await mesaAbierta();
+
+  const r = await rotarManual(idMesa, { solo_si_vacia: true });
+  assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+  const nuevo = await tokenGuardado(idMesa);
+  assert.notStrictEqual(nuevo, viejo);
+  assert.ok(r.body.url.includes(encodeURIComponent(nuevo)), 'la url lleva el token guardado');
+  assert.deepStrictEqual(Object.keys(r.body).sort(), ['expira_en', 'mesa', 'url']);
+  const { rows: hist } = await sonda.query(
+    'SELECT count(*)::int AS n FROM token_qr_historico WHERE id_mesa = $1::int', [idMesa]
+  );
+  assert.strictEqual(hist[0].n, 0, 'la manual no escribe historico, igual que antes');
+  assert.strictEqual((await sesion(nuevo, 'Ana')).status, 201, 'el nuevo da sesion');
+});
+
+test('rotar-qr con solo_si_vacia: un pedido, un comensal por QR o uno sin celular -> 409 y el token NO cambia', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  // Pedido de la sesión, sin que nadie haya escaneado.
+  const m1 = await mesaAbierta();
+  await pedidosService.crearConDetalles({ id_mesa: m1.idMesa, id_usuario: null, items: [{ id_plato: plato.id_plato, cantidad: 1 }] });
+  // Alguien entra por QR y reserva su nombre.
+  const m2 = await mesaAbierta();
+  assert.strictEqual((await sesion(m2.token, 'Beto')).status, 201);
+  // El mesero da de alta a alguien sin celular.
+  const m3 = await mesaAbierta();
+  const alta = await request(app).post(`/api/mesas/${m3.idMesa}/comensales`)
+    .set('Authorization', `Bearer ${admin}`).send({ alias: 'Abuela' });
+  assert.strictEqual(alta.status, 201, JSON.stringify(alta.body));
+
+  for (const [caso, m] of [['pedido', m1], ['comensal por QR', m2], ['sin celular', m3]]) {
+    const r = await rotarManual(m.idMesa, { solo_si_vacia: true });
+    assert.strictEqual(r.status, 409, `${caso}: ${JSON.stringify(r.body)}`);
+    assert.strictEqual(r.body.motivo, 'mesa_con_comensales', caso);
+    assert.strictEqual(await tokenGuardado(m.idMesa), m.token, `${caso}: el QR queda fijo`);
+  }
+  // Beto conserva su sesión: el QR que escaneó sigue siendo el vigente.
+  assert.strictEqual((await sesion(m2.token, 'Ana')).status, 201);
+});
+
+test('rotar-qr con solo_si_vacia y Redis caido: 503 alias_no_disponible y NO rota', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa, token } = await mesaAbierta();
+  const redis = instalarFakeRedis({ caido: true });
+  try {
+    const r = await rotarManual(idMesa, { solo_si_vacia: true });
+    assert.strictEqual(r.status, 503, JSON.stringify(r.body));
+    assert.strictEqual(r.body.motivo, 'alias_no_disponible');
+  } finally {
+    redis.restaurar();
+  }
+  assert.strictEqual(await tokenGuardado(idMesa), token);
+});
+
+test('rotar-qr SIN solo_si_vacia y con comensales: rota como hoy (el "Nuevo QR" manual)', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa, token } = await mesaAbierta();
+  assert.strictEqual((await sesion(token, 'Dora')).status, 201);
+  await pedidosService.crearConDetalles({ id_mesa: idMesa, id_usuario: null, items: [{ id_plato: plato.id_plato, cantidad: 1 }] });
+
+  const r = await rotarManual(idMesa);
+  assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+  assert.notStrictEqual(await tokenGuardado(idMesa), token);
+
+  const r2 = await rotarManual(idMesa, { solo_si_vacia: false });
+  assert.strictEqual(r2.status, 201, JSON.stringify(r2.body));
+});
+
+test('rotar-qr con un campo extra: 400 cuerpo_invalido y el token NO cambia', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa, token } = await mesaAbierta();
+  const r = await rotarManual(idMesa, { solo_si_vacia: true, forzar: true });
+  assert.strictEqual(r.status, 400);
+  assert.strictEqual(r.body.motivo, 'cuerpo_invalido');
+  assert.strictEqual(await tokenGuardado(idMesa), token);
 });
 
 test('punta a punta con el rotador real del socket-server: ya no recibe 404, rota y anuncia qr:actualizado', async (t) => {

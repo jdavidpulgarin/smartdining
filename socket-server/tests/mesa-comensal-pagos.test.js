@@ -103,6 +103,7 @@ test('Redis real: sin_celular con HSETNX (solo un alias por clave), TTL y limpie
   const mesa = 900000 + Math.floor(Math.random() * 99999);
   t.after(async () => {
     await cliente.del(`sd:mesa:${mesa}:sin_celular`);
+    await cliente.hDel('sd:mesas:con-estado', String(mesa)); // agregarSinCelular también anota el índice
     await conexion.cerrar();
   });
   const e = crearEstadoMesasRedis({ cliente });

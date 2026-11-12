@@ -275,7 +275,7 @@ export function PantallaMesa() {
     <div className="sd-pantalla-page">
       {/* Fondo con foto del plato y viñeta oscura */}
       <img
-        src="/img/fondo.jpg"
+        src="/img/fondo.webp"
         alt=""
         aria-hidden="true"
         className="sd-bg-photo"

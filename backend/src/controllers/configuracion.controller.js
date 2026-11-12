@@ -25,7 +25,68 @@ const CAMPOS_PUBLICOS = [
   'horario',
   'propina_sugerida_pct',
   'moneda',
+  // Script 29 (P-21): el sitio público los muestra en "Nuestro restaurante".
+  'correo',
+  'redes',
 ];
+
+// ---------------------------------------------------------------------------
+// Contacto del local (script 29): las MISMAS reglas que la base
+// (database/scripts/29_configuracion_contacto.sql), copiadas tal cual:
+//   - ck_configuracion_correo: correo IS NULL OR correo ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:].]+$'
+//   - fn_redes_contacto_validas: objeto con solo instagram, facebook, tiktok y
+//     whatsapp; cada valor texto de 1 a 200 sin espacios; las tres URL con ~*
+//     (sin distinguir mayúsculas) y whatsapp E.164 con ~.
+// Son los mismos patrones que REDES del panel (#162). La prueba de integración
+// compara cada uno contra fn_redes_contacto_validas caso por caso.
+// ---------------------------------------------------------------------------
+
+/** VARCHAR(254) y el CHECK de forma de la base. */
+const CORREO = /^[^@\s]+@[^@\s]+\.[^@\s.]+$/;
+const MAX_CORREO = 254;
+/** Cada valor de red: de 1 a 200 caracteres, como char_length(...) BETWEEN 1 AND 200. */
+const MAX_RED = 200;
+
+const PATRONES_REDES = {
+  instagram: {
+    patron: /^https:\/\/([a-z0-9-]+\.)?instagram\.com\/\S+$/i,
+    mensaje: 'instagram debe ser el enlace https del perfil (https://instagram.com/…)',
+  },
+  facebook: {
+    patron: /^https:\/\/([a-z0-9-]+\.)?(facebook|fb)\.com\/\S+$/i,
+    mensaje: 'facebook debe ser el enlace https de la página (https://facebook.com/… o fb.com/…)',
+  },
+  tiktok: {
+    patron: /^https:\/\/([a-z0-9-]+\.)?tiktok\.com\/\S+$/i,
+    mensaje: 'tiktok debe ser el enlace https del perfil (https://tiktok.com/@…)',
+  },
+  whatsapp: {
+    patron: /^\+[1-9][0-9]{6,14}$/,
+    mensaje: 'whatsapp debe ser el número en formato internacional, con + y sin espacios (+573001234567)',
+  },
+};
+
+/** Una red: texto de 1 a 200, sin espacios, con su patrón. Nunca null ni "". */
+const red = (clave) => z
+  .string({ invalid_type_error: `${clave} debe ser un texto; una red sin usar se omite` })
+  .min(1, `${clave} no puede ir vacío; una red sin usar se omite`)
+  .max(MAX_RED, `${clave} admite hasta ${MAX_RED} caracteres`)
+  .regex(/^\S+$/, `${clave} no puede llevar espacios`)
+  .regex(PATRONES_REDES[clave].patron, PATRONES_REDES[clave].mensaje);
+
+/**
+ * `redes`: si viene, REEMPLAZA el objeto completo ({} = sin redes). No admite
+ * null: la columna es NOT NULL DEFAULT '{}'.
+ */
+const redesSchema = z
+  .object({
+    instagram: red('instagram'),
+    facebook: red('facebook'),
+    tiktok: red('tiktok'),
+    whatsapp: red('whatsapp'),
+  }, { invalid_type_error: 'redes debe ser un objeto ({} = sin redes)' })
+  .partial()
+  .strict();
 
 /**
  * Cuerpo de PUT /api/configuracion.
@@ -64,12 +125,26 @@ const configuracionSchema = z
         message: 'propina_sugerida_pct admite como máximo 2 decimales',
       }),
     moneda: z.string().regex(/^[A-Z]{3}$/, 'moneda debe ser 3 letras mayúsculas (ISO 4217)'),
+    // null = quitar el correo; ausente = se conserva. Sin trim: un espacio es
+    // un correo inválido, como en el CHECK de la base, no un dato que arreglar.
+    correo: z
+      .string()
+      .max(MAX_CORREO, `correo admite hasta ${MAX_CORREO} caracteres`)
+      .regex(CORREO, 'correo debe tener la forma nombre@dominio.com')
+      .nullable(),
+    redes: redesSchema,
   })
   .partial()
   .strict()
   .refine((datos) => Object.keys(datos).length > 0, {
     message: 'Indica al menos un campo de la configuración',
   });
+
+/** El motivo de un 400 de validación de correo o redes: el mismo de su CHECK. */
+const MOTIVO_POR_CAMPO = {
+  correo: configuracionService.CHECKS_DE_CONTACTO.ck_configuracion_correo.motivo,
+  redes: configuracionService.CHECKS_DE_CONTACTO.ck_configuracion_redes.motivo,
+};
 
 /** Solo los campos de la lista blanca, en su orden. */
 function vistaPublica(configuracion) {
@@ -109,7 +184,13 @@ async function obtenerCompleta(req, res, next) {
  */
 async function actualizar(req, res, next) {
   const parsed = configuracionSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
+  if (!parsed.success) {
+    // Los errores de correo y redes llevan motivo, como sus CHECK traducidos; el
+    // resto de los 400 de validación conserva la forma de siempre ({ error }).
+    const issue = parsed.error.errors[0];
+    const motivo = MOTIVO_POR_CAMPO[issue.path[0]];
+    return res.status(400).json(motivo ? { error: issue.message, motivo } : { error: issue.message });
+  }
 
   try {
     const configuracion = await configuracionService.actualizar(parsed.data, {
@@ -129,5 +210,9 @@ module.exports = {
   obtenerCompleta,
   actualizar,
   configuracionSchema,
+  redesSchema,
   CAMPOS_PUBLICOS,
+  CORREO,
+  PATRONES_REDES,
+  MOTIVO_POR_CAMPO,
 };

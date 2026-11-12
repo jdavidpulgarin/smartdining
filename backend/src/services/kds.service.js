@@ -54,7 +54,7 @@ const ESTADOS_EN_EL_TABLERO = ['recibido', 'en_preparacion', 'listo'];
  *
  * El recorte es SOLO para 'listo'. Un 'recibido' o 'en_preparacion' viejo
  * aparece igual, por antiguo que sea: eso sí es trabajo pendiente de cocina y
- * esconderlo sería peor (es el caso de ORD-001 del seed).
+ * esconderlo sería peor (por eso el seed ya no trae pedidos de ejemplo).
  */
 const HORAS_VISIBLES_LISTO = 12;
 

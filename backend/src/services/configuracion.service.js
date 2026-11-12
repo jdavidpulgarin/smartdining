@@ -11,7 +11,8 @@ const { traducirAutorInexistente } = require('./autor-inexistente');
  *
  * Columnas, tal como están en el script: `nombre`, `telefono`, `direccion`,
  * `url_logo`, `horario` (JSONB), `propina_sugerida_pct` (NUMERIC(4,2)), `moneda`
- * (CHAR(3)), `actualizado_en` y `actualizado_por`.
+ * (CHAR(3)), `actualizado_en` y `actualizado_por`; y del script 29, `correo`
+ * (VARCHAR(254), opcional) y `redes` (JSONB, NOT NULL, '{}' = ninguna).
  *
  * `actualizado_en` y `actualizado_por` NO los escribe el backend: los pone el
  * trigger `tr_configuracion_actualizada` en cada UPDATE, y el autor sale de
@@ -33,13 +34,52 @@ const CAMPOS_EDITABLES = [
   'horario',
   'propina_sugerida_pct',
   'moneda',
+  // Script 29 (P-21): contacto del local para el sitio público.
+  'correo',
+  'redes',
 ];
+
+/**
+ * Tipo de cada parámetro del UPDATE, explícito: un mismo $N siempre con el
+ * mismo tipo, sin dejar que PostgreSQL lo deduzca. `horario` y `redes` son
+ * JSONB y viajan como texto JSON.
+ */
+const TIPO_COLUMNA = {
+  nombre: 'text',
+  telefono: 'text',
+  direccion: 'text',
+  url_logo: 'text',
+  horario: 'jsonb',
+  propina_sugerida_pct: 'numeric',
+  moneda: 'text',
+  correo: 'text',
+  redes: 'jsonb',
+};
+
+/** Columnas JSONB: el valor se manda como texto JSON. */
+const COLUMNAS_JSON = ['horario', 'redes'];
+
+/**
+ * Los CHECK del script 29, traducidos a 400 con su motivo. El esquema del PUT
+ * ya aplica las mismas reglas, así que esto solo salta si alguna vez difieren;
+ * aun así, un dato rechazado por la base no es un 500 ni un 422 genérico.
+ */
+const CHECKS_DE_CONTACTO = {
+  ck_configuracion_correo: { motivo: 'correo_invalido', mensaje: 'El correo no tiene la forma nombre@dominio.com' },
+  ck_configuracion_redes: { motivo: 'redes_invalidas', mensaje: 'Alguna red no tiene un enlace o número válido' },
+};
+
+function traducirCheckDeContacto(err) {
+  if (!err || err.code !== '23514') return null;
+  const regla = CHECKS_DE_CONTACTO[err.constraint];
+  return regla ? { status: 400, message: regla.mensaje, motivo: regla.motivo } : null;
+}
 
 /** Toda la fila, como la ve un admin. */
 async function obtener() {
   const result = await pool.query(
     `SELECT id, nombre, telefono, direccion, url_logo, horario,
-            propina_sugerida_pct, moneda, actualizado_en, actualizado_por
+            propina_sugerida_pct, moneda, correo, redes, actualizado_en, actualizado_por
        FROM configuracion_restaurante
       WHERE id = $1`,
     [ID_CONFIGURACION]
@@ -83,11 +123,12 @@ async function actualizar(cambios, { idUsuario = null } = {}) {
     ]);
 
     // $1 es el id; los valores empiezan en $2.
-    const asignaciones = columnas.map((c, i) => `${c} = $${i + 2}`).join(', ');
+    const asignaciones = columnas.map((c, i) => `${c} = $${i + 2}::${TIPO_COLUMNA[c]}`).join(', ');
     const valores = columnas.map((c) => {
-      // `horario` es JSONB: se manda como texto JSON y se castea, que es lo que
-      // espera el driver para un objeto.
-      if (c === 'horario') return JSON.stringify(cambios[c]);
+      // `horario` y `redes` son JSONB: se mandan como texto JSON y se castean,
+      // que es lo que espera el driver para un objeto. `redes` REEMPLAZA el
+      // objeto entero (no se mezcla con el que había): {} deja sin redes.
+      if (COLUMNAS_JSON.includes(c)) return JSON.stringify(cambios[c]);
       return cambios[c];
     });
 
@@ -96,7 +137,7 @@ async function actualizar(cambios, { idUsuario = null } = {}) {
           SET ${asignaciones}
         WHERE id = $1
         RETURNING id, nombre, telefono, direccion, url_logo, horario,
-                  propina_sugerida_pct, moneda, actualizado_en, actualizado_por`,
+                  propina_sugerida_pct, moneda, correo, redes, actualizado_en, actualizado_por`,
       [ID_CONFIGURACION, ...valores]
     );
 
@@ -113,10 +154,12 @@ async function actualizar(cambios, { idUsuario = null } = {}) {
     // `fk_configuracion_actualizado_por` contra `usuarios`. Si ese usuario ya se
     // borró, el 23503 salía como el 409 genérico de clave ajena, que no dice que
     // el problema sea la sesión de quien está editando.
-    throw traducirAutorInexistente(err) || err;
+    throw traducirAutorInexistente(err) || traducirCheckDeContacto(err) || err;
   } finally {
     client.release();
   }
 }
 
-module.exports = { obtener, actualizar, ID_CONFIGURACION, CAMPOS_EDITABLES };
+module.exports = {
+  obtener, actualizar, ID_CONFIGURACION, CAMPOS_EDITABLES, CHECKS_DE_CONTACTO, traducirCheckDeContacto,
+};

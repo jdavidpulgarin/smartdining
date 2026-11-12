@@ -97,5 +97,5 @@ function estaEnMesa(socket, idMesa) {
 }
 
 module.exports = {
-  registrarSalas, estaEnMesa, resolverMesa, salaMesa, SALA_KDS, SALA_ADMIN, esIdValido,
+  registrarSalas, estaEnMesa, resolverMesa, salaMesa, SALA_KDS, SALA_ADMIN, ROLES_ADMIN, esIdValido,
 };
