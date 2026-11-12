@@ -19,6 +19,11 @@ const { crearRedisFalso } = require('./redis-falso');
 
 const silencioso = { info() {}, error() {} };
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Espera (hasta 2 s) a que se cumpla `cond`, sin depender de la carga de la máquina. */
+async function hasta(cond, ms = 2000) {
+  const fin = Date.now() + ms;
+  while (!cond() && Date.now() < fin) await pausa(20); // eslint-disable-line no-await-in-loop
+}
 
 // Las 5 filas de la propuesta. `pagos`: [alias, modo, monto esperado en centavos].
 const FILAS = [
@@ -223,11 +228,15 @@ for (const almacen of ['memoria', 'redis']) {
     } = await escenario(t, almacen, { total: 9_000_000 });
     await sentar('Ana');
     await sentar('Beto');
-    await pausa(100);
-    const llega = esperar(sockets.Beto, 'mesa:presencia', 1000);
+    // Bajo carga, la presencia de "Beto se sentó" (pagaron []) puede llegar
+    // tarde: se guardan todas y se espera la que trae el pago.
+    const recibidas = [];
+    sockets.Beto.on('mesa:presencia', (p) => recibidas.push(p));
+    const conPago = () => recibidas.find((p) => p.pagaron.length > 0);
     const i = await pedir('Ana', 'igual');
     await pagar(i.cuerpo.referencia, i.cuerpo.monto_en_centavos);
-    assert.deepStrictEqual(await llega, {
+    await hasta(conPago);
+    assert.deepStrictEqual(conPago(), {
       id_mesa: 5, comensales: ['Ana', 'Beto'], total: 2, pagaron: ['Ana'], sin_celular: [],
     });
     await fetch(`${s.url}/internal/mesa-liberada`, {
