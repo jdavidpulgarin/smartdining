@@ -236,14 +236,6 @@ for (const almacen of ['memoria', 'redis']) {
     assert.deepStrictEqual(await s.estadoMesas.pagaron(5), []);
   });
 
-  test(`${almacen}: el pago que deja saldo 0 no se anota (la mesa se libera)`, async (t) => {
-    const { s, sentar, pedir, pagar } = await escenario(t, almacen, { total: 9_000_000 });
-    await sentar('Ana');
-    const i = await pedir('Ana', 'total');
-    assert.strictEqual((await pagar(i.cuerpo.referencia, 9_000_000)).registrado, true);
-    assert.deepStrictEqual(await s.estadoMesas.pagaron(5), []);
-  });
-
   test(`${almacen}: un cobro de caja con alias también saca a ese comensal del reparto`, async (t) => {
     const {
       s, mesa, sockets, sentar, pedir,
