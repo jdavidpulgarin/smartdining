@@ -101,10 +101,11 @@ database/scripts/
 ├── 29_configuracion_contacto.sql       # correo y redes (instagram, facebook, tiktok, whatsapp) del local (P-21)
 ├── 30_fix_auditoria_registro_id.sql    # registro_id de la auditoría = llave primaria real (en transacciones guardaba el id_pedido)
 ├── 31_transicion_listo_cancelado.sql   # transición listo → cancelado (lo cocinado es merma); cancelar_pedido() lee transiciones_validas
-└── 32_fix_intento_pago_fallido_ambiguo.sql # borra la sobrecarga de 4 parámetros de registrar_intento_pago_fallido (hacía ambigua toda llamada de 4)
+├── 32_fix_intento_pago_fallido_ambiguo.sql # borra la sobrecarga de 4 parámetros de registrar_intento_pago_fallido (hacía ambigua toda llamada de 4)
+└── 33_estado_pago_al_cambiar_total.sql # estado_pago se recalcula también cuando cambia el total (al quitar un plato quedaba «parcial» con saldo 0)
 ```
 
-> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (33).
+> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (34).
 
 > **Auditoría de transacciones antes del script 30:** las filas de `auditoria_cambios` con
 > `tabla_afectada = 'transacciones'` escritas antes del 30 tienen el **id del pedido** en
@@ -211,7 +212,15 @@ psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p18_configuracion.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p21_configuracion_contacto.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_30_auditoria_registro_id.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_31_listo_cancelado.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_33_estado_pago_total.sql
 ```
+
+`estado_pago` al cambiar el total (script 33): `test_33_estado_pago_total.sql` crea su propia
+mesa y plato, abona la mitad de un pedido de dos líneas y quita una: el total queda igual a lo
+pagado y exige `pagado` (sin el 33 se queda en `parcial`). También comprueba que al agregar una
+línea vuelve a `parcial`, que sin pagos sigue `pendiente`, que no toca el estado de cocina y que
+el script corrige las filas que ya quedaron mal y es idempotente. Usa `\ir`: correrla desde
+`database/tests`. Corre en `BEGIN … ROLLBACK`: no deja nada.
 
 Pedido en `listo` que se cancela (script 31): `test_31_listo_cancelado.sql` crea su propia mesa,
 insumo y plato con receta (no depende del seed) y comprueba que `listo → cancelado` se permite por
