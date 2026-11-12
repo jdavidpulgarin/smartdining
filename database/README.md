@@ -100,10 +100,11 @@ database/scripts/
 ├── 28_aviso_insumo_agotado.sql         # Aviso stock_bajo también al llegar a 0 aunque ya estuviera bajo (G-06)
 ├── 29_configuracion_contacto.sql       # correo y redes (instagram, facebook, tiktok, whatsapp) del local (P-21)
 ├── 30_fix_auditoria_registro_id.sql    # registro_id de la auditoría = llave primaria real (en transacciones guardaba el id_pedido)
-└── 31_transicion_listo_cancelado.sql   # transición listo → cancelado (lo cocinado es merma); cancelar_pedido() lee transiciones_validas
+├── 31_transicion_listo_cancelado.sql   # transición listo → cancelado (lo cocinado es merma); cancelar_pedido() lee transiciones_validas
+└── 32_fix_intento_pago_fallido_ambiguo.sql # borra la sobrecarga de 4 parámetros de registrar_intento_pago_fallido (hacía ambigua toda llamada de 4)
 ```
 
-> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (32).
+> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (33).
 
 > **Auditoría de transacciones antes del script 30:** las filas de `auditoria_cambios` con
 > `tabla_afectada = 'transacciones'` escritas antes del 30 tienen el **id del pedido** en
@@ -191,7 +192,18 @@ docker compose up -d postgres
 
 ### Pruebas SQL
 
-Cada archivo de `database/tests/` es un bloque `DO` que lanza una excepción si algo falla y limpia lo que crea. Se corren sobre una base ya cargada:
+Cada archivo de `database/tests/` es un bloque `DO` que lanza una excepción si algo falla y limpia lo que crea. Se corren sobre una base ya cargada. **Ninguna depende de que el seed traiga pedidos** (desde #182 no trae ninguno): las que los necesitan crean los suyos. `test_g07_inventario_demo.sql` sí necesita `seed_inventario_demo.sql`.
+
+Para correrlas todas y ver cuál falla (en Git Bash, con el proyecto de Docker de pruebas):
+
+```bash
+for t in database/tests/*.sql; do
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d smartdining < "$t" >/dev/null 2>&1 \
+    && echo "OK    $t" || echo "FALLA $t"
+done
+```
+
+Una por una:
 
 ```bash
 cd database/tests
