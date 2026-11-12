@@ -4345,19 +4345,22 @@ fija y `x-internal-key`; en `/api/v1` responde 404. Las rutas de clientes de aba
   (`utils/clave-bcrypt.js`): **mínimo 8 caracteres** y **máximo 72 bytes** en UTF-8 (bcrypt
   ignora en silencio lo que pasa de 72 bytes; una tilde ocupa 2 y un emoji 4).
 - **Límites de peticiones propios** (además del global): registro, login y refresh, cada
-  uno con su contador por IP (el login, por IP **y** correo, como el del personal).
+  uno con su contador por IP (el login, por IP **y** `email`, como el del personal).
 
 ### Autenticación
 
 | Método y ruta | Cuerpo | Éxito | Errores |
 |---|---|---|---|
-| `POST /api/v1/auth/clientes/registro` | `{ nombre, correo, password, telefono? }` | **201** `{ cliente, token, refresh_token, expira_en }` | **409** `correo_registrado` · **400** `nombre_invalido`, `correo_invalido`, `clave_corta`, `clave_larga`, `telefono_invalido`, `cuerpo_invalido` · 429 |
-| `POST /api/v1/auth/clientes/login` | `{ correo, password }` | **200** `{ cliente, token, refresh_token, expira_en }` | **401** `credenciales_invalidas` · 400 `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/registro` | `{ nombre, email, password, telefono? }` | **201** `{ cliente, token, refresh_token, expira_en }` | **409** `email_registrado` · **400** `nombre_invalido`, `email_invalido`, `clave_corta`, `clave_larga`, `telefono_invalido`, `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/login` | `{ email, password }` | **200** `{ cliente, token, refresh_token, expira_en }` | **401** `credenciales_invalidas` · 400 `cuerpo_invalido` · 429 |
+
+El campo es **`email`**, igual que en `POST /api/auth/login` del personal. El `email` se compara
+sin distinguir mayúsculas (se guarda y se busca por `lower(email)`).
 | `POST /api/v1/auth/clientes/refresh` | `{ refresh_token }` | **200** `{ token, refresh_token, expira_en }` | **401** `refresh_invalido` (no existe o venció) · **401** `sesion_revocada` (reuso) · 429 |
 | `POST /api/v1/auth/clientes/logout` | `{ refresh_token }` + `Authorization: Bearer <token>` | **204** | 401 sin JWT de cliente |
 
-- **Login sin enumeración:** el **mismo 401 y el mismo mensaje** si el correo no existe o si
-  la clave falla, y el **mismo tiempo de respuesta**: con un correo que no existe se compara
+- **Login sin enumeración:** el **mismo 401 y el mismo mensaje** si el `email` no existe o si
+  la clave falla, y el **mismo tiempo de respuesta**: con un `email` que no existe se compara
   contra un hash ficticio del mismo costo (como `HASH_FICTICIO` en el login del personal).
 - **Rotación del refresh:** cada uso emite un `refresh_token` **nuevo** (misma familia) e
   invalida el anterior (`reemplazado_por`). Si llega uno **ya rotado** (reuso: alguien copió
@@ -4365,7 +4368,7 @@ fija y `x-internal-key`; en `/api/v1` responde 404. Las rutas de clientes de aba
   cliente vuelve a iniciar sesión.
 - **Logout:** revoca **ese** refresh token (no la familia entera ni otras sesiones del
   cliente). El JWT sigue valiendo hasta su vencimiento corto (15 min).
-- `cliente` es `{ id_cliente, nombre, correo, telefono }`, nunca el hash.
+- `cliente` es `{ id_cliente, nombre, email, telefono, verificado }`, nunca el hash.
 
 ### Perfil
 
@@ -4413,50 +4416,51 @@ contratos esperados y no llama a nada):
 | Respuesta `{ usuario, token, refreshToken }` | `{ cliente, token, refresh_token, expira_en }` (**`usuario` → `cliente`**, **`refreshToken` → `refresh_token`**, y llega **`expira_en`**) |
 | `refrescarToken(refreshToken)` → `{ token, refreshToken? }` | Cuerpo `{ refresh_token }` → `{ token, refresh_token, expira_en }`: el refresh **siempre** rota, así que hay que **guardar el nuevo** cada vez (reusar el viejo revoca la sesión con 401 `sesion_revocada`) |
 | `cerrarSesion(token)` | `POST /api/v1/auth/clientes/logout` con **`Authorization: Bearer <token>`** y cuerpo **`{ refresh_token }`**; responde **204** sin cuerpo |
-| `registrarUsuario({ nombre, correo, password })` | Además acepta `telefono?`; la clave necesita **8 caracteres** como mínimo y **72 bytes** como máximo |
-| Errores sin motivo | Leer `motivo` del cuerpo (`correo_registrado`, `credenciales_invalidas`, `sesion_revocada`, `refresh_invalido`, `fuera_de_cobertura`…) |
+| `registrarUsuario({ nombre, correo, password })` e `iniciarSesion({ correo, password })` | **`correo` → `email`** (como el login del personal): `{ nombre, email, password, telefono? }` y `{ email, password }`; el objeto `cliente` también trae `email` (y `verificado`). La clave necesita **8 caracteres** como mínimo y **72 bytes** como máximo |
+| Errores sin motivo | Leer `motivo` del cuerpo (`email_registrado`, `email_invalido`, `credenciales_invalidas`, `sesion_revocada`, `refresh_invalido`, `fuera_de_cobertura`…) |
 | Sin manejo de vencimiento | El `token` vive **15 min**: renovar con `/refresh` ante un 401 o antes de `expira_en` |
 
 ### Lo que necesita la base (P-23)
 
-**Propuesta para Jarrison, no un script.** Las columnas de `direcciones` y `zonas` siguen los
-campos de este contrato (los del plan 5.5: `direccion`, `barrio`, `referencia`, `lat`, `lng`,
-`principal`; y `id_zona`, `nombre`, `barrios`, `costo_envio`, `tiempo_estimado_min`). El plan
-v1.1 no está en el repositorio, así que las de `clientes` se derivan del contrato y hay que
-cuadrarlas con la sección 5.5. La tabla de **refresh tokens es nueva**: la P-23 no la tiene.
+**Propuesta para Jarrison, no un script.** Las tablas y columnas son las del **plan 5.5**
+(`clientes`, `direcciones`, `zonas_envio`). Lo marcado como **sugerido, además del plan** son
+extras de este contrato (columnas, tipos e índices) que Jarrison puede tomar o no. La tabla de
+**refresh tokens es NUEVA**: la P-23 no la tiene.
 
 ```sql
--- clientes
+-- clientes  (plan 5.5: id_cliente, nombre, email UNIQUE, telefono, password_hash, verificado, creado_en)
 id_cliente      SERIAL PRIMARY KEY
 nombre          VARCHAR(80)  NOT NULL
-correo          VARCHAR(254) NOT NULL          -- UNIQUE sobre lower(correo)
+email           VARCHAR(254) NOT NULL          -- UNIQUE sobre lower(email)
 telefono        VARCHAR(20)  NULL
 password_hash   VARCHAR(60)  NOT NULL          -- bcrypt costo 10 ($2b$10$...)
-activo          BOOLEAN      NOT NULL DEFAULT TRUE
+verificado      BOOLEAN      NOT NULL DEFAULT FALSE
 creado_en       TIMESTAMPTZ  NOT NULL DEFAULT now()
-actualizado_en  TIMESTAMPTZ  NOT NULL DEFAULT now()
--- índice: UNIQUE (lower(correo))
+activo          BOOLEAN      NOT NULL DEFAULT TRUE    -- sugerido, además del plan
+actualizado_en  TIMESTAMPTZ  NOT NULL DEFAULT now()   -- sugerido, además del plan
+-- índice: UNIQUE (lower(email))  (el plan pide email UNIQUE; sobre lower() es lo sugerido)
 
--- direcciones_cliente
+-- direcciones  (plan 5.5: id_direccion, id_cliente, direccion, barrio, referencia, lat, lng, principal)
 id_direccion    SERIAL PRIMARY KEY
 id_cliente      INTEGER NOT NULL REFERENCES clientes(id_cliente) ON DELETE CASCADE
 direccion       VARCHAR(200) NOT NULL
 barrio          VARCHAR(80)  NOT NULL
 referencia      VARCHAR(200) NULL
-lat             NUMERIC(9,6) NULL              -- CHECK entre -90 y 90; lat y lng los dos o ninguno
-lng             NUMERIC(9,6) NULL              -- CHECK entre -180 y 180
+lat             NUMERIC(9,6) NULL              -- sugerido: CHECK entre -90 y 90; lat y lng los dos o ninguno
+lng             NUMERIC(9,6) NULL              -- sugerido: CHECK entre -180 y 180
 principal       BOOLEAN NOT NULL DEFAULT FALSE
-creado_en       TIMESTAMPTZ NOT NULL DEFAULT now()
--- índices: (id_cliente); UNIQUE (id_cliente) WHERE principal  -> una sola principal
+creado_en       TIMESTAMPTZ NOT NULL DEFAULT now()   -- sugerido, además del plan
+-- índices sugeridos: (id_cliente); UNIQUE (id_cliente) WHERE principal  -> una sola principal
 
--- zonas_entrega
+-- zonas_envio  (plan 5.5: id_zona, nombre, barrios TEXT[], costo_envio, tiempo_estimado_min, activa;
+--               primera versión por barrios, sin mapa)
 id_zona              SERIAL PRIMARY KEY
 nombre               VARCHAR(80) NOT NULL UNIQUE
 barrios              TEXT[] NOT NULL DEFAULT '{}'
 costo_envio          NUMERIC(10,2) NOT NULL CHECK (costo_envio >= 0)
 tiempo_estimado_min  INTEGER NOT NULL CHECK (tiempo_estimado_min > 0)
 activa               BOOLEAN NOT NULL DEFAULT TRUE
--- índice: (activa); GIN (barrios) para cotizar por barrio
+-- índices sugeridos: (activa); GIN (barrios) para cotizar por barrio
 
 -- refresh_tokens_cliente  (NUEVA: la P-23 no la tiene)
 id               BIGSERIAL PRIMARY KEY
