@@ -103,10 +103,11 @@ database/scripts/
 ├── 31_transicion_listo_cancelado.sql   # transición listo → cancelado (lo cocinado es merma); cancelar_pedido() lee transiciones_validas
 ├── 32_fix_intento_pago_fallido_ambiguo.sql # borra la sobrecarga de 4 parámetros de registrar_intento_pago_fallido (hacía ambigua toda llamada de 4)
 ├── 33_estado_pago_al_cambiar_total.sql # estado_pago se recalcula también cuando cambia el total (al quitar un plato quedaba «parcial» con saldo 0)
-└── 34_contacto_espacios_unicode.sql  # correo y redes rechazan también los espacios Unicode (U+00A0…), igual que `\s` del backend; no depende del locale
+├── 34_contacto_espacios_unicode.sql  # correo y redes rechazan también los espacios Unicode (U+00A0…), igual que `\s` del backend; no depende del locale
+└── 35_transacciones_voucher.sql      # transacciones.voucher VARCHAR(40), opcional, solo con tarjeta débito/crédito, ^[A-Z0-9-]{1,40}$
 ```
 
-> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (35).
+> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (36).
 
 > **Auditoría de transacciones antes del script 30:** las filas de `auditoria_cambios` con
 > `tabla_afectada = 'transacciones'` escritas antes del 30 tienen el **id del pedido** en
@@ -215,7 +216,15 @@ psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_30_auditoria_registro
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_31_listo_cancelado.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_33_estado_pago_total.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_34_contacto_espacios_unicode.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_35_voucher.sql
 ```
+
+Voucher de tarjeta (script 35): `test_35_voucher.sql` crea su propia mesa, plato y pedido y
+comprueba que `transacciones.voucher` es `VARCHAR(40)` opcional, que se guarda con tarjeta débito o
+crédito (también se puede cobrar sin él), que efectivo, transferencia y online lo rechazan, que el
+formato `^[A-Z0-9-]{1,40}$` rechaza minúsculas, espacios, vacío, 41 caracteres, punto y barra, que
+no se puede pasar a efectivo una transacción con voucher y que la auditoría lo guarda. Usa `\ir`:
+correrla desde `database/tests`. Corre en `BEGIN … ROLLBACK`.
 
 Espacios Unicode en el contacto (script 34): `test_34_contacto_espacios_unicode.sql` exige que
 `correo` y `redes` rechacen U+00A0, U+2003, U+3000 y U+FEFF (sin el 34, `postgres:16-alpine` los
