@@ -468,6 +468,73 @@ Con `DOMINIO=staging.smartdining.com.co` hasta el cambio a producción. Ese
 día se cambian las tres URL al `DOMINIO` de producción (§6.5). Mide desde fuera de
 GitHub y del VPS. Además, cada despliegue comprueba lo mismo al terminar.
 
+### Límites de peticiones
+
+Un local, o la feria, sale a Internet con **una sola IP pública** (el Wi-Fi). Todo
+límite «por IP» es el cupo de **todos los celulares y del personal a la vez**. Los
+valores de abajo están pensados para el peor caso de la feria: 6 mesas con QR, hasta 8
+personas por mesa y el personal en el mismo Wi-Fi.
+
+En nginx, `N/min + ráfaga R` significa que pasan `R + 1` peticiones seguidas y luego
+una cada `60/N` segundos; las que sobran reciben `429`.
+
+| Límite | Dónde actúa | Clave | Valor | Variable en `infra/.env` | Se aplica con |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Sesión por QR | backend, `POST /api/mesas/qr/:token/sesion` | IP | 150/min (cuenta todos los intentos) | `RATE_LIMIT_QR_MAX`, `RATE_LIMIT_QR_VENTANA_MS` | `dc up -d backend` |
+| Login del personal | backend, `POST /api/auth/login` | IP + email | 5 intentos **fallidos**/min | `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS` | `dc up -d backend` |
+| Global de la API | backend, toda `/api` menos `health` e `internal` | IP | 4000/min | `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS` | `dc up -d backend` |
+| Login, nginx | `api.`, `/api/auth/login` | IP | 30/min + ráfaga de 20 | `NGINX_LIMITE_LOGIN`, `NGINX_RAFAGA_LOGIN` | validar y `dc up -d nginx` |
+| Pagos, nginx | `rt.`, `/pagos/` (la intención de pago) | IP | 120/min + ráfaga de 60 | `NGINX_LIMITE_PAGOS`, `NGINX_RAFAGA_PAGOS` | validar y `dc up -d nginx` |
+| Webhook, nginx | `rt.`, `/pagos/webhook` (zona propia: las IPs de Wompi) | IP | 300/min + ráfaga de 100 | `NGINX_LIMITE_WEBHOOK`, `NGINX_RAFAGA_WEBHOOK` | validar y `dc up -d nginx` |
+| Conexiones por mesa | socket-server, al conectar | mesa | capacidad de la mesa + 4 | `mesas.capacidad` en la base | `infra/scripts/mesas-feria.sh` |
+| Intención de pago | socket-server | mesa + comensal | 5/min | no se cambia sin código (`socket-server/src/pagos.js`) | — |
+| Eventos de socket | socket-server | socket | 20/s | no se cambia sin código (`socket-server/src/limites.js`) | — |
+| Por mesa | socket-server | mesa | 20 suscripciones push, 20 sin celular, una llamada al mesero cada 60 s | no se cambia sin código | — |
+
+Los valores por defecto están en `docker-compose.prod.yml` (`${VAR:-valor}`), así que
+funcionan sin tocar los `.env`. `infra/.env` no está en git: lo que pongas ahí
+**sobrevive a los despliegues**.
+
+Las IPs son las reales: el backend confía en el `X-Forwarded-For` y el socket-server en
+el `X-Real-IP`, en los dos casos solo si vienen de nginx (`TRUST_PROXY`). Una cabecera
+falsa que mande un cliente no cambia su contador.
+
+**Ajustar el día de la feria, sin desplegar código** (en el VPS, dentro del clon; en
+staging, `ENV_FILE=infra/.env.staging` y `--env-file infra/.env.staging`):
+
+1. Agrega o cambia en `infra/.env` solo las variables que necesites, por ejemplo
+   `RATE_LIMIT_QR_MAX=300` o `NGINX_LIMITE_PAGOS=240r/m`. El formato de nginx es
+   `<n>r/m` o `<n>r/s`; las ráfagas son un entero.
+2. **Backend:** `dc up -d backend`. Recrea el contenedor con el entorno nuevo en unos
+   segundos; los contadores empiezan de cero.
+3. **nginx:** valida primero; un valor mal escrito deja a nginx sin arrancar y **caen
+   todos los sitios**:
+
+   ```bash
+   sh infra/scripts/validar-nginx.sh   # nginx -t con los valores nuevos, sin reiniciar nada
+   dc up -d nginx                      # solo si dijo OK; corta las conexiones 1-2 s
+   ```
+
+4. **Mesas de la demo:** las conexiones por mesa dependen de la capacidad guardada en la
+   base. El script crea las que falten y sube la capacidad; nunca la baja ni toca el
+   estado. El socket-server la toma en máximo 5 minutos.
+
+   ```bash
+   sh infra/scripts/mesas-feria.sh ver       # qué cambiaría
+   sh infra/scripts/mesas-feria.sh aplicar   # mesas 1-6 con capacidad 8
+   FERIA_MESAS=8 FERIA_CAPACIDAD=10 sh infra/scripts/mesas-feria.sh aplicar   # otro montaje
+   ```
+
+5. Comprueba que nadie esté recibiendo 429:
+
+   ```bash
+   dc logs --since 10m nginx | grep -c '" 429 '
+   ```
+
+Para volver a los valores por defecto, borra esas líneas de `infra/.env` y repite los
+pasos 2 y 3. Las capacidades de las mesas no se revierten solas: cámbialas desde el panel
+si hace falta.
+
 ### Cambios de esquema
 
 Con el volumen vacío, `database/docker-init.sh` corre `database/migrar.sh`, que
