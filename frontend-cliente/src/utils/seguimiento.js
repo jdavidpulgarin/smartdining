@@ -242,7 +242,7 @@ export function aplicarCambioEstado(pedidos, evento) {
   }
 
   const idBuscado = String(evento.id_pedido);
-  const nuevoEstado = String(evento.estado || '').toLowerCase();
+  const nuevoEstado = String(evento.estado || '').trim().toLowerCase();
 
   return pedidos.map((p) => {
     if (String(p.id_pedido) === idBuscado) {
@@ -575,7 +575,9 @@ export function aplicarItemCancelado(pedidos, evento) {
     const estadoNuevo = estadoEvento
       ? String(estadoEvento).trim().toLowerCase()
       : detallesActualizados.length > 0 &&
-          detallesActualizados.every((d) => d.estado_item === 'cancelado')
+          detallesActualizados.every(
+            (d) => String(d.estado_item || '').trim().toLowerCase() === 'cancelado'
+          )
         ? 'cancelado'
         : pedido.estado;
 
@@ -609,6 +611,28 @@ export function aplicarItemCancelado(pedidos, evento) {
       ...(evento.emitidoEn ? { actualizado_en: evento.emitidoEn } : {}),
     };
   });
+}
+
+/**
+ * Incorpora un pedido crudo en la lista solo si no existe aún ese `id_pedido`,
+ * preservando la misma referencia si ya está presente (J-07, J-14).
+ *
+ * @param {Array<object>} pedidos
+ * @param {object|null|undefined} pedidoCrudo
+ * @param {string|null} [miAlias]
+ * @returns {Array<object>}
+ */
+export function incorporarPedido(pedidos, pedidoCrudo, miAlias = null) {
+  const lista = Array.isArray(pedidos) ? pedidos : [];
+  const normalizado = normalizarPedido(pedidoCrudo, miAlias);
+  if (!normalizado || normalizado.id_pedido == null) return lista;
+
+  const idBuscado = String(normalizado.id_pedido);
+  if (lista.some((p) => String(p.id_pedido) === idBuscado)) {
+    return lista;
+  }
+
+  return [normalizado, ...lista];
 }
 
 /**
@@ -720,6 +744,7 @@ export default {
   normalizarPedido,
   aplicarCambioEstado,
   aplicarItemCancelado,
+  incorporarPedido,
   reemplazarPedido,
   puedeQuitar,
   accionErrorQuitar,

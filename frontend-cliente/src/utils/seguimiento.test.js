@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   aplicarCambioEstado,
   aplicarItemCancelado,
+  incorporarPedido,
   reemplazarPedido,
   puedeQuitar,
   accionErrorQuitar,
@@ -671,5 +672,129 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
     expect(mensajeEstadoTarjeta(trasOrderStatus[0], 5)).toBe(
       'Quitaste todos los platos de este pedido.'
     );
+  });
+});
+
+describe('incorporarPedido y conteo en vivo de Mis pedidos (J-14)', () => {
+  it('incorpora un pedido nuevo sin sobrescribir uno ya actualizado', () => {
+    const listaInicial = incorporarPedido(
+      [],
+      {
+        id_pedido: 10,
+        estado: 'recibido',
+        items: [{ id_detalle: 100, comensal: 'Ana', plato_nombre: 'Pizza', estado_item: 'pendiente' }],
+      },
+      'Ana'
+    );
+    expect(listaInicial).toHaveLength(1);
+    expect(listaInicial[0].estado).toBe('recibido');
+
+    const listaCancelada = reemplazarPedido(
+      listaInicial,
+      {
+        id_pedido: 10,
+        estado: 'cancelado',
+        total: 0,
+        items: [{ id_detalle: 100, comensal: 'Ana', plato_nombre: 'Pizza', estado_item: 'cancelado' }],
+      },
+      'Ana'
+    );
+
+    // Un snapshot viejo (por ejemplo de location.state) no pisa el estado cancelado
+    const trasSnapshotViejo = incorporarPedido(
+      listaCancelada,
+      {
+        id_pedido: 10,
+        estado: 'recibido',
+        items: [{ id_detalle: 100, comensal: 'Ana', plato_nombre: 'Pizza', estado_item: 'pendiente' }],
+      },
+      'Ana'
+    );
+    expect(trasSnapshotViejo).toBe(listaCancelada);
+    expect(trasSnapshotViejo[0].estado).toBe('cancelado');
+  });
+
+  it('baja el contador de Mis pedidos a 0 al reemplazar por respuesta 200 cancelada', () => {
+    const lista = [
+      normalizarPedido(
+        {
+          id_pedido: 20,
+          estado: 'recibido',
+          total: 25000,
+          items: [
+            { id_detalle: 200, comensal: 'Ana', plato_nombre: 'Pasta', estado_item: 'pendiente', subtotal: 25000 },
+          ],
+        },
+        'Ana'
+      ),
+    ];
+
+    expect(resumenPedidosActivos(separarPedidos(lista, 'Ana').misPedidos).cantidad).toBe(1);
+
+    const tras200 = reemplazarPedido(
+      lista,
+      {
+        id_pedido: 20,
+        estado: 'cancelado',
+        total: 0,
+        items: [
+          { id_detalle: 200, comensal: 'Ana', plato_nombre: 'Pasta', estado_item: 'cancelado', subtotal: 25000 },
+        ],
+      },
+      'Ana'
+    );
+
+    const resumen = resumenPedidosActivos(separarPedidos(tras200, 'Ana').misPedidos);
+    expect(resumen.cantidad).toBe(0);
+    expect(resumen.estadoPrincipal).toBe('cancelado');
+  });
+
+  it('baja el contador de Mis pedidos al recibir item:cancelado o order:status cancelado', () => {
+    const lista = [
+      normalizarPedido(
+        {
+          id_pedido: 30,
+          estado: 'recibido',
+          total: 18000,
+          items: [
+            { id_detalle: 300, comensal: 'Ana', plato_nombre: 'Sopa', estado_item: 'pendiente', subtotal: 18000 },
+          ],
+        },
+        'Ana'
+      ),
+      normalizarPedido(
+        {
+          id_pedido: 31,
+          estado: 'recibido',
+          total: 20000,
+          items: [
+            { id_detalle: 301, comensal: 'Ana', plato_nombre: 'Pollo', estado_item: 'pendiente', subtotal: 20000 },
+          ],
+        },
+        'Ana'
+      ),
+    ];
+
+    expect(resumenPedidosActivos(separarPedidos(lista, 'Ana').misPedidos).cantidad).toBe(2);
+
+    const trasItemCancelado = aplicarItemCancelado(lista, {
+      id_pedido: 30,
+      id_detalle: 300,
+      total: 0,
+      estado_pedido: 'cancelado',
+    });
+    expect(
+      resumenPedidosActivos(separarPedidos(trasItemCancelado, 'Ana').misPedidos).cantidad
+    ).toBe(1);
+
+    const trasOrderStatus = aplicarCambioEstado(trasItemCancelado, {
+      id_pedido: 31,
+      estado: 'cancelado',
+    });
+    const resumenFinal = resumenPedidosActivos(
+      separarPedidos(trasOrderStatus, 'Ana').misPedidos
+    );
+    expect(resumenFinal.cantidad).toBe(0);
+    expect(resumenFinal.estadoPrincipal).toBe('cancelado');
   });
 });

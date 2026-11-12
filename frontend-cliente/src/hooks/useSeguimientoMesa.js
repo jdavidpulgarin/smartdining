@@ -1,305 +1,33 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import useMesaSession from './useMesaSession';
-import { useMesaSocketContext } from '../context/MesaSocketContext';
-import { listarPedidosMesa, cancelarItem } from '../services/pedidoService';
-import {
-  normalizarPedido,
-  aplicarCambioEstado,
-  aplicarItemCancelado,
-  reemplazarPedido,
-  separarPedidos,
-  pedidoPrincipal,
-} from '../utils/seguimiento';
-
-const CLAVE_ULTIMO_PEDIDO = 'smartdining_ultimo_pedido';
-const MAX_EVENT_IDS = 200;
+import { useEffect, useRef } from 'react';
+import { useSeguimientoContext } from '../context/SeguimientoContext';
 
 /**
- * Hook para la gestión y seguimiento en tiempo real de los pedidos de la mesa (J-07).
+ * Hook para consumir el estado compartido de seguimiento de pedidos de la mesa (J-07, J-14).
  *
- * Características:
- * - Carga inicial de pedidos desde la API / pedidos simulados.
- * - Deduplicación de eventos del socket por eventId (últimos 200).
- * - Escucha order:status y order:created en tiempo real.
- * - Re-consulta completa de pedidos al reconectarse el socket.
- * - Gestión de selección entre múltiples pedidos propios.
- * - Soporte para llamar al mesero con cooldown.
+ * Lee del `SeguimientoContext` global para que `Header` y `Seguimiento` compartan
+ * exactamente la misma lista reactiva de pedidos. Si recibe `pedidoInicial`
+ * (por ejemplo desde `location.state.pedido`), lo incorpora al estado compartido
+ * sin sobrescribir actualizaciones más recientes.
  *
  * @param {object|null} [pedidoInicial] - Pedido que viene de navegación (location.state)
  */
 export function useSeguimientoMesa(pedidoInicial = null) {
-  const { mesa, idMesa, comensal } = useMesaSession();
-  const { on: socketOn, estado: estadoSocket, enviar } = useMesaSocketContext();
+  const contexto = useSeguimientoContext();
+  if (!contexto) {
+    throw new Error('useSeguimientoMesa debe usarse dentro de SeguimientoProvider');
+  }
 
-  const [pedidos, setPedidos] = useState(() => {
-    const raw =
-      pedidoInicial ||
-      (() => {
-        try {
-          const guardado = sessionStorage.getItem(CLAVE_ULTIMO_PEDIDO);
-          return guardado ? JSON.parse(guardado) : null;
-        } catch {
-          return null;
-        }
-      })();
-    return raw ? [normalizarPedido(raw, comensal)].filter(Boolean) : [];
-  });
+  const { registrarPedido } = contexto;
+  const ultimoInicialRef = useRef(null);
 
-  const [idSeleccionado, setIdSeleccionado] = useState(null);
-  const [cargando, setCargando] = useState(false);
-  const [error, setError] = useState(null);
-  const [avisoMesero, setAvisoMesero] = useState(null);
-  const [cooldownMesero, setCooldownMesero] = useState(0);
-
-  // Buffer circular para deduplicar hasta 200 eventIds
-  const eventIdsVistosRef = useRef(new Set());
-  const colaIdsRef = useRef([]);
-
-  const esDuplicado = useCallback((eventId) => {
-    if (!eventId) return false;
-    if (eventIdsVistosRef.current.has(eventId)) return true;
-    eventIdsVistosRef.current.add(eventId);
-    colaIdsRef.current.push(eventId);
-    if (colaIdsRef.current.length > MAX_EVENT_IDS) {
-      const viejo = colaIdsRef.current.shift();
-      eventIdsVistosRef.current.delete(viejo);
-    }
-    return false;
-  }, []);
-
-  // Carga inicial y recarga
-  const recargar = useCallback(async () => {
-    try {
-      setCargando(true);
-      setError(null);
-      const lista = await listarPedidosMesa(idMesa);
-      const norm = (Array.isArray(lista) ? lista : [])
-        .map((p) => normalizarPedido(p, comensal))
-        .filter(Boolean);
-
-      setPedidos((prev) => {
-        const combinados = [...norm];
-        // Conservar pedidos locales recientes que aún no estén en el servidor
-        for (const p of prev) {
-          if (
-            p.id_pedido &&
-            !combinados.some(
-              (c) => String(c.id_pedido) === String(p.id_pedido)
-            )
-          ) {
-            combinados.unshift(p);
-          }
-        }
-        return combinados;
-      });
-    } catch (err) {
-      setError(err);
-    } finally {
-      setCargando(false);
-    }
-  }, [idMesa, comensal]);
-
-  // Montaje y carga inicial
   useEffect(() => {
-    let activo = true;
-    (async () => {
-      try {
-        const lista = await listarPedidosMesa(idMesa);
-        if (!activo) return;
-        const norm = (Array.isArray(lista) ? lista : [])
-          .map((p) => normalizarPedido(p, comensal))
-          .filter(Boolean);
-
-        setPedidos((prev) => {
-          const combinados = [...norm];
-          for (const p of prev) {
-            if (
-              p.id_pedido &&
-              !combinados.some(
-                (c) => String(c.id_pedido) === String(p.id_pedido)
-              )
-            ) {
-              combinados.unshift(p);
-            }
-          }
-          return combinados;
-        });
-      } catch (err) {
-        if (activo) setError(err);
-      }
-    })();
-
-    return () => {
-      activo = false;
-    };
-  }, [idMesa, comensal]);
-
-  // Re-consultar al reconectar el socket
-  const estadoAnteriorRef = useRef(estadoSocket);
-  useEffect(() => {
-    if (
-      estadoAnteriorRef.current !== 'conectado' &&
-      estadoSocket === 'conectado'
-    ) {
-      recargar();
+    if (pedidoInicial && pedidoInicial !== ultimoInicialRef.current) {
+      ultimoInicialRef.current = pedidoInicial;
+      registrarPedido(pedidoInicial, { seleccionar: true });
     }
-    estadoAnteriorRef.current = estadoSocket;
-  }, [estadoSocket, recargar]);
+  }, [pedidoInicial, registrarPedido]);
 
-  // Escuchar eventos del socket: order:status, order:created e item:cancelado
-  useEffect(() => {
-    if (!socketOn) return undefined;
-
-    const bajaStatus = socketOn('order:status', (data) => {
-      if (!data || esDuplicado(data.eventId)) return;
-      setPedidos((prev) => aplicarCambioEstado(prev, data));
-    });
-
-    const bajaCreated = socketOn('order:created', (data) => {
-      if (!data || esDuplicado(data.eventId)) return;
-      const nuevo = normalizarPedido(data, comensal);
-      if (!nuevo) return;
-
-      setPedidos((prev) => {
-        if (
-          prev.some(
-            (p) => String(p.id_pedido) === String(nuevo.id_pedido)
-          )
-        ) {
-          return prev;
-        }
-        return [nuevo, ...prev];
-      });
-    });
-
-    const bajaItemCancelado = socketOn('item:cancelado', (data) => {
-      if (!data || esDuplicado(data.eventId)) return;
-      setPedidos((prev) => aplicarItemCancelado(prev, data));
-    });
-
-    return () => {
-      bajaStatus?.();
-      bajaCreated?.();
-      bajaItemCancelado?.();
-    };
-  }, [socketOn, esDuplicado, comensal]);
-
-  // Temporizador para el cooldown de llamar al mesero
-  useEffect(() => {
-    if (cooldownMesero <= 0) return undefined;
-    const timer = setInterval(() => {
-      setCooldownMesero((c) => Math.max(0, c - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [cooldownMesero]);
-
-  // Función para llamar al mesero (J-07)
-  const llamarMesero = useCallback(async () => {
-    if (cooldownMesero > 0) return;
-    setCooldownMesero(60);
-    try {
-      if (enviar) {
-        const ack = await enviar('mesa:llamar_mesero', {});
-        if (ack?.ok) {
-          setAvisoMesero({
-            mensaje: 'Ya avisamos al mesero. Pronto se acercará a la mesa.',
-            tipo: 'exito',
-          });
-        } else if (ack?.codigo === 'RATE_LIMIT') {
-          setAvisoMesero({
-            mensaje:
-              ack.mensaje || 'La mesa ya llamó al mesero; espera 60 s',
-            tipo: 'limite',
-          });
-        } else {
-          setAvisoMesero({
-            mensaje: 'No pudimos conectar con el mesero. Intenta en un momento.',
-            tipo: 'error',
-          });
-        }
-      } else {
-        setAvisoMesero({
-          mensaje: 'Ya avisamos al mesero. Pronto se acercará a la mesa.',
-          tipo: 'exito',
-        });
-      }
-    } catch (err) {
-      if (err?.codigo === 'RATE_LIMIT') {
-        setAvisoMesero({
-          mensaje:
-            err.message || 'La mesa ya llamó al mesero; espera 60 s',
-          tipo: 'limite',
-        });
-      } else {
-        setAvisoMesero({
-          mensaje: 'No pudimos conectar con el mesero. Intenta en un momento.',
-          tipo: 'error',
-        });
-      }
-    }
-    setTimeout(() => {
-      setAvisoMesero(null);
-    }, 4500);
-  }, [cooldownMesero, enviar]);
-
-  const { misPedidos, otrosPedidos } = useMemo(
-    () => separarPedidos(pedidos, comensal),
-    [pedidos, comensal]
-  );
-
-  const pedidoActivo = useMemo(() => {
-    if (misPedidos.length > 0) {
-      return pedidoPrincipal(misPedidos, idSeleccionado);
-    }
-    return otrosPedidos[0] || null;
-  }, [misPedidos, otrosPedidos, idSeleccionado]);
-
-  // Persistir en sessionStorage el pedido activo para recargas
-  useEffect(() => {
-    if (pedidoActivo) {
-      try {
-        sessionStorage.setItem(
-          CLAVE_ULTIMO_PEDIDO,
-          JSON.stringify(pedidoActivo)
-        );
-      } catch {
-        // Ignorar
-      }
-    }
-  }, [pedidoActivo]);
-
-  // Quitar una línea propia de un pedido mientras siga en 'recibido' (J-14)
-  const quitarPlato = useCallback(
-    async (idPedido, idDetalle) => {
-      const respuesta = await cancelarItem(idPedido, idDetalle);
-      const pedidoActualizado = respuesta?.pedido || respuesta;
-      if (pedidoActualizado) {
-        setPedidos((prev) => reemplazarPedido(prev, pedidoActualizado, comensal));
-        if (pedidoActualizado.id_pedido != null) {
-          setIdSeleccionado(pedidoActualizado.id_pedido);
-        }
-      }
-      return pedidoActualizado;
-    },
-    [comensal]
-  );
-
-  return {
-    pedidos,
-    misPedidos,
-    otrosPedidos,
-    pedidoActivo,
-    setPedidoActivo: setIdSeleccionado,
-    cargando,
-    error,
-    avisoMesero,
-    cooldownMesero,
-    llamarMesero,
-    recargar,
-    quitarPlato,
-    mesa,
-    comensal,
-  };
+  return contexto;
 }
 
 export default useSeguimientoMesa;
