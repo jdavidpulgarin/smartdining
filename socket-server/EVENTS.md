@@ -611,7 +611,22 @@ Notas para el frontend:
 ### 5.1. `mesa:liberada`
 
 Lo emite el servidor cuando el backend llama a `POST /internal/mesa-liberada` **después** de
-confirmar en la base que la mesa quedó libre (pago completo o liberación manual).
+confirmar en la base que la mesa quedó libre.
+
+**Cuándo se libera una mesa (regla del backend, la fuente de verdad):**
+
+- Un pedido se cierra (`pagado`) solo cuando está `entregado` **y** su saldo es 0, en
+  cualquiera de los dos órdenes: si se paga antes de que salga la comida, el pago queda
+  registrado y el pedido se cierra cuando el mesero lo marca `entregado`.
+- La mesa se libera **sola** cuando **todos** los pedidos de la visita actual quedan en
+  `pagado` o `cancelado` (`liberarSiNoQuedanPedidosAbiertos`, en la misma transacción que
+  cerró el último). Es `motivo: "pagada"` si lo cerró un pago o una entrega con la cuenta
+  ya pagada, y `"liberada"` si lo cerró una cancelación.
+- **Saldo 0 no basta:** si la mesa pagó todo pero algún pedido sigue en `recibido`,
+  `en_preparacion` o `listo`, la mesa sigue ocupada y no llega `mesa:liberada` hasta que ese
+  pedido se entregue.
+- A mano (`motivo: "liberada"`) solo se puede si la visita no tiene pedidos abiertos. Es
+  para grupos que se van sin pedir; con pedidos abiertos el backend responde `409`.
 
 ```json
 { "id_mesa": 5, "motivo": "pagada", "emitidoEn": "2026-10-11T20:15:00.000Z" }
@@ -693,8 +708,11 @@ En los dos casos:
 - `total`: personas en la mesa = alias distintos (cada JWT de comensal trae el suyo).
 - `pagaron`: alias que ya pagaron algo **en esta sesión de mesa**, en cualquier modo, estén
   sentados o no; ordenados. Se borra al liberarse la mesa. Un cobro de caja sin `comensal`
-  no aparece (no se sabe de quién es). Un pago que deja el saldo en 0 tampoco (la mesa se
-  libera).
+  no aparece (no se sabe de quién es). Un pago que deja el saldo en 0 tampoco: el
+  socket-server lo toma como el último pago. Ojo: la mesa solo se libera cuando además todos
+  los pedidos están entregados ([§5.1](#51-mesaliberada)); mientras tanto, quien pagó ese
+  último saldo no figura en `pagaron`. Con saldo 0 «igual» ya responde `409 SIN_SALDO`, así
+  que el reparto no cambia.
 - El personal y la pantalla no cuentan.
 - No lleva `eventId`: es un estado completo; quédate siempre con el último.
 - La PWA lo usa para mostrar cuánto es «igual» antes de pedir la intención
@@ -1172,10 +1190,10 @@ servidor con la cuenta del backend.
 
 | Error | Cuándo |
 |---|---|
-| `400 PAYLOAD_INVALIDO` | `modo`, `eventId` o `comensal` inválidos |
+| `400 PAYLOAD_INVALIDO` | `modo` o `eventId` inválidos |
 | `401 NO_AUTORIZADO` | Sin JWT, JWT inválido o la mesa ya se liberó |
 | `401 TOKEN_INVALIDO` | JWT de comensal antiguo, sin alias: volver a escanear el QR |
-| `403 NO_AUTORIZADO` | No es comensal, o `comensal` distinto del alias del JWT |
+| `403 NO_AUTORIZADO` | No es comensal, o `comensal` distinto del alias del JWT. Cualquier valor que no sea ese alias, aunque esté mal formado (`""`, `123`, `null`), es `403` y nunca `400` |
 | `409 SIN_SALDO` | Saldo 0 (o `propio` sin consumos de ese alias) |
 | `429 RATE_LIMIT` | Más de 5 intenciones por minuto del mismo comensal |
 | `502/503 ERROR_INTERNO` | El backend no respondió o respondió mal |
@@ -1339,8 +1357,9 @@ Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún fron
 ```
 
 > **Cambio de contrato:** ya no lleva `id_pedido` (el pago es de la mesa, no de un pedido) y
-> agrega `comensal` y `saldo_restante`. `monto` sigue en pesos. Cuando `saldo_restante` llega a
-> 0, el backend libera la mesa y llega `mesa:liberada` con `motivo: "pagada"`.
+> agrega `comensal` y `saldo_restante`. `monto` sigue en pesos. `saldo_restante` en 0 **no**
+> significa mesa libre: el backend la libera (y llega `mesa:liberada` con `motivo: "pagada"`)
+> solo cuando además todos los pedidos de la visita están entregados ([§5.1](#51-mesaliberada)).
 
 ### 8.4. Contrato de registro que necesita del backend
 
@@ -1371,8 +1390,11 @@ x-internal-key: <INTERNAL_API_KEY>
   de la mesa (los más antiguos primero), con la misma `referencia_externa`, en **una
   transacción SQL**. Los triggers (`tr_validar_transaccion_financiera`) siguen siendo la
   autoridad.
-- Si con este pago el saldo llega a 0: liberar la mesa en la misma transacción y, **después
-  del commit**, llamar a `/internal/mesa-liberada` con `{ "id_mesa": 5, "motivo": "pagada" }`.
+- Si con este pago se cierra el último pedido abierto (todos `pagado` o `cancelado`, y solo
+  pasa a `pagado` uno ya `entregado`, [§5.1](#51-mesaliberada)): liberar la mesa en la misma
+  transacción, responder `mesa_liberada: true` y, **después del commit**, llamar a
+  `/internal/mesa-liberada` con `{ "id_mesa": 5, "motivo": "pagada" }`. Con saldo 0 y algún
+  pedido sin entregar, `mesa_liberada` es `false` y no se llama.
 - 5xx o sin respuesta en 1,5 s → el socket-server responde 503 a Wompi y reintenta más tarde.
 
 ### 8.5. `pago:alerta` e intentos fallidos
@@ -1515,8 +1537,10 @@ tal como llegó.
 **Abonos parciales:** una llamada **por abono**, cada una con su `eventId` (y su
 `id_transaccion`) y el `saldo_restante_centavos` que queda después de ese abono.
 
-**Si el saldo queda en 0:** llamar **primero** a `/internal/payment-confirmed` y **después**
-a `/internal/mesa-liberada` con `{ "id_mesa": 5, "motivo": "pagada" }`. El orden importa:
+**Si el cobro libera la mesa** (saldo 0 **y** todos los pedidos entregados, [§5.1](#51-mesaliberada)):
+llamar **primero** a `/internal/payment-confirmed` y **después** a `/internal/mesa-liberada` con
+`{ "id_mesa": 5, "motivo": "pagada" }`. Con saldo 0 y algún pedido sin entregar no se llama a
+`mesa-liberada`: eso pasa cuando el mesero lo entrega. El orden importa:
 `mesa-liberada` desconecta a los comensales, y si se llama antes, la mesa nunca ve el
 pago final.
 
