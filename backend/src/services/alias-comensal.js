@@ -338,11 +338,6 @@ async function liberar(idMesa, clave) {
 }
 
 /**
- * Olvida los alias de la mesa (sesión nueva o mesa liberada). Nunca lanza:
- * se llama después del commit y no debe deshacer nada. Si Redis falla, la
- * reserva vence sola con el JWT.
- */
-/**
  * ¿Hay ALGUNA reserva de alias vigente en la mesa? La usa la rotación interna
  * del QR (POST /mesas/:id/token-qr/interno) como señal de que la sesión de
  * mesa ya tiene comensales: todo el que entra por QR reserva su alias, y a
@@ -387,6 +382,11 @@ async function hayReservas(idMesa, { ahora = Date.now } = {}) {
   }
 }
 
+/**
+ * Olvida los alias de la mesa (sesión nueva o mesa liberada). Nunca lanza:
+ * se llama después del commit y no debe deshacer nada. Si Redis falla, la
+ * reserva vence sola con el JWT.
+ */
 async function olvidarMesa(idMesa) {
   memoria.delete(idMesa);
   try {
