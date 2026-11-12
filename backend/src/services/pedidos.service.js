@@ -579,12 +579,13 @@ async function cancelarItem(idPedido, idDetalle, actor) {
     );
     const pedidoCancelado = vivas.rows[0].n === 0;
     if (pedidoCancelado) {
-      // El personal puede llegar con el pedido en 'listo', y transiciones_validas
-      // (script 11) no tiene 'listo' -> 'cancelado': quitar la ÚLTIMA línea ahí
-      // sería un P0001 del trigger. Se pregunta a la tabla (la fuente de verdad)
-      // y, si no se puede, 409 item_no_cancelable; el ROLLBACK deshace también
-      // la línea ya cancelada y su movimiento de stock. Al comensal no le pasa:
-      // él solo llega con el pedido en 'recibido'.
+      // Pasar el pedido a 'cancelado' lo decide transiciones_validas: desde el
+      // script 31 permite recibido, en_preparacion y listo (lo cocinado queda
+      // como merma, por tr_devolver_inventario), y NO entregado ni pagado. Se
+      // pregunta a la tabla (la fuente de verdad) en vez de a una lista aquí: si
+      // no se puede, 409 item_no_cancelable en lugar del P0001 del trigger, y el
+      // ROLLBACK deshace también la línea ya cancelada y su movimiento de stock.
+      // Al comensal no le hace falta: él solo llega con el pedido en 'recibido'.
       if (esPersonal) {
         const t = await client.query(
           `SELECT EXISTS (SELECT 1 FROM transiciones_validas
