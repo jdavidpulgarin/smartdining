@@ -38,6 +38,7 @@ const {
   registrarSala, crearEstadoMesasMemoria, crearPresencia, rutasSala,
 } = require('./sala');
 const { rutasMesaComensal } = require('./mesa-comensal');
+const { rutasItemCancelado } = require('./item-cancelado');
 
 const rutasBase = {
   /**
@@ -69,7 +70,7 @@ function crearServidor(config, deps = {}) {
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
   const ctx = { config, ipCliente: crearIpCliente(config.proxiesConfiables) };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala, ...rutasMesaComensal }, ctx);
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala, ...rutasMesaComensal, ...rutasItemCancelado }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));
