@@ -770,7 +770,7 @@ Content-Type: application/json
 
 ### 5.5. `inventario:alerta`
 
-> **Estable · R-20.2.** Implementado en `src/sala.js` (pruebas: `tests/sala-inventario.test.js`).
+> **Estable · R-20.2.** Implementado en `src/sala.js` (pruebas: `tests/sala-inventario.test.js` y `tests/sala-inventario-errores.test.js`).
 > El backend la llama desde D-17 (`services/inventario-avisos.js` → `notificarInventarioAlerta`)
 > y el panel escucha `inventario:alerta` en la pestaña de insumos (P-22). Los campos son los de la
 > tabla `insumos` (`database/scripts/27_inventario.sql`).
