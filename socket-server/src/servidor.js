@@ -2,7 +2,9 @@ const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
 const { autenticarSocket } = require('./auth');
-const { registrarSalas, salaMesa, SALA_ADMIN } = require('./salas');
+const {
+  registrarSalas, salaMesa, SALA_ADMIN, ROLES_ADMIN,
+} = require('./salas');
 const { ROL_COMENSAL } = require('./auth');
 const { crearRegistroIdempotencia } = require('./idempotencia');
 const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
@@ -36,6 +38,7 @@ const {
   registrarSala, crearEstadoMesasMemoria, crearPresencia, rutasSala,
 } = require('./sala');
 const { rutasMesaComensal } = require('./mesa-comensal');
+const { rutasItemCancelado } = require('./item-cancelado');
 
 const rutasBase = {
   /**
@@ -67,7 +70,7 @@ function crearServidor(config, deps = {}) {
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
   const ctx = { config, ipCliente: crearIpCliente(config.proxiesConfiables) };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala, ...rutasMesaComensal }, ctx);
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala, ...rutasMesaComensal, ...rutasItemCancelado }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));
@@ -208,6 +211,11 @@ function crearServidor(config, deps = {}) {
       // Con el primer comensal en la sala, el QR de la mesa deja de rotar.
       alEntrarComensal: ctx.rotador.fijar,
     });
+    // El personal que entra a room:admin (o recarga el panel) recibe la
+    // presencia de todas las mesas con algo, solo en ESTE socket, 500 ms
+    // después de conectar (respaldo de mesa:presencia:solicitar; EVENTS.md
+    // §5.2). Si Redis falla, la conexión sigue igual.
+    if (ROLES_ADMIN.includes(rol)) ctx.presencia.programarInicial(socket);
     registrarCarrito(socket, ctx);
     registrarPedidos(socket, ctx);
     registrarSuscripcionesSocket(socket, ctx);

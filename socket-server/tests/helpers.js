@@ -21,7 +21,10 @@ const tokenPersonal = (rol, id_usuario = 1) => firmar({ id_usuario, rol });
 
 async function levantar(extraEnv = {}, deps = {}) {
   const config = cargarConfig({ CORS_ORIGINS: ORIGEN, ...ENV_BASE, ...extraEnv });
-  const servidor = crearServidor(config, deps);
+  // La presencia inicial del personal sale a los 0 ms y no a los 500 ms reales:
+  // así no cae, tarde, dentro de la ventana de las pruebas que cuentan avisos
+  // de presencia. tests/presencia-inicial.test.js prueba el retraso real.
+  const servidor = crearServidor(config, { ...deps, presencia: { retrasoInicialMs: 0, ...deps.presencia } });
   await new Promise((r) => servidor.httpServer.listen(0, r));
   const url = `http://localhost:${servidor.httpServer.address().port}`;
   const clientes = [];
