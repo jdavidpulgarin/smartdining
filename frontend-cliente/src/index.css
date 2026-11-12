@@ -47,4 +47,15 @@
     outline: 2px solid #FF5A5F;
     outline-offset: 2px;
   }
+
+  dialog:modal {
+    overscroll-behavior: contain;
+  }
+
+  dialog::backdrop {
+    overflow: hidden;
+    overscroll-behavior: contain;
+    background-color: rgb(0 0 0 / 0.7);
+    backdrop-filter: blur(4px);
+  }
 }

@@ -1,14 +1,19 @@
+import { useEffect, useId, useRef, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import useSeguimientoMesa from '../hooks/useSeguimientoMesa';
 import TarjetaEstado from '../components/seguimiento/TarjetaEstado';
 import LineaTiempo from '../components/seguimiento/LineaTiempo';
 import OtrosPedidos from '../components/seguimiento/OtrosPedidos';
 import TarjetaPermisoPush from '../components/seguimiento/TarjetaPermisoPush';
-import { infoEstado } from '../utils/seguimiento';
+import {
+  accionErrorQuitar,
+  infoEstado,
+  puedeQuitar,
+} from '../utils/seguimiento';
 import { formatearPrecio } from '../utils/formato';
 
 /**
- * Pantalla principal de seguimiento de pedidos en mesa (J-07).
+ * Pantalla principal de seguimiento de pedidos en mesa (J-07, J-14).
  */
 function Seguimiento() {
   const location = useLocation();
@@ -20,8 +25,65 @@ function Seguimiento() {
     avisoMesero,
     cooldownMesero,
     llamarMesero,
+    recargar,
+    quitarPlato,
     mesa,
+    comensal,
   } = useSeguimientoMesa(location.state?.pedido);
+
+  const [itemAConfirmar, setItemAConfirmar] = useState(null);
+  const [quitando, setQuitando] = useState(false);
+  const [errorQuitar, setErrorQuitar] = useState(null);
+  const quitandoRef = useRef(false);
+  const dialogConfirmarRef = useRef(null);
+  const tituloConfirmarId = useId();
+
+  useEffect(() => {
+    const dialog = dialogConfirmarRef.current;
+    if (!dialog) return;
+    if (itemAConfirmar) {
+      if (!dialog.open && typeof dialog.showModal === 'function') {
+        dialog.showModal();
+      }
+    } else if (dialog.open && typeof dialog.close === 'function') {
+      dialog.close();
+    }
+  }, [itemAConfirmar]);
+
+  const abrirConfirmacion = (detalle) => {
+    if (quitandoRef.current) return;
+    setErrorQuitar(null);
+    setItemAConfirmar(detalle);
+  };
+
+  const cerrarConfirmacion = () => {
+    if (quitandoRef.current) return;
+    setItemAConfirmar(null);
+  };
+
+  const confirmarQuitar = async () => {
+    if (quitandoRef.current || !itemAConfirmar || !pedidoActivo) return;
+    quitandoRef.current = true;
+    setQuitando(true);
+    setErrorQuitar(null);
+
+    try {
+      await quitarPlato(pedidoActivo.id_pedido, itemAConfirmar.id_detalle);
+      setItemAConfirmar(null);
+    } catch (err) {
+      setItemAConfirmar(null);
+      const accion = accionErrorQuitar(err);
+      if (accion.refrescar) {
+        await recargar();
+      }
+      if (accion.mensaje) {
+        setErrorQuitar(accion.mensaje);
+      }
+    } finally {
+      quitandoRef.current = false;
+      setQuitando(false);
+    }
+  };
 
   if (!pedidoActivo) {
     return (
@@ -126,7 +188,10 @@ function Seguimiento() {
                 type="button"
                 role="tab"
                 aria-selected={esActivo}
-                onClick={() => setPedidoActivo(p.id_pedido)}
+                onClick={() => {
+                  setErrorQuitar(null);
+                  setPedidoActivo(p.id_pedido);
+                }}
                 className={`min-h-[44px] px-3.5 py-1.5 rounded-xl border font-etiqueta font-bold text-xs tracking-wider uppercase whitespace-nowrap transition-all cursor-pointer flex items-center gap-2 ${
                   esActivo
                     ? 'bg-superficie-2 text-white shadow-sm'
@@ -162,20 +227,69 @@ function Seguimiento() {
           <h2 className="m-0 font-etiqueta font-bold text-[15px] tracking-wider text-texto-suave uppercase">
             TU ORDEN
           </h2>
-          <div className="flex flex-col gap-2">
-            {detalles.map((detalle, idx) => (
-              <div
-                key={detalle.id_detalle ?? idx}
-                className="flex justify-between items-baseline text-[15px] gap-2"
-              >
-                <span className="text-white truncate">
-                  {detalle.cantidad} × {detalle.plato_nombre || detalle.nombre}
-                </span>
-                <span className="text-texto-suave shrink-0 font-medium">
-                  {formatearPrecio(detalle.subtotal)}
-                </span>
-              </div>
-            ))}
+
+          {errorQuitar && (
+            <div
+              role="alert"
+              className="p-3 rounded-xl border border-primario bg-superficie-2 text-primario-texto text-xs font-medium"
+            >
+              {errorQuitar}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2.5">
+            {detalles.map((detalle, idx) => {
+              const nombrePlato = detalle.plato_nombre || detalle.nombre || 'Plato';
+              const esCancelado =
+                String(detalle.estado_item || '').trim().toLowerCase() === 'cancelado';
+              const permiteQuitar = puedeQuitar(detalle, {
+                yo: comensal,
+                estadoPedido: pedidoActivo.estado,
+              });
+
+              return (
+                <div
+                  key={detalle.id_detalle ?? idx}
+                  className="flex items-center justify-between gap-2 text-[15px]"
+                >
+                  <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`truncate ${
+                        esCancelado ? 'line-through text-texto-tenue' : 'text-white'
+                      }`}
+                    >
+                      {detalle.cantidad} × {nombrePlato}
+                    </span>
+                    {esCancelado && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-superficie-2 border border-borde font-etiqueta font-bold text-[11px] uppercase tracking-wider text-texto-suave shrink-0">
+                        Quitado
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span
+                      className={`font-medium ${
+                        esCancelado ? 'line-through text-texto-tenue' : 'text-texto-suave'
+                      }`}
+                    >
+                      {formatearPrecio(detalle.subtotal)}
+                    </span>
+                    {permiteQuitar && (
+                      <button
+                        type="button"
+                        onClick={() => abrirConfirmacion(detalle)}
+                        disabled={quitando}
+                        aria-label={`Quitar ${nombrePlato}`}
+                        className="min-h-[44px] min-w-[44px] px-3 py-1.5 rounded-xl border border-borde bg-superficie-2 hover:border-primario hover:text-white text-primario-texto font-etiqueta font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
           <div className="h-px bg-borde my-1" />
           <div className="flex justify-between items-baseline">
@@ -186,6 +300,63 @@ function Seguimiento() {
           </div>
         </section>
       )}
+
+      {/* Diálogo nativo de confirmación para quitar un plato */}
+      <dialog
+        ref={dialogConfirmarRef}
+        aria-labelledby={tituloConfirmarId}
+        onCancel={(e) => {
+          if (quitandoRef.current) {
+            e.preventDefault();
+            return;
+          }
+          setItemAConfirmar(null);
+        }}
+        onClose={() => {
+          if (!quitandoRef.current) {
+            setItemAConfirmar(null);
+          }
+        }}
+        className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-borde bg-superficie p-5 text-texto shadow-2xl"
+      >
+        {itemAConfirmar && (
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <h2
+                id={tituloConfirmarId}
+                className="m-0 font-etiqueta font-bold text-xl tracking-wide text-white"
+              >
+                ¿Quitar {itemAConfirmar.plato_nombre || itemAConfirmar.nombre || 'este plato'} de tu pedido?
+              </h2>
+              {Number(itemAConfirmar.cantidad) > 1 && (
+                <p className="m-0 text-xs text-texto-suave">
+                  Se quitará la línea completa ({itemAConfirmar.cantidad} unidades) de tu orden.
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row-reverse gap-2.5">
+              <button
+                type="button"
+                onClick={confirmarQuitar}
+                disabled={quitando}
+                className="min-h-[44px] flex-1 px-4 py-2.5 rounded-xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-sm uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {quitando ? 'Quitando...' : 'Sí, quitar'}
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={cerrarConfirmacion}
+                disabled={quitando}
+                className="min-h-[44px] flex-1 px-4 py-2.5 rounded-xl border border-borde bg-superficie-2 hover:bg-superficie text-texto font-etiqueta font-bold text-sm uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+      </dialog>
 
       {/* OTROS PEDIDOS DE LA MESA */}
       <OtrosPedidos pedidos={otrosAMostrar} />

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useMesaSession from './useMesaSession';
 import { useMesaSocketContext } from '../context/MesaSocketContext';
-import { listarPedidosMesa } from '../services/pedidoService';
+import { listarPedidosMesa, cancelarItem } from '../services/pedidoService';
 import {
   normalizarPedido,
   aplicarCambioEstado,
+  reemplazarPedido,
   separarPedidos,
   pedidoPrincipal,
 } from '../utils/seguimiento';
@@ -260,6 +261,22 @@ export function useSeguimientoMesa(pedidoInicial = null) {
     }
   }, [pedidoActivo]);
 
+  // Quitar una línea propia de un pedido mientras siga en 'recibido' (J-14)
+  const quitarPlato = useCallback(
+    async (idPedido, idDetalle) => {
+      const respuesta = await cancelarItem(idPedido, idDetalle);
+      const pedidoActualizado = respuesta?.pedido || respuesta;
+      if (pedidoActualizado) {
+        setPedidos((prev) => reemplazarPedido(prev, pedidoActualizado, comensal));
+        if (pedidoActualizado.id_pedido != null) {
+          setIdSeleccionado(pedidoActualizado.id_pedido);
+        }
+      }
+      return pedidoActualizado;
+    },
+    [comensal]
+  );
+
   return {
     pedidos,
     misPedidos,
@@ -272,6 +289,7 @@ export function useSeguimientoMesa(pedidoInicial = null) {
     cooldownMesero,
     llamarMesero,
     recargar,
+    quitarPlato,
     mesa,
     comensal,
   };
