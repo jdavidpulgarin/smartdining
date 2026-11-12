@@ -41,18 +41,19 @@ Se traducen en un solo lugar (`src/middleware/errores.middleware.js`):
 ```
 recibido        -> en_preparacion | cancelado
 en_preparacion  -> listo | cancelado
-listo           -> entregado
+listo           -> entregado | cancelado
 entregado       -> pagado
 ```
 
 Es la máquina de estados completa: cualquier otro salto responde **409**. `pagado` es
-terminal. Verificado contra la base real de Jarrison, estado por estado:
+terminal. `listo → cancelado` existe desde el **script 31** de Jarrison (el cliente se fue o
+rechazó el plato antes de servirlo: lo cocinado queda como merma). Estado por estado:
 
 | Desde | → `pagado` | → `cancelado` |
 |---|---|---|
 | `recibido` | 409 | **permitido** |
 | `en_preparacion` | 409 | **permitido** |
-| `listo` | 409 | 409 |
+| `listo` | 409 | **permitido** (script 31) |
 | `entregado` | **permitido** | 409 |
 
 ### Regla de cierre: `entregado` **y** pagado, en cualquier orden
@@ -106,12 +107,14 @@ endpoints de pago. Un camino que fuera pedido → mesa se interbloquearía con e
 (`en_preparacion`, `listo`) no tocan la mesa y por eso no la bloquean: hacerlo
 serializaría sin motivo las comandas de una misma mesa.
 
-### Regla de cancelación: solo desde `recibido` o `en_preparacion`
+### Regla de cancelación: desde `recibido`, `en_preparacion` o `listo`
 
-`POST /pedidos/:id/cancelar` solo funciona mientras el pedido no se haya entregado.
-Desde `listo` o `entregado` responde 409: a esa altura la comida ya salió de cocina, así
-que la salida es cobrar, no cancelar. Un pedido `pagado` tampoco se puede cancelar.
-La función `cancelar_pedido()` de Jarrison aplica la misma regla.
+`POST /pedidos/:id/cancelar` solo funciona mientras el pedido no se haya entregado:
+desde `recibido`, `en_preparacion` o `listo` (este último desde el script 31; lo ya
+cocinado queda como **merma**). Desde `entregado` o `pagado` el trigger responde **409**:
+la comida ya está en la mesa, así que la salida es cobrar, no cancelar. La regla la decide
+`transiciones_validas`, y la función `cancelar_pedido()` de Jarrison la lee de esa misma
+tabla (script 31).
 
 ---
 
@@ -135,8 +138,9 @@ Notas del flujo del comensal (definido por Jarrison):
 - En `historial_estados`, `id_usuario` va `null` cuando el cambio lo hizo un comensal.
 
 **Estados de un pedido (flujo estricto):**
-`recibido → en_preparacion → listo → entregado → pagado`. `cancelado` solo se alcanza
-desde `recibido` o `en_preparacion` (ver *Transiciones válidas* arriba).
+`recibido → en_preparacion → listo → entregado → pagado`. `cancelado` se alcanza desde
+`recibido`, `en_preparacion` o `listo` (este último desde el script 31), nunca desde
+`entregado` ni `pagado` (ver *Transiciones válidas* arriba).
 
 ---
 
@@ -2056,7 +2060,7 @@ Notas de lo que quedó demostrado al escribirlas:
 | **GET** | **/pedidos/mesa/cuenta** | **comensal** | **Cuenta de SU mesa por comensal; la mesa sale del JWT** |
 | GET | /pedidos/:id | **admin, cajero, mesero, comensal** | Detalle con sus ítems; un comensal solo ve los de su mesa y de su visita (403 si no). **`cocina` no entra (S-26)** |
 | PATCH | /pedidos/:id/estado | admin, cajero, mesero | Cambia el estado (cualquiera de los 6 válidos) |
-| POST | /pedidos/:id/cancelar | admin, cajero, mesero | Atajo que fija `estado = cancelado`. **Solo desde `recibido` o `en_preparacion`**; desde `listo`/`entregado` responde 409 |
+| POST | /pedidos/:id/cancelar | admin, cajero, mesero | Atajo que fija `estado = cancelado`. **Desde `recibido`, `en_preparacion` o `listo`** (script 31); desde `entregado`/`pagado` responde 409 |
 | **POST** | **/pedidos/:id/items/:id_detalle/cancelar** | **comensal, admin, mesero** | **D-13: quita UNA línea, entera. El comensal (J-14) solo las suyas y antes de que cocina empiece; admin y mesero cualquiera que no se haya servido, con `motivo` obligatorio (devolución o merma). Con cualquier pago completado, 409. No libera la mesa** |
 
 ### POST /pedidos
@@ -2538,12 +2542,13 @@ Si era la **última línea viva**, el pedido pasa a `cancelado` con su fila en
 `historial_estados`: `id_usuario` = el de la sesión, observación = el `motivo` (obligatorio).
 **No libera la mesa.**
 
-> **`listo` → `cancelado` no es una transición válida** (`transiciones_validas`, script 11:
-> solo `recibido` y `en_preparacion` pasan a `cancelado`). Una línea de un pedido en `listo`
-> se puede cancelar mientras queden otras vivas; si es la **última**, se responde **409**
-> `item_no_cancelable` y el `ROLLBACK` deshace también la línea y su movimiento de stock. Se
-> pregunta a la tabla, no a una lista en el backend: si la regla cambia en la base, esto la
-> sigue. Queda para la revisión de Jarrison y Juan.
+> **Pedido en `listo`** (script 31: `transiciones_validas` tiene `listo → cancelado`). Cancelar
+> la **última** línea viva de un pedido en `listo` **cancela el pedido**: lo cocinado queda como
+> **merma** (una sola vez por insumo, sin devolución), el historial lleva el usuario y el motivo,
+> y **la mesa sigue ocupada**. Para pasar el pedido a `cancelado` se pregunta a la tabla, no a
+> una lista en el backend: si un estado no tiene esa transición (`entregado`, `pagado`), la
+> última línea responde **409** `item_no_cancelable` y el `ROLLBACK` deshace también la línea y
+> su movimiento de stock.
 
 **Respuesta y avisos:** la misma `200` que el comensal, y el mismo
 `POST /internal/item-cancelado`, con **`origen: "personal"`** y **sin el motivo**. Su
