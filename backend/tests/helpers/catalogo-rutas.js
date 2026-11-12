@@ -375,12 +375,12 @@ const TABLA = [
     cuerpo: {},
   },
   {
-    // D-13: quita UNA línea. El comensal (J-14) las suyas; el personal de sala
-    // y caja cualquiera. Cocina no.
+    // D-13: quita UNA línea. El comensal (J-14) las suyas; del personal solo
+    // admin y mesero (revisión de Jarrison). Cajero y cocina no.
     metodo: 'POST',
     patron: '/api/pedidos/:id/items/:id_detalle/cancelar',
     url: '/api/pedidos/87/items/3/cancelar',
-    roles: ['comensal', 'admin', 'cajero', 'mesero'],
+    roles: ['comensal', 'admin', 'mesero'],
   },
 
   // --- KDS ------------------------------------------------------------------

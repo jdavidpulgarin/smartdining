@@ -7,7 +7,7 @@ const socketNotifier = require('../src/services/socket.notifier');
 const app = require('../server');
 
 // POST /api/pedidos/:id/items/:id_detalle/cancelar — D-13 por el PERSONAL: la
-// misma ruta del comensal (J-14), con sesión de admin, mesero o cajero. Lo que
+// misma ruta del comensal (J-14), con sesión de admin o mesero. Lo que
 // hace la base (devolución o merma, total, historial) está en
 // tests/integracion/personal-cancela-item-sql.test.js. El camino del comensal
 // sigue en pedidos-quitar-item.test.js.
@@ -78,8 +78,8 @@ const sinCancelar = (e) => {
 
 // --- Quién --------------------------------------------------------------------
 
-test('personal cancela plato: admin, mesero y cajero pueden; sin regla de dueño (otra mesa, línea sin comensal)', async () => {
-  for (const rol of ['admin', 'mesero', 'cajero']) {
+test('personal cancela plato: admin y mesero pueden; sin regla de dueño (otra mesa, línea sin comensal)', async () => {
+  for (const rol of ['admin', 'mesero']) {
     const e = escenario();
     try {
       const res = await cancelar(rol);
@@ -92,16 +92,18 @@ test('personal cancela plato: admin, mesero y cajero pueden; sin regla de dueño
   }
 });
 
-test('personal cancela plato: cocina -> 403 y no toca la base', async () => {
-  const e = escenario();
-  try {
-    const res = await cancelar('cocina');
-    assert.strictEqual(res.status, 403);
-    assert.strictEqual(e.db.buscar('BEGIN'), undefined);
-  } finally {
-    e.restaurar();
-  }
-});
+for (const rol of ['cajero', 'cocina']) {
+  test(`personal cancela plato: ${rol} -> 403 y no toca la base (solo admin y mesero)`, async () => {
+    const e = escenario();
+    try {
+      const res = await cancelar(rol);
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(e.db.buscar('BEGIN'), undefined);
+    } finally {
+      e.restaurar();
+    }
+  });
+}
 
 test('personal cancela plato: fija app.id_usuario con set_config DENTRO de la transacción, antes de bloquear', async () => {
   const e = escenario();
@@ -184,7 +186,7 @@ for (const [motivo, opcionesDb, nota] of [
   test(`personal cancela plato: ${nota} -> 409 ${motivo} y no se toca nada`, async () => {
     const e = escenario(opcionesDb);
     try {
-      const res = await cancelar('cajero');
+      const res = await cancelar('mesero');
       assert.strictEqual(res.status, 409);
       assert.strictEqual(res.body.motivo, motivo);
       assert.ok(res.body.error);
@@ -268,7 +270,7 @@ test('personal cancela la última línea: la observación del historial es SIEMP
 test('personal cancela plato: misma respuesta 200 que el comensal; aviso con origen "personal" y SIN el motivo', async () => {
   const e = escenario({ pedido: pedidoEn('en_preparacion'), vivas: 0 });
   try {
-    const res = await cancelar('cajero', { cuerpo: { motivo: 'Motivo interno que no viaja' } });
+    const res = await cancelar('mesero', { cuerpo: { motivo: 'Motivo interno que no viaja' } });
     assert.strictEqual(res.status, 200);
     assert.deepStrictEqual(Object.keys(res.body), ['pedido']);
     assert.deepStrictEqual(Object.keys(res.body.pedido).sort(), ['codigo_pedido', 'estado', 'id_pedido', 'items', 'total']);

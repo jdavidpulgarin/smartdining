@@ -579,7 +579,7 @@ const MOTIVO_REQUERIDO = 'motivo_requerido';
 /**
  * POST /api/pedidos/:id/items/:id_detalle/cancelar — D-13: quitar UNA línea de
  * un pedido, entera. Dos caminos, y decide el TIPO DE SESIÓN del JWT (el rol ya
- * lo filtró requireRole: comensal, admin, mesero o cajero; cocina no entra):
+ * lo filtró requireRole: comensal, admin o mesero; cajero y cocina no entran):
  *   - comensal (J-14): sin cuerpo; la mesa y el alias salen del JWT, nunca del
  *     cuerpo. Reglas en pedidosService.cancelarItemComensal.
  *   - personal: cuerpo opcional `{ motivo }`; el autor sale del JWT. Reglas en

@@ -88,7 +88,7 @@ test('quitar plato: sin sesión -> 401', async () => {
   }
 });
 
-// Desde D-13 por el personal la ruta también acepta admin, mesero y cajero (sus
+// Desde D-13 por el personal la ruta también acepta admin y mesero (sus
 // pruebas están en pedidos-personal-cancela-item.test.js). Cocina sigue fuera.
 test('quitar plato: cocina no entra en esta ruta -> 403', async () => {
   const e = escenario();

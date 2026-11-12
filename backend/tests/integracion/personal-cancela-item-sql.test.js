@@ -3,7 +3,7 @@ const assert = require('node:assert');
 
 /**
  * D-13 por el PERSONAL: POST /api/pedidos/:id/items/:id_detalle/cancelar con
- * sesión de admin/mesero/cajero, contra PostgreSQL REAL. Lo que se prueba aquí
+ * sesión de admin o mesero, contra PostgreSQL REAL. Lo que se prueba aquí
  * lo decide la base: devolución o MERMA (tr_devolver_inventario), el autor del
  * movimiento (app.id_usuario), el total y la transición del pedido.
  *
