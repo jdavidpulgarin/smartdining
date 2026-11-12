@@ -51,10 +51,17 @@ function Seguimiento() {
     }
   }, [itemAConfirmar]);
 
-  const abrirConfirmacion = (detalle) => {
+  const abrirConfirmacion = (detalle, idPedido) => {
     if (quitandoRef.current) return;
     setErrorQuitar(null);
-    setItemAConfirmar(detalle);
+    setItemAConfirmar(
+      detalle
+        ? {
+            ...detalle,
+            id_pedido: idPedido ?? detalle.id_pedido ?? pedidoActivo?.id_pedido,
+          }
+        : null
+    );
   };
 
   const cerrarConfirmacion = () => {
@@ -63,13 +70,16 @@ function Seguimiento() {
   };
 
   const confirmarQuitar = async () => {
-    if (quitandoRef.current || !itemAConfirmar || !pedidoActivo) return;
+    if (quitandoRef.current || !itemAConfirmar) return;
+    const idPedidoAQuitar = itemAConfirmar.id_pedido ?? pedidoActivo?.id_pedido;
+    if (!idPedidoAQuitar) return;
+
     quitandoRef.current = true;
     setQuitando(true);
     setErrorQuitar(null);
 
     try {
-      await quitarPlato(pedidoActivo.id_pedido, itemAConfirmar.id_detalle);
+      await quitarPlato(idPedidoAQuitar, itemAConfirmar.id_detalle);
       setItemAConfirmar(null);
     } catch (err) {
       setItemAConfirmar(null);
@@ -286,7 +296,7 @@ function Seguimiento() {
                     {permiteQuitar && (
                       <button
                         type="button"
-                        onClick={() => abrirConfirmacion(detalle)}
+                        onClick={() => abrirConfirmacion(detalle, pedidoActivo.id_pedido)}
                         disabled={quitando}
                         aria-label={`Quitar ${nombrePlato}`}
                         className="min-h-[44px] min-w-[44px] px-3 py-1.5 rounded-xl border border-borde bg-superficie-2 hover:border-primario hover:text-white text-primario-texto font-etiqueta font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"

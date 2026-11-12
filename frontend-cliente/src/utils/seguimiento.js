@@ -243,13 +243,21 @@ export function aplicarCambioEstado(pedidos, evento) {
 
   const idBuscado = String(evento.id_pedido);
   const nuevoEstado = String(evento.estado || '').trim().toLowerCase();
+  const origenEvento =
+    typeof evento.origen === 'string' && evento.origen.trim()
+      ? evento.origen.trim().toLowerCase()
+      : null;
+  const origenCancelacion =
+    origenEvento === 'comensal' ? 'comensal' : 'personal';
 
   return pedidos.map((p) => {
     if (String(p.id_pedido) === idBuscado) {
       const yaCancelado = String(p.estado || '').toLowerCase() === 'cancelado';
       const canceladoPor =
         nuevoEstado === 'cancelado'
-          ? (yaCancelado ? p.cancelado_por : 'restaurante')
+          ? (yaCancelado
+              ? p.cancelado_por
+              : (origenCancelacion === 'comensal' ? 'comensal' : 'restaurante'))
           : p.cancelado_por;
       return {
         ...p,
@@ -685,8 +693,16 @@ export function mensajeEstadoTarjeta(pedido, numeroMesa = null) {
     return info.mensaje;
   }
 
-  if (pedido.esMio === false || pedido.cancelado_por === 'restaurante') {
+  if (pedido.esMio === false) {
     return info.mensaje;
+  }
+
+  if (pedido.cancelado_por === 'restaurante') {
+    return 'Cancelado por el restaurante';
+  }
+
+  if (pedido.cancelado_por === 'comensal') {
+    return 'Quitaste todos los platos de este pedido.';
   }
 
   const lineas = Array.isArray(pedido.detalles)
@@ -696,44 +712,54 @@ export function mensajeEstadoTarjeta(pedido, numeroMesa = null) {
       : [];
 
   if (lineas.length === 0) {
-    return info.mensaje;
+    return 'Este pedido fue cancelado.';
   }
 
-  const todasCanceladasPorComensal = lineas.every((d) => {
-    const estadoItem = String(d?.estado_item || '').trim().toLowerCase();
-    const origen = String(d?.origen_cancelacion ?? d?.origen ?? '')
-      .trim()
-      .toLowerCase();
-    return estadoItem === 'cancelado' && origen !== 'personal';
+  const origenes = lineas.map((d) => {
+    const raw = d?.origen_cancelacion ?? d?.origen;
+    return typeof raw === 'string' && raw.trim() ? raw.trim().toLowerCase() : null;
   });
 
-  if (todasCanceladasPorComensal) {
+  const hayPersonal = origenes.some((o) => o === 'personal');
+  const todasComensal = origenes.every((o) => o === 'comensal');
+
+  if (hayPersonal) {
+    return 'Cancelado por el restaurante';
+  }
+
+  if (todasComensal) {
     return 'Quitaste todos los platos de este pedido.';
   }
 
-  return info.mensaje;
+  return 'Este pedido fue cancelado.';
 }
 
 /**
  * Devuelve la etiqueta visual para una línea cancelada según su origen (J-14).
  * - Si `origen` / `origen_cancelacion` === `'personal'` → `"Cancelado por el restaurante"`.
- * - Si falta o es `'comensal'` → `"Quitado"`.
+ * - Si `origen` / `origen_cancelacion` === `'comensal'` → `"Quitado"`.
+ * - Si el origen es desconocido (null/undefined/otro) → `"Cancelado"`.
  * - Si la línea no está cancelada → `null`.
  *
  * @param {object|null|undefined} item
- * @returns {'Cancelado por el restaurante'|'Quitado'|null}
+ * @returns {'Cancelado por el restaurante'|'Quitado'|'Cancelado'|null}
  */
 export function etiquetaItemCancelado(item) {
   if (!item || String(item.estado_item || '').trim().toLowerCase() !== 'cancelado') {
     return null;
   }
-  const origen = String(item.origen_cancelacion ?? item.origen ?? '')
-    .trim()
-    .toLowerCase();
+  const raw = item.origen_cancelacion ?? item.origen;
+  if (raw == null || (typeof raw === 'string' && !raw.trim())) {
+    return 'Cancelado';
+  }
+  const origen = String(raw).trim().toLowerCase();
   if (origen === 'personal') {
     return 'Cancelado por el restaurante';
   }
-  return 'Quitado';
+  if (origen === 'comensal') {
+    return 'Quitado';
+  }
+  return 'Cancelado';
 }
 
 export default {
