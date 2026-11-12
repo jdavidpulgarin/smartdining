@@ -65,6 +65,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `push:unsubscribe` | `comensal` | — | Estable | [§4](#pushunsubscribe) |
 | `mesa:llamar_mesero` | `comensal` | Obligatorio | Estable | [§4](#mesallamar_mesero) |
 | `cuenta:solicitada` | `comensal` | Obligatorio | Estable | [§4](#cuentasolicitada) |
+| `mesa:presencia:solicitar` | `admin`, `mesero`, `cajero` | — | Estable (nuevo) | [§4](#mesapresenciasolicitar) |
 
 `pantalla` no puede emitir ningún evento: solo escucha.
 
@@ -128,7 +129,7 @@ motivo exacto) va solo al log del servidor.
 | `PAYLOAD_INVALIDO` | Falta un campo o tiene un tipo/valor inválido |
 | `NO_AUTORIZADO` | El rol no puede emitir ese evento o tocar esa mesa; o el comensal manda otro alias que el de su JWT, o toca una línea de otro comensal |
 | `SIN_SALA` | El comensal no hizo `join:table` antes de emitir |
-| `RATE_LIMIT` | 20 eventos/s por socket, o 1 llamada al mesero por mesa cada 60 s |
+| `RATE_LIMIT` | 20 eventos/s por socket, 1 llamada al mesero por mesa cada 60 s, o 1 `mesa:presencia:solicitar` por socket cada 2 s |
 | `ERROR_INTERNO` | Fallo inesperado del servidor o de Redis; reenviar con el **mismo** `eventId` |
 
 ### Respuestas HTTP (`{ ok: false, codigo, mensaje }`)
@@ -530,6 +531,42 @@ hasta que se libere.
 
 ---
 
+### `mesa:presencia:solicitar`
+
+El panel pide la presencia de **todas** las mesas con algo y la recibe **en el ack**: no se
+emiten eventos sueltos, así que funciona aunque sus listeners todavía no estén registrados.
+Solo `admin`, `mesero` y `cajero`. No lleva payload ni `eventId` (es una lectura).
+
+```js
+socket.emit('mesa:presencia:solicitar', {}, (r) => { /* … */ })
+```
+
+| ack | Cuándo |
+|---|---|
+| `{ ok: true, mesas: [ <mesa:presencia>, … ] }` | Siempre que se pueda calcular. Cada elemento tiene el payload de [§5.2](#52-mesapresencia), ordenados por `id_mesa`. La lista es **completa**: una mesa que no aparece no tiene nadie |
+| `{ ok: false, codigo: 'NO_AUTORIZADO' }` | Lo pide un comensal, una tablet o la cocina |
+| `{ ok: false, codigo: 'RATE_LIMIT' }` | Otra solicitud del mismo socket hace menos de 2 s; no se calcula nada. Basta con usar la respuesta anterior |
+| `{ ok: false, codigo: 'ERROR_INTERNO' }` | Redis no responde. La conexión sigue y el panel puede reintentar más tarde |
+
+**Recomendado en el panel:** pedirla en cada `connect` (al abrir, al recargar y al
+reconectar), **después** de registrar los listeners. Por ejemplo, en `TablesContext.jsx`,
+debajo de los `useSocketListener`:
+
+```jsx
+useEffect(() => {
+  const pedir = () => socket.emit('mesa:presencia:solicitar', {}, (r) => {
+    if (!r?.ok) return // RATE_LIMIT o ERROR_INTERNO: queda el envío automático de respaldo
+    setPresenciaPorMesa(Object.fromEntries(r.mesas.map((p) => [Number(p.id_mesa), p])))
+  })
+  if (socket.connected) pedir()
+  socket.on('connect', pedir)
+  return () => socket.off('connect', pedir)
+}, [socket])
+```
+
+Como la lista es completa, **reemplaza** `presenciaPorMesa` en lugar de mezclarla. Sin este
+cambio el panel funciona igual, con el envío automático de 500 ms como respaldo (§5.2).
+
 ## 5. Eventos servidor → cliente
 
 | Evento | Destino | Payload |
@@ -538,7 +575,7 @@ hasta que se libere.
 | `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, emitidoEn }` |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, emitidoEn }` (mismo payload para Wompi, §8.3, y caja, §8.6) |
-| `pago:alerta` | `room:admin` | `{ eventId, id_mesa, referencia_externa, id_transaccion_pasarela, motivo, emitidoEn }` (§8.5) |
+| `pago:alerta` | `room:admin` | `{ eventId, id_mesa, comensal, monto_centavos, monto_esperado_centavos, referencia_externa, id_transaccion_pasarela, motivo, emitidoEn }` (§8.5) |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
@@ -560,10 +597,13 @@ Notas para el frontend:
 - `payment:confirmed` trae el **mismo payload** venga de Wompi (§8.3) o de la caja (§8.6):
   el panel y la mesa no necesitan distinguir el origen. Deduplica por `eventId`.
 - `mesa:liberada`: la sesión de mesa terminó (pago o liberación manual). Ver §5.1.
-- `qr:actualizado` no lleva `eventId` (no lo dispara un cliente, lo dispara el backend al
-  rotar el token en la base). La pantalla de la mesa simplemente **redibuja el QR** con el
-  `token_qr` recibido; no hace falta deduplicar porque redibujar con el mismo valor es
-  inofensivo.
+- `qr:actualizado` no lleva `eventId` (no lo dispara un cliente). Llega en dos casos: cuando
+  el backend rota el token en la base y avisa por `/internal/qr-rotado` (§6.2), y en la
+  **rotación automática** de una mesa abierta y vacía, que el socket-server emite solo
+  después de que el backend guarde el QR nuevo (`POST /api/mesas/:id/token-qr/interno`, #168;
+  ver [docs/rotacion-qr.md](docs/rotacion-qr.md)). La pantalla de la mesa simplemente
+  **redibuja el QR** con el `token_qr` recibido; no hace falta deduplicar porque redibujar con
+  el mismo valor es inofensivo.
 
 ### 5.1. `mesa:liberada`
 
@@ -608,6 +648,39 @@ recibe) cada vez que:
 
 Máximo **un aviso por mesa cada 500 ms**: el primero sale al instante y, si hubo más cambios
 dentro de esa ventana, se envía uno más al cerrarla (el último estado siempre llega).
+
+**Al conectar el panel.** El panel tiene dos formas de saber, al conectar o al recargar la
+página, quién está en cada mesa, sin esperar al siguiente cambio:
+
+1. **Recomendada: [`mesa:presencia:solicitar`](#mesapresenciasolicitar)** en cada `connect`,
+   después de registrar los listeners. La lista llega **en el ack**, así que no depende de
+   que haya listeners.
+2. **Respaldo automático, sin cambios en el panel:** **500 ms** después de que un socket de
+   personal (`admin`, `mesero`, `cajero`) se conecta, el servidor le envía **solo a él** un
+   `mesa:presencia` por cada mesa con algo, con el mismo evento y el mismo payload. Basta con
+   guardar el último por `id_mesa`, como ya hace el panel. Si el socket se desconecta antes,
+   no se calcula ni se envía nada.
+
+¿Por qué el retraso? El panel crea el socket al renderizar y registra los listeners después,
+en un `useEffect`. Si la presencia sale justo al conectar y el handshake gana, Socket.io la
+descarta en el cliente porque nadie la escucha todavía. Pasó en una prueba local: conectó a
+los 13 ms y el listener se registró a los 16 ms. Los 500 ms dan margen de sobra, pero no
+garantizan nada si el primer render tarda más. Por eso se recomienda la opción 1.
+
+En los dos casos:
+
+- No llega a nadie más: ni a los otros paneles, ni a las mesas, ni a la cocina, ni a las
+  tablets.
+- Las mesas sin nada (una tablet sola en su sala, o una mesa cerrada) no se incluyen. Para el
+  panel, que no llegue una mesa equivale a 0 comensales.
+- Se incluyen las mesas **sin ningún socket**, por ejemplo un grupo de personas sin celular
+  con la tablet apagada. Para eso el servidor lleva el índice `sd:mesas:con-estado` (en
+  memoria si no hay Redis), que vence a las 24 h de la última anotación y se borra al liberar
+  la mesa.
+- **Limitación conocida:** si una mesa cambia justo mientras se arma la lista, el panel puede
+  recibir primero el estado nuevo (el aviso normal) y después el de la lista, un poco más
+  viejo. El evento no lleva versión y la ventana dura milisegundos. Queda corregido en el
+  siguiente cambio de esa mesa.
 
 ```json
 { "id_mesa": 5, "comensales": ["Ana", "Beto"], "total": 2, "pagaron": ["Ana"], "sin_celular": [] }
@@ -797,6 +870,12 @@ Se llama cada vez que cambia el `token_qr` vigente de una mesa: al sembrarla, y 
 que el trigger `tr_regenerar_token_qr` lo rota (pago o cancelación). Responde
 `200 { "ok": true }`. La pantalla de esa mesa recibe `qr:actualizado` y redibuja el QR
 sin que nadie tenga que ir a cambiar ningún papel.
+
+La **rotación automática** (mesa abierta y sin comensales, cada 3 min) va en el sentido
+contrario: el socket-server firma el QR y llama a `POST /api/mesas/:id/token-qr/interno` del
+backend (implementado en #168). Ese endpoint **no** llama a `/internal/qr-rotado`: el
+socket-server emite `qr:actualizado` cuando recibe el `200`. Contrato y respuestas en
+[docs/rotacion-qr.md](docs/rotacion-qr.md).
 
 ### 6.3. Cómo emite el backend `order:created` / `order:status`
 
@@ -1221,15 +1300,33 @@ x-internal-key: <INTERNAL_API_KEY>
 
 ### 8.5. `pago:alerta` e intentos fallidos
 
-`pago:alerta` → `room:admin`, para que el personal revise. Sin datos del pagador:
+`pago:alerta` → **solo** `room:admin`, para que el personal revise. Lleva cuánto y quién,
+pero no datos de tarjeta ni del pagador: la pasarela no nos los entrega y no se agrega ninguno.
+`comensal` es el alias de la mesa, el mismo que el panel ya ve en `payment:confirmed`.
 
 ```json
-{ "eventId": "1132-903100443-27458:monto_distinto", "id_mesa": 5, "referencia_externa": "SD-5-…", "id_transaccion_pasarela": "1132-903100443-27458", "motivo": "monto_distinto", "emitidoEn": "…" }
+{ "eventId": "1132-903100443-27458:monto_distinto", "id_mesa": 5, "comensal": "Ana",
+  "monto_centavos": 100, "monto_esperado_centavos": 3333300,
+  "referencia_externa": "SD-5-…", "id_transaccion_pasarela": "1132-903100443-27458",
+  "motivo": "monto_distinto", "emitidoEn": "…" }
 ```
 
-`motivo`: `monto_distinto`, `moneda_distinta`, `estado_no_aprobado`, `transaccion_inexistente`,
-`transaccion_distinta`, `referencia_distinta`, `referencia_desconocida`,
-`intencion_no_pendiente`, `backend_rechazo_<status>`.
+- `comensal`: alias firmado en el JWT de quien creó la intención de pago; `null` si no hay
+  intención.
+- `monto_centavos`: lo **cobrado**, según la API de la pasarela. Si la API no conoce la
+  transacción (`transaccion_inexistente`), lo que dice el evento: está firmado, pero la API no
+  lo confirmó. `null` si no es un entero.
+- `monto_esperado_centavos`: lo que este servidor esperaba cobrar (la intención); `null` si
+  no hay intención.
+
+| `motivo` | `id_mesa` | `comensal` | `monto_centavos` | `monto_esperado_centavos` |
+| :--- | :--- | :--- | :--- | :--- |
+| `monto_distinto`, `moneda_distinta` | sí | sí | API | sí |
+| `estado_no_aprobado`, `transaccion_distinta`, `referencia_distinta` | si hay intención | si hay intención | API | si hay intención |
+| `transaccion_inexistente` | si hay intención | si hay intención | **evento** | si hay intención |
+| `referencia_desconocida` (o vencida) | `null` | `null` | API | `null` |
+| `intencion_no_pendiente` (por ejemplo, un aprobado después de un rechazo) | sí | sí | API | sí |
+| `backend_rechazo_<status>` (por ejemplo, `409` por una reemplazada pagada dos veces, §8.3) | sí | sí | API | sí |
 
 Contrato (el backend lo expone desde PR #33):
 
@@ -1411,3 +1508,6 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Estable (R-20.2) · `POST /internal/inventario-alerta` · `inventario:alerta` | Propuesta (v1.1): sin implementar; el backend (D-17) ya la llamaba y recibía `404` y el aviso se perdía | Implementada según §5.5 sin cambios de contrato: validación estricta, solo `room:admin`, idempotencia `backend:inventario-alerta:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`) | Nadie: backend (D-17) y panel (P-22) ya usan este contrato |
 | Estable (R-19.2) · `POST /internal/mesa-comensal` · `mesa:presencia.sin_celular` | Propuesta (v1.1): sin implementar; el backend (D-18) ya la llamaba y recibía `404`, y la persona sin celular no contaba en «igual» | Implementada según §6.4 y §5.2: `sin_celular` siempre presente; `comensales` y `total` lo incluyen; misma regla de alias que el backend, con paridad probada; además rechaza la clave reservada `general` (D-18c) con `400` | Nadie: backend (D-18) y PWA ya usan este contrato |
 | `POST /internal/payment-confirmed` · `comensal` en `pagaron` (R-19.2) | Se anotaba en `pagaron` el texto tal cual («Abuela » no coincidía con «Abuela») | Se anota normalizado con la regla del alias; si no es válido, tal cual (§8.6). `payment:confirmed` no cambia | Nadie: compatible hacia atrás |
+| `pago:alerta` · cuánto y quién (pedido del panel) | Solo `eventId`, `id_mesa`, referencias, `motivo` y `emitidoEn`: el panel no podía mostrar cuánto ni quién | Agrega `comensal` (alias de la intención o `null`), `monto_centavos` (lo cobrado, según la API o el evento) y `monto_esperado_centavos` (de la intención o `null`). Sin datos de tarjeta ni del pagador; sigue yendo solo a `room:admin` (§8.5) | Panel: mostrarlos si quiere; los campos nuevos no rompen nada |
+| `mesa:presencia` · al conectar el panel | El panel recibía la presencia solo cuando cambiaba algo: al conectar o recargar no sabía quién estaba sentado | **500 ms** después de que un socket de personal entra a `room:admin`, recibe solo él un `mesa:presencia` por cada mesa con algo, incluidas las mesas sin ningún socket (índice `sd:mesas:con-estado`, 24 h). Si se desconecta antes, no se envía. Mismo evento y payload (§5.2) | Nadie: el panel ya lo guarda por `id_mesa`. Es el respaldo de `mesa:presencia:solicitar` |
+| `mesa:presencia:solicitar` (nuevo) | — | El personal pide la presencia de todas las mesas con algo y la recibe en el ack `{ ok, mesas }`, sin depender de listeners. Comensal, tablet y cocina → `NO_AUTORIZADO`; 1 por socket cada 2 s (`RATE_LIMIT`) (§4) | Panel (recomendado): pedirla en cada `connect`, después de registrar los listeners (ejemplo en §4) |

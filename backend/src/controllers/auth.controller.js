@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { z } = require('zod');
 const usuariosService = require('../services/usuarios.service');
 const { ALGORITMO_JWT, ROLES_STAFF } = require('../middleware/auth.middleware');
+const { esquemaClaveNueva, cuerpoDel400 } = require('../utils/clave-bcrypt');
 
 // Solo se registran usuarios del personal: admin, mesero, cajero, cocina.
 // El comensal NO se registra — obtiene su sesión escaneando el QR de la mesa
@@ -12,10 +13,17 @@ const { ALGORITMO_JWT, ROLES_STAFF } = require('../middleware/auth.middleware');
 const registerSchema = z.object({
   nombre: z.string().min(2),
   email: z.string().email(),
-  password: z.string().min(6),
+  // Mínimo 8 caracteres y tope de 72 bytes: la regla común de
+  // utils/clave-bcrypt.js, la misma del cambio de clave.
+  password: esquemaClaveNueva(),
   rol: z.enum(ROLES_STAFF),
 });
 
+// SIN tope en el login, a propósito: quien creó una clave de más de 72 bytes
+// antes de que existiera el tope tiene que poder seguir entrando (bcrypt.compare
+// la trunca igual que la truncó al guardarla). Y el mínimo del login se queda
+// en 6, no en el 8 de las claves nuevas: una clave de 6 o 7 creada antes tiene
+// que seguir entrando.
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
@@ -78,7 +86,8 @@ function firmarTokenStaff(usuario) {
 async function register(req, res, next) {
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.errors[0].message });
+    // La misma forma de siempre ({ error }); con `motivo` solo si es el tope.
+    return res.status(400).json(cuerpoDel400(parsed.error));
   }
   const { nombre, email, password, rol } = parsed.data;
 

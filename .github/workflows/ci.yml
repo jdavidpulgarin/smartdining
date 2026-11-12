@@ -11,10 +11,12 @@ on:
 permissions:
   contents: read
 
-# Un push nuevo al mismo PR cancela la corrida anterior.
+# Un push nuevo al mismo PR cancela la corrida anterior. En develop y main no:
+# la corrida puede llevar dentro el despliegue de staging, y un despliegue no
+# se corta a la mitad.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:
@@ -76,8 +78,17 @@ jobs:
         with:
           node-version: 22
       - name: Sintaxis de los scripts de shell
-        run: for f in infra/scripts/*.sh; do sh -n "$f"; done
-      - name: Pruebas (contraseñas del personal)
+        # Cada script con el intérprete de su shebang: sh es dash en ubuntu y
+        # no entiende la sintaxis de bash (arreglos, [[ ]]).
+        run: |
+          for f in infra/scripts/*.sh; do
+            if head -n 1 "$f" | grep -q bash; then
+              echo "bash -n $f"; bash -n "$f"
+            else
+              echo "sh -n   $f"; sh -n "$f"
+            fi
+          done
+      - name: Pruebas de los scripts (contraseñas del personal y respaldo)
         run: node --test "infra/scripts/*.test.cjs"
 
   frontends:
@@ -100,4 +111,29 @@ jobs:
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
       - run: npm ci
       - run: npm run lint
+      # Pruebas unitarias. No necesitan servicios ni variables (la suite e2e de
+      # Playwright del panel queda fuera: frontend-restaurante/vite.config.js).
+      # El KDS usa node --test: el script falla también si quedan pruebas
+      # CANCELADAS, que node --test no cuenta como fallidas. Vitest (cliente y
+      # panel) sí falla solo, y ese script no entiende su resumen.
+      - name: npm test
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          if [ "$APP" = "frontend-kds" ]; then
+            bash "$GITHUB_WORKSPACE/.github/scripts/npm-test-sin-canceladas.sh"
+          else
+            npm test
+          fi
       - run: npm run build
+
+  # Despliegue a staging: solo en un push a develop, si TODO lo anterior pasó y
+  # el dueño del repo activó la variable DEPLOY_STAGING=true (mientras no exista
+  # el environment "staging" con sus secretos, el job queda "skipped" y el CI
+  # sigue en verde). Ver docs/despliegue.md, sección "Staging".
+  deploy-staging:
+    name: staging · desplegar
+    needs: [backend, socket-server, infra, frontends]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && vars.DEPLOY_STAGING == 'true'
+    uses: ./.github/workflows/deploy-staging.yml
+    secrets: inherit

@@ -56,6 +56,13 @@ jobs:
             "$VPS_USER@$VPS_HOST" sh -s -- "$VPS_RUTA" "$SHA" <<'REMOTO'
           set -eu
           cd "$1"
+          # Staging y producción NO corren a la vez (los dos publican 80/443 y
+          # usan la subred fija de TRUST_PROXY). Se apaga staging con
+          # "down" SIN -v antes de desplegar producción (docs/despliegue.md).
+          if [ -n "$(docker ps -q --filter label=com.docker.compose.project=smartdining-staging)" ]; then
+            echo "::error::Staging (proyecto smartdining-staging) está corriendo. Apágalo con 'docker compose -f docker-compose.prod.yml --env-file infra/.env.staging down' (SIN -v). No se desplegó nada."
+            exit 1
+          fi
           git fetch --quiet origin main
           # Copia de despliegue: nadie edita aquí. infra/.env está ignorado y
           # no se toca.
@@ -65,7 +72,19 @@ jobs:
           # coma el resto. --wait: falla si un servicio no llega a healthy.
           # Primero lo interno; nginx (lo único público) solo si ninguna
           # cuenta del personal tiene una contraseña conocida o publicada.
-          dc up -d --build --remove-orphans --wait --wait-timeout 180 postgres redis backend socket-server
+          dc up -d --build --remove-orphans --wait --wait-timeout 180 postgres redis
+          # Respaldo (R-18) ANTES de migrar. Si el respaldo o migrar.sh fallan,
+          # se aborta aquí: no se levanta el backend ni el socket-server nuevos.
+          RESPALDO_CONTENEDOR=$(dc ps -q postgres) sh infra/scripts/respaldo.sh predeploy "$2" < /dev/null || {
+            echo "::error::Falló el respaldo previo de la base. No se migró ni se levantó el backend nuevo."
+            exit 1
+          }
+          # Migraciones (R-18.1) antes de que el backend nuevo use el esquema.
+          dc exec -T postgres sh /smartdining-db/migrar.sh || {
+            echo "::error::Falló migrar.sh (el script que falló se deshizo completo). No se levantó el backend nuevo. Respaldo previo en /srv/respaldos/<proyecto>/predeploy/."
+            exit 1
+          }
+          dc up -d --build --remove-orphans --wait --wait-timeout 180 backend socket-server
           if ! sh infra/scripts/passwords-demo.sh verificar < /dev/null; then
             dc stop nginx
             echo "::error::Hay cuentas con contraseña conocida (Admin123!). Sitio detenido: corre 'sh infra/scripts/passwords-demo.sh cambiar' en el VPS."

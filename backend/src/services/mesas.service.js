@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const socketNotifier = require('./socket.notifier');
+const aliasComensal = require('./alias-comensal');
 
 // Tabla mesas (docs/modelo-er.md): id_mesa, numero, capacidad, ubicacion,
 // estado, token_qr, actualizado_en.
@@ -225,6 +226,109 @@ async function rotarQr(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
     // Una mesa INACTIVA no se abre ni recibe un QR nuevo: lo impide
     // tr_validar_mesa_activa con un 23514, que sin traducir saldría como un 422
     // genérico. Es una regla de sala, así que sale 409 con su motivo.
+    throw traducirMesaActiva(err, MOTIVO_MESA_INACTIVA, MENSAJE_INACTIVA);
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * ROTACIÓN AUTOMÁTICA del QR, la que pide el socket-server cada 3 minutos
+ * mientras la mesa está abierta y vacía (socket-server/docs/rotacion-qr.md):
+ * POST /mesas/:id/token-qr/interno. A diferencia de `rotarQr` (la manual), el
+ * token NUEVO ya viene firmado por el socket-server: aquí solo se decide si se
+ * puede guardar.
+ *
+ * En UNA transacción, con la mesa bloqueada:
+ *   1. La mesa tiene que existir (`noExiste`) y estar 'ocupada' (`noOcupada`).
+ *   2. COMPARE-AND-SWAP: `tokenAnterior` tiene que ser el token vigente. Si no,
+ *      alguien rotó a mano o liberó la mesa mientras tanto (`cambioDeToken`).
+ *      Un `tokenAnterior` NULL también se rechaza: es un swap sin "compare". El
+ *      socket-server arranca la rotación SIEMPRE con el token que acaba de
+ *      firmar en /qr/generar (que es el que guarda el backend al abrir o rotar
+ *      a mano), así que hoy nunca manda null; si algún día lo hiciera, sería
+ *      un rotador que no sabe qué QR hay vigente, y pisarlo a ciegas podría
+ *      deshacer una rotación manual.
+ *   3. GUARDA DE CONTINUIDAD: rotar deja sin sesión a quien ya tenga un JWT con
+ *      el sid del QR anterior (sesionDeMesaVigente compara el sid con
+ *      mesas.token_qr). Si la sesión de mesa ya tiene comensales, NO se rota
+ *      (`conComensales`): el socket-server deja de rotar y el QR queda fijo,
+ *      que es lo que el diseño quiere en cuanto entra alguien. Dos señales:
+ *        - pedidos de la sesión actual (misma transacción, misma regla de
+ *          `sesion_iniciada_en` que liberarSiNoQuedanPedidosAbiertos);
+ *        - reservas de alias de la mesa (todo el que entra por QR reserva su
+ *          alias, y el personal reserva el de quien no tiene celular).
+ *      Si las reservas no se pueden leer (Redis no responde), NO se rota
+ *      (`reservasNoDisponibles`, que el controller responde 503): el QR anterior
+ *      sigue valiendo, nadie pierde su sesión, y el socket-server lo reintenta
+ *      en el siguiente ciclo.
+ *   4. Se guarda el token anterior en token_qr_historico y se cambia token_qr.
+ *
+ * No avisa a /internal/qr-rotado: el socket-server anuncia qr:actualizado él
+ * mismo al recibir el 200.
+ *
+ * @returns {Promise<{noExiste: true} | {noOcupada: true, estado: string}
+ *   | {cambioDeToken: true} | {conComensales: true, motivo: string}
+ *   | {reservasNoDisponibles: true} | {ok: true}>}
+ */
+async function rotarQrInterno(idMesa, { tokenQr, tokenAnterior, reservas = aliasComensal.hayReservas } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const bloqueada = await client.query(
+      'SELECT id_mesa, estado, token_qr, sesion_iniciada_en FROM mesas WHERE id_mesa = $1::int FOR UPDATE',
+      [idMesa]
+    );
+    if (bloqueada.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { noExiste: true };
+    }
+    const mesa = bloqueada.rows[0];
+    if (mesa.estado !== ESTADO_MESA_OCUPADA) {
+      await client.query('ROLLBACK');
+      return { noOcupada: true, estado: mesa.estado };
+    }
+
+    // Compare-and-swap. NULL no se acepta como comodín (ver arriba).
+    if (tokenAnterior === null || tokenAnterior === undefined || mesa.token_qr !== tokenAnterior) {
+      await client.query('ROLLBACK');
+      return { cambioDeToken: true };
+    }
+
+    const pedidos = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM pedidos p
+          WHERE p.id_mesa = $1::int
+            AND ($2::timestamptz IS NULL OR p.creado_en >= $2::timestamptz)
+       ) AS hay`,
+      [idMesa, mesa.sesion_iniciada_en]
+    );
+    if (pedidos.rows[0].hay) {
+      await client.query('ROLLBACK');
+      return { conComensales: true, motivo: 'pedidos' };
+    }
+
+    const r = await reservas(idMesa);
+    if (!r || r.noDisponible) {
+      await client.query('ROLLBACK');
+      return { reservasNoDisponibles: true };
+    }
+    if (r.hay) {
+      await client.query('ROLLBACK');
+      return { conComensales: true, motivo: 'alias' };
+    }
+
+    await client.query(
+      'INSERT INTO token_qr_historico (id_mesa, token_antiguo) VALUES ($1::int, $2::text)',
+      [idMesa, mesa.token_qr]
+    );
+    await client.query('UPDATE mesas SET token_qr = $1::text WHERE id_mesa = $2::int', [tokenQr, idMesa]);
+
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (err) {
+    await client.query('ROLLBACK');
     throw traducirMesaActiva(err, MOTIVO_MESA_INACTIVA, MENSAJE_INACTIVA);
   } finally {
     client.release();
@@ -684,6 +788,7 @@ module.exports = {
   ESTADO_MESA_OCUPADA,
   abrirSesion,
   rotarQr,
+  rotarQrInterno,
   liberarSesion,
   liberarSiNoQuedanPedidosAbiertos,
   existe,

@@ -238,10 +238,246 @@ async function crearInterno(req, res, next) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// POST /transacciones/mesa — cobro de MESA en caja (pedido de Jarrison tras la
+// prueba de punta a punta: la Caja cobraba siempre al primer pedido).
+// ---------------------------------------------------------------------------
+
+/** Métodos de la caja: los de la tabla menos 'online', que es solo de Wompi. */
+const METODOS_CAJA = METODOS_PAGO.filter((m) => m !== 'online');
+
+/** Tope de DECIMAL(10,2) en centavos: 99.999.999,99 pesos. */
+const MAX_CENTAVOS = 9999999999;
+
+const MOTIVO_CUERPO_INVALIDO = 'cuerpo_invalido';
+const MOTIVO_MESA_INEXISTENTE = 'mesa_inexistente';
+const MOTIVO_SIN_CUENTA = 'sin_cuenta';
+const MOTIVO_EXCEDE = 'excede';
+const MOTIVO_ID_COBRO_EN_USO = 'id_cobro_en_uso';
+
+/**
+ * Pesos con como mucho 2 decimales -> centavos ENTEROS, sin coma flotante.
+ *
+ * `Math.round(monto * 100)` falla en casos reales: 1.15 * 100 es
+ * 114.99999999999999 en coma flotante. Aquí se trabaja sobre el TEXTO del
+ * número: la parte entera por 100 más los decimales rellenados a dos cifras.
+ * Devuelve null si tiene más de 2 decimales, exponente, o no cabe en
+ * DECIMAL(10,2).
+ */
+function montoACentavos(monto) {
+  if (typeof monto !== 'number' || !Number.isFinite(monto) || monto <= 0) return null;
+  const m = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(monto));
+  if (!m) return null; // más de 2 decimales, o notación con exponente
+  const centavos = Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0'));
+  if (!Number.isSafeInteger(centavos) || centavos < 1 || centavos > MAX_CENTAVOS) return null;
+  return centavos;
+}
+
+/** Centavos enteros -> pesos como número (12500050 -> 125000.5). */
+const aPesos = (centavos) => Number(centavos) / 100;
+
+const cobroMesaSchema = z
+  .object({
+    id_mesa: z.number().int().positive(),
+    monto: z
+      .number()
+      .positive()
+      .refine((v) => montoACentavos(v) !== null, {
+        message: 'monto debe tener como mucho 2 decimales y caber en 99.999.999,99',
+      }),
+    metodo_pago: z.enum(METODOS_CAJA, {
+      errorMap: () => ({ message: `metodo_pago debe ser uno de: ${METODOS_CAJA.join(', ')}` }),
+    }),
+    // Las mismas reglas que el comensal de POST /transacciones.
+    comensal: z.string().min(1).max(40).nullish(),
+    id_cobro: z.string().uuid({ message: 'id_cobro debe ser un UUID' }),
+  })
+  .strict();
+
+/**
+ * POST /transacciones/mesa — la caja cobra un monto A LA MESA y la base lo
+ * reparte entre sus pedidos con saldo, del más viejo al más nuevo (el mismo
+ * núcleo que el pago en línea). `id_cobro` hace el reintento seguro: con el
+ * mismo id_cobro no se cobra dos veces.
+ */
+async function cobrarMesa(req, res, next) {
+  const parsed = cobroMesaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0].message, motivo: MOTIVO_CUERPO_INVALIDO });
+  }
+  const { id_mesa, monto, metodo_pago, id_cobro } = parsed.data;
+  const monto_centavos = montoACentavos(monto);
+  const comensal = aliasDelComensal(req, parsed.data);
+
+  try {
+    const r = await transaccionesService.cobrarMesaEnCaja({
+      id_mesa,
+      monto_centavos,
+      metodo_pago,
+      comensal,
+      id_cobro,
+      id_usuario: req.user.id_usuario,
+    });
+
+    if (r.noExiste) {
+      return res.status(404).json({ error: 'Mesa no encontrada', motivo: MOTIVO_MESA_INEXISTENTE });
+    }
+    if (r.sinCuenta) {
+      return res.status(409).json({
+        error: 'La mesa no tiene una cuenta abierta por pagar',
+        motivo: MOTIVO_SIN_CUENTA,
+      });
+    }
+    if (r.excede) {
+      return res.status(409).json({
+        error: 'El pago excede el saldo de la mesa',
+        motivo: MOTIVO_EXCEDE,
+        saldo: aPesos(r.saldo_centavos),
+      });
+    }
+    // Un id_cobro que ya se usó en OTRA mesa: no es un reintento de este cobro,
+    // y contestar "duplicado" haría creer a la caja que cobró. No se escribe nada.
+    if (r.idCobroEnUso) {
+      return res.status(409).json({
+        error: 'Ese id_cobro ya se usó en otra mesa; genera uno nuevo',
+        motivo: MOTIVO_ID_COBRO_EN_USO,
+      });
+    }
+    // El reintento con el mismo id_cobro no cobra ni avisa otra vez: los avisos
+    // ya salieron con el primero.
+    if (r.duplicado) {
+      return res.status(200).json({ duplicado: true, saldo_restante: aPesos(r.saldo_restante_centavos) });
+    }
+
+    // Los mismos avisos que el cobro en caja de POST /transacciones, en orden y
+    // después del COMMIT (el notifier nunca lanza): primero el pago, luego cada
+    // pedido que quedó pagado y al final la mesa liberada.
+    const avisos = [
+      () => socketNotifier.notificarPagoConfirmado({
+        id_mesa,
+        monto_centavos,
+        saldo_restante_centavos: r.saldo_restante_centavos,
+        comensal,
+        referencia_externa: transaccionesService.PREFIJO_REFERENCIA_CAJA + id_cobro,
+        // La primera fila del reparto: es la guardia de idempotencia del
+        // socket-server para este cobro.
+        id_transaccion: r.transacciones[0] ? r.transacciones[0].id_transaccion : null,
+      }),
+      ...r.pagados.map((p) => () => socketNotifier.notificarCambioEstado({
+        id_pedido: p.id_pedido,
+        id_mesa,
+        estado_anterior: p.estado_anterior,
+        estado: 'pagado',
+      })),
+    ];
+    if (r.mesa_liberada) avisos.push(() => socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA));
+    socketNotifier.encadenarAvisos(avisos);
+
+    if (r.mesa_liberada) aliasComensal.olvidarMesa(id_mesa);
+
+    return res.status(201).json({
+      duplicado: false,
+      saldo_restante: aPesos(r.saldo_restante_centavos),
+      mesa_liberada: r.mesa_liberada,
+      pagados: r.pagados.map((p) => p.id_pedido),
+      transacciones: r.transacciones.map((t) => ({
+        id_transaccion: t.id_transaccion,
+        id_pedido: t.id_pedido,
+        monto: aPesos(t.monto_centavos),
+        comensal: t.comensal,
+      })),
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function obtenerPorPedido(req, res, next) {
   try {
     const transacciones = await transaccionesService.obtenerPorPedido(req.params.id_pedido);
     return res.json({ transacciones });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/** Motivo del 400 cuando la query de GET /transacciones no es la esperada. */
+const MOTIVO_CONSULTA_INVALIDA = 'consulta_invalida';
+
+/** Forma de una fecha de calendario en la query: AAAA-MM-DD, nada más. */
+const FORMATO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * ¿Existe esa fecha en el calendario? (2026-02-30 y 2026-13-01 no.)
+ *
+ * Se construye con `Date.UTC` y se comprueba que año, mes y día no se
+ * "desbordaron" (JavaScript convierte el 30 de febrero en el 2 de marzo sin
+ * avisar). Todo en UTC, así que el resultado no depende de la zona del
+ * servidor: aquí no se pregunta qué día es hoy, solo si la fecha existe.
+ */
+function fechaExiste(texto) {
+  const [anio, mes, dia] = texto.split('-').map(Number);
+  const f = new Date(Date.UTC(anio, mes - 1, dia));
+  return f.getUTCFullYear() === anio && f.getUTCMonth() === mes - 1 && f.getUTCDate() === dia;
+}
+
+/**
+ * Query de GET /transacciones (cierre de caja, propuesta de Roberto).
+ *
+ * `desde` es `hoy` o una fecha `AAAA-MM-DD` que exista; `.strict()` rechaza
+ * cualquier otro parámetro. Si la fecha es futura o demasiado antigua NO se
+ * decide aquí sino en la base, con el mismo "hoy de Bogotá" que usa la
+ * consulta (ver transaccionesService.listarDelDia).
+ */
+const transaccionesDelDiaSchema = z
+  .object({
+    desde: z
+      .string({ required_error: 'desde es obligatorio: "hoy" o una fecha AAAA-MM-DD' })
+      .superRefine((valor, ctx) => {
+        if (valor === transaccionesService.DESDE_HOY) return;
+        if (!FORMATO_FECHA.test(valor)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'desde debe ser "hoy" o una fecha AAAA-MM-DD',
+          });
+        } else if (!fechaExiste(valor)) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `La fecha ${valor} no existe` });
+        }
+      }),
+  })
+  .strict();
+
+/** Mensajes de los límites que decide la base. */
+const MENSAJES_RANGO = {
+  futura: (r) => `desde no puede ser posterior a hoy (${r.hoy}, hora de Bogotá)`,
+  antigua: (r) =>
+    `desde admite como mucho ${transaccionesService.DIAS_ATRAS_MAXIMOS} días atrás: `
+    + `la fecha más antigua permitida hoy es ${r.minimo}`,
+};
+
+/**
+ * GET /transacciones?desde=hoy|AAAA-MM-DD — las transacciones completadas
+ * desde ese día hasta el final de hoy, para el cierre de caja. Los días son de
+ * Bogotá; los calcula la base, ver transaccionesService.listarDelDia.
+ */
+async function listarDelDia(req, res, next) {
+  const parsed = transaccionesDelDiaSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: parsed.error.errors[0].message,
+      motivo: MOTIVO_CONSULTA_INVALIDA,
+    });
+  }
+
+  try {
+    const resumen = await transaccionesService.listarDelDia({ desde: parsed.data.desde });
+    if (resumen.invalido) {
+      return res.status(400).json({
+        error: MENSAJES_RANGO[resumen.invalido](resumen),
+        motivo: MOTIVO_CONSULTA_INVALIDA,
+      });
+    }
+    return res.json(resumen);
   } catch (err) {
     return next(err);
   }
@@ -252,7 +488,17 @@ module.exports = {
   crearInterno,
   aliasDelComensal,
   obtenerPorPedido,
+  listarDelDia,
+  cobrarMesa,
+  montoACentavos,
+  METODOS_CAJA,
+  MOTIVO_CUERPO_INVALIDO,
+  MOTIVO_SIN_CUENTA,
+  MOTIVO_EXCEDE,
+  MOTIVO_ID_COBRO_EN_USO,
   METODOS_PAGO,
   ESTADOS_TRANSACCION,
   MONEDA,
+  MOTIVO_CONSULTA_INVALIDA,
+  fechaExiste,
 };

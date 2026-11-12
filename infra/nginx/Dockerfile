@@ -30,6 +30,17 @@ ENV VITE_API_URL=https://api.${DOMINIO}/api \
     VITE_SOCKET_URL=https://rt.${DOMINIO}
 RUN npm run build
 
+# --- Pantalla de cocina (KDS)
+FROM node:22-alpine AS kds
+ARG DOMINIO
+WORKDIR /src
+COPY frontend-kds/package.json frontend-kds/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend-kds/ ./
+ENV VITE_API_URL=https://api.${DOMINIO}/api \
+    VITE_SOCKET_URL=https://rt.${DOMINIO}
+RUN npm run build
+
 # --- Nginx final
 FROM nginx:1.27-alpine
 # Plantilla con ${DOMINIO}: la imagen oficial la procesa al arrancar.
@@ -37,7 +48,6 @@ COPY infra/nginx/templates/ /etc/nginx/templates/
 COPY infra/nginx/snippets/ /etc/nginx/snippets/
 COPY --from=cliente /src/dist /usr/share/nginx/html/app
 COPY --from=staff /src/dist /usr/share/nginx/html/staff
-# frontend-kds aún no tiene proyecto: página provisional.
-COPY infra/nginx/kds/ /usr/share/nginx/html/cocina
+COPY --from=kds /src/dist /usr/share/nginx/html/cocina
 # Recarga cada 6 h para tomar los certificados que renueva certbot.
 CMD ["/bin/sh", "-c", "(while :; do sleep 6h; nginx -s reload; done) & exec /docker-entrypoint.sh nginx -g 'daemon off;'"]

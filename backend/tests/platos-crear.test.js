@@ -403,7 +403,7 @@ test('review-144: el helper traduce las FK del autor y nada mas', () => {
   // Otra FK, u otro codigo, no son este caso: devuelve null para que quien
   // llama siga con su propia traduccion.
   assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk(platosService.FK_CATEGORIA)), null);
-  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk('fk_historial_usuario')), null);
+  assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk('fk_detalles_pedido_plato')), null);
   assert.strictEqual(autorInexistente.traducirAutorInexistente(errorDeFk(undefined)), null);
   assert.strictEqual(
     autorInexistente.traducirAutorInexistente(Object.assign(new Error('u'), { code: '23505', constraint: autorInexistente.FK_AUTOR[0] })),
@@ -457,14 +457,29 @@ test('review-144: por la ruta, el PUT de un plato da 409 autor_inexistente', asy
   }
 });
 
-test('review-144: y al CREAR un plato, lo mismo', async () => {
-  const db = fakePlatos({ error: errorDeFk('fk_historial_precios_usuario') });
+test('review-144 (medido): al CREAR un plato ese 23503 no puede salir', async () => {
+  // El doble puede lanzar lo que se le pida, pero PostgreSQL no: el trigger
+  // tr_historial_precio_plato es AFTER UPDATE OF precio, asi que un INSERT
+  // nunca escribe en historial_precios y no hay autor que validar. Comprobado
+  // contra PostgreSQL de verdad: un POST /platos -y un INSERT a pelo con
+  // app.id_usuario apuntando a un usuario que no existe- pasan sin error.
+  //
+  // Antes esta prueba afirmaba lo contrario con un error inventado, asi que
+  // documentaba un caso que la base no produce. Lo que se vigila ahora es la
+  // sentencia: el POST inserta y no toca el historial de precios. La traduccion
+  // del autor se prueba por el PUT, que es donde el caso existe de verdad.
+  const db = fakePlatos({});
   const redis = instalarFakeRedis();
   try {
     const res = await crear(CUERPO_MINIMO);
 
-    assert.strictEqual(res.status, 409);
-    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.status, 201);
+    assert.ok(insert(db), 'el POST inserta el plato');
+    assert.strictEqual(
+      db.todas('historial_precios').length,
+      0,
+      'y no escribe el historial de precios: eso es trabajo del trigger del UPDATE'
+    );
   } finally {
     redis.restaurar();
     db.restaurar();
