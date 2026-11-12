@@ -32,8 +32,10 @@ INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr)
 SELECT 2, 4, 'Terraza', 'disponible', 'qr-token-mesa-02-e5f6g7h8'
 WHERE NOT EXISTS (SELECT 1 FROM mesas WHERE numero = 2);
 
+-- La mesa 3 nace libre: 'ocupada' con un token falso no tenía sesión real y el
+-- panel no podía abrirla (producción sale de este seed). La abre el mesero.
 INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr)
-SELECT 3, 4, 'Salón Principal', 'ocupada', 'qr-token-mesa-03-i9j0k1l2'
+SELECT 3, 4, 'Salón Principal', 'disponible', NULL
 WHERE NOT EXISTS (SELECT 1 FROM mesas WHERE numero = 3);
 
 INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr)
@@ -348,75 +350,10 @@ INSERT INTO ingredientes (id_paso, nombre, precio_extra, calorias, url_imagen, d
 SELECT 304, 'Guacamole', 2000.00, 100, 'https://images.unsplash.com/photo-1604467715878-83e57e8bc129?w=600&q=80&auto=format', TRUE
 WHERE NOT EXISTS (SELECT 1 FROM ingredientes WHERE id_paso = 304 AND nombre = 'Guacamole');
 
--- 6. PEDIDO DEMO
-INSERT INTO pedidos (id_mesa, codigo_pedido, estado, total, notas_generales, creado_en)
-SELECT m.id_mesa, 'ORD-001', 'en_preparacion', 70000.00, 'Mesa de cumpleaños', CURRENT_TIMESTAMP - INTERVAL '15 minutes'
-FROM mesas m
-WHERE m.numero = 3
-  AND NOT EXISTS (SELECT 1 FROM pedidos WHERE codigo_pedido = 'ORD-001');
-
--- 7. DETALLES DEL PEDIDO DEMO
-INSERT INTO detalles_pedido (id_pedido, id_plato, cantidad, precio_unitario, subtotal, notas_especiales, estado_item)
-SELECT p.id_pedido, pl.id_plato, 1, 34000.00, 34000.00, 'Término 3/4, sin cebolla', 'cocinando'
-FROM pedidos p
-JOIN platos pl ON pl.nombre = 'Hamburguesa Smart Angus'
-WHERE p.codigo_pedido = 'ORD-001'
-  AND NOT EXISTS (
-      SELECT 1 FROM detalles_pedido dp
-      WHERE dp.id_pedido = p.id_pedido AND dp.id_plato = pl.id_plato
-  );
-
-INSERT INTO detalles_pedido (id_pedido, id_plato, cantidad, precio_unitario, subtotal, notas_especiales, estado_item)
-SELECT p.id_pedido, pl.id_plato, 1, 24000.00, 24000.00, 'Guacamole adicional', 'listo'
-FROM pedidos p
-JOIN platos pl ON pl.nombre = 'Nachos Supremos'
-WHERE p.codigo_pedido = 'ORD-001'
-  AND NOT EXISTS (
-      SELECT 1 FROM detalles_pedido dp
-      WHERE dp.id_pedido = p.id_pedido AND dp.id_plato = pl.id_plato
-  );
-
-INSERT INTO detalles_pedido (id_pedido, id_plato, cantidad, precio_unitario, subtotal, notas_especiales, estado_item)
-SELECT p.id_pedido, pl.id_plato, 1, 12000.00, 12000.00, 'Poco dulce', 'servido'
-FROM pedidos p
-JOIN platos pl ON pl.nombre = 'Limonada de Coco'
-WHERE p.codigo_pedido = 'ORD-001'
-  AND NOT EXISTS (
-      SELECT 1 FROM detalles_pedido dp
-      WHERE dp.id_pedido = p.id_pedido AND dp.id_plato = pl.id_plato
-  );
-
--- 8. HISTORIAL DE ESTADOS DEMO
-INSERT INTO historial_estados (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones, fecha_cambio)
-SELECT p.id_pedido, NULL, NULL, 'recibido', 'Pedido emitido desde el celular del cliente vía QR', CURRENT_TIMESTAMP - INTERVAL '15 minutes'
-FROM pedidos p
-WHERE p.codigo_pedido = 'ORD-001'
-  AND NOT EXISTS (
-      SELECT 1 FROM historial_estados h
-      WHERE h.id_pedido = p.id_pedido AND h.estado_nuevo = 'recibido'
-  );
-
-INSERT INTO historial_estados (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones, fecha_cambio)
-SELECT p.id_pedido, u.id_usuario, 'recibido', 'en_preparacion', 'Comanda tomada por chef en cocina KDS', CURRENT_TIMESTAMP - INTERVAL '10 minutes'
-FROM pedidos p
-JOIN usuarios u ON u.email = 'cocina@smartdining.com'
-WHERE p.codigo_pedido = 'ORD-001'
-  AND NOT EXISTS (
-      SELECT 1 FROM historial_estados h
-      WHERE h.id_pedido = p.id_pedido AND h.estado_nuevo = 'en_preparacion'
-  );
-
--- Actualizar fecha_cambio y creado_en si el pedido ya existia para evitar metricas KDS absurdas (+35.000 %)
-UPDATE pedidos
-SET creado_en = CURRENT_TIMESTAMP - INTERVAL '15 minutes'
-WHERE codigo_pedido = 'ORD-001';
-
-UPDATE historial_estados
-SET fecha_cambio = CURRENT_TIMESTAMP - INTERVAL '15 minutes'
-WHERE id_pedido = (SELECT id_pedido FROM pedidos WHERE codigo_pedido = 'ORD-001')
-  AND estado_nuevo = 'recibido';
-
-UPDATE historial_estados
-SET fecha_cambio = CURRENT_TIMESTAMP - INTERVAL '10 minutes'
-WHERE id_pedido = (SELECT id_pedido FROM pedidos WHERE codigo_pedido = 'ORD-001')
-  AND estado_nuevo = 'en_preparacion';
+-- 6. SIN PEDIDOS DE EJEMPLO
+-- El seed ya no crea pedidos, detalles, historial ni transacciones de ejemplo.
+-- Hasta ahora creaba ORD-001 ('en_preparacion', mesa 3), que aparecía para
+-- siempre en el KDS (no se esconde un pedido en preparación, por viejo que
+-- sea), dejaba la mesa con un pedido abierto y contaba en los reportes. La
+-- producción sale de este seed: arranca sin pedidos. Las pruebas y los e2e
+-- crean los suyos.

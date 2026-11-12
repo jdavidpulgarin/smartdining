@@ -219,6 +219,42 @@ async function cuenta(req, res, next) {
 }
 
 /**
+ * Cuerpo opcional de POST /api/mesas/:id/rotar-qr. `solo_si_vacia: true` lo usa
+ * la renovación automática del modal del panel (#174): no debe tumbar la sesión
+ * de quien ya entró a la mesa.
+ */
+const rotacionManualSchema = z
+  .object({ solo_si_vacia: z.boolean().optional() })
+  .strict();
+
+const avisarRotacionNoAplicada = (idMesa, motivo) =>
+  console.info(`[mesas] rotación del QR no aplicada en la mesa ${idMesa}: ${motivo}`);
+
+/**
+ * Responde lo que dice la guarda de continuidad (mesasService.guardaDeContinuidad),
+ * igual en la rotación interna y en la manual con solo_si_vacia: 409
+ * mesa_con_comensales o 503 alias_no_disponible. null si la guarda no frenó.
+ * Los logs llevan el id de la mesa y el motivo, NUNCA un token.
+ */
+function responderGuardaDeContinuidad(res, r, idMesa) {
+  if (r.conComensales) {
+    avisarRotacionNoAplicada(idMesa, `${MOTIVOS_ROTACION.conComensales} (${r.motivo})`);
+    return res.status(409).json({
+      error: 'La mesa ya tiene comensales: el QR queda fijo',
+      motivo: MOTIVOS_ROTACION.conComensales,
+    });
+  }
+  if (r.reservasNoDisponibles) {
+    avisarRotacionNoAplicada(idMesa, MOTIVOS_ROTACION.reservasNoDisponibles);
+    return res.status(503).json({
+      error: 'No se pudo comprobar si la mesa tiene comensales; se conserva el QR actual',
+      motivo: MOTIVOS_ROTACION.reservasNoDisponibles,
+    });
+  }
+  return null;
+}
+
+/**
  * POST /api/mesas/:id/rotar-qr — el mesero cambia el QR de una mesa abierta
  * (p. ej. porque alguien fotografió la tablet).
  *
@@ -235,15 +271,22 @@ async function rotarQr(req, res, next) {
   if (!Number.isInteger(idMesa) || idMesa <= 0) {
     return res.status(400).json({ error: 'id de mesa inválido' });
   }
+  // Cuerpo opcional (#174): sin cuerpo es el "Nuevo QR" de siempre.
+  const parsed = rotacionManualSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0].message, motivo: 'cuerpo_invalido' });
+  }
 
   try {
     const jwtStaff = (req.headers.authorization || '').replace(/^Bearer /, '');
-    const r = await mesasService.rotarQr(idMesa, { jwtStaff });
+    const r = await mesasService.rotarQr(idMesa, { jwtStaff, soloSiVacia: parsed.data.solo_si_vacia === true });
 
     if (r.noExiste) return res.status(404).json({ error: 'Mesa no encontrada' });
     if (r.noOcupada) {
       return res.status(409).json({ error: 'Solo se puede rotar el QR de una mesa abierta (ocupada)', estado: r.estado });
     }
+    const guarda = responderGuardaDeContinuidad(res, r, idMesa);
+    if (guarda) return guarda;
     if (r.socketCaido) {
       return res.status(503).json({
         error: 'No se pudo rotar el QR: el servicio de tiempo real no responde',
@@ -329,7 +372,7 @@ async function rotarQrInterno(req, res, next) {
     if (r.ok) return res.status(200).json({ ok: true });
     if (r.noExiste) return res.status(404).json({ error: 'Mesa no encontrada' });
 
-    const avisar = (motivo) => console.info(`[mesas] rotación del QR no aplicada en la mesa ${idMesa}: ${motivo}`);
+    const avisar = (motivo) => avisarRotacionNoAplicada(idMesa, motivo);
     if (r.noOcupada) {
       avisar(MOTIVOS_ROTACION.noOcupada);
       return res.status(409).json({
@@ -345,20 +388,8 @@ async function rotarQrInterno(req, res, next) {
         motivo: MOTIVOS_ROTACION.cambioDeToken,
       });
     }
-    if (r.conComensales) {
-      avisar(`${MOTIVOS_ROTACION.conComensales} (${r.motivo})`);
-      return res.status(409).json({
-        error: 'La mesa ya tiene comensales: el QR queda fijo',
-        motivo: MOTIVOS_ROTACION.conComensales,
-      });
-    }
-    if (r.reservasNoDisponibles) {
-      avisar(MOTIVOS_ROTACION.reservasNoDisponibles);
-      return res.status(503).json({
-        error: 'No se pudo comprobar si la mesa tiene comensales; se conserva el QR actual',
-        motivo: MOTIVOS_ROTACION.reservasNoDisponibles,
-      });
-    }
+    const guarda = responderGuardaDeContinuidad(res, r, idMesa);
+    if (guarda) return guarda;
     return next(new Error('Resultado inesperado de rotarQrInterno'));
   } catch (err) {
     return next(err);

@@ -198,14 +198,39 @@ for (const [motivo, opcionesDb, nota] of [
   });
 }
 
-test('personal cancela plato: la ÚLTIMA línea de un pedido en "listo" -> 409 item_no_cancelable (listo -> cancelado no es una transición válida) y ROLLBACK', async () => {
-  const e = escenario({ pedido: pedidoEn('listo'), linea: lineaEn('listo'), vivas: 0, transicionValida: false });
+test('personal cancela plato: si transiciones_validas NO permite pasar el pedido a cancelado, la ÚLTIMA línea -> 409 item_no_cancelable y ROLLBACK', async () => {
+  const e = escenario({ pedido: pedidoEn('en_preparacion'), linea: lineaEn('cocinando'), vivas: 0, transicionValida: false });
   try {
     const res = await cancelar('admin');
     assert.strictEqual(res.status, 409);
     assert.strictEqual(res.body.motivo, 'item_no_cancelable');
-    assert.deepStrictEqual(e.db.buscar('FROM transiciones_validas').params, ['listo'], 'se pregunta a la tabla');
+    assert.deepStrictEqual(e.db.buscar('FROM transiciones_validas').params, ['en_preparacion'], 'se pregunta a la tabla');
     sinCancelar(e);
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('personal cancela plato: la ÚLTIMA línea de un pedido en "listo" con la transición permitida (script 31) -> 200 y el pedido se cancela', async () => {
+  const e = escenario({ pedido: pedidoEn('listo'), linea: lineaEn('listo'), vivas: 0, transicionValida: true });
+  try {
+    const res = await cancelar('mesero', { cuerpo: { motivo: 'El cliente se fue' } });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(res.body.pedido.estado, 'cancelado');
+    assert.deepStrictEqual(e.db.buscar('FROM transiciones_validas').params, ['listo'], 'se pregunta a la tabla');
+    assert.ok(e.db.buscar("UPDATE pedidos SET estado = 'cancelado'"));
+    assert.deepStrictEqual(e.db.buscar('INSERT INTO historial_estados').params, [PEDIDO, USUARIO, 'listo', 'El cliente se fue']);
+    assert.strictEqual(e.db.buscar('UPDATE mesas'), undefined, 'la mesa no se libera');
+
+    await socketNotifier.esperarAvisos();
+    const estado = e.socket.buscar('/internal/order-status');
+    assert.ok(estado, 'order:status del pedido cancelado');
+    assert.strictEqual(estado.cuerpo.estado, 'cancelado');
+    assert.strictEqual(estado.cuerpo.estado_anterior, 'listo');
+    // `origen` en order-status llega con la D-12 (feature/api-comensal-cancela-pedido),
+    // que se apila encima de esta rama y lo verifica allí.
+    assert.strictEqual(e.socket.buscar('/internal/mesa-liberada'), undefined, 'ni mesa-liberada');
+    assert.strictEqual(e.socket.buscar('/internal/item-cancelado').cuerpo.estado_pedido, 'cancelado');
   } finally {
     e.restaurar();
   }

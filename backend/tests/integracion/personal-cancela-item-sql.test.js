@@ -279,20 +279,37 @@ test('d. última línea (pedido en preparación): pedido cancelado, historial co
   assert.strictEqual(mesa[0].estado, 'ocupada', 'la mesa no se libera');
 });
 
-test('d2. última línea con el pedido en "listo": 409 item_no_cancelable (listo -> cancelado no es transición válida) y nada cambia', async (t) => {
+test('d2. última línea con el pedido en "listo" (script 31): el pedido se cancela, lo cocinado es merma UNA vez por insumo y la mesa sigue ocupada', async (t) => {
   if (!hayBase) return t.skip('sin base de datos');
   const idMesa = await mesaAbierta();
   const { idPedido, detalles: [unica] } = await pedidoCon(idMesa, [{ id_plato: plato.id_plato, cantidad: 1, comensal: 'Ana' }]);
   await pedidosService.actualizarEstado(idPedido, 'en_preparacion', null, admin.id);
   await pedidosService.actualizarEstado(idPedido, 'listo', null, admin.id);
-  const antes = await filaPedido(idPedido);
 
-  const res = await cancelar(idPedido, unica.id_detalle);
-  assert.strictEqual(res.status, 409, JSON.stringify(res.body));
-  assert.strictEqual(res.body.motivo, 'item_no_cancelable');
-  assert.strictEqual((await estadoItem(unica.id_detalle)).estado_item, 'pendiente', 'el ROLLBACK deshace la línea');
-  assert.deepStrictEqual(Object.keys(await libroDe(unica.id_detalle)), ['reserva'], 'y su merma');
-  assert.deepStrictEqual(await filaPedido(idPedido), antes);
+  const res = await cancelar(idPedido, unica.id_detalle, { motivo: 'El cliente se fue' });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.strictEqual(res.body.pedido.estado, 'cancelado');
+  assert.strictEqual((await estadoItem(unica.id_detalle)).estado_item, 'cancelado');
+  assert.strictEqual((await filaPedido(idPedido)).estado, 'cancelado');
+
+  const { rows: hist } = await sonda.query(
+    `SELECT id_usuario, estado_anterior, observaciones FROM historial_estados
+      WHERE id_pedido = $1::int AND estado_nuevo = 'cancelado'`,
+    [idPedido]
+  );
+  assert.deepStrictEqual(hist, [{ id_usuario: admin.id, estado_anterior: 'listo', observaciones: 'El cliente se fue' }]);
+
+  // Lo cocinado es merma, UNA sola vez por insumo: sin devolución y sin una
+  // segunda merma del trigger del pedido (tr_devolver_inventario_pedido).
+  const libro = await libroDe(unica.id_detalle);
+  assert.deepStrictEqual(Object.keys(libro).sort(), ['merma', 'reserva'], 'ni devolución');
+  assert.strictEqual(libro.merma.filas, libro.reserva.filas, 'una merma por cada insumo reservado');
+  assert.deepStrictEqual(libro.merma.insumos, libro.reserva.insumos);
+  assert.strictEqual(Number(libro.merma.suma), 0, 'la merma va en 0: el stock no vuelve');
+  assert.deepStrictEqual(libro.merma.usuarios, [admin.id]);
+
+  const { rows: mesa } = await sonda.query('SELECT estado FROM mesas WHERE id_mesa = $1::int', [idMesa]);
+  assert.strictEqual(mesa[0].estado, 'ocupada', 'la mesa no se libera');
 });
 
 test('e. con CUALQUIER pago completado (uno parcial pequeño): 409 pago_registrado y nada cambia', async (t) => {

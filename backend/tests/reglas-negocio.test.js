@@ -181,10 +181,12 @@ for (const estado of ['fallida', 'pendiente', 'reembolsada']) {
 // tumba el proceso en vez de responder.
 // ---------------------------------------------------------------------------
 
-test('cancelar un pedido en listo responde 409 y no tumba el proceso', async () => {
-  const mensaje = 'Transición de estado no autorizada: de "listo" hacia "cancelado"';
+// Desde el script 31 'listo' SÍ puede pasar a 'cancelado'; 'entregado' sigue sin
+// poder (transiciones_validas), así que es el caso que mantiene esta regresión.
+test('cancelar un pedido entregado responde 409 y no tumba el proceso', async () => {
+  const mensaje = 'Transición de estado no autorizada: de "entregado" hacia "cancelado"';
   const db = instalarFakeDb((sql) => {
-    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'listo' }] };
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'entregado' }] };
     if (sql.includes('UPDATE pedidos SET estado')) {
       const err = new Error(mensaje);
       err.code = 'P0001';

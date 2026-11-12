@@ -47,8 +47,15 @@ const cuenta = (id, saldo, extra = {}) => ({
  * Backend simulado. `cobro(body, n)` responde cada POST /transacciones/mesa
  * (n = número de llamada). Devuelve el espía y la lista de cuerpos enviados.
  */
-function backend({ cobro = () => json({}, 201) } = {}) {
+const DIA_VACIO = { desde: '2026-11-11', hasta: '2026-11-11', total: 0, cantidad: 0, transacciones: [] }
+
+/**
+ * `dia(n)`: lo que responde GET /transacciones?desde=hoy en la llamada n (o un
+ * objeto fijo). `saldoMesa1`: para probar saldos que no son múltiplos de 1.000.
+ */
+function backend({ cobro = () => json({}, 201), dia = DIA_VACIO, saldoMesa1 = 60000 } = {}) {
   const cobros = []
+  const consultasDia = []
   const spy = vi.spyOn(global, 'fetch').mockImplementation(async (url, config = {}) => {
     const metodo = config.method || 'GET'
     if (url.includes('/transacciones/mesa') && metodo === 'POST') {
@@ -56,8 +63,13 @@ function backend({ cobro = () => json({}, 201) } = {}) {
       cobros.push(body)
       return cobro(body, cobros.length)
     }
+    if (/\/transacciones\?desde=hoy$/.test(url) && metodo === 'GET') {
+      consultasDia.push(url)
+      const r = typeof dia === 'function' ? dia(consultasDia.length, cobros.length) : dia
+      return r instanceof Error ? Promise.reject(r) : json(r)
+    }
     if (url.includes('/transacciones')) throw new Error(`no debería llamar a ${url}`)
-    if (url.includes('/mesas/1/cuenta')) return json(cuenta(1, 60000))
+    if (url.includes('/mesas/1/cuenta')) return json(cuenta(1, saldoMesa1))
     if (url.includes('/mesas/2/cuenta')) return json(cuenta(2, 20000))
     if (url.includes('/mesas')) return json({ mesas: MESAS })
     const ped = url.match(/\/pedidos\/(\d+)$/)
@@ -66,8 +78,13 @@ function backend({ cobro = () => json({}, 201) } = {}) {
     }
     return json({})
   })
-  return { spy, cobros }
+  return { spy, cobros, consultasDia }
 }
+
+const fila = (id, mesa, monto, ref, fecha = '2026-11-11T20:11:00.000Z') => ({
+  id_transaccion: id, id_pedido: id * 10, codigo_pedido: `PED-${id}`, id_mesa: mesa, numero_mesa: mesa,
+  monto, metodo_pago: 'efectivo', comensal: null, fecha, referencia_pago: ref,
+})
 
 function montar(ruta = '/caja') {
   render(
@@ -254,6 +271,106 @@ describe('Caja: cobro de mesa (POST /transacciones/mesa)', () => {
     backend()
     montar('/caja?mesa=2')
     await waitFor(() => expect(screen.getByText(/COBRAR \/ MESA 2/)).toBeInTheDocument())
+  })
+})
+
+describe('Caja: «Recaudado hoy» e Historial salen del backend (GET /transacciones?desde=hoy)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.clear()
+    sesionComo('cajero')
+  })
+
+  const DIA_12000 = {
+    desde: '2026-11-11', hasta: '2026-11-11', total: 12000, cantidad: 3,
+    transacciones: [
+      fila(3, 4, 6000, 'caja:bbb', '2026-11-11T20:11:17.767Z'),
+      fila(2, 4, 3000, 'caja:bbb', '2026-11-11T20:11:17.767Z'),
+      fila(1, 2, 3000, 'caja:aaa', '2026-11-11T20:11:14.981Z'),
+    ],
+  }
+
+  it('al abrir la Caja (otra pestaña, otro equipo, otro cajero) muestra lo cobrado hoy, no $0', async () => {
+    backend({ dia: DIA_12000 })
+    montar()
+    await waitFor(() => expect(screen.getByTestId('recaudado-hoy')).toHaveTextContent(/12\.000 RECAUDADO HOY/))
+    expect(screen.getByRole('button', { name: /HISTORIAL DE PAGOS/ })).toHaveTextContent('2')
+  })
+
+  it('el Historial agrupa un cobro repartido en una fila y su total coincide con «Recaudado hoy»', async () => {
+    backend({ dia: DIA_12000 })
+    montar()
+    await waitFor(() => expect(screen.getByTestId('recaudado-hoy')).toHaveTextContent(/12\.000/))
+    fireEvent.click(screen.getByRole('button', { name: /HISTORIAL DE PAGOS/ }))
+    const filas = screen.getAllByRole('row').slice(1, -1).map((r) => r.textContent.replace(/\s+/g, ' '))
+    expect(filas).toHaveLength(2)
+    expect(filas[0]).toMatch(/TRX-2 · TRX-3.*15:11.*Mesa 4.*9\.000/)
+    expect(filas[1]).toMatch(/TRX-1.*15:11.*Mesa 2.*3\.000/)
+    expect(screen.getByTestId('total-historial')).toHaveTextContent(/12\.000/)
+  })
+
+  it('después de cobrar vuelve a pedir el día: «Recaudado hoy» sube exactamente lo cobrado', async () => {
+    const { consultasDia } = backend({
+      dia: (_n, nCobros) => (nCobros === 0 ? DIA_12000 : {
+        ...DIA_12000, total: 72000, cantidad: 5,
+        transacciones: [fila(5, 1, 30000, 'caja:ccc', '2026-11-11T20:20:00.000Z'), fila(4, 1, 30000, 'caja:ccc', '2026-11-11T20:20:00.000Z'), ...DIA_12000.transacciones],
+      }),
+      cobro: () => json({ duplicado: false, saldo_restante: 0, mesa_liberada: true, pagados: [10, 11], transacciones: [{ id_transaccion: 4, id_pedido: 10, monto: 30000, comensal: null }, { id_transaccion: 5, id_pedido: 11, monto: 30000, comensal: null }] }, 201),
+    })
+    montar()
+    await waitFor(() => expect(screen.getByTestId('recaudado-hoy')).toHaveTextContent(/12\.000/))
+    await elegirMesa1YEfectivo()
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(screen.getByTestId('recaudado-hoy')).toHaveTextContent(/72\.000 RECAUDADO HOY/))
+    expect(consultasDia.length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByRole('button', { name: /HISTORIAL DE PAGOS/ })).toHaveTextContent('3')
+  })
+
+  it('si el backend no responde, «Recaudado hoy» dice «—» (no un $0 engañoso) y el Historial lo explica', async () => {
+    backend({ dia: Object.assign(new TypeError('Failed to fetch')) })
+    montar()
+    await waitFor(() => expect(screen.getByTestId('recaudado-hoy')).toHaveTextContent(/^— RECAUDADO HOY$/))
+    fireEvent.click(screen.getByRole('button', { name: /HISTORIAL DE PAGOS/ }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/No se pudo cargar el historial de hoy/)
+  })
+
+  it('ya no guarda nada en sessionStorage', async () => {
+    sessionStorage.setItem('smartdining_caja_history', JSON.stringify([{ monto: 999 }]))
+    backend({ dia: DIA_12000 })
+    montar()
+    await waitFor(() => expect(screen.getByTestId('recaudado-hoy')).toHaveTextContent(/12\.000/))
+    expect(sessionStorage.getItem('smartdining_caja_history')).toBeNull()
+  })
+})
+
+describe('Caja: efectivo con un total que no es múltiplo de 1.000', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.clear()
+    sesionComo('cajero')
+  })
+
+  it('saldo 34.500: el campo acepta 40.000 (antes step=1000 y min=total lo rechazaban en silencio) y se cobra', async () => {
+    const { cobros } = backend({ saldoMesa1: 34500, cobro: () => json({ duplicado: false, saldo_restante: 0, mesa_liberada: true, pagados: [], transacciones: [] }, 201) })
+    montar()
+    await elegirMesa1YEfectivo('40000')
+    expect(screen.getByLabelText(/efectivo recibido/i).checkValidity()).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(cobros).toHaveLength(1))
+    expect(cobros[0].monto).toBe(34500)
+  })
+
+  it('con propina (60.000 + 6.000) acepta 70.000 y el monto enviado sigue sin propina', async () => {
+    const { cobros } = backend({ cobro: () => json({ duplicado: false, saldo_restante: 0, mesa_liberada: true, pagados: [], transacciones: [] }, 201) })
+    montar()
+    await elegirMesa1YEfectivo('70000')
+    fireEvent.click(screen.getByRole('checkbox'))
+    const input = screen.getByLabelText(/efectivo recibido/i)
+    fireEvent.change(input, { target: { value: '66500' } })
+    expect(input.checkValidity()).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(cobros).toHaveLength(1))
+    expect(cobros[0].monto).toBe(60000)
   })
 })
 

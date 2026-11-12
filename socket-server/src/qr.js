@@ -118,7 +118,14 @@ function crearServicioQr({
     return (emitidoSeg + 1) * 1000 <= desde;
   }
 
-  return { generar, validar, revocarMesa, revocadaDespuesDe };
+  /** ms de la última liberación de la mesa (la marca de revocarMesa), o null si nunca se liberó. */
+  async function ultimaLiberacion(idMesa) {
+    return (await revocaciones.obtener(idMesa)) || null;
+  }
+
+  return {
+    generar, validar, revocarMesa, revocadaDespuesDe, ultimaLiberacion,
+  };
 }
 
 /** Deriva una clave de firma propia si no se configuró QR_SECRET. */

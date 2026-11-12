@@ -13,8 +13,10 @@ const assert = require('node:assert');
  * MESA_NUMERO_COBRO (904 por omisión), marcadas en `ubicacion`. El `after` lo
  * deja todo como estaba aunque una prueba falle:
  *   1. borra las transacciones de esas mesas y su rastro en auditoria_cambios,
- *      identificado por el id_transaccion del JSON (registro_id, para esta
- *      tabla, es el id_pedido: ver 08_triggers.sql);
+ *      identificado por el id_transaccion del JSON. Desde el script 30
+ *      (30_fix_auditoria_registro_id.sql) registro_id ya es el id_transaccion,
+ *      pero las filas auditadas antes conservan el id_pedido; el JSON vale
+ *      para las dos;
  *   2. cierra la reserva de inventario de cada detalle con
  *      fn_cerrar_reserva_detalle(id, false), que DEVUELVE el stock (y no hace
  *      nada si ya estaba cerrada), sea cual sea el estado del pedido;

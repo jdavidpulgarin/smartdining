@@ -541,10 +541,10 @@ async function actualizarEstado(req, res, next) {
 }
 
 /**
- * Atajo de PATCH /:id/estado con estado = 'cancelado'. Cancelar solo es legal
- * desde 'recibido' o 'en_preparacion' (transiciones_validas); desde 'listo' o
- * 'entregado' el trigger responde 409, así que hay que propagar next para que
- * ese error llegue al manejador central.
+ * Atajo de PATCH /:id/estado con estado = 'cancelado'. Cancelar es legal desde
+ * 'recibido', 'en_preparacion' o 'listo' (transiciones_validas, script 31); desde
+ * 'entregado' o 'pagado' el trigger responde 409, así que hay que propagar next
+ * para que ese error llegue al manejador central.
  */
 async function cancelar(req, res, next) {
   // D-12: una sesión de COMENSAL va por su propio camino (abajo). El del

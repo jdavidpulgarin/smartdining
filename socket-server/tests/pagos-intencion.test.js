@@ -216,6 +216,15 @@ test('quien paga es el alias del JWT; `comensal` en el cuerpo es opcional', asyn
   assert.strictEqual((await r.json()).monto_en_centavos, 5_000_000, 'lo propio de Beto');
 });
 
+test('un `comensal` distinto del JWT es 403, aunque esté mal formado (nunca 400)', async (t) => {
+  const { sentar, pedir } = await escenario(t);
+  const ana = await sentar('Ana');
+  for (const otro of ['Beto', '', 123, null, { a: 1 }]) {
+    const r = await pedir(ana, cuerpo('total', { comensal: otro }));
+    assert.deepStrictEqual([r.status, (await r.json()).codigo], [403, 'NO_AUTORIZADO'], JSON.stringify(otro));
+  }
+});
+
 test('límite: 5 intenciones por minuto por comensal', async (t) => {
   const { sentar, pedir } = await escenario(t);
   const ana = await sentar('Ana');
