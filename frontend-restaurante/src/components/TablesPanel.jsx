@@ -73,9 +73,9 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
     )
   }
 
-  const handleUpdateTokenAction = async (idMesa) => {
+  const handleUpdateTokenAction = async (idMesa, opciones) => {
     if (regenerarQr) {
-      return await regenerarQr(idMesa)
+      return await regenerarQr(idMesa, undefined, opciones)
     }
   }
 

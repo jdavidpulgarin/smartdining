@@ -447,9 +447,12 @@ export const mesasApi = {
    * Rota el QR de una mesa abierta: POST /api/mesas/:id/rotar-qr
    * Responde { url, expira_en, mesa }: el token solo viaja dentro de url.
    */
-  async rotarQr(id) {
+  async rotarQr(id, { soloSiVacia = false } = {}) {
+    // solo_si_vacia: la rotación automática del modal pide que el backend la
+    // rechace (409 mesa_con_comensales) si la mesa ya tiene comensales.
     return apiFetch(`/mesas/${id}/rotar-qr`, {
       method: 'POST',
+      ...(soloSiVacia ? { body: JSON.stringify({ solo_si_vacia: true }) } : {}),
     })
   },
 
