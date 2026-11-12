@@ -284,6 +284,7 @@ test('personal cancela plato: misma respuesta 200 que el comensal; aviso con ori
     assert.ok(estado, 'pedido cancelado: también order-status');
     assert.strictEqual(estado.cuerpo.estado, 'cancelado');
     assert.strictEqual(estado.cuerpo.estado_anterior, 'en_preparacion');
+    assert.strictEqual(estado.cuerpo.origen, 'personal', 'D-13: el personal canceló la última línea');
   } finally {
     e.restaurar();
   }

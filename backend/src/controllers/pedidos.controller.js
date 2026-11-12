@@ -510,8 +510,13 @@ async function actualizarEstado(req, res, next) {
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
     // actualizarEstado devuelve el pedido ya con estado_anterior, que es lo que
-    // espera el payload de order:status.
-    socketNotifier.notificarCambioEstado(pedido);
+    // espera el payload de order:status. `origen` solo si se llegó por
+    // POST /:id/cancelar del personal y el pedido quedó cancelado; un
+    // PATCH /:id/estado normal (mesero, caja) no lo lleva.
+    const origen = res.locals.origenCancelacion;
+    socketNotifier.notificarCambioEstado(
+      origen && pedido.estado === 'cancelado' ? { ...pedido, origen } : pedido
+    );
 
     // El cierre del pedido pudo liberar la mesa (ya ocurrió en la transacción):
     // se avisa para que el socket-server cierre la sesión de esa mesa.
@@ -546,6 +551,8 @@ async function cancelar(req, res, next) {
   // personal sigue siendo exactamente el de siempre.
   if (esComensal(req)) return cancelarPedidoComensal(req, res, next);
   req.body = { ...req.body, estado: 'cancelado' };
+  // El order-status de esta cancelación lleva origen 'personal'.
+  res.locals.origenCancelacion = 'personal';
   return actualizarEstado(req, res, next);
 }
 
@@ -591,7 +598,7 @@ async function cancelarPedidoComensal(req, res, next) {
 
     const { pedido, estadoAnterior } = r;
     socketNotifier.encadenarAvisos([
-      () => socketNotifier.notificarCambioEstado({ ...pedido, estado_anterior: estadoAnterior }),
+      () => socketNotifier.notificarCambioEstado({ ...pedido, estado_anterior: estadoAnterior, origen: 'comensal' }),
     ]);
 
     return res.json({
@@ -707,7 +714,11 @@ async function cancelarItem(req, res, next) {
       origen: delComensal ? 'comensal' : 'personal',
     })];
     if (pedidoCancelado) {
-      pasos.push(() => socketNotifier.notificarCambioEstado({ ...pedido, estado_anterior: estadoAnterior }));
+      pasos.push(() => socketNotifier.notificarCambioEstado({
+        ...pedido,
+        estado_anterior: estadoAnterior,
+        origen: delComensal ? 'comensal' : 'personal',
+      }));
     }
     socketNotifier.encadenarAvisos(pasos);
 

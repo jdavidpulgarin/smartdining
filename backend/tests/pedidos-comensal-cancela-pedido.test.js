@@ -112,6 +112,7 @@ test('D-12: el comensal dueño de todas las líneas vivas cancela el pedido -> 2
     const estado = e.socket.buscar('/internal/order-status').cuerpo;
     assert.strictEqual(estado.estado, 'cancelado');
     assert.strictEqual(estado.estado_anterior, 'recibido');
+    assert.strictEqual(estado.origen, 'comensal', 'D-12: lo canceló el comensal');
   } finally {
     e.restaurar();
   }
@@ -136,6 +137,7 @@ test('D-12: el personal cancela por la misma ruta como siempre (cambio de estado
     assert.ok(db.buscar('UPDATE mesas SET estado = $1, token_qr = NULL'), 'la mesa se libera, como hoy');
     await socketNotifier.esperarAvisos();
     assert.ok(socket.buscar('/internal/mesa-liberada'));
+    assert.strictEqual(socket.buscar('/internal/order-status').cuerpo.origen, 'personal', 'la cancelación del personal');
   } finally {
     socket.restaurar();
     db.restaurar();
