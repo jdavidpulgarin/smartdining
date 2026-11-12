@@ -14,13 +14,22 @@ const MAX_COMENSAL = 40;
 const MAX_CODIGO = 40;
 const MAX_TOTAL = 99999999.99;
 
-// El comensal solo puede quitar líneas de un pedido 'recibido' (#180): el
-// pedido sigue 'recibido' o, si era la última línea viva, queda 'cancelado'.
-const ESTADOS_TRAS_QUITAR = ['recibido', 'cancelado'];
+// Estado del pedido DESPUÉS de quitar la línea: los estados en que el backend
+// deja cancelar un plato, más 'cancelado' si era la última línea viva. El
+// comensal solo puede con el pedido 'recibido' (#180); el personal (D-13),
+// también con el pedido ya en cocina ('en_preparacion' o 'listo'). Nunca
+// 'entregado' ni 'pagado': el backend no deja cancelar ahí.
+const ESTADOS_TRAS_QUITAR = ['recibido', 'en_preparacion', 'listo', 'cancelado'];
+
+// Quién quitó el plato: el comensal desde su sesión de QR (#180) o el personal
+// desde el panel (D-13). Opcional: sin él es 'comensal', el único origen que
+// había antes de este campo.
+const ORIGENES = ['comensal', 'personal'];
+const ORIGEN_POR_DEFECTO = 'comensal';
 
 const CAMPOS = [
   'id_pedido', 'id_mesa', 'codigo_pedido', 'id_detalle', 'id_plato',
-  'nombre', 'comensal', 'total', 'estado_pedido', 'eventId',
+  'nombre', 'comensal', 'total', 'estado_pedido', 'origen', 'eventId',
 ];
 
 const esId = (v) => Number.isSafeInteger(v) && v > 0 && v <= MAX_INT_PG;
@@ -45,12 +54,16 @@ function validar(c) {
   if (!esTextoONulo(c.comensal, MAX_COMENSAL)) throw invalido(`comensal debe ser null o un texto de 1 a ${MAX_COMENSAL} caracteres`);
   if (!esTotal(c.total)) throw invalido(`total debe ser un número entre 0 y ${MAX_TOTAL}`);
   if (!ESTADOS_TRAS_QUITAR.includes(c.estado_pedido)) throw invalido(`estado_pedido debe ser uno de: ${ESTADOS_TRAS_QUITAR.join(', ')}`);
+  // Opcional quiere decir que puede NO venir; si viene, tiene que ser válido
+  // (un null o un texto cualquiera es un error del backend, no 'comensal').
+  if (c.origen !== undefined && !ORIGENES.includes(c.origen)) throw invalido(`origen debe ser uno de: ${ORIGENES.join(', ')} (o no venir)`);
   if (!esEventIdValido(c.eventId)) throw invalido('eventId debe ser un UUID');
 }
 
 /**
- * POST /internal/item-cancelado (EVENTS.md §5.6) — un comensal quitó UNA
- * línea de su pedido (J-14, #180). Lo llama el backend después del COMMIT.
+ * POST /internal/item-cancelado (EVENTS.md §5.6) — se canceló UNA línea de un
+ * pedido: la quitó el comensal (J-14, #180) o el personal (D-13). Lo llama el
+ * backend después del COMMIT; `origen` dice quién fue.
  *
  * Emite item:cancelado a room:kds (la cocina tacha la línea), room:admin (la
  * Caja ve el total nuevo) y room:mesa-N (los demás comensales). Si era la
@@ -80,6 +93,7 @@ async function rutaItemCancelado(req, res, ctx) {
       comensal: c.comensal,
       total: c.total,
       estado_pedido: c.estado_pedido,
+      origen: c.origen ?? ORIGEN_POR_DEFECTO,
       emitidoEn: new Date().toISOString(),
     });
   } catch (err) {

@@ -14,7 +14,7 @@ const RUTA = '/internal/item-cancelado';
 const EVENTO = 'item:cancelado';
 const CAMPOS_EVENTO = [
   'codigo_pedido', 'comensal', 'emitidoEn', 'estado_pedido', 'eventId',
-  'id_detalle', 'id_mesa', 'id_pedido', 'nombre', 'total',
+  'id_detalle', 'id_mesa', 'id_pedido', 'nombre', 'origen', 'total',
 ];
 
 const avisar = (s, cuerpo, clave = CLAVE_INTERNA) => fetch(`${s.url}${RUTA}`, {
@@ -99,7 +99,8 @@ for (const almacen of Object.keys(ALMACENES)) {
       assert.deepStrictEqual(Object.keys(ev).sort(), CAMPOS_EVENTO);
       const { emitidoEn, ...resto } = ev;
       const { id_plato, ...esperado } = cuerpo;
-      assert.deepStrictEqual(resto, esperado);
+      // Sin origen en el cuerpo (como antes del campo): sale 'comensal'.
+      assert.deepStrictEqual(resto, { ...esperado, origen: 'comensal' });
       assert.ok(!Number.isNaN(Date.parse(emitidoEn)));
     }
     assert.strictEqual(await nada, null, 'la mesa 6 no lo recibe');
@@ -213,7 +214,10 @@ const INVALIDOS = {
   nombre: [SIN, null, '', '   ', 7, 'n'.repeat(121)],
   comensal: [SIN, '', '  ', 5, 'c'.repeat(41)],
   total: [SIN, null, '18000', '18000.00', -1, 100000000, Number.NaN],
-  estado_pedido: [SIN, null, '', 'pagado', 'en_preparacion', 'RECIBIDO'],
+  // entregado y pagado no: el backend no deja cancelar un plato ahí.
+  estado_pedido: [SIN, null, '', 'entregado', 'pagado', 'RECIBIDO', 'listo '],
+  // Opcional (no hay caso SIN), pero si viene tiene que ser uno de los dos.
+  origen: [null, '', 'Comensal', 'cocina', 'sistema', 5],
   eventId: [SIN, null, '', 'no-es-uuid', 123],
 };
 
@@ -263,4 +267,34 @@ test('cuerpo que no es un objeto o JSON malformado: 400', async (t) => {
     const r = await avisar(e.s, cuerpo);
     assert.strictEqual(r.status, 400, cuerpo);
   }
+});
+
+test('origen: sin él sale comensal; "comensal" y "personal" se reenvían tal cual', async (t) => {
+  const e = await escenario(t, 'memoria');
+  for (const [enviado, esperado] of [[undefined, 'comensal'], ['comensal', 'comensal'], ['personal', 'personal']]) {
+    const cuerpo = aviso();
+    if (enviado !== undefined) cuerpo.origen = enviado;
+    const llega = esperar(e.cajero, EVENTO, 1000);
+    assert.strictEqual((await avisar(e.s, cuerpo)).status, 200, `origen ${enviado}`);
+    assert.strictEqual((await llega).origen, esperado, `origen ${enviado}`);
+  }
+});
+
+test('estado_pedido: recibido, en_preparacion, listo y cancelado (D-13: el personal cancela con el pedido en cocina)', async (t) => {
+  const e = await escenario(t, 'memoria');
+  for (const estado_pedido of ['recibido', 'en_preparacion', 'listo', 'cancelado']) {
+    const llega = esperar(e.cocina, EVENTO, 1000);
+    const r = await avisar(e.s, aviso({ estado_pedido, origen: 'personal', comensal: null }));
+    assert.strictEqual(r.status, 200, estado_pedido);
+    const ev = await llega;
+    assert.deepStrictEqual([ev.estado_pedido, ev.origen], [estado_pedido, 'personal']);
+  }
+});
+
+test('el cuerpo real del #180 (con origen) pasa: antes de este campo daba 400', async (t) => {
+  const e = await escenario(t, 'memoria');
+  const llega = esperar(e.comensal, EVENTO, 1000);
+  const r = await avisar(e.s, aviso({ origen: 'comensal' }));
+  assert.deepStrictEqual([r.status, await r.json()], [200, { ok: true, duplicado: false }]);
+  assert.strictEqual((await llega).origen, 'comensal');
 });
