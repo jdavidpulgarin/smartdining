@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   crearPedido,
   listarPedidosMesa,
+  cancelarItem,
   NOTAS_MAX_SERVIDOR,
   NOTAS_GENERALES_MAX_SERVIDOR,
 } from './pedidoService';
@@ -359,5 +360,48 @@ describe('pedidoService (H-05, H-06, J-05)', () => {
       motivo: 'sin_stock',
       faltantes: [],
     });
+  });
+
+  it('J-14 cancelarItem: envia POST sin cuerpo y con JWT en Authorization', async () => {
+    globalThis.sessionStorage.setItem(
+      CLAVE_SESION,
+      JSON.stringify({ token: 'jwt.comensal.ana', comensal: 'Ana' })
+    );
+
+    const respuesta200 = {
+      pedido: {
+        id_pedido: 87,
+        codigo_pedido: 'PED-87',
+        estado: 'recibido',
+        total: 18000,
+        items: [
+          {
+            id_detalle: 210,
+            plato_nombre: 'Bandeja paisa',
+            estado_item: 'cancelado',
+            comensal: 'Ana',
+            ingredientes: [],
+          },
+        ],
+      },
+    };
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue(respuesta200);
+
+    const res = await cancelarItem(87, 210);
+
+    expect(spyPedirJson).toHaveBeenCalledTimes(1);
+    const [ruta, opciones] = spyPedirJson.mock.calls[0];
+    expect(ruta).toBe('/pedidos/87/items/210/cancelar');
+    expect(opciones.method).toBe('POST');
+    expect(opciones.token).toBe('jwt.comensal.ana');
+    expect(opciones.body).toBeUndefined();
+    expect(res).toEqual(respuesta200);
+  });
+
+  it('J-14 cancelarItem: rechaza identificadores invalidos', async () => {
+    await expect(cancelarItem(0, 10)).rejects.toThrow(/inválidos/);
+    await expect(cancelarItem(10, -1)).rejects.toThrow(/inválidos/);
   });
 });

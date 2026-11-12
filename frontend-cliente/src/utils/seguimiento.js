@@ -1,6 +1,9 @@
 /**
  * Utilidades puras para el estado, formato y seguimiento del pedido.
  */
+import { claveAlias } from './apodo';
+
+export { claveAlias };
 
 const ESTADOS_INFO = {
   recibido: {
@@ -144,7 +147,7 @@ export function infoEstado(estado, numeroMesa = null) {
 export function normalizarPedido(pedido, miAlias = null) {
   if (!pedido || typeof pedido !== 'object') return null;
 
-  const aliasNormalizado = String(miAlias || '').trim().toLowerCase();
+  const miClave = claveAlias(miAlias);
 
   const rawItems = Array.isArray(pedido.detalles)
     ? pedido.detalles
@@ -162,19 +165,25 @@ export function normalizarPedido(pedido, miAlias = null) {
       item.subtotal ?? (precioUnitario * cantidad)
     );
     const comensal = item.comensal ? String(item.comensal).trim() : null;
+    const estadoItem = item.estado_item
+      ? String(item.estado_item).trim().toLowerCase()
+      : null;
+    const claveComensal = claveAlias(comensal);
     const esMio = Boolean(
-      aliasNormalizado &&
-        comensal &&
-        comensal.toLowerCase() === aliasNormalizado
+      miClave &&
+        claveComensal &&
+        claveComensal === miClave
     );
 
     return {
       id_detalle: item.id_detalle ?? item.id ?? idx,
+      id_plato: item.id_plato ?? null,
       plato_nombre: nombre,
       nombre,
       cantidad,
       precio_unitario: precioUnitario,
       subtotal,
+      estado_item: estadoItem,
       notas: item.notas || null,
       comensal,
       esMio,
@@ -182,17 +191,17 @@ export function normalizarPedido(pedido, miAlias = null) {
     };
   });
 
-  const pedidoComensal = pedido.comensal
-    ? String(pedido.comensal).trim().toLowerCase()
-    : null;
+  const clavePedidoComensal = claveAlias(pedido.comensal);
   const algunItemEsMio = detalles.some((d) => d.esMio);
   const raizEsMio = Boolean(
-    (aliasNormalizado && pedidoComensal && pedidoComensal === aliasNormalizado) ||
+    (miClave && clavePedidoComensal && clavePedidoComensal === miClave) ||
       pedido.esMio === true
   );
   const esMio = algunItemEsMio || raizEsMio;
 
-  const totalCalculado = detalles.reduce((acc, d) => acc + d.subtotal, 0);
+  const totalCalculado = detalles
+    .filter((d) => d.estado_item !== 'cancelado')
+    .reduce((acc, d) => acc + d.subtotal, 0);
   const total = Number(pedido.total ?? totalCalculado);
 
   const id_pedido = pedido.id_pedido ?? pedido.id ?? null;
@@ -252,16 +261,16 @@ export function separarPedidos(pedidos, miAlias = null) {
     return { misPedidos: [], otrosPedidos: [] };
   }
 
-  const aliasNorm = String(miAlias || '').trim().toLowerCase();
+  const miClave = claveAlias(miAlias);
   const misPedidos = [];
   const otrosPedidos = [];
 
   for (const p of pedidos) {
-    const esMio = aliasNorm
+    const esMio = miClave
       ? Boolean(
           p.esMio ||
-          p.detalles?.some((d) => d.comensal?.toLowerCase() === aliasNorm) ||
-          p.comensal?.toLowerCase() === aliasNorm
+          p.detalles?.some((d) => claveAlias(d.comensal) === miClave) ||
+          claveAlias(p.comensal) === miClave
         )
       : Boolean(p.esMio);
 
@@ -428,12 +437,184 @@ export function resumenPedidosActivos(mios) {
   };
 }
 
+/**
+ * Indica si el comensal actual puede quitar una línea de un pedido (J-14).
+ *
+ * Solo es true cuando el pedido sigue en `recibido`, la línea está `pendiente`
+ * y la clave normalizada del comensal de la línea coincide con `yo` (`null` → `false`).
+ *
+ * @param {object|null|undefined} item - Línea del pedido
+ * @param {{ yo?: string|null, estadoPedido?: string|null }} [contexto]
+ * @returns {boolean}
+ */
+export function puedeQuitar(item, { yo, estadoPedido } = {}) {
+  if (!item || typeof item !== 'object') return false;
+  if (String(estadoPedido || '').trim().toLowerCase() !== 'recibido') {
+    return false;
+  }
+  if (String(item.estado_item || '').trim().toLowerCase() !== 'pendiente') {
+    return false;
+  }
+  const claveItem = claveAlias(item.comensal);
+  const claveYo = claveAlias(yo);
+  if (!claveItem || !claveYo) return false;
+  return claveItem === claveYo;
+}
+
+/**
+ * Traduce un error de POST /pedidos/:id/items/:id_detalle/cancelar a la acción de UI (J-14).
+ *
+ * @param {unknown} error
+ * @returns {{ tipo: string, mensaje: string|null, refrescar: boolean }}
+ */
+export function accionErrorQuitar(error) {
+  const motivo = String(error?.motivo ?? error?.data?.motivo ?? '')
+    .trim()
+    .toLowerCase();
+  const status = Number(error?.status ?? 0);
+
+  if (motivo === 'item_ya_cancelado') {
+    return { tipo: 'silencioso', mensaje: null, refrescar: true };
+  }
+  if (motivo === 'item_en_preparacion') {
+    return {
+      tipo: 'en_preparacion',
+      mensaje: 'Cocina ya empezó a preparar este plato.',
+      refrescar: true,
+    };
+  }
+  if (motivo === 'pago_registrado') {
+    return {
+      tipo: 'pago_registrado',
+      mensaje: 'Ya hay un pago registrado; pídele ayuda al mesero.',
+      refrescar: false,
+    };
+  }
+  if (
+    motivo === 'no_es_tuyo' ||
+    motivo === 'no_encontrado' ||
+    status === 403 ||
+    status === 404
+  ) {
+    return {
+      tipo: 'no_disponible',
+      mensaje: 'No pudimos quitar este plato.',
+      refrescar: true,
+    };
+  }
+
+  return {
+    tipo: 'error',
+    mensaje: 'No pudimos quitar el plato. Inténtalo de nuevo.',
+    refrescar: false,
+  };
+}
+
+/**
+ * Aplica de forma idempotente un evento `item:cancelado` sobre la lista de pedidos (J-14).
+ * Marca la línea como `cancelado` y actualiza el total y estado del pedido.
+ *
+ * @param {Array<object>} pedidos
+ * @param {object} evento - `{ id_pedido, id_detalle, total, estado_pedido, emitidoEn }`
+ * @returns {Array<object>}
+ */
+export function aplicarItemCancelado(pedidos, evento) {
+  if (!Array.isArray(pedidos)) return [];
+  if (!evento || evento.id_pedido == null || evento.id_detalle == null) {
+    return pedidos;
+  }
+
+  const idPedidoBuscado = String(evento.id_pedido);
+  const idDetalleBuscado = String(evento.id_detalle);
+
+  return pedidos.map((pedido) => {
+    if (String(pedido.id_pedido) !== idPedidoBuscado) return pedido;
+
+    const rawDetalles = Array.isArray(pedido.detalles)
+      ? pedido.detalles
+      : Array.isArray(pedido.items)
+        ? pedido.items
+        : [];
+
+    const detallesActualizados = rawDetalles.map((detalle) => {
+      if (String(detalle.id_detalle ?? detalle.id) !== idDetalleBuscado) {
+        return detalle;
+      }
+      return {
+        ...detalle,
+        estado_item: 'cancelado',
+      };
+    });
+
+    const estadoEvento = evento.estado_pedido ?? evento.estado;
+    const estadoNuevo = estadoEvento
+      ? String(estadoEvento).trim().toLowerCase()
+      : detallesActualizados.length > 0 &&
+          detallesActualizados.every((d) => d.estado_item === 'cancelado')
+        ? 'cancelado'
+        : pedido.estado;
+
+    const tieneTotalEvento =
+      evento.total != null &&
+      evento.total !== '' &&
+      Number.isFinite(Number(evento.total));
+    const totalNuevo = tieneTotalEvento
+      ? Number(evento.total)
+      : detallesActualizados
+          .filter((d) => d.estado_item !== 'cancelado')
+          .reduce((acc, d) => acc + (Number(d.subtotal) || 0), 0);
+
+    return {
+      ...pedido,
+      estado: estadoNuevo,
+      total: totalNuevo,
+      detalles: detallesActualizados,
+      items: detallesActualizados,
+      ...(evento.emitidoEn ? { actualizado_en: evento.emitidoEn } : {}),
+    };
+  });
+}
+
+/**
+ * Reemplaza en la lista un pedido con la respuesta completa devuelta por la API
+ * (por ejemplo el `pedido` del 200 al cancelar un ítem).
+ *
+ * @param {Array<object>} pedidos
+ * @param {object} pedidoCrudo
+ * @param {string|null} [miAlias]
+ * @returns {Array<object>}
+ */
+export function reemplazarPedido(pedidos, pedidoCrudo, miAlias = null) {
+  if (!Array.isArray(pedidos)) return [];
+  const normalizado = normalizarPedido(pedidoCrudo, miAlias);
+  if (!normalizado || normalizado.id_pedido == null) return pedidos;
+
+  const idBuscado = String(normalizado.id_pedido);
+  const existe = pedidos.some((p) => String(p.id_pedido) === idBuscado);
+  if (!existe) return [normalizado, ...pedidos];
+
+  return pedidos.map((p) => {
+    if (String(p.id_pedido) !== idBuscado) return p;
+    return {
+      ...p,
+      ...normalizado,
+      creado_en: pedidoCrudo.creado_en || p.creado_en,
+      esMio: p.esMio || normalizado.esMio,
+    };
+  });
+}
+
 export default {
   CLAVE_MIS_PEDIDOS_IDS,
   CLAVE_ULTIMO_PEDIDO,
+  claveAlias,
   infoEstado,
   normalizarPedido,
   aplicarCambioEstado,
+  aplicarItemCancelado,
+  reemplazarPedido,
+  puedeQuitar,
+  accionErrorQuitar,
   separarPedidos,
   pedidoPrincipal,
   haceCuanto,

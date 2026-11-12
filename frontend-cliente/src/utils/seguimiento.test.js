@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   aplicarCambioEstado,
+  aplicarItemCancelado,
+  reemplazarPedido,
+  puedeQuitar,
+  accionErrorQuitar,
   haceCuanto,
   infoEstado,
   normalizarPedido,
@@ -299,5 +303,236 @@ describe('resumenPedidosActivos', () => {
     expect(res.cantidad).toBe(0);
     expect(res.estadoPrincipal).toBe('entregado');
     expect(res.tienePedidos).toBe(true);
+  });
+});
+
+describe('puedeQuitar (J-14)', () => {
+  it('devuelve true solo si recibido, pendiente y mismo comensal por clave (Ana vs ana)', () => {
+    expect(
+      puedeQuitar(
+        { id_detalle: 1, comensal: 'Ana', estado_item: 'pendiente', cantidad: 3 },
+        { yo: 'ana', estadoPedido: 'recibido' }
+      )
+    ).toBe(true);
+
+    expect(
+      puedeQuitar(
+        { id_detalle: 2, comensal: 'Ána María', estado_item: 'pendiente' },
+        { yo: 'ana  maria', estadoPedido: 'recibido' }
+      )
+    ).toBe(true);
+  });
+
+  it('devuelve false si el comensal es null, distinto, o estado no permite quitar', () => {
+    expect(
+      puedeQuitar(
+        { id_detalle: 1, comensal: null, estado_item: 'pendiente' },
+        { yo: 'Ana', estadoPedido: 'recibido' }
+      )
+    ).toBe(false);
+
+    expect(
+      puedeQuitar(
+        { id_detalle: 1, comensal: 'Ana', estado_item: 'pendiente' },
+        { yo: null, estadoPedido: 'recibido' }
+      )
+    ).toBe(false);
+
+    expect(
+      puedeQuitar(
+        { id_detalle: 1, comensal: 'Beto', estado_item: 'pendiente' },
+        { yo: 'Ana', estadoPedido: 'recibido' }
+      )
+    ).toBe(false);
+
+    expect(
+      puedeQuitar(
+        { id_detalle: 1, comensal: 'Ana', estado_item: 'cancelado' },
+        { yo: 'Ana', estadoPedido: 'recibido' }
+      )
+    ).toBe(false);
+
+    expect(
+      puedeQuitar(
+        { id_detalle: 1, comensal: 'Ana', estado_item: 'pendiente' },
+        { yo: 'Ana', estadoPedido: 'en_preparacion' }
+      )
+    ).toBe(false);
+  });
+});
+
+describe('accionErrorQuitar (J-14)', () => {
+  it('mapea los motivos del contrato y errores sin red', () => {
+    expect(accionErrorQuitar({ status: 409, motivo: 'item_ya_cancelado' })).toEqual({
+      tipo: 'silencioso',
+      mensaje: null,
+      refrescar: true,
+    });
+
+    expect(accionErrorQuitar({ status: 409, motivo: 'item_en_preparacion' })).toEqual({
+      tipo: 'en_preparacion',
+      mensaje: 'Cocina ya empezó a preparar este plato.',
+      refrescar: true,
+    });
+
+    expect(accionErrorQuitar({ status: 409, motivo: 'pago_registrado' })).toEqual({
+      tipo: 'pago_registrado',
+      mensaje: 'Ya hay un pago registrado; pídele ayuda al mesero.',
+      refrescar: false,
+    });
+
+    expect(accionErrorQuitar({ status: 403, motivo: 'no_es_tuyo' })).toEqual({
+      tipo: 'no_disponible',
+      mensaje: 'No pudimos quitar este plato.',
+      refrescar: true,
+    });
+
+    expect(accionErrorQuitar({ status: 404, motivo: 'no_encontrado' })).toEqual({
+      tipo: 'no_disponible',
+      mensaje: 'No pudimos quitar este plato.',
+      refrescar: true,
+    });
+
+    expect(accionErrorQuitar({ status: 0, motivo: 'sin_conexion' })).toEqual({
+      tipo: 'error',
+      mensaje: 'No pudimos quitar el plato. Inténtalo de nuevo.',
+      refrescar: false,
+    });
+
+    expect(accionErrorQuitar(new Error('Fallo inesperado'))).toEqual({
+      tipo: 'error',
+      mensaje: 'No pudimos quitar el plato. Inténtalo de nuevo.',
+      refrescar: false,
+    });
+  });
+});
+
+describe('aplicarItemCancelado y reemplazarPedido (J-14)', () => {
+  it('marca una linea con cantidad > 1 como cancelada, actualiza total e idempotencia', () => {
+    const inicial = [
+      {
+        id_pedido: 87,
+        estado: 'recibido',
+        total: 54000,
+        detalles: [
+          {
+            id_detalle: 210,
+            plato_nombre: 'Bandeja paisa',
+            cantidad: 2,
+            subtotal: 36000,
+            estado_item: 'pendiente',
+            comensal: 'Ana',
+          },
+          {
+            id_detalle: 211,
+            plato_nombre: 'Bowl Personalizado',
+            cantidad: 1,
+            subtotal: 18000,
+            estado_item: 'pendiente',
+            comensal: 'Ana',
+          },
+        ],
+      },
+    ];
+
+    const evento = {
+      id_pedido: 87,
+      id_detalle: 210,
+      total: 18000,
+      estado_pedido: 'recibido',
+      emitidoEn: '2026-11-11T20:00:00.000Z',
+    };
+
+    const trasPrimero = aplicarItemCancelado(inicial, evento);
+    expect(trasPrimero[0].estado).toBe('recibido');
+    expect(trasPrimero[0].total).toBe(18000);
+    expect(trasPrimero[0].detalles[0].estado_item).toBe('cancelado');
+    expect(trasPrimero[0].detalles[1].estado_item).toBe('pendiente');
+
+    const trasSegundo = aplicarItemCancelado(trasPrimero, evento);
+    expect(trasSegundo).toEqual(trasPrimero);
+  });
+
+  it('cuando era el ultimo plato deja total 0 y pedido cancelado', () => {
+    const inicial = [
+      {
+        id_pedido: 88,
+        estado: 'recibido',
+        total: 18000,
+        items: [
+          {
+            id_detalle: 300,
+            plato_nombre: 'Bowl Personalizado',
+            cantidad: 1,
+            subtotal: 18000,
+            estado_item: 'pendiente',
+            comensal: 'Ana',
+          },
+        ],
+      },
+    ];
+
+    const evento = {
+      id_pedido: 88,
+      id_detalle: 300,
+      total: 0,
+      estado_pedido: 'cancelado',
+    };
+
+    const res = aplicarItemCancelado(inicial, evento);
+    expect(res[0].estado).toBe('cancelado');
+    expect(res[0].total).toBe(0);
+    expect(res[0].items[0].estado_item).toBe('cancelado');
+    expect(res[0].detalles[0].estado_item).toBe('cancelado');
+  });
+
+  it('reemplazarPedido normaliza el 200 de cancelarItem y no suma items cancelados al calcular total', () => {
+    const lista = [
+      normalizarPedido(
+        {
+          id_pedido: 87,
+          codigo_pedido: 'PED-87',
+          estado: 'recibido',
+          total: 54000,
+          detalles: [
+            { id_detalle: 210, plato_nombre: 'A', cantidad: 2, subtotal: 36000, estado_item: 'pendiente', comensal: 'Ana' },
+            { id_detalle: 211, plato_nombre: 'B', cantidad: 1, subtotal: 18000, estado_item: 'pendiente', comensal: 'Ana' },
+          ],
+        },
+        'ana'
+      ),
+    ];
+
+    const actualizado = reemplazarPedido(
+      lista,
+      {
+        id_pedido: 87,
+        codigo_pedido: 'PED-87',
+        estado: 'cancelado',
+        total: 0,
+        items: [
+          { id_detalle: 210, plato_nombre: 'A', cantidad: 2, subtotal: 36000, estado_item: 'cancelado', comensal: 'Ana' },
+          { id_detalle: 211, plato_nombre: 'B', cantidad: 1, subtotal: 18000, estado_item: 'cancelado', comensal: 'Ana' },
+        ],
+      },
+      'ana'
+    );
+
+    expect(actualizado[0].estado).toBe('cancelado');
+    expect(actualizado[0].total).toBe(0);
+    expect(actualizado[0].esMio).toBe(true);
+    expect(actualizado[0].detalles.every((d) => d.estado_item === 'cancelado')).toBe(true);
+
+    const sinTotal = normalizarPedido(
+      {
+        id_pedido: 89,
+        items: [
+          { id_detalle: 1, plato_nombre: 'A', cantidad: 1, subtotal: 15000, estado_item: 'cancelado', comensal: 'Ana' },
+          { id_detalle: 2, plato_nombre: 'B', cantidad: 1, subtotal: 12000, estado_item: 'pendiente', comensal: 'Ana' },
+        ],
+      },
+      'Ana'
+    );
+    expect(sinTotal.total).toBe(12000);
   });
 });
