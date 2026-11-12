@@ -4312,6 +4312,172 @@ vez**; ante un 503 conviene dejar pasar unos segundos, porque lo que sobra es ca
 
 ---
 
+## API v1 · Clientes (D-19)
+
+> **Contrato. Implementación después de la P-23.** Nada de esta sección existe todavía en
+> el código: es el acuerdo para que la app móvil (Juan) y la base (Jarrison) puedan
+> avanzar en paralelo. **Todo va bajo `/api/v1`, nada en `/api`.**
+
+### El prefijo `/api/v1` (ya montado, D-19 parte A)
+
+La API completa responde también en `/api/v1/...` con el **mismo router**
+(`src/routes/montaje.js`): mismas rutas, auth, roles, CORS, 404 y errores. `/api` sigue igual
+y es compatible hacia atrás (PWA, panel y KDS no cambian). Los **límites de peticiones son
+compartidos**: `/api/x` y `/api/v1/x` gastan el mismo cupo (el global cuenta por IP; los de
+login y QR son la misma instancia en los dos prefijos). **Fuera de v1** queda el canal
+interno servidor-a-servidor (`.../internal`, `.../interno`): lo llama el socket-server con URL
+fija y `x-internal-key`; en `/api/v1` responde 404. Las rutas de clientes de abajo nacen
+**solo** en `/api/v1`.
+
+### Sesión del cliente: JWT corto + refresh token
+
+| | Valor |
+|---|---|
+| JWT (`token`) | `rol: "cliente"`, `sub: id_cliente`. Vida corta: **15 min** (`JWT_CLIENTE_EXPIRES_IN`, configurable). **Mismo algoritmo y secreto** que hoy: HS256 (`ALGORITMO_JWT`) con `JWT_SECRET`. |
+| `refresh_token` | **Opaco y aleatorio** (32 bytes, `crypto.randomBytes`, en base64url). En la base se guarda **solo su hash SHA-256**, nunca el valor. Vida **30 días** (`REFRESH_CLIENTE_DIAS`, configurable). Pertenece a una **familia** (la de su primer login) para detectar reuso. |
+| `expira_en` | Cuándo vence el `token`, en ISO 8601 UTC. |
+
+- **Separación de roles:** un JWT de cliente **no entra** a rutas de staff ni de comensal
+  (`requireRole` no tiene `cliente` en ninguna de ellas → 403), y un JWT de staff o de
+  comensal **no entra** a las de cliente (403).
+- **Contraseñas:** el **mismo algoritmo y costo** que el login del personal: **bcrypt con
+  costo 10** (`COSTO_BCRYPT` en `auth.controller.js`), y las mismas reglas de clave nueva
+  (`utils/clave-bcrypt.js`): **mínimo 8 caracteres** y **máximo 72 bytes** en UTF-8 (bcrypt
+  ignora en silencio lo que pasa de 72 bytes; una tilde ocupa 2 y un emoji 4).
+- **Límites de peticiones propios** (además del global): registro, login y refresh, cada
+  uno con su contador por IP (el login, por IP **y** correo, como el del personal).
+
+### Autenticación
+
+| Método y ruta | Cuerpo | Éxito | Errores |
+|---|---|---|---|
+| `POST /api/v1/auth/clientes/registro` | `{ nombre, correo, password, telefono? }` | **201** `{ cliente, token, refresh_token, expira_en }` | **409** `correo_registrado` · **400** `nombre_invalido`, `correo_invalido`, `clave_corta`, `clave_larga`, `telefono_invalido`, `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/login` | `{ correo, password }` | **200** `{ cliente, token, refresh_token, expira_en }` | **401** `credenciales_invalidas` · 400 `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/refresh` | `{ refresh_token }` | **200** `{ token, refresh_token, expira_en }` | **401** `refresh_invalido` (no existe o venció) · **401** `sesion_revocada` (reuso) · 429 |
+| `POST /api/v1/auth/clientes/logout` | `{ refresh_token }` + `Authorization: Bearer <token>` | **204** | 401 sin JWT de cliente |
+
+- **Login sin enumeración:** el **mismo 401 y el mismo mensaje** si el correo no existe o si
+  la clave falla, y el **mismo tiempo de respuesta**: con un correo que no existe se compara
+  contra un hash ficticio del mismo costo (como `HASH_FICTICIO` en el login del personal).
+- **Rotación del refresh:** cada uso emite un `refresh_token` **nuevo** (misma familia) e
+  invalida el anterior (`reemplazado_por`). Si llega uno **ya rotado** (reuso: alguien copió
+  un token viejo), se **revoca toda la familia** y se responde **401** `sesion_revocada`; el
+  cliente vuelve a iniciar sesión.
+- **Logout:** revoca **ese** refresh token (no la familia entera ni otras sesiones del
+  cliente). El JWT sigue valiendo hasta su vencimiento corto (15 min).
+- `cliente` es `{ id_cliente, nombre, correo, telefono }`, nunca el hash.
+
+### Perfil
+
+| Método y ruta | Auth | Cuerpo | Respuesta |
+|---|---|---|---|
+| `GET /api/v1/clientes/yo` | cliente | — | **200** `{ cliente }` |
+| `PATCH /api/v1/clientes/yo` | cliente | `{ nombre?, telefono? }` (zod `.strict()`, al menos uno) | **200** `{ cliente }` · 400 `cuerpo_invalido` |
+
+El cliente sale del JWT (`sub`); no hay `:id` en la ruta.
+
+### Direcciones
+
+| Método y ruta | Auth | Respuesta |
+|---|---|---|
+| `GET /api/v1/clientes/yo/direcciones` | cliente | **200** `{ direcciones }` (la principal primero) |
+| `POST /api/v1/clientes/yo/direcciones` | cliente | **201** `{ direccion }` |
+| `PATCH /api/v1/clientes/yo/direcciones/:id` | cliente | **200** `{ direccion }` |
+| `DELETE /api/v1/clientes/yo/direcciones/:id` | cliente | **204** |
+
+- Campos: `direccion` (obligatorio), `barrio` (obligatorio), `referencia?`, `lat?`, `lng?`
+  (los dos o ninguno; rango válido), `principal` (booleano).
+- **Una sola principal por cliente**: marcar una como `principal: true` desmarca la anterior
+  en la misma transacción. La primera dirección de un cliente nace principal.
+- **404** si `:id` no existe **o no es del cliente** (no se distingue, para no revelar
+  direcciones ajenas). 400 `cuerpo_invalido` con zod `.strict()`.
+
+### Zonas de entrega
+
+| Método y ruta | Auth | Respuesta |
+|---|---|---|
+| `GET /api/v1/zonas` | **pública** | **200** `{ zonas: [{ id_zona, nombre, barrios, costo_envio, tiempo_estimado_min }] }`, **solo las activas** |
+| `GET /api/v1/zonas/cotizar?id_direccion=N` | cliente | **200** `{ zona: { id_zona, nombre, tiempo_estimado_min }, costo_envio }` · **422** `fuera_de_cobertura` · 404 si la dirección no es del cliente |
+
+`costo_envio` es un número JSON en pesos, como el resto de montos del panel; `barrios` es una
+lista de textos.
+
+### Diferencias con `app-movil/src/services/authService.js`
+
+Lo que Juan debe ajustar en la app para usar este contrato (el archivo hoy solo define los
+contratos esperados y no llama a nada):
+
+| Hoy en la app | En el contrato |
+|---|---|
+| `POST /api/auth/clientes/registro`, `/login`, `/refresh`, `/logout` | Prefijo **`/api/v1`**: `POST /api/v1/auth/clientes/...` |
+| Respuesta `{ usuario, token, refreshToken }` | `{ cliente, token, refresh_token, expira_en }` (**`usuario` → `cliente`**, **`refreshToken` → `refresh_token`**, y llega **`expira_en`**) |
+| `refrescarToken(refreshToken)` → `{ token, refreshToken? }` | Cuerpo `{ refresh_token }` → `{ token, refresh_token, expira_en }`: el refresh **siempre** rota, así que hay que **guardar el nuevo** cada vez (reusar el viejo revoca la sesión con 401 `sesion_revocada`) |
+| `cerrarSesion(token)` | `POST /api/v1/auth/clientes/logout` con **`Authorization: Bearer <token>`** y cuerpo **`{ refresh_token }`**; responde **204** sin cuerpo |
+| `registrarUsuario({ nombre, correo, password })` | Además acepta `telefono?`; la clave necesita **8 caracteres** como mínimo y **72 bytes** como máximo |
+| Errores sin motivo | Leer `motivo` del cuerpo (`correo_registrado`, `credenciales_invalidas`, `sesion_revocada`, `refresh_invalido`, `fuera_de_cobertura`…) |
+| Sin manejo de vencimiento | El `token` vive **15 min**: renovar con `/refresh` ante un 401 o antes de `expira_en` |
+
+### Lo que necesita la base (P-23)
+
+**Propuesta para Jarrison, no un script.** Las columnas de `direcciones` y `zonas` siguen los
+campos de este contrato (los del plan 5.5: `direccion`, `barrio`, `referencia`, `lat`, `lng`,
+`principal`; y `id_zona`, `nombre`, `barrios`, `costo_envio`, `tiempo_estimado_min`). El plan
+v1.1 no está en el repositorio, así que las de `clientes` se derivan del contrato y hay que
+cuadrarlas con la sección 5.5. La tabla de **refresh tokens es nueva**: la P-23 no la tiene.
+
+```sql
+-- clientes
+id_cliente      SERIAL PRIMARY KEY
+nombre          VARCHAR(80)  NOT NULL
+correo          VARCHAR(254) NOT NULL          -- UNIQUE sobre lower(correo)
+telefono        VARCHAR(20)  NULL
+password_hash   VARCHAR(60)  NOT NULL          -- bcrypt costo 10 ($2b$10$...)
+activo          BOOLEAN      NOT NULL DEFAULT TRUE
+creado_en       TIMESTAMPTZ  NOT NULL DEFAULT now()
+actualizado_en  TIMESTAMPTZ  NOT NULL DEFAULT now()
+-- índice: UNIQUE (lower(correo))
+
+-- direcciones_cliente
+id_direccion    SERIAL PRIMARY KEY
+id_cliente      INTEGER NOT NULL REFERENCES clientes(id_cliente) ON DELETE CASCADE
+direccion       VARCHAR(200) NOT NULL
+barrio          VARCHAR(80)  NOT NULL
+referencia      VARCHAR(200) NULL
+lat             NUMERIC(9,6) NULL              -- CHECK entre -90 y 90; lat y lng los dos o ninguno
+lng             NUMERIC(9,6) NULL              -- CHECK entre -180 y 180
+principal       BOOLEAN NOT NULL DEFAULT FALSE
+creado_en       TIMESTAMPTZ NOT NULL DEFAULT now()
+-- índices: (id_cliente); UNIQUE (id_cliente) WHERE principal  -> una sola principal
+
+-- zonas_entrega
+id_zona              SERIAL PRIMARY KEY
+nombre               VARCHAR(80) NOT NULL UNIQUE
+barrios              TEXT[] NOT NULL DEFAULT '{}'
+costo_envio          NUMERIC(10,2) NOT NULL CHECK (costo_envio >= 0)
+tiempo_estimado_min  INTEGER NOT NULL CHECK (tiempo_estimado_min > 0)
+activa               BOOLEAN NOT NULL DEFAULT TRUE
+-- índice: (activa); GIN (barrios) para cotizar por barrio
+
+-- refresh_tokens_cliente  (NUEVA: la P-23 no la tiene)
+id               BIGSERIAL PRIMARY KEY
+id_cliente       INTEGER NOT NULL REFERENCES clientes(id_cliente) ON DELETE CASCADE
+hash             CHAR(64) NOT NULL UNIQUE      -- SHA-256 en hex del refresh token; nunca el valor
+familia          UUID NOT NULL                 -- la del primer login; se hereda al rotar
+creado_en        TIMESTAMPTZ NOT NULL DEFAULT now()
+expira_en        TIMESTAMPTZ NOT NULL
+revocado_en      TIMESTAMPTZ NULL              -- logout, rotación o reuso de la familia
+reemplazado_por  BIGINT NULL REFERENCES refresh_tokens_cliente(id)
+-- índices: UNIQUE (hash); (familia); (id_cliente); (expira_en) para la limpieza de vencidos
+```
+
+Cómo se usa la tabla de refresh tokens: buscar por `hash` (el UNIQUE es el índice de la
+búsqueda); al rotar, en una transacción, marcar el viejo con `revocado_en` y
+`reemplazado_por` e insertar el nuevo con la misma `familia`; si llega uno con `revocado_en`
+o `reemplazado_por` ya puestos, `UPDATE ... SET revocado_en = now() WHERE familia = $1::uuid
+AND revocado_en IS NULL` y 401 `sesion_revocada`.
+
+---
+
 ## Pendiente por acordar con el equipo
 
 Ya resueltos contra el `schema.sql` de Jarrison: `mesas.estado` es
