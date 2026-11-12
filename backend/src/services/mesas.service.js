@@ -173,6 +173,46 @@ async function abrirSesion(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
 }
 
 /**
+ * GUARDA DE CONTINUIDAD del QR, común a la rotación automática (#168) y a la
+ * manual con `soloSiVacia` (#174). Rotar deja sin sesión a quien ya tenga un
+ * JWT con el sid del QR anterior, así que no se rota si la sesión de mesa ya
+ * tiene comensales:
+ *   - pedidos de la sesión actual (misma regla de `sesion_iniciada_en` que
+ *     liberarSiNoQuedanPedidosAbiertos);
+ *   - reservas de alias de la mesa (todo el que entra por QR reserva su alias, y
+ *     el personal reserva el de quien no tiene celular).
+ *
+ * Se llama DENTRO de la transacción de quien rota y con la mesa ya bloqueada
+ * (FOR UPDATE), así la comprobación y el UPDATE del token no se separan. No hace
+ * ROLLBACK: eso es de quien llama.
+ *
+ * @param {import('pg').PoolClient} client  el de la transacción abierta
+ * @param {number} idMesa
+ * @param {{sesion_iniciada_en: Date|null}} mesa  la fila bloqueada
+ * @param {typeof aliasComensal.hayReservas} reservas
+ * @returns {Promise<null | {conComensales: true, motivo: 'pedidos'|'alias'}
+ *   | {reservasNoDisponibles: true}>}  null si se puede rotar.
+ */
+async function guardaDeContinuidad(client, idMesa, mesa, reservas) {
+  const pedidos = await client.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM pedidos p
+        WHERE p.id_mesa = $1::int
+          AND ($2::timestamptz IS NULL OR p.creado_en >= $2::timestamptz)
+     ) AS hay`,
+    [idMesa, mesa.sesion_iniciada_en]
+  );
+  if (pedidos.rows[0].hay) return { conComensales: true, motivo: 'pedidos' };
+
+  // Si las reservas no se pueden leer (Redis no responde) NO se rota: el QR
+  // anterior sigue valiendo y nadie pierde su sesión.
+  const r = await reservas(idMesa);
+  if (!r || r.noDisponible) return { reservasNoDisponibles: true };
+  if (r.hay) return { conComensales: true, motivo: 'alias' };
+  return null;
+}
+
+/**
  * Rota el QR de una mesa con sesión abierta: pide un token nuevo al
  * socket-server y lo guarda como el vigente.
  *
@@ -184,11 +224,22 @@ async function abrirSesion(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
  * Avisar a la tablet (/internal/qr-rotado) es del controller, DESPUÉS del
  * commit: así nunca se anuncia un token que no quedó guardado.
  *
+ * `soloSiVacia` (#174, la renovación automática del modal del panel): antes de
+ * pedir el token se aplica la MISMA guarda de continuidad que la rotación
+ * interna, en esta transacción y con la mesa bloqueada. Sin él, el "Nuevo QR"
+ * manual rota aunque haya comensales, como siempre.
+ *
  * @returns { noExiste: true } | { noOcupada: true, estado }
+ *          | { conComensales: true, motivo } | { reservasNoDisponibles: true }
  *          | { socketCaido: true, motivo } | { rechazado: true, status, mensaje }
  *          | { mesa, token, expira_en }
  */
-async function rotarQr(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
+async function rotarQr(idMesa, {
+  jwtStaff,
+  socket = socketNotifier,
+  soloSiVacia = false,
+  reservas = aliasComensal.hayReservas,
+} = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -202,6 +253,14 @@ async function rotarQr(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
     if (mesa.estado !== ESTADO_MESA_OCUPADA) {
       await client.query('ROLLBACK');
       return { noOcupada: true, estado: mesa.estado };
+    }
+
+    if (soloSiVacia) {
+      const impide = await guardaDeContinuidad(client, idMesa, mesa, reservas);
+      if (impide) {
+        await client.query('ROLLBACK');
+        return impide;
+      }
     }
 
     const generado = await socket.generarTokenQr(idMesa, jwtStaff);
@@ -261,7 +320,8 @@ async function rotarQr(idMesa, { jwtStaff, socket = socketNotifier } = {}) {
  *      Si las reservas no se pueden leer (Redis no responde), NO se rota
  *      (`reservasNoDisponibles`, que el controller responde 503): el QR anterior
  *      sigue valiendo, nadie pierde su sesión, y el socket-server lo reintenta
- *      en el siguiente ciclo.
+ *      en el siguiente ciclo. Vive en `guardaDeContinuidad`, que comparte con
+ *      la rotación manual con `soloSiVacia`.
  *   4. Se guarda el token anterior en token_qr_historico y se cambia token_qr.
  *
  * No avisa a /internal/qr-rotado: el socket-server anuncia qr:actualizado él
@@ -296,27 +356,10 @@ async function rotarQrInterno(idMesa, { tokenQr, tokenAnterior, reservas = alias
       return { cambioDeToken: true };
     }
 
-    const pedidos = await client.query(
-      `SELECT EXISTS (
-         SELECT 1 FROM pedidos p
-          WHERE p.id_mesa = $1::int
-            AND ($2::timestamptz IS NULL OR p.creado_en >= $2::timestamptz)
-       ) AS hay`,
-      [idMesa, mesa.sesion_iniciada_en]
-    );
-    if (pedidos.rows[0].hay) {
+    const impide = await guardaDeContinuidad(client, idMesa, mesa, reservas);
+    if (impide) {
       await client.query('ROLLBACK');
-      return { conComensales: true, motivo: 'pedidos' };
-    }
-
-    const r = await reservas(idMesa);
-    if (!r || r.noDisponible) {
-      await client.query('ROLLBACK');
-      return { reservasNoDisponibles: true };
-    }
-    if (r.hay) {
-      await client.query('ROLLBACK');
-      return { conComensales: true, motivo: 'alias' };
+      return impide;
     }
 
     await client.query(
