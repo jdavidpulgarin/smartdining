@@ -205,6 +205,13 @@ function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
       pagos.get(idMesa).add(alias);
       anotarEnIndice(idMesa);
     },
+    /** Deshace un marcarPago que llegó tarde a una mesa ya liberada (ver anotarPagoEnSesion en pagos.js). */
+    desmarcarPago(idMesa, alias) {
+      const p = pagos.get(idMesa);
+      if (p) p.delete(alias);
+      if (p && p.size === 0) pagos.delete(idMesa);
+      if (!pagos.has(idMesa) && !listaSinCelular(idMesa)) conEstado.delete(idMesa);
+    },
     pagaron(idMesa) { return [...(pagos.get(idMesa) || [])].sort((a, b) => a.localeCompare(b)); },
     reservarLlamada(idMesa, segundos) {
       if ((llamadas.get(idMesa) || 0) > ahora()) return false;
