@@ -3,6 +3,7 @@ import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTok
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
+import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
@@ -323,9 +324,27 @@ export function TablesProvider({ children }) {
 
 
 
+  // Presencia ACTUAL de todas las mesas en cada conexión (también tras iniciar
+  // sesión, recargar o reconectar): mesa:presencia:solicitar (EVENTS.md §5.2,
+  // #175) la devuelve en el ack, sin depender de que los listeners ya estén
+  // registrados. Es una foto completa: una mesa que no viene tiene 0. Si falla
+  // (RATE_LIMIT, ERROR_INTERNO o un socket-server viejo sin el evento), queda el
+  // envío automático del socket-server y los avisos de abajo.
+  useEffect(() => {
+    const socket = getSocket()
+    const pedirPresencia = () => {
+      socket.timeout(5000).emit('mesa:presencia:solicitar', {}, (err, r) => {
+        if (err || !r?.ok || !Array.isArray(r.mesas)) return
+        setPresenciaPorMesa(Object.fromEntries(r.mesas.map((p) => [Number(p.id_mesa), p])))
+      })
+    }
+    if (socket.connected) pedirPresencia()
+    socket.on('connect', pedirPresencia)
+    return () => socket.off('connect', pedirPresencia)
+  }, [])
+
   // Escuchar presencia de comensales en vivo (room:admin recibe cambios de todas las mesas).
-  // Guardarla en el contexto evita perderla al cerrar y volver a abrir "Tomar pedido",
-  // ya que en EVENTS.md no existe un evento para consultar la presencia actual bajo demanda.
+  // Guardarla en el contexto evita perderla al cerrar y volver a abrir "Tomar pedido".
   useSocketListener('mesa:presencia', (data) => {
     if (data && data.id_mesa != null) {
       const numId = Number(data.id_mesa)

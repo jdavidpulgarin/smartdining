@@ -14,6 +14,8 @@
 //    8. Un 2.º celular («Beto») no puede pedirla.
 //    9. En Inventario el admin ve la Carne Angus en 0 y registra una entrada de 10.
 //   10. Sin recargar, la Hamburguesa vuelve en el panel, el KDS y el cliente, y Ana la pide (201).
+//  10a. Panel: se inicia sesión SIN recargar y un pedido nuevo llega en vivo a Pedidos (el
+//       socket conecta con el token tras el login).
 //  10b. Caja: en otra mesa (MESA_COBRO), dos pedidos entregados se cobran con «Toda
 //       la mesa»; «Recaudado hoy» sube exactamente lo cobrado sin recargar y coincide
 //       con la suma del Historial y con GET /transacciones?desde=hoy.
@@ -399,6 +401,34 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
     })
 
     for (const c of [ana?.ctx, beto?.ctx, kds?.context(), ctxAdmin]) await c?.close()
+  })
+
+  test('10a. Tras iniciar sesión SIN recargar, el panel recibe en vivo un pedido nuevo', async ({ browser }) => {
+    // El resto del guion recarga después del login (page.goto), y así no se
+    // veía el fallo: el socket se creaba en /login sin token y nadie lo volvía
+    // a conectar al entrar. Aquí se entra y se navega SOLO por la interfaz.
+    if ((await pedidosAbiertosDeMesa(admin, MESA_COBRO)).length > 0) {
+      throw new Error(`la mesa ${MESA_COBRO} tiene pedidos abiertos: ciérralos o usa otra MESA_COBRO`)
+    }
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+    const page = await ctx.newPage()
+    await entrarPanel(page, 'mesero@smartdining.com')
+    await marcar(page)
+    await page.getByRole('navigation', { name: /Navegación principal/ }).getByRole('link', { name: 'PEDIDOS' }).click()
+    await expect(page).toHaveURL(/\/pedidos$/)
+
+    expect([200, 201]).toContain((await api(admin, `/mesas/${MESA_COBRO}/abrir`, { method: 'POST' })).status)
+    const platos = (await api(null, '/platos')).data?.platos || []
+    const otro = platos.find((p) => !/Angus/i.test(p.nombre) && !p.personalizable
+      && p.disponible !== false && p.stock_suficiente !== false && Number(p.precio) > 0)
+    const r = await api(admin, '/pedidos', { method: 'POST', body: { id_mesa: MESA_COBRO, items: [{ id_plato: otro.id_plato, cantidad: 1 }] } })
+    expect(r.status).toBe(201)
+    await expect(page.getByText(r.data.codigo_pedido).first()).toBeVisible({ timeout: 10_000 })
+    expect(await sinRecargar(page), 'el panel no se recargó').toBe(true)
+
+    expect((await api(admin, `/pedidos/${r.data.id_pedido}/cancelar`, { method: 'POST', body: { motivo: 'E2E demo 10a' } })).status).toBe(200)
+    await api(admin, `/mesas/${MESA_COBRO}/liberar`, { method: 'POST' })
+    await ctx.close()
   })
 
   test('10b. Caja: después de un cobro, «Recaudado hoy» sube exactamente lo cobrado y cuadra con el Historial', async ({ browser }) => {

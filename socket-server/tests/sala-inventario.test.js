@@ -1,67 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { randomUUID } = require('node:crypto');
-const { crearConexionRedis } = require('../src/almacen/redis');
-const { crearRedisFalso } = require('./redis-falso');
+const { esperar, CLAVE_INTERNA } = require('./helpers');
 const {
-  levantar, emitir, esperar, tokenComensal, tokenPantalla, tokenPersonal, CLAVE_INTERNA,
-} = require('./helpers');
+  EVENTO, CAMPOS, avisar, aviso, ALMACENES, escenario,
+} = require('./sala-inventario-helpers');
 
 // POST /internal/inventario-alerta → inventario:alerta solo a room:admin (EVENTS.md §5.5).
-
-const RUTA = '/internal/inventario-alerta';
-const EVENTO = 'inventario:alerta';
-const CAMPOS = ['agotado', 'emitidoEn', 'eventId', 'id_insumo', 'nombre', 'stock_actual', 'stock_minimo', 'unidad'];
-
-// Un cuerpo de tipo string se manda tal cual (para probar JSON malformado).
-const avisar = (s, cuerpo, clave = CLAVE_INTERNA) => fetch(`${s.url}${RUTA}`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', ...(clave ? { 'x-internal-key': clave } : {}) },
-  body: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo),
-});
-const aviso = (extra = {}) => ({
-  id_insumo: 12, nombre: 'Queso costeño', unidad: 'g', stock_actual: 450, stock_minimo: 500, eventId: randomUUID(), ...extra,
-});
-
-// Cada prueba corre con el registro de idempotencia en memoria y con el doble de Redis.
-const silencioso = { info() {}, error() {} };
-const ALMACENES = {
-  memoria: () => ({ falso: null, deps: {} }),
-  redis: () => {
-    const falso = crearRedisFalso();
-    return { falso, deps: { redis: crearConexionRedis({ url: 'redis://falso:6379', crearCliente: falso.crearCliente, log: silencioso }) } };
-  },
-};
-
-/** Personal de sala (admin, mesero, cajero), cocina, un comensal en su mesa y la pantalla de esa mesa. */
-async function escenario(t, almacen, env = {}) {
-  const { falso, deps } = ALMACENES[almacen]();
-  const s = await levantar(env, deps);
-  t.after(() => s.cerrar());
-  const comensal = await s.conectar(tokenComensal(5));
-  await emitir(comensal, 'join:table', {});
-  const pantalla = await s.conectar(tokenPantalla(5));
-  const cocina = await s.conectar(tokenPersonal('cocina'));
-  const admin = await s.conectar(tokenPersonal('admin'));
-  const mesero = await s.conectar(tokenPersonal('mesero'));
-  const cajero = await s.conectar(tokenPersonal('cajero'));
-  return { s, falso, comensal, pantalla, cocina, admin, mesero, cajero };
-}
-
-/** Hace fallar UNA vez el emit de inventario:alerta (socket.io no exporta BroadcastOperator). */
-function fallarEmisionUnaVez(t, s) {
-  const proto = Object.getPrototypeOf(s.io.to('room:ninguna'));
-  const original = proto.emit;
-  let pendiente = true;
-  proto.emit = function emit(evento, ...args) {
-    if (evento === EVENTO && pendiente) {
-      pendiente = false;
-      throw new Error('falla simulada al emitir');
-    }
-    return original.call(this, evento, ...args);
-  };
-  t.after(() => { proto.emit = original; });
-}
+// Casos válidos, idempotencia y validación del cuerpo. Los errores van en sala-inventario-errores.test.js.
 
 for (const almacen of Object.keys(ALMACENES)) {
   test(`[${almacen}] válido: 200 y llega solo a room:admin (admin, mesero, cajero), no a mesas, pantalla ni cocina`, async (t) => {
@@ -177,75 +123,4 @@ for (const almacen of Object.keys(ALMACENES)) {
     const ev = await llega;
     assert.deepStrictEqual([ev.nombre, ev.agotado], [nombre, true]);
   });
-
-  test(`[${almacen}] JSON malformado o que no es objeto: 400 JSON_INVALIDO sin emitir`, async (t) => {
-    const e = await escenario(t, almacen);
-    const nada = esperar(e.admin, EVENTO, 400);
-    for (const cuerpo of ['{"id_insumo": 1,', '[1,2]', '"texto"', 'null', '12']) {
-      const r = await avisar(e.s, cuerpo);
-      assert.strictEqual(r.status, 400, cuerpo);
-      assert.strictEqual((await r.json()).codigo, 'JSON_INVALIDO', cuerpo);
-    }
-    assert.strictEqual(await nada, null);
-  });
-
-  test(`[${almacen}] sin clave o con clave errónea: 401 NO_AUTORIZADO, sin emitir ni consumir el eventId`, async (t) => {
-    const e = await escenario(t, almacen);
-    const cuerpo = aviso();
-    const nada = esperar(e.admin, EVENTO, 400);
-    for (const clave of [null, 'otra', `${CLAVE_INTERNA}x`]) {
-      const r = await avisar(e.s, cuerpo, clave);
-      assert.strictEqual(r.status, 401);
-      assert.strictEqual((await r.json()).codigo, 'NO_AUTORIZADO');
-    }
-    assert.strictEqual(await nada, null);
-    assert.strictEqual((await (await avisar(e.s, cuerpo)).json()).duplicado, false);
-  });
-
-  test(`[${almacen}] emisión que falla: 500 ERROR_INTERNO, se libera la clave y el reintento emite`, async (t) => {
-    const e = await escenario(t, almacen);
-    fallarEmisionUnaVez(t, e.s);
-    const cuerpo = aviso();
-    const nada = esperar(e.admin, EVENTO, 300);
-    const r = await avisar(e.s, cuerpo);
-    assert.deepStrictEqual([r.status, (await r.json()).codigo], [500, 'ERROR_INTERNO']);
-    assert.strictEqual(await nada, null);
-    if (e.falso) assert.ok(!e.falso.llaves().includes(`sd:idem:backend:inventario-alerta:${cuerpo.eventId}`), 'la clave se liberó');
-    const llega = esperar(e.admin, EVENTO, 1000);
-    const reintento = await avisar(e.s, cuerpo);
-    assert.deepStrictEqual([reintento.status, await reintento.json()], [200, { ok: true, duplicado: false }]);
-    assert.strictEqual((await llega).eventId, cuerpo.eventId);
-  });
 }
-
-test('sin INTERNAL_API_KEY configurada: 503 NO_CONFIGURADO y no se emite', async (t) => {
-  // El arranque exige la clave (secretos.js): se quita del config ya cargado,
-  // que es el mismo objeto que lee la ruta, para cubrir la defensa del endpoint.
-  const e = await escenario(t, 'memoria');
-  e.s.config.internalApiKey = undefined;
-  const nada = esperar(e.admin, EVENTO, 400);
-  const r = await avisar(e.s, aviso());
-  assert.deepStrictEqual([r.status, (await r.json()).codigo], [503, 'NO_CONFIGURADO']);
-  assert.strictEqual(await nada, null);
-});
-
-test('con Redis caído: 500 ERROR_INTERNO sin emitir; al volver, el mismo eventId se emite', async (t) => {
-  const e = await escenario(t, 'redis');
-  const cuerpo = aviso();
-  e.falso.caer();
-  const nada = esperar(e.admin, EVENTO, 300);
-  const r = await avisar(e.s, cuerpo);
-  assert.deepStrictEqual([r.status, (await r.json()).codigo], [500, 'ERROR_INTERNO']);
-  assert.strictEqual(await nada, null);
-  e.falso.levantar();
-  const llega = esperar(e.admin, EVENTO, 1000);
-  assert.strictEqual((await (await avisar(e.s, cuerpo)).json()).duplicado, false);
-  assert.ok(await llega);
-});
-
-test('un comensal no puede emitirlo por socket (no existe como evento de cliente)', async (t) => {
-  const e = await escenario(t, 'memoria');
-  const nada = esperar(e.admin, EVENTO, 300);
-  e.comensal.emit(EVENTO, aviso());
-  assert.strictEqual(await nada, null);
-});
