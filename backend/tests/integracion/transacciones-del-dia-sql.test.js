@@ -34,7 +34,7 @@ const assert = require('node:assert');
 const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const transaccionesService = require('../../src/services/transacciones.service');
@@ -139,67 +139,63 @@ async function insertar(nombre, { monto, estado, creadoEn }) {
 const INICIO_HOY = `(date_trunc('day', now() AT TIME ZONE $3::text))`;
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    const p = await sonda.query(
-      `SELECT id_plato FROM platos
-        WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
-        ORDER BY id_plato LIMIT 1`
-    );
-    hayBase = p.rows.length > 0;
-    if (!hayBase) return;
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  const p = await sonda.query(
+    `SELECT id_plato FROM platos
+      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
+      ORDER BY id_plato LIMIT 1`
+  );
+  hayBase = p.rows.length > 0;
+  if (!hayBase) return;
 
-    await limpiar();
-    const m = await sonda.query(
-      'INSERT INTO mesas (numero, capacidad, ubicacion) VALUES ($1, 4, $2) RETURNING id_mesa',
-      [MESA_NUMERO, MARCA_MESA]
-    );
-    mesa = m.rows[0];
-    pedido = await pedidosService.crearConDetalles({
-      id_mesa: mesa.id_mesa,
-      id_usuario: null,
-      items: [{ id_plato: p.rows[0].id_plato, cantidad: 1 }],
-    });
+  await limpiar();
+  const m = await sonda.query(
+    'INSERT INTO mesas (numero, capacidad, ubicacion) VALUES ($1, 4, $2) RETURNING id_mesa',
+    [MESA_NUMERO, MARCA_MESA]
+  );
+  mesa = m.rows[0];
+  pedido = await pedidosService.crearConDetalles({
+    id_mesa: mesa.id_mesa,
+    id_usuario: null,
+    items: [{ id_plato: p.rows[0].id_plato, cantidad: 1 }],
+  });
 
-    // Montos chicos y distintos: la suma de las completadas (1.000) cabe en el
-    // total de cualquier plato de >= 5.000, así tr_validar_transaccion_financiera
-    // no las rechaza por pagar de más.
-    await insertar('hoy_ahora', { monto: 100, estado: 'completada', creadoEn: 'now()' });
-    await insertar('hoy_20h', {
-      monto: 200, estado: 'completada',
-      creadoEn: `(${INICIO_HOY} + interval '20 hours') AT TIME ZONE $3::text`,
-    });
-    await insertar('ayer_2330', {
-      monto: 300, estado: 'completada',
-      creadoEn: `(${INICIO_HOY} - interval '30 minutes') AT TIME ZONE $3::text`,
-    });
-    await insertar('ayer_mediodia', {
-      monto: 400, estado: 'completada',
-      creadoEn: `(${INICIO_HOY} - interval '12 hours') AT TIME ZONE $3::text`,
-    });
-    await insertar('hoy_fallida', { monto: 500, estado: 'fallida', creadoEn: 'now()' });
-    await insertar('hoy_reembolsada', { monto: 600, estado: 'reembolsada', creadoEn: 'now()' });
-    // Para el rango desde=<ayer>: el borde inferior exacto (00:00 de ayer, que
-    // entra), las 23:30 de ANTEAYER (el día anterior a `desde`, que no entra)
-    // y una de hace dos días al mediodía (tampoco). Suma de las completadas:
-    // 3.400, que sigue cabiendo en el total del pedido.
-    await insertar('ayer_0000', {
-      monto: 900, estado: 'completada',
-      creadoEn: `(${INICIO_HOY} - interval '1 day') AT TIME ZONE $3::text`,
-    });
-    await insertar('anteayer_2330', {
-      monto: 800, estado: 'completada',
-      creadoEn: `(${INICIO_HOY} - interval '1 day' - interval '30 minutes') AT TIME ZONE $3::text`,
-    });
-    await insertar('hace2_mediodia', {
-      monto: 700, estado: 'completada',
-      creadoEn: `(${INICIO_HOY} - interval '2 days' + interval '12 hours') AT TIME ZONE $3::text`,
-    });
-  } catch (err) {
-    if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
-    hayBase = false;
-  }
+  // Montos chicos y distintos: la suma de las completadas (1.000) cabe en el
+  // total de cualquier plato de >= 5.000, así tr_validar_transaccion_financiera
+  // no las rechaza por pagar de más.
+  await insertar('hoy_ahora', { monto: 100, estado: 'completada', creadoEn: 'now()' });
+  await insertar('hoy_20h', {
+    monto: 200, estado: 'completada',
+    creadoEn: `(${INICIO_HOY} + interval '20 hours') AT TIME ZONE $3::text`,
+  });
+  await insertar('ayer_2330', {
+    monto: 300, estado: 'completada',
+    creadoEn: `(${INICIO_HOY} - interval '30 minutes') AT TIME ZONE $3::text`,
+  });
+  await insertar('ayer_mediodia', {
+    monto: 400, estado: 'completada',
+    creadoEn: `(${INICIO_HOY} - interval '12 hours') AT TIME ZONE $3::text`,
+  });
+  await insertar('hoy_fallida', { monto: 500, estado: 'fallida', creadoEn: 'now()' });
+  await insertar('hoy_reembolsada', { monto: 600, estado: 'reembolsada', creadoEn: 'now()' });
+  // Para el rango desde=<ayer>: el borde inferior exacto (00:00 de ayer, que
+  // entra), las 23:30 de ANTEAYER (el día anterior a `desde`, que no entra)
+  // y una de hace dos días al mediodía (tampoco). Suma de las completadas:
+  // 3.400, que sigue cabiendo en el total del pedido.
+  await insertar('ayer_0000', {
+    monto: 900, estado: 'completada',
+    creadoEn: `(${INICIO_HOY} - interval '1 day') AT TIME ZONE $3::text`,
+  });
+  await insertar('anteayer_2330', {
+    monto: 800, estado: 'completada',
+    creadoEn: `(${INICIO_HOY} - interval '1 day' - interval '30 minutes') AT TIME ZONE $3::text`,
+  });
+  await insertar('hace2_mediodia', {
+    monto: 700, estado: 'completada',
+    creadoEn: `(${INICIO_HOY} - interval '2 days' + interval '12 hours') AT TIME ZONE $3::text`,
+  });
 });
 
 test.after(async () => {
