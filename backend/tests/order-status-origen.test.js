@@ -52,7 +52,30 @@ test('origen: un cambio de estado del KDS (en_preparacion) NO lleva origen', asy
   }
 });
 
-for (const [estadoActual, estado] of [['en_preparacion', 'listo'], ['listo', 'entregado'], ['recibido', 'cancelado']]) {
+for (const estadoActual of ['recibido', 'en_preparacion', 'listo']) {
+  // Desde el script 31 el personal también cancela un pedido en 'listo'.
+  test(`origen: POST /pedidos/:id/cancelar del personal desde ${estadoActual} lleva origen "personal"`, async () => {
+    const socket = instalarFakeSocket();
+    const db = fakeEstado(estadoActual);
+    try {
+      const res = await request(app)
+        .post('/api/pedidos/87/cancelar')
+        .set('Authorization', `Bearer ${tokenStaff(1, 'mesero')}`);
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      const cuerpo = await cuerpoOrderStatus(socket);
+      assert.strictEqual(cuerpo.estado, 'cancelado');
+      assert.strictEqual(cuerpo.estado_anterior, estadoActual);
+      assert.strictEqual(cuerpo.origen, 'personal');
+    } finally {
+      socket.restaurar();
+      db.restaurar();
+    }
+  });
+}
+
+for (const [estadoActual, estado] of [
+  ['en_preparacion', 'listo'], ['listo', 'entregado'], ['recibido', 'cancelado'], ['listo', 'cancelado'],
+]) {
   test(`origen: PATCH /pedidos/:id/estado del mesero (${estadoActual} -> ${estado}) NO lleva origen`, async () => {
     const socket = instalarFakeSocket();
     const db = fakeEstado(estadoActual);

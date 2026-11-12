@@ -227,8 +227,7 @@ test('personal cancela plato: la ÚLTIMA línea de un pedido en "listo" con la t
     assert.ok(estado, 'order:status del pedido cancelado');
     assert.strictEqual(estado.cuerpo.estado, 'cancelado');
     assert.strictEqual(estado.cuerpo.estado_anterior, 'listo');
-    // `origen` en order-status llega con la D-12 (feature/api-comensal-cancela-pedido),
-    // que se apila encima de esta rama y lo verifica allí.
+    assert.strictEqual(estado.cuerpo.origen, 'personal', 'D-13: el personal canceló la última línea (pedido en listo)');
     assert.strictEqual(e.socket.buscar('/internal/mesa-liberada'), undefined, 'ni mesa-liberada');
     assert.strictEqual(e.socket.buscar('/internal/item-cancelado').cuerpo.estado_pedido, 'cancelado');
   } finally {
