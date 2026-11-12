@@ -58,11 +58,14 @@ export function obtenerCuentaSimulada(idMesa = 5, miAlias = 'Beto') {
   const comensalesMap = new Map();
 
   for (const pedido of pedidos) {
+    if (String(pedido.estado || '').toLowerCase() === 'cancelado') continue;
+
     const detalles = Array.isArray(pedido.detalles)
       ? pedido.detalles
       : (Array.isArray(pedido.items) ? pedido.items : []);
 
     for (const d of detalles) {
+      if (String(d.estado_item || '').toLowerCase() === 'cancelado') continue;
       const alias = (d.comensal || pedido.comensal || 'General').trim();
       const subtotal = Number(d.subtotal ?? ((d.precioUnitario ?? d.precio ?? 0) * (d.cantidad ?? 1)));
       const cant = Number(d.cantidad ?? 1);
@@ -143,9 +146,24 @@ export function agregarPedidoACuentaSimulada(pedido = {}) {
   }
 }
 
+/**
+ * Recalcula la cuenta simulada tras quitar un plato en vivo.
+ *
+ * @param {number|string} [idMesa=5]
+ */
+export function refrescarCuentaSimulada(idMesa = 5) {
+  try {
+    sessionStorage.removeItem(CLAVE_CUENTA_SIMULADA);
+    return obtenerCuentaSimulada(idMesa || 5);
+  } catch {
+    return null;
+  }
+}
+
 export default {
   CLAVE_CUENTA_SIMULADA,
   obtenerCuentaSimulada,
   registrarPagoSimulado,
   agregarPedidoACuentaSimulada,
+  refrescarCuentaSimulada,
 };
