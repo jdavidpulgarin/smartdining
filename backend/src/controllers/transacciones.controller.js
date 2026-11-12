@@ -254,6 +254,53 @@ const MOTIVO_MESA_INEXISTENTE = 'mesa_inexistente';
 const MOTIVO_SIN_CUENTA = 'sin_cuenta';
 const MOTIVO_EXCEDE = 'excede';
 const MOTIVO_ID_COBRO_EN_USO = 'id_cobro_en_uso';
+const MOTIVO_VOUCHER_INVALIDO = 'voucher_invalido';
+const MOTIVO_VOUCHER_NO_APLICA = 'voucher_no_aplica';
+
+/** Métodos con datáfono: los únicos que pueden llevar voucher (script 35). */
+const METODOS_CON_VOUCHER = ['tarjeta_debito', 'tarjeta_credito'];
+
+/** Formato del voucher ya normalizado: el mismo del CHECK ck_transacciones_voucher. */
+const FORMATO_VOUCHER = /^[A-Z0-9-]{1,40}$/;
+
+/**
+ * Voucher del datáfono en el cobro de mesa (script 35), normalizado en el
+ * servidor. Devuelve `{ voucher }` (null si no hay) o `{ error, motivo }`.
+ *
+ * ORDEN de las comprobaciones (el primero que falla manda):
+ *   1. TIPO: ausente o null -> sin voucher; un string se normaliza; cualquier
+ *      otra cosa (número, objeto...) -> 400 voucher_invalido.
+ *   2. NORMALIZACIÓN: trim() de los extremos (también quita los espacios
+ *      Unicode, como U+00A0) y toUpperCase(). Vacío tras recortar -> null.
+ *   3. MÉTODO: con contenido y un método sin datáfono (efectivo, transferencia)
+ *      -> 400 voucher_no_aplica. Antes que el formato: decirle a la caja que el
+ *      voucher sobra es más útil que corregirle un voucher que no va.
+ *   4. FORMATO: ^[A-Z0-9-]{1,40}$ -> si no, 400 voucher_invalido.
+ *
+ * Con efectivo o transferencia NUNCA llega un voucher a la base: o es null, o
+ * ya se rechazó en el paso 3.
+ */
+function normalizarVoucher(valor, metodoPago) {
+  if (valor === undefined || valor === null) return { voucher: null };
+  if (typeof valor !== 'string') {
+    return { error: 'voucher debe ser texto', motivo: MOTIVO_VOUCHER_INVALIDO };
+  }
+  const voucher = valor.trim().toUpperCase();
+  if (voucher === '') return { voucher: null };
+  if (!METODOS_CON_VOUCHER.includes(metodoPago)) {
+    return {
+      error: 'El voucher solo aplica a pagos con tarjeta (débito o crédito)',
+      motivo: MOTIVO_VOUCHER_NO_APLICA,
+    };
+  }
+  if (!FORMATO_VOUCHER.test(voucher)) {
+    return {
+      error: 'El voucher solo admite letras, números y guiones, hasta 40 caracteres',
+      motivo: MOTIVO_VOUCHER_INVALIDO,
+    };
+  }
+  return { voucher };
+}
 
 /**
  * Pesos con como mucho 2 decimales -> centavos ENTEROS, sin coma flotante.
@@ -291,6 +338,9 @@ const cobroMesaSchema = z
     // Las mismas reglas que el comensal de POST /transacciones.
     comensal: z.string().min(1).max(40).nullish(),
     id_cobro: z.string().uuid({ message: 'id_cobro debe ser un UUID' }),
+    // Script 35. Se acepta cualquier valor aquí y lo valida normalizarVoucher,
+    // con su propio orden y sus motivos (voucher_invalido, voucher_no_aplica).
+    voucher: z.unknown().optional(),
   })
   .strict();
 
@@ -308,6 +358,8 @@ async function cobrarMesa(req, res, next) {
   const { id_mesa, monto, metodo_pago, id_cobro } = parsed.data;
   const monto_centavos = montoACentavos(monto);
   const comensal = aliasDelComensal(req, parsed.data);
+  const voucher = normalizarVoucher(parsed.data.voucher, metodo_pago);
+  if (voucher.error) return res.status(400).json({ error: voucher.error, motivo: voucher.motivo });
 
   try {
     const r = await transaccionesService.cobrarMesaEnCaja({
@@ -317,6 +369,7 @@ async function cobrarMesa(req, res, next) {
       comensal,
       id_cobro,
       id_usuario: req.user.id_usuario,
+      voucher: voucher.voucher,
     });
 
     if (r.noExiste) {
@@ -362,6 +415,8 @@ async function cobrarMesa(req, res, next) {
         // La primera fila del reparto: es la guardia de idempotencia del
         // socket-server para este cobro.
         id_transaccion: r.transacciones[0] ? r.transacciones[0].id_transaccion : null,
+        // El voucher NO viaja al socket-server (script 35): es un dato de la
+        // caja, se queda en transacciones y en GET /transacciones.
       }),
       ...r.pagados.map((p) => () => socketNotifier.notificarCambioEstado({
         id_pedido: p.id_pedido,
@@ -385,6 +440,7 @@ async function cobrarMesa(req, res, next) {
         id_pedido: t.id_pedido,
         monto: aPesos(t.monto_centavos),
         comensal: t.comensal,
+        voucher: t.voucher,
       })),
     });
   } catch (err) {
@@ -501,4 +557,7 @@ module.exports = {
   MONEDA,
   MOTIVO_CONSULTA_INVALIDA,
   fechaExiste,
+  normalizarVoucher,
+  MOTIVO_VOUCHER_INVALIDO,
+  MOTIVO_VOUCHER_NO_APLICA,
 };
