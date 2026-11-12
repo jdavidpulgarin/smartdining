@@ -5,6 +5,7 @@ import {
   reemplazarPedido,
   puedeQuitar,
   accionErrorQuitar,
+  etiquetaItemCancelado,
   haceCuanto,
   infoEstado,
   normalizarPedido,
@@ -534,5 +535,61 @@ describe('aplicarItemCancelado y reemplazarPedido (J-14)', () => {
       'Ana'
     );
     expect(sinTotal.total).toBe(12000);
+  });
+
+  it('distingue origen personal vs comensal en aplicarItemCancelado y etiquetaItemCancelado', () => {
+    const base = [
+      {
+        id_pedido: 90,
+        estado: 'recibido',
+        total: 36000,
+        detalles: [
+          {
+            id_detalle: 1,
+            plato_nombre: 'Bandeja paisa',
+            cantidad: 1,
+            subtotal: 20000,
+            estado_item: 'pendiente',
+            comensal: 'Ana',
+          },
+          {
+            id_detalle: 2,
+            plato_nombre: 'Limonada',
+            cantidad: 1,
+            subtotal: 16000,
+            estado_item: 'pendiente',
+            comensal: 'Ana',
+          },
+        ],
+      },
+    ];
+
+    const trasPersonal = aplicarItemCancelado(base, {
+      id_pedido: 90,
+      id_detalle: 1,
+      total: 16000,
+      estado_pedido: 'recibido',
+      origen: 'personal',
+    });
+    expect(etiquetaItemCancelado(trasPersonal[0].detalles[0])).toBe(
+      'Cancelado por el restaurante'
+    );
+    expect(etiquetaItemCancelado(trasPersonal[0].detalles[1])).toBeNull();
+
+    const trasComensal = aplicarItemCancelado(trasPersonal, {
+      id_pedido: 90,
+      id_detalle: 2,
+      total: 0,
+      estado_pedido: 'cancelado',
+      origen: 'comensal',
+    });
+    expect(etiquetaItemCancelado(trasComensal[0].detalles[1])).toBe('Quitado');
+
+    expect(
+      etiquetaItemCancelado({ estado_item: 'cancelado' })
+    ).toBe('Quitado');
+    expect(
+      etiquetaItemCancelado({ estado_item: 'pendiente' })
+    ).toBeNull();
   });
 });

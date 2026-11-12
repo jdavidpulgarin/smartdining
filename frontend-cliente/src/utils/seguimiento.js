@@ -168,6 +168,11 @@ export function normalizarPedido(pedido, miAlias = null) {
     const estadoItem = item.estado_item
       ? String(item.estado_item).trim().toLowerCase()
       : null;
+    const origenRaw = item.origen_cancelacion ?? item.origen ?? null;
+    const origenCancelacion =
+      typeof origenRaw === 'string' && origenRaw.trim()
+        ? origenRaw.trim().toLowerCase()
+        : null;
     const claveComensal = claveAlias(comensal);
     const esMio = Boolean(
       miClave &&
@@ -184,6 +189,7 @@ export function normalizarPedido(pedido, miAlias = null) {
       precio_unitario: precioUnitario,
       subtotal,
       estado_item: estadoItem,
+      ...(origenCancelacion ? { origen_cancelacion: origenCancelacion } : {}),
       notas: item.notas || null,
       comensal,
       esMio,
@@ -536,13 +542,25 @@ export function aplicarItemCancelado(pedidos, evento) {
         ? pedido.items
         : [];
 
+    const origenEvento =
+      typeof evento.origen === 'string' && evento.origen.trim()
+        ? evento.origen.trim().toLowerCase()
+        : null;
+
     const detallesActualizados = rawDetalles.map((detalle) => {
       if (String(detalle.id_detalle ?? detalle.id) !== idDetalleBuscado) {
         return detalle;
       }
+      const origenCancelacion =
+        origenEvento === 'personal'
+          ? 'personal'
+          : origenEvento === 'comensal'
+            ? 'comensal'
+            : detalle.origen_cancelacion || 'comensal';
       return {
         ...detalle,
         estado_item: 'cancelado',
+        origen_cancelacion: origenCancelacion,
       };
     });
 
@@ -604,6 +622,28 @@ export function reemplazarPedido(pedidos, pedidoCrudo, miAlias = null) {
   });
 }
 
+/**
+ * Devuelve la etiqueta visual para una línea cancelada según su origen (J-14).
+ * - Si `origen` / `origen_cancelacion` === `'personal'` → `"Cancelado por el restaurante"`.
+ * - Si falta o es `'comensal'` → `"Quitado"`.
+ * - Si la línea no está cancelada → `null`.
+ *
+ * @param {object|null|undefined} item
+ * @returns {'Cancelado por el restaurante'|'Quitado'|null}
+ */
+export function etiquetaItemCancelado(item) {
+  if (!item || String(item.estado_item || '').trim().toLowerCase() !== 'cancelado') {
+    return null;
+  }
+  const origen = String(item.origen_cancelacion ?? item.origen ?? '')
+    .trim()
+    .toLowerCase();
+  if (origen === 'personal') {
+    return 'Cancelado por el restaurante';
+  }
+  return 'Quitado';
+}
+
 export default {
   CLAVE_MIS_PEDIDOS_IDS,
   CLAVE_ULTIMO_PEDIDO,
@@ -615,6 +655,7 @@ export default {
   reemplazarPedido,
   puedeQuitar,
   accionErrorQuitar,
+  etiquetaItemCancelado,
   separarPedidos,
   pedidoPrincipal,
   haceCuanto,

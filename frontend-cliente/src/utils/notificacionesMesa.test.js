@@ -74,13 +74,44 @@ describe('formatearMensajeItemCancelado (J-14)', () => {
     ).toBe('Ana quitó Bandeja paisa');
   });
 
-  it('devuelve null si el comensal del evento soy yo (comparando por clave)', () => {
+  it('devuelve null si el comensal del evento soy yo y origen falta o es comensal', () => {
     expect(
       formatearMensajeItemCancelado(
         { comensal: 'Ána María', nombre: 'Bandeja paisa' },
         'ana  maria'
       )
     ).toBeNull();
+    expect(
+      formatearMensajeItemCancelado(
+        { comensal: 'Ana', nombre: 'Bandeja paisa', origen: 'comensal' },
+        'ana'
+      )
+    ).toBeNull();
+  });
+
+  it('cuando origen es personal avisa a toda la mesa incluido el dueno', () => {
+    expect(
+      formatearMensajeItemCancelado(
+        { comensal: 'Ana', nombre: 'Bandeja paisa', origen: 'personal' },
+        'Ana'
+      )
+    ).toBe('El restaurante canceló Bandeja paisa');
+
+    expect(
+      formatearMensajeItemCancelado(
+        { comensal: 'Ana', nombre: 'Bandeja paisa', origen: 'personal' },
+        'Beto'
+      )
+    ).toBe('El restaurante canceló Bandeja paisa');
+  });
+
+  it('cuando origen es comensal muestra "<comensal> quitó <nombre>" a los demas', () => {
+    expect(
+      formatearMensajeItemCancelado(
+        { comensal: 'Ana', nombre: 'Limonada', origen: 'comensal' },
+        'Beto'
+      )
+    ).toBe('Ana quitó Limonada');
   });
 
   it('devuelve null si evento es nulo', () => {

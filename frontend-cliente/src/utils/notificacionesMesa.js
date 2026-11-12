@@ -64,15 +64,26 @@ export function formatearMensajePedidoCreado(data, miAlias) {
 }
 
 /**
- * Formatea el aviso breve cuando otro comensal de la mesa quita un plato (`item:cancelado`).
- * Si el evento corresponde al comensal actual (por clave normalizada), devuelve `null`.
+ * Formatea el aviso breve cuando se quita o cancela un plato (`item:cancelado`).
+ * - Si `origen === 'personal'`, devuelve `"El restaurante canceló <nombre>"` para todos (incluido el dueño).
+ * - Si `origen` falta o es `'comensal'`, devuelve `"<comensal> quitó <nombre>"` solo a los demás (`null` al propio dueño).
  *
- * @param {object} evento - Payload `{ comensal, nombre, ... }`
+ * @param {object} evento - Payload `{ comensal, nombre, origen?, ... }`
  * @param {string|null} [miAlias]
  * @returns {string|null}
  */
 export function formatearMensajeItemCancelado(evento, miAlias = null) {
   if (!evento || typeof evento !== 'object') return null;
+
+  const origen = String(evento.origen || '').trim().toLowerCase();
+  const plato =
+    typeof evento.nombre === 'string' && evento.nombre.trim()
+      ? evento.nombre.trim()
+      : 'un plato';
+
+  if (origen === 'personal') {
+    return `El restaurante canceló ${plato}`;
+  }
 
   const actor = typeof evento.comensal === 'string' ? evento.comensal.trim() : '';
   const claveActor = claveAlias(actor);
@@ -81,11 +92,6 @@ export function formatearMensajeItemCancelado(evento, miAlias = null) {
   if (claveActor && claveMio && claveActor === claveMio) {
     return null;
   }
-
-  const plato =
-    typeof evento.nombre === 'string' && evento.nombre.trim()
-      ? evento.nombre.trim()
-      : 'un plato';
 
   if (actor) {
     return `${actor} quitó ${plato}`;

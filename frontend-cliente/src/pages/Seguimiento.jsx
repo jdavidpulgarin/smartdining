@@ -7,6 +7,7 @@ import OtrosPedidos from '../components/seguimiento/OtrosPedidos';
 import TarjetaPermisoPush from '../components/seguimiento/TarjetaPermisoPush';
 import {
   accionErrorQuitar,
+  etiquetaItemCancelado,
   infoEstado,
   puedeQuitar,
 } from '../utils/seguimiento';
@@ -242,6 +243,7 @@ function Seguimiento() {
               const nombrePlato = detalle.plato_nombre || detalle.nombre || 'Plato';
               const esCancelado =
                 String(detalle.estado_item || '').trim().toLowerCase() === 'cancelado';
+              const etiquetaCancelado = etiquetaItemCancelado(detalle);
               const permiteQuitar = puedeQuitar(detalle, {
                 yo: comensal,
                 estadoPedido: pedidoActivo.estado,
@@ -260,9 +262,15 @@ function Seguimiento() {
                     >
                       {detalle.cantidad} × {nombrePlato}
                     </span>
-                    {esCancelado && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-superficie-2 border border-borde font-etiqueta font-bold text-[11px] uppercase tracking-wider text-texto-suave shrink-0">
-                        Quitado
+                    {etiquetaCancelado && (
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-md bg-superficie-2 border font-etiqueta font-bold text-[11px] uppercase tracking-wider shrink-0 ${
+                          detalle.origen_cancelacion === 'personal'
+                            ? 'border-primario/50 text-primario-texto'
+                            : 'border-borde text-texto-suave'
+                        }`}
+                      >
+                        {etiquetaCancelado}
                       </span>
                     )}
                   </div>
