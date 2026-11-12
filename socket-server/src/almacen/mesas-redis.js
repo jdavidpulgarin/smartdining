@@ -8,9 +8,21 @@ const TTL_CUENTA_SEG = 24 * 60 * 60;
  * Estado de sala por mesa en Redis (misma interfaz que crearEstadoMesasMemoria
  * en sala.js). Va en Redis y no en memoria del proceso para que el límite de
  * llamadas al mesero valga aunque haya varias instancias detrás de Nginx.
+ *
+ * Índice sd:mesas:con-estado (hash id_mesa -> ms en que vence): las mesas con
+ * pagos o sin celular anotados en esta sesión. Sirve para mandar la presencia
+ * de TODAS al panel que se conecta (EVENTS.md §5.2), incluida una mesa sin
+ * ningún socket. Cada mesa vence a las 24 h de su última anotación, como
+ * pagaron y sin_celular, y la llave entera también: si una mesa nunca se
+ * libera, no queda basura.
  */
-function crearEstadoMesasRedis({ cliente }) {
+function crearEstadoMesasRedis({ cliente, ahora = Date.now }) {
   const llave = (idMesa, cosa) => `${PREFIJO}mesa:${idMesa}:${cosa}`;
+  const INDICE = `${PREFIJO}mesas:con-estado`;
+  async function anotarEnIndice(idMesa) {
+    await cliente.hSet(INDICE, String(idMesa), String(ahora() + TTL_CUENTA_SEG * 1000));
+    await cliente.expire(INDICE, TTL_CUENTA_SEG);
+  }
   return {
     /** Marca sd:mesa:{ID}:cuenta = 1. */
     async marcarCuenta(idMesa) {
@@ -22,12 +34,14 @@ function crearEstadoMesasRedis({ cliente }) {
     /** La sesión de mesa terminó: nada de su estado de sala pasa al grupo siguiente. */
     async limpiarMesa(idMesa) {
       await cliente.del([llave(idMesa, 'cuenta'), llave(idMesa, 'llamada'), llave(idMesa, 'pagaron'), llave(idMesa, 'sin_celular')]);
+      await cliente.hDel(INDICE, String(idMesa));
     },
     /** Anota que `alias` pagó en esta sesión (hash sd:mesa:{ID}:pagaron, idempotente). */
     async marcarPago(idMesa, alias) {
       const k = llave(idMesa, 'pagaron');
       await cliente.hSet(k, alias, alias);
       await cliente.expire(k, TTL_CUENTA_SEG);
+      await anotarEnIndice(idMesa);
     },
     /** Alias que ya pagaron en esta sesión, ordenados. */
     async pagaron(idMesa) {
@@ -46,12 +60,25 @@ function crearEstadoMesasRedis({ cliente }) {
     async agregarSinCelular(idMesa, clave, alias) {
       const k = llave(idMesa, 'sin_celular');
       const nuevo = await cliente.hSetNX(k, clave, alias);
-      if (nuevo) await cliente.expire(k, TTL_CUENTA_SEG);
+      if (nuevo) {
+        await cliente.expire(k, TTL_CUENTA_SEG);
+        await anotarEnIndice(idMesa);
+      }
       return Boolean(nuevo);
     },
     /** true si había un alias con esa clave y se quitó. */
     async quitarSinCelular(idMesa, clave) {
       return (await cliente.hDel(llave(idMesa, 'sin_celular'), clave)) > 0;
+    },
+    /** Mesas del índice que no han vencido, en orden; borra las vencidas. */
+    async mesasConEstado() {
+      const todas = await cliente.hGetAll(INDICE);
+      const vigentes = [];
+      for (const [id, vence] of Object.entries(todas)) {
+        if (Number(vence) > ahora()) vigentes.push(Number(id));
+        else await cliente.hDel(INDICE, id);
+      }
+      return vigentes.filter((id) => Number.isInteger(id) && id > 0).sort((a, b) => a - b);
     },
     /** true si la mesa puede llamar ahora (y deja la marca por `segundos`). */
     async reservarLlamada(idMesa, segundos) {
