@@ -102,10 +102,11 @@ database/scripts/
 ├── 30_fix_auditoria_registro_id.sql    # registro_id de la auditoría = llave primaria real (en transacciones guardaba el id_pedido)
 ├── 31_transicion_listo_cancelado.sql   # transición listo → cancelado (lo cocinado es merma); cancelar_pedido() lee transiciones_validas
 ├── 32_fix_intento_pago_fallido_ambiguo.sql # borra la sobrecarga de 4 parámetros de registrar_intento_pago_fallido (hacía ambigua toda llamada de 4)
-└── 33_estado_pago_al_cambiar_total.sql # estado_pago se recalcula también cuando cambia el total (al quitar un plato quedaba «parcial» con saldo 0)
+├── 33_estado_pago_al_cambiar_total.sql # estado_pago se recalcula también cuando cambia el total (al quitar un plato quedaba «parcial» con saldo 0)
+└── 34_contacto_espacios_unicode.sql  # correo y redes rechazan también los espacios Unicode (U+00A0…), igual que `\s` del backend; no depende del locale
 ```
 
-> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (34).
+> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (35).
 
 > **Auditoría de transacciones antes del script 30:** las filas de `auditoria_cambios` con
 > `tabla_afectada = 'transacciones'` escritas antes del 30 tienen el **id del pedido** en
@@ -213,7 +214,14 @@ psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p21_configuracion_con
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_30_auditoria_registro_id.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_31_listo_cancelado.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_33_estado_pago_total.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_34_contacto_espacios_unicode.sql
 ```
+
+Espacios Unicode en el contacto (script 34): `test_34_contacto_espacios_unicode.sql` exige que
+`correo` y `redes` rechacen U+00A0, U+2003, U+3000 y U+FEFF (sin el 34, `postgres:16-alpine` los
+acepta: `[[:space:]]` depende del locale), que lo de antes no cambie y que, si una fila vieja ya
+tuviera uno, el script no falle y deje el CHECK `NOT VALID` hasta corregirla. Usa `\ir`: correrla
+desde `database/tests`. Corre en `BEGIN … ROLLBACK`.
 
 `estado_pago` al cambiar el total (script 33): `test_33_estado_pago_total.sql` crea su propia
 mesa y plato, abona la mitad de un pedido de dos líneas y quita una: el total queda igual a lo
