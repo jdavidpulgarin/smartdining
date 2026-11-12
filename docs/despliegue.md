@@ -472,8 +472,8 @@ GitHub y del VPS. Además, cada despliegue comprueba lo mismo al terminar.
 
 Un local, o la feria, sale a Internet con **una sola IP pública** (el Wi-Fi). Todo
 límite «por IP» es el cupo de **todos los celulares y del personal a la vez**. Los
-valores de abajo están pensados para el peor caso de la feria: 6 mesas con QR, hasta 8
-personas por mesa y el personal en el mismo Wi-Fi.
+valores de abajo están pensados para la feria: de 10 a 15 mesas con QR, unos 10
+celulares a la vez como máximo y el personal en el mismo Wi-Fi.
 
 En nginx, `N/min + ráfaga R` significa que pasan `R + 1` peticiones seguidas y luego
 una cada `60/N` segundos; las que sobran reciben `429`.
@@ -516,13 +516,22 @@ staging, `ENV_FILE=infra/.env.staging` y `--env-file infra/.env.staging`):
    ```
 
 4. **Mesas de la demo:** las conexiones por mesa dependen de la capacidad guardada en la
-   base. El script crea las que falten y sube la capacidad; nunca la baja ni toca el
-   estado. El socket-server la toma en máximo 5 minutos.
+   base, y una mesa `ocupada` sin nadie no se puede abrir desde el panel.
+   `mesas-feria.sh` deja las mesas 1 a 15, todo en una transacción e idempotente:
+   - **Capacidad:** crea las que falten con capacidades de 2, 4, 4, 6 y 8 por número
+     (las mesas 1-5 del seed ya son así) y sube la de las que tengan menos. **Nunca la baja.**
+   - **Ocupada sin sesión real** (sin pedidos abiertos ni alias reservados en Redis): la
+     pasa a `disponible` sin QR, como la libera el backend.
+   - **Ocupada con sesión real:** no la toca y avisa. Un pedido `entregado` sin pagar
+     cuenta como abierto.
+   - Si Redis no responde, no cambia nada.
+
+   El socket-server toma las capacidades nuevas en máximo 5 minutos.
 
    ```bash
-   sh infra/scripts/mesas-feria.sh ver       # qué cambiaría
-   sh infra/scripts/mesas-feria.sh aplicar   # mesas 1-6 con capacidad 8
-   FERIA_MESAS=8 FERIA_CAPACIDAD=10 sh infra/scripts/mesas-feria.sh aplicar   # otro montaje
+   sh infra/scripts/mesas-feria.sh ver       # qué cambiaría, sin cambiar nada
+   sh infra/scripts/mesas-feria.sh aplicar   # lo aplica
+   FERIA_MESAS=20 sh infra/scripts/mesas-feria.sh ver   # más mesas
    ```
 
 5. Comprueba que nadie esté recibiendo 429:

@@ -24,7 +24,8 @@ gzip_types text/css application/javascript text/javascript application/json imag
 #
 # OJO: un local o una feria salen a Internet con UNA sola IP (el Wi-Fi), así
 # que cada zona es el cupo de TODOS a la vez. Valores para el peor caso de la
-# feria (6 mesas × 8 personas y el personal en el mismo Wi-Fi); tabla y cómo
+# feria (10 a 15 mesas, ~10 celulares a la vez y el personal en el mismo
+# Wi-Fi); tabla y cómo
 # cambiarlos en docs/despliegue.md, "Límites de peticiones". Los valores
 # vienen de variables NGINX_LIMITE_* y NGINX_RAFAGA_* que define
 # docker-compose.prod.yml (con estos valores por defecto): se ajustan en

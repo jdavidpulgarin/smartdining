@@ -81,8 +81,8 @@ services:
       # todos a la vez. Los valores por defecto van aquí para que funcionen sin
       # tocar los .env; se cambian en infra/.env (ver docs/despliegue.md,
       # "Límites de peticiones") y se aplican con `up -d backend`.
-      #   QR: apertura de sesión por QR (150/min por IP; 6 mesas × 8 personas
-      #       escaneando a la vez caben con margen).
+      #   QR: apertura de sesión por QR (150/min por IP; en la feria, 10 a 15
+      #       mesas y ~10 celulares a la vez caben con mucho margen).
       #   LOGIN: login del personal, 5 intentos FALLIDOS/min por IP + email.
       #   GLOBAL: techo de toda la API por IP.
       RATE_LIMIT_QR_MAX: ${RATE_LIMIT_QR_MAX:-150}
