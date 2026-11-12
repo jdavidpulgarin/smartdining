@@ -1987,7 +1987,7 @@ Notas de lo que quedó demostrado al escribirlas:
 | **GET** | **/pedidos/mesa/cuenta** | **comensal** | **Cuenta de SU mesa por comensal; la mesa sale del JWT** |
 | GET | /pedidos/:id | **admin, cajero, mesero, comensal** | Detalle con sus ítems; un comensal solo ve los de su mesa y de su visita (403 si no). **`cocina` no entra (S-26)** |
 | PATCH | /pedidos/:id/estado | admin, cajero, mesero | Cambia el estado (cualquiera de los 6 válidos) |
-| POST | /pedidos/:id/cancelar | admin, cajero, mesero | Atajo que fija `estado = cancelado`. **Solo desde `recibido` o `en_preparacion`**; desde `listo`/`entregado` responde 409 |
+| POST | /pedidos/:id/cancelar | admin, cajero, mesero, **comensal** | Personal: atajo que fija `estado = cancelado`. **Solo desde `recibido` o `en_preparacion`**; desde `listo`/`entregado` responde 409. **Comensal (D-12): cancela SU pedido completo, solo en `recibido`; no libera la mesa** |
 | **POST** | **/pedidos/:id/items/:id_detalle/cancelar** | **comensal, admin, mesero, cajero** | **D-13: quita UNA línea, entera. El comensal (J-14) solo las suyas y antes de que cocina empiece; el personal cualquiera que no se haya servido (devolución o merma). No libera la mesa** |
 
 ### POST /pedidos
@@ -2323,6 +2323,46 @@ ve su pedido cerrado. Con cuenta pendiente o abono parcial, el pedido se queda e
 
 > Punto de integración con Roberto: en el código (marcado con un comentario `NOTA`)
 > es donde se debe emitir `order:created` / `order:status` hacia el socket-server.
+
+### POST /pedidos/:id/cancelar — personal y comensal (D-12)
+
+Una sola ruta y **decide el tipo de sesión del JWT**. Cocina no entra (403).
+
+**Personal (admin, cajero, mesero):** el de siempre, sin cambios. Es el atajo de `PATCH
+/pedidos/:id/estado` con `estado = cancelado`: historial con el usuario y las
+`observaciones` del cuerpo, y si la mesa se queda sin pedidos abiertos **se libera**
+(`mesa-liberada`). La respuesta es el pedido (como en `PATCH`).
+
+**Comensal (D-12, contrato aprobado por Juan):** cancela **su pedido completo**.
+
+- **Sin cuerpo:** nada o `{}`. Un campo cualquiera es **400** `{ "motivo": "cuerpo_invalido" }`;
+  un `:id` que no sea entero > 0, **400** `parametro_invalido`. La mesa y el comensal salen
+  del JWT.
+- En **una transacción**, con el pedido y después sus líneas bloqueados (`FOR UPDATE`, las
+  líneas en orden de `id_detalle`), y en este orden:
+
+| Paso | Si no se cumple |
+|---|---|
+| El pedido existe | **404** `{ "motivo": "no_encontrado" }` |
+| Es de la **mesa del JWT** y de su **visita actual** (`creado_en ≥ sesion_iniciada_en`, la regla del #180) | **403** `{ "motivo": "no_es_tuyo" }` |
+| No está ya cancelado (va **primero** entre los 409) | **409** `{ "motivo": "pedido_ya_cancelado" }` |
+| Todas sus líneas **vivas** (no canceladas) son **suyas**, comparando por la **clave** del alias (D-18b). Una línea viva de otro comensal, o sin comensal, lo impide; una ya quitada no cuenta | **409** `{ "motivo": "pedido_compartido" }` |
+| El pedido está en `recibido` y todas las líneas vivas en `pendiente` | **409** `{ "motivo": "no_cancelable" }` |
+| No tiene pagos `completada` | **409** `{ "motivo": "pago_registrado" }` |
+
+Si pasa, cancela las líneas vivas y después el pedido (`recibido → cancelado`, transición
+válida), con su fila en `historial_estados` (`id_usuario` NULL, *"Cancelado por el
+comensal"*). El stock vuelve como **devolución, una sola vez por línea**: cada línea se
+devuelve al cancelarla (`tr_devolver_inventario`, con el pedido aún en `recibido`), y al
+cerrar el pedido `tr_devolver_inventario_pedido` ya no vuelve a cerrarla
+(`fn_cerrar_reserva_detalle` no repite una línea con su devolución hecha). Lo ya quitado con
+el #180 tampoco se devuelve otra vez. **No libera la mesa**: el grupo sigue sentado.
+
+`200` con la **misma forma que el #180**: `{ "pedido": { id_pedido, codigo_pedido, estado:
+"cancelado", total (número, 0), items } }`, con cada ítem en `estado_item: "cancelado"`.
+
+Después del COMMIT sale **solo** el `POST /internal/order-status` (→ `cancelado`); **no**
+un `item-cancelado` por línea, ni `mesa-liberada`.
 
 ### POST /pedidos/:id/items/:id_detalle/cancelar — comensal (D-13, J-14) y personal (D-13)
 

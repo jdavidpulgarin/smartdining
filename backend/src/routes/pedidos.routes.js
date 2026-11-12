@@ -26,7 +26,9 @@ router.get(
   ctrl.obtener
 );
 router.patch('/:id/estado', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.actualizarEstado);
-router.post('/:id/cancelar', requireAuth, requireRole('admin', 'cajero', 'mesero'), ctrl.cancelar);
+// El personal cancela cualquier pedido (como siempre); D-12: el comensal, el
+// suyo completo. El controller decide por el tipo de sesión.
+router.post('/:id/cancelar', requireAuth, requireRole('admin', 'cajero', 'mesero', 'comensal'), ctrl.cancelar);
 // D-13: quita UNA línea. El comensal (J-14) solo las suyas; el personal de sala
 // y caja cualquiera. Cocina no. El controller decide por el tipo de sesión.
 router.post(
