@@ -6,6 +6,7 @@ import {
   puedeQuitar,
   accionErrorQuitar,
   etiquetaItemCancelado,
+  mensajeEstadoTarjeta,
   haceCuanto,
   infoEstado,
   normalizarPedido,
@@ -591,5 +592,84 @@ describe('aplicarItemCancelado y reemplazarPedido (J-14)', () => {
     expect(
       etiquetaItemCancelado({ estado_item: 'pendiente' })
     ).toBeNull();
+  });
+});
+
+describe('mensajeEstadoTarjeta (J-14)', () => {
+  it('dice "Quitaste todos los platos de este pedido." si todas las lineas fueron canceladas por comensal o sin origen', () => {
+    const pedido = {
+      id_pedido: 1,
+      estado: 'cancelado',
+      esMio: true,
+      detalles: [
+        { id_detalle: 10, estado_item: 'cancelado', origen_cancelacion: 'comensal' },
+        { id_detalle: 11, estado_item: 'cancelado' },
+      ],
+    };
+    expect(mensajeEstadoTarjeta(pedido, 5)).toBe(
+      'Quitaste todos los platos de este pedido.'
+    );
+  });
+
+  it('mantiene el texto de mesero si lo cancelo el restaurante por order:status o por origen personal', () => {
+    const porOrderStatus = aplicarCambioEstado(
+      [
+        {
+          id_pedido: 2,
+          estado: 'recibido',
+          esMio: true,
+          detalles: [{ id_detalle: 20, estado_item: 'pendiente' }],
+        },
+      ],
+      { id_pedido: 2, estado: 'cancelado' }
+    )[0];
+    expect(mensajeEstadoTarjeta(porOrderStatus, 5)).toBe(
+      'Habla con el mesero si tienes dudas.'
+    );
+
+    const porOrigenPersonal = {
+      id_pedido: 3,
+      estado: 'cancelado',
+      esMio: true,
+      detalles: [
+        { id_detalle: 30, estado_item: 'cancelado', origen_cancelacion: 'personal' },
+      ],
+    };
+    expect(mensajeEstadoTarjeta(porOrigenPersonal, 5)).toBe(
+      'Habla con el mesero si tienes dudas.'
+    );
+  });
+
+  it('mantiene el texto de mesero si el pedido no es mio aunque todas las lineas esten canceladas', () => {
+    const deOtro = {
+      id_pedido: 4,
+      estado: 'cancelado',
+      esMio: false,
+      detalles: [{ id_detalle: 40, estado_item: 'cancelado' }],
+    };
+    expect(mensajeEstadoTarjeta(deOtro, 5)).toBe(
+      'Habla con el mesero si tienes dudas.'
+    );
+  });
+
+  it('conserva "Quitaste todos los platos de este pedido." aunque llegue despues order:status cancelado', () => {
+    const trasItem = aplicarItemCancelado(
+      [
+        {
+          id_pedido: 5,
+          estado: 'recibido',
+          esMio: true,
+          detalles: [{ id_detalle: 50, estado_item: 'pendiente', subtotal: 15000 }],
+        },
+      ],
+      { id_pedido: 5, id_detalle: 50, total: 0, estado_pedido: 'cancelado' }
+    );
+    const trasOrderStatus = aplicarCambioEstado(trasItem, {
+      id_pedido: 5,
+      estado: 'cancelado',
+    });
+    expect(mensajeEstadoTarjeta(trasOrderStatus[0], 5)).toBe(
+      'Quitaste todos los platos de este pedido.'
+    );
   });
 });

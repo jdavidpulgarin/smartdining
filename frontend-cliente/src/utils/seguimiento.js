@@ -220,6 +220,7 @@ export function normalizarPedido(pedido, miAlias = null) {
     codigo_pedido: pedido.codigo_pedido ?? pedido.codigo ?? '',
     id_mesa: pedido.id_mesa ?? null,
     estado: String(pedido.estado || 'recibido').toLowerCase(),
+    ...(pedido.cancelado_por ? { cancelado_por: pedido.cancelado_por } : {}),
     total,
     creado_en: pedido.creado_en || pedido.fecha || new Date().toISOString(),
     detalles,
@@ -245,9 +246,15 @@ export function aplicarCambioEstado(pedidos, evento) {
 
   return pedidos.map((p) => {
     if (String(p.id_pedido) === idBuscado) {
+      const yaCancelado = String(p.estado || '').toLowerCase() === 'cancelado';
+      const canceladoPor =
+        nuevoEstado === 'cancelado'
+          ? (yaCancelado ? p.cancelado_por : 'restaurante')
+          : p.cancelado_por;
       return {
         ...p,
         estado: nuevoEstado,
+        ...(canceladoPor ? { cancelado_por: canceladoPor } : {}),
         actualizado_en: evento.emitidoEn || new Date().toISOString(),
       };
     }
@@ -582,9 +589,20 @@ export function aplicarItemCancelado(pedidos, evento) {
           .filter((d) => d.estado_item !== 'cancelado')
           .reduce((acc, d) => acc + (Number(d.subtotal) || 0), 0);
 
+    const huboPersonal = detallesActualizados.some(
+      (d) =>
+        String(d.estado_item || '').trim().toLowerCase() === 'cancelado' &&
+        String(d.origen_cancelacion ?? d.origen ?? '').trim().toLowerCase() === 'personal'
+    );
+    const canceladoPor =
+      estadoNuevo === 'cancelado'
+        ? (huboPersonal || origenEvento === 'personal' ? 'restaurante' : 'comensal')
+        : pedido.cancelado_por;
+
     return {
       ...pedido,
       estado: estadoNuevo,
+      ...(canceladoPor ? { cancelado_por: canceladoPor } : {}),
       total: totalNuevo,
       detalles: detallesActualizados,
       items: detallesActualizados,
@@ -613,13 +631,63 @@ export function reemplazarPedido(pedidos, pedidoCrudo, miAlias = null) {
 
   return pedidos.map((p) => {
     if (String(p.id_pedido) !== idBuscado) return p;
+    const canceladoPor =
+      normalizado.estado === 'cancelado'
+        ? (normalizado.cancelado_por || p.cancelado_por || 'comensal')
+        : normalizado.cancelado_por;
     return {
       ...p,
       ...normalizado,
+      ...(canceladoPor ? { cancelado_por: canceladoPor } : {}),
       creado_en: pedidoCrudo.creado_en || p.creado_en,
       esMio: p.esMio || normalizado.esMio,
     };
   });
+}
+
+/**
+ * Devuelve el mensaje que debe mostrar la tarjeta principal de seguimiento para un pedido.
+ * Si quedó `cancelado` porque el propio comensal quitó todos los platos (todas las líneas
+ * canceladas con origen `'comensal'` o sin origen, y no fue cancelado por el restaurante),
+ * devuelve `"Quitaste todos los platos de este pedido."`.
+ *
+ * @param {object|null|undefined} pedido
+ * @param {number|string|null} [numeroMesa]
+ * @returns {string}
+ */
+export function mensajeEstadoTarjeta(pedido, numeroMesa = null) {
+  const info = infoEstado(pedido?.estado, numeroMesa);
+  if (!pedido || info.clave !== 'cancelado') {
+    return info.mensaje;
+  }
+
+  if (pedido.esMio === false || pedido.cancelado_por === 'restaurante') {
+    return info.mensaje;
+  }
+
+  const lineas = Array.isArray(pedido.detalles)
+    ? pedido.detalles
+    : Array.isArray(pedido.items)
+      ? pedido.items
+      : [];
+
+  if (lineas.length === 0) {
+    return info.mensaje;
+  }
+
+  const todasCanceladasPorComensal = lineas.every((d) => {
+    const estadoItem = String(d?.estado_item || '').trim().toLowerCase();
+    const origen = String(d?.origen_cancelacion ?? d?.origen ?? '')
+      .trim()
+      .toLowerCase();
+    return estadoItem === 'cancelado' && origen !== 'personal';
+  });
+
+  if (todasCanceladasPorComensal) {
+    return 'Quitaste todos los platos de este pedido.';
+  }
+
+  return info.mensaje;
 }
 
 /**
@@ -656,6 +724,7 @@ export default {
   puedeQuitar,
   accionErrorQuitar,
   etiquetaItemCancelado,
+  mensajeEstadoTarjeta,
   separarPedidos,
   pedidoPrincipal,
   haceCuanto,

@@ -459,8 +459,36 @@ describe('pedidoService (H-05, H-06, J-05)', () => {
     expect(segundo.pedido.items.every((i) => i.estado_item === 'cancelado')).toBe(true);
   });
 
-  it('J-14 cancelarItem (simulado): fuerza errores con smartdining_sim_quitar', async () => {
+  it('J-14 cancelarItem (simulado): fuerza errores con smartdining_sim_quitar y pasa el pedido a en_preparacion', async () => {
     vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const { CLAVE_PEDIDOS_SIMULADOS } = await import('./pedidoSimulado');
+
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify([
+        {
+          id_pedido: 87,
+          codigo_pedido: 'PED-87',
+          id_mesa: 5,
+          estado: 'recibido',
+          total: 36000,
+          detalles: [
+            {
+              id_detalle: 210,
+              plato_nombre: 'Bandeja paisa',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+            {
+              id_detalle: 211,
+              plato_nombre: 'Limonada',
+              estado_item: 'cancelado',
+              comensal: 'Ana',
+            },
+          ],
+        },
+      ])
+    );
 
     const casos = [
       ['item_ya_cancelado', 409],
@@ -476,5 +504,12 @@ describe('pedidoService (H-05, H-06, J-05)', () => {
         motivo,
       });
     }
+
+    const guardados = JSON.parse(
+      globalThis.sessionStorage.getItem(CLAVE_PEDIDOS_SIMULADOS)
+    );
+    expect(guardados[0].estado).toBe('en_preparacion');
+    expect(guardados[0].detalles[0].estado_item).toBe('en_preparacion');
+    expect(guardados[0].detalles[1].estado_item).toBe('cancelado');
   });
 });

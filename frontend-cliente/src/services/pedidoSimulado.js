@@ -216,6 +216,37 @@ export async function cancelarItemSimulado(idPedido, idDetalle) {
       simQuitar = null;
     }
 
+    if (simQuitar === 'item_en_preparacion') {
+      try {
+        const listaActual = listarPedidosMesaSimulados(null);
+        const existe = listaActual.some((p) => String(p.id_pedido) === String(idPedido));
+        if (existe) {
+          const listaEnCocina = listaActual.map((p) => {
+            if (String(p.id_pedido) !== String(idPedido)) return p;
+            const rawLineas = Array.isArray(p.detalles)
+              ? p.detalles
+              : Array.isArray(p.items)
+                ? p.items
+                : [];
+            const lineasCocina = rawLineas.map((d) =>
+              String(d.estado_item || '').toLowerCase() === 'cancelado'
+                ? d
+                : { ...d, estado_item: 'en_preparacion' }
+            );
+            return {
+              ...p,
+              estado: 'en_preparacion',
+              detalles: lineasCocina,
+            };
+          });
+          sessionStorage.setItem(CLAVE_PEDIDOS_SIMULADOS, JSON.stringify(listaEnCocina));
+        }
+      } catch {
+        // Ignorar errores de almacenamiento
+      }
+      throw new ErrorApi(ERRORES_SIM_QUITAR.item_en_preparacion);
+    }
+
     if (simQuitar && ERRORES_SIM_QUITAR[simQuitar]) {
       throw new ErrorApi(ERRORES_SIM_QUITAR[simQuitar]);
     }
