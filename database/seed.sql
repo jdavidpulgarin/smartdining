@@ -32,8 +32,10 @@ INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr)
 SELECT 2, 4, 'Terraza', 'disponible', 'qr-token-mesa-02-e5f6g7h8'
 WHERE NOT EXISTS (SELECT 1 FROM mesas WHERE numero = 2);
 
+-- La mesa 3 nace libre: 'ocupada' con un token falso no tenía sesión real y el
+-- panel no podía abrirla (producción sale de este seed). La abre el mesero.
 INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr)
-SELECT 3, 4, 'Salón Principal', 'ocupada', 'qr-token-mesa-03-i9j0k1l2'
+SELECT 3, 4, 'Salón Principal', 'disponible', NULL
 WHERE NOT EXISTS (SELECT 1 FROM mesas WHERE numero = 3);
 
 INSERT INTO mesas (numero, capacidad, ubicacion, estado, token_qr)
