@@ -218,15 +218,18 @@ const ESTADOS_ACTIVOS = ['recibido', 'en_preparacion', 'listo', 'entregado'];
  * (compatible hacia atrás) y lo nuevo se agrega al lado.
  *
  * Se une con mesas para dar `mesa_numero`, que es lo que el panel muestra: el
- * número que el personal ve en el salón, no el id interno. Es un JOIN y no un
- * LEFT JOIN porque pedidos.id_mesa es NOT NULL con FK a mesas: todo pedido
- * tiene su mesa. Mismo alias y mismo nombre de campo que kds.service, para que
- * el panel y el KDS hablen igual.
+ * número que el personal ve en el salón, no el id interno. Mismo alias y mismo
+ * nombre de campo que kds.service, para que el panel y el KDS hablen igual.
+ *
+ * LEFT JOIN desde la D-20a: el script 36 dejó pedidos.id_mesa NULLABLE (los
+ * pedidos a domicilio y para llevar no tienen mesa) y con JOIN esos pedidos
+ * desaparecían del panel. Salen con mesa_numero null; `p.*` ya trae `canal` e
+ * `id_cliente`, así que no hace falta pedirlos aparte.
  */
 const SQL_PEDIDOS_ACTIVOS = `
   SELECT p.*, m.numero AS mesa_numero
   FROM pedidos p
-  JOIN mesas m ON m.id_mesa = p.id_mesa
+  LEFT JOIN mesas m ON m.id_mesa = p.id_mesa
   WHERE p.estado = ANY($1::text[])
   ORDER BY p.creado_en ASC`;
 

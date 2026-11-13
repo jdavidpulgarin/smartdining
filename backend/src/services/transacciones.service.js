@@ -691,11 +691,14 @@ async function listarDelDia({ desde = DESDE_HOY, zona = ZONA, ahora = null } = {
          FROM limites l
      ),
      filas AS (
+       -- D-20a: LEFT JOIN mesas. Un pago anticipado de un domicilio o de un
+       -- pedido para llevar no tiene mesa y con JOIN no contaba en el cierre de
+       -- caja ("Recaudado hoy"). Sale con numero_mesa null y su canal.
        SELECT t.id_transaccion, t.id_pedido, p.codigo_pedido, p.id_mesa, m.numero AS numero_mesa,
-              t.monto, t.metodo_pago, t.comensal, t.voucher, t.creado_en, t.referencia_externa
+              p.canal, t.monto, t.metodo_pago, t.comensal, t.voucher, t.creado_en, t.referencia_externa
          FROM transacciones t
          JOIN pedidos p ON p.id_pedido = t.id_pedido
-         JOIN mesas   m ON m.id_mesa   = p.id_mesa
+         LEFT JOIN mesas m ON m.id_mesa = p.id_mesa
          CROSS JOIN validez l
         WHERE t.estado_transaccion = $2::text
           AND NOT l.futura AND NOT l.antigua
@@ -716,6 +719,8 @@ async function listarDelDia({ desde = DESDE_HOY, zona = ZONA, ahora = null } = {
                        'codigo_pedido',  f.codigo_pedido,
                        'id_mesa',        f.id_mesa,
                        'numero_mesa',    f.numero_mesa,
+                       -- D-20a: 'mesa', 'para_llevar' o 'domicilio'.
+                       'canal',          f.canal,
                        'monto',          f.monto,
                        'metodo_pago',    f.metodo_pago,
                        'comensal',       f.comensal,
