@@ -7,7 +7,7 @@ import { normalizarCuenta, aplicarPagoConfirmado } from '../utils/cuenta';
 /**
  * Hook para cargar y sincronizar la cuenta de la mesa en tiempo real (J-08).
  *
- * Escucha payment:confirmed y order:created para actualizar saldos y comensales.
+ * Escucha payment:confirmed, order:created e item:cancelado para actualizar saldos y comensales.
  * Deduplica eventos usando un buffer circular de 200 eventId.
  *
  * @returns {{
@@ -123,9 +123,23 @@ export function useCuentaMesa() {
       }
     });
 
+    const bajaItemCancelado = socketOn('item:cancelado', (data) => {
+      if (!data || esDuplicado(data.eventId)) return;
+
+      if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+        import('../services/cuentaSimulada').then(({ refrescarCuentaSimulada }) => {
+          refrescarCuentaSimulada?.(data.id_mesa);
+          cargarCuenta();
+        });
+      } else {
+        cargarCuenta();
+      }
+    });
+
     return () => {
       bajaPayment?.();
       bajaCreated?.();
+      bajaItemCancelado?.();
     };
   }, [socketOn, esDuplicado, cargarCuenta]);
 

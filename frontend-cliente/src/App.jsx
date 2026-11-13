@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { SesionProvider } from './context/SesionContext'
 import { MesaSocketProvider } from './context/MesaSocketContext'
 import { CarritoProvider } from './context/CarritoContext'
+import { SeguimientoProvider } from './context/SeguimientoContext'
 import Layout from './components/layout/Layout'
 import Inicio from './pages/Inicio'
 import { obtenerMetadatosRuta } from './utils/metadatosRuta'
@@ -56,7 +57,8 @@ function App() {
       <SesionProvider>
         <MesaSocketProvider>
           <CarritoProvider>
-          <Suspense fallback={<CargandoRuta />}>
+            <SeguimientoProvider>
+              <Suspense fallback={<CargandoRuta />}>
           <Routes>
             <Route path="/" element={<Inicio />} />
             <Route
@@ -104,7 +106,8 @@ function App() {
               <Route path="/dev/ui" element={<UiShowcase />} />
             )}
           </Routes>
-          </Suspense>
+              </Suspense>
+            </SeguimientoProvider>
         </CarritoProvider>
       </MesaSocketProvider>
     </SesionProvider>

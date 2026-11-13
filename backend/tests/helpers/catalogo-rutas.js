@@ -374,6 +374,14 @@ const TABLA = [
     roles: ['admin', 'cajero', 'mesero'],
     cuerpo: {},
   },
+  {
+    // D-13: quita UNA línea. El comensal (J-14) las suyas; del personal solo
+    // admin y mesero (revisión de Jarrison). Cajero y cocina no.
+    metodo: 'POST',
+    patron: '/api/pedidos/:id/items/:id_detalle/cancelar',
+    url: '/api/pedidos/87/items/3/cancelar',
+    roles: ['comensal', 'admin', 'mesero'],
+  },
 
   // --- KDS ------------------------------------------------------------------
   { metodo: 'GET', patron: '/api/kds/comandas', url: '/api/kds/comandas', roles: ['cocina', 'admin'] },
@@ -422,6 +430,13 @@ const TABLA = [
 
   // --- Reportes (D-07): cifras de negocio, solo admin -----------------------
   { metodo: 'GET', patron: '/api/reportes', url: '/api/reportes?rango=hoy', roles: ['admin'] },
+  // Consumo de inventario (plan v1.1, D-17 P3).
+  {
+    metodo: 'GET',
+    patron: '/api/reportes/consumo',
+    url: '/api/reportes/consumo?desde=2026-11-01&hasta=2026-11-02',
+    roles: ['admin'],
+  },
 ];
 
 /** Clave con la que se compara contra `rutasRegistradas()`. */

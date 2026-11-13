@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import {
   CreditCard,
   DollarSign,
@@ -13,7 +14,16 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
-import { useSocketEmit, useSocketListener, useTables } from '../hooks'
+import { useAuth, useSocketListener, useTables } from '../hooks'
+import {
+  puedeUsarCaja,
+  comensalDelCobro,
+  idCobroParaEnviar,
+  mensajeDeErrorCobro,
+  descartarIdCobro,
+  agruparCobros,
+  horaBogota,
+} from '../utils/caja'
 
 function formatCOP(monto) {
   const num = Number(monto) || 0
@@ -24,25 +34,43 @@ function formatCOP(monto) {
   }).format(num)
 }
 
-function generateRef() {
-  return 'POS-' + Date.now().toString().slice(-6)
-}
-
 function getCurrentTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+/**
+ * La Caja es de admin y cajero (el backend da 403 al resto). Al mesero ni se le
+ * muestra el enlace; si llega por la URL, vuelve al inicio.
+ */
 export function Caja() {
-  const emit = useSocketEmit()
+  const { user } = useAuth()
+  if (!puedeUsarCaja(user?.rol)) return <Navigate to="/" replace />
+  return <CajaRegistradora />
+}
+
+function CajaRegistradora() {
   const { cargarMesas } = useTables()
+  const [searchParams] = useSearchParams()
 
   const [loading, setLoading] = useState(() => Boolean(getAuthToken()))
   const [errorMessage, setErrorMessage] = useState(null)
   const [processingPayment, setProcessingPayment] = useState(false)
+  const [errorCobro, setErrorCobro] = useState(null)
+
+  // El cobro en curso: { clave, id_cobro }. Se guarda ANTES de enviar y solo se
+  // borra cuando el backend confirma (201 o 200 duplicado). Así un doble clic o
+  // un reintento tras un error de red repite el MISMO id_cobro y el backend no
+  // cobra dos veces; un cobro distinto (otra mesa, persona, monto o método)
+  // lleva un id nuevo.
+  const cobroPendiente = useRef(null)
+  // Bloqueo síncrono: el estado `processingPayment` tarda un render en llegar,
+  // y un doble clic dispara dos submit antes.
+  const enviando = useRef(false)
 
   // Cuentas reales cargadas desde el backend
   const [cuentasMesas, setCuentasMesas] = useState([])
-  const [selectedMesaId, setSelectedMesaId] = useState(null)
+  // "Cobrar en Caja" desde el detalle de una mesa llega con ?mesa=ID.
+  const [selectedMesaId, setSelectedMesaId] = useState(() => Number(searchParams.get('mesa')) || null)
   const [selectedComensal, setSelectedComensal] = useState('TOTAL')
 
   // Detalles de ítems del pedido activo
@@ -57,24 +85,48 @@ export function Caja() {
   const [paidReceipt, setPaidReceipt] = useState(null)
   const [activeTab, setActiveTab] = useState('pendientes')
 
-  // Historial de transacciones de la jornada
-  const [history, setHistory] = useState(() => {
-    try {
-      const stored = sessionStorage.getItem('smartdining_caja_history')
-      return stored ? JSON.parse(stored) : []
-    } catch {
-      return []
-    }
-  })
+  // Lo cobrado hoy, del BACKEND (GET /transacciones?desde=hoy, #158): "Recaudado
+  // hoy" es su `total` y el Historial sus filas. Antes salían de sessionStorage,
+  // así que en otra pestaña, otro equipo, otro cajero o al reabrir la Caja se
+  // veía $0 aunque ya se hubiera cobrado. null = todavía no se sabe.
+  const [dia, setDia] = useState(null)
+  const [errorDia, setErrorDia] = useState(null)
 
-  // Sincronizar historial con sessionStorage
-  useEffect(() => {
+  const cargarDia = useCallback(async () => {
     try {
-      sessionStorage.setItem('smartdining_caja_history', JSON.stringify(history))
-    } catch {
-      // Ignorar error de almacenamiento
+      const d = await transaccionesApi.delDia('hoy')
+      setDia(d)
+      setErrorDia(null)
+    } catch (err) {
+      setErrorDia(err?.message || 'error desconocido')
     }
-  }, [history])
+  }, [])
+
+  useEffect(() => {
+    let cancel = false
+    // El historial viejo de la pestaña ya no se usa.
+    try {
+      sessionStorage.removeItem('smartdining_caja_history')
+    } catch {
+      // Sin almacenamiento no hay nada que borrar.
+    }
+    transaccionesApi
+      .delDia('hoy')
+      .then((d) => {
+        if (!cancel) {
+          setDia(d)
+          setErrorDia(null)
+        }
+      })
+      .catch((err) => {
+        if (!cancel) setErrorDia(err?.message || 'error desconocido')
+      })
+    return () => {
+      cancel = true
+    }
+  }, [])
+
+  const cobrosDelDia = useMemo(() => agruparCobros(dia?.transacciones || []), [dia])
 
   /**
    * Carga las cuentas activas directamente desde la API para todas las mesas ocupadas
@@ -139,6 +191,7 @@ export function Caja() {
   const handleSelectMesa = useCallback((mesaId) => {
     setSelectedMesaId(mesaId)
     setSelectedComensal('TOTAL')
+    setErrorCobro(null)
   }, [])
 
   // Cargar cuentas al montar de forma asíncrona
@@ -211,6 +264,8 @@ export function Caja() {
   useSocketListener('order:status', () => cargarCuentas())
   useSocketListener('payment:confirmed', (data) => {
     cargarCuentas()
+    // Cualquier cobro (esta caja, otra, o un pago en línea) cambia lo recaudado.
+    cargarDia()
     if (data?.id_mesa) cargarMesas()
   })
   useSocketListener('mesa:liberada', () => {
@@ -233,7 +288,7 @@ export function Caja() {
     return cuentasMesas.find((c) => c.id_mesa === selectedMesaId) || null
   }, [cuentasMesas, selectedMesaId])
 
-  // Cargar detalle de ítems del pedido activo cuando se selecciona una mesa
+  // Ítems de TODOS los pedidos de la mesa (antes solo los del primero)
   useEffect(() => {
     let cancel = false
 
@@ -243,13 +298,12 @@ export function Caja() {
         return
       }
 
-      const primerPedido = selectedCuenta.pedidos[0]
       setLoadingDetalles(true)
       try {
-        const pedData = await pedidosApi.obtener(primerPedido.id_pedido)
-        if (!cancel && pedData?.detalles) {
-          setDetallesPedido(pedData.detalles)
-        }
+        const respuestas = await Promise.all(
+          selectedCuenta.pedidos.map((p) => pedidosApi.obtener(p.id_pedido).catch(() => null))
+        )
+        if (!cancel) setDetallesPedido(respuestas.flatMap((r) => r?.detalles || []))
       } catch {
         if (!cancel) setDetallesPedido([])
       } finally {
@@ -313,108 +367,87 @@ export function Caja() {
   const numericCash = parseFloat(cashGiven) || 0
   const changeDue = Math.max(0, numericCash - financialDetails.total)
 
-  // Procesar registro de pago en el backend
+  // Cobro de MESA: un solo POST /api/transacciones/mesa; el backend reparte el
+  // monto entre los pedidos de la mesa (antes iba entero al primer pedido).
   const handleProcessPayment = async (e) => {
     e.preventDefault()
-    if (!selectedCuenta) return
+    if (!selectedCuenta || enviando.current) return
+    setErrorCobro(null)
 
     if (paymentMethod === 'efectivo' && numericCash < financialDetails.total) {
-      alert(
-        `El efectivo recibido (${formatCOP(numericCash)}) es menor al total a pagar (${formatCOP(
-          financialDetails.total
-        )})`
+      setErrorCobro(
+        `El efectivo recibido (${formatCOP(numericCash)}) es menor al total a pagar (${formatCOP(financialDetails.total)}).`
       )
       return
     }
 
-    // Identificar el pedido activo con saldo en la mesa
-    const pedidoTarget = selectedCuenta.pedidos?.[0]
-    if (!pedidoTarget) {
-      alert('No se encontró un pedido activo para liquidar en esta mesa.')
-      return
+    // La propina no entra en el monto: el backend solo cubre el saldo de los
+    // pedidos (un monto mayor es 409 excede). Queda en el recibo.
+    const datos = {
+      id_mesa: selectedCuenta.id_mesa,
+      comensal: comensalDelCobro(selectedComensal),
+      monto: financialDetails.subtotal,
+      metodo_pago: paymentMethod,
     }
-
+    // Mismo cobro que el intento anterior sin confirmar → mismo id_cobro.
+    const cobro = idCobroParaEnviar(cobroPendiente.current, datos)
+    cobroPendiente.current = cobro
+    enviando.current = true
     setProcessingPayment(true)
-    const refOperacion = authCode.trim() || generateRef()
 
     try {
-      // 1. Llamar al backend real: POST /api/transacciones
-      const resTx = await transaccionesApi.registrarPago({
-        id_pedido: pedidoTarget.id_pedido,
-        monto: financialDetails.subtotal,
-        metodo_pago: paymentMethod,
-        referencia_externa: refOperacion,
-        comensal: selectedComensal === 'TOTAL' ? null : selectedComensal,
-      })
+      const res = await transaccionesApi.cobrarMesa({ ...datos, id_cobro: cobro.id_cobro })
+      // Confirmado (201, o 200 si ya se había cobrado): el próximo cobro es otro.
+      cobroPendiente.current = null
 
-      // 2. Construir comprobante de pago
+      const transacciones = res?.transacciones || []
+      const codigos = transacciones
+        .map((t) => selectedCuenta.pedidos?.find((p) => p.id_pedido === t.id_pedido)?.codigo_pedido || `#${t.id_pedido}`)
       const receipt = {
-        id_transaccion: resTx?.id_transaccion ? `TRX-${resTx.id_transaccion}` : generateRef(),
-        id_pedido: pedidoTarget.codigo_pedido || `#${pedidoTarget.id_pedido}`,
+        id_transaccion: transacciones.length
+          ? transacciones.map((t) => `TRX-${t.id_transaccion}`).join(' · ')
+          : `COBRO ${cobro.id_cobro.slice(0, 8).toUpperCase()}`,
+        duplicado: Boolean(res?.duplicado),
+        pedidos: codigos,
         mesa: `Mesa ${selectedCuenta.numero || selectedCuenta.numero_mesa}`,
         comensal: financialDetails.comensalNombre,
         metodo_pago: paymentMethod,
-        items: detallesPedido.length > 0 ? detallesPedido : [
-          {
-            nombre: 'Consumo registrado',
-            cantidad: selectedCuenta.items_totales || 1,
-            subtotal: financialDetails.subtotal,
-          },
-        ],
         subtotal: financialDetails.subtotal,
         tip: financialDetails.tip,
         total: financialDetails.total,
         cashGiven: paymentMethod === 'efectivo' ? numericCash : null,
         changeDue: paymentMethod === 'efectivo' ? changeDue : null,
-        referencia: refOperacion,
+        voucher: authCode.trim() || null,
+        saldoRestante: Number(res?.saldo_restante) || 0,
+        mesaLiberada: Boolean(res?.mesa_liberada),
         hora: getCurrentTime(),
       }
 
-      // 3. Emitir evento por WebSockets
-      emit('payment:confirmed', {
-        id_pedido: pedidoTarget.id_pedido,
-        id_mesa: selectedCuenta.id_mesa,
-        monto: financialDetails.total,
-        comensal: selectedComensal === 'TOTAL' ? null : selectedComensal,
-        metodo_pago: paymentMethod,
-        timestamp: new Date().toISOString(),
-      })
-
-      // 4. Agregar al historial local
-      setHistory((prev) => [
-        {
-          id_transaccion: receipt.id_transaccion,
-          id_pedido: pedidoTarget.id_pedido,
-          mesa: receipt.mesa,
-          comensal: receipt.comensal,
-          metodo_pago: receipt.metodo_pago,
-          monto: receipt.total,
-          hora: receipt.hora,
-          estado: 'completada',
-          referencia: receipt.referencia,
-        },
-        ...prev,
-      ])
-
-      // 5. Mostrar recibo y limpiar inputs
       setPaidReceipt(receipt)
       setCashGiven('')
       setAuthCode('')
-
-      // 6. Recargar mesas y cuentas
-      await cargarCuentas()
+      // Los avisos de tiempo real (payment:confirmed, order:status,
+      // mesa:liberada) los manda el backend después del COMMIT. "Recaudado hoy"
+      // y el Historial se vuelven a pedir aquí también, sin esperar al aviso
+      // (también tras un duplicado: no cambia nada, pero queda al día).
+      await Promise.all([cargarCuentas(), cargarDia()])
       await cargarMesas()
     } catch (err) {
-      alert(`Error al registrar el cobro en caja: ${err.message}`)
+      // 409 id_cobro_en_uso: no se cobró nada y ese id es de otro cobro; el
+      // siguiente clic lleva un id_cobro nuevo.
+      if (descartarIdCobro(err)) cobroPendiente.current = null
+      setErrorCobro(mensajeDeErrorCobro(err, formatCOP))
+      // El saldo cambió por otro lado: se recarga para que el cajero vea el real.
+      if (err?.motivo === 'excede' || err?.motivo === 'sin_cuenta') await cargarCuentas()
     } finally {
+      enviando.current = false
       setProcessingPayment(false)
     }
   }
 
-  // Métricas acumuladas del turno
-  const totalRecaudadoHoy = useMemo(() => {
-    return history.reduce((acc, h) => acc + (Number(h.monto) || 0), 0)
-  }, [history])
+  // "Recaudado hoy": el total que da el backend (la propina no se registra, así
+  // que no entra). Mientras carga, "…"; si no se pudo, "—" y no un $0 engañoso.
+  const textoRecaudadoHoy = dia ? formatCOP(dia.total) : errorDia ? '—' : '…'
 
   const totalSaldoSalon = useMemo(() => {
     return cuentasMesas.reduce((acc, c) => acc + (Number(c.saldo_mesa) || 0), 0)
@@ -438,7 +471,7 @@ export function Caja() {
               className={`sd-red-band-btn ${activeTab === 'historial' ? 'active' : ''}`}
               onClick={() => setActiveTab('historial')}
             >
-              HISTORIAL DE PAGOS <span>{history.length}</span>
+              HISTORIAL DE PAGOS <span>{cobrosDelDia.length}</span>
             </button>
           </div>
 
@@ -449,9 +482,9 @@ export function Caja() {
             <button
               type="button"
               className="sd-red-band-btn"
-              onClick={cargarCuentas}
+              onClick={() => { cargarCuentas(); cargarDia() }}
               disabled={loading}
-              title="Actualizar cuentas"
+              title="Actualizar cuentas y lo recaudado hoy"
             >
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
               <span>ACTUALIZAR</span>
@@ -468,7 +501,9 @@ export function Caja() {
             REGISTRADORA
           </h1>
           <div className="sd-tables-counters">
-            <span>{formatCOP(totalRecaudadoHoy)} RECAUDADO HOY</span>
+            <span data-testid="recaudado-hoy" title={errorDia ? `No se pudo cargar lo recaudado hoy: ${errorDia}` : undefined}>
+              {textoRecaudadoHoy} RECAUDADO HOY
+            </span>
             <span className="sd-counter-sep">·</span>
             <span>{cuentasMesas.length} CUENTAS PENDIENTES</span>
             <span className="sd-counter-sep">·</span>
@@ -543,7 +578,11 @@ export function Caja() {
                       COBRAR / MESA {selectedCuenta.numero || selectedCuenta.numero_mesa}
                     </h2>
                     <span style={{ fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-text-muted)', fontSize: 16 }}>
-                      {selectedCuenta.pedidos?.[0]?.codigo_pedido ? `PEDIDO ${selectedCuenta.pedidos[0].codigo_pedido} · ` : ''}
+                      {selectedCuenta.pedidos?.length === 1 && selectedCuenta.pedidos[0].codigo_pedido
+                        ? `PEDIDO ${selectedCuenta.pedidos[0].codigo_pedido} · `
+                        : selectedCuenta.pedidos?.length > 1
+                        ? `${selectedCuenta.pedidos.length} PEDIDOS · `
+                        : ''}
                       UBICACIÓN: {(selectedCuenta.ubicacion || selectedCuenta.ubicacion_mesa || 'PRINCIPAL').toUpperCase()}
                     </span>
                   </header>
@@ -704,15 +743,19 @@ export function Caja() {
                           <label htmlFor="efectivo-input" className="sd-input-label">
                             EFECTIVO RECIBIDO (COP):
                           </label>
+                          {/* Sin min/step/required: con step=1000 y min=total, un total
+                              que no es múltiplo de 1.000 (con propina, o un saldo de
+                              34.500) hacía que el navegador rechazara 50.000 en
+                              silencio. El mínimo lo comprueba handleProcessPayment. */}
                           <input
                             id="efectivo-input"
                             type="number"
-                            step="1000"
-                            min={financialDetails.total}
+                            inputMode="numeric"
+                            min="0"
+                            step="any"
                             placeholder={financialDetails.total.toString()}
                             value={cashGiven}
                             onChange={(e) => setCashGiven(e.target.value)}
-                            required
                             className="sd-input"
                           />
                         </div>
@@ -748,6 +791,12 @@ export function Caja() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, background: 'rgba(224, 165, 38, 0.1)', border: '1px solid var(--sd-gold)', borderRadius: 8, marginBottom: 20, color: 'var(--sd-gold)' }}>
                         <Sparkles size={16} />
                         <span style={{ fontSize: 14 }}>Confirmar abono en App Bancolombia / Nequi / Daviplata antes de emitir recibo.</span>
+                      </div>
+                    )}
+
+                    {errorCobro && (
+                      <div className="table-toast-banner error" role="alert" style={{ marginBottom: 16 }}>
+                        <span>{errorCobro}</span>
                       </div>
                     )}
 
@@ -814,22 +863,43 @@ export function Caja() {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((tx, idx) => (
-                    <tr key={tx.id_transaccion || idx} style={{ borderBottom: '1px solid var(--sd-border)' }}>
-                      <td style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', fontWeight: 700, color: 'var(--sd-white)' }}>
-                        {tx.id_transaccion}
+                  {errorDia && !dia && (
+                    <tr>
+                      <td colSpan={7} role="alert" style={{ padding: '12px 14px', color: 'var(--sd-red)' }}>
+                        No se pudo cargar el historial de hoy: {errorDia}. Pulsa ACTUALIZAR.
                       </td>
-                      <td style={{ padding: '12px 14px' }}>{tx.hora}</td>
-                      <td style={{ padding: '12px 14px', fontWeight: 700 }}>{tx.mesa}</td>
-                      <td style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>{tx.comensal || tx.cliente || 'Mesa'}</td>
-                      <td style={{ padding: '12px 14px', textTransform: 'uppercase' }}>{tx.metodo_pago.replace('_', ' ')}</td>
-                      <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700 }}>{formatCOP(tx.monto)}</td>
+                    </tr>
+                  )}
+                  {dia && cobrosDelDia.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>Todavía no hay cobros hoy.</td>
+                    </tr>
+                  )}
+                  {cobrosDelDia.map((cobro) => (
+                    <tr key={cobro.clave} style={{ borderBottom: '1px solid var(--sd-border)' }}>
+                      <td style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', fontWeight: 700, color: 'var(--sd-white)' }}>
+                        {cobro.ids.map((id) => `TRX-${id}`).join(' · ')}
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>{horaBogota(cobro.fecha)}</td>
+                      <td style={{ padding: '12px 14px', fontWeight: 700 }}>Mesa {cobro.numero_mesa}</td>
+                      <td style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>{cobro.comensal || 'Mesa'}</td>
+                      <td style={{ padding: '12px 14px', textTransform: 'uppercase' }}>{String(cobro.metodo_pago || '').replace('_', ' ')}</td>
+                      <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700 }}>{formatCOP(cobro.monto)}</td>
                       <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                         <span className="sd-badge sd-badge-white">Completada</span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
+                {dia && cobrosDelDia.length > 0 && (
+                  <tfoot>
+                    <tr>
+                      <td colSpan={5} style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', textTransform: 'uppercase' }}>Total del día</td>
+                      <td data-testid="total-historial" style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800 }}>{formatCOP(dia.total)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </section>
@@ -853,7 +923,11 @@ export function Caja() {
                   <h3 className="sd-card-title" style={{ margin: 0, fontSize: 24 }}>
                     Pago Procesado con Éxito
                   </h3>
-                  <small style={{ color: 'var(--sd-text-muted)' }}>Transacción guardada en base de datos</small>
+                  <small style={{ color: 'var(--sd-text-muted)' }}>
+                    {paidReceipt.duplicado
+                      ? 'Este cobro ya estaba registrado: no se cobró otra vez'
+                      : 'Transacción guardada en base de datos'}
+                  </small>
                 </div>
               </div>
               <button
@@ -878,6 +952,16 @@ export function Caja() {
                 <div><span style={{ color: 'var(--sd-text-muted)' }}>Comensal:</span> {paidReceipt.comensal}</div>
                 <div><span style={{ color: 'var(--sd-text-muted)' }}>Método:</span> {paidReceipt.metodo_pago.toUpperCase()}</div>
                 <div><span style={{ color: 'var(--sd-text-muted)' }}>Hora:</span> {paidReceipt.hora}</div>
+                {paidReceipt.pedidos?.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--sd-text-muted)' }}>Pedidos:</span> {paidReceipt.pedidos.join(', ')}</div>
+                )}
+                {paidReceipt.voucher && (
+                  <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--sd-text-muted)' }}>Voucher:</span> {paidReceipt.voucher}</div>
+                )}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <span style={{ color: 'var(--sd-text-muted)' }}>Saldo de la mesa:</span>{' '}
+                  <strong>{paidReceipt.mesaLiberada ? 'PAGADA · mesa liberada' : formatCOP(paidReceipt.saldoRestante)}</strong>
+                </div>
               </div>
 
               <div style={{ borderTop: '1px solid var(--sd-border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14 }}>

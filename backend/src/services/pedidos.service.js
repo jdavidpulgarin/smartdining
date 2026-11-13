@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const pool = require('../config/db');
 const mesasService = require('./mesas.service');
+const aliasComensal = require('./alias-comensal');
 const { traducirAutorInexistente } = require('./autor-inexistente');
 
 /**
@@ -427,6 +428,225 @@ async function listarPorMesa(idMesa) {
   return agruparDetalles(result.rows, await detallesDePedidos(result.rows.map((p) => p.id_pedido)));
 }
 
+/* -------------------------------------------------------------------------- *
+ * D-13 por el comensal (J-14): quitar UNA línea de su pedido
+ * -------------------------------------------------------------------------- */
+
+/** Motivos estables de cancelar una línea (los leen los frontends). */
+const MOTIVOS_QUITAR_ITEM = Object.freeze({
+  noEsTuyo: 'no_es_tuyo',
+  yaCancelado: 'item_ya_cancelado',
+  enPreparacion: 'item_en_preparacion',
+  noCancelable: 'item_no_cancelable',
+  pagoRegistrado: 'pago_registrado',
+});
+
+const OBSERVACION_CANCELADO_POR_COMENSAL = 'Cancelado por el comensal';
+const OBSERVACION_CANCELADO_POR_PERSONAL = 'Cancelado por el personal';
+
+/** Estados del PEDIDO en los que el personal ya no cancela una línea. */
+const ESTADOS_PEDIDO_NO_CANCELABLES = ['entregado', 'pagado', 'cancelado'];
+
+/** ¿La línea es de este comensal? Por la CLAVE del alias (D-18b), no por el texto. */
+function esDelComensal(aliasDeLaLinea, aliasDelJwt) {
+  if (typeof aliasDeLaLinea !== 'string' || typeof aliasDelJwt !== 'string') return false;
+  const linea = aliasComensal.normalizarAlias(aliasDeLaLinea);
+  const jwt = aliasComensal.normalizarAlias(aliasDelJwt);
+  if (linea.error || jwt.error) return false;
+  return linea.clave === jwt.clave;
+}
+
+/**
+ * El comensal quita UNA línea de su pedido, entera (aunque tenga cantidad > 1).
+ *
+ * TODO en una transacción, con el pedido y después la línea bloqueados (FOR
+ * UPDATE, siempre en ese orden). El KDS cambia el estado con un UPDATE del
+ * pedido, que toma el mismo bloqueo de fila: si cocina llega primero, aquí se
+ * espera y al despertar se lee el estado YA confirmado ('en_preparacion' -> 409);
+ * si llega primero el comensal, cocina espera a que la línea quede cancelada y
+ * el stock devuelto. No hay una ventana entre comprobar y cancelar.
+ *
+ * Lo que hace la BASE, no este archivo: devolver el stock al cancelar la línea
+ * (tr_devolver_inventario: ítem 'pendiente' y pedido 'recibido' es devolución,
+ * no merma; incluye las porciones de los ingredientes del constructor, que se
+ * reservaron por detalle), recalcular el total (tr_actualizar_total_pedido
+ * excluye las canceladas) y validar la transición del pedido.
+ *
+ * NO libera la mesa aunque no le queden pedidos abiertos: el grupo sigue
+ * sentado y puede volver a pedir. Por eso no llama a
+ * liberarSiNoQuedanPedidosAbiertos, a diferencia de la cancelación del pedido
+ * completo (POST /pedidos/:id/cancelar).
+ *
+ * Es el núcleo común de dos caminos, que solo difieren donde se dice:
+ *   - COMENSAL (D-13 por el comensal, J-14): regla de dueño (mesa, visita y
+ *     clave del alias); solo con el pedido en 'recibido' y la línea en
+ *     'pendiente' (409 item_en_preparacion); historial sin usuario.
+ *   - PERSONAL (D-13): sin regla de dueño; 409 item_no_cancelable si la línea
+ *     está 'servido' o el pedido ya está entregado, pagado o cancelado; se
+ *     puede con la línea en 'pendiente', 'cocinando' o 'listo', y el stock lo
+ *     decide el trigger (devolución o MERMA). El autor va en app.id_usuario
+ *     (los movimientos lo llevan) y en historial_estados, con el motivo.
+ *
+ * @param {number} idPedido
+ * @param {number} idDetalle
+ * @param {{tipo: 'comensal', idMesa: number, comensal: string}
+ *   | {tipo: 'personal', idUsuario: number, motivo?: string}} actor
+ * @returns {Promise<{noExiste: true} | {noEsTuyo: true}
+ *   | {conflicto: 'item_ya_cancelado'|'item_en_preparacion'|'item_no_cancelable'|'pago_registrado'}
+ *   | {pedido: object, linea: object, pedidoCancelado: boolean, estadoAnterior: string}>}
+ */
+async function cancelarItem(idPedido, idDetalle, actor) {
+  const esPersonal = actor.tipo === 'personal';
+  const client = await pool.connect();
+  const salir = async (resultado) => {
+    await client.query('ROLLBACK');
+    return resultado;
+  };
+  try {
+    await client.query('BEGIN');
+
+    // El autor de los movimientos de inventario (devolución o merma) que
+    // escriben los triggers: fn_usuario_de_sesion() lo lee de aquí. `true` =
+    // solo esta transacción, así no se filtra a la siguiente petición.
+    if (esPersonal) {
+      await client.query('SELECT set_config($1::text, $2::text, true)', ['app.id_usuario', String(actor.idUsuario)]);
+    }
+
+    // 1. Pedido, y después la línea: siempre en este orden.
+    const p = await client.query(
+      `SELECT id_pedido, id_mesa, codigo_pedido, estado, total, creado_en
+         FROM pedidos WHERE id_pedido = $1::int FOR UPDATE`,
+      [idPedido]
+    );
+    if (p.rows.length === 0) return await salir({ noExiste: true });
+    const pedido = p.rows[0];
+
+    const d = await client.query(
+      `SELECT dp.id_detalle, dp.id_plato, dp.comensal, dp.estado_item, dp.subtotal, pl.nombre
+         FROM detalles_pedido dp JOIN platos pl ON pl.id_plato = dp.id_plato
+        WHERE dp.id_detalle = $1::int AND dp.id_pedido = $2::int
+          FOR UPDATE OF dp`,
+      [idDetalle, idPedido]
+    );
+    if (d.rows.length === 0) return await salir({ noExiste: true });
+    const linea = d.rows[0];
+
+    // 2. Dueño, SOLO para el comensal: la mesa del JWT, la visita actual de
+    // esa mesa (como en GET /pedidos/:id) y el comensal por la clave de su
+    // alias. Una línea sin comensal no es de nadie. El personal no tiene dueño.
+    if (!esPersonal) {
+      if (pedido.id_mesa !== actor.idMesa) return await salir({ noEsTuyo: true });
+      const m = await client.query('SELECT sesion_iniciada_en FROM mesas WHERE id_mesa = $1::int', [actor.idMesa]);
+      const inicio = m.rows[0] && m.rows[0].sesion_iniciada_en;
+      if (inicio && new Date(pedido.creado_en) < new Date(inicio)) return await salir({ noEsTuyo: true });
+      if (!esDelComensal(linea.comensal, actor.comensal)) return await salir({ noEsTuyo: true });
+    }
+
+    // 3. Conflictos. 'item_ya_cancelado' va primero: un reintento no debe
+    // contestarse como si cocina lo hubiera empezado.
+    if (linea.estado_item === 'cancelado') return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.yaCancelado });
+    if (esPersonal) {
+      if (linea.estado_item === 'servido' || ESTADOS_PEDIDO_NO_CANCELABLES.includes(pedido.estado)) {
+        return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.noCancelable });
+      }
+    } else if (pedido.estado !== 'recibido' || linea.estado_item !== 'pendiente') {
+      return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.enPreparacion });
+    }
+    // pago_registrado ESTRICTO (revisión de Jarrison): CUALQUIER transacción
+    // completada bloquea, al comensal y al personal. Ya no se mira si el total
+    // nuevo quedaría por debajo de lo pagado: estado_pago (script 22) no se
+    // recalcula al bajar el total, así que tocar un pedido con pagos dejaría
+    // su estado financiero mal hasta que se arregle eso en la base.
+    const pago = await client.query(
+      `SELECT EXISTS (SELECT 1 FROM transacciones t
+                       WHERE t.id_pedido = $1::int AND t.estado_transaccion = 'completada') AS bloquea`,
+      [idPedido]
+    );
+    if (pago.rows[0].bloquea) return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado });
+
+    // 4. La línea COMPLETA. La base decide el stock (devolución o merma, según
+    // tr_devolver_inventario) y recalcula el total.
+    await client.query(
+      `UPDATE detalles_pedido SET estado_item = 'cancelado' WHERE id_detalle = $1::int`,
+      [idDetalle]
+    );
+
+    // 5. Sin líneas vivas, el pedido se cancela por la transición válida.
+    const vivas = await client.query(
+      `SELECT count(*)::int AS n FROM detalles_pedido
+        WHERE id_pedido = $1::int AND estado_item <> 'cancelado'`,
+      [idPedido]
+    );
+    const pedidoCancelado = vivas.rows[0].n === 0;
+    if (pedidoCancelado) {
+      // Pasar el pedido a 'cancelado' lo decide transiciones_validas: desde el
+      // script 31 permite recibido, en_preparacion y listo (lo cocinado queda
+      // como merma, por tr_devolver_inventario), y NO entregado ni pagado. Se
+      // pregunta a la tabla (la fuente de verdad) en vez de a una lista aquí: si
+      // no se puede, 409 item_no_cancelable en lugar del P0001 del trigger, y el
+      // ROLLBACK deshace también la línea ya cancelada y su movimiento de stock.
+      // Al comensal no le hace falta: él solo llega con el pedido en 'recibido'.
+      if (esPersonal) {
+        const t = await client.query(
+          `SELECT EXISTS (SELECT 1 FROM transiciones_validas
+                           WHERE estado_desde = $1::text AND estado_hacia = 'cancelado') AS ok`,
+          [pedido.estado]
+        );
+        if (!t.rows[0].ok) return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.noCancelable });
+      }
+      await client.query(`UPDATE pedidos SET estado = 'cancelado' WHERE id_pedido = $1::int`, [idPedido]);
+      if (esPersonal) {
+        await client.query(
+          `INSERT INTO historial_estados (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones)
+           VALUES ($1::int, $2::int, $3::text, 'cancelado', $4::text)`,
+          [idPedido, actor.idUsuario, pedido.estado, actor.motivo || OBSERVACION_CANCELADO_POR_PERSONAL]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO historial_estados (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones)
+           VALUES ($1::int, NULL, $2::text, 'cancelado', $3::text)`,
+          [idPedido, pedido.estado, OBSERVACION_CANCELADO_POR_COMENSAL]
+        );
+      }
+    }
+
+    // 6. Sin liberarSiNoQuedanPedidosAbiertos (ver arriba).
+    const final = await client.query(
+      'SELECT id_pedido, id_mesa, codigo_pedido, estado, total FROM pedidos WHERE id_pedido = $1::int',
+      [idPedido]
+    );
+    const items = await detallesDePedidos([idPedido], client);
+
+    await client.query('COMMIT');
+    return {
+      pedido: { ...final.rows[0], items },
+      linea,
+      pedidoCancelado,
+      estadoAnterior: pedido.estado,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    // El autor del JWT ya no existe: choca con fk_historial_usuario o con la
+    // de movimientos_inventario. 409 autor_inexistente, el de siempre.
+    throw traducirAutorInexistente(err) || err;
+  } finally {
+    client.release();
+  }
+}
+
+/** D-13 por el comensal (J-14). La mesa y el alias salen del JWT. */
+function cancelarItemComensal(idPedido, idDetalle, { idMesa, comensal }) {
+  return cancelarItem(idPedido, idDetalle, { tipo: 'comensal', idMesa, comensal });
+}
+
+/**
+ * D-13 por el personal. `idUsuario` del JWT; `motivo` para el historial (la
+ * ruta lo exige; el texto por defecto queda solo como respaldo defensivo).
+ */
+function cancelarItemPersonal(idPedido, idDetalle, { idUsuario, motivo = null }) {
+  return cancelarItem(idPedido, idDetalle, { tipo: 'personal', idUsuario, motivo });
+}
+
 /** Reparte una lista plana de detalles entre sus pedidos, sin consultas extra. */
 function agruparDetalles(pedidos, detalles) {
   const porPedido = new Map(pedidos.map((p) => [p.id_pedido, []]));
@@ -445,4 +665,7 @@ module.exports = {
   obtenerConDetalles,
   actualizarEstado,
   listarPorMesa,
+  cancelarItemComensal,
+  cancelarItemPersonal,
+  MOTIVOS_QUITAR_ITEM,
 };

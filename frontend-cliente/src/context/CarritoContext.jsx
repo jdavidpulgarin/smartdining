@@ -29,6 +29,7 @@ import {
   aplicarFaltantesMenu,
   marcarFaltantesEnCache,
   recargarMenu,
+  suscribirCambiosMenu,
 } from '../services/menuService';
 
 const CarritoContext = createContext(null);
@@ -172,6 +173,11 @@ export function CarritoProvider({ children }) {
   useEffect(() => {
     if (!mesa) return undefined;
     let activo = true;
+    const cancelarSuscripcion = suscribirCambiosMenu((nuevoMenu) => {
+      if (activo && nuevoMenu) {
+        setMenuRaw(nuevoMenu);
+      }
+    });
     obtenerMenuRaw()
       .then((menu) => {
         if (activo) setMenuRaw(menu);
@@ -181,6 +187,7 @@ export function CarritoProvider({ children }) {
       });
     return () => {
       activo = false;
+      cancelarSuscripcion();
     };
   }, [mesa]);
 

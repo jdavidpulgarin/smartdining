@@ -3,6 +3,7 @@ import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTok
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
+import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
@@ -323,9 +324,27 @@ export function TablesProvider({ children }) {
 
 
 
+  // Presencia ACTUAL de todas las mesas en cada conexión (también tras iniciar
+  // sesión, recargar o reconectar): mesa:presencia:solicitar (EVENTS.md §5.2,
+  // #175) la devuelve en el ack, sin depender de que los listeners ya estén
+  // registrados. Es una foto completa: una mesa que no viene tiene 0. Si falla
+  // (RATE_LIMIT, ERROR_INTERNO o un socket-server viejo sin el evento), queda el
+  // envío automático del socket-server y los avisos de abajo.
+  useEffect(() => {
+    const socket = getSocket()
+    const pedirPresencia = () => {
+      socket.timeout(5000).emit('mesa:presencia:solicitar', {}, (err, r) => {
+        if (err || !r?.ok || !Array.isArray(r.mesas)) return
+        setPresenciaPorMesa(Object.fromEntries(r.mesas.map((p) => [Number(p.id_mesa), p])))
+      })
+    }
+    if (socket.connected) pedirPresencia()
+    socket.on('connect', pedirPresencia)
+    return () => socket.off('connect', pedirPresencia)
+  }, [])
+
   // Escuchar presencia de comensales en vivo (room:admin recibe cambios de todas las mesas).
-  // Guardarla en el contexto evita perderla al cerrar y volver a abrir "Tomar pedido",
-  // ya que en EVENTS.md no existe un evento para consultar la presencia actual bajo demanda.
+  // Guardarla en el contexto evita perderla al cerrar y volver a abrir "Tomar pedido".
   useSocketListener('mesa:presencia', (data) => {
     if (data && data.id_mesa != null) {
       const numId = Number(data.id_mesa)
@@ -483,13 +502,15 @@ export function TablesProvider({ children }) {
   /**
    * Regenera el token QR de una mesa en curso (rotación de seguridad).
    */
-  const regenerarQr = useCallback(async (idMesa, ttlMinutos = 240) => {
+  // `silencioso`: la renovación automática del modal (cada ~3 min) no avisa con
+  // un toast ni en el éxito ni en el error; el modal muestra su propio estado.
+  const regenerarQr = useCallback(async (idMesa, ttlMinutos = 240, { silencioso = false, soloSiVacia = false } = {}) => {
     const numId = Number(idMesa)
     const tableActual = tables.find((t) => t.id === numId || t.number === numId)
     const tableName = tableActual?.name || `Mesa ${numId}`
 
     try {
-      const qrResult = await rotarTokenQrMesa(numId, ttlMinutos)
+      const qrResult = await rotarTokenQrMesa(numId, ttlMinutos, { soloSiVacia })
       const sidCorto = qrResult.sid ? qrResult.sid.slice(0, 8) : 'rotado'
 
       setTables((prev) =>
@@ -507,10 +528,10 @@ export function TablesProvider({ children }) {
         })
       )
 
-      showNotification(`QR regenerado para ${tableName}. Sesión actualizada.`, 'success')
+      if (!silencioso) showNotification(`QR regenerado para ${tableName}. Sesión actualizada.`, 'success')
       return qrResult
     } catch (err) {
-      showNotification(err.message || `Error al rotar QR en ${tableName}`, 'error')
+      if (!silencioso) showNotification(err.message || `Error al rotar QR en ${tableName}`, 'error')
       throw err
     }
   }, [tables, showNotification])

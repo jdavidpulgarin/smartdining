@@ -98,10 +98,21 @@ database/scripts/
 ├── 26_configuracion.sql                # Configuración del local, mesas.activa e historial de precios (P-18; lo aplica migrar.sh)
 ├── 27_inventario.sql                   # Inventario real: insumos, recetas, reserva al pedir, devoluciones y avisos (P-19)
 ├── 28_aviso_insumo_agotado.sql         # Aviso stock_bajo también al llegar a 0 aunque ya estuviera bajo (G-06)
-└── 29_configuracion_contacto.sql       # correo y redes (instagram, facebook, tiktok, whatsapp) del local (P-21)
+├── 29_configuracion_contacto.sql       # correo y redes (instagram, facebook, tiktok, whatsapp) del local (P-21)
+├── 30_fix_auditoria_registro_id.sql    # registro_id de la auditoría = llave primaria real (en transacciones guardaba el id_pedido)
+├── 31_transicion_listo_cancelado.sql   # transición listo → cancelado (lo cocinado es merma); cancelar_pedido() lee transiciones_validas
+├── 32_fix_intento_pago_fallido_ambiguo.sql # borra la sobrecarga de 4 parámetros de registrar_intento_pago_fallido (hacía ambigua toda llamada de 4)
+├── 33_estado_pago_al_cambiar_total.sql # estado_pago se recalcula también cuando cambia el total (al quitar un plato quedaba «parcial» con saldo 0)
+├── 34_contacto_espacios_unicode.sql  # correo y redes rechazan también los espacios Unicode (U+00A0…), igual que `\s` del backend; no depende del locale
+└── 35_transacciones_voucher.sql      # transacciones.voucher VARCHAR(40), opcional, solo con tarjeta débito/crédito, ^[A-Z0-9-]{1,40}$
 ```
 
-> El 30 queda para el script de "menú con agotados" que se decida en la G-06.
+> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (36).
+
+> **Auditoría de transacciones antes del script 30:** las filas de `auditoria_cambios` con
+> `tabla_afectada = 'transacciones'` escritas antes del 30 tienen el **id del pedido** en
+> `registro_id`. No se corrigen (el `hash_verificacion` de cada fila incluye `registro_id`).
+> La transacción de esas filas es `COALESCE(datos_nuevos, datos_anteriores)->>'id_transaccion'`.
 
 ### ⚠️ Regla: un script aplicado NUNCA se edita
 
@@ -184,13 +195,60 @@ docker compose up -d postgres
 
 ### Pruebas SQL
 
-Cada archivo de `database/tests/` es un bloque `DO` que lanza una excepción si algo falla y limpia lo que crea. Se corren sobre una base ya cargada:
+Cada archivo de `database/tests/` es un bloque `DO` que lanza una excepción si algo falla y limpia lo que crea. Se corren sobre una base ya cargada. **Ninguna depende de que el seed traiga pedidos** (desde #182 no trae ninguno): las que los necesitan crean los suyos. `test_g07_inventario_demo.sql` sí necesita `seed_inventario_demo.sql`.
+
+Para correrlas todas y ver cuál falla (en Git Bash, con el proyecto de Docker de pruebas):
+
+```bash
+for t in database/tests/*.sql; do
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d smartdining < "$t" >/dev/null 2>&1 \
+    && echo "OK    $t" || echo "FALLA $t"
+done
+```
+
+Una por una:
 
 ```bash
 cd database/tests
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p18_configuracion.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_p21_configuracion_contacto.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_30_auditoria_registro_id.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_31_listo_cancelado.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_33_estado_pago_total.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_34_contacto_espacios_unicode.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_35_voucher.sql
 ```
+
+Voucher de tarjeta (script 35): `test_35_voucher.sql` crea su propia mesa, plato y pedido y
+comprueba que `transacciones.voucher` es `VARCHAR(40)` opcional, que se guarda con tarjeta débito o
+crédito (también se puede cobrar sin él), que efectivo, transferencia y online lo rechazan, que el
+formato `^[A-Z0-9-]{1,40}$` rechaza minúsculas, espacios, vacío, 41 caracteres, punto y barra, que
+no se puede pasar a efectivo una transacción con voucher y que la auditoría lo guarda. Usa `\ir`:
+correrla desde `database/tests`. Corre en `BEGIN … ROLLBACK`.
+
+Espacios Unicode en el contacto (script 34): `test_34_contacto_espacios_unicode.sql` exige que
+`correo` y `redes` rechacen U+00A0, U+2003, U+3000 y U+FEFF (sin el 34, `postgres:16-alpine` los
+acepta: `[[:space:]]` depende del locale), que lo de antes no cambie y que, si una fila vieja ya
+tuviera uno, el script no falle y deje el CHECK `NOT VALID` hasta corregirla. Usa `\ir`: correrla
+desde `database/tests`. Corre en `BEGIN … ROLLBACK`.
+
+`estado_pago` al cambiar el total (script 33): `test_33_estado_pago_total.sql` crea su propia
+mesa y plato, abona la mitad de un pedido de dos líneas y quita una: el total queda igual a lo
+pagado y exige `pagado` (sin el 33 se queda en `parcial`). También comprueba que al agregar una
+línea vuelve a `parcial`, que sin pagos sigue `pendiente`, que no toca el estado de cocina y que
+el script corrige las filas que ya quedaron mal y es idempotente. Usa `\ir`: correrla desde
+`database/tests`. Corre en `BEGIN … ROLLBACK`: no deja nada.
+
+Pedido en `listo` que se cancela (script 31): `test_31_listo_cancelado.sql` crea su propia mesa,
+insumo y plato con receta (no depende del seed) y comprueba que `listo → cancelado` se permite por
+`UPDATE` y por `cancelar_pedido()`, que lo cocinado queda como merma sin devolver stock, que desde
+`recibido` se sigue devolviendo y que `entregado` y `pagado` siguen sin poder cancelarse. Corre en
+`BEGIN … ROLLBACK`: no deja nada.
+
+Auditoría (script 30): `test_30_auditoria_registro_id.sql` hace INSERT, UPDATE y DELETE en
+`transacciones`, `usuarios` y `platos` y exige que `registro_id` sea la llave primaria de cada
+fila (10 filas). Sin el script 30 falla en las 4 de `transacciones`. Lo deshace todo, también
+sus filas de auditoría.
 
 Contacto del local (P-21, script 29): `test_p21_configuracion_contacto.sql` prueba los CHECK de
 `correo` y `redes` (8 correos y 16 formas de redes que se rechazan) y deja la fila como estaba.

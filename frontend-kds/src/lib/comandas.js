@@ -149,6 +149,9 @@ export function comandaDesdePedido(pedido, llegadaEnMs = Date.now()) {
       notas_especiales: item.notas_especiales ?? null,
       comensal: item.comensal ?? null,
       ingredientes: item.ingredientes ?? [],
+      // Una comanda nueva llega con sus lineas vivas; se guarda igual que la
+      // trae la API para que lineaCancelada funcione con las dos fuentes.
+      estado_item: item.estado_item ?? 'pendiente',
     })),
   }
 }
@@ -208,6 +211,60 @@ export function aplicarEstado(estado, evento) {
     ...estado,
     comandas: estado.comandas.map((c) =>
       c.id_pedido === evento.id_pedido ? { ...c, ...cambioDeEstado(evento) } : c
+    ),
+    eventos,
+  }
+}
+
+/** Valor de estado_item de una linea cancelada (el mismo que trae la API). */
+export const ESTADO_ITEM_CANCELADO = 'cancelado'
+
+/**
+ * ¿Esta linea esta cancelada? Es lo que decide que la tarjeta la pinte TACHADA.
+ *
+ * La carga inicial (GET /api/kds/comandas) trae las lineas canceladas con
+ * `estado_item: 'cancelado'` (no las filtra), y aplicarItemCancelado deja la
+ * linea exactamente asi: por eso una linea cancelada se ve igual en vivo que al
+ * recargar.
+ */
+export function lineaCancelada(item) {
+  return item?.estado_item === ESTADO_ITEM_CANCELADO
+}
+
+/**
+ * Aplica item:cancelado (D-13 y #180: alguien quito UNA linea del pedido): la
+ * linea con ese id_detalle de esa comanda pasa a cancelada en vivo, y la tarjeta
+ * la pinta tachada, igual que la trae la API al recargar.
+ *
+ * - Deduplica por eventId, como order:created y order:status.
+ * - Una comanda que el tablero no tiene se ignora (el evento no trae los items
+ *   para inventarla; al reconectar, la carga inicial pone todo en su sitio).
+ * - NO saca la comanda aunque se quede sin lineas vivas: el order:status ->
+ *   cancelado que manda el backend despues es quien la saca, como siempre. Asi
+ *   un solo camino decide que una comanda sale del tablero.
+ */
+export function aplicarItemCancelado(estado, evento) {
+  if (esEventoRepetido(estado, evento?.eventId)) return estado
+  if (!evento || evento.id_pedido === undefined || evento.id_pedido === null) return estado
+  if (evento.id_detalle === undefined || evento.id_detalle === null) return estado
+
+  const eventos = recordarEvento(estado, evento.eventId)
+  const comanda = estado.comandas.find((c) => c.id_pedido === evento.id_pedido)
+  if (!comanda || !comanda.items.some((i) => i.id_detalle === evento.id_detalle)) {
+    return { ...estado, eventos }
+  }
+
+  return {
+    ...estado,
+    comandas: estado.comandas.map((c) =>
+      c.id_pedido === evento.id_pedido
+        ? {
+            ...c,
+            items: c.items.map((i) =>
+              i.id_detalle === evento.id_detalle ? { ...i, estado_item: ESTADO_ITEM_CANCELADO } : i
+            ),
+          }
+        : c
     ),
     eventos,
   }
@@ -351,6 +408,9 @@ export function comensalesDeComanda(comanda) {
 
   const vistos = []
   for (const item of items) {
+    // Una linea cancelada ya no es un plato que salga al pase: su comensal no
+    // cuenta (si tiene otra linea viva, aparece por esa).
+    if (lineaCancelada(item)) continue
     const nombre = typeof item?.comensal === 'string' ? item.comensal.trim() : ''
     if (nombre && !vistos.includes(nombre)) vistos.push(nombre)
   }

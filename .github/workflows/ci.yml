@@ -11,10 +11,12 @@ on:
 permissions:
   contents: read
 
-# Un push nuevo al mismo PR cancela la corrida anterior.
+# Un push nuevo al mismo PR cancela la corrida anterior. En develop y main no:
+# la corrida puede llevar dentro el despliegue de staging, y un despliegue no
+# se corta a la mitad.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:
@@ -70,6 +72,22 @@ jobs:
     name: infra · scripts de despliegue
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # PostgreSQL real para las pruebas de datos de mesas-feria.sh (se omiten
+    # en local sin SD_PG_URL). Solo esquemas de prueba; nada de la app.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: prueba
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      SD_PG_URL: postgresql://postgres:prueba@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -86,8 +104,10 @@ jobs:
               echo "sh -n   $f"; sh -n "$f"
             fi
           done
-      - name: Pruebas (contraseñas del personal)
-        run: node --test "infra/scripts/*.test.cjs"
+      - name: Pruebas de los scripts (contraseñas, respaldo, mesas y nginx)
+        run: |
+          psql --version
+          node --test "infra/scripts/*.test.cjs"
 
   frontends:
     name: ${{ matrix.app }} · lint y build
@@ -109,4 +129,29 @@ jobs:
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
       - run: npm ci
       - run: npm run lint
+      # Pruebas unitarias. No necesitan servicios ni variables (la suite e2e de
+      # Playwright del panel queda fuera: frontend-restaurante/vite.config.js).
+      # El KDS usa node --test: el script falla también si quedan pruebas
+      # CANCELADAS, que node --test no cuenta como fallidas. Vitest (cliente y
+      # panel) sí falla solo, y ese script no entiende su resumen.
+      - name: npm test
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          if [ "$APP" = "frontend-kds" ]; then
+            bash "$GITHUB_WORKSPACE/.github/scripts/npm-test-sin-canceladas.sh"
+          else
+            npm test
+          fi
       - run: npm run build
+
+  # Despliegue a staging: solo en un push a develop, si TODO lo anterior pasó y
+  # el dueño del repo activó la variable DEPLOY_STAGING=true (mientras no exista
+  # el environment "staging" con sus secretos, el job queda "skipped" y el CI
+  # sigue en verde). Ver docs/despliegue.md, sección "Staging".
+  deploy-staging:
+    name: staging · desplegar
+    needs: [backend, socket-server, infra, frontends]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && vars.DEPLOY_STAGING == 'true'
+    uses: ./.github/workflows/deploy-staging.yml
+    secrets: inherit

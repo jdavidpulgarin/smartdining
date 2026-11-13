@@ -346,6 +346,27 @@ function sqlHistorialPagado(idUsuario, observacion) {
  *        | { sinCuenta: true } | { excede: true, saldo_centavos }
  *        | { duplicado: false, saldo_restante_centavos, mesa_liberada, pagados, transacciones }
  */
+/**
+ * ¿La transacción que ya tiene esta referencia es de OTRA mesa? Se mira por su
+ * pedido: transacciones -> pedidos.id_mesa. La referencia es única
+ * (uq_transacciones_referencia_externa), así que hay como mucho una fila; las
+ * filas siguientes de un mismo pago llevan '#2', '#3'… y son de la misma mesa.
+ *
+ * Si no se encuentra la fila (no debería pasar: la consulta anterior la vio) se
+ * responde `false`, que es el comportamiento de siempre: duplicado.
+ */
+async function referenciaEsDeOtraMesa(ejecutor, referencia, idMesa) {
+  const r = await ejecutor.query(
+    `SELECT p.id_mesa
+       FROM transacciones t
+       JOIN pedidos p ON p.id_pedido = t.id_pedido
+      WHERE t.referencia_externa = $1::text
+      LIMIT 1`,
+    [referencia]
+  );
+  return r.rows.length > 0 && Number(r.rows[0].id_mesa) !== Number(idMesa);
+}
+
 async function repartirPagoDeMesa(client, {
   referencia_externa,
   id_mesa,
@@ -372,7 +393,10 @@ async function repartirPagoDeMesa(client, {
   );
   if (yaRegistrada.rows.length > 0) {
     const saldo = await saldoDeLaMesaEnCentavos(client, id_mesa);
-    return { duplicado: true, saldo_restante_centavos: saldo };
+    // ¿Esa referencia es de ESTA mesa? Quien decide qué hacer si es de otra
+    // es el camino de la caja (cobrarMesaEnCaja); el núcleo solo lo informa.
+    const otraMesa = await referenciaEsDeOtraMesa(client, referencia_externa, id_mesa);
+    return { duplicado: true, saldo_restante_centavos: saldo, otraMesa };
   }
 
   // H-01: los pedidos entre los que se va a repartir también se bloquean,
@@ -489,6 +513,9 @@ async function cobrarMesa(pago) {
       return {
         duplicado: true,
         saldo_restante_centavos: await saldoDeLaMesaEnCentavos(pool, pago.id_mesa),
+        // La otra petición ya hizo COMMIT (por eso chocó el índice): aquí se
+        // ve su fila y se sabe de qué mesa es.
+        otraMesa: await referenciaEsDeOtraMesa(pool, pago.referencia_externa, pago.id_mesa),
       };
     }
     // El 23503 de fk_historial_usuario (la caja, con un autor ya borrado) lo
@@ -528,6 +555,13 @@ async function registrarPagoInterno({
     id_usuario: null,
     observacion: OBSERVACION_PAGO_EN_LINEA,
   });
+  // El pago en línea NO cambia de contrato: una referencia ya registrada es
+  // duplicado sea de la mesa que sea (`otraMesa` es solo para la caja y no
+  // sale por aquí).
+  if (r.duplicado === true) {
+    const { otraMesa, ...igualQueAntes } = r;
+    return igualQueAntes;
+  }
   if (r.duplicado !== false) return r;
   const { transacciones, ...igualQueAntes } = r;
   return igualQueAntes;
@@ -544,7 +578,7 @@ async function registrarPagoInterno({
  * sin chocar nunca con una de Wompi.
  */
 async function cobrarMesaEnCaja({ id_mesa, monto_centavos, metodo_pago, comensal = null, id_cobro, id_usuario }) {
-  return cobrarMesa({
+  const r = await cobrarMesa({
     referencia_externa: PREFIJO_REFERENCIA_CAJA + id_cobro,
     id_mesa,
     comensal,
@@ -553,6 +587,14 @@ async function cobrarMesaEnCaja({ id_mesa, monto_centavos, metodo_pago, comensal
     id_usuario,
     observacion: OBSERVACION_PAGO_EN_CAJA,
   });
+  // Un id_cobro ya usado en OTRA mesa no es un reintento de este cobro: si se
+  // contestara "duplicado", la caja creería que cobró sin haber cobrado nada.
+  if (r.duplicado === true && r.otraMesa) return { idCobroEnUso: true };
+  if (r.duplicado === true) {
+    const { otraMesa, ...duplicado } = r;
+    return duplicado;
+  }
+  return r;
 }
 
 async function obtenerPorPedido(idPedido) {

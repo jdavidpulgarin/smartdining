@@ -14,8 +14,21 @@
  * entrando, y bcrypt.compare la trunca igual que la truncó al guardarla.
  */
 
+const { z } = require('zod');
+
 /** Lo que bcrypt de verdad usa de una contraseña. */
 const BYTES_MAXIMOS_CLAVE = 72;
+
+/**
+ * Mínimo de una clave NUEVA, en CARACTERES (lo que la persona escribe y
+ * cuenta). El mismo en el registro y en el cambio de clave, y el que ya exige
+ * el panel (decidido con Jarrison). Antes el registro pedía 6 y el cambio 8.
+ * Como el tope, NO se aplica en el login: una clave de 6 o 7 creada antes
+ * tiene que poder seguir entrando.
+ */
+const CARACTERES_MINIMOS_CLAVE = 8;
+
+const MENSAJE_CLAVE_CORTA = `La contraseña debe tener al menos ${CARACTERES_MINIMOS_CLAVE} caracteres`;
 
 const MOTIVO_CLAVE_DEMASIADO_LARGA = 'clave_demasiado_larga';
 
@@ -42,6 +55,14 @@ function conTopeDeBcrypt(esquema) {
 }
 
 /**
+ * El esquema de zod de una clave NUEVA, con el mínimo y el tope comunes. Lo
+ * usan el registro y el cambio de clave, para que no vuelvan a separarse.
+ */
+function esquemaClaveNueva() {
+  return conTopeDeBcrypt(z.string().min(CARACTERES_MINIMOS_CLAVE, MENSAJE_CLAVE_CORTA));
+}
+
+/**
  * El cuerpo del 400 de un safeParse fallido, con la MISMA forma que ya usan
  * estas rutas: `{ error }` con el primer mensaje de zod. Solo cuando el fallo
  * es el del tope se añade `motivo`, para que el cliente lo distinga sin
@@ -58,6 +79,9 @@ function cuerpoDel400(errorDeZod) {
 
 module.exports = {
   BYTES_MAXIMOS_CLAVE,
+  CARACTERES_MINIMOS_CLAVE,
+  MENSAJE_CLAVE_CORTA,
+  esquemaClaveNueva,
   MOTIVO_CLAVE_DEMASIADO_LARGA,
   MENSAJE_CLAVE_DEMASIADO_LARGA,
   claveCabeEnBcrypt,

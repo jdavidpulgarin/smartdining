@@ -4,6 +4,7 @@ import { crearSocket, esErrorDeToken } from '../services/socket'
 import {
   aplicarCreado,
   aplicarEstado,
+  aplicarItemCancelado,
   cargarInicial,
   estadoInicial,
   marcarCargando,
@@ -26,6 +27,8 @@ const ACCIONES = {
   error: marcarError,
   creado: aplicarCreado,
   estado: aplicarEstado,
+  // D-13 / #180: alguien quito UNA linea; se tacha en vivo.
+  itemCancelado: aplicarItemCancelado,
   // Movimiento optimista tras un PATCH propio: no espera al socket.
   local: (estado, { id_pedido, nuevoEstado }) => marcarEstadoLocal(estado, id_pedido, nuevoEstado),
 }
@@ -161,6 +164,12 @@ export function useTablero({
 
     socket.on('order:status', (evento) => {
       if (vivo) despachar({ tipo: 'estado', datos: evento })
+    })
+
+    // item:cancelado (socket-server #181): una linea del pedido se quito, por el
+    // comensal o por el personal. La regla esta en aplicarItemCancelado.
+    socket.on('item:cancelado', (evento) => {
+      if (vivo) despachar({ tipo: 'itemCancelado', datos: evento })
     })
 
     socket.on('ingrediente:disponibilidad', (evento) => {

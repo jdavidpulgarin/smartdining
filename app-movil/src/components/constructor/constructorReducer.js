@@ -1,44 +1,42 @@
-// Copiado desde frontend-cliente/src/components/constructor/constructorReducer.js
-// Adaptado para frontend-restaurante en J-16
-
-const PORCIONES_VALIDAS = ['ligera', 'normal', 'extra']
+// Copiado de frontend-cliente; pasar a packages/core (R-22)
+const PORCIONES_VALIDAS = ['ligera', 'normal', 'extra'];
 
 export const estadoInicial = {
   pasoActual: 0,
   selecciones: {},
   notas: '',
   enResumen: false,
-}
+};
 
 export function constructorReducer(estado, accion) {
   if (!accion || !accion.type) {
-    return estado
+    return estado;
   }
 
   switch (accion.type) {
     case 'ALTERNAR_INGREDIENTE': {
-      const { paso, ingrediente } = accion
+      const { paso, ingrediente } = accion;
       if (!paso || !ingrediente || ingrediente.disponible === false) {
-        return estado
+        return estado;
       }
 
-      const idPaso = paso.id_paso
-      const idIngrediente = ingrediente.id_ingrediente
-      const seleccionesPaso = { ...(estado.selecciones[idPaso] || {}) }
+      const idPaso = paso.id_paso;
+      const idIngrediente = ingrediente.id_ingrediente;
+      const seleccionesPaso = { ...(estado.selecciones[idPaso] || {}) };
       const yaElegido = Object.prototype.hasOwnProperty.call(
         seleccionesPaso,
         idIngrediente
-      )
+      );
 
       if (yaElegido) {
-        delete seleccionesPaso[idIngrediente]
+        delete seleccionesPaso[idIngrediente];
         return {
           ...estado,
           selecciones: {
             ...estado.selecciones,
             [idPaso]: seleccionesPaso,
           },
-        }
+        };
       }
 
       if (Number(paso.max_sel) === 1) {
@@ -50,12 +48,12 @@ export function constructorReducer(estado, accion) {
               [idIngrediente]: 'normal',
             },
           },
-        }
+        };
       }
 
-      const cantidadActual = Object.keys(seleccionesPaso).length
+      const cantidadActual = Object.keys(seleccionesPaso).length;
       if (Number(paso.max_sel) > 0 && cantidadActual >= Number(paso.max_sel)) {
-        return estado
+        return estado;
       }
 
       return {
@@ -67,21 +65,21 @@ export function constructorReducer(estado, accion) {
             [idIngrediente]: 'normal',
           },
         },
-      }
+      };
     }
 
     case 'CAMBIAR_PORCION': {
-      const { id_paso: idPaso, id_ingrediente: idIngrediente, porcion } = accion
+      const { id_paso: idPaso, id_ingrediente: idIngrediente, porcion } = accion;
       if (!PORCIONES_VALIDAS.includes(porcion)) {
-        return estado
+        return estado;
       }
 
-      const seleccionesPaso = estado.selecciones[idPaso]
+      const seleccionesPaso = estado.selecciones[idPaso];
       if (
         !seleccionesPaso ||
         !Object.prototype.hasOwnProperty.call(seleccionesPaso, idIngrediente)
       ) {
-        return estado
+        return estado;
       }
 
       return {
@@ -93,37 +91,57 @@ export function constructorReducer(estado, accion) {
             [idIngrediente]: porcion,
           },
         },
-      }
+      };
     }
 
-    case 'ESTABLECER_PASO': {
-      const nuevoPaso = Number(accion.paso)
-      if (Number.isNaN(nuevoPaso) || nuevoPaso < 0) {
-        return estado
+    case 'SIGUIENTE': {
+      if (estado.enResumen) {
+        return estado;
+      }
+      const totalPasos = Number(accion.totalPasos) || 0;
+      if (totalPasos > 0 && estado.pasoActual + 1 >= totalPasos) {
+        return {
+          ...estado,
+          enResumen: true,
+        };
       }
       return {
         ...estado,
-        pasoActual: nuevoPaso,
+        pasoActual: estado.pasoActual + 1,
+      };
+    }
+
+    case 'ANTERIOR': {
+      if (estado.enResumen) {
+        return {
+          ...estado,
+          enResumen: false,
+        };
       }
+      return {
+        ...estado,
+        pasoActual: Math.max(0, estado.pasoActual - 1),
+      };
     }
 
     case 'CAMBIAR_NOTAS': {
+      const texto = typeof accion.notas === 'string' ? accion.notas : '';
       return {
         ...estado,
-        notas: typeof accion.notas === 'string' ? accion.notas.slice(0, 200) : '',
-      }
+        notas: texto.slice(0, 200),
+      };
     }
 
     case 'REINICIAR': {
       return {
-        pasoActual: 0,
-        selecciones: accion.seleccionesIniciales || {},
-        notas: accion.notasIniciales || '',
-        enResumen: false,
-      }
+        ...estadoInicial,
+        selecciones: {},
+      };
     }
 
     default:
-      return estado
+      return estado;
   }
 }
+
+export default constructorReducer;

@@ -148,6 +148,12 @@ function esperarAvisos() {
  * Los ingredientes mantienen el orden que trae la consulta (pasos_constructor
  * .orden), así que agrupar por `paso` respeta el orden del constructor sin que
  * el receptor tenga que ordenar nada.
+ *
+ * Cada ítem lleva también `id_detalle` (primero) y `estado_item` ('pendiente'
+ * al crear). Los otros comensales de la mesa y el KDS reciben las líneas SOLO
+ * por este evento: sin `id_detalle` no podían relacionar un `item:cancelado`
+ * posterior con su línea, y no la tachaban hasta recargar. Los dos vienen en
+ * `detalles` porque SQL_DETALLES_CON_INGREDIENTES lee `dp.*`.
  */
 function armarPedido(pedido, detalles = []) {
   return {
@@ -158,7 +164,9 @@ function armarPedido(pedido, detalles = []) {
     total: pedido.total,
     notas_generales: pedido.notas_generales ?? null,
     items: detalles.map((d) => ({
+      id_detalle: d.id_detalle,
       id_plato: d.id_plato,
+      estado_item: d.estado_item ?? null,
       nombre: d.plato_nombre ?? null,
       cantidad: d.cantidad,
       comensal: d.comensal ?? null,
@@ -308,6 +316,54 @@ async function notificarCambioEstado({ id_pedido, id_mesa, codigo_pedido, estado
     estado_anterior: estado_anterior ?? null,
     estado,
   });
+}
+
+/**
+ * POST /internal/item-cancelado — un comensal quitó UNA línea de su pedido
+ * (D-13 por el comensal, J-14). Hacia el KDS, admin y la mesa.
+ *
+ * PENDIENTE DE ROBERTO: la ruta todavía no existe en el socket-server. Hasta
+ * entonces responde 404, que `enviar` registra en el log y aquí se explica; la
+ * respuesta al comensal no depende de este aviso (sale después del COMMIT).
+ *
+ * Con reintento, igual que los demás avisos que lo usan: solo ante 500/502/503
+ * `ERROR_INTERNO`, siempre con el mismo eventId. `total` va como NÚMERO JSON.
+ *
+ * `origen` dice quién quitó el plato: 'comensal' (su sesión de QR) o 'personal'
+ * (pedido de Juan, aceptado por Roberto en su #181). Un consumidor que no lo
+ * reciba debe asumir 'comensal', que era el único origen antes de este campo.
+ */
+const ORIGENES_ITEM_CANCELADO = Object.freeze(['comensal', 'personal']);
+
+async function notificarItemCancelado({
+  id_pedido, id_mesa, codigo_pedido, id_detalle, id_plato, nombre, comensal, total, estado_pedido, origen,
+}) {
+  // Como el resto del módulo, no lanza: un origen fuera del contrato es un error
+  // de programación y se registra sin mandar un aviso que el socket rechazaría.
+  if (!ORIGENES_ITEM_CANCELADO.includes(origen)) {
+    console.error(`[socket] /internal/item-cancelado: origen no valido (${origen}), no se envia`);
+    return { ok: false, motivo: 'ORIGEN_INVALIDO' };
+  }
+  const resultado = await enviarConReintento('/internal/item-cancelado', {
+    id_pedido,
+    id_mesa,
+    codigo_pedido: codigo_pedido ?? null,
+    id_detalle,
+    id_plato,
+    nombre,
+    comensal: comensal ?? null,
+    total: Number(total),
+    estado_pedido,
+    origen,
+    eventId: nuevoEventId(),
+  });
+  if (!resultado.ok && resultado.motivo === 'HTTP_404') {
+    console.error(
+      `[socket] /internal/item-cancelado aun no existe en el socket-server (pendiente de Roberto): `
+        + `el aviso del pedido ${id_pedido} no se emitio`
+    );
+  }
+  return resultado;
 }
 
 /**
@@ -746,6 +802,7 @@ module.exports = {
   notificarQrRotado,
   notificarPedidoCreado,
   notificarCambioEstado,
+  notificarItemCancelado,
   notificarPagoConfirmado,
   notificarMesaLiberada,
   notificarIngredienteDisponibilidad,

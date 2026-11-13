@@ -42,12 +42,13 @@ const assert = require('node:assert');
 const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const kdsService = require('../../src/services/kds.service');
 const transaccionesService = require('../../src/services/transacciones.service');
 const autorInexistente = require('../../src/services/autor-inexistente');
+const socketNotifier = require('../../src/services/socket.notifier');
 
 /** Número de la mesa de prueba. No puede chocar con una mesa de verdad. */
 const MESA_NUMERO = parseInt(process.env.MESA_NUMERO || '901', 10);
@@ -119,35 +120,30 @@ async function limpiarMesaDePrueba() {
 }
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    // Un plato NO personalizable: uno del constructor exigiría elegir opciones
-    // de cada paso y el pedido fallaría por otra razón (P0001).
-    const p = await sonda.query(
-      `SELECT id_plato FROM platos
-        WHERE disponible AND stock_suficiente AND NOT personalizable
-        ORDER BY id_plato LIMIT 1`
-    );
-    const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
-    plato = p.rows[0] || null;
-    usuarioReal = u.rows[0] || null;
-    hayBase = Boolean(plato && usuarioReal);
-    if (!hayBase) return;
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  // Cualquier otro error (la mesa es de otro, por ejemplo) también se ve.
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  // Un plato NO personalizable: uno del constructor exigiría elegir opciones
+  // de cada paso y el pedido fallaría por otra razón (P0001).
+  const p = await sonda.query(
+    `SELECT id_plato FROM platos
+      WHERE disponible AND stock_suficiente AND NOT personalizable
+      ORDER BY id_plato LIMIT 1`
+  );
+  const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
+  plato = p.rows[0] || null;
+  usuarioReal = u.rows[0] || null;
+  hayBase = Boolean(plato && usuarioReal);
+  if (!hayBase) return;
 
-    // Si quedó algo de una corrida interrumpida, se limpia antes de empezar.
-    await limpiarMesaDePrueba();
-    const m = await sonda.query(
-      `INSERT INTO mesas (numero, capacidad, ubicacion) VALUES ($1, 4, $2) RETURNING id_mesa`,
-      [MESA_NUMERO, MARCA_MESA]
-    );
-    mesa = m.rows[0];
-  } catch (err) {
-    // Sin base no hay nada que probar; con base y un problema de verdad (la
-    // mesa es de otro) se quiere ver el error, no un skip silencioso.
-    if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
-    hayBase = false;
-  }
+  // Si quedó algo de una corrida interrumpida, se limpia antes de empezar.
+  await limpiarMesaDePrueba();
+  const m = await sonda.query(
+    `INSERT INTO mesas (numero, capacidad, ubicacion) VALUES ($1, 4, $2) RETURNING id_mesa`,
+    [MESA_NUMERO, MARCA_MESA]
+  );
+  mesa = m.rows[0];
 });
 
 test.after(async () => {
@@ -252,6 +248,26 @@ test('POST /pedidos con un usuario que existe: entra y deja su linea de historia
   );
   assert.strictEqual(rows[0].id_usuario, usuarioReal.id_usuario);
   assert.strictEqual(rows[0].estado_nuevo, 'recibido');
+});
+
+test('order:created con datos reales: cada linea lleva su id_detalle y estado_item pendiente', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  // Lo mismo que hace POST /pedidos: notificarPedidoCreado(pedido, pedido.detalles)
+  // da forma al aviso con armarPedido. Aquí los detalles salen de la base de verdad.
+  const pedido = await crearConUsuarioReal();
+  const { items } = socketNotifier.armarPedido(pedido, pedido.detalles);
+
+  const { rows } = await sonda.query(
+    'SELECT id_detalle FROM detalles_pedido WHERE id_pedido = $1::int ORDER BY id_detalle',
+    [pedido.id_pedido]
+  );
+  assert.ok(items.length > 0);
+  assert.deepStrictEqual(items.map((i) => i.id_detalle).sort((a, b) => a - b), rows.map((r) => r.id_detalle));
+  for (const item of items) {
+    assert.ok(Number.isInteger(item.id_detalle), 'id_detalle es entero');
+    assert.strictEqual(item.estado_item, 'pendiente');
+  }
 });
 
 test('PATCH /pedidos/:id/estado con el autor borrado: 409 autor_inexistente', async (t) => {

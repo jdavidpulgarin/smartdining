@@ -111,10 +111,40 @@ export async function listarPedidosMesa(idMesa = null) {
   return Array.isArray(data?.pedidos) ? data.pedidos : [];
 }
 
+/**
+ * Cancela una línea propia de un pedido del comensal mientras siga `recibido` (J-14).
+ * Envía POST sin cuerpo con el JWT del comensal en `Authorization`.
+ *
+ * @param {number|string} idPedido
+ * @param {number|string} idDetalle
+ * @returns {Promise<{ pedido: object }>}
+ */
+export async function cancelarItem(idPedido, idDetalle) {
+  const idP = Number(idPedido);
+  const idD = Number(idDetalle);
+  if (!Number.isInteger(idP) || idP <= 0 || !Number.isInteger(idD) || idD <= 0) {
+    throw new Error('Identificadores de pedido y plato inválidos');
+  }
+
+  if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+    const { cancelarItemSimulado } = await import('./pedidoSimulado');
+    return cancelarItemSimulado(idP, idD);
+  }
+
+  const sesion = obtenerSesion();
+  const token = sesion?.token;
+
+  return pedirJson(`/pedidos/${idP}/items/${idD}/cancelar`, {
+    method: 'POST',
+    token,
+  });
+}
+
 export default {
   NOTAS_MAX_SERVIDOR,
   NOTAS_GENERALES_MAX_SERVIDOR,
   MAX_INGREDIENTES_POR_ITEM,
   crearPedido,
   listarPedidosMesa,
+  cancelarItem,
 };

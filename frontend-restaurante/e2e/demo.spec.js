@@ -14,8 +14,17 @@
 //    8. Un 2.º celular («Beto») no puede pedirla.
 //    9. En Inventario el admin ve la Carne Angus en 0 y registra una entrada de 10.
 //   10. Sin recargar, la Hamburguesa vuelve en el panel, el KDS y el cliente, y Ana la pide (201).
-//   11. Limpieza: se cancelan los pedidos de la prueba, la mesa queda libre y la Carne
-//       Angus vuelve a su stock inicial. Se comprueba que todo quedó como estaba.
+//  10a. Panel: se inicia sesión SIN recargar y un pedido nuevo llega en vivo a Pedidos (el
+//       socket conecta con el token tras el login).
+//  10b. Caja: en otra mesa (MESA_COBRO), dos pedidos entregados se cobran con «Toda
+//       la mesa»; «Recaudado hoy» sube exactamente lo cobrado sin recargar y coincide
+//       con la suma del Historial y con GET /transacciones?desde=hoy.
+//   11. Limpieza: se cancelan los pedidos de la prueba, la mesa queda libre y TODOS los
+//       insumos vuelven al stock que tenían antes de empezar (la Carne Angus y también lo
+//       que gastó el cobro del 10b, que no se puede cancelar). Se comprueba que todo
+//       quedó como estaba, así la prueba se puede correr muchas veces seguidas.
+//       Queda el historial, que no se borra: pedidos cancelados y pagados, el cobro
+//       del 10b y los movimientos del libro (la entrada del paso 9 y los ajustes).
 //
 // "Sin recargar" se comprueba con una marca en `window` que tiene que seguir ahí al final.
 // La carta pública (GET /menu) se comprueba al empezar, al agotarse y al reponer, con
@@ -38,6 +47,10 @@ const CLIENTE = (process.env.CLIENTE_URL || 'http://localhost:5174').replace(/\/
 const KDS = (process.env.KDS_URL || 'http://localhost:5175').replace(/\/+$/, '')
 const CLAVE = process.env.DEMO_PASSWORD || 'Admin123!'
 const MESA = Number(process.env.MESA_DEMO || 1)
+// Mesa del paso 10b (cobro en Caja). Distinta de la de la demo.
+const MESA_COBRO = Number(process.env.MESA_COBRO || 2)
+/** 12000 → "12\\.000": como lo pinta formatCOP (es-CO), escapado para un RegExp. */
+const pesos = (n) => new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(n).replace(/\./g, '\\.')
 const PLATO = 'Hamburguesa Smart Angus'
 const INSUMO = 'Carne Angus 200 g'
 const STOCK_DEMO = 4
@@ -109,6 +122,12 @@ async function pedidosAbiertosDeMesa(token, idMesa) {
   return (r.data?.pedidos || []).filter((p) => Number(p.id_mesa) === idMesa)
 }
 
+/** { id_insumo: stock_actual } de todos los insumos. */
+async function stockDeInsumos(token) {
+  const insumos = (await api(token, '/inventario/insumos?limite=500')).data?.insumos || []
+  return Object.fromEntries(insumos.map((i) => [i.id_insumo, Number(i.stock_actual)]))
+}
+
 /** Lo que la demo enseña. Se toma antes y se compara al final. */
 async function fotografiar(token, ids) {
   const insumo = await leerInsumo(token, ids.insumo)
@@ -121,6 +140,8 @@ async function fotografiar(token, ids) {
     mesa: mesa?.estado,
     pedidosAbiertos: (await pedidosAbiertosDeMesa(token, MESA)).length,
     libroCuadra: await libroCuadra(token, insumo),
+    mesaCobro: (Array.isArray(mesas) ? mesas : mesas?.mesas || []).find((m) => Number(m.id_mesa) === MESA_COBRO)?.estado,
+    stockInsumos: await stockDeInsumos(token),
   }
 }
 
@@ -201,12 +222,17 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
     // hasta 60 s a que caducara la caché).
     await esperarMenu(true, 'al empezar, con la carne en 4,')
     antes = await fotografiar(admin, ids)
-    expect(antes).toEqual({ stock: STOCK_DEMO, platoDisponible: true, mesa: 'disponible', pedidosAbiertos: 0, libroCuadra: true })
+    const { stockInsumos, ...resumen } = antes
+    expect(resumen).toEqual({ stock: STOCK_DEMO, platoDisponible: true, mesa: 'disponible', pedidosAbiertos: 0, libroCuadra: true, mesaCobro: 'disponible' })
+    expect(Object.keys(stockInsumos).length).toBeGreaterThan(0)
   })
 
   /**
    * Cancela lo que creó la prueba (la base devuelve las porciones), libera la
-   * mesa y deja la carne en su stock de demo con un ajuste. Idempotente: el
+   * mesa y deja CADA insumo en el stock que tenía al empezar, con un ajuste.
+   * Hace falta para todos y no solo para la carne: el cobro del 10b gasta
+   * insumos de otro plato y un pedido pagado no se cancela, así que sin esto
+   * cada corrida dejaba menos stock hasta agotar ese plato. Idempotente: el
    * test 11 la llama y comprueba; afterAll la repite por si la prueba se cortó.
    */
   async function limpiar() {
@@ -217,13 +243,16 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
       if (r.status !== 200) console.warn(`AVISO cancelar pedido ${id}: ${r.status} ${r.data?.error || ''}`)
     }
     await api(admin, `/mesas/${MESA}/liberar`, { method: 'POST' })
-    const insumo = await leerInsumo(admin, ids.insumo)
-    const diferencia = STOCK_DEMO - Number(insumo.stock_actual)
-    if (diferencia !== 0) {
-      await api(admin, `/inventario/insumos/${ids.insumo}/movimientos`, {
+    if (!antes?.stockInsumos) return
+    const ahora = await stockDeInsumos(admin)
+    for (const [id, stock] of Object.entries(antes.stockInsumos)) {
+      const diferencia = Math.round((stock - (ahora[id] ?? stock)) * 1000) / 1000
+      if (diferencia === 0) continue
+      const r = await api(admin, `/inventario/insumos/${id}/movimientos`, {
         method: 'POST',
-        body: { tipo: 'ajuste', cantidad: diferencia, motivo: 'E2E demo: volver a 4' },
+        body: { tipo: 'ajuste', cantidad: diferencia, motivo: 'E2E demo: volver al stock de antes' },
       })
+      if (r.status !== 201) console.warn(`AVISO ajuste insumo ${id}: ${r.status} ${r.data?.error || ''}`)
     }
   }
 
@@ -392,6 +421,88 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
     })
 
     for (const c of [ana?.ctx, beto?.ctx, kds?.context(), ctxAdmin]) await c?.close()
+  })
+
+  test('10a. Tras iniciar sesión SIN recargar, el panel recibe en vivo un pedido nuevo', async ({ browser }) => {
+    // El resto del guion recarga después del login (page.goto), y así no se
+    // veía el fallo: el socket se creaba en /login sin token y nadie lo volvía
+    // a conectar al entrar. Aquí se entra y se navega SOLO por la interfaz.
+    if ((await pedidosAbiertosDeMesa(admin, MESA_COBRO)).length > 0) {
+      throw new Error(`la mesa ${MESA_COBRO} tiene pedidos abiertos: ciérralos o usa otra MESA_COBRO`)
+    }
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+    const page = await ctx.newPage()
+    await entrarPanel(page, 'mesero@smartdining.com')
+    await marcar(page)
+    await page.getByRole('navigation', { name: /Navegación principal/ }).getByRole('link', { name: 'PEDIDOS' }).click()
+    await expect(page).toHaveURL(/\/pedidos$/)
+
+    expect([200, 201]).toContain((await api(admin, `/mesas/${MESA_COBRO}/abrir`, { method: 'POST' })).status)
+    const platos = (await api(null, '/platos')).data?.platos || []
+    const otro = platos.find((p) => !/Angus/i.test(p.nombre) && !p.personalizable
+      && p.disponible !== false && p.stock_suficiente !== false && Number(p.precio) > 0)
+    const r = await api(admin, '/pedidos', { method: 'POST', body: { id_mesa: MESA_COBRO, items: [{ id_plato: otro.id_plato, cantidad: 1 }] } })
+    expect(r.status).toBe(201)
+    await expect(page.getByText(r.data.codigo_pedido).first()).toBeVisible({ timeout: 10_000 })
+    expect(await sinRecargar(page), 'el panel no se recargó').toBe(true)
+
+    expect((await api(admin, `/pedidos/${r.data.id_pedido}/cancelar`, { method: 'POST', body: { motivo: 'E2E demo 10a' } })).status).toBe(200)
+    await api(admin, `/mesas/${MESA_COBRO}/liberar`, { method: 'POST' })
+    await ctx.close()
+  })
+
+  test('10b. Caja: después de un cobro, «Recaudado hoy» sube exactamente lo cobrado y cuadra con el Historial', async ({ browser }) => {
+    // Mesa propia (MESA_COBRO, 2 por omisión) y un plato que no use la Carne
+    // Angus: así no toca la mesa ni la carne de la demo. El cobro libera la mesa
+    // solo; las transacciones quedan (son dinero cobrado de verdad, no hay ruta
+    // para borrarlas). Lo que gasta de insumos lo devuelve limpiar() con un
+    // ajuste, porque un pedido pagado ya no se cancela.
+    const caja = await login('caja@smartdining.com')
+    if ((await pedidosAbiertosDeMesa(admin, MESA_COBRO)).length > 0) {
+      throw new Error(`la mesa ${MESA_COBRO} tiene pedidos abiertos: ciérralos o usa otra MESA_COBRO`)
+    }
+    const platos = (await api(null, '/platos')).data?.platos || []
+    // Ni personalizable (pide opciones del constructor) ni sin stock.
+    const otro = platos.find((p) => !/Angus/i.test(p.nombre) && !p.personalizable
+      && p.disponible !== false && p.stock_suficiente !== false && Number(p.precio) > 0)
+    expect(otro, 'un plato sin Carne Angus para cobrar').toBeTruthy()
+    expect([200, 201]).toContain((await api(admin, `/mesas/${MESA_COBRO}/abrir`, { method: 'POST' })).status)
+    for (const cantidad of [1, 2]) {
+      const r = await api(admin, '/pedidos', { method: 'POST', body: { id_mesa: MESA_COBRO, items: [{ id_plato: otro.id_plato, cantidad }] } })
+      expect(r.status).toBe(201)
+      for (const estado of ['en_preparacion', 'listo', 'entregado']) {
+        expect((await api(admin, `/pedidos/${r.data.id_pedido}/estado`, { method: 'PATCH', body: { estado } })).status).toBe(200)
+      }
+    }
+    const saldo = Number((await api(caja, `/mesas/${MESA_COBRO}/cuenta`)).data.saldo_mesa)
+    const totalAntes = (await api(caja, '/transacciones?desde=hoy')).data.total
+
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+    const page = await ctx.newPage()
+    await entrarPanel(page, 'caja@smartdining.com')
+    await page.goto(`/caja?mesa=${MESA_COBRO}`)
+    const recaudado = page.getByTestId('recaudado-hoy')
+    await expect(recaudado).toHaveText(new RegExp(`^\\$\\s?${pesos(totalAntes)} RECAUDADO HOY$`))
+
+    // "Toda la mesa": un solo cobro repartido entre los dos pedidos.
+    await page.getByRole('button', { name: /TODA LA MESA/ }).click()
+    await page.getByLabel(/EFECTIVO RECIBIDO/).fill(String(Math.ceil(saldo / 1000) * 1000))
+    await page.getByRole('button', { name: /^Cobrar/ }).click()
+    await expect(page.getByText('Pago Procesado con Éxito')).toBeVisible()
+    await page.getByRole('button', { name: 'Cerrar recibo' }).click()
+
+    // Sube EXACTAMENTE lo cobrado, sin recargar la página.
+    await expect(recaudado).toHaveText(new RegExp(`^\\$\\s?${pesos(totalAntes + saldo)} RECAUDADO HOY$`))
+    expect((await api(caja, '/transacciones?desde=hoy')).data.total).toBe(totalAntes + saldo)
+
+    // Y cuadra con la suma del Historial de hoy (una fila por cobro).
+    await page.getByRole('button', { name: /HISTORIAL DE PAGOS/ }).click()
+    const montos = await page.locator('.history-panel tbody tr td:nth-child(6)').allInnerTexts()
+    const sumaHistorial = montos.reduce((acc, t) => acc + Number(t.replace(/[^\d]/g, '')), 0)
+    expect(sumaHistorial).toBe(totalAntes + saldo)
+    await expect(page.getByTestId('total-historial')).toHaveText(new RegExp(pesos(totalAntes + saldo)))
+    await expect(page.locator('.history-panel tbody tr').first()).toContainText(`Mesa ${MESA_COBRO}`)
+    await ctx.close()
   })
 
   test('11. Limpieza: todo queda como estaba', async () => {

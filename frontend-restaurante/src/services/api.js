@@ -447,9 +447,12 @@ export const mesasApi = {
    * Rota el QR de una mesa abierta: POST /api/mesas/:id/rotar-qr
    * Responde { url, expira_en, mesa }: el token solo viaja dentro de url.
    */
-  async rotarQr(id) {
+  async rotarQr(id, { soloSiVacia = false } = {}) {
+    // solo_si_vacia: la rotación automática del modal pide que el backend la
+    // rechace (409 mesa_con_comensales) si la mesa ya tiene comensales.
     return apiFetch(`/mesas/${id}/rotar-qr`, {
       method: 'POST',
+      ...(soloSiVacia ? { body: JSON.stringify({ solo_si_vacia: true }) } : {}),
     })
   },
 
@@ -585,6 +588,30 @@ export const transaccionesApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     })
+  },
+
+  /**
+   * Cobro de MESA en caja (admin/cajero): POST /api/transacciones/mesa.
+   * El backend reparte el monto entre los pedidos de la mesa, del más viejo al
+   * más nuevo. `id_cobro` (UUID) se genera una vez por cobro y se repite en los
+   * reintentos: con el mismo id_cobro no se cobra dos veces (200 { duplicado }).
+   * @param {{ id_mesa: number, monto: number, metodo_pago: string, comensal?: string|null, id_cobro: string }} datos
+   * @returns {Promise<{ duplicado: boolean, saldo_restante: number, mesa_liberada?: boolean, pagados?: number[], transacciones?: Array<{ id_transaccion: number, id_pedido: number, monto: number, comensal: string|null }> }>}
+   */
+  async cobrarMesa({ id_mesa, monto, metodo_pago, comensal = null, id_cobro }) {
+    return apiFetch('/transacciones/mesa', {
+      method: 'POST',
+      body: JSON.stringify({ id_mesa, monto, metodo_pago, comensal, id_cobro }),
+    })
+  },
+
+  /**
+   * Lo cobrado en el día (admin/cajero): GET /api/transacciones?desde=hoy (#158).
+   * El "hoy" lo calcula el backend en hora de Bogotá; solo trae las completadas.
+   * @returns {Promise<{ desde: string, hasta: string, total: number, cantidad: number, transacciones: Array<{ id_transaccion: number, id_pedido: number, codigo_pedido: string, id_mesa: number, numero_mesa: number, monto: number, metodo_pago: string, comensal: string|null, fecha: string, referencia_pago: string|null }> }>}
+   */
+  async delDia(desde = 'hoy') {
+    return apiFetch(`/transacciones?desde=${encodeURIComponent(desde)}`)
   },
 
   /**

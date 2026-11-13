@@ -176,6 +176,43 @@ const TTL_INTENCION_RESUELTA_SEG = 7 * 24 * 60 * 60;
 // Estados de una intención que el webhook acepta como "se esperaba este cobro".
 // Una reemplazada sigue valiendo: el comensal pudo pagarla en otra pestaña
 // antes de pedir la nueva, y ese dinero ya salió de su cuenta.
+/**
+ * Anota a quien pagó en `pagaron` (deja de contar en «igual» y la mesa lo ve),
+ * también si el pago dejó el saldo en 0: la mesa sigue ocupada mientras quede
+ * un pedido sin entregar (EVENTS.md §5.1). Pero solo si la sesión de mesa en la
+ * que pagó sigue abierta, para no ensuciar la del grupo siguiente.
+ *
+ * Sesión cerrada = la mesa se liberó DESPUÉS de `desde` (cuando empezó este
+ * pago: la creación de la intención, o la llegada del cobro de caja), según la
+ * marca de qr.revocarMesa (en Redis si lo hay: sobrevive a un reinicio y a un
+ * QR nuevo), o la mesa figura liberada sin QR nuevo (mesaLiberada; cubre el
+ * reintento de caja que llega después de la liberación).
+ *
+ * La carrera con /internal/mesa-liberada se resuelve por el orden, sin
+ * bloqueos: liberarMesa hace R (revocarMesa) y DESPUÉS L (limpiarMesa, que
+ * borra pagaron); aquí se hace W (marcarPago) y DESPUÉS C (mirar R).
+ *  - Si C no ve R, R es posterior a C; L, posterior a R, lo es también a W y
+ *    borra la anotación junto con el resto de la sesión.
+ *  - Si C ve R, puede que L ya haya pasado antes de W: se deshace W.
+ * Mirar antes de W solo evita la escritura cuando la liberación ya se ve.
+ *
+ * @returns {Promise<boolean>} true si quedó anotado.
+ */
+async function anotarPagoEnSesion(ctx, idMesa, alias, desde) {
+  const cerrada = async () => {
+    if (ctx.mesaLiberada && ctx.mesaLiberada(idMesa)) return true;
+    const liberadaEn = await ctx.qr.ultimaLiberacion(idMesa);
+    return liberadaEn !== null && liberadaEn > desde;
+  };
+  if (await cerrada()) return false;
+  await ctx.estadoMesas.marcarPago(idMesa, alias);
+  if (await cerrada()) {
+    await ctx.estadoMesas.desmarcarPago(idMesa, alias);
+    return false;
+  }
+  return true;
+}
+
 const ESTADOS_COBRABLES = ['pendiente', 'reemplazada'];
 const ESTADOS_FALLIDOS = { DECLINED: 'rechazada', ERROR: 'error', VOIDED: 'anulada' };
 
@@ -267,28 +304,43 @@ async function registrarEnBackend(ctx, { evento, tx, intencion }) {
  * pasarela reintenta (no se pierde la evidencia).
  */
 async function alertarPago(ctx, { evento, tx, intencion, motivo }) {
+  const idMesa = intencion ? intencion.id_mesa : null;
+  // Lo cobrado según la API de la pasarela; si la API no conoce la
+  // transacción, lo que dice el evento (firmado, pero sin confirmar).
+  const monto = tx ? tx.monto_centavos : evento.monto_centavos;
+  // Lo que ESTE servidor esperaba cobrar; null si no hay intención.
+  const montoEsperado = intencion ? intencion.monto_centavos : null;
   const r = await ctx.backend.post('/api/pagos/intentos-fallidos/interno', {
     referencia_externa: evento.referencia,
     id_transaccion_pasarela: evento.id_transaccion,
     pasarela: ctx.pasarela.nombre,
-    id_mesa: intencion ? intencion.id_mesa : null,
+    id_mesa: idMesa,
     motivo,
-    monto_centavos: tx ? tx.monto_centavos : evento.monto_centavos,
-    monto_esperado_centavos: intencion ? intencion.monto_centavos : null,
+    monto_centavos: monto,
+    monto_esperado_centavos: montoEsperado,
     moneda: tx ? tx.moneda : evento.moneda,
     metodo_pago: 'online',
   });
   if (r.status >= 500) throw Object.assign(new Error(`el backend respondió ${r.status}`), { codigo: 'BACKEND_ERROR' });
-  // Al panel: qué pasó y dónde, sin datos del pagador.
+  // Solo al panel (room:admin): qué pasó, dónde, cuánto y quién. `comensal` es
+  // el alias firmado en el JWT de quien creó la intención (el mismo que el
+  // panel ya ve en payment:confirmed); null si no hay intención. La pasarela
+  // no nos entrega datos de tarjeta ni del pagador, y no se agrega ninguno.
   ctx.io.to(SALA_ADMIN).emit('pago:alerta', {
     eventId: `${evento.id_transaccion}:${motivo}`,
-    id_mesa: intencion ? intencion.id_mesa : null,
+    id_mesa: idMesa,
+    comensal: intencion ? intencion.comensal ?? null : null,
+    monto_centavos: centavosONull(monto),
+    monto_esperado_centavos: centavosONull(montoEsperado),
     referencia_externa: evento.referencia,
     id_transaccion_pasarela: evento.id_transaccion,
     motivo,
     emitidoEn: new Date().toISOString(),
   });
 }
+
+/** Al panel no se le muestra un monto que no sea un entero seguro: null. */
+const centavosONull = (v) => (Number.isSafeInteger(v) ? v : null);
 
 /** Un pago rechazado o con error libera al comensal para que pueda reintentar. */
 async function registrarFallo(ctx, evento) {
@@ -310,6 +362,7 @@ async function registrarFallo(ctx, evento) {
  *    efectos.
  */
 async function recibirEventoPasarela(req, res, ctx) {
+  const recibido = Date.now(); // respaldo de `desde` si la intención no trae creada_en
   if (!ctx.pasarela) throw new ErrorHttp(503, 'NO_CONFIGURADO', 'Los pagos no están configurados');
   const crudo = await leerCuerpoCrudo(req);
   const v = ctx.pasarela.verificarEvento(crudo, req.headers);
@@ -355,10 +408,11 @@ async function recibirEventoPasarela(req, res, ctx) {
     // Quien pagó deja de contar en "igual" (en cualquier modo). Va ANTES de
     // marcar la intención como pagada: si esto falla, el 503 hace que Wompi
     // reintente y el reintento la encuentra todavía cobrable (el backend es
-    // idempotente por referencia_externa y marcarPago también). Con saldo 0
-    // no hay nada que repartir y el backend libera la mesa (quizá antes de
-    // que lleguemos aquí): no se anota, para no ensuciar la sesión siguiente.
-    if (registro.saldo > 0) await ctx.estadoMesas.marcarPago(intencion.id_mesa, intencion.comensal);
+    // idempotente por referencia_externa y marcarPago también). También con
+    // saldo 0: la mesa puede seguir ocupada por un pedido sin entregar. Si el
+    // backend ya la liberó, no se anota (anotarPagoEnSesion).
+    const creada = Date.parse(intencion.creada_en);
+    await anotarPagoEnSesion(ctx, intencion.id_mesa, intencion.comensal, Number.isFinite(creada) ? creada : recibido);
     await ctx.almacenPagos.actualizarEstado(evento.referencia, 'pagada', TTL_INTENCION_RESUELTA_SEG);
     // Solo libera la marca si apunta a ESTA referencia: si se pagó una
     // reemplazada, la intención nueva sigue pendiente (y, como el saldo
@@ -431,16 +485,17 @@ function aliasParaPagaron(comensal) {
  * Solo se reenvían los campos conocidos; el resto del cuerpo se descarta.
  */
 async function difundirPagoConfirmado(ctx, p) {
+  const recibido = Date.now(); // el cobro de caja no trae hora: cuenta desde que llega
   if (!esEventIdValido(p.eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
   const errorPayload = validarPagoCaja(p);
   if (errorPayload) return fallo('PAYLOAD_INVALIDO', errorPayload, { eventId: p.eventId });
 
   // Un cobro de caja con alias también saca a ese comensal del reparto
   // "igual". Antes de las marcas de idempotencia: si falla, el reintento del
-  // backend lo vuelve a intentar (marcarPago es idempotente). Con saldo 0 no
-  // se anota (la mesa se libera; ver el webhook).
-  const conAlias = typeof p.comensal === 'string' && p.saldo_restante_centavos > 0;
-  if (conAlias) await ctx.estadoMesas.marcarPago(p.id_mesa, aliasParaPagaron(p.comensal));
+  // backend lo vuelve a intentar (marcarPago es idempotente). También con
+  // saldo 0 mientras la mesa no se haya liberado (anotarPagoEnSesion).
+  const anotado = typeof p.comensal === 'string'
+    && await anotarPagoEnSesion(ctx, p.id_mesa, aliasParaPagaron(p.comensal), recibido);
 
   // Doble guardia, como order:created: por eventId (reintento exacto) y por
   // id_transaccion (el backend reintenta el mismo cobro con otro eventId).
@@ -458,7 +513,7 @@ async function difundirPagoConfirmado(ctx, p) {
     saldoCentavos: p.saldo_restante_centavos,
     referencia: p.referencia_externa,
   });
-  if (conAlias) ctx.presencia.programar(p.id_mesa);
+  if (anotado) ctx.presencia.programar(p.id_mesa);
   return exito({ eventId: p.eventId, duplicado: false });
 }
 

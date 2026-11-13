@@ -226,7 +226,7 @@ export function TomarPedido() {
       if (accion.tipo === 'alias_en_uso') {
         setErrorRegistro('Ese nombre ya está en la mesa')
         let listaParaBuscar = comensales
-        if (!accion.alias) {
+        if (!accion.alias?.trim()) {
           try {
             const cuentaActualizada = await obtenerCuenta(idMesa)
             setCuenta(cuentaActualizada)
