@@ -105,10 +105,11 @@ database/scripts/
 ├── 33_estado_pago_al_cambiar_total.sql # estado_pago se recalcula también cuando cambia el total (al quitar un plato quedaba «parcial» con saldo 0)
 ├── 34_contacto_espacios_unicode.sql  # correo y redes rechazan también los espacios Unicode (U+00A0…), igual que `\s` del backend; no depende del locale
 ├── 35_transacciones_voucher.sql      # transacciones.voucher VARCHAR(40), opcional, solo con tarjeta débito/crédito, ^[A-Z0-9-]{1,40}$
-└── 36_multicanal.sql                 # P-23: canal (mesa/para_llevar/domicilio), por_pagar, clientes, direcciones, zonas, domicilios, repartidor, pago anticipado
+├── 36_multicanal.sql                 # P-23: canal (mesa/para_llevar/domicilio), por_pagar, clientes, direcciones, zonas, domicilios, repartidor, pago anticipado
+└── 37_refresh_rotado_en.sql          # refresh_tokens_cliente.rotado_en (ventana de gracia del contrato de #199): va con reemplazado_por, no cambia una vez puesto, reemplazo de la misma familia y cliente
 ```
 
-> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (37).
+> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (38).
 
 > **Multicanal (script 36, P-23).** Un pedido tiene `canal`: `mesa` (con mesa, como siempre),
 > `para_llevar` o `domicilio` (sin mesa, con cliente registrado). Los dos últimos nacen en
@@ -229,6 +230,7 @@ psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_33_estado_pago_total.
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_34_contacto_espacios_unicode.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_35_voucher.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_36_multicanal.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_37_refresh_rotado.sql
 ```
 
 Voucher de tarjeta (script 35): `test_35_voucher.sql` crea su propia mesa, plato y pedido y
@@ -287,6 +289,12 @@ sh database/tests/test_36_carrera.sh                  # misma conexión que migr
 RONDAS=50 sh database/tests/test_36_carrera.sh
 docker compose exec -T postgres sh /smartdining-db/tests/test_36_carrera.sh
 ```
+
+Rotación de los refresh tokens de la app (script 37): `test_37_refresh_rotado.sql` corre en
+`BEGIN … ROLLBACK` (usa `\ir`) y comprueba la rotación normal del contrato de #199
+(`reemplazado_por` + `rotado_en`, sin tocar `revocado_en`), que los dos van juntos, que la
+ventana de gracia puede cambiar el reemplazo sin mover `rotado_en`, que el reemplazo es de la
+misma familia y del mismo cliente, el reuso (revocar la familia) y que el script es idempotente.
 
 Aviso de insumo agotado (script 28, G-06): también necesita `COMMIT` (escucha `LISTEN
 inventario`), crea y borra sus propios datos (prefijo `G06A`):
