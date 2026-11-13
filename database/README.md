@@ -299,7 +299,7 @@ Rotación de los refresh tokens de la app (script 37): `test_37_refresh_rotado.s
 ventana de gracia puede cambiar el reemplazo sin mover `rotado_en`, que el reemplazo es de la
 misma familia y del mismo cliente, el reuso (revocar la familia) y que el script es idempotente.
 
-Orden de la entrega (script 40): `test_40_orden_entrega.sql` corre en `BEGIN … ROLLBACK` (usa `ir`) y
+Orden de la entrega (script 40): `test_40_orden_entrega.sql` corre en `BEGIN … ROLLBACK` (usa `\ir`) y
 comprueba que una entrega nace en `por_asignar`, el camino `por_asignar → asignado` (y reasignar) `→ en_camino →
 entregado | fallido`, que saltar pasos y volver atrás se rechazan, que un UPDATE sin cambio de estado pasa, que
 lo del 36 sigue (de entregado o fallido no se sale) y que el script es idempotente.
