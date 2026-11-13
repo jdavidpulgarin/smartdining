@@ -18,7 +18,9 @@ const { instalarFakeSocket } = require('./fake-socket');
 const request = require('supertest');
 const app = require('../../server');
 
-const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina'];
+// D-20a: el repartidor es personal; la matriz comprueba que en todo lo que no
+// es suyo recibe 403.
+const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina', 'repartidor'];
 const TODOS_LOS_ROLES = [...ROLES_STAFF, 'comensal'];
 
 /** Mesa que usan las rutas con :id, y la del JWT de comensal. */
