@@ -76,7 +76,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `cart:updated` | `room:mesa-{ID}` menos quien emitió | Sí | Estable | [§5](#5-eventos-servidor--cliente) |
 | `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Estable (`items[].id_detalle` y `estado_item` desde #202) | [§5](#5-eventos-servidor--cliente) |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Estable (`origen` opcional desde J-14) | [§5](#5-eventos-servidor--cliente) |
-| `item:cancelado` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Lista; el backend la llama desde J-14 (#180, `origen: "comensal"`) y la llamará desde D-13 (`origen: "personal"`). Falta que KDS, panel y PWA la escuchen | [§5.6](#56-itemcancelado) |
+| `item:cancelado` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Estable; el backend la llama desde J-14 (#180, `origen: "comensal"`) y desde D-13 (#186, `origen: "personal"`). La escuchan el KDS y la PWA; el panel todavía no | [§5.6](#56-itemcancelado) |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye la pantalla) | No | Estable | [§6.2](#62-cómo-avisa-el-backend-una-rotación-de-token_qr-pantalla-de-mesa) |
 | `mesa:llamar_mesero` | `room:admin` | Sí | Estable | [§4](#mesallamar_mesero) |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§4](#cuentasolicitada) |
@@ -104,7 +104,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `POST /internal/payment-confirmed` | backend (cobros de caja) | Estable (el backend la llama desde `registrarPago`, PR #58) | [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 | `POST /internal/mesa-comensal` | backend (tras el COMMIT de D-18) | Estable (el backend ya la llama, D-18/D-18b) | [§6.4](#64-comensales-sin-celular-post-internalmesa-comensal) |
 | `POST /internal/inventario-alerta` | backend (D-17, oyente del canal `inventario`) | Estable (el backend ya la llama, D-17) | [§5.5](#55-inventarioalerta) |
-| `POST /internal/item-cancelado` | backend (tras el COMMIT de J-14, el comensal quita un plato, o de D-13, el personal cancela uno) | Lista; el backend la llama desde #180 | [§5.6](#56-itemcancelado) |
+| `POST /internal/item-cancelado` | backend (tras el COMMIT de J-14, el comensal quita un plato, o de D-13, el personal cancela uno) | Estable; el backend la llama desde #180 (J-14) y #186 (D-13) | [§5.6](#56-itemcancelado) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
 responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
@@ -844,10 +844,11 @@ necesita saber qué se agota); nunca a las mesas ni a `room:kds`:
 
 ### 5.6. `item:cancelado`
 
-> **Lista · R-24.** Implementado en `src/item-cancelado.js` (pruebas: `tests/item-cancelado.test.js`).
-> El backend la llama desde J-14 (#180: `POST /api/pedidos/:id/items/:id_detalle/cancelar` →
-> `notificarItemCancelado`, con `origen: "comensal"`) y lo hará desde D-13 (el personal cancela un plato,
-> `origen: "personal"`). Falta que el KDS, el panel y la PWA escuchen `item:cancelado`.
+> **Estable · R-24.** Implementado en `src/item-cancelado.js` (pruebas: `tests/item-cancelado.test.js`).
+> El backend la llama desde la misma ruta, `POST /api/pedidos/:id/items/:id_detalle/cancelar` →
+> `notificarItemCancelado`, en dos casos: J-14 (#180, el comensal, `origen: "comensal"`) y D-13 (#186,
+> el personal: solo `admin` y `mesero`, `origen: "personal"`). La escuchan el KDS (`useTablero.js`) y la
+> PWA (`SeguimientoContext`, `Layout`, `useCuentaMesa`); el panel todavía no.
 
 Se cancela **una línea entera** de un pedido:
 
@@ -1639,6 +1640,7 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Estable (R-20.2) · `POST /internal/inventario-alerta` · `inventario:alerta` | Propuesta (v1.1): sin implementar; el backend (D-17) ya la llamaba y recibía `404` y el aviso se perdía | Implementada según §5.5 sin cambios de contrato: validación estricta, solo `room:admin`, idempotencia `backend:inventario-alerta:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`) | Nadie: backend (D-17) y panel (P-22) ya usan este contrato |
 | Estable (R-19.2) · `POST /internal/mesa-comensal` · `mesa:presencia.sin_celular` | Propuesta (v1.1): sin implementar; el backend (D-18) ya la llamaba y recibía `404`, y la persona sin celular no contaba en «igual» | Implementada según §6.4 y §5.2: `sin_celular` siempre presente; `comensales` y `total` lo incluyen; misma regla de alias que el backend, con paridad probada; además rechaza la clave reservada `general` (D-18c) con `400` | Nadie: backend (D-18) y PWA ya usan este contrato |
 | Lista (R-24) · `POST /internal/item-cancelado` · `item:cancelado` | — (el backend del #180 ya la llamaba y recibía `404`: el aviso se perdía) | Nuevos según §5.6: validación estricta (un campo de más → `400`), emisión a `room:kds`, `room:admin` y `room:mesa-{ID}` con `emitidoEn`, idempotencia `backend:item-cancelado:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`). `origen` opcional (`comensal` o `personal`; sin él se emite `comensal`) y `estado_pedido` `recibido`, `en_preparacion`, `listo` o `cancelado` (D-13) | Backend: nada (#180 ya manda `origen: "comensal"`; D-13 mandará `personal`). KDS, panel (Caja) y PWA: escuchar `item:cancelado` y mostrar quién lo quitó con `origen` |
+| Estable (D-13, #186) · `item:cancelado` con `origen: "personal"` | Lista: solo la usaba J-14 (#180, `origen: "comensal"`); D-13 y quién la escuchaba estaban pendientes | El backend también la llama desde D-13 (el personal cancela un plato: solo `admin` y `mesero`) con `origen: "personal"`, sin cambios de contrato. La escuchan el KDS y la PWA | Panel: escuchar `item:cancelado` (pendiente) |
 | `POST /internal/order-status` · `order:status.origen` (J-14) | El cambio de estado no decía quién lo causó: un pedido cancelado porque el comensal quitó su última línea se veía igual que uno cancelado por el restaurante | `origen` opcional en `/internal/order-status` (`comensal` o `personal`; otro valor o `null` → `400` sin consumir el `eventId`). Se reenvía en `order:status` solo si vino; sin él, el evento no lleva la clave (§6.3). Por socket se ignora | Backend (#180): mandar `origen: "comensal"` en el `order:status` de la última línea. PWA, panel y KDS: leer `origen` si viene y asumir `personal` si no |
 | `POST /internal/payment-confirmed` · `comensal` en `pagaron` (R-19.2) | Se anotaba en `pagaron` el texto tal cual («Abuela » no coincidía con «Abuela») | Se anota normalizado con la regla del alias; si no es válido, tal cual (§8.6). `payment:confirmed` no cambia | Nadie: compatible hacia atrás |
 | `pago:alerta` · cuánto y quién (pedido del panel) | Solo `eventId`, `id_mesa`, referencias, `motivo` y `emitidoEn`: el panel no podía mostrar cuánto ni quién | Agrega `comensal` (alias de la intención o `null`), `monto_centavos` (lo cobrado, según la API o el evento) y `monto_esperado_centavos` (de la intención o `null`). Sin datos de tarjeta ni del pagador; sigue yendo solo a `room:admin` (§8.5) | Panel: mostrarlos si quiere; los campos nuevos no rompen nada |
