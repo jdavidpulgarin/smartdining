@@ -4559,6 +4559,27 @@ El cliente sale del JWT (`sub`); no hay `:id` en la ruta.
 `costo_envio` es un número JSON en pesos, como el resto de montos del panel; `barrios` es una
 lista de textos.
 
+**Cotizar compara barrios normalizados contra normalizados**, con la regla de la **base**
+(`normalizar_barrio(text)`, ver [Lo que necesita la base](#lo-que-necesita-la-base-p-23)), no
+con una regla propia del backend ni de la app: `direcciones.barrio` normalizado contra cada
+elemento normalizado de `zonas_envio.barrios`. Así `"  Los   Álamos "` y `"los alamos"` son el
+mismo barrio en la app, en la API y en la base. La app puede normalizar para mostrar o
+sugerir, pero quien decide la cobertura es la base.
+
+### Datos personales
+
+- **Quién los lee:** `nombre`, `email`, `telefono` y las **direcciones** de un cliente solo los
+  lee **el propio cliente** (las rutas `/api/v1/clientes/yo...`) y el **admin**. Ningún otro
+  rol (`mesero`, `cajero`, `cocina`, `repartidor`) tiene una ruta que liste clientes ni sus
+  direcciones.
+- **El repartidor (D-20)** ve solo la dirección **copiada** en `pedidos_domicilio` de **sus**
+  entregas, no el perfil del cliente ni sus otras direcciones.
+- **Respaldos:** estos datos van en los respaldos de la base (los de Roberto,
+  `infra/scripts/respaldo.sh`, ver `docs/despliegue.md` § *Respaldos de la base*), así que se
+  rigen por esas mismas reglas de acceso y retención.
+- **Nunca en logs:** ni el cuerpo de las peticiones de clientes, ni el perfil, ni direcciones,
+  ni contraseñas o tokens. Un error se registra con su código y la ruta, no con los datos.
+
 ### Límites de las rutas de clientes
 
 Además del global (2000 / minuto por IP, compartido entre `/api` y `/api/v1`), cada ruta de
@@ -4683,7 +4704,7 @@ barrios              TEXT[] NOT NULL DEFAULT '{}'
 costo_envio          NUMERIC(10,2) NOT NULL CHECK (costo_envio >= 0)
 tiempo_estimado_min  INTEGER NOT NULL CHECK (tiempo_estimado_min > 0)
 activa               BOOLEAN NOT NULL DEFAULT TRUE
--- índices sugeridos: (activa); GIN (barrios) para cotizar por barrio
+-- índices sugeridos: (activa); GIN sobre los barrios NORMALIZADOS (ver normalizar_barrio abajo)
 
 -- refresh_tokens_cliente  (NUEVA: la P-23 no la tiene)
 id               BIGSERIAL PRIMARY KEY
@@ -4715,6 +4736,32 @@ búsqueda) con `FOR UPDATE`.
 - **Logout**: `revocado_en = now()` solo en la fila de ese `hash`, si aún no lo tenía.
 
 La regla completa está en [la ventana de gracia del refresh](#la-ventana-de-gracia-del-refresh).
+
+**Barrios: la normalización vive en la base** (sugerido). Para que la app y la API coincidan,
+una sola regla estable, definida en la base:
+
+- Una función `normalizar_barrio(text) RETURNS text IMMUTABLE`: **sin tildes** (`unaccent`),
+  **minúsculas**, espacios **recortados** en los extremos y los de en medio **colapsados** a
+  uno (`"  Los   Álamos "` → `"los alamos"`).
+- Aplicada a los **dos lados**: `direcciones.barrio` y cada elemento de `zonas_envio.barrios`.
+  Dos formas de guardarlo, a elección de Jarrison: un **índice de expresión** (y un GIN sobre
+  el arreglo normalizado), o una **columna normalizada** (`barrio_normalizado`, y
+  `barrios_normalizados TEXT[]` en zonas) que mantiene un trigger o una columna generada.
+- **Cotizar compara normalizado contra normalizado**; el backend no reimplementa la regla, la
+  llama. (Si se usa `unaccent` en una función `IMMUTABLE`, conviene fijar el diccionario,
+  `unaccent('unaccent', ...)`, para que el índice no dependa del `search_path`.)
+
+**Auditoría** (sugerido). Hoy `usuarios` se audita con `fn_tr_auditar_cambios`, que guarda la
+**fila completa** (`to_jsonb(NEW)` / `to_jsonb(OLD)`) en `auditoria_cambios`, **hash de la
+contraseña incluido**. Para los clientes, no repetir eso:
+
+- `clientes`: **o no auditarla**, **o** auditarla **sin** `password_hash` y sin lo que no haga
+  falta para saber qué cambió (p. ej. guardar solo `id_cliente`, la operación y los nombres de
+  las columnas cambiadas, o la fila sin `password_hash`, `email` ni `telefono`).
+- `refresh_tokens_cliente`: el `hash` del token **nunca** va a la auditoría. Es una tabla de
+  mucho movimiento (cada refresh inserta y actualiza); lo razonable es no auditarla y dejar el
+  rastro en sus propias columnas (`creado_en`, `rotado_en`, `revocado_en`).
+- `direcciones`: los mismos datos personales; si se audita, sin la dirección en claro.
 
 ---
 
