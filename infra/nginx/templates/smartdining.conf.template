@@ -139,8 +139,9 @@ server {
     root /usr/share/nginx/html/cocina;
     client_max_body_size 64k;
 
-    # La pantalla de cocina no carga fuentes externas.
-    set $csp "default-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'";
+    # La pantalla de cocina no carga fuentes externas. Las fotos de los platos
+    # (D-23) vienen de api.${DOMINIO}/imagenes/ (app. y staff. ya permiten https:).
+    set $csp "default-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data: https://api.${DOMINIO}; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'";
     include /etc/nginx/snippets/cabeceras-sitio.conf;
     include /etc/nginx/snippets/bloqueo-interno.conf;
 
