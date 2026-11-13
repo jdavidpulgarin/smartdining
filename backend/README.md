@@ -654,21 +654,121 @@ propios archivos de prueba se excluyen del informe (`--test-coverage-exclude`): 
 interesa es cuánto de `src/` se ejercita, y contar las pruebas a sí mismas infla el
 porcentaje sin decir nada.
 
-Medido en noviembre de 2026, con `develop` en `67b1f1f` y 1.737 pruebas:
+Medido el 13 de noviembre de 2026, con `develop` en `5adc729`, Node 24.20.0 y 2.113
+pruebas (2.113 pass, 0 fail, 0 cancelled, 0 skipped):
 
 | | Líneas | Ramas | Funciones |
 |---|---|---|---|
-| Todo el backend | **98,90 %** | 93,61 % | 96,97 % |
+| Todo el backend | **98,89 %** | 93,90 % | 97,47 % |
 
 Es la línea `all files` del informe. No se repite aquí un número por carpeta porque
 `node --test --experimental-test-coverage` **no imprime el total de un directorio**: la
 fila `services` sale vacía y cada archivo trae el suyo. Para mirar un área concreta, el
 informe completo está en la salida del comando.
 
-Lo que queda sin cubrir son sobre todo ramas de Redis caído y de errores de red del aviso al
-socket-server: `socket.notifier.js` es el más bajo en ramas (**84,50 %**). `server.js` baja
-a **83,33 %** porque el bloque de `require.main` —`listen` y los manejadores de señal— no se
-ejecuta cuando las pruebas importan la app con supertest, que es justamente lo que se quiere.
+#### Lo que queda sin cubrir
+
+Los 8 archivos de `src/` más bajos en **ramas** en esa misma medición. "Sin revisar"
+quiere decir que el informe no marca líneas (todas se ejecutan) y que la rama que falta
+no se ha buscado todavía; no es que no haya motivo.
+
+| Archivo | Líneas | Ramas | Funciones | Por qué |
+|---|---|---|---|---|
+| `services/qr.token.js` | 94,44 % | **37,50 %** | 100 % | Ninguna prueba manda un token cuyos datos no sean JSON: el `catch` de `leerDatos` (líneas 32-33) no se ejecuta |
+| `services/platos.service.js` | 99,33 % | 82,86 % | 100 % | El caso en que el `ROLLBACK` de la actualización también falla (194-195) |
+| `services/configuracion.service.js` | 100 % | 85,71 % | 100 % | Sin revisar |
+| `services/socket.notifier.js` | 98,10 % | 85,71 % | 94,44 % | Respuestas anómalas del socket-server: cuerpo que no es JSON, códigos HTTP inesperados en `/qr/generar` y `/qr/validar`, y la red de seguridad de las cadenas de avisos |
+| `services/inventario.service.js` | 100 % | 86,90 % | 100 % | Sin revisar |
+| `services/categorias.service.js` | 100 % | 87,50 % | 100 % | Sin revisar |
+| `routes/montaje.js` | 100 % | 88,89 % | 100 % | Sin revisar |
+| `services/inventario-avisos.js` | 92,97 % | 89,41 % | 72,22 % | La conexión real del canal `LISTEN` (su configuración la reemplaza el doble) y los fallos al invalidar la caché, reenviar un aviso o cerrar la conexión |
+
+Fuera de `src/`, `server.js` queda en 83,64 % de líneas y 88,89 % de ramas porque el
+bloque de `require.main` —`listen`, el oyente de inventario y los manejadores de
+señal— no se ejecuta cuando las pruebas importan la app con supertest, que es
+justamente lo que se quiere.
+
+### Cobertura de integración
+
+Las pruebas de `tests/integracion/` corren contra PostgreSQL de verdad y prueban lo que
+el doble de base no puede: los **triggers** (totales, transiciones, auditoría), el
+**inventario** (reservas, devoluciones y mermas en `movimientos_inventario`) y las
+**transacciones reales** (rollback entero, bloqueos y peticiones a la vez). Su cobertura
+dice qué parte de `src/` llega de verdad a la base.
+
+Siempre contra una base **desechable**, migrada con `database/migrar.sh` y con
+`database/seed_inventario_demo.sql`, como el job del CI. **Nunca** contra la de
+desarrollo: las suites crean y borran datos. Desde la raíz del repositorio:
+
+```bash
+createdb smartdining_cobertura
+PGDATABASE=smartdining_cobertura sh database/migrar.sh
+PGDATABASE=smartdining_cobertura psql -v ON_ERROR_STOP=1 -f database/seed_inventario_demo.sql
+
+cd backend
+PGDATABASE=smartdining_cobertura \
+  node --test --experimental-test-coverage --test-coverage-exclude="tests/**" \
+  --test-force-exit tests/integracion/*.test.js
+
+dropdb smartdining_cobertura
+```
+
+Medido el mismo día, sobre `5adc729`, con un `JWT_SECRET` aleatorio y sin Redis (como el
+CI): **124 pruebas, 124 pass**, 0 fail, 0 cancelled, 0 skipped.
+
+| | Líneas | Ramas | Funciones |
+|---|---|---|---|
+| Todo el backend (solo integración) | **71,15 %** | 62,87 % | 44,09 % |
+
+El número es bajo a propósito y no se compara con el de la unitaria: aquí solo se prueba
+lo que necesita la base. Lo que interesa son los servicios que la tocan:
+
+| `src/services/` | Líneas | Ramas | Funciones |
+|---|---|---|---|
+| `transacciones.service.js` | 98,31 % | 86,32 % | 94,44 % |
+| `pedidos.service.js` | 96,28 % | 77,65 % | 90,91 % |
+| `configuracion.service.js` | 95,76 % | 50,00 % | 83,33 % |
+| `reportes.service.js` | 94,43 % | 57,69 % | 57,14 % |
+| `qr.token.js` | 94,44 % | 37,50 % | 100 % |
+| `platos.service.js` | 81,67 % | 78,26 % | 60,00 % |
+| `inventario.service.js` | 80,75 % | 58,70 % | 65,00 % |
+| `alias-en-cuenta.js` | 78,31 % | 50,00 % | 50,00 % |
+| `socket.notifier.js` | 78,12 % | 49,02 % | 65,71 % |
+| `usuario-activo.js` | 75,21 % | 45,45 % | 57,14 % |
+| `mesas.service.js` | 72,00 % | 63,64 % | 61,11 % |
+| `kds.service.js` | 72,02 % | 25,00 % | 50,00 % |
+| `alias-comensal.js` | 70,79 % | 48,48 % | 54,55 % |
+| `menu.service.js` | 70,83 % | 100 % | 0 % |
+| `disponibilidad-efectiva.js` | 69,57 % | 100 % | 0 % |
+| `constructor.service.js` | 60,05 % | 36,36 % | 18,18 % |
+| `usuarios.service.js` | 51,54 % | 66,67 % | 11,11 % |
+| `cache.js` | 42,50 % | 100 % | 0 % |
+| `inventario-avisos.js` | 40,82 % | 100 % | 0 % |
+| `pagos.service.js` | 33,64 % | 100 % | 0 % |
+| `categorias.service.js` | 24,44 % | 100 % | 0 % |
+| `autor-inexistente.js` | 100 % | 100 % | 100 % |
+
+Ojo al leerla: un archivo con **0 % de funciones y 100 % de ramas** no está bien cubierto,
+es que ninguna de sus funciones se llamó (solo se cargó el módulo), así que no hubo ramas
+que contar.
+
+### En el CI
+
+El CI corre **dos jobs del backend**:
+
+- `backend · pruebas`: las unitarias (`npm test`, con el doble de base), que fallan
+  también si queda alguna prueba cancelada.
+- `backend · integración (con PostgreSQL)` (#203): levanta PostgreSQL, migra una base
+  vacía con `migrar.sh` y el seed de inventario, y corre `npm run test:integracion` con un
+  `JWT_SECRET` aleatorio. Falla si hay pruebas fallidas, canceladas **o saltadas**: una
+  suite saltada no probó nada contra la base.
+
+Desde el #218 cada suite de integración crea **sus propios datos** con
+[`tests/helpers/plato-prueba.js`](tests/helpers/plato-prueba.js): su categoría, su plato
+(sin receta si no mira inventario; con receta y un insumo con stock alto si verifica
+reservas, devoluciones o mermas) y, si hace falta, un plato del constructor. Lo borra
+todo al terminar. Antes varias suites pedían el primer plato del seed y, corriendo en
+paralelo, le gastaban el stock o tomaban el plato que otra acababa de crear.
 
 ## Estructura
 
@@ -716,5 +816,27 @@ ejecuta cuando las pruebas importan la app con supertest, que es justamente lo q
 - [x] Inventario (D-17): insumos, movimientos, recetas, carta y avisos por el canal
       `inventario`
 - [x] Configuración del restaurante e historial de precios (D-16 B)
-- [x] Comensales sin celular y alias canónico del pedido (D-18)
+- [x] Comensales sin celular y alias canónico del pedido (D-18):
+      `POST`/`DELETE /api/mesas/:id/comensales`
+- [x] Personal y mesas (D-16): listar y editar usuarios y cambiar su clave
+      (`/api/usuarios`, solo `admin`); editar y borrar mesas (`PATCH`/`DELETE /api/mesas/:id`)
+- [x] Platos agotados en el KDS (D-14): `PATCH /api/platos/:id/disponible` (`admin` y
+      `cocina`) con el aviso `plato:disponibilidad`, y la sección de platos del panel de agotados
+- [x] Cobro de mesa en caja con `id_cobro` (idempotente): `POST /api/transacciones/mesa`
+- [x] Transacciones del día para la caja: `GET /api/transacciones?desde=hoy|AAAA-MM-DD`,
+      en días de Bogotá
+- [x] Voucher del datáfono en los cobros con métodos de datáfono (#201)
+- [x] Rotación del QR de la mesa, también con `solo_si_vacia` (`POST /api/mesas/:id/rotar-qr`)
+- [x] El comensal quita un plato suyo (#180) y el personal cancela un plato con motivo
+      obligatorio (D-13, #186): `POST /api/pedidos/:id/items/:id_detalle/cancelar`
+- [x] El comensal cancela su pedido completo (D-12, #197): `POST /api/pedidos/:id/cancelar`
+- [x] `pago_registrado` según quién cancela (#206): estricto para el comensal, otra regla
+      para el personal
+- [x] Reporte de consumo de insumos (#187): `GET /api/reportes/consumo`
+- [x] `order:created` con `id_detalle` y `estado_item` en cada línea (#202)
+- [x] Límites de peticiones (ver [Límite de peticiones](#límite-de-peticiones-h-04-h-27-y-d-21))
+- [x] API también en `/api/v1` (#199), con el mismo router y sin el canal interno
+- [ ] En revisión: subida de imágenes de platos e ingredientes (#209)
+- [ ] Pendiente: rutas de clientes (D-19 parte B)
+- [ ] Pendiente: domicilios (D-20)
 - [ ] Endpoints de `suscripciones_push` (la tabla está en el modelo, el módulo es de Roberto)
