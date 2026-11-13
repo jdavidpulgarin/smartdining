@@ -3,8 +3,14 @@ import {
   extraerIatToken,
   calcularClaveSesion,
   cargarUltimoPedidoGuardado,
+  procesarOrderCreated,
 } from './SeguimientoContext';
-import { CLAVE_ULTIMO_PEDIDO } from '../utils/seguimiento';
+import {
+  CLAVE_ULTIMO_PEDIDO,
+  puedeQuitar,
+  aplicarItemCancelado,
+  normalizarPedido,
+} from '../utils/seguimiento';
 import { CLAVE_SESION } from '../utils/sesion';
 
 function crearJwtSimulado(payload) {
@@ -194,6 +200,198 @@ describe('SeguimientoContext: aislamiento de sesión entre grupos de la mesa', (
       }
       expect(combinados).toHaveLength(1);
       expect(combinados[0].id_pedido).toBe(601);
+    });
+  });
+
+  describe('procesarOrderCreated y registrarPedido (pedidos nuevos en vivo)', () => {
+    it('order:created con { eventId, pedido: {..., detalles con id_detalle y estado_item "pendiente"} } agrega el pedido con sus lineas', () => {
+      const evento = {
+        eventId: 'evt-1',
+        pedido: {
+          id_pedido: 701,
+          codigo_pedido: 'PED-701',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [
+            {
+              id_detalle: 11,
+              plato_nombre: 'Ajiaco',
+              comensal: 'Ana',
+              cantidad: 1,
+              subtotal: 25000,
+              estado_item: 'pendiente',
+            },
+          ],
+        },
+      };
+
+      const lista = procesarOrderCreated([], evento, 'Ana');
+      expect(lista).toHaveLength(1);
+      expect(lista[0].id_pedido).toBe(701);
+      expect(lista[0].detalles).toHaveLength(1);
+      expect(lista[0].detalles[0].id_detalle).toBe(11);
+      expect(lista[0].detalles[0].estado_item).toBe('pendiente');
+    });
+
+    it('pedido ya guardado sin detalles + order:created con detalles -> queda con las lineas y puedeQuitar es true para la linea del comensal', () => {
+      // Estado previo: pedido registrado desde POST sin detalles
+      const pedidoSinDetalles = normalizarPedido(
+        {
+          id_pedido: 702,
+          codigo_pedido: 'PED-702',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [],
+        },
+        'Ana'
+      );
+      const listaInicial = [pedidoSinDetalles];
+      expect(listaInicial[0].detalles).toHaveLength(0);
+
+      // Llega order:created con el pedido enriquecido con detalles
+      const eventoConDetalles = {
+        eventId: 'evt-2',
+        pedido: {
+          id_pedido: 702,
+          codigo_pedido: 'PED-702',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [
+            {
+              id_detalle: 22,
+              plato_nombre: 'Bandeja Paisa',
+              comensal: 'Ana',
+              cantidad: 1,
+              subtotal: 32000,
+              estado_item: 'pendiente',
+            },
+          ],
+        },
+      };
+
+      const listaActualizada = procesarOrderCreated(listaInicial, eventoConDetalles, 'Ana');
+      expect(listaActualizada).toHaveLength(1);
+      expect(listaActualizada[0].detalles).toHaveLength(1);
+      const linea = listaActualizada[0].detalles[0];
+      expect(linea.id_detalle).toBe(22);
+      expect(linea.estado_item).toBe('pendiente');
+
+      // puedeQuitar es true para la linea del comensal
+      const sePuedeQuitar = puedeQuitar(linea, {
+        yo: 'Ana',
+        estadoPedido: listaActualizada[0].estado,
+      });
+      expect(sePuedeQuitar).toBe(true);
+    });
+
+    it('registrarPedido sin detalles + listarPedidosMesa mockeado con detalles -> termina con las lineas sin recargar la pagina', async () => {
+      // Simulamos la logica de registrarPedido que incorpora el pedido crudo e invoca recargar()
+      let listaEstado = [];
+      const actualizarListaPedidos = (updater) => {
+        listaEstado = updater(listaEstado);
+      };
+
+      // Mock de listarPedidosMesa que devuelve el pedido con líneas desde la BD
+      const mockListarPedidosMesa = vi.fn().mockResolvedValue([
+        {
+          id_pedido: 703,
+          codigo_pedido: 'PED-703',
+          estado: 'recibido',
+          comensal: 'Ana',
+          items: [
+            {
+              id_detalle: 33,
+              plato_nombre: 'Limonada de Coco',
+              comensal: 'Ana',
+              cantidad: 2,
+              subtotal: 16000,
+              estado_item: 'pendiente',
+            },
+          ],
+        },
+      ]);
+
+      const recargar = async () => {
+        const respuesta = await mockListarPedidosMesa();
+        const norm = respuesta.map((p) => normalizarPedido(p, 'Ana')).filter(Boolean);
+        actualizarListaPedidos(() => norm);
+      };
+
+      const registrarPedido = (pedidoCrudo) => {
+        actualizarListaPedidos((prev) => [normalizarPedido(pedidoCrudo, 'Ana'), ...prev]);
+        recargar().catch(() => {});
+      };
+
+      // Se registra pedido que vino de POST /pedidos sin detalles
+      registrarPedido({
+        id_pedido: 703,
+        codigo_pedido: 'PED-703',
+        estado: 'recibido',
+        comensal: 'Ana',
+        detalles: [],
+      });
+
+      // Inmediatamente tras registrar, está en la lista pero sin detalles
+      expect(listaEstado[0].id_pedido).toBe(703);
+      expect(listaEstado[0].detalles).toHaveLength(0);
+
+      // Una vez resuelve recargar() asíncrono
+      await vi.waitFor(() => {
+        expect(listaEstado[0].detalles).toHaveLength(1);
+      });
+      expect(listaEstado[0].detalles[0].id_detalle).toBe(33);
+      expect(mockListarPedidosMesa).toHaveBeenCalledTimes(1);
+    });
+
+    it('luego item:cancelado con ese id_detalle tacha la linea en el otro comensal', () => {
+      // Estado en el celular de Beto (otro comensal de la mesa)
+      const pedidoEnMesa = normalizarPedido(
+        {
+          id_pedido: 704,
+          codigo_pedido: 'PED-704',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [
+            {
+              id_detalle: 44,
+              plato_nombre: 'Empanadas',
+              comensal: 'Ana',
+              cantidad: 3,
+              subtotal: 15000,
+              estado_item: 'pendiente',
+            },
+            {
+              id_detalle: 45,
+              plato_nombre: 'Jugo de Maracuyá',
+              comensal: 'Beto',
+              cantidad: 1,
+              subtotal: 8000,
+              estado_item: 'pendiente',
+            },
+          ],
+        },
+        'Beto'
+      );
+
+      const listaBeto = [pedidoEnMesa];
+      expect(listaBeto[0].detalles[0].estado_item).toBe('pendiente');
+
+      // Ana cancela su plato (id_detalle: 44) y llega socket item:cancelado
+      const eventoItemCancelado = {
+        eventId: 'evt-cancel-44',
+        id_pedido: 704,
+        id_detalle: 44,
+        total: 8000,
+        estado_pedido: 'recibido',
+        comensal: 'Ana',
+        origen: 'comensal',
+      };
+
+      const listaActualizada = aplicarItemCancelado(listaBeto, eventoItemCancelado);
+      expect(listaActualizada[0].detalles[0].estado_item).toBe('cancelado');
+      expect(listaActualizada[0].detalles[0].origen_cancelacion).toBe('comensal');
+      // La línea de Beto sigue pendiente
+      expect(listaActualizada[0].detalles[1].estado_item).toBe('pendiente');
     });
   });
 });

@@ -50,6 +50,28 @@ export function calcularClaveSesion(idMesa, token) {
 }
 
 // oxlint-disable-next-line react/only-export-components
+export function procesarOrderCreated(prevLista, data, comensal) {
+  const crudo = data?.pedido ?? data;
+  if (!crudo) return prevLista;
+  const idBuscado = String(crudo.id_pedido ?? crudo.id ?? '');
+  const yaExiste = prevLista.some((p) => String(p.id_pedido) === idBuscado);
+  const detalles = Array.isArray(crudo.detalles)
+    ? crudo.detalles
+    : Array.isArray(crudo.items)
+      ? crudo.items
+      : [];
+  const tieneDetalles = detalles.length > 0;
+
+  if (yaExiste) {
+    if (tieneDetalles) {
+      return reemplazarPedido(prevLista, crudo, comensal);
+    }
+    return prevLista;
+  }
+  return incorporarPedido(prevLista, crudo, comensal);
+}
+
+// oxlint-disable-next-line react/only-export-components
 export function cargarUltimoPedidoGuardado(comensal, claveSesionActual) {
   try {
     const guardado = sessionStorage.getItem(CLAVE_ULTIMO_PEDIDO);
@@ -278,7 +300,7 @@ export function SeguimientoProvider({ children }) {
 
     const bajaCreated = socketOn('order:created', (data) => {
       if (!data || esDuplicado(data.eventId)) return;
-      actualizarListaPedidos((prev) => incorporarPedido(prev, data, comensal));
+      actualizarListaPedidos((prev) => procesarOrderCreated(prev, data, comensal));
     });
 
     const bajaItemCancelado = socketOn('item:cancelado', (data) => {
@@ -384,12 +406,13 @@ export function SeguimientoProvider({ children }) {
       actualizarListaPedidos((prev) =>
         incorporarPedido(prev, pedidoCrudo, comensal)
       );
+      recargar().catch(() => {});
       const idNuevo = pedidoCrudo.id_pedido ?? pedidoCrudo.id;
       if (seleccionar && idNuevo != null) {
         setIdSeleccionado(idNuevo);
       }
     },
-    [comensal, actualizarListaPedidos]
+    [comensal, actualizarListaPedidos, recargar]
   );
 
   const quitarPlato = useCallback(
