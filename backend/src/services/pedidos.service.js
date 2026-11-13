@@ -258,8 +258,9 @@ const ESTADO_ENTREGADO = 'entregado';
 const ESTADO_PAGADO = 'pagado';
 
 // Valor de pedidos.estado_pago (script 22) que significa cuenta cubierta. Esa
-// columna la mantiene el trigger tr_sincronizar_estado_pago_pedido sobre
-// transacciones; aquí solo se lee.
+// columna la mantiene la base: tr_sincronizar_estado_pago_pedido sobre
+// transacciones (script 22) y tr_estado_pago_al_cambiar_total cuando cambia el
+// total (script 33); aquí solo se lee.
 const ESTADO_PAGO_CUBIERTO = 'pagado';
 
 /**
@@ -343,11 +344,11 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
     // y ni el mesero ni la caja podían cerrar la mesa (medido: 409 "pedidos
     // abiertos" incluso después de entregar).
     //
-    // Se mira estado_pago, que mantiene el trigger del script 22, y se confirma
-    // con obtener_saldo_pendiente antes de cerrar: estado_pago se recalcula al
-    // tocar transacciones, así que es la columna la que podría quedarse atrás
-    // respecto del total, nunca el saldo. Dos fuentes de acuerdo para mover
-    // dinero; con una sola se podría cerrar un pedido con saldo vivo.
+    // Se mira estado_pago, que mantiene la base (al tocar transacciones, script
+    // 22, y al cambiar el total, script 33), y se confirma con
+    // obtener_saldo_pendiente antes de cerrar. Dos fuentes de acuerdo para
+    // mover dinero: si alguna vez una se quedara atrás, con una sola se podría
+    // cerrar un pedido con saldo vivo.
     let cerradoPorPago = false;
     if (estado === ESTADO_ENTREGADO && pedido.estado_pago === ESTADO_PAGO_CUBIERTO) {
       const saldo = await client.query('SELECT obtener_saldo_pendiente($1) <= 0 AS liquidado', [id]);
@@ -499,6 +500,10 @@ function esDelComensal(aliasDeLaLinea, aliasDelJwt) {
  *     decide el trigger (devolución o MERMA). El autor va en app.id_usuario
  *     (los movimientos lo llevan) y en historial_estados, con el motivo.
  *
+ * pago_registrado: el comensal, ESTRICTO (cualquier pago completado); el
+ * personal, solo si lo pagado supera el total que queda sin la línea. Ver el
+ * paso 3 y el 4b.
+ *
  * @param {number} idPedido
  * @param {number} idDetalle
  * @param {{tipo: 'comensal', idMesa: number, comensal: string}
@@ -561,24 +566,53 @@ async function cancelarItem(idPedido, idDetalle, actor) {
     } else if (pedido.estado !== 'recibido' || linea.estado_item !== 'pendiente') {
       return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.enPreparacion });
     }
-    // pago_registrado ESTRICTO (revisión de Jarrison): CUALQUIER transacción
-    // completada bloquea, al comensal y al personal. Ya no se mira si el total
-    // nuevo quedaría por debajo de lo pagado: estado_pago (script 22) no se
-    // recalcula al bajar el total, así que tocar un pedido con pagos dejaría
-    // su estado financiero mal hasta que se arregle eso en la base.
-    const pago = await client.query(
-      `SELECT EXISTS (SELECT 1 FROM transacciones t
-                       WHERE t.id_pedido = $1::int AND t.estado_transaccion = 'completada') AS bloquea`,
-      [idPedido]
-    );
-    if (pago.rows[0].bloquea) return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado });
+    // pago_registrado. estado_pago YA NO se queda desfasado al bajar el total:
+    // desde el script 33 (tr_estado_pago_al_cambiar_total) la base lo recalcula
+    // cuando cambia pedidos.total. La diferencia entre los dos caminos es una
+    // DECISIÓN DE PRODUCTO (Jarrison), no una limitación de la base:
+    //   - COMENSAL: ESTRICTO. Con cualquier transacción completada no quita
+    //     nada: desde el teléfono no se decide sobre dinero ya cobrado; se lo
+    //     pide al mesero.
+    //   - PERSONAL: se permite si lo ya pagado NO supera el total nuevo (paso
+    //     4b, después de cancelar la línea). Es quien atiende la mesa y puede
+    //     ver la cuenta.
+    if (!esPersonal) {
+      const pago = await client.query(
+        `SELECT EXISTS (SELECT 1 FROM transacciones t
+                         WHERE t.id_pedido = $1::int AND t.estado_transaccion = 'completada') AS bloquea`,
+        [idPedido]
+      );
+      if (pago.rows[0].bloquea) return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado });
+    }
 
     // 4. La línea COMPLETA. La base decide el stock (devolución o merma, según
-    // tr_devolver_inventario) y recalcula el total.
+    // tr_devolver_inventario), recalcula el total (tr_actualizar_total_pedido,
+    // sin las canceladas) y con él estado_pago (script 33).
     await client.query(
       `UPDATE detalles_pedido SET estado_item = 'cancelado' WHERE id_detalle = $1::int`,
       [idDetalle]
     );
+
+    // 4b. PERSONAL: lo pagado no puede superar el total NUEVO, el que acaba de
+    // dejar el trigger en esta misma transacción (el pedido sigue bloqueado por
+    // el FOR UPDATE del paso 1, así que nadie cobra en medio). Se compara en
+    // CENTAVOS ENTEROS calculados por la base, sin coma flotante; igual vale.
+    // Si es la última línea viva, el total nuevo es 0 y cualquier pago (> 0) lo
+    // supera: no se cancela un pedido con pagos. El ROLLBACK de `salir` deshace
+    // la línea y su movimiento de stock.
+    if (esPersonal) {
+      const cuenta = await client.query(
+        `SELECT ROUND(p.total * 100)::bigint AS total_centavos,
+                (SELECT COALESCE(ROUND(SUM(t.monto) * 100), 0)::bigint
+                   FROM transacciones t
+                  WHERE t.id_pedido = $1::int AND t.estado_transaccion = 'completada') AS pagado_centavos
+           FROM pedidos p WHERE p.id_pedido = $1::int`,
+        [idPedido]
+      );
+      const totalNuevo = Number(cuenta.rows[0].total_centavos);
+      const pagado = Number(cuenta.rows[0].pagado_centavos);
+      if (pagado > totalNuevo) return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado });
+    }
 
     // 5. Sin líneas vivas, el pedido se cancela por la transición válida.
     const vivas = await client.query(

@@ -415,9 +415,9 @@ test('e. reintento sobre una línea ya cancelada: 409 item_ya_cancelado y el sto
   assert.strictEqual((await filaPedido(idPedido)).total, totalAntes);
 });
 
-// pago_registrado ESTRICTO (revisión de Jarrison): CUALQUIER transacción
-// completada bloquea, grande o pequeña. Antes solo bloqueaba si el total nuevo
-// quedaba por debajo de lo pagado.
+// pago_registrado ESTRICTO para el COMENSAL, por decisión de producto
+// (Jarrison): CUALQUIER transacción completada bloquea, grande o pequeña. El
+// personal tiene otra regla (personal-cancela-item-sql, casos e1 a e4).
 for (const [nota, montoDe] of [
   ['un pago grande (más que lo que quedaría sin la línea)', (total, subtotal) => total - subtotal + 500],
   ['un pago parcial PEQUEÑO (100), que antes no bloqueaba', () => 100],

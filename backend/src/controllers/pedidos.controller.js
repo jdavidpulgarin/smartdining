@@ -754,7 +754,7 @@ const MENSAJES_QUITAR_ITEM_PERSONAL = {
   item_ya_cancelado: 'Esa línea ya estaba cancelada',
   item_no_cancelable: 'Esa línea ya no se puede cancelar: ya se sirvió, o el pedido está entregado, pagado o '
     + 'cancelado, o es la última línea de un pedido que no puede pasar a cancelado desde su estado',
-  pago_registrado: 'El pedido ya tiene un pago registrado: hay que reembolsarlo antes de cancelar una línea',
+  pago_registrado: 'Lo ya pagado supera el total que quedaría sin esa línea: hay que reembolsar antes de cancelarla',
 };
 
 /**
