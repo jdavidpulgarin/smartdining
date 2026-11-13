@@ -1,5 +1,6 @@
 const express = require('express');
 const routes = require('./index');
+const rutasSoloV1 = require('./solo-v1');
 
 /**
  * D-19 parte A: la API se monta en DOS prefijos, `/api/v1` y `/api`, con el
@@ -47,13 +48,20 @@ function esCanalInterno(ruta) {
 }
 
 /**
- * El router de `/api/v1`: el mismo agregador, sin el canal interno. Una ruta
- * interna sale del router con next('router') y termina en el 404 global de
- * server.js, con el mismo cuerpo que cualquier ruta que no existe.
+ * El router de `/api/v1`: el agregador compartido, sin el canal interno, MÁS
+ * las rutas que solo existen en v1 (D-19 parte B: las de los clientes de la
+ * app, src/routes/solo-v1.js). Una ruta interna sale del router con
+ * next('router') y termina en el 404 global de server.js, con el mismo cuerpo
+ * que cualquier ruta que no existe.
+ *
+ * Las de solo v1 van ANTES del agregador compartido: sus prefijos
+ * (/auth/clientes, /clientes, /zonas) no chocan con ninguna ruta compartida,
+ * y así una petición de cliente no recorre la API entera antes de llegar.
  */
-function crearRouterV1(rutas = routes) {
+function crearRouterV1(rutas = routes, soloV1 = rutasSoloV1) {
   const v1 = express.Router();
   v1.use((req, res, next) => (esCanalInterno(req.path) ? next('router') : next()));
+  v1.use(soloV1);
   v1.use(rutas);
   return v1;
 }
@@ -63,9 +71,12 @@ function crearRouterV1(rutas = routes) {
  * petición a /api/v1/x entraría primero al router de /api como "/v1/x", lo
  * recorrería sin coincidir y solo entonces llegaría a v1. Así cada prefijo va
  * directo a su router.
+ *
+ * `/api` monta SOLO el agregador compartido: las rutas de clientes no existen
+ * ahí (404).
  */
-function montarApi(app, rutas = routes) {
-  app.use('/api/v1', crearRouterV1(rutas));
+function montarApi(app, rutas = routes, soloV1 = rutasSoloV1) {
+  app.use('/api/v1', crearRouterV1(rutas, soloV1));
   app.use('/api', rutas);
 }
 

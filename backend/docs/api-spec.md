@@ -202,7 +202,7 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 | 200 | `{ usuario, token }` | Credenciales correctas y cuenta activa |
 | 400 | `{ "error": "..." }` | El body no cumple el esquema (email inválido, contraseña de menos de 6) |
 | **401** | `{ "error": "Credenciales inválidas" }` | **El email no existe, la contraseña es incorrecta o la cuenta está inactiva: los tres responden lo mismo** |
-| 429 | `{ "error": "Demasiados intentos..." }` | Límite de intentos (H-04): 5 fallos por minuto y por IP+email |
+| 429 | `{ "error": "Demasiados intentos...", "motivo": "demasiadas_peticiones" }` | Límite de intentos (H-04): 5 fallos por minuto y por IP+email |
 
 #### Un solo código y un solo mensaje (H-12)
 
@@ -383,8 +383,13 @@ Los contadores son **independientes**: una petición al login gasta cupo del lí
 login **y** del global, pero agotar uno no agota el otro.
 
 ```json
-{ "error": "Demasiados intentos de inicio de sesión. Espera un momento y vuelve a intentarlo." }
+{
+  "error": "Demasiados intentos de inicio de sesión. Espera un momento y vuelve a intentarlo.",
+  "motivo": "demasiadas_peticiones"
+}
 ```
+
+(`motivo` se agregó en la D-19 parte B, en todos los 429; el `error` no cambió.)
 
 La clave del login combina IP y email a propósito: por IP sola, una botnet esquiva el
 límite; por email solo, cualquiera podría bloquear la cuenta de otro. Y solo cuentan los
@@ -396,7 +401,10 @@ pasar.
 #### El límite global (D-21)
 
 ```json
-{ "error": "Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo." }
+{
+  "error": "Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo.",
+  "motivo": "demasiadas_peticiones"
+}
 ```
 
 **No cuenta** dos cosas:
@@ -4596,9 +4604,11 @@ vez**; ante un 503 conviene dejar pasar unos segundos, porque lo que sobra es ca
 
 ## API v1 · Clientes (D-19)
 
-> **Contrato. Implementación después de la P-23.** Nada de esta sección existe todavía en
-> el código: es el acuerdo para que la app móvil (Juan) y la base (Jarrison) puedan
-> avanzar en paralelo. **Todo va bajo `/api/v1`, nada en `/api`.**
+> **Implementado (D-19 parte B)** sobre los scripts 36 y 37 de la base. **Todo va bajo
+> `/api/v1`, nada en `/api`:** `/api/auth/clientes/...`, `/api/clientes/...` y `/api/zonas`
+> responden el 404 de siempre (`src/routes/solo-v1.js`, montado solo en v1 por
+> `src/routes/montaje.js`). Lo que el contrato no decía, y cómo se resolvió, está en
+> [Decisiones de la implementación](#decisiones-de-la-implementación-d-19-parte-b).
 
 ### El prefijo `/api/v1` (ya montado, D-19 parte A)
 
@@ -4615,7 +4625,7 @@ fija y `x-internal-key`; en `/api/v1` responde 404. Las rutas de clientes de aba
 
 | | Valor |
 |---|---|
-| JWT (`token`) | `rol: "cliente"`, `sub: id_cliente`. Vida corta: **15 min** (`JWT_CLIENTE_EXPIRES_IN`, configurable). **Mismo algoritmo y secreto** que hoy: HS256 (`ALGORITMO_JWT`) con `JWT_SECRET`. |
+| JWT (`token`) | `rol: "cliente"`, `sub: id_cliente` (como texto, el estándar de JWT). Vida corta: **15 min** (`JWT_CLIENTE_EXPIRES_IN`, configurable; también se acepta `CLIENTE_JWT_EXPIRES_IN`, y si están las dos gana la primera). **Mismo algoritmo y secreto** que hoy: HS256 (`ALGORITMO_JWT`) con `JWT_SECRET`. |
 | `refresh_token` | **Opaco y aleatorio** (32 bytes, `crypto.randomBytes`, en base64url: **43 caracteres** `[A-Za-z0-9_-]`). En la base se guarda **solo su hash SHA-256**, nunca el valor. Vida **30 días** desde que se emite (`REFRESH_CLIENTE_DIAS`, configurable). Pertenece a una **familia** (la de su primer login) para detectar reuso. |
 | Ventana de gracia | **30 s** (`REFRESH_CLIENTE_GRACIA_SEGUNDOS`, configurable; `0` la apaga). Ver [la ventana de gracia del refresh](#la-ventana-de-gracia-del-refresh). |
 | `expira_en` | Cuándo vence el `token`, en ISO 8601 UTC. |
@@ -4770,8 +4780,9 @@ El cliente sale del JWT (`sub`); no hay `:id` en la ruta.
 lista de textos.
 
 **Cotizar compara barrios normalizados contra normalizados**, con la regla de la **base**
-(`normalizar_barrio(text)`, ver [Lo que necesita la base](#lo-que-necesita-la-base-p-23)), no
-con una regla propia del backend ni de la app: `direcciones.barrio` normalizado contra cada
+(implementada en el script 36 como `fn_clave_barrio(text)` y usada por
+`cotizar_zona(barrio)`; el backend llama a `cotizar_zona` y no reimplementa nada), no con una
+regla propia del backend ni de la app: `direcciones.barrio` normalizado contra cada
 elemento normalizado de `zonas_envio.barrios`. Así `"  Los   Álamos "` y `"los alamos"` son el
 mismo barrio en la app, en la API y en la base. La app puede normalizar para mostrar o
 sugerir, pero quien decide la cobertura es la base.
@@ -4817,7 +4828,8 @@ Superar cualquiera de los dos da **429** `demasiadas_peticiones` con `Retry-Afte
 - Mismo almacén que los límites de hoy (`limites.middleware.js`) y se desactivan solos dentro
   de las pruebas.
 
-**Variables sugeridas** (no existen todavía; se implementan en la parte B):
+**Variables** (implementadas en `limites.middleware.js`, `crearLimitadoresClientes`; ver
+`.env.example`):
 
 | Variable | Por defecto |
 |---|---|
@@ -4852,12 +4864,28 @@ puede cambiar.
 | **429** | `demasiadas_peticiones` | Algún límite, con cabecera `Retry-After` en segundos |
 | **500** | `error_interno` | Cualquier fallo no previsto. El detalle va al log del servidor, nunca a la respuesta |
 
-**Hoy no es así en todo:** el **404** de ruta inexistente (`server.js`), el **429** de los
-límites (`limites.middleware.js`) y el **500** del manejador global responden solo
-`{ error }`, igual que el 401/403 de `requireAuth`/`requireRole`. En la **parte B** se les
-agrega `motivo` (y las rutas de clientes usan su propio middleware de sesión con
-`no_autenticado` y `prohibido`). Es **compatible hacia atrás**: solo se agrega un campo, y
-la PWA, el panel y el KDS siguen leyendo `error` como hasta ahora.
+**En TODA la API, desde la parte B:** el **404** de ruta inexistente (`server.js`,
+`no_encontrado`), el **429** de todos los límites (`demasiadas_peticiones`), el **500** del
+manejador global (`error_interno`) y el 401/403 de `requireAuth`/`requireRole`
+(`no_autenticado` y `prohibido`) llevan `motivo`. Es **compatible hacia atrás**: solo se
+agregó el campo, el `error` es el mismo de antes, y la PWA, el panel y el KDS siguen leyendo
+`error`. (Las rutas de clientes usan el mismo `requireAuth`, con un caso propio para el rol
+`cliente`.)
+
+**Solo en las rutas de clientes**, los demás errores genéricos del manejador global, que en
+el resto de la API siguen siendo `{ error }`, llevan también un `motivo`:
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| 400 | `cuerpo_invalido` | JSON mal formado (el mensaje del parser, que cita el cuerpo, se cambia por uno genérico) |
+| 409 | `conflicto` | Un 23505/23503 o un choque de concurrencia que no es `email_registrado` |
+| 409 | `principal_requerida` | Ver [Decisiones de la implementación](#decisiones-de-la-implementación-d-19-parte-b) |
+| 413 | `cuerpo_demasiado_grande` | El cuerpo pasa el tope de `express.json()` |
+| 422 | `dato_invalido` | Un CHECK de la base (23514) o un dato fuera de rango (clase 22) |
+| 503 | `servicio_no_disponible` | La consulta se canceló por `statement_timeout` (57014) |
+
+En esas rutas el **log** no lleva el mensaje ni el `detail` de PostgreSQL (pueden repetir un
+email o una dirección): solo el código, el método y el camino.
 
 ### Diferencias con `app-movil/src/services/authService.js`
 
@@ -4874,7 +4902,55 @@ contratos esperados y no llama a nada):
 | Errores sin motivo | **Todo** error de estas rutas trae `{ error, motivo }`, también 404, 429 y 500: decidir siempre por `motivo` ([la tabla](#errores-de-las-rutas-de-clientes)). Ante un 429 `demasiadas_peticiones`, esperar lo que diga `Retry-After` |
 | Sin manejo de vencimiento | El `token` vive **15 min**: renovar con `/refresh` ante un 401 `no_autenticado` o antes de `expira_en`. Con `sesion_revocada` o `refresh_invalido`, volver al login |
 
+### Decisiones de la implementación (D-19 parte B)
+
+Lo que el contrato no decía, o donde la implementación lo concreta:
+
+- **Cliente inactivo** (`clientes.activo = false`): en sus rutas, **401** `no_autenticado`
+  (`requireAuth` lo comprueba en cada petición, con la misma caché que el personal, H-09); en
+  el login, el **mismo 401** `credenciales_invalidas` que un email inexistente; en
+  `/refresh`, **401** `refresh_invalido` **sin revocar nada** (paso 3b, después del
+  vencimiento y antes de mirar si está revocado).
+- **Login:** no se valida la forma del email. Un email mal escrito sigue el camino de uno que
+  no existe (bcrypt contra el hash ficticio y 401), así que no dice nada que no diría uno bien
+  escrito. Solo es 400 `cuerpo_invalido` lo que no es un intento de login (tipos, vacíos,
+  campos de más). La clave del login no tiene el tope de 72 bytes (como en el personal), solo
+  un freno de 1024 caracteres.
+- **Registro:** el motivo de un campo que falta o no sirve es el de ese campo
+  (`nombre_invalido`, `email_invalido`, `telefono_invalido`); una clave que falta o no es
+  texto, y un campo de más, `cuerpo_invalido`. El nombre se guarda recortado y el email en
+  minúsculas y recortado. `telefono: null` equivale a no mandarlo. El mínimo de 8 cuenta
+  caracteres (puntos de código) y el tope, bytes.
+- **Perfil (`PATCH /clientes/yo`):** `telefono: null` borra el teléfono. El nombre se recorta.
+- **Direcciones:**
+  - la **primera** nace principal aunque llegue `principal: false`;
+  - las siguientes son principales solo con `principal: true`, y eso desmarca la anterior en
+    la misma transacción;
+  - **`principal: false` sobre la principal → 409 `principal_requerida`**: para cambiarla se
+    marca otra. Así, mientras el cliente tenga direcciones, siempre hay exactamente una
+    principal;
+  - **al borrar la principal**, pasa a ser principal la **más reciente** de las que quedan
+    (por `creado_en`, y por id si empatan); si no queda ninguna, no hay principal;
+  - cada escritura bloquea primero la fila del cliente (`FOR UPDATE`): dos cambios a la vez
+    del mismo cliente se ponen en fila, y nunca hay dos principales ni un 23505 por la carrera;
+  - `referencia` vacía se guarda como `null`; `lat` y `lng` en `null` los dos borran las
+    coordenadas; `PATCH` pide al menos un campo;
+  - un `:id` que no es un entero positivo es **404** (no puede ser una dirección de nadie);
+  - la respuesta no lleva `id_cliente`.
+- **Cotizar:** la query admite **solo** `id_direccion` (entero positivo); otra cosa, 400
+  `cuerpo_invalido`.
+- **Base:** la normalización se llama `fn_clave_barrio` (no `normalizar_barrio`) y la
+  cotización `cotizar_zona(barrio)`, del script 36; la columna `rotado_en`, sus CHECK y el
+  trigger `tr_refresh_rotacion` son del script 37. El backend nunca mueve `rotado_en` una vez
+  puesto ni apunta un reemplazo de otra familia.
+- **socket-server:** su `verificarJwt` (`socket-server/src/auth.js`) **rechaza** un JWT con
+  `rol: "cliente"` (solo acepta comensal, pantalla y los cuatro roles del personal). Si la app
+  necesita tiempo real, hay que agregar el rol allí.
+
 ### Lo que necesita la base (P-23)
+
+**Ya implementado en los scripts 36 y 37** (con los nombres de arriba). Se deja la propuesta
+original como referencia.
 
 **Propuesta para Jarrison, no un script.** Las tablas y columnas son las del **plan 5.5**
 (`clientes`, `direcciones`, `zonas_envio`). Lo marcado como **sugerido, además del plan** son

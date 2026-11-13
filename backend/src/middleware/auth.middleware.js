@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const mesasService = require('../services/mesas.service');
 const usuarioActivo = require('../services/usuario-activo');
+const clienteActivo = require('../services/cliente-activo');
 const { extraerSid } = require('../services/qr.token');
 
 /**
@@ -15,6 +16,23 @@ const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina'];
  * { id_mesa, rol: 'comensal' } — no tiene id_usuario.
  */
 const ROL_COMENSAL = 'comensal';
+
+/**
+ * D-19 parte B: rol del cliente de la app. Tampoco existe en `usuarios`: su
+ * cuenta está en `clientes` y su JWT es `{ rol: 'cliente', sub: '<id_cliente>' }`.
+ * Ninguna ruta del personal ni del comensal lo lista en requireRole, así que
+ * ahí recibe 403; y las rutas de clientes solo listan este rol.
+ */
+const ROL_CLIENTE = 'cliente';
+
+/**
+ * Motivos de los 401 y 403 de este middleware. Solo se AGREGAN al `error` de
+ * siempre (D-19): la PWA, el panel y el KDS siguen leyendo `error`.
+ */
+const MOTIVO_NO_AUTENTICADO = 'no_autenticado';
+const MOTIVO_PROHIBIDO = 'prohibido';
+
+const no401 = (res, error) => res.status(401).json({ error, motivo: MOTIVO_NO_AUTENTICADO });
 
 /**
  * Único algoritmo con el que este backend firma y acepta sus JWT.
@@ -47,7 +65,7 @@ async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token no proporcionado' });
+    return no401(res, 'Token no proporcionado');
   }
 
   const token = authHeader.split(' ')[1];
@@ -56,10 +74,27 @@ async function requireAuth(req, res, next) {
   try {
     payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: [ALGORITMO_JWT] });
   } catch (err) {
-    return res.status(401).json({ error: 'Token inválido o expirado' });
+    return no401(res, 'Token inválido o expirado');
   }
 
   req.user = payload;
+
+  if (payload.rol === ROL_CLIENTE) {
+    // D-19: el cliente tiene que existir y seguir activo, igual que el personal
+    // (H-09). Su id viaja en `sub` como texto; se deja en req.user.id_cliente
+    // como número, que es lo único que leen las rutas de clientes.
+    const idCliente = idClienteDelPayload(payload);
+    if (!idCliente) return no401(res, 'Token inválido o expirado');
+    try {
+      if (!(await clienteActivo.estaActivo(idCliente))) {
+        return no401(res, MENSAJE_CUENTA_CLIENTE_INACTIVA);
+      }
+    } catch (err) {
+      return next(err);
+    }
+    req.user = { rol: ROL_CLIENTE, id_cliente: idCliente };
+    return next();
+  }
 
   if (payload.rol !== ROL_COMENSAL) {
     // H-09: un JWT válido no basta. El token vive 8 horas y no se puede
@@ -68,7 +103,7 @@ async function requireAuth(req, res, next) {
     // Redis para no añadir una consulta por llamada (ver usuario-activo.js).
     try {
       if (!(await usuarioActivo.estaActivo(payload.id_usuario))) {
-        return res.status(401).json({ error: MENSAJE_CUENTA_INACTIVA });
+        return no401(res, MENSAJE_CUENTA_INACTIVA);
       }
     } catch (err) {
       // Si la base no responde no se deja pasar a ciegas: falla cerrada, igual
@@ -80,7 +115,7 @@ async function requireAuth(req, res, next) {
 
   try {
     if (!(await sesionDeMesaVigente(payload))) {
-      return res.status(401).json({ error: MENSAJE_SESION_CERRADA });
+      return no401(res, MENSAJE_SESION_CERRADA);
     }
   } catch (err) {
     // Un fallo de base de datos no debe dejar pasar una sesión sin comprobar.
@@ -92,6 +127,15 @@ async function requireAuth(req, res, next) {
 
 const MENSAJE_SESION_CERRADA = 'Sesión de mesa cerrada, escanea el QR de nuevo';
 const MENSAJE_CUENTA_INACTIVA = 'Tu cuenta está desactivada, habla con administración';
+const MENSAJE_CUENTA_CLIENTE_INACTIVA = 'Tu cuenta no está activa';
+
+/** El id del cliente de un JWT de cliente: `sub` con un entero positivo, o null. */
+function idClienteDelPayload(payload) {
+  const sub = payload && payload.sub;
+  if (typeof sub !== 'string' || !/^[1-9][0-9]{0,9}$/.test(sub)) return null;
+  const id = Number(sub);
+  return id <= 2147483647 ? id : null;
+}
 
 /**
  * ¿El JWT de este comensal corresponde al QR que la mesa tiene ahora?
@@ -120,7 +164,7 @@ async function sesionDeMesaVigente({ id_mesa, sid }) {
 function requireRole(...rolesPermitidos) {
   return (req, res, next) => {
     if (!req.user || !rolesPermitidos.includes(req.user.rol)) {
-      return res.status(403).json({ error: 'No tienes permisos para esta acción' });
+      return res.status(403).json({ error: 'No tienes permisos para esta acción', motivo: MOTIVO_PROHIBIDO });
     }
     next();
   };
@@ -139,6 +183,11 @@ module.exports = {
   ALGORITMO_JWT,
   ROLES_STAFF,
   ROL_COMENSAL,
+  ROL_CLIENTE,
+  MOTIVO_NO_AUTENTICADO,
+  MOTIVO_PROHIBIDO,
   MENSAJE_SESION_CERRADA,
   MENSAJE_CUENTA_INACTIVA,
+  MENSAJE_CUENTA_CLIENTE_INACTIVA,
+  idClienteDelPayload,
 };
