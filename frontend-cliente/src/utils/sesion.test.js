@@ -7,6 +7,7 @@ import {
   borrarSesionDeStorages,
   migrarSesionStorage,
   leerSesionAlmacenada,
+  decidirDestinoInicio,
 } from './sesion';
 
 function crearJwtPrueba(payloadObj) {
@@ -167,5 +168,87 @@ describe('persistencia y migracion de sesion en localStorage', () => {
     const resAlmacenada = leerSesionAlmacenada(mockLocal2, mockSession2);
     expect(resAlmacenada).toBeNull();
     expect(mockLocal2._datos[CLAVE_SESION]).toBeUndefined();
+  });
+});
+
+function crearTokenQrPrueba(mesa) {
+  const payloadB64 = Buffer.from(JSON.stringify({ m: mesa, iat: Date.now() }))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `v1.${payloadB64}.firma`;
+}
+
+describe('decidirDestinoInicio', () => {
+  const sesionVigenteMesa5 = {
+    token: 'jwt.token.valido',
+    idMesa: 5,
+    numeroMesa: 5,
+    comensal: 'Ana',
+  };
+
+  it('(sin token + sesión vigente con pedidos activos) -> redirige a /seguimiento', () => {
+    const res = decidirDestinoInicio({
+      tokenUrl: null,
+      sesion: sesionVigenteMesa5,
+      tienePedidosActivos: true,
+    });
+    expect(res).toEqual({ accion: 'redirigir', ruta: '/seguimiento' });
+  });
+
+  it('(sin token + sesión vigente sin pedidos activos) -> redirige a /menu', () => {
+    const res = decidirDestinoInicio({
+      tokenUrl: '',
+      sesion: sesionVigenteMesa5,
+      tienePedidosActivos: false,
+    });
+    expect(res).toEqual({ accion: 'redirigir', ruta: '/menu' });
+  });
+
+  it('(sin token + sin sesión) -> pantalla normal sin_sesion', () => {
+    const res = decidirDestinoInicio({
+      tokenUrl: null,
+      sesion: null,
+    });
+    expect(res).toEqual({ accion: 'sin_sesion' });
+  });
+
+  it('(con token + sin sesión) -> pide_nombre con numero de mesa si es legible', () => {
+    const token = crearTokenQrPrueba(5);
+    const res = decidirDestinoInicio({
+      tokenUrl: token,
+      sesion: null,
+    });
+    expect(res).toEqual({ accion: 'pide_nombre', mesaQr: 5 });
+  });
+
+  it('(con token misma mesa + sesión vigente) -> redirige directamente a /menu o /seguimiento', () => {
+    const tokenMesa5 = crearTokenQrPrueba(5);
+    const res = decidirDestinoInicio({
+      tokenUrl: tokenMesa5,
+      sesion: sesionVigenteMesa5,
+      tienePedidosActivos: false,
+    });
+    expect(res).toEqual({ accion: 'redirigir', ruta: '/menu', mesaQr: 5 });
+  });
+
+  it('(con token de OTRA mesa + sesión vigente) -> unirse_nueva_mesa', () => {
+    const tokenMesa8 = crearTokenQrPrueba(8);
+    const res = decidirDestinoInicio({
+      tokenUrl: tokenMesa8,
+      sesion: sesionVigenteMesa5,
+      tienePedidosActivos: false,
+    });
+    expect(res).toEqual({ accion: 'unirse_nueva_mesa', mesaQr: 8 });
+  });
+
+  it('(con token opaco sin mesa decodificable + sesión vigente) -> confirmar_reutilizar', () => {
+    const res = decidirDestinoInicio({
+      tokenUrl: 'token_opaco_sin_v1',
+      sesion: sesionVigenteMesa5,
+      tienePedidosActivos: false,
+    });
+    expect(res).toEqual({ accion: 'confirmar_reutilizar', mesaQr: null });
   });
 });

@@ -23,35 +23,17 @@ import {
   reemplazarPedido,
   separarPedidos,
   pedidoPrincipal,
+  extraerIatToken,
+  calcularClaveSesion,
+  cargarUltimoPedidoGuardado,
 } from '../utils/seguimiento';
+
+// oxlint-disable-next-line react/only-export-components
+export { extraerIatToken, calcularClaveSesion, cargarUltimoPedidoGuardado };
 
 const MAX_EVENT_IDS = 200;
 
 const SeguimientoContext = createContext(null);
-
-// oxlint-disable-next-line react/only-export-components
-export function extraerIatToken(token) {
-  if (typeof token !== 'string' || !token.trim()) return null;
-  const partes = token.split('.');
-  if (partes.length !== 3 || !partes[1]) return null;
-  try {
-    const base64 = partes[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padLen = (4 - (base64.length % 4)) % 4;
-    const conPadding = base64 + '='.repeat(padLen);
-    const json = atob(conPadding);
-    const payload = JSON.parse(json);
-    return payload?.iat ?? null;
-  } catch {
-    return null;
-  }
-}
-
-// oxlint-disable-next-line react/only-export-components
-export function calcularClaveSesion(idMesa, token) {
-  if (!idMesa) return null;
-  const iat = extraerIatToken(token);
-  return iat != null ? `${idMesa}:${iat}` : String(idMesa);
-}
 
 // oxlint-disable-next-line react/only-export-components
 export function procesarOrderCreated(prevLista, data, comensal) {
@@ -73,31 +55,6 @@ export function procesarOrderCreated(prevLista, data, comensal) {
     return prevLista;
   }
   return incorporarPedido(prevLista, crudo, comensal);
-}
-
-// oxlint-disable-next-line react/only-export-components
-export function cargarUltimoPedidoGuardado(comensal, claveSesionActual) {
-  try {
-    const guardado = sessionStorage.getItem(CLAVE_ULTIMO_PEDIDO);
-    if (!guardado) return [];
-    const datos = JSON.parse(guardado);
-    if (!datos) return [];
-    // Si viene con metadata de sesión guardada, debe coincidir
-    if (datos.__sesion != null && claveSesionActual != null) {
-      if (String(datos.__sesion) !== String(claveSesionActual)) {
-        return [];
-      }
-    } else if (claveSesionActual != null && datos.__sesion == null) {
-      // Si no tiene metadata de sesión pero tenemos sesión activa, no es verificable
-      return [];
-    }
-    const pedidoLimpio = { ...datos };
-    delete pedidoLimpio.__sesion;
-    const norm = normalizarPedido(pedidoLimpio, comensal);
-    return norm ? [norm] : [];
-  } catch {
-    return [];
-  }
 }
 
 /**

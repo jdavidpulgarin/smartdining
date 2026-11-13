@@ -1,4 +1,10 @@
 import { aliasDelToken } from '../services/clienteMesa';
+import { leerMesaDelQr } from './qr';
+import {
+  calcularClaveSesion,
+  cargarUltimoPedidoGuardado,
+  resumenPedidosActivos,
+} from './seguimiento';
 
 export const CLAVE_SESION = 'smartdining_sesion';
 
@@ -71,6 +77,87 @@ export function leerExpiracionJwt(token) {
   } catch {
     return null;
   }
+}
+
+export function tienePedidosActivosGuardados(comensal, idMesa, token) {
+  try {
+    const claveSesion = idMesa ? calcularClaveSesion(idMesa, token) : null;
+    const pedidos = cargarUltimoPedidoGuardado(comensal, claveSesion);
+    if (!pedidos || pedidos.length === 0) return false;
+    const resumen = resumenPedidosActivos(pedidos);
+    return Boolean(resumen && resumen.cantidad > 0);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Determina el flujo o redirección al cargar la pantalla de Inicio:
+ * - 'redirigir': hay sesión vigente sin token o en la misma mesa
+ * - 'confirmar_reutilizar': hay sesión vigente, hay token pero no se puede saber la mesa sin unirse
+ * - 'unirse_nueva_mesa': hay token para otra mesa distinta a la sesión guardada
+ * - 'pide_nombre': no hay sesión y hay token
+ * - 'sin_sesion': no hay sesión y no hay token
+ *
+ * @param {object} params
+ * @param {string|null} [params.tokenUrl] - Token QR de la URL
+ * @param {object|null} [params.sesion] - Sesión vigente almacenada ({ token, idMesa, numeroMesa, comensal })
+ * @param {boolean} [params.tienePedidosActivos=false] - Si el comensal tiene pedidos activos
+ * @returns {{ accion: string, ruta?: string, mesaQr?: number|null }}
+ */
+export function decidirDestinoInicio({
+  tokenUrl = null,
+  sesion = null,
+  tienePedidosActivos = false,
+} = {}) {
+  const tieneSesionValida = Boolean(sesion && sesion.token && sesion.idMesa);
+  const tokenLimpio =
+    typeof tokenUrl === 'string' && tokenUrl.trim() ? tokenUrl.trim() : null;
+
+  // Caso 1: Sin token en URL
+  if (!tokenLimpio) {
+    if (tieneSesionValida) {
+      return {
+        accion: 'redirigir',
+        ruta: tienePedidosActivos ? '/seguimiento' : '/menu',
+      };
+    }
+    return { accion: 'sin_sesion' };
+  }
+
+  // Caso 2: Con token en URL y sin sesión previa
+  if (!tieneSesionValida) {
+    return { accion: 'pide_nombre', mesaQr: leerMesaDelQr(tokenLimpio) };
+  }
+
+  // Caso 3: Con token en URL Y con sesión previa vigente
+  const mesaQr = leerMesaDelQr(tokenLimpio);
+
+  if (mesaQr !== null) {
+    const esMismaMesa =
+      Number(mesaQr) === Number(sesion.idMesa) ||
+      Number(mesaQr) === Number(sesion.numeroMesa);
+
+    if (esMismaMesa) {
+      return {
+        accion: 'redirigir',
+        ruta: tienePedidosActivos ? '/seguimiento' : '/menu',
+        mesaQr,
+      };
+    }
+
+    // Es otra mesa diferente
+    return {
+      accion: 'unirse_nueva_mesa',
+      mesaQr,
+    };
+  }
+
+  // No se puede saber la mesa del QR sin unirse (token opaco o simulado sin v1)
+  return {
+    accion: 'confirmar_reutilizar',
+    mesaQr: null,
+  };
 }
 
 export function borrarSesionDeStorages(
