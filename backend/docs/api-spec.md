@@ -5282,6 +5282,14 @@ estas son las únicas transiciones:
   tocar nada. En el último se bloquea **cualquier** línea, no solo la última (la comida ya va
   en la bolsa; quitar la última, además, cancelaría el pedido). Antes de decidir se bloquea la
   fila de `pedidos_domicilio`.
+- **En un domicilio, la entrega la marca solo el repartidor.** El paso del pedido a
+  `entregado` lo hace únicamente `POST /domicilios/:id_pedido/entregar`.
+  `PATCH /pedidos/:id/estado` con `estado: "entregado"` sobre un pedido de canal `domicilio`
+  responde **409** `entrega_por_repartidor` ("En un domicilio la entrega la marca el
+  repartidor"), **en cualquier estado de la entrega** y para cualquier rol, sin tocar nada. Se
+  bloquea igual que el resto: el pedido y después su fila de `pedidos_domicilio`. Mesa y para
+  llevar no cambian. (El paso a `pagado` solo es legal desde `entregado`, así que tampoco hay
+  otro camino para cerrar un domicilio: ver abajo.)
 - **Entregado cierra.** `en_camino -> entregado` pasa el pedido `listo -> entregado` en la
   **misma transacción**, firmado por el repartidor en `historial_estados` (la transición
   requiere usuario), y aplica la **misma regla de cierre** que el mesero
@@ -5303,6 +5311,18 @@ estas son las únicas transiciones:
   orden, una cancelación y un `salir` del mismo pedido se ponen en fila en el bloqueo del
   pedido: gana el primero y el segundo decide con lo que aquel confirmó (`pedido_no_listo` si
   ganó la cancelación, `entrega_en_camino` si ganó la salida). Nunca los dos.
+
+### Quién puede llevar un domicilio a `entregado` o `pagado`
+
+Revisado camino por camino:
+
+| Camino | ¿Puede con un domicilio? |
+|---|---|
+| `POST /domicilios/:id_pedido/entregar` (repartidor) | **Sí: el único** a `entregado` (y, con el pago cubierto, a `pagado` en la misma transacción) |
+| `PATCH /pedidos/:id/estado` y `POST /pedidos/:id/cancelar` | No: `entregado` da 409 `entrega_por_repartidor`; `pagado` solo es legal desde `entregado` |
+| `PATCH /kds/comandas/:id/estado` | No: el KDS solo pide `en_preparacion` o `listo` |
+| Pagos (`POST /transacciones`, el interno del socket-server, el cobro de mesa en caja) | Solo `entregado -> pagado` (la base no deja otra transición a `pagado`), o sea después de que el repartidor entregó; el cobro de mesa ni siquiera ve pedidos sin mesa |
+| Función de la base `cambiar_estado_pedido()` (script 03) | **Podría** (`listo -> entregado` respetando `transiciones_validas`), pero **ni el backend ni el socket-server la llaman**; queda anotada |
 
 ### Los pedidos sin mesa en los listados (LEFT JOIN)
 

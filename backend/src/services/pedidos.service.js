@@ -295,6 +295,15 @@ const ESTADOS_QUE_BLOQUEAN_LA_MESA = [...ESTADOS_CIERRE, ESTADO_ENTREGADO];
  * decide con lo que aquel confirmó.
  * -------------------------------------------------------------------------- */
 
+/**
+ * En un pedido de canal 'domicilio' el paso a 'entregado' lo hace SOLO el
+ * repartidor (POST /domicilios/:id/entregar, que además mueve la entrega a
+ * 'entregado' en la misma transacción). PATCH /pedidos/:id/estado a 'entregado'
+ * sobre un domicilio es 409 entrega_por_repartidor, esté como esté la entrega.
+ */
+const MOTIVO_ENTREGA_POR_REPARTIDOR = 'entrega_por_repartidor';
+const MENSAJE_ENTREGA_POR_REPARTIDOR = 'En un domicilio la entrega la marca el repartidor';
+
 const MOTIVO_ENTREGA_EN_CAMINO = 'entrega_en_camino';
 const MENSAJE_ENTREGA_EN_CAMINO =
   'El pedido ya salió con el repartidor: no se puede cancelar mientras la entrega está en camino';
@@ -415,6 +424,18 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
       await client.query('SELECT id_pedido FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [id]);
       if (await entregaEnCamino(client, id)) {
         throw errorConMotivo(409, MOTIVO_ENTREGA_EN_CAMINO, MENSAJE_ENTREGA_EN_CAMINO);
+      }
+    }
+
+    // D-20a: en un DOMICILIO el paso a 'entregado' es solo del repartidor
+    // (domicilios.service, entregar), en cualquier estado de la entrega. Mismo
+    // orden de bloqueos: el pedido y después su fila de pedidos_domicilio.
+    // Mesa y para llevar siguen como siempre.
+    if (estado === ESTADO_ENTREGADO) {
+      const p = await client.query('SELECT id_pedido, canal FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [id]);
+      if (p.rows[0] && p.rows[0].canal === 'domicilio') {
+        await client.query('SELECT id_pedido FROM pedidos_domicilio WHERE id_pedido = $1::int FOR UPDATE', [id]);
+        throw errorConMotivo(409, MOTIVO_ENTREGA_POR_REPARTIDOR, MENSAJE_ENTREGA_POR_REPARTIDOR);
       }
     }
 
@@ -921,4 +942,6 @@ module.exports = {
   cerrarSiEntregadoYPagado,
   MOTIVO_ENTREGA_EN_CAMINO,
   MENSAJE_ENTREGA_EN_CAMINO,
+  MOTIVO_ENTREGA_POR_REPARTIDOR,
+  MENSAJE_ENTREGA_POR_REPARTIDOR,
 };

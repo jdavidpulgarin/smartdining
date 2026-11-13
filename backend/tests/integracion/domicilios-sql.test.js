@@ -50,6 +50,8 @@ let zona = null;
 let sinReceta = null;
 let conReceta = null;
 const pedidosCreados = [];
+const MARCA_MESA = 'PRUEBA domicilios-sql';
+const conNumeroDeMesa = require('../helpers/mesa-prueba').numerosDeMesa('domicilios-sql');
 
 const token = (rol, id) => tokenStaff(id, rol);
 const como = (rol, id) => {
@@ -100,6 +102,14 @@ async function limpiar() {
       await sonda.query('DELETE FROM pedidos WHERE id_pedido = ANY($1::int[])', [idsPedidos]);
     }
     await sonda.query('DELETE FROM clientes WHERE id_cliente = ANY($1::int[])', [idsClientes]);
+  }
+  // La mesa propia (y sus pedidos) del caso "la mesa sigue marcando entregado".
+  // Por marca de la suite, no de la corrida: así también se va lo de una corrida cortada.
+  const { rows: ms } = await sonda.query('SELECT id_mesa FROM mesas WHERE ubicacion = $1::text', [MARCA_MESA]);
+  const idsMesas = ms.map((r) => r.id_mesa);
+  if (idsMesas.length) {
+    await sonda.query('DELETE FROM pedidos WHERE id_mesa = ANY($1::int[])', [idsMesas]);
+    await sonda.query('DELETE FROM mesas WHERE id_mesa = ANY($1::int[])', [idsMesas]);
   }
   await sonda.query('DELETE FROM zonas_envio WHERE nombre LIKE $1::text', [`${PREFIJO_ZONA}%`]);
   if (idsUsuarios.length) {
@@ -292,6 +302,71 @@ test('asignar: un pedido cancelado -> 409 pedido_no_asignable', async (t) => {
   assert.strictEqual(res.status, 409);
   assert.strictEqual(res.body.motivo, 'pedido_no_asignable');
   assert.strictEqual((await estadoDe(id)).estado_entrega, 'por_asignar');
+});
+
+test('domicilio en camino: PATCH /pedidos/:id/estado a entregado -> 409 entrega_por_repartidor y nada cambia', async (t) => {
+  if (saltar(t)) return;
+  const id = await pedidoDomicilio();
+  await admin().patch(`/domicilios/${id}/repartidor`, { id_repartidor: u.rafa });
+  await rafa().post(`/domicilios/${id}/salir`);
+  const antes = await estadoDe(id);
+
+  for (const quien of [admin(), cajero()]) {
+    const res = await quien.patch(`/pedidos/${id}/estado`, { estado: 'entregado' });
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.deepStrictEqual(res.body, {
+      error: 'En un domicilio la entrega la marca el repartidor',
+      motivo: 'entrega_por_repartidor',
+    });
+  }
+  assert.deepStrictEqual(await estadoDe(id), antes, 'ni el pedido ni la entrega cambiaron');
+  const { rows: hist } = await sonda.query(
+    `SELECT count(*)::int AS n FROM historial_estados WHERE id_pedido = $1::int AND estado_nuevo = 'entregado'`,
+    [id]
+  );
+  assert.strictEqual(hist[0].n, 0);
+
+  // Antes de salir (por_asignar) tampoco: la entrega es siempre del repartidor.
+  const otro = await pedidoDomicilio();
+  const res = await admin().patch(`/pedidos/${otro}/estado`, { estado: 'entregado' });
+  assert.strictEqual(res.body.motivo, 'entrega_por_repartidor');
+  assert.strictEqual((await estadoDe(otro)).estado, 'listo');
+});
+
+test('para llevar y mesa: PATCH /pedidos/:id/estado a entregado sigue funcionando', async (t) => {
+  if (saltar(t)) return;
+  // Para llevar: sin mesa y sin fila de pedidos_domicilio.
+  const pl = await sonda.query(
+    `INSERT INTO pedidos (codigo_pedido, canal, id_cliente, estado)
+     VALUES ($1::varchar, 'para_llevar', $2::int, 'recibido') RETURNING id_pedido`,
+    [`L${CORRIDA.slice(0, 8)}-1`.toUpperCase(), idCliente]
+  );
+  // Mesa: una propia, con número de su rango.
+  const mesa = await conNumeroDeMesa((numero) =>
+    sonda.query(
+      `INSERT INTO mesas (numero, capacidad, ubicacion, estado) VALUES ($1::int, 4, $2::text, 'ocupada') RETURNING id_mesa`,
+      [numero, MARCA_MESA]
+    )
+  );
+  const pm = await sonda.query(
+    `INSERT INTO pedidos (codigo_pedido, canal, id_mesa, estado)
+     VALUES ($1::varchar, 'mesa', $2::int, 'recibido') RETURNING id_pedido`,
+    [`M${CORRIDA.slice(0, 8)}-1`.toUpperCase(), mesa.rows[0].id_mesa]
+  );
+  for (const id of [pl.rows[0].id_pedido, pm.rows[0].id_pedido]) {
+    await sonda.query(
+      `INSERT INTO detalles_pedido (id_pedido, id_plato, cantidad, precio_unitario) VALUES ($1::int, $2::int, 1, $3::numeric)`,
+      [id, sinReceta.plato.id_plato, sinReceta.plato.precio]
+    );
+    for (const e of ['en_preparacion', 'listo']) {
+      await sonda.query('UPDATE pedidos SET estado = $1::varchar WHERE id_pedido = $2::int', [e, id]);
+    }
+    const res = await admin().patch(`/pedidos/${id}/estado`, { estado: 'entregado' });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(res.body.estado, 'entregado');
+    const { rows } = await sonda.query('SELECT estado FROM pedidos WHERE id_pedido = $1::int', [id]);
+    assert.strictEqual(rows[0].estado, 'entregado');
+  }
 });
 
 test('salir: con el pedido sin listo -> 409 pedido_no_listo; en listo -> en_camino', async (t) => {
@@ -495,7 +570,7 @@ async function esperarBloqueados(conexion, cuantas) {
 }
 
 for (const primero of ['cancelar', 'salir']) {
-  test(`carrera: cancelar y salir A LA VEZ (llega primero ${primero}) -> gana uno, nunca los dos`, async (t) => {
+  test(`carrera: cancelar y salir A LA VEZ (se lanza primero ${primero}) -> gana uno, nunca los dos`, async (t) => {
     if (saltar(t)) return;
     const id = await pedidoDomicilio();
     await admin().patch(`/domicilios/${id}/repartidor`, { id_repartidor: u.rafa });
@@ -522,16 +597,19 @@ for (const primero of ['cancelar', 'salir']) {
     const cancelar = await enCola.cancelar;
     const salir = await enCola.salir;
 
+    // Las dos llegan de verdad a la vez a la fila del pedido. QUIÉN gana no se
+    // afirma: PostgreSQL no garantiza que despierte primero al que llegó
+    // primero a la cola (en una corrida en serie despertó al segundo). Lo que
+    // se afirma es la regla: gana UNO, el otro recibe su 409, y el estado
+    // final es el del ganador. Nunca los dos.
     const e = await estadoDe(id);
-    if (primero === 'cancelar') {
-      assert.strictEqual(cancelar.status, 200, JSON.stringify(cancelar.body));
-      assert.strictEqual(salir.status, 409);
-      assert.strictEqual(salir.body.motivo, 'pedido_no_listo');
+    const estados = [cancelar.status, salir.status].sort();
+    assert.deepStrictEqual(estados, [200, 409], `cancelar ${cancelar.status}, salir ${salir.status}`);
+    if (cancelar.status === 200) {
+      assert.strictEqual(salir.body.motivo, 'pedido_no_listo', 'ganó la cancelación');
       assert.deepStrictEqual([e.estado, e.estado_entrega], ['cancelado', 'asignado']);
     } else {
-      assert.strictEqual(salir.status, 200, JSON.stringify(salir.body));
-      assert.strictEqual(cancelar.status, 409);
-      assert.strictEqual(cancelar.body.motivo, 'entrega_en_camino');
+      assert.strictEqual(cancelar.body.motivo, 'entrega_en_camino', 'ganó la salida');
       assert.deepStrictEqual([e.estado, e.estado_entrega], ['listo', 'en_camino']);
     }
   });
