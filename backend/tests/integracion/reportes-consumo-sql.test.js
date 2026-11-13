@@ -37,6 +37,7 @@ const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const { abrirSonda } = require('../helpers/base-prueba');
 const { tokenStaff } = require('../helpers/fake-db');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 const MESA_NUMERO = parseInt(process.env.MESA_NUMERO_CONSUMO || '1020', 10);
 const MARCA = 'PRUEBA consumo';
@@ -45,6 +46,10 @@ const ZONA = 'America/Bogota';
 let sonda = null;
 let hayBase = false;
 let admin = null;
+// Solo por su CATEGORÍA propia (tests/helpers/plato-prueba.js): el plato de
+// esta suite no puede colgar de una categoría del seed. Los insumos A y B y su
+// plato siguen siendo los de aquí: el reporte depende de sus movimientos.
+let catalogo = null;
 const ids = { A: null, B: null, plato: null, mesa: null };
 let dia = null; // { D, Dm1, Dp1, desde, hasta } en AAAA-MM-DD
 
@@ -117,10 +122,12 @@ test.before(async () => {
   sonda = await abrirSonda();
   if (!sonda) return;
   const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' AND activo ORDER BY id_usuario LIMIT 1");
-  const c = await sonda.query('SELECT id_categoria FROM categorias ORDER BY id_categoria LIMIT 1');
-  if (!u.rows[0] || !c.rows[0]) return;
+  if (!u.rows[0]) return;
   admin = tokenStaff(u.rows[0].id_usuario, 'admin');
+  // Primero los restos de una corrida cortada (su plato colgaba de la
+  // categoría vieja) y después la categoría nueva.
   await limpiar();
+  catalogo = await crearCatalogoPrueba(sonda, 'reportes-consumo');
 
   // Los días, de la base: D = hoy en Bogotá - 3.
   const d = await sonda.query(
@@ -144,7 +151,7 @@ test.before(async () => {
 
   const p = await sonda.query(
     `INSERT INTO platos (id_categoria, nombre, precio, disponible) VALUES ($1::int, $2::text, 10000, TRUE) RETURNING id_plato`,
-    [c.rows[0].id_categoria, `${MARCA} plato`]
+    [catalogo.idCategoria, `${MARCA} plato`]
   );
   ids.plato = p.rows[0].id_plato;
   await sonda.query(
@@ -190,6 +197,8 @@ test.before(async () => {
 test.after(async () => {
   try {
     if (sonda) await limpiar();
+    // Después de limpiar(): su plato cuelga de esta categoría.
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();

@@ -49,6 +49,7 @@ const kdsService = require('../../src/services/kds.service');
 const transaccionesService = require('../../src/services/transacciones.service');
 const autorInexistente = require('../../src/services/autor-inexistente');
 const socketNotifier = require('../../src/services/socket.notifier');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 /** Número de la mesa de prueba. No puede chocar con una mesa de verdad. */
 const MESA_NUMERO = parseInt(process.env.MESA_NUMERO || '901', 10);
@@ -58,6 +59,7 @@ const MARCA_MESA = 'PRUEBA autor-inexistente';
 let sonda = null;
 let hayBase = false;
 let mesa = null;
+let catalogo = null; // el de plato-prueba.js, con su limpiar()
 let plato = null;
 let usuarioReal = null;
 
@@ -124,21 +126,20 @@ test.before(async () => {
   // Cualquier otro error (la mesa es de otro, por ejemplo) también se ve.
   sonda = await abrirSonda();
   if (!sonda) return;
-  // Un plato NO personalizable: uno del constructor exigiría elegir opciones
-  // de cada paso y el pedido fallaría por otra razón (P0001).
-  const p = await sonda.query(
-    `SELECT id_plato FROM platos
-      WHERE disponible AND stock_suficiente AND NOT personalizable
-      ORDER BY id_plato LIMIT 1`
-  );
   const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
-  plato = p.rows[0] || null;
   usuarioReal = u.rows[0] || null;
-  hayBase = Boolean(plato && usuarioReal);
-  if (!hayBase) return;
+  if (!usuarioReal) return;
 
   // Si quedó algo de una corrida interrumpida, se limpia antes de empezar.
   await limpiarMesaDePrueba();
+  // Un plato PROPIO no personalizable (uno del constructor exigiría elegir
+  // opciones y el pedido fallaría por otra razón, P0001). CON receta sobre un
+  // insumo propio: "sin stock gastado" solo prueba algo si el plato reserva.
+  // Antes era el primero del seed (Nachos Supremos), que otras suites gastaban
+  // a la vez hasta dejarlo sin stock.
+  catalogo = await crearCatalogoPrueba(sonda, 'pedidos', { receta: true });
+  plato = catalogo.plato;
+  hayBase = true;
   const m = await sonda.query(
     `INSERT INTO mesas (numero, capacidad, ubicacion) VALUES ($1, 4, $2) RETURNING id_mesa`,
     [MESA_NUMERO, MARCA_MESA]
@@ -149,6 +150,7 @@ test.before(async () => {
 test.after(async () => {
   try {
     if (hayBase) await limpiarMesaDePrueba();
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();
