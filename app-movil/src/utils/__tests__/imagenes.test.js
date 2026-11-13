@@ -22,6 +22,14 @@ describe('resolverUrlImagen (D-23 imágenes app-movil)', () => {
     expect(res).toBe('https://api.staging.smartdining.com.co/imagenes/abc.webp');
   });
 
+  it('/imagenes/abc.webp con apiBase con barra final https://api.staging.smartdining.com.co/api/ → https://api.staging.smartdining.com.co/imagenes/abc.webp', () => {
+    const res = resolverUrlImagen(
+      '/imagenes/abc.webp',
+      'https://api.staging.smartdining.com.co/api/'
+    );
+    expect(res).toBe('https://api.staging.smartdining.com.co/imagenes/abc.webp');
+  });
+
   it('/imagenes/abc.webp con apiBase http://localhost:4000/api → http://localhost:4000/imagenes/abc.webp', () => {
     const res = resolverUrlImagen('/imagenes/abc.webp', 'http://localhost:4000/api');
     expect(res).toBe('http://localhost:4000/imagenes/abc.webp');

@@ -6,7 +6,7 @@ import { urlsServidor } from './urlsServidor';
  * Reglas:
  * - null, undefined, '' o solo espacios → null
  * - empieza por http:// o https:// → igual
- * - empieza por /imagenes/ → new URL(apiBase).origin + url (si apiBase es inválida, devuelve url tal cual)
+ * - empieza por /imagenes/ → origen de apiBase (extraído vía regex) + url; si apiBase es inválida o no tiene match, devuelve url tal cual
  * - cualquier otro valor → igual (no romper datos viejos)
  * - debe ser idempotente: resolver dos veces da lo mismo
  *
@@ -29,12 +29,11 @@ export function resolverUrlImagen(url, apiBase) {
     if (!apiBase || typeof apiBase !== 'string') {
       return limpia;
     }
-    try {
-      const parsed = new URL(apiBase.trim());
-      return `${parsed.origin}${limpia}`;
-    } catch {
-      return limpia;
+    const m = /^(https?:\/\/[^/?#]+)/i.exec(apiBase.trim());
+    if (m) {
+      return `${m[1]}${limpia}`;
     }
+    return limpia;
   }
 
   return limpia;
