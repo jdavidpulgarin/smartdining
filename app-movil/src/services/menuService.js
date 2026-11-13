@@ -1,5 +1,6 @@
 import { pedirJson, tieneApiUrlConfigurada, ErrorApi } from './api';
 import menuSimulado from '../mocks/menu-simulado.json';
+import { urlImagen } from '../utils/imagenes';
 
 let cacheMenuPromise = null;
 let cacheConfigPromise = null;
@@ -77,7 +78,7 @@ export function adaptarPlato(plato, id_categoria) {
     descripcion: plato.descripcion || '',
     precio: Number(plato.precio),
     categoriaId: id_categoria,
-    imagen: plato.url_imagen || null,
+    imagen: urlImagen(plato.url_imagen),
     alergenos: Array.isArray(plato.alergenos) ? plato.alergenos : [],
     etiquetas: Array.isArray(plato.etiquetas) ? plato.etiquetas : [],
     disponible: plato.disponible !== false,
@@ -120,7 +121,22 @@ export function adaptarPlatosArmables(rawMenu) {
   const cats = normalizarCategorias(rawMenu);
   return cats
     .flatMap((cat) => cat.platos || [])
-    .filter((plato) => plato.personalizable === true);
+    .filter((plato) => plato.personalizable === true)
+    .map((plato) => ({
+      ...plato,
+      url_imagen: urlImagen(plato.url_imagen),
+      pasos: Array.isArray(plato.pasos)
+        ? plato.pasos.map((paso) => ({
+            ...paso,
+            ingredientes: Array.isArray(paso.ingredientes)
+              ? paso.ingredientes.map((ing) => ({
+                  ...ing,
+                  url_imagen: urlImagen(ing.url_imagen),
+                }))
+              : [],
+          }))
+        : [],
+    }));
 }
 
 // Copiado de frontend-cliente; pasar a packages/core (R-22)
