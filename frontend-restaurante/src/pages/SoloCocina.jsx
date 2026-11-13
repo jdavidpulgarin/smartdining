@@ -1,26 +1,24 @@
 import { useEffect, useState } from 'react'
 import { ChefHat } from 'lucide-react'
-import { useAuth } from '../hooks'
 import { urlDelKds } from '../utils/kds'
 
 /** Segundos antes de llevar al KDS solo. */
 export const SEGUNDOS_PARA_IR_AL_KDS = 5
 
-/**
- * Lo que ve un usuario de COCINA en el panel: un aviso y el paso a la pantalla
- * de cocina. No ve el panel (el backend le negaría casi todo con 403). La
- * sesión del panel se cierra al salir: el KDS tiene su propio inicio de sesión.
- */
 const irConElNavegador = (url) => window.location.assign(url)
 
+/**
+ * El aviso para un usuario de COCINA que inicia sesión en el panel. No hay
+ * sesión que cerrar: AuthContext.login() no guarda nada ni conecta el socket
+ * con el rol cocina. Solo explica y lleva a la pantalla de cocina (KDS), que
+ * tiene su propio inicio de sesión.
+ */
 export function SoloCocina({ irA = irConElNavegador }) {
-  const { logout } = useAuth()
   const url = urlDelKds()
   const [faltan, setFaltan] = useState(SEGUNDOS_PARA_IR_AL_KDS)
 
   useEffect(() => {
     if (faltan <= 0) {
-      cerrarSesionGuardada()
       irA(url)
       return undefined
     }
@@ -39,33 +37,10 @@ export function SoloCocina({ irA = irConElNavegador }) {
         <small style={{ color: 'var(--sd-text-muted)' }}>
           Te llevamos allá en {Math.max(faltan, 0)} s. Ahí inicias sesión con el mismo usuario.
         </small>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <a
-            href={url}
-            className="sd-btn sd-btn-primary"
-            style={{ minHeight: 44, fontSize: 15 }}
-            onClick={cerrarSesionGuardada}
-          >
-            IR A LA PANTALLA DE COCINA
-          </a>
-          <button type="button" className="sd-btn sd-btn-secondary" style={{ minHeight: 44, fontSize: 15 }} onClick={logout}>
-            CERRAR SESIÓN
-          </button>
-        </div>
+        <a href={url} className="sd-btn sd-btn-primary" style={{ minHeight: 44, fontSize: 15 }}>
+          IR A LA PANTALLA DE COCINA
+        </a>
       </div>
     </div>
   )
-}
-
-/**
- * Borra la sesión del panel sin re-renderizar (la página se va al KDS). Con
- * logout() el panel saltaría a /login antes de salir.
- */
-function cerrarSesionGuardada() {
-  try {
-    sessionStorage.removeItem('smartdining_staff_user')
-    sessionStorage.removeItem('smartdining_token')
-  } catch {
-    // Sin almacenamiento no hay nada que borrar.
-  }
 }

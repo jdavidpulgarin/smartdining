@@ -1,4 +1,5 @@
 import './App.css'
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { Topbar } from './components'
 import {
@@ -13,12 +14,20 @@ import {
   TomarPedido,
   Configuracion,
   Inventario,
-  SoloCocina,
 } from './pages'
-import { esCocina } from './utils/kds'
 import { useSocket, useAuth } from './hooks'
 import { AuthProvider } from './context/AuthContext'
 import { TablesProvider } from './context/TablesContext'
+import { esCocina } from './utils/kds'
+
+/** Cierra una sesión de cocina (estado, almacenamiento y socket) y va al aviso del login. */
+function CerrarSesionDeCocina() {
+  const { logout } = useAuth()
+  useEffect(() => {
+    logout()
+  }, [logout])
+  return <Navigate to="/login" replace state={{ cocina: true }} />
+}
 
 function AppContent() {
   useSocket()
@@ -48,9 +57,12 @@ function AppContent() {
     return <Navigate to="/login" replace />
   }
 
-  // El rol cocina no usa el panel: aviso y paso al KDS, en cualquier ruta.
+  // Red de seguridad: AuthContext ya no deja entrar al rol cocina (login() no
+  // guarda nada y una sesión vieja de cocina se descarta al cargar). Si aun así
+  // llegara una, se cierra del todo (estado, almacenamiento y socket) y el login
+  // muestra el aviso con el enlace al KDS.
   if (esCocina(user.rol)) {
-    return <SoloCocina />
+    return <CerrarSesionDeCocina />
   }
 
   return (
