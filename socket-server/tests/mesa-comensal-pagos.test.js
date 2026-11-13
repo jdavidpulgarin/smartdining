@@ -1,4 +1,4 @@
-// «Igual», cobro de caja y almacenes de sin_celular (memoria, doble de Redis y Redis real)
+// Pagos con sin celular, cobro de caja y almacenes de sin_celular (memoria, doble de Redis y Redis real)
 // (EVENTS.md §6.4 y §5.2). Utilidades en ./mesa-comensal-ayuda.js.
 const test = require('node:test');
 const assert = require('node:assert');
@@ -16,7 +16,7 @@ const {
 } = require('./mesa-comensal-ayuda');
 
 // ---------------------------------------------------------------------------
-// «Igual» y cobro de caja (§8.1 y §8.6), en memoria y con el doble de Redis
+// Intención de pago y cobro de caja (§8.1 y §8.6), en memoria y con el doble de Redis
 // ---------------------------------------------------------------------------
 
 async function escenarioPagos(t, almacen, total) {
@@ -29,27 +29,28 @@ async function escenarioPagos(t, almacen, total) {
   });
   const beto = await s.conectar(tokenComensal(5, 'Beto'));
   await emitir(beto, 'join:table', {});
-  const igual = async (alias) => {
+  const intencion = async (alias, modo) => {
     const r = await fetch(`${s.url}/pagos/intencion`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenComensal(5, alias)}` },
-      body: JSON.stringify({ modo: 'igual', eventId: randomUUID() }),
+      body: JSON.stringify({ modo, eventId: randomUUID() }),
     });
     return (await r.json()).monto_en_centavos;
   };
-  return { s, mesa, igual };
+  return { s, mesa, intencion };
 }
 
 for (const almacen of Object.keys(ALMACENES)) {
-  test(`[${almacen}] «igual» con 2 conectados + 1 sin celular reparte entre 3`, async (t) => {
-    const { s, igual } = await escenarioPagos(t, almacen, 9_000_000);
-    assert.strictEqual(await igual('Ana'), 4_500_000, 'antes: entre Ana y Beto');
+  test(`[${almacen}] un sin celular entra en la presencia y «total» sigue cobrando todo el saldo`, async (t) => {
+    const { s, intencion } = await escenarioPagos(t, almacen, 9_000_000);
     assert.deepStrictEqual(await llamar(s, aviso('Abuela')), OK);
-    assert.strictEqual(await igual('Beto'), 3_000_000, 'con Abuela: entre 3');
+    const p = await s.presencia.calcular(5);
+    assert.deepStrictEqual([p.comensales, p.sin_celular], [['Abuela', 'Ana', 'Beto'], ['Abuela']]);
+    assert.strictEqual(await intencion('Beto', 'total'), 9_000_000);
   });
 
-  test(`[${almacen}] caja con comensal "Abuela " marca a "Abuela" en pagaron y deja de contar en «igual»`, async (t) => {
-    const { s, mesa, igual } = await escenarioPagos(t, almacen, 9_000_000);
+  test(`[${almacen}] caja con comensal "Abuela " marca a "Abuela" en pagaron`, async (t) => {
+    const { s, mesa, intencion } = await escenarioPagos(t, almacen, 9_000_000);
     assert.deepStrictEqual(await llamar(s, aviso('Abuela')), OK);
     mesa.saldo = 6_000_000;
     const r = await post(s, '/internal/payment-confirmed', {
@@ -57,7 +58,7 @@ for (const almacen of Object.keys(ALMACENES)) {
     });
     assert.strictEqual(r.status, 200);
     assert.deepStrictEqual(await s.estadoMesas.pagaron(5), ['Abuela']);
-    assert.strictEqual(await igual('Ana'), 3_000_000, 'el saldo de 60.000 entre Ana y Beto');
+    assert.strictEqual(await intencion('Ana', 'total'), 6_000_000, 'el saldo que dejó la caja');
   });
 }
 

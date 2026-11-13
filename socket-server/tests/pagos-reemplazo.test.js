@@ -140,15 +140,15 @@ for (const almacen of ['memoria', 'redis']) {
     const { s, sentar, pedir } = await escenario(t, almacen);
     const ana = await sentar('Ana');
     await sentar('Beto');
-    const vieja = await pedir(ana, 'igual');
-    assert.strictEqual(vieja.cuerpo.monto_en_centavos, 4_500_000);
+    const vieja = await pedir(ana, 'total');
+    assert.strictEqual(vieja.cuerpo.monto_en_centavos, 9_000_000);
     const nueva = await pedir(ana, 'propio');
     assert.strictEqual(nueva.status, 201);
     assert.notStrictEqual(nueva.cuerpo.referencia, vieja.cuerpo.referencia);
     assert.strictEqual(nueva.cuerpo.monto_en_centavos, 4_000_000, 'lo propio de Ana, no el monto viejo');
     assert.strictEqual(await s.almacenPagos.obtenerPendiente(5, 'Ana'), nueva.cuerpo.referencia);
     const v = await s.almacenPagos.obtener(vieja.cuerpo.referencia);
-    assert.deepStrictEqual([v.estado, v.reemplazada_por, v.monto_centavos], ['reemplazada', nueva.cuerpo.referencia, 4_500_000]);
+    assert.deepStrictEqual([v.estado, v.reemplazada_por, v.monto_centavos], ['reemplazada', nueva.cuerpo.referencia, 9_000_000]);
   });
 
   test(`${almacen}: si la cuenta cambió (pedido nuevo), mismo modo → intención nueva con el monto nuevo`, async (t) => {
@@ -184,23 +184,23 @@ for (const almacen of ['memoria', 'redis']) {
     };
     const ana = await sentar('Ana');
     await sentar('Beto');
-    const vieja = await pedir(ana, 'igual');
-    const nueva = await pedir(ana, 'propio');
+    const vieja = await pedir(ana, 'propio');
+    const nueva = await pedir(ana, 'total');
 
     const aviso = esperar(admin, 'payment:confirmed');
-    assert.deepStrictEqual(await pagar(vieja.cuerpo.referencia, 4_500_000), { ok: true, duplicado: false, registrado: true });
+    assert.deepStrictEqual(await pagar(vieja.cuerpo.referencia, 4_000_000), { ok: true, duplicado: false, registrado: true });
     const ev = await aviso;
-    assert.deepStrictEqual([ev.referencia_externa, ev.monto_centavos, ev.comensal], [vieja.cuerpo.referencia, 4_500_000, 'Ana']);
-    assert.deepStrictEqual(registros.map((r) => [r.referencia_externa, r.modo, r.monto_centavos]), [[vieja.cuerpo.referencia, 'igual', 4_500_000]]);
+    assert.deepStrictEqual([ev.referencia_externa, ev.monto_centavos, ev.comensal], [vieja.cuerpo.referencia, 4_000_000, 'Ana']);
+    assert.deepStrictEqual(registros.map((r) => [r.referencia_externa, r.modo, r.monto_centavos]), [[vieja.cuerpo.referencia, 'propio', 4_000_000]]);
     assert.strictEqual((await s.almacenPagos.obtener(vieja.cuerpo.referencia)).estado, 'pagada');
     assert.strictEqual(await s.almacenPagos.obtenerPendiente(5, 'Ana'), nueva.cuerpo.referencia, 'la marca de la nueva no se borra');
 
     // El saldo cambió: la próxima petición ya no reutiliza la nueva (monto viejo).
-    estado.cuenta = cuenta(5, 9_000_000, 4_500_000, { Ana: 0, Beto: 4_500_000 });
+    estado.cuenta = cuenta(5, 9_000_000, 5_000_000, { Ana: 0, Beto: 5_000_000 });
     assert.strictEqual((await pedir(ana, 'propio')).status, 409, 'Ana ya no debe nada propio');
     const otra = await pedir(ana, 'total');
     assert.strictEqual(otra.status, 201);
-    assert.strictEqual(otra.cuerpo.monto_en_centavos, 4_500_000);
+    assert.strictEqual(otra.cuerpo.monto_en_centavos, 5_000_000);
     assert.strictEqual((await s.almacenPagos.obtener(nueva.cuerpo.referencia)).estado, 'reemplazada');
   });
 
@@ -232,7 +232,7 @@ for (const almacen of ['memoria', 'redis']) {
     estado.registro = () => ({ status: 201, cuerpo: { ok: true, saldo_restante_centavos: 0 } });
     const ana = await sentar('Ana');
     await sentar('Beto');
-    const vieja = await pedir(ana, 'igual');
+    const vieja = await pedir(ana, 'total');
     const nueva = await pedir(ana, 'propio');
     const alerta = esperar(admin, 'pago:alerta');
     // Con la referencia vieja pero por el monto de la nueva: no cuadra.
@@ -246,9 +246,9 @@ for (const almacen of ['memoria', 'redis']) {
     } = await escenario(t, almacen);
     const ana = await sentar('Ana');
     await sentar('Beto');
-    const vieja = await pedir(ana, 'igual');
+    const vieja = await pedir(ana, 'total');
     const nueva = await pedir(ana, 'propio');
-    assert.strictEqual((await pagar(vieja.cuerpo.referencia, 4_500_000, 'DECLINED')).registrado, false);
+    assert.strictEqual((await pagar(vieja.cuerpo.referencia, 9_000_000, 'DECLINED')).registrado, false);
     assert.strictEqual((await s.almacenPagos.obtener(vieja.cuerpo.referencia)).estado, 'rechazada');
     assert.strictEqual(await s.almacenPagos.obtenerPendiente(5, 'Ana'), nueva.cuerpo.referencia);
   });

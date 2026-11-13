@@ -154,7 +154,7 @@ for (const almacen of ['memoria', 'redis']) {
   test(`${almacen}: una reemplazada pagada tarde se sigue registrando`, async (t) => {
     const e = await escenario(t, almacen);
     const { cuerpo: vieja } = await e.intencion('total');
-    assert.strictEqual((await e.intencion('igual')).status, 201);
+    assert.strictEqual((await e.intencion('propio')).status, 201, 'otro modo: reemplaza a la vieja');
     assert.strictEqual((await e.s.almacenPagos.obtener(vieja.referencia)).estado, 'reemplazada');
     e.avanzar(3 * HORA);
     assert.deepStrictEqual((await e.webhook(vieja.referencia)).cuerpo, REGISTRADO);
