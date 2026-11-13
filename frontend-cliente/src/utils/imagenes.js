@@ -1,42 +1,65 @@
 import { urlsServidor } from './urlsServidor';
 
+const PATRON_RUTA = /^\/imagenes\/[0-9a-f-]{36}\.webp$/i;
+const PATRON_ORIGEN = /^(https?:\/\/[^/?#]+)/i;
+// oxlint-disable-next-line eslint/no-control-regex, no-control-regex
+const PATRON_HTTPS = /^https:\/\/[^\s/?#\x00-\x1f\x7f]+(?:[/?#][^\s\x00-\x1f\x7f]*)?$/;
+
 /**
- * Resuelve la URL pública de una imagen según su origen.
+ * Resuelve la URL pública de una imagen según su origen con lista blanca.
  *
  * Reglas:
- * - null, undefined, '' o solo espacios → null
- * - empieza por http:// o https:// → igual
- * - empieza por /imagenes/ → origen de apiBase (extraído vía regex) + url; si apiBase es inválida o no tiene match, devuelve url tal cual
- * - cualquier otro valor → igual (no romper datos viejos)
- * - debe ser idempotente: resolver dos veces da lo mismo
+ * - const PATRON_RUTA = /^\/imagenes\/[0-9a-f-]{36}\.webp$/i
+ * - null, undefined, no-string, '' o solo espacios → null
+ * - /imagenes/<uuid>.webp que cumple PATRON_RUTA exacto → origen de la API + ruta. Si no hay origen válido → null.
+ * - Ya resuelta (idempotente): URL absoluta cuyo origen es EXACTAMENTE el origen de la API y cuyo path cumple PATRON_RUTA → igual.
+ * - Cualquier otra https:// bien formada (sin espacios ni caracteres de control) → igual.
+ * - TODO lo demás → null: http:// de otro origen, javascript:, data:, //host, rutas relativas, ../, /imagenes/../…, /imagenes/x.png, mayúsculas raras en el esquema que no sean https, etc.
  *
  * @param {string | null | undefined} url
  * @param {string} [apiBase]
  * @returns {string | null}
  */
 export function resolverUrlImagen(url, apiBase) {
-  if (url === null || url === undefined) return null;
-  if (typeof url !== 'string') return null;
+  if (url === null || url === undefined || typeof url !== 'string') {
+    return null;
+  }
 
   const limpia = url.trim();
-  if (limpia.length === 0) return null;
-
-  if (limpia.startsWith('http://') || limpia.startsWith('https://')) {
-    return limpia;
+  if (limpia.length === 0) {
+    return null;
   }
 
-  if (limpia.startsWith('/imagenes/')) {
-    if (!apiBase || typeof apiBase !== 'string') {
+  let origenApi = null;
+  if (typeof apiBase === 'string') {
+    const m = PATRON_ORIGEN.exec(apiBase.trim());
+    if (m) {
+      origenApi = m[1];
+    }
+  }
+
+  // 1. Ruta relativa /imagenes/<uuid>.webp que cumple PATRON_RUTA exacto
+  if (PATRON_RUTA.test(limpia)) {
+    if (!origenApi) return null;
+    return `${origenApi}${limpia}`;
+  }
+
+  // 2. Ya resuelta con el origen de la API (idempotente)
+  if (origenApi && limpia.startsWith(`${origenApi}/`)) {
+    const path = limpia.slice(origenApi.length);
+    if (PATRON_RUTA.test(path)) {
       return limpia;
     }
-    const m = /^(https?:\/\/[^/?#]+)/i.exec(apiBase.trim());
-    if (m) {
-      return `${m[1]}${limpia}`;
-    }
+    return null;
+  }
+
+  // 3. Cualquier otra https:// bien formada (sin espacios ni caracteres de control)
+  if (PATRON_HTTPS.test(limpia)) {
     return limpia;
   }
 
-  return limpia;
+  // 4. Todo lo demás es inválido o no permitido
+  return null;
 }
 
 /**

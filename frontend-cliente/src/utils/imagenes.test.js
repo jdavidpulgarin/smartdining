@@ -1,57 +1,74 @@
 import { describe, it, expect } from 'vitest';
 import { resolverUrlImagen } from './imagenes';
 
-describe('resolverUrlImagen (D-23 imágenes)', () => {
-  it('null, "", "   " y undefined devuelven null', () => {
+const UUID_EJEMPLO = '3f2b8c1e-9a4d-4e6f-8b2a-1c3d5e7f9a0b';
+
+describe('resolverUrlImagen (D-23 lista blanca de imágenes)', () => {
+  it('null, "", "   ", undefined y no-strings devuelven null', () => {
     expect(resolverUrlImagen(null, 'https://api.staging.smartdining.com.co/api')).toBeNull();
     expect(resolverUrlImagen(undefined, 'https://api.staging.smartdining.com.co/api')).toBeNull();
     expect(resolverUrlImagen('', 'https://api.staging.smartdining.com.co/api')).toBeNull();
     expect(resolverUrlImagen('   ', 'https://api.staging.smartdining.com.co/api')).toBeNull();
+    expect(resolverUrlImagen(12345, 'https://api.staging.smartdining.com.co/api')).toBeNull();
   });
 
-  it('https://images.unsplash.com/... se conserva igual', () => {
-    const urlAbs = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400';
+  it('https://images.unsplash.com/x se conserva igual', () => {
+    const urlAbs = 'https://images.unsplash.com/x';
     expect(resolverUrlImagen(urlAbs, 'https://api.staging.smartdining.com.co/api')).toBe(urlAbs);
     expect(resolverUrlImagen(urlAbs, 'http://localhost:4000/api')).toBe(urlAbs);
   });
 
-  it('/imagenes/abc.webp con apiBase https://api.staging.smartdining.com.co/api → https://api.staging.smartdining.com.co/imagenes/abc.webp', () => {
-    const res = resolverUrlImagen(
-      '/imagenes/abc.webp',
-      'https://api.staging.smartdining.com.co/api'
-    );
-    expect(res).toBe('https://api.staging.smartdining.com.co/imagenes/abc.webp');
+  it('/imagenes/<uuid>.webp con apiBase https://api.staging.smartdining.com.co/api, con /api/ y con /api/v1', () => {
+    const ruta = `/imagenes/${UUID_EJEMPLO}.webp`;
+    const esperada = `https://api.staging.smartdining.com.co/imagenes/${UUID_EJEMPLO}.webp`;
+
+    expect(resolverUrlImagen(ruta, 'https://api.staging.smartdining.com.co/api')).toBe(esperada);
+    expect(resolverUrlImagen(ruta, 'https://api.staging.smartdining.com.co/api/')).toBe(esperada);
+    expect(resolverUrlImagen(ruta, 'https://api.staging.smartdining.com.co/api/v1')).toBe(esperada);
   });
 
-  it('/imagenes/abc.webp con apiBase con barra final https://api.staging.smartdining.com.co/api/ → https://api.staging.smartdining.com.co/imagenes/abc.webp', () => {
-    const res = resolverUrlImagen(
-      '/imagenes/abc.webp',
-      'https://api.staging.smartdining.com.co/api/'
-    );
-    expect(res).toBe('https://api.staging.smartdining.com.co/imagenes/abc.webp');
-  });
+  it('/imagenes/<uuid>.webp con apiBase http://localhost:4000/api y es idempotente', () => {
+    const ruta = `/imagenes/${UUID_EJEMPLO}.webp`;
+    const apiBase = 'http://localhost:4000/api';
+    const esperada = `http://localhost:4000/imagenes/${UUID_EJEMPLO}.webp`;
 
-  it('/imagenes/abc.webp con apiBase http://localhost:4000/api → http://localhost:4000/imagenes/abc.webp', () => {
-    const res = resolverUrlImagen('/imagenes/abc.webp', 'http://localhost:4000/api');
-    expect(res).toBe('http://localhost:4000/imagenes/abc.webp');
-  });
+    const unaVez = resolverUrlImagen(ruta, apiBase);
+    expect(unaVez).toBe(esperada);
 
-  it('es idempotente: resolver dos veces da el mismo resultado', () => {
-    const apiBase = 'https://api.staging.smartdining.com.co/api';
-    const unaVez = resolverUrlImagen('/imagenes/abc.webp', apiBase);
     const dosVeces = resolverUrlImagen(unaVez, apiBase);
-    expect(dosVeces).toBe('https://api.staging.smartdining.com.co/imagenes/abc.webp');
-    expect(dosVeces).toBe(unaVez);
+    expect(dosVeces).toBe(esperada);
   });
 
-  it('apiBase inválida devuelve la ruta tal cual', () => {
-    expect(resolverUrlImagen('/imagenes/abc.webp', 'invalida')).toBe('/imagenes/abc.webp');
-    expect(resolverUrlImagen('/imagenes/abc.webp', '')).toBe('/imagenes/abc.webp');
-    expect(resolverUrlImagen('/imagenes/abc.webp', null)).toBe('/imagenes/abc.webp');
+  it('devuelve null si apiBase es inválida o ausente', () => {
+    const ruta = `/imagenes/${UUID_EJEMPLO}.webp`;
+    expect(resolverUrlImagen(ruta, 'invalida')).toBeNull();
+    expect(resolverUrlImagen(ruta, '')).toBeNull();
+    expect(resolverUrlImagen(ruta, null)).toBeNull();
+    expect(resolverUrlImagen(ruta, undefined)).toBeNull();
   });
 
-  it('cualquier otro valor relativo o desconocido se conserva tal cual', () => {
-    expect(resolverUrlImagen('/assets/logo.png', 'https://api.staging.smartdining.com.co/api')).toBe('/assets/logo.png');
-    expect(resolverUrlImagen('data:image/png;base64,abc', 'https://api.staging.smartdining.com.co/api')).toBe('data:image/png;base64,abc');
+  it('devuelve null para URLs y rutas no permitidas en la lista blanca', () => {
+    const apiBase = 'https://api.staging.smartdining.com.co/api';
+    const noPermitidas = [
+      'http://ejemplo.com/a.webp',
+      'javascript:alert(1)',
+      'data:image/png;base64,AAA',
+      '//evil.com/a.webp',
+      '../a.webp',
+      '/imagenes/../api/usuarios',
+      '/imagenes/abc.webp',
+      `/imagenes/${UUID_EJEMPLO}.png`,
+      `/otra/${UUID_EJEMPLO}.webp`,
+      'http://localhost:4000/api/usuarios',
+      '/assets/logo.png',
+      'HTTPS://images.unsplash.com/x',
+    ];
+
+    for (const valor of noPermitidas) {
+      expect(resolverUrlImagen(valor, apiBase)).toBeNull();
+    }
+
+    // Caso de URL en el origen de desarrollo que no cumple PATRON_RUTA
+    expect(resolverUrlImagen('http://localhost:4000/api/usuarios', 'http://localhost:4000/api')).toBeNull();
   });
 });
