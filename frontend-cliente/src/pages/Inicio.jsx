@@ -5,6 +5,8 @@ import {
   validarNombre,
   decidirDestinoInicio,
   tienePedidosActivosGuardados,
+  obtenerSesionCerrada,
+  nombreSugerido,
 } from '../utils/sesion';
 import { leerMesaDelQr } from '../utils/qr';
 import { aliasDelToken } from '../services/clienteMesa';
@@ -90,6 +92,11 @@ function Inicio() {
     error?.status === 0 ||
     error?.motivo === 'sin_conexion';
 
+  const aliasSesionCerrada = useMemo(
+    () => (esErrorAlias409 ? obtenerSesionCerrada() : null),
+    [esErrorAlias409]
+  );
+
   useEffect(() => {
     if (cuentaRegresiva <= 0) return;
     const timer = setInterval(() => {
@@ -110,16 +117,30 @@ function Inicio() {
     setTocado(true);
     if (!validacion.valido || enviando || cuentaRegresiva > 0) return;
     const res = await unirse(nombre);
-    if (res && !res.ok && res.error?.status === 429) {
-      setCuentaRegresiva(res.error.retryAfter || 60);
+    if (res && !res.ok) {
+      if (res.error?.status === 429) {
+        setCuentaRegresiva(res.error.retryAfter || 60);
+      } else if (res.error?.status === 409 || res.error?.motivo === 'alias_en_uso') {
+        const aliasCerrado = obtenerSesionCerrada();
+        if (aliasCerrado) {
+          setNombre(nombreSugerido(nombre || aliasCerrado));
+        }
+      }
     }
   };
 
   const manejarReintentar = async () => {
     if (!validacion.valido || enviando || cuentaRegresiva > 0) return;
     const res = await unirse(nombre);
-    if (res && !res.ok && res.error?.status === 429) {
-      setCuentaRegresiva(res.error.retryAfter || 60);
+    if (res && !res.ok) {
+      if (res.error?.status === 429) {
+        setCuentaRegresiva(res.error.retryAfter || 60);
+      } else if (res.error?.status === 409 || res.error?.motivo === 'alias_en_uso') {
+        const aliasCerrado = obtenerSesionCerrada();
+        if (aliasCerrado) {
+          setNombre(nombreSugerido(nombre || aliasCerrado));
+        }
+      }
     }
   };
 
@@ -334,12 +355,20 @@ function Inicio() {
                       aria-live="polite"
                       className="mt-2 rounded-xl bg-primario/10 border border-primario/30 p-3 space-y-1"
                     >
-                      <p className="text-xs font-bold text-primario-texto">
-                        {error.mensaje}
-                      </p>
-                      <p className="text-xs text-texto-suave">
-                        Prueba con otro nombre o agrega una inicial
-                      </p>
+                      {aliasSesionCerrada ? (
+                        <p className="text-xs font-bold text-primario-texto">
+                          {`Tu sesión anterior se cerró. Ese nombre sigue reservado en la mesa; elige otro (por ejemplo, ${nombreSugerido(nombre || aliasSesionCerrada)}).`}
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-xs font-bold text-primario-texto">
+                            {error.mensaje}
+                          </p>
+                          <p className="text-xs text-texto-suave">
+                            Prueba con otro nombre o agrega una inicial
+                          </p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

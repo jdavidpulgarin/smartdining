@@ -15,6 +15,9 @@ import {
   validarNombre,
   borrarSesionDeStorages,
   leerSesionAlmacenada,
+  guardarSesionCerrada,
+  borrarSesionCerrada,
+  esMotivo401,
 } from '../utils/sesion';
 import { CLAVE_ULTIMO_PEDIDO } from '../utils/seguimiento';
 
@@ -114,7 +117,13 @@ export function SesionProvider({ children }) {
   const cerrarSesion = useCallback((motivo = null) => {
     setState((prev) => {
       const idMesaActual = prev.sesion?.idMesa;
+      const comensalActual = prev.sesion?.comensal;
       borrarSesionDeStorages();
+      if (comensalActual && esMotivo401(motivo)) {
+        guardarSesionCerrada(comensalActual);
+      } else {
+        borrarSesionCerrada();
+      }
       try {
         sessionStorage.removeItem(CLAVE_ULTIMO_PEDIDO);
       } catch {
@@ -222,6 +231,7 @@ export function SesionProvider({ children }) {
 
       try {
         const respuesta = await crearSesion(tokenQr, validacion.nombre);
+        borrarSesionCerrada();
         const aliasJwt = aliasDelToken(respuesta.token);
         const comensalFinal =
           aliasJwt || respuesta.comensal || validacion.nombre;

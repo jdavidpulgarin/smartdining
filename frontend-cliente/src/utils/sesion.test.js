@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   CLAVE_SESION,
+  CLAVE_SESION_CERRADA,
   leerExpiracionJwt,
   validarNombre,
   obtenerSesion,
@@ -8,6 +9,11 @@ import {
   migrarSesionStorage,
   leerSesionAlmacenada,
   decidirDestinoInicio,
+  nombreSugerido,
+  obtenerSesionCerrada,
+  guardarSesionCerrada,
+  borrarSesionCerrada,
+  esMotivo401,
 } from './sesion';
 
 function crearJwtPrueba(payloadObj) {
@@ -250,5 +256,80 @@ describe('decidirDestinoInicio', () => {
       tienePedidosActivos: false,
     });
     expect(res).toEqual({ accion: 'confirmar_reutilizar', mesaQr: null });
+  });
+});
+
+describe('nombreSugerido', () => {
+  it('agrega sufijo " 2" si el alias no termina en numero', () => {
+    expect(nombreSugerido('Juan')).toBe('Juan 2');
+    expect(nombreSugerido('Carlos')).toBe('Carlos 2');
+    expect(nombreSugerido('Ana Maria')).toBe('Ana Maria 2');
+  });
+
+  it('incrementa el numero si el alias ya termina en numero', () => {
+    expect(nombreSugerido('Juan 2')).toBe('Juan 3');
+    expect(nombreSugerido('Juan 3')).toBe('Juan 4');
+    expect(nombreSugerido('Juan 9')).toBe('Juan 10');
+    expect(nombreSugerido('Ana Maria 5')).toBe('Ana Maria 6');
+  });
+
+  it('retorna cadena vacia si el alias es invalido o vacio', () => {
+    expect(nombreSugerido('')).toBe('');
+    expect(nombreSugerido('   ')).toBe('');
+    expect(nombreSugerido(null)).toBe('');
+    expect(nombreSugerido(undefined)).toBe('');
+    expect(nombreSugerido(123)).toBe('');
+  });
+});
+
+describe('guardarSesionCerrada, obtenerSesionCerrada y borrarSesionCerrada', () => {
+  it('guarda, lee y borra la marca de sesion cerrada en sessionStorage', () => {
+    const mockStorage = {
+      data: {},
+      getItem(k) {
+        return this.data[k] || null;
+      },
+      setItem(k, v) {
+        this.data[k] = String(v);
+      },
+      removeItem(k) {
+        delete this.data[k];
+      },
+    };
+
+    expect(obtenerSesionCerrada(mockStorage)).toBeNull();
+
+    guardarSesionCerrada('Juan', mockStorage);
+    expect(mockStorage.data[CLAVE_SESION_CERRADA]).toBe('Juan');
+    expect(obtenerSesionCerrada(mockStorage)).toBe('Juan');
+
+    borrarSesionCerrada(mockStorage);
+    expect(mockStorage.data[CLAVE_SESION_CERRADA]).toBeUndefined();
+    expect(obtenerSesionCerrada(mockStorage)).toBeNull();
+  });
+});
+
+describe('esMotivo401', () => {
+  it('identifica motivos tipicos de 401 como verdaderos', () => {
+    expect(esMotivo401(401)).toBe(true);
+    expect(esMotivo401('401')).toBe(true);
+    expect(esMotivo401('sesion_invalida')).toBe(true);
+    expect(esMotivo401('TOKEN_INVALIDO')).toBe(true);
+    expect(esMotivo401('token_invalido')).toBe(true);
+    expect(esMotivo401('token_vencido')).toBe(true);
+    expect(esMotivo401('expirado')).toBe(true);
+    expect(esMotivo401('auth_requerida')).toBe(true);
+    expect(esMotivo401('no_autorizado')).toBe(true);
+  });
+
+  it('identifica liberacion de mesa, cierre manual o valores nulos como falsos', () => {
+    expect(esMotivo401('mesa:liberada')).toBe(false);
+    expect(esMotivo401('liberada')).toBe(false);
+    expect(esMotivo401('pagada')).toBe(false);
+    expect(esMotivo401('MESA_LIBERADA')).toBe(false);
+    expect(esMotivo401('manual')).toBe(false);
+    expect(esMotivo401(null)).toBe(false);
+    expect(esMotivo401(undefined)).toBe(false);
+    expect(esMotivo401('')).toBe(false);
   });
 });

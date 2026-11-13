@@ -7,6 +7,88 @@ import {
 } from './seguimiento';
 
 export const CLAVE_SESION = 'smartdining_sesion';
+export const CLAVE_SESION_CERRADA = 'smartdining_sesion_cerrada';
+
+/**
+ * Sugiere el siguiente nombre disponible agregando o incrementando un sufijo numérico.
+ * Ejemplo: "Juan" -> "Juan 2", "Juan 2" -> "Juan 3".
+ *
+ * @param {string} alias
+ * @returns {string}
+ */
+export function nombreSugerido(alias) {
+  if (typeof alias !== 'string') return '';
+  const trimmed = alias.trim();
+  if (!trimmed) return '';
+
+  const match = trimmed.match(/^(.*?)(?:\s+(\d+))$/);
+  if (match && match[1]) {
+    const base = match[1];
+    const num = parseInt(match[2], 10);
+    return `${base} ${num + 1}`;
+  }
+  return `${trimmed} 2`;
+}
+
+export function obtenerSesionCerrada(
+  storage = typeof window !== 'undefined' ? window.sessionStorage : null
+) {
+  try {
+    const s =
+      storage ||
+      (typeof window !== 'undefined' ? window.sessionStorage : null) ||
+      globalThis.sessionStorage;
+    return s?.getItem(CLAVE_SESION_CERRADA) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function guardarSesionCerrada(
+  alias,
+  storage = typeof window !== 'undefined' ? window.sessionStorage : null
+) {
+  try {
+    const s =
+      storage ||
+      (typeof window !== 'undefined' ? window.sessionStorage : null) ||
+      globalThis.sessionStorage;
+    if (alias && s) {
+      s.setItem(CLAVE_SESION_CERRADA, String(alias));
+    }
+  } catch {
+    // Ignorar si sessionStorage no está disponible
+  }
+}
+
+export function borrarSesionCerrada(
+  storage = typeof window !== 'undefined' ? window.sessionStorage : null
+) {
+  try {
+    const s =
+      storage ||
+      (typeof window !== 'undefined' ? window.sessionStorage : null) ||
+      globalThis.sessionStorage;
+    s?.removeItem(CLAVE_SESION_CERRADA);
+  } catch {
+    // Ignorar si sessionStorage no está disponible
+  }
+}
+
+export function esMotivo401(motivo) {
+  if (!motivo) return false;
+  if (motivo === 401 || motivo === '401') return true;
+  const str = String(motivo).toLowerCase();
+  return (
+    str === 'sesion_invalida' ||
+    str === 'token_invalido' ||
+    str === 'token_vencido' ||
+    str === 'expirado' ||
+    str === 'auth_requerida' ||
+    str === 'token_expirado' ||
+    str === 'no_autorizado'
+  );
+}
 
 const REGEX_CARACTERES_PERMITIDOS = /^[\p{L}\p{N}\s._'-]+$/u;
 const REGEX_AL_MENOS_ALFANUMERICO = /[\p{L}\p{N}]/u;
@@ -214,6 +296,10 @@ export function leerSesionAlmacenada(
 
     const expMs = leerExpiracionJwt(datos.token);
     if (expMs !== null && expMs <= Date.now()) {
+      const aliasVencido = aliasDelToken(datos.token) || datos.comensal;
+      if (aliasVencido) {
+        guardarSesionCerrada(aliasVencido, session);
+      }
       borrarSesionDeStorages(local, session);
       return null;
     }
@@ -256,6 +342,10 @@ export function obtenerSesion(
     }
     const expMs = leerExpiracionJwt(parsed.token);
     if (expMs !== null && expMs <= Date.now()) {
+      const aliasVencido = aliasDelToken(parsed.token) || parsed.comensal;
+      if (aliasVencido) {
+        guardarSesionCerrada(aliasVencido, session);
+      }
       borrarSesionDeStorages(local, session);
       return null;
     }
