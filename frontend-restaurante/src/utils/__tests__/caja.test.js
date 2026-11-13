@@ -9,6 +9,9 @@ import {
   descartarIdCobro,
   agruparCobros,
   horaBogota,
+  usaVoucher,
+  normalizarVoucher,
+  voucherDelCobro,
 } from '../caja'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -83,5 +86,53 @@ describe('utils/caja', () => {
     for (const err of [{ sinConexion: true }, { motivo: 'excede' }, { motivo: 'sin_cuenta' }, {}, null]) {
       expect(descartarIdCobro(err)).toBe(false)
     }
+  })
+})
+
+describe('utils/caja: voucher del datáfono (script 35)', () => {
+  it('usaVoucher: solo tarjeta débito y crédito', () => {
+    expect(['tarjeta_debito', 'tarjeta_credito', 'efectivo', 'transferencia', undefined].map(usaVoucher))
+      .toEqual([true, true, false, false, false])
+  })
+
+  it('normalizarVoucher: recorta los extremos (también U+00A0) y pasa a mayúsculas', () => {
+    expect(normalizarVoucher('  ap-948 ')).toBe('AP-948')
+    expect(normalizarVoucher(null)).toBe('')
+  })
+
+  it('voucherDelCobro: con tarjeta va normalizado; vacío es null', () => {
+    expect(voucherDelCobro('tarjeta_credito', ' ab-12 ')).toEqual({ voucher: 'AB-12' })
+    expect(voucherDelCobro('tarjeta_debito', '   ')).toEqual({ voucher: null })
+    expect(voucherDelCobro('tarjeta_debito', 'A'.repeat(40))).toEqual({ voucher: 'A'.repeat(40) })
+  })
+
+  it('voucherDelCobro: con efectivo o transferencia nunca se manda, aunque el campo tenga algo', () => {
+    expect(voucherDelCobro('efectivo', 'AB-12')).toEqual({ voucher: null })
+    expect(voucherDelCobro('transferencia', 'esto no vale')).toEqual({ voucher: null })
+  })
+
+  it('voucherDelCobro: fuera del formato del contrato es error (espacios internos, símbolos, más de 40)', () => {
+    for (const malo of ['AB 12', 'AB_12', 'Ñ1', 'A'.repeat(41), 'AB/12']) {
+      expect(voucherDelCobro('tarjeta_credito', malo).error).toMatch(/letras, números y guiones/)
+    }
+  })
+
+  it('el voucher no cambia la clave del cobro: corregirlo tras un error de red no cobra dos veces', () => {
+    const datos = { id_mesa: 1, comensal: null, monto: 1000, metodo_pago: 'tarjeta_credito' }
+    const p = idCobroParaEnviar(null, datos, () => 'id-1')
+    expect(idCobroParaEnviar(p, { ...datos, voucher: 'OTRO' }, () => 'id-2').id_cobro).toBe('id-1')
+  })
+
+  it('mensajeDeErrorCobro: voucher_invalido y voucher_no_aplica', () => {
+    expect(mensajeDeErrorCobro({ motivo: 'voucher_invalido' })).toMatch(/No se cobró.*letras, números y guiones/)
+    expect(mensajeDeErrorCobro({ motivo: 'voucher_no_aplica' })).toMatch(/solo va con tarjeta/)
+  })
+
+  it('agruparCobros: el voucher sale una vez por cobro', () => {
+    const t = (id, voucher) => ({ id_transaccion: id, numero_mesa: 4, monto: 1000, metodo_pago: 'tarjeta_credito', comensal: null, voucher, fecha: '2026-11-11T20:00:00Z', referencia_pago: 'caja:v' })
+    const g = agruparCobros([t(2, 'AB-12'), t(1, 'AB-12')])
+    expect(g).toHaveLength(1)
+    expect(g[0]).toMatchObject({ ids: [1, 2], voucher: 'AB-12', monto: 2000 })
+    expect(agruparCobros([{ ...t(5, undefined), referencia_pago: null }])[0].voucher).toBeNull()
   })
 })

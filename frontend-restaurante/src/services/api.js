@@ -595,20 +595,24 @@ export const transaccionesApi = {
    * El backend reparte el monto entre los pedidos de la mesa, del más viejo al
    * más nuevo. `id_cobro` (UUID) se genera una vez por cobro y se repite en los
    * reintentos: con el mismo id_cobro no se cobra dos veces (200 { duplicado }).
-   * @param {{ id_mesa: number, monto: number, metodo_pago: string, comensal?: string|null, id_cobro: string }} datos
-   * @returns {Promise<{ duplicado: boolean, saldo_restante: number, mesa_liberada?: boolean, pagados?: number[], transacciones?: Array<{ id_transaccion: number, id_pedido: number, monto: number, comensal: string|null }> }>}
+   * `voucher` (script 35): el comprobante del datáfono, solo con tarjeta. Si es
+   * null o no viene, el campo no se manda.
+   * @param {{ id_mesa: number, monto: number, metodo_pago: string, comensal?: string|null, id_cobro: string, voucher?: string|null }} datos
+   * @returns {Promise<{ duplicado: boolean, saldo_restante: number, mesa_liberada?: boolean, pagados?: number[], transacciones?: Array<{ id_transaccion: number, id_pedido: number, monto: number, comensal: string|null, voucher: string|null }> }>}
    */
-  async cobrarMesa({ id_mesa, monto, metodo_pago, comensal = null, id_cobro }) {
+  async cobrarMesa({ id_mesa, monto, metodo_pago, comensal = null, id_cobro, voucher = null }) {
+    const cuerpo = { id_mesa, monto, metodo_pago, comensal, id_cobro }
+    if (voucher) cuerpo.voucher = voucher
     return apiFetch('/transacciones/mesa', {
       method: 'POST',
-      body: JSON.stringify({ id_mesa, monto, metodo_pago, comensal, id_cobro }),
+      body: JSON.stringify(cuerpo),
     })
   },
 
   /**
    * Lo cobrado en el día (admin/cajero): GET /api/transacciones?desde=hoy (#158).
    * El "hoy" lo calcula el backend en hora de Bogotá; solo trae las completadas.
-   * @returns {Promise<{ desde: string, hasta: string, total: number, cantidad: number, transacciones: Array<{ id_transaccion: number, id_pedido: number, codigo_pedido: string, id_mesa: number, numero_mesa: number, monto: number, metodo_pago: string, comensal: string|null, fecha: string, referencia_pago: string|null }> }>}
+   * @returns {Promise<{ desde: string, hasta: string, total: number, cantidad: number, transacciones: Array<{ id_transaccion: number, id_pedido: number, codigo_pedido: string, id_mesa: number, numero_mesa: number, monto: number, metodo_pago: string, comensal: string|null, voucher: string|null, fecha: string, referencia_pago: string|null }> }>}
    */
   async delDia(desde = 'hoy') {
     return apiFetch(`/transacciones?desde=${encodeURIComponent(desde)}`)

@@ -395,6 +395,96 @@ describe('Caja: acceso por rol', () => {
   })
 })
 
+describe('Caja: voucher del datáfono (script 35)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.clear()
+    sesionComo('cajero')
+  })
+
+  const confirmado = (voucher) => json({
+    duplicado: false, saldo_restante: 0, mesa_liberada: true, pagados: [10, 11],
+    transacciones: [
+      { id_transaccion: 61, id_pedido: 10, monto: 30000, comensal: null, voucher },
+      { id_transaccion: 62, id_pedido: 11, monto: 30000, comensal: null, voucher },
+    ],
+  }, 201)
+
+  async function elegirMesa1YTarjeta(voucher) {
+    await waitFor(() => expect(screen.getByText('Mesa 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Mesa 1'))
+    fireEvent.click(screen.getByRole('button', { name: /T. CRÉDITO/ }))
+    if (voucher !== undefined) {
+      fireEvent.change(screen.getByLabelText(/voucher/i), { target: { value: voucher } })
+    }
+  }
+
+  it('con tarjeta: el campo queda en mayúsculas (máx. 40), va normalizado y el recibo muestra el que guardó el backend', async () => {
+    const { cobros } = backend({ cobro: () => confirmado('AP-948') })
+    montar()
+    await elegirMesa1YTarjeta(' ap-948 ')
+    const campo = screen.getByLabelText(/voucher/i)
+    expect(campo).toHaveValue(' AP-948 ')
+    expect(campo).toHaveAttribute('maxLength', '40')
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(screen.getByText('Pago Procesado con Éxito')).toBeInTheDocument())
+    expect(cobros[0]).toEqual({
+      id_mesa: 1, monto: 60000, metodo_pago: 'tarjeta_credito', comensal: null,
+      id_cobro: expect.stringMatching(UUID), voucher: 'AP-948',
+    })
+    expect(screen.getByRole('dialog')).toHaveTextContent(/Voucher: AP-948/)
+  })
+
+  it('con tarjeta y sin voucher: no se manda el campo', async () => {
+    const { cobros } = backend({ cobro: () => confirmado(null) })
+    montar()
+    await elegirMesa1YTarjeta('   ')
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(cobros).toHaveLength(1))
+    expect(cobros[0]).not.toHaveProperty('voucher')
+    await waitFor(() => expect(screen.getByRole('dialog')).not.toHaveTextContent(/Voucher/))
+  })
+
+  it('escrito con tarjeta y después cambiado a efectivo: el voucher NO viaja', async () => {
+    const { cobros } = backend({ cobro: () => confirmado(null) })
+    montar()
+    await elegirMesa1YTarjeta('AB-12')
+    fireEvent.click(screen.getByRole('button', { name: /EFECTIVO/ }))
+    fireEvent.change(screen.getByLabelText(/efectivo recibido/i), { target: { value: '60000' } })
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(cobros).toHaveLength(1))
+    expect(cobros[0]).not.toHaveProperty('voucher')
+    expect(cobros[0].metodo_pago).toBe('efectivo')
+  })
+
+  it('formato inválido (espacio interno o símbolo): aviso y ningún envío', async () => {
+    const { cobros } = backend()
+    montar()
+    await elegirMesa1YTarjeta('AB 12')
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/letras, números y guiones/))
+    expect(cobros).toHaveLength(0)
+  })
+
+  it('400 voucher_invalido del backend: mensaje claro y sin recibo', async () => {
+    backend({ cobro: () => json({ error: 'El voucher solo admite letras', motivo: 'voucher_invalido' }, 400) })
+    montar()
+    await elegirMesa1YTarjeta('AB-12')
+    fireEvent.click(screen.getByRole('button', { name: /^cobrar/i }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/No se cobró: el voucher/))
+    expect(screen.queryByText('Pago Procesado con Éxito')).not.toBeInTheDocument()
+  })
+
+  it('el Historial muestra el voucher una vez por cobro', async () => {
+    const conVoucher = (id) => ({ ...fila(id, 4, 3000, 'caja:v'), metodo_pago: 'tarjeta_credito', voucher: 'AB-12' })
+    backend({ dia: { desde: '2026-11-11', hasta: '2026-11-11', total: 9000, cantidad: 3, transacciones: [conVoucher(2), conVoucher(1), fila(3, 2, 3000, 'caja:e')] } })
+    montar()
+    await waitFor(() => expect(screen.getByTestId('recaudado-hoy')).toHaveTextContent(/9.000/))
+    fireEvent.click(screen.getByRole('button', { name: /HISTORIAL DE PAGOS/ }))
+    expect(screen.getAllByText('Voucher AB-12')).toHaveLength(1)
+  })
+})
+
 describe('transaccionesApi', () => {
   beforeEach(() => vi.restoreAllMocks())
 
@@ -405,6 +495,15 @@ describe('transaccionesApi', () => {
     expect(spy.mock.calls[0][0]).toMatch(/\/transacciones\/mesa$/)
     expect(spy.mock.calls[0][1].method).toBe('POST')
     expect(JSON.parse(spy.mock.calls[0][1].body)).toEqual({ id_mesa: 3, monto: 1.15, metodo_pago: 'transferencia', comensal: null, id_cobro: 'x' })
+  })
+
+  it('cobrarMesa: con voucher lo agrega como sexto campo; null no se manda', async () => {
+    const spy = vi.spyOn(global, 'fetch').mockResolvedValue(json({ duplicado: false }, 201))
+    const { transaccionesApi } = await import('../../services/api')
+    await transaccionesApi.cobrarMesa({ id_mesa: 3, monto: 5, metodo_pago: 'tarjeta_debito', id_cobro: 'x', voucher: 'AB-12' })
+    await transaccionesApi.cobrarMesa({ id_mesa: 3, monto: 5, metodo_pago: 'tarjeta_debito', id_cobro: 'y', voucher: null })
+    expect(JSON.parse(spy.mock.calls[0][1].body)).toEqual({ id_mesa: 3, monto: 5, metodo_pago: 'tarjeta_debito', comensal: null, id_cobro: 'x', voucher: 'AB-12' })
+    expect(JSON.parse(spy.mock.calls[1][1].body)).not.toHaveProperty('voucher')
   })
 
   it('H-07: registrarPago omite cualquier estado_transaccion distinto a "completada"', async () => {
