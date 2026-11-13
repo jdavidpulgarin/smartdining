@@ -1,9 +1,10 @@
-import { Clock, FileText, LoaderCircle } from 'lucide-react'
+import { Ban, Clock, FileText, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import {
   comensalesDeComanda,
   debeEsperarConexion,
   ingredientesPorPaso,
+  lineaCancelada,
   siguientePaso,
 } from '../lib/comandas'
 import { minutosDesdeCreacion, senalDeEsperaDeComanda, textoDeEspera } from '../lib/espera'
@@ -185,34 +186,54 @@ export default function ComandaCard({ comanda, ahora, conectado = true, onAvanza
       )}
 
       <ul className="mt-3 space-y-3 border-t border-[color:var(--color-borde)] pt-3">
-        {comanda.items.map((item, indice) => (
-          <li key={item.id_detalle ?? `${comanda.id_pedido}-${indice}`}>
-            <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-              <div className="flex flex-wrap items-baseline gap-2">
-                <span className="display text-2xl font-bold text-[color:var(--color-marca)] tabular-nums">
-                  {item.cantidad}×
-                </span>
-                <span className="display text-2xl font-bold leading-tight">
-                  {item.plato_nombre || 'Plato sin nombre'}
-                </span>
+        {comanda.items.map((item, indice) => {
+          // Una linea cancelada (D-13 / #180) se ve TACHADA, igual en vivo que al
+          // recargar (ver lineaCancelada). Sin ingredientes ni notas: ya no hay
+          // nada que preparar, solo dejar constancia de que se quito.
+          const cancelada = lineaCancelada(item)
+          return (
+            <li
+              key={item.id_detalle ?? `${comanda.id_pedido}-${indice}`}
+              className={cancelada ? 'opacity-60' : undefined}
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                <div className={`flex flex-wrap items-baseline gap-2 ${cancelada ? 'line-through' : ''}`}>
+                  <span
+                    className={`display text-2xl font-bold tabular-nums ${
+                      cancelada ? 'text-[color:var(--color-texto-suave)]' : 'text-[color:var(--color-marca)]'
+                    }`}
+                  >
+                    {item.cantidad}×
+                  </span>
+                  <span className="display text-2xl font-bold leading-tight">
+                    {item.plato_nombre || 'Plato sin nombre'}
+                  </span>
+                </div>
+                {cancelada ? (
+                  <span className="flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-[color:var(--color-alerta)]">
+                    <Ban size={14} aria-hidden="true" />
+                    Cancelado
+                  </span>
+                ) : (
+                  item.comensal && (
+                    <span className="text-base text-[color:var(--color-texto-suave)]">
+                      {item.comensal}
+                    </span>
+                  )
+                )}
               </div>
-              {item.comensal && (
-                <span className="text-base text-[color:var(--color-texto-suave)]">
-                  {item.comensal}
-                </span>
+
+              {!cancelada && <Ingredientes item={item} />}
+
+              {!cancelada && item.notas_especiales && (
+                <p className="mt-2 flex items-start gap-2 rounded-lg border border-[color:var(--color-preparacion)] p-2 text-base font-semibold text-[color:var(--color-preparacion)]">
+                  <FileText size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  <span>{item.notas_especiales}</span>
+                </p>
               )}
-            </div>
-
-            <Ingredientes item={item} />
-
-            {item.notas_especiales && (
-              <p className="mt-2 flex items-start gap-2 rounded-lg border border-[color:var(--color-preparacion)] p-2 text-base font-semibold text-[color:var(--color-preparacion)]">
-                <FileText size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
-                <span>{item.notas_especiales}</span>
-              </p>
-            )}
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ul>
 
       {comanda.items.length === 0 && (
