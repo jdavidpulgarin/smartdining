@@ -17,6 +17,15 @@ const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina'];
 const ROL_COMENSAL = 'comensal';
 
 /**
+ * Motivos de los 401 y 403 de este middleware. Solo se AGREGAN al `error` de
+ * siempre (D-19): la PWA, el panel y el KDS siguen leyendo `error`.
+ */
+const MOTIVO_NO_AUTENTICADO = 'no_autenticado';
+const MOTIVO_PROHIBIDO = 'prohibido';
+
+const no401 = (res, error) => res.status(401).json({ error, motivo: MOTIVO_NO_AUTENTICADO });
+
+/**
  * Único algoritmo con el que este backend firma y acepta sus JWT.
  *
  * Se declara en `jwt.verify` en vez de dejar que la librería acepte cualquiera
@@ -47,7 +56,7 @@ async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token no proporcionado' });
+    return no401(res, 'Token no proporcionado');
   }
 
   const token = authHeader.split(' ')[1];
@@ -56,7 +65,7 @@ async function requireAuth(req, res, next) {
   try {
     payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: [ALGORITMO_JWT] });
   } catch (err) {
-    return res.status(401).json({ error: 'Token inválido o expirado' });
+    return no401(res, 'Token inválido o expirado');
   }
 
   req.user = payload;
@@ -68,7 +77,7 @@ async function requireAuth(req, res, next) {
     // Redis para no añadir una consulta por llamada (ver usuario-activo.js).
     try {
       if (!(await usuarioActivo.estaActivo(payload.id_usuario))) {
-        return res.status(401).json({ error: MENSAJE_CUENTA_INACTIVA });
+        return no401(res, MENSAJE_CUENTA_INACTIVA);
       }
     } catch (err) {
       // Si la base no responde no se deja pasar a ciegas: falla cerrada, igual
@@ -80,7 +89,7 @@ async function requireAuth(req, res, next) {
 
   try {
     if (!(await sesionDeMesaVigente(payload))) {
-      return res.status(401).json({ error: MENSAJE_SESION_CERRADA });
+      return no401(res, MENSAJE_SESION_CERRADA);
     }
   } catch (err) {
     // Un fallo de base de datos no debe dejar pasar una sesión sin comprobar.
@@ -120,7 +129,7 @@ async function sesionDeMesaVigente({ id_mesa, sid }) {
 function requireRole(...rolesPermitidos) {
   return (req, res, next) => {
     if (!req.user || !rolesPermitidos.includes(req.user.rol)) {
-      return res.status(403).json({ error: 'No tienes permisos para esta acción' });
+      return res.status(403).json({ error: 'No tienes permisos para esta acción', motivo: MOTIVO_PROHIBIDO });
     }
     next();
   };
@@ -139,6 +148,8 @@ module.exports = {
   ALGORITMO_JWT,
   ROLES_STAFF,
   ROL_COMENSAL,
+  MOTIVO_NO_AUTENTICADO,
+  MOTIVO_PROHIBIDO,
   MENSAJE_SESION_CERRADA,
   MENSAJE_CUENTA_INACTIVA,
 };

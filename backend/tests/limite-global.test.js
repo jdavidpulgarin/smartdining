@@ -91,7 +91,7 @@ test('d-21: al pasarse del limite responde 429 con el error de siempre', async (
   const res = await request(app).get('/api/menu');
 
   assert.strictEqual(res.status, 429);
-  assert.deepStrictEqual(res.body, { error: MENSAJE_GLOBAL });
+  assert.deepStrictEqual(res.body, { error: MENSAJE_GLOBAL, motivo: 'demasiadas_peticiones' });
 });
 
 test('d-21: el 429 trae Retry-After, para que el cliente sepa cuanto esperar', async () => {
@@ -107,13 +107,15 @@ test('d-21: el 429 trae Retry-After, para que el cliente sepa cuanto esperar', a
 
 test('el cuerpo del 429 tiene la MISMA forma que el de los otros limitadores', async () => {
   // Un cliente que ya sabe leer un 429 del login no tiene que aprender otro
-  // formato para el global: los tres son { error: "..." }.
+  // formato para el global: los tres son { error: "...", motivo:
+  // "demasiadas_peticiones" } (el motivo se agregó en la D-19).
   const app = appGlobal({ RATE_LIMIT_GLOBAL_MAX: '1' });
   await request(app).get('/api/menu');
   const res = await request(app).get('/api/menu');
 
-  assert.deepStrictEqual(Object.keys(res.body), ['error']);
+  assert.deepStrictEqual(Object.keys(res.body), ['error', 'motivo']);
   assert.strictEqual(typeof res.body.error, 'string');
+  assert.strictEqual(res.body.motivo, 'demasiadas_peticiones');
   assert.notStrictEqual(res.body.error, MENSAJE_LOGIN, 'el mensaje es el suyo, no el del login');
   assert.notStrictEqual(res.body.error, MENSAJE_QR);
 });

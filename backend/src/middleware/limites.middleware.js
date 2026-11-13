@@ -39,12 +39,15 @@ const MENSAJE_QR =
 const MENSAJE_GLOBAL =
   'Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo.';
 
+/** Motivo de todos los 429 (D-19): se AGREGA al `error` de siempre. */
+const MOTIVO_429 = 'demasiadas_peticiones';
+
 /**
  * Respuesta del 429. express-rate-limit ya pone Retry-After; aquí solo se da
- * un cuerpo con la misma forma que el resto de errores de la API ({ error }).
+ * el cuerpo, `{ error, motivo }` como el resto de errores con motivo.
  */
 function responder429(mensaje) {
-  return (req, res) => res.status(429).json({ error: mensaje });
+  return (req, res) => res.status(429).json({ error: mensaje, motivo: MOTIVO_429 });
 }
 
 /**
@@ -181,6 +184,7 @@ module.exports = {
   crearLimitadorLogin,
   crearLimitadorQr,
   crearLimitadorGlobal,
+  MOTIVO_429,
   enPruebas,
   entero,
   rutaExenta,
