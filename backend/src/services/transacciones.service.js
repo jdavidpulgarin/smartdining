@@ -375,6 +375,10 @@ async function repartirPagoDeMesa(client, {
   metodo_pago,
   id_usuario,
   observacion,
+  // Script 35: el voucher del datáfono, ya normalizado por el controller (o
+  // null). El MISMO en todas las filas del cobro. Un reintento con la misma
+  // referencia sale antes (duplicado) y no lo toca: se queda el del primero.
+  voucher = null,
 }) {
   // La fila de la mesa se bloquea de entrada: dos webhooks de Wompi para la
   // misma mesa (o un webhook y un cobro en caja) se serializan, así no se
@@ -438,15 +442,16 @@ async function repartirPagoDeMesa(client, {
     // Tipos explícitos en cada parámetro: un mismo $N, siempre el mismo tipo.
     const fila = await client.query(
       `INSERT INTO transacciones
-        (id_pedido, metodo_pago, monto, estado_transaccion, referencia_externa, comensal, creado_en)
-       VALUES ($1::int, $2::text, ($3::bigint)::numeric / 100, 'completada', $4::text, $5::text, NOW())
-       RETURNING id_transaccion, id_pedido, monto, comensal`,
+        (id_pedido, metodo_pago, monto, estado_transaccion, referencia_externa, comensal, voucher, creado_en)
+       VALUES ($1::int, $2::text, ($3::bigint)::numeric / 100, 'completada', $4::text, $5::text, $6::varchar, NOW())
+       RETURNING id_transaccion, id_pedido, monto, comensal, voucher`,
       [
         pedido.id_pedido,
         metodo_pago,
         aplicado,
         referenciaDeFila(referencia_externa, filas),
         comensal,
+        voucher,
       ]
     );
     filas += 1;
@@ -458,6 +463,7 @@ async function repartirPagoDeMesa(client, {
       id_pedido: t.id_pedido ?? pedido.id_pedido,
       monto_centavos: aplicado,
       comensal: t.comensal ?? comensal ?? null,
+      voucher: t.voucher ?? voucher ?? null,
     });
 
     // Un pedido se liquida solo si quedó en cero Y ya está entregado: el
@@ -577,7 +583,9 @@ async function registrarPagoInterno({
  * referencias y su idempotencia (el reintento con el mismo id_cobro no cobra),
  * sin chocar nunca con una de Wompi.
  */
-async function cobrarMesaEnCaja({ id_mesa, monto_centavos, metodo_pago, comensal = null, id_cobro, id_usuario }) {
+async function cobrarMesaEnCaja({
+  id_mesa, monto_centavos, metodo_pago, comensal = null, id_cobro, id_usuario, voucher = null,
+}) {
   const r = await cobrarMesa({
     referencia_externa: PREFIJO_REFERENCIA_CAJA + id_cobro,
     id_mesa,
@@ -586,6 +594,7 @@ async function cobrarMesaEnCaja({ id_mesa, monto_centavos, metodo_pago, comensal
     metodo_pago,
     id_usuario,
     observacion: OBSERVACION_PAGO_EN_CAJA,
+    voucher,
   });
   // Un id_cobro ya usado en OTRA mesa no es un reintento de este cobro: si se
   // contestara "duplicado", la caja creería que cobró sin haber cobrado nada.
@@ -683,7 +692,7 @@ async function listarDelDia({ desde = DESDE_HOY, zona = ZONA, ahora = null } = {
      ),
      filas AS (
        SELECT t.id_transaccion, t.id_pedido, p.codigo_pedido, p.id_mesa, m.numero AS numero_mesa,
-              t.monto, t.metodo_pago, t.comensal, t.creado_en, t.referencia_externa
+              t.monto, t.metodo_pago, t.comensal, t.voucher, t.creado_en, t.referencia_externa
          FROM transacciones t
          JOIN pedidos p ON p.id_pedido = t.id_pedido
          JOIN mesas   m ON m.id_mesa   = p.id_mesa
@@ -710,6 +719,8 @@ async function listarDelDia({ desde = DESDE_HOY, zona = ZONA, ahora = null } = {
                        'monto',          f.monto,
                        'metodo_pago',    f.metodo_pago,
                        'comensal',       f.comensal,
+                       -- Script 35: el voucher del datáfono, o null.
+                       'voucher',        f.voucher,
                        -- Solo para calcular referencia_pago en JS; no sale tal cual.
                        'referencia_externa', f.referencia_externa,
                        'fecha',          to_char(f.creado_en AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')

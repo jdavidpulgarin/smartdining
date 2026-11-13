@@ -121,7 +121,8 @@ for (const rol of ['admin', 'cajero']) {
       assert.strictEqual(res.body.mesa_liberada, true);
       assert.deepStrictEqual(res.body.pagados, [87]);
       assert.deepStrictEqual(res.body.transacciones, [
-        { id_transaccion: 501, id_pedido: 87, monto: 30000, comensal: null },
+        // voucher: script 35; en efectivo siempre null.
+        { id_transaccion: 501, id_pedido: 87, monto: 30000, comensal: null, voucher: null },
       ]);
     } finally {
       db.restaurar();

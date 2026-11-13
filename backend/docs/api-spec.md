@@ -3042,12 +3042,12 @@ Errores, todos **400** `{ "error": "...", "motivo": "consulta_invalida" }`:
     {
       "id_transaccion": 41, "id_pedido": 87, "codigo_pedido": "PED-261110-7K2Q9",
       "id_mesa": 5, "numero_mesa": 5, "monto": 34000, "metodo_pago": "efectivo",
-      "comensal": "Ana", "fecha": "2026-11-11T01:12:40.512Z",
+      "comensal": "Ana", "voucher": null, "fecha": "2026-11-11T01:12:40.512Z",
       "referencia_pago": null
     },
     { "id_transaccion": 40, "id_pedido": 86, "codigo_pedido": "PED-261110-3M8ZT",
       "id_mesa": 2, "numero_mesa": 2, "monto": 24000, "metodo_pago": "tarjeta_debito",
-      "comensal": null, "fecha": "2026-11-10T18:03:11.004Z", "referencia_pago": null }
+      "comensal": null, "voucher": "AB-12", "fecha": "2026-11-10T18:03:11.004Z", "referencia_pago": null }
   ]
 }
 ```
@@ -3062,6 +3062,10 @@ Errores, todos **400** `{ "error": "...", "motivo": "consulta_invalida" }`:
 - `fecha` es el instante en ISO 8601 UTC (`Z`); el cliente lo muestra en su hora local.
 - `comensal` es quien pagó cuando la mesa dividió la cuenta; `null` en un cobro de la mesa
   completa.
+- `voucher` (script 35) es el comprobante del datáfono de un cobro con tarjeta en caja
+  (`POST /transacciones/mesa`), ya normalizado (`AB-12`); `null` en efectivo, transferencia,
+  pago en línea o un cobro con tarjeta sin voucher. Todas las filas de un mismo cobro llevan el
+  mismo. La clave sale siempre, aunque sea `null`.
 - **`referencia_pago`** identifica el **pago** al que pertenece la fila, para agrupar. Un
   pago a la mesa se reparte entre varios pedidos y deja **una fila por pedido**; todas llevan
   el mismo `referencia_pago`. Pasa con los dos pagos de mesa: el de Wompi (la referencia de la
@@ -3576,6 +3580,29 @@ la mesa»; `POST /transacciones` sigue siendo el cobro de **un pedido** concreto
 | `metodo_pago` | Sí | `efectivo`, `tarjeta_debito`, `tarjeta_credito` o `transferencia`. **`online` no**: es solo de Wompi |
 | `comensal` | No | Las mismas reglas que en `POST /transacciones`: texto de 1 a 40, o `null`. Es de quién se descuenta en la cuenta por persona; sin él, el cobro es «de la mesa» |
 | `id_cobro` | Sí | **UUID**. Ver abajo |
+| `voucher` | No | El número del comprobante del **datáfono**, solo con `tarjeta_debito` o `tarjeta_credito`. Texto; `null` o ausente = sin voucher. Ver abajo |
+
+**`voucher` (script 35, `transacciones.voucher VARCHAR(40)`).** El backend lo **normaliza**
+antes de validarlo: `trim()` (también los espacios Unicode, como el de no separación) y
+`toUpperCase()`, así que `"  ab-12 "` se guarda `"AB-12"`. Vacío o solo espacios cuenta como
+**sin voucher** (`null`), con cualquier método. Las comprobaciones van en este orden y la
+primera que falla decide:
+
+1. **Tipo**: ausente o `null` → sin voucher. Cualquier otra cosa que no sea texto (número,
+   booleano, objeto, arreglo) → **400 `voucher_invalido`**.
+2. **Normalización**: `trim()` + mayúsculas; si queda vacío → sin voucher (y se acaba aquí).
+3. **Método**: con contenido y un `metodo_pago` que no es tarjeta (`efectivo`,
+   `transferencia`) → **400 `voucher_no_aplica`**. Va antes que el formato: si el voucher sobra,
+   da igual cómo esté escrito.
+4. **Formato**: tiene que cumplir `^[A-Z0-9-]{1,40}$` (letras sin tilde, números y guiones,
+   hasta 40) → si no, **400 `voucher_invalido`**.
+
+Es la misma regla que el `CHECK ck_transacciones_voucher` de la base, que queda como última
+defensa: efectivo y transferencia nunca mandan voucher a la base. El **mismo voucher va en
+todas las filas** del cobro (una por pedido repartido). Un **reintento** con el mismo
+`id_cobro` responde `duplicado` y **no cambia** el voucher guardado, aunque traiga otro: vale
+el del primer envío. El voucher **no** viaja en los avisos de tiempo real ni se escribe en los
+logs. El resto del cuerpo sigue siendo `.strict()`.
 
 **`id_cobro`: generarlo una vez y reutilizarlo en los reintentos.** La caja genera un UUID v4
 (`crypto.randomUUID()`) **cuando el cajero pulsa «Cobrar»**, no en cada envío, y si la petición
@@ -3620,21 +3647,23 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
   "mesa_liberada": true,
   "pagados": [91, 92],
   "transacciones": [
-    { "id_transaccion": 120, "id_pedido": 91, "monto": 34000, "comensal": null },
-    { "id_transaccion": 121, "id_pedido": 92, "monto": 34000, "comensal": null }
+    { "id_transaccion": 120, "id_pedido": 91, "monto": 34000, "comensal": null, "voucher": "AB-12" },
+    { "id_transaccion": 121, "id_pedido": 92, "monto": 34000, "comensal": null, "voucher": "AB-12" }
   ]
 }
 ```
 
 - `saldo_restante` es el saldo de **la mesa** tras el cobro, en pesos (número). `pagados` son
   los `id_pedido` que pasaron a `pagado` con este cobro. `transacciones`, las filas creadas, con
-  `monto` en pesos.
+  `monto` en pesos y `voucher` ya normalizado (`null` si no hubo).
 
 | Status | Cuerpo | Cuándo |
 |---|---|---|
 | **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró **en esta mesa**: no se cobra ni se avisa otra vez |
 | **409** | `{ "error": "Ese id_cobro ya se usó en otra mesa; genera uno nuevo", "motivo": "id_cobro_en_uso" }` | Ese `id_cobro` ya se usó en **otra** mesa. No se escribe nada |
 | **400** | `{ "error", "motivo": "cuerpo_invalido" }` | Cuerpo inválido (tabla de arriba) |
+| **400** | `{ "error", "motivo": "voucher_invalido" }` | `voucher` no es texto, o tiene caracteres fuera de `A-Z 0-9 -` o más de 40. No se escribe nada |
+| **400** | `{ "error", "motivo": "voucher_no_aplica" }` | `voucher` con contenido y un método que no es tarjeta. No se escribe nada |
 | **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
 | **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
 | **409** | `{ "error", "motivo": "excede", "saldo": 68000 }` | El monto supera el saldo de la mesa (`saldo` en pesos). No se escribe nada |
@@ -3657,7 +3686,10 @@ Un `duplicado` no avisa nada. Si el socket-server no responde, el cobro ya está
 Cobertura: `tests/transacciones-mesa.test.js` (roles, validación, centavos, cada respuesta,
 avisos) y `tests/integracion/transacciones-mesa-sql.test.js` contra PostgreSQL (reparto entre
 pedidos, pago parcial, pedido en cocina, excede, `id_cobro` repetido en serie y a la vez, caja y
-Wompi a la vez, autor inexistente, historial).
+Wompi a la vez, autor inexistente, historial). El voucher: `tests/transacciones-voucher.test.js`
+(normalización, orden de validación, los dos 400, que no viaja en el aviso) y
+`tests/integracion/transacciones-voucher-sql.test.js` (mismo voucher en todas las filas,
+reintento que no lo cambia, efectivo en NULL, `GET /transacciones`).
 
 ### POST /pagos/intentos-fallidos/interno
 
