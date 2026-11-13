@@ -1,7 +1,8 @@
 import { Component } from 'react'
+import Button from './Button'
 
 /**
- * ErrorBoundary con el estilo visual de SmartDining (fondo oscuro, acento y botón rojo).
+ * ErrorBoundary con el estilo visual de SmartDining (fondo oscuro, acento y botón del tema).
  * Captura fallas de render o de carga de componentes perezosos (lazy) y ofrece
  * un botón claro para recargar la aplicación.
  */
@@ -27,7 +28,7 @@ class ErrorBoundary extends Component {
           role="alert"
           className="min-h-screen bg-fondo text-texto flex flex-col items-center justify-center p-6 text-center"
         >
-          <div className="w-16 h-16 rounded-full bg-rojo-marca/10 text-rojo-marca flex items-center justify-center mb-4">
+          <div className="w-16 h-16 rounded-full bg-primario/10 text-primario-texto flex items-center justify-center mb-4">
             <svg
               aria-hidden="true"
               className="w-8 h-8"
@@ -43,19 +44,19 @@ class ErrorBoundary extends Component {
               />
             </svg>
           </div>
-          <h1 className="text-xl font-bold font-marca mb-2 text-texto">
+          <h1 className="text-2xl font-bold font-titulo tracking-wide mb-2 text-texto">
             Algo salió mal al cargar esta pantalla
           </h1>
-          <p className="text-sm font-sans text-texto-suave mb-6 max-w-sm">
+          <p className="text-sm font-cuerpo text-texto-suave mb-6 max-w-sm">
             Puede que haya una versión nueva de la app.
           </p>
-          <button
+          <Button
             type="button"
             onClick={() => window.location.reload()}
-            className="px-6 py-3 bg-rojo-marca hover:bg-rojo-marca/90 text-blanco font-bold rounded-lg shadow-md transition-colors min-h-11"
+            className="px-6 min-h-11"
           >
             Recargar
-          </button>
+          </Button>
         </div>
       )
     }
