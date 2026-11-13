@@ -3215,6 +3215,20 @@ registra el motivo y sigue. Un socket-server caído no hace fallar un pedido ni 
 En `order:created` los ítems se envían con `nombre` (no `plato_nombre`), que es el nombre
 de campo del contrato de Roberto.
 
+Cada ítem lleva además, primero, **`id_detalle`** (entero) y **`estado_item`**
+(`"pendiente"` al crear; `null` solo si la base no lo trajera):
+
+```json
+"items": [
+  { "id_detalle": 512, "id_plato": 3, "estado_item": "pendiente", "nombre": "Hamburguesa Smart Angus",
+    "cantidad": 2, "comensal": "Ana", "notas_especiales": "sin cebolla", "ingredientes": [] }
+]
+```
+
+Los otros comensales de la mesa y el KDS reciben las líneas **solo** por este evento: sin
+`id_detalle` no podían relacionar un `item:cancelado` posterior con su línea y no la
+tachaban hasta recargar.
+
 Cada ingrediente de un ítem va con `id_ingrediente`, `nombre`, `porcion`, `precio_aplicado`
 y **`paso`**, el nombre del paso del constructor al que pertenece:
 

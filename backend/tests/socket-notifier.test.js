@@ -15,6 +15,7 @@ const DETALLES = [
     id_detalle: 1,
     id_pedido: 87,
     id_plato: 3,
+    estado_item: 'pendiente',
     cantidad: 2,
     comensal: 'Ana',
     notas_especiales: 'sin cebolla',
@@ -25,6 +26,7 @@ const DETALLES = [
     id_detalle: 2,
     id_pedido: 87,
     id_plato: 5,
+    estado_item: 'pendiente',
     cantidad: 1,
     comensal: 'Pipe',
     notas_especiales: null,
@@ -94,7 +96,9 @@ test('los items usan "nombre" (formato de Roberto), no "plato_nombre"', async ()
     const { items } = socket.buscar('/internal/order-created').cuerpo.pedido;
     assert.strictEqual(items.length, 2);
     assert.deepStrictEqual(items[0], {
+      id_detalle: 1,
       id_plato: 3,
+      estado_item: 'pendiente',
       nombre: 'Hamburguesa Smart Angus',
       cantidad: 2,
       comensal: 'Ana',
@@ -119,6 +123,39 @@ test('los items usan "nombre" (formato de Roberto), no "plato_nombre"', async ()
     socket.restaurar();
     db.restaurar();
   }
+});
+
+test('cada linea de order:created lleva id_detalle (entero, primero) y estado_item pendiente', async () => {
+  // Los otros comensales y el KDS reciben las lineas solo por este evento: sin
+  // id_detalle no pueden tachar la linea cuando llega item:cancelado.
+  const db = instalarFakeDb(dbCreacionOk);
+  const socket = instalarFakeSocket();
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send(bodyPedido);
+
+    const { items } = socket.buscar('/internal/order-created').cuerpo.pedido;
+    assert.strictEqual(items.length, 2);
+    assert.deepStrictEqual(items.map((i) => i.id_detalle), [1, 2]);
+    for (const item of items) {
+      assert.ok(Number.isInteger(item.id_detalle), 'id_detalle es entero');
+      assert.strictEqual(Object.keys(item)[0], 'id_detalle', 'id_detalle va primero');
+      assert.strictEqual(item.estado_item, 'pendiente');
+    }
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('order:created: estado_item que no llega de la base sale null, no se omite', () => {
+  const { armarPedido } = require('../src/services/socket.notifier');
+  const [item] = armarPedido(PEDIDO, [{ id_detalle: 7, id_plato: 3, cantidad: 1 }]).items;
+  assert.strictEqual(item.id_detalle, 7);
+  assert.ok('estado_item' in item);
+  assert.strictEqual(item.estado_item, null);
 });
 
 test('el nombre del paso viaja en el evento, en el orden del constructor', async () => {
