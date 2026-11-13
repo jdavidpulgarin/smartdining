@@ -5,7 +5,6 @@ import { io } from 'socket.io-client'
 import {
   Wifi,
   Sparkles,
-  RefreshCw,
   Maximize2,
   Minimize2,
   ExternalLink,
@@ -20,7 +19,6 @@ import {
 import { useTables } from '../hooks'
 import {
   solicitarTokenPantalla,
-  notificarQrRotado,
   rotarTokenQrMesa,
   decodificarTokenQr,
 } from '../services/qrService'
@@ -43,12 +41,14 @@ export function PantallaMesa() {
   const tableData = tables?.find((t) => t.id === numMesa || t.number === numMesa)
 
   // Token QR y URL activa de la mesa
-  const [tokenQr, setTokenQr] = useState(() => tableData?.token_qr || `qr-mesa-${numMesa}-demo`)
+  // Sin token real de la mesa NO se inventa uno: el QR esperaría un token que el
+  // backend rechaza. La tablet espera el de qr:actualizado o el de ROTAR QR.
+  const [tokenQr, setTokenQr] = useState(() => tableData?.token_qr || null)
   const [qrUrl, setQrUrl] = useState(() => tableData?.qr_url || '')
   const [prevTableToken, setPrevTableToken] = useState(tableData?.token_qr)
   if (tableData?.token_qr !== prevTableToken) {
     setPrevTableToken(tableData?.token_qr)
-    setTokenQr(tableData?.token_qr || `qr-mesa-${numMesa}-demo`)
+    setTokenQr(tableData?.token_qr || null)
   }
   const [prevTableQrUrl, setPrevTableQrUrl] = useState(tableData?.qr_url)
   if (tableData?.qr_url !== prevTableQrUrl) {
@@ -64,8 +64,6 @@ export function PantallaMesa() {
 
   // Estado del socket exclusivo de la tablet (rol: 'pantalla')
   const [socketStatus, setSocketStatus] = useState('conectando') // 'conectado' | 'reconectando' | 'desconectado'
-  const [socketId, setSocketId] = useState('')
-  const [pantallaToken, setPantallaToken] = useState('')
 
   // Pantalla completa y configuración
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -131,10 +129,12 @@ export function PantallaMesa() {
         if (res?.url) setQrUrl(res.url)
       }
       setSegundosRestantes(ROTACION_INTERVALO)
+      setErrorPantalla('')
       setJustRotated(true)
       setTimeout(() => setJustRotated(false), 2500)
     } catch (err) {
-      console.warn('Error al rotar QR:', err.message)
+      // Visible en la tablet: antes solo iba a la consola y nadie se enteraba.
+      setErrorPantalla(`No se pudo renovar el QR: ${err.message}. Sigue el código anterior; avisa al personal.`)
     } finally {
       setLoadingAction(false)
     }
@@ -177,7 +177,6 @@ export function PantallaMesa() {
       }
       if (isCancelled) return
       setErrorPantalla('')
-      setPantallaToken(cred.token)
 
       // 2. Conectar al socket server con el token emitido
       socket = io(SOCKET_URL, {
@@ -191,7 +190,6 @@ export function PantallaMesa() {
       socket.on('connect', () => {
         if (isCancelled) return
         setSocketStatus('conectado')
-        setSocketId(socket.id)
       })
 
       socket.on('disconnect', () => {
@@ -241,27 +239,6 @@ export function PantallaMesa() {
       document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {})
     } else {
       document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {})
-    }
-  }
-
-  // Rotación manual: la hace el backend (POST /api/mesas/:id/rotar-qr) con el
-  // JWT del personal; la tablet también recibirá qr:actualizado por el socket.
-  const handleSimularRotacion = async () => {
-    setLoadingAction(true)
-    setErrorPantalla('')
-    try {
-      const res = await notificarQrRotado(numMesa)
-      if (res?.token) {
-        setTokenQr(res.token)
-        if (res?.url) setQrUrl(res.url)
-        setSegundosRestantes(ROTACION_INTERVALO)
-        setJustRotated(true)
-        setTimeout(() => setJustRotated(false), 2000)
-      }
-    } catch (err) {
-      setErrorPantalla(`No se pudo rotar el QR: ${err.message}`)
-    } finally {
-      setLoadingAction(false)
     }
   }
 
@@ -443,21 +420,29 @@ export function PantallaMesa() {
 
         {/* QR sobre blanco en el centro */}
         <div className="sd-pantalla-qr-card">
-          <div className="sd-pantalla-qr-white-frame">
-            <QRCodeSVG
-              value={diningUrl}
-              size={260}
-              level="M"
-              includeMargin={false}
-              fgColor="#0a0f1d"
-              bgColor="#ffffff"
-            />
-          </div>
+          {tokenQr ? (
+            <div className="sd-pantalla-qr-white-frame">
+              <QRCodeSVG
+                value={diningUrl}
+                size={260}
+                level="M"
+                includeMargin={false}
+                fgColor="#0a0f1d"
+                bgColor="#ffffff"
+              />
+            </div>
+          ) : (
+            <div className="sd-pantalla-qr-white-frame" role="status" style={{ width: 260, height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 16, color: '#0a0f1d', fontWeight: 700 }}>
+              Esperando el código QR de la mesa. Pide al personal que abra la mesa o toque ROTAR QR.
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: '100%' }}>
-            <div className="sd-pantalla-sid-meta">
-              <span>Sesión activa · sid: {sid}</span>
-            </div>
+            {tokenQr && (
+              <div className="sd-pantalla-sid-meta">
+                <span>Sesión activa · sid: {sid}</span>
+              </div>
+            )}
 
             {qrApuntaALocalhost && (
               <div
@@ -547,13 +532,6 @@ export function PantallaMesa() {
                 : 'Rotación periódica automática cada 3 min mientras no haya comensales.'}
             </p>
           </div>
-          <div className="sd-card sd-pantalla-feature-card">
-            <Wifi size={20} style={{ color: 'var(--sd-red-text)', marginBottom: 8 }} />
-            <strong className="sd-feature-title">RED WI-FI INVITADOS</strong>
-            <p className="sd-feature-desc">
-              Red: <strong>SmartDining_Invitados</strong> · Clave: <span style={{ fontFamily: 'monospace' }}>Gourmet2026</span>
-            </p>
-          </div>
         </div>
       </main>
 
@@ -576,11 +554,6 @@ export function PantallaMesa() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Info size={15} style={{ color: 'var(--sd-text)' }} />
           <span>Si necesitas asistencia de nuestro equipo, avisa a cualquier mesero en salón.</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span>SmartDining Kiosk v2.4</span>
-          <span>·</span>
-          <span>{socketId ? `Socket: ${socketId.substring(0, 8)}...` : 'Conectando'}</span>
         </div>
       </footer>
 
@@ -681,17 +654,6 @@ export function PantallaMesa() {
               </div>
 
               <div>
-                <label className="sd-input-label">CREDENCIAL JWT PANTALLA:</label>
-                <input
-                  type="text"
-                  readOnly
-                  value={pantallaToken ? `${pantallaToken.slice(0, 32)}...` : 'Autenticando tablet...'}
-                  className="sd-input"
-                  style={{ opacity: 0.7 }}
-                />
-              </div>
-
-              <div>
                 <label className="sd-input-label">ENLACE CODIFICADO:</label>
                 <input type="text" readOnly value={diningUrl} className="sd-input" style={{ opacity: 0.7 }} />
               </div>
@@ -707,28 +669,6 @@ export function PantallaMesa() {
                   <ExternalLink size={15} />
                   <span>PROBAR ENLACE EN NUEVA PESTAÑA</span>
                 </a>
-
-                <button
-                  type="button"
-                  className="sd-btn sd-btn-secondary"
-                  onClick={handleRotarQr}
-                  disabled={loadingAction}
-                  style={{ justifyContent: 'center' }}
-                >
-                  <RotateCw size={15} className={loadingAction ? 'spin' : ''} />
-                  <span>Rotar QR oficial (POST /api/mesas/:id/rotar-qr)</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="sd-btn sd-btn-secondary"
-                  onClick={handleSimularRotacion}
-                  disabled={loadingAction}
-                  style={{ justifyContent: 'center' }}
-                >
-                  <RefreshCw size={15} className={loadingAction ? 'spin' : ''} />
-                  <span>Simular evento qr:actualizado en vivo</span>
-                </button>
 
                 <button
                   type="button"

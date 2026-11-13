@@ -61,7 +61,9 @@ function normalizarPedido(p) {
     table: p.mesa_numero ? `Mesa ${p.mesa_numero}` : p.id_mesa ? `Mesa ${p.id_mesa}` : 'Barra',
     numeroMesa: p.mesa_numero || p.id_mesa || '?',
     client: lineas.find((d) => d.comensal)?.comensal || 'Comensal General',
-    waiter: p.mesero || 'Mesero Asignado',
+    // El nombre de quien atiende, solo si el backend lo manda; sin dato, nada
+    // (antes salía "Mesero Asignado", un texto de relleno).
+    waiter: p.mesero || null,
     state: backendEstadoAUI(p.estado),
     rawEstado: p.estado,
     time: p.creado_en

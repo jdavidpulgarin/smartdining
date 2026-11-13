@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useContext } from 'react'
+import { Navigate } from 'react-router-dom'
+import { AuthContext } from '../context/authContextDef'
 import {
   Printer,
   AlertTriangle,
@@ -65,7 +67,18 @@ function SinDatos({ children }) {
   )
 }
 
+/**
+ * Reportes es solo de admin: GET /api/reportes da 403 a los demás roles. Al
+ * mesero y al cajero no se les muestra el enlace y, si llegan por la URL,
+ * vuelven al inicio (como la Caja).
+ */
 export function Reportes() {
+  const rol = useContext(AuthContext)?.user?.rol
+  if (rol && rol !== 'admin') return <Navigate to="/" replace />
+  return <ReportesAdmin />
+}
+
+function ReportesAdmin() {
   const [timeRange, setTimeRange] = useState('hoy') // 'hoy' | 'semana' | 'mes'
   const [loading, setLoading] = useState(true)
   const [reportData, setReportData] = useState(null)

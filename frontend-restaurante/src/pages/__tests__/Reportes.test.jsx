@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { AuthContext } from '../../context/authContextDef'
 import { Reportes } from '../Reportes'
 
 const json = (body, status = 200) => ({
@@ -125,5 +126,25 @@ describe('Flujo de Reportes & BI en frontend-restaurante', () => {
 
     await waitFor(() => expect(screen.getByText(/\$3\.150\.000/)).toBeInTheDocument())
     expect(fetchSpy.mock.calls.some(([url]) => url.includes('/reportes?rango=semana'))).toBe(true)
+  })
+})
+
+describe('Reportes es solo de admin', () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it.each(['mesero', 'cajero'])('%s que entra por la URL vuelve al inicio y no pide el reporte', (rol) => {
+    const spy = vi.spyOn(global, 'fetch')
+    render(
+      <AuthContext.Provider value={{ user: { rol } }}>
+        <MemoryRouter initialEntries={['/reportes']}>
+          <Routes>
+            <Route path="/" element={<p>INICIO</p>} />
+            <Route path="/reportes" element={<Reportes />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>
+    )
+    expect(screen.getByText('INICIO')).toBeInTheDocument()
+    expect(spy).not.toHaveBeenCalled()
   })
 })
