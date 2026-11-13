@@ -86,9 +86,11 @@ Los dos órdenes existen de verdad y cada uno lo cierra un endpoint distinto:
   volvía a `pagado`, así que seguía contando como abierto y ni el mesero ni la caja
   podían cerrar la mesa.
 - El cierre pide que **las dos fuentes digan lo mismo**: `estado_pago = 'pagado'` y
-  `obtener_saldo_pendiente(:id) <= 0`. `estado_pago` se recalcula al tocar
-  `transacciones`, así que es esa columna la que podría quedarse atrás respecto del
-  total; con una sola fuente se podría cerrar un pedido con saldo vivo.
+  `obtener_saldo_pendiente(:id) <= 0`. `estado_pago` lo recalcula la base al tocar
+  `transacciones` (script 22) y, desde el **script 33**, también cuando cambia el total
+  (`tr_estado_pago_al_cambiar_total`, p. ej. al quitar un plato). Se piden las dos igual:
+  con una sola fuente, si alguna vez se quedara atrás, se podría cerrar un pedido con saldo
+  vivo.
 - **La mesa se libera al entregar y pagar, nunca solo al pagar.** Pagar antes de recibir
   la comida no suelta la mesa ni invalida el QR: el comensal sigue sentado y su sesión
   tiene que seguir en pie.
@@ -2427,11 +2429,12 @@ en ese orden), y en este orden de comprobación:
 | El pedido sigue en `recibido` y la línea en `pendiente` | **409** `{ "motivo": "item_en_preparacion" }` |
 | El pedido **no tiene ninguna** transacción `completada` (ver abajo) | **409** `{ "motivo": "pago_registrado" }` |
 
-> **`pago_registrado` es estricto** (revisión de Jarrison), en los dos caminos: basta
-> **cualquier** transacción `completada`, aunque el total nuevo siguiera cubriendo lo
-> pagado. El `estado_pago` del pedido (script 22) no se recalcula cuando baja el total, así
-> que tocar un pedido con pagos lo dejaría mal. Se queda así **hasta que se arregle
-> `estado_pago` en la base**; con un pago, hay que reembolsar antes.
+> **Para el comensal, `pago_registrado` es estricto por decisión de producto** (Jarrison):
+> basta **cualquier** transacción `completada`, aunque el total nuevo siguiera cubriendo lo
+> pagado. No es una limitación de la base (desde el script 33 `estado_pago` se recalcula al
+> bajar el total): desde el teléfono no se decide sobre dinero ya cobrado, y con un pago el
+> comensal se lo pide al mesero. El personal tiene otra regla (ver
+> [Camino del personal](#camino-del-personal-d-13)).
 
 > **Doble clic:** el segundo envío sobre la misma línea espera al primero (el bloqueo de la
 > línea) y responde **409** `item_ya_cancelado`; el stock no se devuelve dos veces.
@@ -2498,7 +2501,8 @@ cada uno con su `estado_item`. `total` es un número:
 #### Camino del personal (D-13)
 
 > **Contrato con los ajustes de la revisión de Jarrison** (motivo obligatorio, solo admin y
-> mesero, `pago_registrado` estricto).
+> mesero) y su decisión sobre `pago_registrado`: para el personal **no** es estricto, se
+> permite mientras lo pagado no supere el total nuevo.
 
 Admin y mesero cancelan **cualquier línea** de **cualquier mesa** (no hay regla de dueño),
 también cuando cocina ya la empezó.
@@ -2520,7 +2524,7 @@ movimientos de inventario que escriben los triggers lleven al usuario:
 | El pedido existe y `id_detalle` es de ese pedido | **404** `{ "motivo": "no_encontrado" }` |
 | La línea no estaba ya cancelada (va **primero**) | **409** `{ "motivo": "item_ya_cancelado" }` |
 | La línea no está `servido` y el pedido no está `entregado`, `pagado` ni `cancelado` | **409** `{ "motivo": "item_no_cancelable" }` |
-| El pedido no tiene **ninguna** transacción `completada` (estricto, igual que el comensal) | **409** `{ "motivo": "pago_registrado" }` |
+| Después de cancelar la línea: lo **ya pagado** (transacciones `completada` del pedido) **no supera** el **total nuevo** (ver abajo) | **409** `{ "motivo": "pago_registrado" }` y `ROLLBACK` |
 | Si es la **última** línea viva: el pedido puede pasar a `cancelado` desde su estado según `transiciones_validas` | **409** `{ "motivo": "item_no_cancelable" }` (ver abajo) |
 | El usuario del JWT existe | **409** `{ "motivo": "autor_inexistente" }` (el helper de siempre) |
 
@@ -2555,11 +2559,29 @@ Si era la **última línea viva**, el pedido pasa a `cancelado` con su fila en
 `estado_pedido` puede ser `recibido`, `en_preparacion`, `listo` o `cancelado` (Roberto los
 acepta en su #181). Si el pedido quedó cancelado, también el `order:status` de siempre.
 
-> El `estado_pago` del pedido (script 22) solo lo recalcula un trigger sobre
-> `transacciones`, no cuando baja el total. Por eso `pago_registrado` bloquea con cualquier
-> pago completado: así ninguna cancelación de línea deja un pedido con pagos y su
-> `estado_pago` desfasado. Es de la base; queda anotado para Jarrison, y cuando se arregle
-> se puede volver a permitir quitar líneas que el pago siga cubriendo.
+**`pago_registrado` del personal: lo pagado contra el total nuevo.** En la misma
+transacción, con el pedido bloqueado (`FOR UPDATE`), se cancela la línea y se lee el total
+que deja `tr_actualizar_total_pedido` (sin las líneas canceladas). Se compara en **centavos
+enteros** calculados por la base, sin coma flotante:
+
+- **pagado ≤ total nuevo** → se permite (**igual vale**). Un pedido **sin pagos** sigue como
+  siempre.
+- **pagado > total nuevo** → **409** `pago_registrado` y `ROLLBACK`: la línea sigue viva y su
+  movimiento de stock y el total se deshacen. Hay que reembolsar antes.
+- **Última línea viva con algo pagado** → el total nuevo es 0 y cualquier pago lo supera:
+  **409** `pago_registrado`. Un pedido con pagos no se cancela por aquí.
+
+`estado_pago` queda bien solo: desde el **script 33** la base lo recalcula al cambiar el total
+(`calcular_estado_pago`, la regla del script 22):
+
+| Caso | `estado_pago` después |
+|---|---|
+| Sin pagos | `pendiente` |
+| 0 < pagado < total nuevo | `parcial` |
+| pagado = total nuevo | `pagado` (saldo 0). El `estado` de cocina **no** cambia: el pedido se cierra al entregarlo, como cualquier pedido ya cubierto |
+
+La ruta del personal para cancelar el **pedido completo** (`POST /pedidos/:id/cancelar`) no
+cambia con esta regla.
 
 ---
 
