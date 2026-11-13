@@ -3,6 +3,7 @@ import {
   crearPedido,
   listarPedidosMesa,
   cancelarItem,
+  cancelarPedido,
   NOTAS_MAX_SERVIDOR,
   NOTAS_GENERALES_MAX_SERVIDOR,
 } from './pedidoService';
@@ -511,5 +512,125 @@ describe('pedidoService (H-05, H-06, J-05)', () => {
     expect(guardados[0].estado).toBe('en_preparacion');
     expect(guardados[0].detalles[0].estado_item).toBe('en_preparacion');
     expect(guardados[0].detalles[1].estado_item).toBe('cancelado');
+  });
+
+  it('D-12 cancelarPedido: envia POST sin cuerpo y con JWT en Authorization', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'false');
+    globalThis.sessionStorage.setItem(
+      CLAVE_SESION,
+      JSON.stringify({ token: 'jwt.comensal.ana', comensal: 'Ana' })
+    );
+    const spy = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({
+        pedido: {
+          id_pedido: 90,
+          codigo_pedido: 'PED-90',
+          estado: 'cancelado',
+          total: 0,
+          items: [],
+        },
+      });
+
+    const res = await cancelarPedido(90);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [ruta, opciones] = spy.mock.calls[0];
+    expect(ruta).toBe('/pedidos/90/cancelar');
+    expect(opciones.method).toBe('POST');
+    expect(opciones.token).toBe('jwt.comensal.ana');
+    expect(opciones.body).toBeUndefined();
+    expect(res.pedido.estado).toBe('cancelado');
+  });
+
+  it('D-12 cancelarPedido: rechaza identificadores invalidos', async () => {
+    await expect(cancelarPedido(0)).rejects.toThrow(/inválido/);
+    await expect(cancelarPedido(-5)).rejects.toThrow(/inválido/);
+    await expect(cancelarPedido('invalido')).rejects.toThrow(/inválido/);
+  });
+
+  it('D-12 cancelarPedido (simulado): marca pedido y todas las lineas como cancelados con total 0', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const CLAVE_PEDIDOS_SIMULADOS = 'smartdining_pedidos_simulados';
+
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify([
+        {
+          id_pedido: 95,
+          codigo_pedido: 'PED-95',
+          id_mesa: 5,
+          estado: 'recibido',
+          total: 35000,
+          detalles: [
+            {
+              id_detalle: 301,
+              plato_nombre: 'Hamburguesa',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+            {
+              id_detalle: 302,
+              plato_nombre: 'Papas',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+          ],
+        },
+      ])
+    );
+
+    const res = await cancelarPedido(95);
+    expect(res.pedido.estado).toBe('cancelado');
+    expect(res.pedido.total).toBe(0);
+    expect(res.pedido.items.every((d) => d.estado_item === 'cancelado')).toBe(true);
+
+    const guardados = JSON.parse(
+      globalThis.sessionStorage.getItem(CLAVE_PEDIDOS_SIMULADOS)
+    );
+    expect(guardados[0].estado).toBe('cancelado');
+    expect(guardados[0].total).toBe(0);
+    expect(guardados[0].cancelado_por).toBe('comensal');
+  });
+
+  it('D-12 cancelarPedido (simulado): fuerza errores con smartdining_sim_cancelar', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const CLAVE_PEDIDOS_SIMULADOS = 'smartdining_pedidos_simulados';
+
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify([
+        {
+          id_pedido: 96,
+          codigo_pedido: 'PED-96',
+          id_mesa: 5,
+          estado: 'recibido',
+          total: 20000,
+          detalles: [
+            {
+              id_detalle: 303,
+              plato_nombre: 'Pizza',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+          ],
+        },
+      ])
+    );
+
+    const casos = [
+      ['pedido_compartido', 409],
+      ['no_cancelable', 409],
+      ['pago_registrado', 409],
+      ['pedido_ya_cancelado', 409],
+      ['no_es_tuyo', 403],
+    ];
+
+    for (const [motivo, status] of casos) {
+      globalThis.sessionStorage.setItem('smartdining_sim_cancelar', motivo);
+      await expect(cancelarPedido(96)).rejects.toMatchObject({
+        status,
+        motivo,
+      });
+    }
   });
 });
