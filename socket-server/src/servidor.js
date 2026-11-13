@@ -78,11 +78,13 @@ function crearServidor(config, deps = {}) {
 
   const io = new Server(httpServer, {
     cors: { origin: origenCors, methods: ['GET', 'POST'], credentials: true },
-    // Al reconectar tras un corte corto, Socket.io recupera la sesión y los
-    // eventos perdidos. No basta por sí solo: la garantía de no duplicar la
-    // da la idempotencia por eventId (idempotencia.js), que cubre también los
-    // cortes largos y los reenvíos manuales del cliente.
-    connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
+    // SIN connectionStateRecovery, a propósito: al recuperar una sesión,
+    // Socket.io se salta los middlewares (skipMiddlewares) y devuelve las salas
+    // y socket.data. Un celular sin red mientras se liberaba su mesa volvía a
+    // room:mesa-N y leía y escribía el carrito del grupo siguiente sin pasar
+    // por sesionVigente. Cada reconexión es un socket nuevo que se autentica de
+    // cero; el cliente hace join:table y reemplaza su carrito (EVENTS.md §3.3).
+    // Prueba de regresión: tests/reconexion-sin-recuperacion.test.js.
     // Un mensaje más grande que esto se rechaza y se cierra esa conexión.
     maxHttpBufferSize: MAX_BUFFER_BYTES,
   });
