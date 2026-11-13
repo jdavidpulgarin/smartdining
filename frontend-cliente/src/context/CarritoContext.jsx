@@ -171,6 +171,7 @@ export function CarritoProvider({ children }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!mesa) return undefined;
     let activo = true;
     const cancelarSuscripcion = suscribirCambiosMenu((nuevoMenu) => {
       if (activo && nuevoMenu) {
@@ -188,7 +189,7 @@ export function CarritoProvider({ children }) {
       activo = false;
       cancelarSuscripcion();
     };
-  }, []);
+  }, [mesa]);
 
   // Escuchar ingrediente:disponibilidad y plato:disponibilidad en tiempo real para actualizar el menú en memoria
   const socketOn = mesaSocket?.on;

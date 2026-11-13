@@ -398,6 +398,48 @@ describe('SeguimientoContext: aislamiento de sesión entre grupos de la mesa', (
       expect(listaActualizada[0].detalles[1].estado_item).toBe('pendiente');
     });
 
+    it('pedido ya existente CON lineas + order:created { eventId, pedido } SIN detalles -> procesarOrderCreated devuelve la lista sin cambios', () => {
+      const pedidoExistente = normalizarPedido(
+        {
+          id_pedido: 705,
+          codigo_pedido: 'PED-705',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [
+            {
+              id_detalle: 50,
+              plato_nombre: 'Ajiaco Santafereño',
+              comensal: 'Ana',
+              cantidad: 1,
+              subtotal: 28000,
+              estado_item: 'pendiente',
+            },
+          ],
+        },
+        'Ana'
+      );
+
+      const listaPrev = [pedidoExistente];
+
+      const eventoSinDetalles = {
+        eventId: 'evt-order-created-sin-detalles',
+        pedido: {
+          id_pedido: 705,
+          codigo_pedido: 'PED-705',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [],
+        },
+      };
+
+      const resultado = procesarOrderCreated(listaPrev, eventoSinDetalles, 'Ana');
+
+      expect(resultado).toBe(listaPrev);
+      expect(resultado[0].detalles).toHaveLength(1);
+      expect(resultado[0].detalles[0].id_detalle).toBe(50);
+      expect(resultado[0].detalles[0].estado_item).toBe('pendiente');
+    });
+
     it('lista con pedidos A y B, se intenta cancelar A, llega pedido_ya_cancelado y la recarga trae A cancelado → la selección queda en A', async () => {
       const pedidoA = normalizarPedido(
         {

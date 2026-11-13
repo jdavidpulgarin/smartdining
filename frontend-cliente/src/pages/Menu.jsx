@@ -221,14 +221,20 @@ function Menu() {
 
   if (errorMenu) {
     return (
-      <div className="bg-superficie rounded-2xl border border-borde p-8 text-center space-y-4 my-8">
-        <div className="w-12 h-12 bg-primario/15 text-primario rounded-full flex items-center justify-center mx-auto text-xl font-bold">
+      <div
+        role="alert"
+        className="bg-superficie rounded-2xl border border-borde p-8 text-center space-y-4 my-8"
+      >
+        <div
+          aria-hidden="true"
+          className="w-12 h-12 bg-primario/15 text-primario rounded-full flex items-center justify-center mx-auto text-xl font-bold"
+        >
           !
         </div>
         <div>
-          <h2 className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto">
+          <h1 className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto">
             No pudimos cargar el menú
-          </h2>
+          </h1>
           <p className="text-sm text-texto-suave mt-1">{errorMenu}</p>
         </div>
         <Button
@@ -249,8 +255,12 @@ function Menu() {
       {/* Portada Hero del Menú */}
       <div className="-mx-4 -mt-4 mb-2 relative h-56 sm:h-64 overflow-hidden rounded-b-3xl bg-superficie">
         <img
-          src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1200&q=80&auto=format"
+          src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=75&auto=format"
           alt="Comida fresca de SmartDining"
+          width={800}
+          height={533}
+          fetchPriority="high"
+          decoding="async"
           className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />
