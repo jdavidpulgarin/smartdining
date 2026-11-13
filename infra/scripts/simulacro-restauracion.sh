@@ -15,7 +15,12 @@
 #   3. Compara con la base en vivo: tablas en public, cantidad y última fila
 #      de schema_migraciones (deben ser iguales). usuarios y pedidos se
 #      muestran como referencia (la base en vivo sigue cambiando).
-#   4. Borra el contenedor temporal, también si algo falla.
+#   4. Imágenes (D-23): si junto al .dump está su .tar.gz (mismo nombre), lo
+#      valida (gzip -t, carpeta raíz, ninguna ruta absoluta ni con ..), lo
+#      extrae dentro del contenedor temporal y comprueba que salen todas las
+#      .webp que lista. La cantidad del volumen en vivo es solo referencia.
+#      Sin .tar.gz (respaldo anterior a D-23) solo avisa.
+#   5. Borra el contenedor temporal, también si algo falla.
 #
 # Sale con 0 solo si todo cuadra.
 # Variables: RESPALDOS_DIR (/srv/respaldos), IMAGEN (si no hay postgres en marcha).
@@ -48,6 +53,21 @@ if [ -z "$archivo" ]; then
   [ -n "$archivo" ] || fallar "no hay respaldos diarios en $RESPALDOS_DIR/$proyecto/diario"
 fi
 [ -f "$archivo" ] && [ -r "$archivo" ] || fallar "no se puede leer $archivo"
+
+# --- Imágenes: validación en el host --------------------------------------------
+tar_img=${archivo%.dump}.tar.gz
+r_img=- v_img=-
+if [ -f "$tar_img" ]; then
+  [ -r "$tar_img" ] && [ -s "$tar_img" ] || fallar "no se puede leer $tar_img o está vacío"
+  gzip -t < "$tar_img" 2>/dev/null || fallar "$tar_img está corrupto (gzip -t)"
+  entradas=$(tar -tzf - < "$tar_img" 2>/dev/null) || fallar "$tar_img no se puede listar"
+  printf '%s\n' "$entradas" | grep -qx '\./' || fallar "$tar_img no trae la carpeta raíz"
+  ! printf '%s\n' "$entradas" | grep -Eq '^/|(^|/)\.\.(/|$)' \
+    || fallar "$tar_img trae rutas absolutas o con '..': no se restaura"
+  r_img=$(printf '%s\n' "$entradas" | grep -c '\.webp$' || true)
+else
+  echo "simulacro: aviso: no hay $tar_img (respaldo anterior a D-23): solo se prueba la base" >&2
+fi
 
 if [ -n "$vivo" ]; then
   imagen=$("$DOCKER" inspect -f '{{.Config.Image}}' "$vivo")
@@ -89,6 +109,22 @@ inicio=$(date +%s)
   -d restaurada /tmp/respaldo.dump || fallar "pg_restore falló: el respaldo NO se puede restaurar"
 segundos=$(($(date +%s) - inicio))
 
+# --- Imágenes: extracción en el contenedor temporal ----------------------------------
+if [ "$r_img" != "-" ]; then
+  "$DOCKER" cp "$tar_img" "$nombre:/tmp/imagenes.tar.gz" >/dev/null
+  x_img=$("$DOCKER" exec "$nombre" sh -c 'mkdir /tmp/imagenes && tar -xzf /tmp/imagenes.tar.gz -C /tmp/imagenes && find /tmp/imagenes -type f -name "*.webp" | wc -l') \
+    || fallar "el tar.gz de imágenes no se pudo extraer: NO se puede restaurar"
+  x_img=$(printf '%s' "$x_img" | tr -d ' \r\n')
+  [ "$x_img" = "$r_img" ] || fallar "el tar.gz lista $r_img imágenes .webp y al extraerlo salen $x_img"
+  if [ -n "$proyecto" ]; then
+    vol=$("$DOCKER" volume ls -q --filter "label=com.docker.compose.project=$proyecto" --filter "label=com.docker.compose.volume=imagenes")
+    if [ -n "$vol" ]; then
+      v_img=$("$DOCKER" run --rm --pull never --network none -v "$vol:/imagenes:ro" --entrypoint sh "$imagen" \
+        -c 'find /imagenes -type f -name "*.webp" | wc -l' | tr -d ' \r\n') || v_img=-
+    fi
+  fi
+fi
+
 # --- Verificación -------------------------------------------------------------------
 CONSULTA="SELECT
   (SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'),
@@ -119,6 +155,8 @@ printf '%-22s %-34s %s\n' "schema_migraciones" "$r_migr" "$v_migr"
 printf '%-24s %-34s %s\n' "última migración" "$r_ultima" "$v_ultima"
 printf '%-22s %-34s %s\n' "usuarios" "$r_usuarios" "$v_usuarios"
 printf '%-22s %-34s %s\n' "pedidos" "$r_pedidos" "$v_pedidos"
+# "á" ocupa dos bytes, de ahí el 23.
+printf '%-23s %-34s %s\n' "imágenes .webp" "$r_img" "$v_img"
 printf '%-22s %s s\n\n' "pg_restore" "$segundos"
 
 [ "$r_tablas" -gt 0 ] && [ "$r_migr" -gt 0 ] || fallar "la base restaurada está vacía"
@@ -131,4 +169,8 @@ fi
 limpiar
 trap - EXIT
 [ -z "$("$DOCKER" ps -aq --filter "name=^$nombre\$")" ] || fallar "no se pudo borrar $nombre"
-echo "simulacro: OK. El respaldo se restaura completo; contenedor temporal borrado."
+if [ "$r_img" != "-" ]; then
+  echo "simulacro: OK. La base y las $r_img imágenes se restauran completas; contenedor temporal borrado."
+else
+  echo "simulacro: OK. El respaldo se restaura completo; contenedor temporal borrado."
+fi
