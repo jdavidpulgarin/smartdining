@@ -15,6 +15,9 @@ const pagosRoutes = require('./pagos.routes');
 const reportesRoutes = require('./reportes.routes');
 const configuracionRoutes = require('./configuracion.routes');
 const inventarioRoutes = require('./inventario.routes');
+const zonasEnvioRoutes = require('./zonas-envio.routes');
+const domiciliosRoutes = require('./domicilios.routes');
+const imagenesRoutes = require('./imagenes.routes');
 
 const router = express.Router();
 
@@ -42,5 +45,12 @@ router.use('/configuracion', configuracionRoutes);
 // D-17 PR 2: insumos y movimientos de bodega, solo admin. Las recetas cuelgan
 // del plato y de la opcion (/api/platos/:id/receta, /api/ingredientes/:id/receta).
 router.use('/inventario', inventarioRoutes);
+// D-20a: zonas de entrega para el admin (la pública es /api/v1/zonas, D-19).
+router.use('/zonas-envio', zonasEnvioRoutes);
+// D-20a: despacho de domicilios (admin y cajero) y repartidor.
+router.use('/domicilios', domiciliosRoutes);
+// D-23: subida de imágenes del menú, solo admin. Devuelve /imagenes/<uuid>.webp,
+// que en producción sirve nginx y en desarrollo server.js.
+router.use('/imagenes', imagenesRoutes);
 
 module.exports = router;

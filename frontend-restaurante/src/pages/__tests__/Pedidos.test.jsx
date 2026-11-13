@@ -9,6 +9,7 @@ vi.mock('../../hooks', () => ({
     oyentes[evento] = callback
   },
   useSocketEmit: () => vi.fn(),
+  useAuth: () => ({ user: { rol: 'admin' } }),
 }))
 
 import { Pedidos } from '../Pedidos'

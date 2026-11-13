@@ -291,3 +291,97 @@ describe('Menú de solo consulta para mesero y cajero (el backend les niega la g
     expect(screen.getAllByTitle('Alternar disponibilidad para comensales')[0].tagName).toBe('BUTTON')
   })
 })
+
+describe('Foto de respaldo: solo para pintar, nunca se guarda (revisión de Roberto)', () => {
+  const RESPALDO = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
+  const platosFotos = [
+    { id_plato: 401, id_categoria: 1, nombre: 'Sin Foto Burger', precio: 20000, descripcion: '', tiempo_preparacion_estimado: 10, disponible: true, url_imagen: null },
+    { id_plato: 402, id_categoria: 1, nombre: 'Arepa Rellena', precio: 15000, descripcion: '', tiempo_preparacion_estimado: 10, disponible: true, url_imagen: null },
+    { id_plato: 403, id_categoria: 1, nombre: 'Con Foto Burger', precio: 22000, descripcion: '', tiempo_preparacion_estimado: 10, disponible: true, url_imagen: 'https://images.unsplash.com/photo-propia?w=600' },
+  ]
+
+  function backendQueGuarda() {
+    const escritas = []
+    simularBackend({
+      categorias: categoriasBase,
+      platos: platosFotos,
+      escrituras: (url, config) => {
+        escritas.push({ url, metodo: config.method, body: JSON.parse(config.body || '{}') })
+        return json({ plato: { id_plato: 999 } }, config.method === 'POST' ? 201 : 200)
+      },
+    })
+    return escritas
+  }
+
+  const editar = (nombre) => fireEvent.click(within(tarjetaDe(nombre)).getByTitle('Editar plato'))
+
+  beforeEach(() => vi.restoreAllMocks())
+
+  it('la tarjeta de un plato sin foto PINTA la de respaldo; la arepa, su foto local', async () => {
+    backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Sin Foto Burger')).toBeInTheDocument())
+    expect(screen.getByAltText('Sin Foto Burger')).toHaveAttribute('src', RESPALDO)
+    expect(screen.getByAltText('Arepa Rellena')).toHaveAttribute('src', '/img/arepa-rellena.png')
+  })
+
+  it('crear con el campo de imagen vacío NO manda url_imagen', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Sin Foto Burger')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('NUEVO PLATO'))
+    fireEvent.change(screen.getByPlaceholderText(/Ej. Bowl Personalizado/i), { target: { value: 'Plato Nuevo' } })
+    fireEvent.change(screen.getByPlaceholderText('25000'), { target: { value: '15000' } })
+    fireEvent.click(screen.getByText('CREAR PLATO'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'POST')).toBe(true))
+    expect(escritas.find((e) => e.metodo === 'POST').body).not.toHaveProperty('url_imagen')
+  })
+
+  it('crear con foto la manda recortada', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Sin Foto Burger')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('NUEVO PLATO'))
+    fireEvent.change(screen.getByPlaceholderText(/Ej. Bowl Personalizado/i), { target: { value: 'Plato Con Foto' } })
+    fireEvent.change(screen.getByPlaceholderText('25000'), { target: { value: '15000' } })
+    fireEvent.change(screen.getByPlaceholderText('https://images.unsplash.com/...'), { target: { value: '  https://fotos.co/p.jpg  ' } })
+    fireEvent.click(screen.getByText('CREAR PLATO'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'POST')).toBe(true))
+    expect(escritas.find((e) => e.metodo === 'POST').body.url_imagen).toBe('https://fotos.co/p.jpg')
+  })
+
+  it('editar un plato sin foto: el campo sale vacío (no con la de respaldo) y no se manda url_imagen', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Sin Foto Burger')).toBeInTheDocument())
+    editar('Sin Foto Burger')
+    expect(screen.getByPlaceholderText('https://images.unsplash.com/...')).toHaveValue('')
+    fireEvent.click(screen.getByText('GUARDAR CAMBIOS'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'PUT' || e.metodo === 'PATCH')).toBe(true))
+    const guardado = escritas.find((e) => e.metodo === 'PUT' || e.metodo === 'PATCH')
+    expect(guardado.url).toMatch(/\/platos\/401$/)
+    expect(guardado.body).not.toHaveProperty('url_imagen')
+  })
+
+  it('editar la Arepa rellena no manda /img/arepa-rellena.png (la foto local es solo para pintar)', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Arepa Rellena')).toBeInTheDocument())
+    editar('Arepa Rellena')
+    expect(screen.getByPlaceholderText('https://images.unsplash.com/...')).toHaveValue('')
+    fireEvent.click(screen.getByText('GUARDAR CAMBIOS'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'PUT' || e.metodo === 'PATCH')).toBe(true))
+    expect(escritas.find((e) => e.metodo === 'PUT' || e.metodo === 'PATCH').body).not.toHaveProperty('url_imagen')
+  })
+
+  it('editar un plato con foto conserva su url_imagen real', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Con Foto Burger')).toBeInTheDocument())
+    editar('Con Foto Burger')
+    expect(screen.getByPlaceholderText('https://images.unsplash.com/...')).toHaveValue('https://images.unsplash.com/photo-propia?w=600')
+    fireEvent.click(screen.getByText('GUARDAR CAMBIOS'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'PUT' || e.metodo === 'PATCH')).toBe(true))
+    expect(escritas.find((e) => e.metodo === 'PUT' || e.metodo === 'PATCH').body.url_imagen).toBe('https://images.unsplash.com/photo-propia?w=600')
+  })
+})

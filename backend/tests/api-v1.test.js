@@ -82,7 +82,7 @@ test('v1: el canal interno NO está en v1 (404, aun con la clave buena); en /api
     for (const [metodo, ruta] of internas) {
       const enV1 = await request(app)[metodo](`/api/v1${ruta}`).set('x-internal-key', CLAVE_FALSA).send({});
       assert.strictEqual(enV1.status, 404, `v1${ruta}`);
-      assert.deepStrictEqual(enV1.body, { error: 'Ruta no encontrada' }, 'el 404 de siempre');
+      assert.deepStrictEqual(enV1.body, { error: 'Ruta no encontrada', motivo: 'no_encontrado' }, 'el 404 de siempre');
 
       const enApiSinClave = await request(app)[metodo](`/api${ruta}`).send({});
       assert.strictEqual(enApiSinClave.status, 401, `/api${ruta} sigue exigiendo la clave`);

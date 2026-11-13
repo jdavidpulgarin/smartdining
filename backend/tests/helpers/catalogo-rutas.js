@@ -18,7 +18,9 @@ const { instalarFakeSocket } = require('./fake-socket');
 const request = require('supertest');
 const app = require('../../server');
 
-const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina'];
+// D-20a: el repartidor es personal; la matriz comprueba que en todo lo que no
+// es suyo recibe 403.
+const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina', 'repartidor'];
 const TODOS_LOS_ROLES = [...ROLES_STAFF, 'comensal'];
 
 /** Mesa que usan las rutas con :id, y la del JWT de comensal. */
@@ -183,6 +185,11 @@ const TABLA = [
     roles: ['admin'],
     cuerpo: { nombre: 'SmartDining' },
   },
+
+  // --- D-23: subida de imágenes del menú (solo admin) ------------------------
+  // Sin archivo: el admin pasa la guarda y recibe 400 sin_archivo; la subida
+  // de verdad está en imagenes.test.js.
+  { metodo: 'POST', patron: '/api/imagenes', url: '/api/imagenes', roles: ['admin'], cuerpo: {} },
 
   // --- D-16: administración de usuarios del personal (solo admin) -----------
   { metodo: 'GET', patron: '/api/usuarios', url: '/api/usuarios', roles: ['admin'] },
@@ -427,6 +434,44 @@ const TABLA = [
       metodo_pago: 'efectivo',
       id_cobro: '3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f',
     },
+  },
+
+  // --- Zonas de entrega para el admin (D-20a) --------------------------------
+  { metodo: 'GET', patron: '/api/zonas-envio', url: '/api/zonas-envio', roles: ['admin'] },
+  {
+    metodo: 'POST',
+    patron: '/api/zonas-envio',
+    url: '/api/zonas-envio',
+    roles: ['admin'],
+    cuerpo: { nombre: 'Norte', barrios: ['Centro'], costo_envio: 5000, tiempo_estimado_min: 30 },
+  },
+  {
+    metodo: 'PATCH',
+    patron: '/api/zonas-envio/:id',
+    url: '/api/zonas-envio/3',
+    roles: ['admin'],
+    cuerpo: { activa: false },
+  },
+
+  // --- Despacho de domicilios y repartidor (D-20a) ---------------------------
+  { metodo: 'GET', patron: '/api/domicilios', url: '/api/domicilios', roles: ['admin', 'cajero'] },
+  {
+    metodo: 'PATCH',
+    patron: '/api/domicilios/:id_pedido/repartidor',
+    url: '/api/domicilios/87/repartidor',
+    roles: ['admin', 'cajero'],
+    cuerpo: { id_repartidor: 40 },
+  },
+  { metodo: 'GET', patron: '/api/usuarios/repartidores', url: '/api/usuarios/repartidores', roles: ['admin', 'cajero'] },
+  { metodo: 'GET', patron: '/api/domicilios/mios', url: '/api/domicilios/mios', roles: ['repartidor'] },
+  { metodo: 'POST', patron: '/api/domicilios/:id_pedido/salir', url: '/api/domicilios/87/salir', roles: ['repartidor'] },
+  { metodo: 'POST', patron: '/api/domicilios/:id_pedido/entregar', url: '/api/domicilios/87/entregar', roles: ['repartidor'] },
+  {
+    metodo: 'POST',
+    patron: '/api/domicilios/:id_pedido/fallar',
+    url: '/api/domicilios/87/fallar',
+    roles: ['repartidor'],
+    cuerpo: { motivo: 'No había nadie en la dirección' },
   },
 
   // --- Reportes (D-07): cifras de negocio, solo admin -----------------------
