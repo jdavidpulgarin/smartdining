@@ -74,7 +74,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | Evento | Destino | `eventId` | Estado | Detalle |
 |---|---|---|---|---|
 | `cart:updated` | `room:mesa-{ID}` menos quien emitió | Sí | Estable | [§5](#5-eventos-servidor--cliente) |
-| `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§5](#5-eventos-servidor--cliente) |
+| `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Estable (`items[].id_detalle` y `estado_item` desde #202) | [§5](#5-eventos-servidor--cliente) |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Estable (`origen` opcional desde J-14) | [§5](#5-eventos-servidor--cliente) |
 | `item:cancelado` | `room:kds`, `room:admin`, `room:mesa-{ID}` | Sí | Lista; el backend la llama desde J-14 (#180, `origen: "comensal"`) y la llamará desde D-13 (`origen: "personal"`). Falta que KDS, panel y PWA la escuchen | [§5.6](#56-itemcancelado) |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye la pantalla) | No | Estable | [§6.2](#62-cómo-avisa-el-backend-una-rotación-de-token_qr-pantalla-de-mesa) |
@@ -387,11 +387,13 @@ la fuente de verdad; un comensal **no** puede emitirlo.
     "total": 56000,
     "notas_generales": null,
     "items": [
-      { 
-        "id_plato": 3, 
-        "nombre": "Bowl", 
-        "cantidad": 2, 
-        "comensal": "Ana", 
+      {
+        "id_detalle": 310,
+        "id_plato": 3,
+        "estado_item": "pendiente",
+        "nombre": "Bowl",
+        "cantidad": 2,
+        "comensal": "Ana",
         "notas_especiales": "sin cebolla",
         "ingredientes": [
           { "id_ingrediente": 10, "nombre": "Arroz", "porcion": "normal", "precio_aplicado": 0, "paso": "Elige tu Base" },
@@ -404,6 +406,11 @@ la fuente de verdad; un comensal **no** puede emitirlo.
 ```
 
 `id_pedido`, `id_mesa` y `estado` son obligatorios; el resto se reenvía tal cual.
+Cada ítem lleva `id_detalle` (primero; entero, la línea en `detalles_pedido`) y `estado_item`
+(`"pendiente"` al crear; `null` si el backend no lo tuviera). Con `id_detalle` quien recibe el
+aviso (los otros comensales de la mesa y el KDS) relaciona un `item:cancelado` posterior
+(§5.6) con su línea sin recargar. El backend los copia en `armarPedido`
+(`backend/src/services/socket.notifier.js`, #202); el socket-server no los valida ni los filtra.
 Cada ingrediente lleva `paso`: el nombre del paso del constructor al que pertenece, o `null` si no viene de un paso (el campo va siempre, nunca se omite). Los ingredientes llegan ordenados por `pasos_constructor.orden`, así que el KDS los agrupa por `paso` sin ordenar nada. El socket-server no valida ni filtra este campo: lo reenvía tal cual.
 Qué pasa con el carrito al crear la comanda (cada comensal envía **solo sus platos**):
 
@@ -577,7 +584,7 @@ cambio el panel funciona igual, con el envío automático de 500 ms como respald
 | Evento | Destino | Payload |
 |---|---|---|
 | `cart:updated` | `room:mesa-{ID}` (todos **menos** quien emitió; tras `order:created`, **todos**) | `{ eventId, origen, carrito: { version, items } }` (`origen`: alias de quien editó, o `"sistema"` tras `order:created`) |
-| `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` |
+| `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` (cada `pedido.items[]` trae `id_detalle`, `id_plato`, `estado_item`, `nombre`, `cantidad`, `comensal`, `notas_especiales` e `ingredientes`; ver [`order:created`](#ordercreated)) |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, origen?, emitidoEn }` (`origen` solo si el backend lo mandó por `/internal/order-status`; sin él, asume `personal`; ver §6.3) |
 | `item:cancelado` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, id_detalle, nombre, comensal, total, estado_pedido, origen, emitidoEn }` (§5.6) |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, emitidoEn }` (mismo payload para Wompi, §8.3, y caja, §8.6) |
@@ -1618,6 +1625,7 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Arranque | Aceptaba secretos cortos o de ejemplo | No arranca sin secretos de 32+ caracteres, distintos y propios | Todo el equipo: regenerar `.env` |
 | Alias del comensal (R-18) | Lo mandaba el cliente en cada evento (`join:table`, `cart:update`, pago, push) | Sale **solo del JWT**; otro alias → `NO_AUTORIZADO`; JWT sin alias → `TOKEN_INVALIDO`; solo se tocan las líneas propias | PWA: enviar `{ comensal }` al abrir la sesión y dejar de mandarlo en los eventos. Backend: `feature/mesas-alias-en-jwt` |
 | `order:created` · `ingredientes[].paso` | Los ingredientes no traían su paso | Cada ingrediente lleva `paso` (nombre del paso o `null`) | Nadie: compatible hacia atrás. KDS: agrupar por `paso` |
+| `order:created` · `items[].id_detalle` y `estado_item` (#202) | Las líneas no traían su `id_detalle`: los otros comensales y el KDS no podían relacionar un `item:cancelado` con su línea y no la tachaban hasta recargar | Cada ítem lleva `id_detalle` (primero) y `estado_item` (`"pendiente"` al crear, `null` si no viniera de la base). El socket-server los reenvía sin cambios de código | Nadie: compatible hacia atrás. PWA y KDS: ubicar la línea de `item:cancelado` por `id_detalle` |
 | `order:created` · carrito y dueños | Vaciaba el carrito de **toda** la mesa; dueños = todos los alias del carrito | Quita solo las líneas de `items[].comensal`; sin alias no toca el carrito; dueños = solo esos alias | PWA: nada (sigue reemplazando el carrito con `cart:updated`). Backend: mantener `comensal` en cada ítem |
 | `order:created` · orden y reintentos | Reservaba el aviso antes de tocar el carrito: si Redis fallaba a mitad de camino, el reintento llegaba como duplicado y las líneas nunca se quitaban | Primero quita líneas y guarda dueños, después reserva por `id_pedido` y emite; un reintento ante `5xx`/`ERROR_INTERNO` completa lo que faltó. `cart:updated` llega **antes** que `order:created` | Nadie que dependa del orden. Backend: reintentar ante `5xx` con el mismo `eventId` es seguro |
 | Catálogo · estado de endpoints | `/pagos/intencion`, `/pagos/webhook`, `/internal/ingrediente-disponibilidad`, `/internal/payment-confirmed` y sus eventos (`payment:confirmed`, `pago:alerta`, `ingrediente:disponibilidad`, `mesa:liberada` con `motivo: "pagada"`) figuraban como «Espera backend» | Estables `/internal/ingrediente-disponibilidad` (PR #70) y `/internal/payment-confirmed` (PR #58). Los pagos en línea (`/pagos/*`, `pago:alerta` y la parte Wompi de `payment:confirmed` y `mesa:liberada`) quedan «Conectado (falta prueba E2E con Wompi sandbox)» (PR #33) | Nadie: solo documentación |
