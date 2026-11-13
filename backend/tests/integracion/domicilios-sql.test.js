@@ -168,9 +168,14 @@ async function pedidoDomicilio({ estado = 'listo', plato = sinReceta.plato, paga
     await client.query('BEGIN');
     const p = await client.query(
       `INSERT INTO pedidos (codigo_pedido, canal, id_cliente, estado)
-       VALUES ($1::varchar, 'domicilio', $2::int, 'recibido') RETURNING id_pedido`,
+       VALUES ($1::varchar, 'domicilio', $2::int, $3::varchar) RETURNING id_pedido`,
       // codigo_pedido es VARCHAR(16): "D" + 8 de la corrida + "-" + número.
-      [`D${CORRIDA.slice(0, 8)}-${pedidosCreados.length + 1}`.toUpperCase(), idCliente]
+      // 'por_pagar' nace así (ck_pedidos_por_pagar lo permite fuera de mesa).
+      [
+        `D${CORRIDA.slice(0, 8)}-${pedidosCreados.length + 1}`.toUpperCase(),
+        idCliente,
+        estado === 'por_pagar' ? 'por_pagar' : 'recibido',
+      ]
     );
     idPedido = p.rows[0].id_pedido;
     await client.query(
@@ -192,7 +197,7 @@ async function pedidoDomicilio({ estado = 'listo', plato = sinReceta.plato, paga
   }
   pedidosCreados.push(idPedido);
   for (const e of ['en_preparacion', 'listo']) {
-    if (estado === 'recibido' || (estado === 'en_preparacion' && e === 'listo')) break;
+    if (estado === 'por_pagar' || estado === 'recibido' || (estado === 'en_preparacion' && e === 'listo')) break;
     await sonda.query('UPDATE pedidos SET estado = $1::varchar WHERE id_pedido = $2::int', [e, idPedido]);
   }
   if (pagado) {
@@ -255,6 +260,38 @@ test('el despacho lista el domicilio con el cliente (nombre y teléfono) y la di
     assert.strictEqual(d.direccion.barrio, `barrio uno ${CORRIDA}`);
     assert.strictEqual(d.costo_envio, 5000);
   }
+});
+
+test('asignar: un domicilio en por_pagar -> 409 pedido_sin_pagar y su fila de pedidos_domicilio no cambia', async (t) => {
+  if (saltar(t)) return;
+  const id = await pedidoDomicilio({ estado: 'por_pagar' });
+  const leerFila = async () =>
+    (await sonda.query(
+      `SELECT estado_entrega, id_repartidor, asignado_en, actualizado_en
+         FROM pedidos_domicilio WHERE id_pedido = $1::int`,
+      [id]
+    )).rows[0];
+  const antes = await leerFila();
+
+  const res = await cajero().patch(`/domicilios/${id}/repartidor`, { id_repartidor: u.rafa });
+  assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+  assert.strictEqual(res.body.motivo, 'pedido_sin_pagar');
+  assert.deepStrictEqual(await leerFila(), antes, 'la fila quedó igual');
+  assert.strictEqual(antes.estado_entrega, 'por_asignar');
+
+  // Tampoco sale en el despacho ni en las del repartidor.
+  const despacho = await admin().get('/domicilios?estado_entrega=por_asignar,asignado');
+  assert.ok(!despacho.body.domicilios.some((d) => d.pedido.id_pedido === id));
+});
+
+test('asignar: un pedido cancelado -> 409 pedido_no_asignable', async (t) => {
+  if (saltar(t)) return;
+  const id = await pedidoDomicilio({ estado: 'recibido' });
+  await sonda.query(`UPDATE pedidos SET estado = 'cancelado' WHERE id_pedido = $1::int`, [id]);
+  const res = await admin().patch(`/domicilios/${id}/repartidor`, { id_repartidor: u.rafa });
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(res.body.motivo, 'pedido_no_asignable');
+  assert.strictEqual((await estadoDe(id)).estado_entrega, 'por_asignar');
 });
 
 test('salir: con el pedido sin listo -> 409 pedido_no_listo; en listo -> en_camino', async (t) => {

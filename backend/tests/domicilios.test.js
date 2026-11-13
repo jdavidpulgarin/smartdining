@@ -288,12 +288,53 @@ test('despacho: si el trigger lo rechaza (lo desactivaron en medio) también es 
     }
   ));
 
-test('despacho: pedido cancelado -> 409 pedido_cancelado; pedido que no es domicilio o no existe -> 404', () =>
-  con(async ({ estado }) => {
-    estado.pedidos[87].estado = 'cancelado';
-    const c = await admin.patch('/domicilios/87/repartidor', { id_repartidor: REPARTIDOR });
-    assert.strictEqual(c.status, 409);
-    assert.strictEqual(c.body.motivo, 'pedido_cancelado');
+test('despacho: un pedido en por_pagar NO se asigna -> 409 pedido_sin_pagar, sin tocar la entrega', () =>
+  con(async ({ estado, db }) => {
+    const desde = db.ejecutadas.length;
+    const res = await admin.patch('/domicilios/89/repartidor', { id_repartidor: REPARTIDOR });
+    assert.strictEqual(res.status, 409);
+    assert.deepStrictEqual(res.body, {
+      error: 'El pedido todavía no está pagado: no se le asigna repartidor hasta que se confirme el pago',
+      motivo: 'pedido_sin_pagar',
+    });
+    assert.strictEqual(estado.domicilios[89].estado_entrega, 'por_asignar');
+    assert.strictEqual(estado.domicilios[89].id_repartidor, null);
+    assert.strictEqual(indice(db, 'UPDATE pedidos_domicilio', desde), -1);
+    assert.ok(indice(db, 'ROLLBACK', desde) >= 0);
+  }));
+
+for (const est of ['cancelado', 'entregado', 'pagado']) {
+  test(`despacho: un pedido en ${est} no se asigna ni se reasigna -> 409 pedido_no_asignable`, () =>
+    con(async ({ estado }) => {
+      estado.pedidos[87].estado = est;
+      for (const entregaEstado of ['por_asignar', 'asignado']) {
+        Object.assign(estado.domicilios[87], {
+          estado_entrega: entregaEstado,
+          id_repartidor: entregaEstado === 'asignado' ? REPARTIDOR : null,
+        });
+        const res = await cajero.patch('/domicilios/87/repartidor', { id_repartidor: OTRO_REPARTIDOR });
+        assert.strictEqual(res.status, 409, `${est}/${entregaEstado}`);
+        assert.deepStrictEqual(res.body, {
+          error: 'El pedido ya está cancelado, entregado o pagado: no se le asigna repartidor',
+          motivo: 'pedido_no_asignable',
+        });
+        assert.notStrictEqual(estado.domicilios[87].id_repartidor, OTRO_REPARTIDOR);
+      }
+    }));
+}
+
+for (const est of ['recibido', 'en_preparacion', 'listo']) {
+  test(`despacho: un pedido en ${est} sí se asigna (200)`, () =>
+    con(async ({ estado }) => {
+      estado.pedidos[87].estado = est;
+      const res = await admin.patch('/domicilios/87/repartidor', { id_repartidor: REPARTIDOR });
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      assert.strictEqual(estado.domicilios[87].estado_entrega, 'asignado');
+    }));
+}
+
+test('despacho: un pedido que no es domicilio o no existe -> 404', () =>
+  con(async () => {
     for (const id of [90, 12345]) {
       const r = await admin.patch(`/domicilios/${id}/repartidor`, { id_repartidor: REPARTIDOR });
       assert.strictEqual(r.status, 404, String(id));
@@ -341,6 +382,8 @@ test('repartidor: GET /domicilios/mios filtra por SU id y con el día de Bogotá
     assert.deepStrictEqual(res.body.domicilios.map((d) => d.pedido.id_pedido), [87]);
     const q = db.buscar('pd.id_repartidor = $1::int');
     assert.deepStrictEqual(q.params, [REPARTIDOR, 'America/Bogota']);
+    // Las no terminadas, sin pedidos sin pagar ni cancelados (como el despacho).
+    assert.match(q.sql, /\('asignado', 'en_camino'\) AND p\.estado NOT IN \('por_pagar', 'cancelado'\)/);
     assert.deepStrictEqual((await lucho.get('/domicilios/mios')).body.domicilios, [], 'Lucho no ve las de Rafa');
   }));
 
