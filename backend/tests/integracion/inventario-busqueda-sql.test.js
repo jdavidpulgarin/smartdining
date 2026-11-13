@@ -79,7 +79,9 @@ test('q=% ya no trae todo: solo el nombre con un % literal', async (t) => {
   const todos = await inventario.listarInsumos({ limite: 500 });
   const conPorciento = await inventario.listarInsumos({ q: '%', limite: 500 });
 
-  assert.ok(todos.length > 4, 'hay insumos');
+  // Al menos los de esta prueba, sin contar con el seed de inventario: tres de
+  // los cuatro no llevan %, así que "q=% no es todo" se prueba igual sin él.
+  assert.ok(todos.length >= Object.keys(NOMBRES).length, 'hay insumos (por lo menos los de esta prueba)');
   assert.ok(conPorciento.length < todos.length, 'q=% ya no es "todo"');
   assert.ok(conPorciento.every((f) => f.nombre.includes('%')), 'solo nombres con % literal');
   assert.deepStrictEqual(await buscar('%'), [NOMBRES.porciento]);

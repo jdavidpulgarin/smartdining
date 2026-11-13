@@ -4594,6 +4594,387 @@ vez**; ante un 503 conviene dejar pasar unos segundos, porque lo que sobra es ca
 
 ---
 
+## API v1 · Clientes (D-19)
+
+> **Contrato. Implementación después de la P-23.** Nada de esta sección existe todavía en
+> el código: es el acuerdo para que la app móvil (Juan) y la base (Jarrison) puedan
+> avanzar en paralelo. **Todo va bajo `/api/v1`, nada en `/api`.**
+
+### El prefijo `/api/v1` (ya montado, D-19 parte A)
+
+La API completa responde también en `/api/v1/...` con el **mismo router**
+(`src/routes/montaje.js`): mismas rutas, auth, roles, CORS, 404 y errores. `/api` sigue igual
+y es compatible hacia atrás (PWA, panel y KDS no cambian). Los **límites de peticiones son
+compartidos**: `/api/x` y `/api/v1/x` gastan el mismo cupo (el global cuenta por IP; los de
+login y QR son la misma instancia en los dos prefijos). **Fuera de v1** queda el canal
+interno servidor-a-servidor (`.../internal`, `.../interno`): lo llama el socket-server con URL
+fija y `x-internal-key`; en `/api/v1` responde 404. Las rutas de clientes de abajo nacen
+**solo** en `/api/v1`.
+
+### Sesión del cliente: JWT corto + refresh token
+
+| | Valor |
+|---|---|
+| JWT (`token`) | `rol: "cliente"`, `sub: id_cliente`. Vida corta: **15 min** (`JWT_CLIENTE_EXPIRES_IN`, configurable). **Mismo algoritmo y secreto** que hoy: HS256 (`ALGORITMO_JWT`) con `JWT_SECRET`. |
+| `refresh_token` | **Opaco y aleatorio** (32 bytes, `crypto.randomBytes`, en base64url: **43 caracteres** `[A-Za-z0-9_-]`). En la base se guarda **solo su hash SHA-256**, nunca el valor. Vida **30 días** desde que se emite (`REFRESH_CLIENTE_DIAS`, configurable). Pertenece a una **familia** (la de su primer login) para detectar reuso. |
+| Ventana de gracia | **30 s** (`REFRESH_CLIENTE_GRACIA_SEGUNDOS`, configurable; `0` la apaga). Ver [la ventana de gracia del refresh](#la-ventana-de-gracia-del-refresh). |
+| `expira_en` | Cuándo vence el `token`, en ISO 8601 UTC. |
+
+- **Separación de roles:** un JWT de cliente **no entra** a rutas de staff ni de comensal
+  (`requireRole` no tiene `cliente` en ninguna de ellas → 403), y un JWT de staff o de
+  comensal **no entra** a las de cliente (403).
+- **Contraseñas:** el **mismo algoritmo y costo** que el login del personal: **bcrypt con
+  costo 10** (`COSTO_BCRYPT` en `auth.controller.js`), y las mismas reglas de clave nueva
+  (`utils/clave-bcrypt.js`): **mínimo 8 caracteres** y **máximo 72 bytes** en UTF-8 (bcrypt
+  ignora en silencio lo que pasa de 72 bytes; una tilde ocupa 2 y un emoji 4).
+- **Límites de peticiones propios** (además del global): registro y login por `email`, refresh
+  por token, y en los tres un tope alto por IP. Ver
+  [Límites de las rutas de clientes](#límites-de-las-rutas-de-clientes).
+- **Errores:** en las rutas de clientes **todo** error responde `{ error, motivo }`. Ver
+  [Errores de las rutas de clientes](#errores-de-las-rutas-de-clientes).
+
+### Autenticación
+
+| Método y ruta | Cuerpo | Éxito | Errores |
+|---|---|---|---|
+| `POST /api/v1/auth/clientes/registro` | `{ nombre, email, password, telefono? }` | **201** `{ cliente, token, refresh_token, expira_en }` | **409** `email_registrado` · **400** `nombre_invalido`, `email_invalido`, `clave_corta`, `clave_larga`, `telefono_invalido`, `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/login` | `{ email, password }` | **200** `{ cliente, token, refresh_token, expira_en }` | **401** `credenciales_invalidas` · 400 `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/refresh` | `{ refresh_token }` | **200** `{ token, refresh_token, expira_en }` | **401** `refresh_invalido` (no existe o venció) · **401** `sesion_revocada` (reuso) · 400 `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/logout` | `{ refresh_token }`, **sin** `Authorization` | **204** sin cuerpo | 400 `cuerpo_invalido` · 429 |
+
+El campo es **`email`**, igual que en `POST /api/auth/login` del personal. El `email` se compara
+sin distinguir mayúsculas (se guarda y se busca por `lower(email)`). Los cuerpos son zod
+`.strict()`.
+
+- **Login sin enumeración:** el **mismo 401 y el mismo mensaje** si el `email` no existe o si
+  la clave falla, y el **mismo tiempo de respuesta**: con un `email` que no existe se compara
+  contra un hash ficticio del mismo costo (como `HASH_FICTICIO` en el login del personal).
+- **Rotación del refresh:** cada uso emite un `refresh_token` **nuevo** (misma familia) y el
+  anterior queda rotado (`reemplazado_por` y `rotado_en`). Si llega uno **ya rotado** fuera de
+  la [ventana de gracia](#la-ventana-de-gracia-del-refresh) (reuso: alguien copió un token
+  viejo), se **revoca toda la familia** y se responde **401** `sesion_revocada`; el cliente
+  vuelve a iniciar sesión.
+- `cliente` es `{ id_cliente, nombre, email, telefono, verificado }`, nunca el hash.
+
+#### Logout
+
+`POST /api/v1/auth/clientes/logout` pide **solo** `{ refresh_token }` y **no exige
+`Authorization`**: el JWT puede haber vencido ya (vive 15 min) y el cliente tiene que poder
+cerrar sesión igual. Si la app manda la cabecera, se ignora. Quien tiene el refresh token es
+quien puede revocarlo; no hace falta más prueba.
+
+- Responde **204** sin cuerpo **siempre que el cuerpo sea válido**: también si el token **no
+  existe**, ya estaba **revocado**, ya estaba **rotado** o **venció**. Así la respuesta no
+  revela si un token existe ni en qué estado está.
+- **400** `cuerpo_invalido` si falta `refresh_token`, no es texto o no tiene el formato
+  (43 caracteres base64url), o si sobra un campo.
+- Revoca **ese** token y nada más: `UPDATE ... SET revocado_en = now() WHERE hash = $1::char(64)
+  AND revocado_en IS NULL`. **No** la familia ni las otras sesiones del cliente (otro
+  teléfono sigue conectado). No cambia `reemplazado_por` ni `rotado_en`.
+- El JWT que ya tenga la app sigue valiendo hasta su vencimiento corto (15 min); la app lo
+  borra al cerrar sesión.
+- Si después llega a `/refresh` ese token revocado por logout, es reuso: se revoca la familia
+  y **401** `sesion_revocada` (ver abajo).
+
+#### La ventana de gracia del refresh
+
+**El problema:** la app manda `/refresh`, el servidor rota y responde, pero la respuesta se
+pierde (red móvil). La app solo tiene el token viejo, lo reenvía, y sin gracia eso sería
+reuso: familia revocada y el cliente expulsado sin haber hecho nada malo. Como en la base se
+guarda **solo el hash**, el servidor **no puede reenviar** el token nuevo que ya emitió: no lo
+conoce. Por eso la gracia emite un par **nuevo** y anula el que se perdió.
+
+**La regla.** Llega a `/refresh` un token que **ya fue rotado** (tiene `reemplazado_por`):
+
+- Se aplica la gracia si se cumplen **las dos**:
+  - **a)** la rotación fue hace **30 s o menos**: `now() - viejo.rotado_en <=
+    REFRESH_CLIENTE_GRACIA_SEGUNDOS`, medido con el reloj de la base;
+  - **b)** su reemplazo **no se ha usado**: el reemplazo no tiene `reemplazado_por` y no
+    está revocado (`revocado_en IS NULL`).
+
+  Entonces:
+  1. se **revoca el reemplazo** (`revocado_en = now()`): el cliente nunca lo recibió;
+  2. se emite un par **nuevo** en la **misma familia**, con su vida completa de 30 días;
+  3. el viejo queda con `reemplazado_por` apuntando al **nuevo**. Su `rotado_en` **no se
+     toca**: la ventana se cuenta desde la **primera** rotación, así que reintentar no la
+     alarga.
+  4. Responde **200** normal, igual que un refresh cualquiera.
+- **Cualquier otro reuso** → se **revoca toda la familia** y **401** `sesion_revocada`:
+  - pasaron más de 30 s desde la rotación;
+  - el reemplazo **ya se usó** (ya rotó a su vez, o fue revocado);
+  - el token llegó **revocado** (`revocado_en` puesto: logout, familia ya revocada o
+    reemplazo anulado por una gracia anterior), tenga o no `reemplazado_por`.
+
+**El orden completo** en `/refresh`, **en una sola transacción**:
+
+1. Formato del cuerpo → si no, **400** `cuerpo_invalido`.
+2. `SELECT ... FROM refresh_tokens_cliente WHERE hash = $1::char(64) FOR UPDATE`. No existe →
+   **401** `refresh_invalido`.
+3. Vencido (`expira_en <= now()`) → **401** `refresh_invalido`. No revoca nada: un token
+   vencido ya no sirve para nada.
+4. Revocado (`revocado_en IS NOT NULL`) → revocar la familia, **401** `sesion_revocada`.
+5. Rotado (`reemplazado_por IS NOT NULL`) → bloquear también el reemplazo (`FOR UPDATE`,
+   siempre en el orden viejo → nuevo) y aplicar la regla de gracia de arriba.
+6. Vigente → rotación normal: insertar el nuevo y marcar el viejo con `reemplazado_por` y
+   `rotado_en = now()`.
+
+El `FOR UPDATE` sobre la fila del token **serializa dos refresh simultáneos con el mismo
+token**: el segundo espera al primero y, cuando sigue, ya ve el token rotado. **Nunca quedan
+dos ramas vivas**: si el segundo cae en la gracia, anula el reemplazo del primero y emite el
+suyo; en la familia queda **un solo** refresh token vigente.
+
+**El trade-off, aceptado:** un token **robado** sirve como mucho **30 s más** dentro de esa
+ventana: si el ladrón lo usa antes que el cliente legítimo y dentro de los 30 s de una
+rotación cuyo reemplazo no se ha usado, obtiene un par válido. Fuera de la ventana, o en
+cuanto el cliente legítimo use su token, el reuso revoca la familia como antes. Se puede
+apagar con `REFRESH_CLIENTE_GRACIA_SEGUNDOS=0`.
+
+**Lo que asume de la app:** hace **un solo refresh a la vez** (una promesa compartida: las
+peticiones que reciben 401 a la vez esperan el mismo refresh) y guarda el token nuevo **antes**
+de usarlo. Si mandara dos refresh en paralelo con el mismo token, el segundo anularía el token
+que devolvió el primero, y usar después ese token anulado revocaría la sesión.
+
+### Perfil
+
+| Método y ruta | Auth | Cuerpo | Respuesta |
+|---|---|---|---|
+| `GET /api/v1/clientes/yo` | cliente | — | **200** `{ cliente }` |
+| `PATCH /api/v1/clientes/yo` | cliente | `{ nombre?, telefono? }` (zod `.strict()`, al menos uno) | **200** `{ cliente }` · 400 `cuerpo_invalido` |
+
+El cliente sale del JWT (`sub`); no hay `:id` en la ruta.
+
+### Direcciones
+
+| Método y ruta | Auth | Respuesta |
+|---|---|---|
+| `GET /api/v1/clientes/yo/direcciones` | cliente | **200** `{ direcciones }` (la principal primero) |
+| `POST /api/v1/clientes/yo/direcciones` | cliente | **201** `{ direccion }` |
+| `PATCH /api/v1/clientes/yo/direcciones/:id` | cliente | **200** `{ direccion }` |
+| `DELETE /api/v1/clientes/yo/direcciones/:id` | cliente | **204** |
+
+- Campos: `direccion` (obligatorio), `barrio` (obligatorio), `referencia?`, `lat?`, `lng?`
+  (los dos o ninguno; rango válido), `principal` (booleano).
+- **Una sola principal por cliente**: marcar una como `principal: true` desmarca la anterior
+  en la misma transacción. La primera dirección de un cliente nace principal.
+- **404** si `:id` no existe **o no es del cliente** (no se distingue, para no revelar
+  direcciones ajenas). 400 `cuerpo_invalido` con zod `.strict()`.
+
+### Zonas de entrega
+
+| Método y ruta | Auth | Respuesta |
+|---|---|---|
+| `GET /api/v1/zonas` | **pública** | **200** `{ zonas: [{ id_zona, nombre, barrios, costo_envio, tiempo_estimado_min }] }`, **solo las activas** |
+| `GET /api/v1/zonas/cotizar?id_direccion=N` | cliente | **200** `{ zona: { id_zona, nombre, tiempo_estimado_min }, costo_envio }` · **422** `fuera_de_cobertura` · 404 si la dirección no es del cliente |
+
+`costo_envio` es un número JSON en pesos, como el resto de montos del panel; `barrios` es una
+lista de textos.
+
+**Cotizar compara barrios normalizados contra normalizados**, con la regla de la **base**
+(`normalizar_barrio(text)`, ver [Lo que necesita la base](#lo-que-necesita-la-base-p-23)), no
+con una regla propia del backend ni de la app: `direcciones.barrio` normalizado contra cada
+elemento normalizado de `zonas_envio.barrios`. Así `"  Los   Álamos "` y `"los alamos"` son el
+mismo barrio en la app, en la API y en la base. La app puede normalizar para mostrar o
+sugerir, pero quien decide la cobertura es la base.
+
+### Datos personales
+
+- **Quién los lee:** `nombre`, `email`, `telefono` y las **direcciones** de un cliente solo los
+  lee **el propio cliente** (las rutas `/api/v1/clientes/yo...`) y el **admin**. Ningún otro
+  rol (`mesero`, `cajero`, `cocina`, `repartidor`) tiene una ruta que liste clientes ni sus
+  direcciones.
+- **El repartidor (D-20)** ve solo la dirección **copiada** en `pedidos_domicilio` de **sus**
+  entregas, no el perfil del cliente ni sus otras direcciones.
+- **Respaldos:** estos datos van en los respaldos de la base (los de Roberto,
+  `infra/scripts/respaldo.sh`, ver `docs/despliegue.md` § *Respaldos de la base*), así que se
+  rigen por esas mismas reglas de acceso y retención.
+- **Nunca en logs:** ni el cuerpo de las peticiones de clientes, ni el perfil, ni direcciones,
+  ni contraseñas o tokens. Un error se registra con su código y la ruta, no con los datos.
+
+### Límites de las rutas de clientes
+
+Además del global (2000 / minuto por IP, compartido entre `/api` y `/api/v1`), cada ruta de
+autenticación tiene **dos** contadores independientes. El principal cuenta por la
+**cuenta** (email o token); el de IP es un **freno de abuso alto**, porque muchos clientes
+legítimos comparten IP (el wifi del restaurante, una universidad, el NAT del operador móvil).
+Superar cualquiera de los dos da **429** `demasiadas_peticiones` con `Retry-After`.
+
+| Ruta | Contador principal (por defecto) | Freno por IP (por defecto) | Qué cuenta |
+|---|---|---|---|
+| `POST .../registro` | **email normalizado**: 5 por hora | 100 por hora | Todos los intentos |
+| `POST .../login` | **email normalizado**: 10 por 15 min | 200 por 15 min | Solo los **fallidos**, como el login del personal |
+| `POST .../refresh` y `.../logout` | **hash del `refresh_token`**: 10 por minuto | 600 por minuto | Todos los intentos |
+
+- **Email normalizado:** `trim()` y minúsculas, el mismo valor que se busca en
+  `lower(email)`. Si el cuerpo no trae un `email` de texto, solo cuenta el freno por IP (y la
+  validación responde 400).
+- **Hash del `refresh_token`:** SHA-256, el mismo que se guarda en la base: el contador nunca
+  guarda el token. Una app sana refresca una vez cada 15 min; 10 por minuto solo frena a
+  quien reintenta en bucle. Logout comparte el contador de refresh.
+- **El riesgo de contar por email**, aceptado: quien conoce un email puede gastar los 10
+  fallos y bloquear el login de esa cuenta hasta 15 min. A cambio, el wifi de un local no
+  bloquea a todos sus clientes porque uno se equivocó de clave, y probar claves contra una
+  cuenta queda frenado sin importar desde cuántas IP se haga.
+- Mismo almacén que los límites de hoy (`limites.middleware.js`) y se desactivan solos dentro
+  de las pruebas.
+
+**Variables sugeridas** (no existen todavía; se implementan en la parte B):
+
+| Variable | Por defecto |
+|---|---|
+| `RATE_LIMIT_CLIENTES_REGISTRO_EMAIL_MAX` | `5` |
+| `RATE_LIMIT_CLIENTES_REGISTRO_IP_MAX` | `100` |
+| `RATE_LIMIT_CLIENTES_REGISTRO_VENTANA_MS` | `3600000` (1 h) |
+| `RATE_LIMIT_CLIENTES_LOGIN_EMAIL_MAX` | `10` |
+| `RATE_LIMIT_CLIENTES_LOGIN_IP_MAX` | `200` |
+| `RATE_LIMIT_CLIENTES_LOGIN_VENTANA_MS` | `900000` (15 min) |
+| `RATE_LIMIT_CLIENTES_REFRESH_TOKEN_MAX` | `10` |
+| `RATE_LIMIT_CLIENTES_REFRESH_IP_MAX` | `600` |
+| `RATE_LIMIT_CLIENTES_REFRESH_VENTANA_MS` | `60000` (1 min) |
+
+### Errores de las rutas de clientes
+
+En las rutas de clientes (`/api/v1/auth/clientes/...`, `/api/v1/clientes/...`,
+`/api/v1/zonas...`) **todo** error responde `{ "error": "...", "motivo": "..." }`, **también
+los genéricos**. La app decide por `motivo`; `error` es texto para mostrar o registrar y
+puede cambiar.
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **400** | `cuerpo_invalido`, o el específico (`nombre_invalido`, `email_invalido`, `clave_corta`, `clave_larga`, `telefono_invalido`) | Cuerpo o query inválidos |
+| **401** | `no_autenticado` | Ruta de cliente sin JWT, con JWT inválido o vencido. La app renueva con `/refresh` y reintenta |
+| **401** | `credenciales_invalidas` | Login: email o clave incorrectos (el mismo para los dos) |
+| **401** | `sesion_revocada` | Refresh: reuso fuera de la gracia o token revocado; la familia queda revocada |
+| **401** | `refresh_invalido` | Refresh: el token no existe o venció |
+| **403** | `prohibido` | JWT válido pero de otro rol (staff o comensal) |
+| **404** | `no_encontrado` | El recurso no existe o no es del cliente (no se distingue); también una ruta que no existe |
+| **409** | `email_registrado` | Registro con un email que ya tiene cuenta |
+| **422** | `fuera_de_cobertura` | Cotizar: la dirección no cae en ninguna zona activa |
+| **429** | `demasiadas_peticiones` | Algún límite, con cabecera `Retry-After` en segundos |
+| **500** | `error_interno` | Cualquier fallo no previsto. El detalle va al log del servidor, nunca a la respuesta |
+
+**Hoy no es así en todo:** el **404** de ruta inexistente (`server.js`), el **429** de los
+límites (`limites.middleware.js`) y el **500** del manejador global responden solo
+`{ error }`, igual que el 401/403 de `requireAuth`/`requireRole`. En la **parte B** se les
+agrega `motivo` (y las rutas de clientes usan su propio middleware de sesión con
+`no_autenticado` y `prohibido`). Es **compatible hacia atrás**: solo se agrega un campo, y
+la PWA, el panel y el KDS siguen leyendo `error` como hasta ahora.
+
+### Diferencias con `app-movil/src/services/authService.js`
+
+Lo que Juan debe ajustar en la app para usar este contrato (el archivo hoy solo define los
+contratos esperados y no llama a nada):
+
+| Hoy en la app | En el contrato |
+|---|---|
+| `POST /api/auth/clientes/registro`, `/login`, `/refresh`, `/logout` | Prefijo **`/api/v1`**: `POST /api/v1/auth/clientes/...` |
+| Respuesta `{ usuario, token, refreshToken }` | `{ cliente, token, refresh_token, expira_en }` (**`usuario` → `cliente`**, **`refreshToken` → `refresh_token`**, y llega **`expira_en`**) |
+| `refrescarToken(refreshToken)` → `{ token, refreshToken? }` | Cuerpo `{ refresh_token }` → `{ token, refresh_token, expira_en }`: el refresh **siempre** rota, así que hay que **guardar el nuevo** cada vez. Si la respuesta se pierde, reenviar el **mismo** token viejo **antes de 30 s** funciona (ventana de gracia: llega un par nuevo); pasado eso, o si el token nuevo ya se usó, el viejo revoca la sesión con 401 `sesion_revocada`. **Un solo refresh a la vez** (una promesa compartida) |
+| `cerrarSesion(token)` | `POST /api/v1/auth/clientes/logout` con cuerpo **`{ refresh_token }`** y **sin `Authorization`** (funciona aunque el JWT haya vencido); responde **204** sin cuerpo siempre que el cuerpo sea válido, aunque el token ya no sirva. Después, borrar `token` y `refresh_token` del almacenamiento |
+| `registrarUsuario({ nombre, correo, password })` e `iniciarSesion({ correo, password })` | **`correo` → `email`** (como el login del personal): `{ nombre, email, password, telefono? }` y `{ email, password }`; el objeto `cliente` también trae `email` (y `verificado`). La clave necesita **8 caracteres** como mínimo y **72 bytes** como máximo |
+| Errores sin motivo | **Todo** error de estas rutas trae `{ error, motivo }`, también 404, 429 y 500: decidir siempre por `motivo` ([la tabla](#errores-de-las-rutas-de-clientes)). Ante un 429 `demasiadas_peticiones`, esperar lo que diga `Retry-After` |
+| Sin manejo de vencimiento | El `token` vive **15 min**: renovar con `/refresh` ante un 401 `no_autenticado` o antes de `expira_en`. Con `sesion_revocada` o `refresh_invalido`, volver al login |
+
+### Lo que necesita la base (P-23)
+
+**Propuesta para Jarrison, no un script.** Las tablas y columnas son las del **plan 5.5**
+(`clientes`, `direcciones`, `zonas_envio`). Lo marcado como **sugerido, además del plan** son
+extras de este contrato (columnas, tipos e índices) que Jarrison puede tomar o no. La tabla de
+**refresh tokens es NUEVA**: la P-23 no la tiene.
+
+```sql
+-- clientes  (plan 5.5: id_cliente, nombre, email UNIQUE, telefono, password_hash, verificado, creado_en)
+id_cliente      SERIAL PRIMARY KEY
+nombre          VARCHAR(80)  NOT NULL
+email           VARCHAR(254) NOT NULL          -- UNIQUE sobre lower(email)
+telefono        VARCHAR(20)  NULL
+password_hash   VARCHAR(60)  NOT NULL          -- bcrypt costo 10 ($2b$10$...)
+verificado      BOOLEAN      NOT NULL DEFAULT FALSE
+creado_en       TIMESTAMPTZ  NOT NULL DEFAULT now()
+activo          BOOLEAN      NOT NULL DEFAULT TRUE    -- sugerido, además del plan
+actualizado_en  TIMESTAMPTZ  NOT NULL DEFAULT now()   -- sugerido, además del plan
+-- índice: UNIQUE (lower(email))  (el plan pide email UNIQUE; sobre lower() es lo sugerido)
+
+-- direcciones  (plan 5.5: id_direccion, id_cliente, direccion, barrio, referencia, lat, lng, principal)
+id_direccion    SERIAL PRIMARY KEY
+id_cliente      INTEGER NOT NULL REFERENCES clientes(id_cliente) ON DELETE CASCADE
+direccion       VARCHAR(200) NOT NULL
+barrio          VARCHAR(80)  NOT NULL
+referencia      VARCHAR(200) NULL
+lat             NUMERIC(9,6) NULL              -- sugerido: CHECK entre -90 y 90; lat y lng los dos o ninguno
+lng             NUMERIC(9,6) NULL              -- sugerido: CHECK entre -180 y 180
+principal       BOOLEAN NOT NULL DEFAULT FALSE
+creado_en       TIMESTAMPTZ NOT NULL DEFAULT now()   -- sugerido, además del plan
+-- índices sugeridos: (id_cliente); UNIQUE (id_cliente) WHERE principal  -> una sola principal
+
+-- zonas_envio  (plan 5.5: id_zona, nombre, barrios TEXT[], costo_envio, tiempo_estimado_min, activa;
+--               primera versión por barrios, sin mapa)
+id_zona              SERIAL PRIMARY KEY
+nombre               VARCHAR(80) NOT NULL UNIQUE
+barrios              TEXT[] NOT NULL DEFAULT '{}'
+costo_envio          NUMERIC(10,2) NOT NULL CHECK (costo_envio >= 0)
+tiempo_estimado_min  INTEGER NOT NULL CHECK (tiempo_estimado_min > 0)
+activa               BOOLEAN NOT NULL DEFAULT TRUE
+-- índices sugeridos: (activa); GIN sobre los barrios NORMALIZADOS (ver normalizar_barrio abajo)
+
+-- refresh_tokens_cliente  (NUEVA: la P-23 no la tiene)
+id               BIGSERIAL PRIMARY KEY
+id_cliente       INTEGER NOT NULL REFERENCES clientes(id_cliente) ON DELETE CASCADE
+hash             CHAR(64) NOT NULL UNIQUE      -- SHA-256 en hex del refresh token; nunca el valor
+familia          UUID NOT NULL                 -- la del primer login; se hereda al rotar
+creado_en        TIMESTAMPTZ NOT NULL DEFAULT now()
+expira_en        TIMESTAMPTZ NOT NULL
+rotado_en        TIMESTAMPTZ NULL              -- cuándo se rotó por PRIMERA vez: mide la ventana de gracia
+reemplazado_por  BIGINT NULL REFERENCES refresh_tokens_cliente(id)  -- el reemplazo vigente (la gracia lo cambia)
+revocado_en      TIMESTAMPTZ NULL              -- logout, reuso (toda la familia) o reemplazo anulado por la gracia;
+                                               -- la rotación normal NO lo pone
+-- sugerido: CHECK ((rotado_en IS NULL) = (reemplazado_por IS NULL))
+-- índices: UNIQUE (hash); (familia); (id_cliente); (expira_en) para la limpieza de vencidos
+```
+
+Cómo se usa la tabla de refresh tokens: buscar por `hash` (el UNIQUE es el índice de la
+búsqueda) con `FOR UPDATE`.
+
+- **Rotación normal**, en una transacción: insertar el nuevo con la misma `familia` y marcar
+  el viejo con `reemplazado_por = <nuevo>` y `rotado_en = now()`.
+- **La ventana de gracia usa `rotado_en`**, una columna propia, y no `revocado_en`: así
+  `revocado_en` significa solo "revocado a propósito" (logout, reuso, reemplazo anulado), y
+  un token rotado se distingue de uno revocado sin mirar dos columnas a la vez. `rotado_en`
+  no se mueve cuando la gracia cambia `reemplazado_por`, así que la ventana no se alarga
+  reintentando.
+- **Reuso**: `UPDATE ... SET revocado_en = now() WHERE familia = $1::uuid AND revocado_en IS
+  NULL` y 401 `sesion_revocada`.
+- **Logout**: `revocado_en = now()` solo en la fila de ese `hash`, si aún no lo tenía.
+
+La regla completa está en [la ventana de gracia del refresh](#la-ventana-de-gracia-del-refresh).
+
+**Barrios: la normalización vive en la base** (sugerido). Para que la app y la API coincidan,
+una sola regla estable, definida en la base:
+
+- Una función `normalizar_barrio(text) RETURNS text IMMUTABLE`: **sin tildes** (`unaccent`),
+  **minúsculas**, espacios **recortados** en los extremos y los de en medio **colapsados** a
+  uno (`"  Los   Álamos "` → `"los alamos"`).
+- Aplicada a los **dos lados**: `direcciones.barrio` y cada elemento de `zonas_envio.barrios`.
+  Dos formas de guardarlo, a elección de Jarrison: un **índice de expresión** (y un GIN sobre
+  el arreglo normalizado), o una **columna normalizada** (`barrio_normalizado`, y
+  `barrios_normalizados TEXT[]` en zonas) que mantiene un trigger o una columna generada.
+- **Cotizar compara normalizado contra normalizado**; el backend no reimplementa la regla, la
+  llama. (Si se usa `unaccent` en una función `IMMUTABLE`, conviene fijar el diccionario,
+  `unaccent('unaccent', ...)`, para que el índice no dependa del `search_path`.)
+
+**Auditoría** (sugerido). Hoy `usuarios` se audita con `fn_tr_auditar_cambios`, que guarda la
+**fila completa** (`to_jsonb(NEW)` / `to_jsonb(OLD)`) en `auditoria_cambios`, **hash de la
+contraseña incluido**. Para los clientes, no repetir eso:
+
+- `clientes`: **o no auditarla**, **o** auditarla **sin** `password_hash` y sin lo que no haga
+  falta para saber qué cambió (p. ej. guardar solo `id_cliente`, la operación y los nombres de
+  las columnas cambiadas, o la fila sin `password_hash`, `email` ni `telefono`).
+- `refresh_tokens_cliente`: el `hash` del token **nunca** va a la auditoría. Es una tabla de
+  mucho movimiento (cada refresh inserta y actualiza); lo razonable es no auditarla y dejar el
+  rastro en sus propias columnas (`creado_en`, `rotado_en`, `revocado_en`).
+- `direcciones`: los mismos datos personales; si se audita, sin la dirección en claro.
+
+---
+
 ## Pendiente por acordar con el equipo
 
 Ya resueltos contra el `schema.sql` de Jarrison: `mesas.estado` es

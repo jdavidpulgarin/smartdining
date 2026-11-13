@@ -38,13 +38,15 @@ const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const transaccionesService = require('../../src/services/transacciones.service');
 const autorInexistente = require('../../src/services/autor-inexistente');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 const MESA_BASE = parseInt(process.env.MESA_NUMERO_COBRO || '904', 10);
 const MARCA_MESA = 'PRUEBA cobro-de-mesa';
 
 let sonda = null;
 let hayBase = false;
-let plato = null; // { id_plato, precio_centavos }
+let catalogo = null; // el de plato-prueba.js, con su limpiar()
+let plato = null; // { id_plato, precio, precio_centavos }
 let usuarioReal = null;
 let siguienteMesa = MESA_BASE;
 
@@ -96,21 +98,23 @@ test.before(async () => {
   // Sin base configurada salta; configurada y sin responder, falla (#165).
   sonda = await abrirSonda();
   if (!sonda) return;
-  const p = await sonda.query(
-    `SELECT id_plato, ROUND(precio * 100)::bigint AS precio_centavos FROM platos
-      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
-      ORDER BY id_plato LIMIT 1`
-  );
   const u = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
-  plato = p.rows[0] ? { id_plato: p.rows[0].id_plato, precio_centavos: Number(p.rows[0].precio_centavos) } : null;
   usuarioReal = u.rows[0] || null;
-  hayBase = Boolean(plato && usuarioReal);
-  if (hayBase) await limpiar();
+  if (!usuarioReal) return;
+  await limpiar();
+  // Plato PROPIO SIN receta (tests/helpers/plato-prueba.js): aquí se prueba el
+  // cobro, no el inventario, así que no reserva stock. Antes era el primero
+  // del seed (Nachos Supremos, 26 unidades): esta suite retiene ~21 hasta su
+  // `after` y, con otras suites a la vez, el CI caía por stock insuficiente.
+  catalogo = await crearCatalogoPrueba(sonda, 'transacciones-mesa', { precio: 24000 });
+  plato = catalogo.plato;
+  hayBase = true;
 });
 
 test.after(async () => {
   try {
     if (hayBase) await limpiar();
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();
