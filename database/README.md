@@ -106,10 +106,11 @@ database/scripts/
 ├── 34_contacto_espacios_unicode.sql  # correo y redes rechazan también los espacios Unicode (U+00A0…), igual que `\s` del backend; no depende del locale
 ├── 35_transacciones_voucher.sql      # transacciones.voucher VARCHAR(40), opcional, solo con tarjeta débito/crédito, ^[A-Z0-9-]{1,40}$
 ├── 36_multicanal.sql                 # P-23: canal (mesa/para_llevar/domicilio), por_pagar, clientes, direcciones, zonas, domicilios, repartidor, pago anticipado
-└── 37_refresh_rotado_en.sql          # refresh_tokens_cliente.rotado_en (ventana de gracia del contrato de #199): va con reemplazado_por, no cambia una vez puesto, reemplazo de la misma familia y cliente
+├── 37_refresh_rotado_en.sql          # refresh_tokens_cliente.rotado_en (ventana de gracia del contrato de #199): va con reemplazado_por, no cambia una vez puesto, reemplazo de la misma familia y cliente
+└── 38_platos_sin_foto_falsa.sql      # platos cuyo url_imagen es EXACTAMENTE la foto genérica que ponía el panel → NULL (sin foto); las fotos de la semilla no se tocan
 ```
 
-> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (38).
+> El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (39).
 
 > **Multicanal (script 36, P-23).** Un pedido tiene `canal`: `mesa` (con mesa, como siempre),
 > `para_llevar` o `domicilio` (sin mesa, con cliente registrado). Los dos últimos nacen en
@@ -231,6 +232,7 @@ psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_34_contacto_espacios_
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_35_voucher.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_36_multicanal.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_37_refresh_rotado.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_38_foto_falsa.sql
 ```
 
 Voucher de tarjeta (script 35): `test_35_voucher.sql` crea su propia mesa, plato y pedido y
@@ -295,6 +297,12 @@ Rotación de los refresh tokens de la app (script 37): `test_37_refresh_rotado.s
 (`reemplazado_por` + `rotado_en`, sin tocar `revocado_en`), que los dos van juntos, que la
 ventana de gracia puede cambiar el reemplazo sin mover `rotado_en`, que el reemplazo es de la
 misma familia y del mismo cliente, el reuso (revocar la familia) y que el script es idempotente.
+
+Foto falsa del panel (script 38): `test_38_foto_falsa.sql` corre en `BEGIN … ROLLBACK` (usa
+`\ir`) y comprueba que solo el `url_imagen` **exactamente** igual a la foto genérica que ponía el
+panel queda en NULL. La misma foto con otros parámetros (la del Bowl de la semilla), otras fotos,
+`/imagenes/<uuid>.webp`, los platos sin foto y los valores casi iguales no cambian. También
+comprueba que el cambio queda en la auditoría y que correrlo otra vez no hace nada.
 
 Aviso de insumo agotado (script 28, G-06): también necesita `COMMIT` (escucha `LISTEN
 inventario`), crea y borra sus propios datos (prefijo `G06A`):
