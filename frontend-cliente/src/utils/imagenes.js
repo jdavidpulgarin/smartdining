@@ -1,6 +1,6 @@
 import { urlsServidor } from './urlsServidor';
 
-const PATRON_RUTA = /^\/imagenes\/[0-9a-f-]{36}\.webp$/i;
+const PATRON_RUTA = /^\/imagenes\/[0-9a-f-]{36}\.webp$/;
 const PATRON_ORIGEN = /^(https?:\/\/[^/?#]+)/i;
 // oxlint-disable-next-line eslint/no-control-regex, no-control-regex
 const PATRON_HTTPS = /^https:\/\/[^\s/?#\x00-\x1f\x7f]+(?:[/?#][^\s\x00-\x1f\x7f]*)?$/;
@@ -9,7 +9,7 @@ const PATRON_HTTPS = /^https:\/\/[^\s/?#\x00-\x1f\x7f]+(?:[/?#][^\s\x00-\x1f\x7f
  * Resuelve la URL pública de una imagen según su origen con lista blanca.
  *
  * Reglas:
- * - const PATRON_RUTA = /^\/imagenes\/[0-9a-f-]{36}\.webp$/i
+ * - const PATRON_RUTA = /^\/imagenes\/[0-9a-f-]{36}\.webp$/
  * - null, undefined, no-string, '' o solo espacios → null
  * - /imagenes/<uuid>.webp que cumple PATRON_RUTA exacto → origen de la API + ruta. Si no hay origen válido → null.
  * - Ya resuelta (idempotente): URL absoluta cuyo origen es EXACTAMENTE el origen de la API y cuyo path cumple PATRON_RUTA → igual.
