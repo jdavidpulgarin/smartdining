@@ -102,6 +102,10 @@ describe('mensajes', () => {
     ['transicion_invalida', /Actualiza/],
     ['repartidor_no_valido', /no está activo/],
     ['entrega_en_camino', /no se puede cancelar/],
+    // #232
+    ['pedido_sin_pagar', /no está pagado/],
+    ['pedido_no_asignable', /no se le asigna repartidor/],
+    ['entrega_por_repartidor', /la marca el repartidor/],
   ])('%s', (motivo, esperado) => {
     expect(mensajeErrorDomicilio({ motivo })).toMatch(esperado)
   })

@@ -119,8 +119,11 @@ const MENSAJES = {
   no_es_tu_entrega: 'Esa entrega no es tuya.',
   transicion_invalida: 'La entrega ya cambió de estado. Actualiza la lista.',
   repartidor_no_valido: 'Ese repartidor ya no está activo.',
-  pedido_cancelado: 'El pedido está cancelado.',
+  // #232: asignar solo pedidos pagados y vivos (reemplazan a pedido_cancelado).
+  pedido_sin_pagar: 'El pedido todavía no está pagado: se asigna cuando se confirme el pago.',
+  pedido_no_asignable: 'El pedido ya está cancelado, entregado o cerrado: no se le asigna repartidor.',
   entrega_en_camino: 'El pedido va en camino: no se puede cancelar.',
+  entrega_por_repartidor: 'En un domicilio la entrega la marca el repartidor.',
   no_encontrado: 'Ese domicilio ya no existe.',
 }
 
