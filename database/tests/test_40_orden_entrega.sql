@@ -17,6 +17,11 @@
 --  5. Un UPDATE que no cambia estado_entrega (la referencia, reasignar) pasa.
 --  6. Lo del 36 sigue: de entregado o fallido no se sale.
 --  7. Correr el script otra vez no cambia nada (un solo trigger).
+--  8. Un domicilio solo pasa a 'entregado' si su entrega ya está entregada:
+--     con la entrega asignada o en camino, cambiar_estado_pedido() del script
+--     03 y un UPDATE directo se rechazan; con la entrega entregada, pasa. Un
+--     pedido para llevar sigue pasando a 'entregado'. SIN la regla del pedido
+--     la prueba falla aquí.
 -- ==============================================================================
 
 BEGIN;
@@ -143,5 +148,37 @@ SELECT pg_temp.exigir(pg_temp.rechaza(pg_temp.poner('A', 'en_camino')) AND pg_te
 SELECT pg_temp.exigir((SELECT count(*) FROM pg_trigger WHERE tgname = 'tr_orden_estado_entrega' AND NOT tgisinternal) = 1
                   AND pg_temp.rechaza(pg_temp.poner('S', 'asignado')),
     'caso 7: correr el script otra vez deja un solo trigger y sigue rechazando');
+
+-- 8. El pedido de un domicilio solo se entrega con la entrega entregada
+SELECT pg_temp.domicilio('E');
+UPDATE pedidos SET estado = 'en_preparacion' WHERE id_pedido = pg_temp.id('E');
+UPDATE pedidos SET estado = 'listo' WHERE id_pedido = pg_temp.id('E');
+UPDATE pedidos_domicilio SET id_repartidor = pg_temp.id('rep1'), estado_entrega = 'asignado' WHERE id_pedido = pg_temp.id('E');
+SELECT pg_temp.exigir(
+    pg_temp.rechaza(format($f$SELECT cambiar_estado_pedido(%s, 'entregado', 'atajo', %s)$f$, pg_temp.id('E'), pg_temp.id('rep1')))
+    AND pg_temp.rechaza(format('UPDATE pedidos SET estado = %L WHERE id_pedido = %s', 'entregado', pg_temp.id('E'))),
+    'caso 8: con la entrega asignada, cambiar_estado_pedido() y un UPDATE directo a entregado se rechazan');
+UPDATE pedidos_domicilio SET estado_entrega = 'en_camino' WHERE id_pedido = pg_temp.id('E');
+SELECT pg_temp.exigir(
+    pg_temp.rechaza(format($f$SELECT cambiar_estado_pedido(%s, 'entregado', 'atajo', %s)$f$, pg_temp.id('E'), pg_temp.id('rep1'))),
+    'caso 8: en camino tampoco');
+UPDATE pedidos_domicilio SET estado_entrega = 'entregado' WHERE id_pedido = pg_temp.id('E');
+SELECT cambiar_estado_pedido(pg_temp.id('E'), 'entregado', 'Entregado a domicilio', pg_temp.id('rep1'));
+SELECT pg_temp.exigir((SELECT estado FROM pedidos WHERE id_pedido = pg_temp.id('E')) = 'entregado',
+    'caso 8: con la entrega entregada, el pedido sí pasa a entregado');
+DO $$
+DECLARE v INTEGER;
+BEGIN
+    INSERT INTO pedidos (codigo_pedido, estado, total, canal, id_cliente)
+    VALUES (left('T40L' || md5(clock_timestamp()::text), 16), 'recibido', 0, 'para_llevar', pg_temp.id('cliente'))
+    RETURNING id_pedido INTO v;
+    INSERT INTO t40 VALUES ('L', v);
+    UPDATE pedidos SET estado = 'en_preparacion' WHERE id_pedido = v;
+    UPDATE pedidos SET estado = 'listo' WHERE id_pedido = v;
+    UPDATE pedidos SET estado = 'entregado' WHERE id_pedido = v;
+END
+$$;
+SELECT pg_temp.exigir((SELECT estado FROM pedidos WHERE id_pedido = pg_temp.id('L')) = 'entregado',
+    'caso 8: un pedido para llevar sigue pasando a entregado');
 
 ROLLBACK;

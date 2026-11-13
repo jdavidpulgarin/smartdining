@@ -20,8 +20,17 @@
 -- reasignar, o tocar la referencia) no se mira aquí.
 --
 -- Es un trigger aparte del del 36 (que sigue validando repartidor activo,
--- canal y marcas de tiempo): este solo mira el orden. No toca datos y se
--- puede correr dos veces.
+-- canal y marcas de tiempo): este solo mira el orden.
+--
+-- Además, del lado del PEDIDO: un pedido de canal 'domicilio' solo pasa a
+-- 'entregado' si su entrega (pedidos_domicilio) ya está 'entregado'. Lo
+-- entrega el repartidor (POST /domicilios/:id/entregar, que marca primero la
+-- entrega y después el pedido, en la misma transacción). Así ningún otro
+-- camino se lo salta: ni PATCH /pedidos/:id/estado (el backend ya da 409
+-- entrega_por_repartidor desde el #232), ni cambiar_estado_pedido() del
+-- script 03, ni un UPDATE directo. Mesa y para llevar no cambian.
+--
+-- No toca datos y se puede correr dos veces.
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION fn_tr_orden_estado_entrega()
@@ -59,3 +68,29 @@ DROP TRIGGER IF EXISTS tr_orden_estado_entrega ON pedidos_domicilio;
 CREATE TRIGGER tr_orden_estado_entrega
     BEFORE INSERT OR UPDATE OF estado_entrega ON pedidos_domicilio
     FOR EACH ROW EXECUTE FUNCTION fn_tr_orden_estado_entrega();
+
+-- ------------------------------------------------------------------------------
+-- Un domicilio solo se marca entregado si su entrega ya lo está
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_tr_domicilio_entregado_por_repartidor()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.canal = 'domicilio'
+       AND NEW.estado = 'entregado'
+       AND OLD.estado IS DISTINCT FROM 'entregado'
+       AND NOT EXISTS (SELECT 1 FROM pedidos_domicilio d
+                        WHERE d.id_pedido = NEW.id_pedido AND d.estado_entrega = 'entregado') THEN
+        RAISE EXCEPTION 'El pedido a domicilio % solo se marca entregado cuando el repartidor entrega',
+            NEW.id_pedido USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION fn_tr_domicilio_entregado_por_repartidor() IS
+    'Un pedido de canal domicilio pasa a entregado solo con su pedidos_domicilio.estado_entrega = entregado (por cualquier camino). Script 40.';
+
+DROP TRIGGER IF EXISTS tr_domicilio_entregado_por_repartidor ON pedidos;
+CREATE TRIGGER tr_domicilio_entregado_por_repartidor
+    BEFORE UPDATE OF estado ON pedidos
+    FOR EACH ROW EXECUTE FUNCTION fn_tr_domicilio_entregado_por_repartidor();

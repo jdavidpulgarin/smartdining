@@ -107,7 +107,7 @@ database/scripts/
 ├── 35_transacciones_voucher.sql      # transacciones.voucher VARCHAR(40), opcional, solo con tarjeta débito/crédito, ^[A-Z0-9-]{1,40}$
 ├── 36_multicanal.sql                 # P-23: canal (mesa/para_llevar/domicilio), por_pagar, clientes, direcciones, zonas, domicilios, repartidor, pago anticipado
 ├── 37_refresh_rotado_en.sql          # refresh_tokens_cliente.rotado_en (ventana de gracia del contrato de #199): va con reemplazado_por, no cambia una vez puesto, reemplazo de la misma familia y cliente
-└── 40_orden_estado_entrega.sql       # orden de pedidos_domicilio.estado_entrega: nace en por_asignar; por_asignar → asignado → en_camino → entregado | fallido
+└── 40_orden_estado_entrega.sql       # orden de pedidos_domicilio.estado_entrega: nace en por_asignar; por_asignar → asignado → en_camino → entregado | fallido; un domicilio solo pasa a entregado si su entrega ya lo está
 ```
 
 > El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (38).
@@ -302,7 +302,9 @@ misma familia y del mismo cliente, el reuso (revocar la familia) y que el script
 Orden de la entrega (script 40): `test_40_orden_entrega.sql` corre en `BEGIN … ROLLBACK` (usa `\ir`) y
 comprueba que una entrega nace en `por_asignar`, el camino `por_asignar → asignado` (y reasignar) `→ en_camino →
 entregado | fallido`, que saltar pasos y volver atrás se rechazan, que un UPDATE sin cambio de estado pasa, que
-lo del 36 sigue (de entregado o fallido no se sale) y que el script es idempotente.
+lo del 36 sigue (de entregado o fallido no se sale), que el script es idempotente, y que el PEDIDO de un
+domicilio solo pasa a `entregado` si su entrega ya está entregada: con la entrega asignada o en camino,
+`cambiar_estado_pedido()` (script 03) y un UPDATE directo se rechazan; un pedido para llevar no cambia.
 
 Aviso de insumo agotado (script 28, G-06): también necesita `COMMIT` (escucha `LISTEN
 inventario`), crea y borra sus propios datos (prefijo `G06A`):
