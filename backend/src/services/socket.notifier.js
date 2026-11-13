@@ -298,6 +298,16 @@ async function validarTokenQr(token) {
   }
 }
 
+/**
+ * D-20a: ¿el pedido no tiene mesa? (domicilio o para llevar, script 36). Hoy el
+ * socket-server exige id_mesa en order-status e item-cancelado, así que esos
+ * avisos no se mandan: se devuelve SIN_MESA, sin tocar la red y sin lanzar (la
+ * respuesta HTTP nunca depende de un aviso). Los avisos de domicilio llegan con
+ * la R-23 de Roberto.
+ */
+const sinMesa = (idMesa) => idMesa === null || idMesa === undefined;
+const SIN_MESA = Object.freeze({ ok: false, motivo: 'SIN_MESA' });
+
 /** POST /internal/order-created — comanda nueva hacia KDS, admin y la mesa. */
 async function notificarPedidoCreado(pedido, detalles) {
   return enviar('/internal/order-created', {
@@ -321,6 +331,10 @@ async function notificarPedidoCreado(pedido, detalles) {
  * sí sale (es el de siempre).
  */
 async function notificarCambioEstado({ id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, origen }) {
+  // D-20a: un pedido sin mesa (domicilio, para llevar) no se avisa: el
+  // socket-server lo rechazaría (su contrato exige id_mesa). Los avisos de
+  // domicilio llegan con la R-23 de Roberto.
+  if (sinMesa(id_mesa)) return SIN_MESA;
   const cuerpo = {
     eventId: nuevoEventId(),
     id_pedido,
@@ -365,6 +379,8 @@ async function notificarItemCancelado({
     console.error(`[socket] /internal/item-cancelado: origen no valido (${origen}), no se envia`);
     return { ok: false, motivo: 'ORIGEN_INVALIDO' };
   }
+  // D-20a: sin mesa no hay sala a la que avisar (ver notificarCambioEstado).
+  if (sinMesa(id_mesa)) return SIN_MESA;
   const resultado = await enviarConReintento('/internal/item-cancelado', {
     id_pedido,
     id_mesa,
@@ -838,4 +854,5 @@ module.exports = {
   MOTIVO_LIBERADA,
   MAX_REFERENCIA_PAGO,
   TIMEOUT_POR_DEFECTO_MS,
+  SIN_MESA,
 };
