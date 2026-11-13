@@ -4,7 +4,7 @@
  */
 
 const { traducirErrorInventario } = require('./inventario-errores');
-const { esRutaDeClientes, caminoDe } = require('../config/rutas-clientes');
+const { esRutaConMotivo, caminoDe } = require('../config/rutas-clientes');
 
 // SQLSTATE que PostgreSQL asigna a un RAISE EXCEPTION sin código propio, o sea
 // a las reglas de negocio que viven en los triggers de Jarrison.
@@ -149,7 +149,8 @@ function manejadorErrores(err, req, res, next) {
   // status si no trae uno propio) y el log no lleva datos: ni el mensaje de
   // PostgreSQL ni su `detail` (que puede repetir un email o una dirección), solo
   // el código, el método y el camino.
-  const deClientes = esRutaDeClientes(req.originalUrl);
+  // D-20a: también despacho, zonas del admin y repartidores (rutas-clientes.js).
+  const deClientes = esRutaConMotivo(req.originalUrl);
   const enviar = (status, cuerpo) =>
     res
       .status(status)
@@ -174,6 +175,11 @@ function manejadorErrores(err, req, res, next) {
     const mensaje = deClientes && err.type ? MENSAJE_CUERPO_INVALIDO : err.message;
     const cuerpo = { error: mensaje };
     if (typeof err.motivo === 'string' && err.motivo) cuerpo.motivo = err.motivo;
+    // D-20a: un error de negocio puede traer datos para quien llama (p. ej. el
+    // barrio con el que choca una zona) en `extra`. Nunca pisan error ni motivo.
+    if (err.extra && typeof err.extra === 'object' && !Array.isArray(err.extra)) {
+      for (const [k, v] of Object.entries(err.extra)) if (!(k in cuerpo)) cuerpo[k] = v;
+    }
     return enviar(err.status, cuerpo);
   }
 

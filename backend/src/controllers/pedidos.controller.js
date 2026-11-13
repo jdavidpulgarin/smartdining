@@ -561,6 +561,8 @@ const MENSAJES_CANCELAR_PEDIDO = {
   pedido_compartido: 'Ese pedido tiene platos de otras personas: quita solo los tuyos, o pídeselo al mesero',
   no_cancelable: 'Ese pedido ya se está preparando: pídeselo al mesero',
   pago_registrado: 'Ese pedido ya tiene un pago registrado: pídeselo al mesero',
+  // D-20a
+  entrega_en_camino: pedidosService.MENSAJE_ENTREGA_EN_CAMINO,
 };
 
 /**
@@ -748,6 +750,7 @@ const MENSAJES_QUITAR_ITEM = {
   item_ya_cancelado: 'Ese plato ya estaba quitado del pedido',
   item_en_preparacion: 'Ese plato ya se está preparando: pídeselo al mesero',
   pago_registrado: 'El pedido ya tiene un pago registrado: pídeselo al mesero',
+  entrega_en_camino: pedidosService.MENSAJE_ENTREGA_EN_CAMINO,
 };
 
 const MENSAJES_QUITAR_ITEM_PERSONAL = {
@@ -755,6 +758,8 @@ const MENSAJES_QUITAR_ITEM_PERSONAL = {
   item_no_cancelable: 'Esa línea ya no se puede cancelar: ya se sirvió, o el pedido está entregado, pagado o '
     + 'cancelado, o es la última línea de un pedido que no puede pasar a cancelado desde su estado',
   pago_registrado: 'Lo ya pagado supera el total que quedaría sin esa línea: hay que reembolsar antes de cancelarla',
+  // D-20a: con la entrega a domicilio en camino no se toca ninguna línea.
+  entrega_en_camino: pedidosService.MENSAJE_ENTREGA_EN_CAMINO,
 };
 
 /**
