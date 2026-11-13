@@ -204,6 +204,10 @@ test('quitar plato: pago_registrado es ESTRICTO, cualquier transacción completa
     assert.ok(pago.sql.includes('EXISTS'), 'basta con que exista una');
     assert.ok(pago.sql.includes("estado_transaccion = 'completada'"));
     assert.deepStrictEqual(pago.params, [PEDIDO], 'ni el total ni el subtotal entran en la regla');
+    // Decisión de producto: el comensal NO usa la regla del personal (pagado
+    // contra el total nuevo), y con un pago ni siquiera llega a tocar la línea.
+    assert.strictEqual(e.db.buscar('pagado_centavos'), undefined);
+    assert.strictEqual(e.db.buscar('UPDATE detalles_pedido'), undefined);
   } finally {
     e.restaurar();
   }

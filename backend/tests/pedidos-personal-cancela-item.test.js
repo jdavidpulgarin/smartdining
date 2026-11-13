@@ -36,14 +36,22 @@ function fakePersonal({
   pedido = pedidoEn('en_preparacion'),
   linea = lineaEn('cocinando'),
   pagoBloquea = false,
+  // pago_registrado del personal: lo pagado y el total NUEVO (sin la línea) en
+  // centavos, como los devuelve pg (bigint -> texto). Por omisión, sin pagos.
+  pagadoCentavos = 0,
+  totalNuevoCentavos = null,
   vivas = 1,
   transicionValida = true,
   falloEn = null,
 } = {}) {
+  const totalNuevo = totalNuevoCentavos ?? (pedido && linea ? (pedido.total - linea.subtotal) * 100 : 0);
   return instalarFakeDb((sql) => {
     if (falloEn && sql.includes(falloEn.sql)) throw falloEn.error;
     if (sql.includes('total, creado_en') && sql.includes('FOR UPDATE')) return { rows: pedido ? [pedido] : [] };
     if (sql.includes('FOR UPDATE OF dp')) return { rows: linea ? [linea] : [] };
+    if (sql.includes('pagado_centavos')) {
+      return { rows: [{ total_centavos: String(totalNuevo), pagado_centavos: String(pagadoCentavos) }] };
+    }
     if (sql.includes('FROM transacciones t')) return { rows: [{ bloquea: pagoBloquea }] };
     if (sql.includes('count(*)::int AS n FROM detalles_pedido')) return { rows: [{ n: vivas }] };
     if (sql.includes('FROM transiciones_validas')) return { rows: [{ ok: transicionValida }] };
@@ -181,7 +189,6 @@ for (const [motivo, opcionesDb, nota] of [
   ['item_no_cancelable', { pedido: pedidoEn('entregado'), linea: lineaEn('pendiente') }, 'pedido entregado'],
   ['item_no_cancelable', { pedido: pedidoEn('pagado'), linea: lineaEn('pendiente') }, 'pedido pagado'],
   ['item_no_cancelable', { pedido: pedidoEn('cancelado'), linea: lineaEn('pendiente') }, 'pedido cancelado'],
-  ['pago_registrado', { pagoBloquea: true }, 'con cualquier pago completado'],
 ]) {
   test(`personal cancela plato: ${nota} -> 409 ${motivo} y no se toca nada`, async () => {
     const e = escenario(opcionesDb);
@@ -197,6 +204,91 @@ for (const [motivo, opcionesDb, nota] of [
     }
   });
 }
+
+// --- pago_registrado del personal: lo pagado contra el total NUEVO ------------------
+// Pedido de 50.000 y línea de 30.000: el total nuevo es 20.000 (2.000.000 centavos).
+
+for (const [caso, pagadoCentavos] of [
+  ['sin pagos', 0],
+  ['pagado < total nuevo', 1500000],
+  ['pagado == total nuevo (igual vale)', 2000000],
+]) {
+  test(`personal cancela plato: ${caso} -> 200 y COMMIT`, async () => {
+    const e = escenario({ pagadoCentavos });
+    try {
+      const res = await cancelar('mesero');
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      assert.ok(e.db.buscar('COMMIT'));
+      assert.strictEqual(e.db.buscar('ROLLBACK'), undefined);
+    } finally {
+      e.restaurar();
+    }
+  });
+}
+
+test('personal cancela plato: el pago se compara DESPUÉS de cancelar la línea, en centavos que calcula la base', async () => {
+  const e = escenario({ pagadoCentavos: 1500000 });
+  try {
+    assert.strictEqual((await cancelar('admin')).status, 200);
+    const cuenta = e.db.buscar('pagado_centavos');
+    assert.ok(cuenta, 'lee total y pagado');
+    assert.ok(cuenta.sql.includes('ROUND(p.total * 100)::bigint'), 'total en centavos enteros');
+    assert.ok(cuenta.sql.includes('ROUND(SUM(t.monto) * 100)'), 'pagado en centavos enteros');
+    assert.ok(cuenta.sql.includes("estado_transaccion = 'completada'"));
+    assert.deepStrictEqual(cuenta.params, [PEDIDO]);
+    const sqls = e.db.todas('').map((c) => c.sql);
+    const iLinea = sqls.findIndex((s) => s.includes("UPDATE detalles_pedido SET estado_item = 'cancelado'"));
+    const iCuenta = sqls.findIndex((s) => s.includes('pagado_centavos'));
+    const iVivas = sqls.findIndex((s) => s.includes('count(*)::int AS n FROM detalles_pedido'));
+    assert.ok(iLinea >= 0 && iCuenta > iLinea, 'primero se cancela la línea (el trigger deja el total nuevo)');
+    assert.ok(iVivas > iCuenta, 'y se compara antes de decidir si el pedido se cancela');
+    assert.strictEqual(e.db.buscar('EXISTS (SELECT 1 FROM transacciones'), undefined, 'el personal no usa la regla estricta');
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('personal cancela plato: pagado > total nuevo -> 409 pago_registrado, ROLLBACK y sin avisos', async () => {
+  const e = escenario({ pagadoCentavos: 2000001 });
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, 'pago_registrado');
+    assert.ok(res.body.error);
+    assert.ok(e.db.buscar("UPDATE detalles_pedido SET estado_item = 'cancelado'"), 'la línea se canceló dentro de la transacción');
+    sinCancelar(e); // ... y el ROLLBACK la deshace, con su movimiento de stock
+    assert.strictEqual(e.db.buscar('count(*)::int AS n FROM detalles_pedido'), undefined, 'no sigue al paso del pedido');
+    await socketNotifier.esperarAvisos();
+    assert.strictEqual(e.socket.avisos.length, 0, 'nada que avisar');
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('personal cancela plato: ÚLTIMA línea con algo pagado -> 409 pago_registrado (no se cancela un pedido con pagos)', async () => {
+  const e = escenario({ vivas: 0, totalNuevoCentavos: 0, pagadoCentavos: 100 });
+  try {
+    const res = await cancelar('admin');
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, 'pago_registrado');
+    sinCancelar(e);
+    assert.strictEqual(e.db.buscar('FROM transiciones_validas'), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('personal cancela plato: ÚLTIMA línea sin pagos sigue cancelando el pedido (total nuevo 0 = pagado 0)', async () => {
+  const e = escenario({ pedido: pedidoEn('recibido'), linea: lineaEn('pendiente'), vivas: 0, totalNuevoCentavos: 0 });
+  try {
+    const res = await cancelar('admin');
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.ok(e.db.buscar("UPDATE pedidos SET estado = 'cancelado'"));
+    assert.ok(e.db.buscar('COMMIT'));
+  } finally {
+    e.restaurar();
+  }
+});
 
 test('personal cancela plato: si transiciones_validas NO permite pasar el pedido a cancelado, la ÚLTIMA línea -> 409 item_no_cancelable y ROLLBACK', async () => {
   const e = escenario({ pedido: pedidoEn('en_preparacion'), linea: lineaEn('cocinando'), vivas: 0, transicionValida: false });
