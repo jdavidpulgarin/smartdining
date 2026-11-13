@@ -19,6 +19,7 @@ import { useMesaSocket } from '../context/MesaSocketContext';
 import { obtenerApodo } from '../utils/apodo';
 import { generarIdLinea } from '../utils/id';
 import { formatearPrecio } from '../utils/formato';
+import { urlImagen } from '../utils/imagenes';
 
 function Menu() {
   const navigate = useNavigate();
@@ -288,7 +289,7 @@ function Menu() {
               >
                 <div className="space-y-2">
                   <Imagen
-                    src={plato.url_imagen}
+                    src={urlImagen(plato.url_imagen)}
                     alt={plato.nombre}
                     aspecto="4/3"
                     className="w-full rounded-xl"

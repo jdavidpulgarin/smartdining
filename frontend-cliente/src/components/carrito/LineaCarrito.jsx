@@ -1,4 +1,5 @@
 import { formatearPrecio } from '../../utils/formato';
+import { urlImagen } from '../../utils/imagenes';
 
 function LineaCarrito({
   linea,
@@ -12,7 +13,7 @@ function LineaCarrito({
     linea.subtotal !== undefined
       ? Number(linea.subtotal)
       : (Number(linea.precioUnitario) || 0) * (Number(linea.cantidad) || 0);
-  const imagenUrl = linea.imagen || linea.url_imagen;
+  const imagenUrl = urlImagen(linea.imagen || linea.url_imagen);
 
   const faltantesLista = Array.isArray(faltantes) ? faltantes : [];
   const tieneFaltante =
