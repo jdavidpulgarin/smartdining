@@ -242,6 +242,23 @@ describe('pedidoPrincipal', () => {
     const principal = pedidoPrincipal(misPedidos, null);
     expect(principal.id_pedido).toBe(2);
   });
+
+  it('mantiene la seleccion en un pedido cancelado si idSeleccionado coincide', () => {
+    const misPedidos = [
+      { id_pedido: 'A', estado: 'cancelado' },
+      { id_pedido: 'B', estado: 'recibido' },
+    ];
+    const principal = pedidoPrincipal(misPedidos, 'A');
+    expect(principal.id_pedido).toBe('A');
+  });
+
+  it('si el pedido seleccionado no existe tras recargar, cae al primer pedido activo', () => {
+    const misPedidos = [
+      { id_pedido: 'B', estado: 'recibido' },
+    ];
+    const principal = pedidoPrincipal(misPedidos, 'A');
+    expect(principal.id_pedido).toBe('B');
+  });
 });
 
 describe('haceCuanto', () => {
@@ -652,7 +669,7 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
     );
   });
 
-  it('muestra "Este pedido fue cancelado." cuando el origen es desconocido tras recargar', () => {
+  it('muestra "El restaurante canceló este pedido." cuando el origen es desconocido tras recargar', () => {
     const pedidoOrigenDesconocido = {
       id_pedido: 7,
       estado: 'cancelado',
@@ -662,7 +679,7 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
       ],
     };
     expect(mensajeEstadoTarjeta(pedidoOrigenDesconocido, 5)).toBe(
-      'Este pedido fue cancelado.'
+      'El restaurante canceló este pedido.'
     );
   });
 

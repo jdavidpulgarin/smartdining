@@ -132,6 +132,9 @@ function Seguimiento() {
       const accion = accionErrorCancelarPedido(err);
       if (accion.recargar) {
         await recargar();
+        if (targetId != null) {
+          setPedidoActivo(targetId);
+        }
       }
       if (accion.mensaje) {
         setErrorQuitar(accion.mensaje);

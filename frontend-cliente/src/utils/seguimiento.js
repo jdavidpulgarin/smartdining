@@ -795,12 +795,12 @@ export function mensajeEstadoTarjeta(pedido, numeroMesa = null) {
     return info.mensaje;
   }
 
-  if (pedido.cancelado_por === 'restaurante') {
-    return 'El restaurante canceló este pedido.';
-  }
-
   if (pedido.cancelado_por === 'comensal') {
     return 'Cancelaste este pedido.';
+  }
+
+  if (pedido.cancelado_por === 'restaurante' || pedido.cancelado_por === 'personal') {
+    return 'El restaurante canceló este pedido.';
   }
 
   const lineas = Array.isArray(pedido.detalles)
@@ -809,27 +809,18 @@ export function mensajeEstadoTarjeta(pedido, numeroMesa = null) {
       ? pedido.items
       : [];
 
-  if (lineas.length === 0) {
-    return 'Este pedido fue cancelado.';
-  }
-
   const origenes = lineas.map((d) => {
     const raw = d?.origen_cancelacion ?? d?.origen;
     return typeof raw === 'string' && raw.trim() ? raw.trim().toLowerCase() : null;
   });
 
-  const hayPersonal = origenes.some((o) => o === 'personal');
-  const todasComensal = origenes.every((o) => o === 'comensal');
-
-  if (hayPersonal) {
-    return 'El restaurante canceló este pedido.';
-  }
+  const todasComensal = origenes.length > 0 && origenes.every((o) => o === 'comensal');
 
   if (todasComensal) {
     return 'Cancelaste este pedido.';
   }
 
-  return 'Este pedido fue cancelado.';
+  return 'El restaurante canceló este pedido.';
 }
 
 /**
