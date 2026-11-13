@@ -483,6 +483,104 @@ export function puedeQuitar(item, { yo, estadoPedido } = {}) {
 }
 
 /**
+ * Indica si el comensal actual puede cancelar todo el pedido (D-12).
+ *
+ * True solo si:
+ * - Estado del pedido es 'recibido'.
+ * - Tiene al menos una línea viva (estado_item distinto de 'cancelado').
+ * - TODAS las líneas vivas están en 'pendiente' y pertenecen al comensal (comparado con claveAlias).
+ *
+ * @param {object|null|undefined} pedido
+ * @param {{ yo?: string|null }} [contexto]
+ * @returns {boolean}
+ */
+export function puedeCancelarPedido(pedido, { yo } = {}) {
+  if (!pedido || typeof pedido !== 'object') return false;
+  if (String(pedido.estado || '').trim().toLowerCase() !== 'recibido') {
+    return false;
+  }
+
+  const claveYo = claveAlias(yo);
+  if (!claveYo) return false;
+
+  const rawLineas = Array.isArray(pedido.detalles)
+    ? pedido.detalles
+    : Array.isArray(pedido.items)
+      ? pedido.items
+      : [];
+
+  const lineasVivas = rawLineas.filter(
+    (item) => String(item?.estado_item || '').trim().toLowerCase() !== 'cancelado'
+  );
+
+  if (lineasVivas.length === 0) {
+    return false;
+  }
+
+  return lineasVivas.every((item) => {
+    const estadoItem = String(item?.estado_item || '').trim().toLowerCase();
+    const claveItem = claveAlias(item?.comensal);
+    return estadoItem === 'pendiente' && claveItem && claveItem === claveYo;
+  });
+}
+
+/**
+ * Traduce un error de POST /pedidos/:id/cancelar a la acción de UI (D-12).
+ *
+ * @param {unknown} error
+ * @returns {{ tipo: string, mensaje: string|null, recargar: boolean }}
+ */
+export function accionErrorCancelarPedido(error) {
+  const motivo = String(error?.motivo ?? error?.data?.motivo ?? '')
+    .trim()
+    .toLowerCase();
+  const status = Number(error?.status ?? 0);
+
+  if (motivo === 'pedido_ya_cancelado') {
+    return { tipo: 'silencioso', mensaje: null, recargar: true };
+  }
+  if (motivo === 'pedido_compartido') {
+    return {
+      tipo: 'pedido_compartido',
+      mensaje: 'Hay platos de otras personas en este pedido. Pídele ayuda al mesero.',
+      recargar: false,
+    };
+  }
+  if (motivo === 'no_cancelable') {
+    return {
+      tipo: 'no_cancelable',
+      mensaje: 'La cocina ya empezó tu pedido; ya no se puede cancelar.',
+      recargar: true,
+    };
+  }
+  if (motivo === 'pago_registrado') {
+    return {
+      tipo: 'pago_registrado',
+      mensaje: 'Ya hay un pago registrado; pídele ayuda al mesero.',
+      recargar: false,
+    };
+  }
+  if (
+    motivo === 'no_es_tuyo' ||
+    motivo === 'no_encontrado' ||
+    status === 403 ||
+    status === 404
+  ) {
+    return {
+      tipo: 'no_encontrado',
+      mensaje: 'No encontramos ese pedido en tu mesa.',
+      recargar: true,
+    };
+  }
+
+  return {
+    tipo: 'error',
+    mensaje: 'No pudimos cancelar el pedido. Intenta de nuevo.',
+    recargar: false,
+  };
+}
+
+/**
  * Traduce un error de POST /pedidos/:id/items/:id_detalle/cancelar a la acción de UI (J-14).
  *
  * @param {unknown} error
@@ -698,11 +796,11 @@ export function mensajeEstadoTarjeta(pedido, numeroMesa = null) {
   }
 
   if (pedido.cancelado_por === 'restaurante') {
-    return 'Cancelado por el restaurante';
+    return 'El restaurante canceló este pedido.';
   }
 
   if (pedido.cancelado_por === 'comensal') {
-    return 'Quitaste todos los platos de este pedido.';
+    return 'Cancelaste este pedido.';
   }
 
   const lineas = Array.isArray(pedido.detalles)
@@ -724,11 +822,11 @@ export function mensajeEstadoTarjeta(pedido, numeroMesa = null) {
   const todasComensal = origenes.every((o) => o === 'comensal');
 
   if (hayPersonal) {
-    return 'Cancelado por el restaurante';
+    return 'El restaurante canceló este pedido.';
   }
 
   if (todasComensal) {
-    return 'Quitaste todos los platos de este pedido.';
+    return 'Cancelaste este pedido.';
   }
 
   return 'Este pedido fue cancelado.';
@@ -773,7 +871,9 @@ export default {
   incorporarPedido,
   reemplazarPedido,
   puedeQuitar,
+  puedeCancelarPedido,
   accionErrorQuitar,
+  accionErrorCancelarPedido,
   etiquetaItemCancelado,
   mensajeEstadoTarjeta,
   separarPedidos,

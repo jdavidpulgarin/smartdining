@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /menu
+Disallow: /armar
+Disallow: /carrito
+Disallow: /seguimiento
+Disallow: /pago
+Disallow: /despedida

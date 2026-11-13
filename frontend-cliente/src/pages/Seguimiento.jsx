@@ -5,11 +5,15 @@ import TarjetaEstado from '../components/seguimiento/TarjetaEstado';
 import LineaTiempo from '../components/seguimiento/LineaTiempo';
 import OtrosPedidos from '../components/seguimiento/OtrosPedidos';
 import TarjetaPermisoPush from '../components/seguimiento/TarjetaPermisoPush';
+import Button from '../components/ui/Button';
+import Modal from '../components/ui/Modal';
 import {
   accionErrorQuitar,
+  accionErrorCancelarPedido,
   etiquetaItemCancelado,
   infoEstado,
   puedeQuitar,
+  puedeCancelarPedido,
 } from '../utils/seguimiento';
 import { formatearPrecio } from '../utils/formato';
 
@@ -28,6 +32,7 @@ function Seguimiento() {
     llamarMesero,
     recargar,
     quitarPlato,
+    cancelarPedido,
     mesa,
     comensal,
   } = useSeguimientoMesa(location.state?.pedido);
@@ -38,6 +43,10 @@ function Seguimiento() {
   const quitandoRef = useRef(false);
   const dialogConfirmarRef = useRef(null);
   const tituloConfirmarId = useId();
+
+  const [idPedidoACancelar, setIdPedidoACancelar] = useState(null);
+  const [cancelando, setCancelando] = useState(false);
+  const cancelandoRef = useRef(false);
 
   useEffect(() => {
     const dialog = dialogConfirmarRef.current;
@@ -96,6 +105,46 @@ function Seguimiento() {
     }
   };
 
+  const abrirConfirmarCancelar = (idPedido) => {
+    if (cancelandoRef.current) return;
+    setErrorQuitar(null);
+    setIdPedidoACancelar(idPedido ?? pedidoActivo?.id_pedido ?? null);
+  };
+
+  const cerrarConfirmarCancelar = () => {
+    if (cancelandoRef.current) return;
+    setIdPedidoACancelar(null);
+  };
+
+  const confirmarCancelarPedido = async () => {
+    if (cancelandoRef.current || !idPedidoACancelar) return;
+    const targetId = idPedidoACancelar;
+
+    cancelandoRef.current = true;
+    setCancelando(true);
+    setErrorQuitar(null);
+
+    try {
+      await cancelarPedido(targetId);
+      setIdPedidoACancelar(null);
+    } catch (err) {
+      setIdPedidoACancelar(null);
+      const accion = accionErrorCancelarPedido(err);
+      if (accion.recargar) {
+        await recargar();
+        if (targetId != null) {
+          setPedidoActivo(targetId);
+        }
+      }
+      if (accion.mensaje) {
+        setErrorQuitar(accion.mensaje);
+      }
+    } finally {
+      cancelandoRef.current = false;
+      setCancelando(false);
+    }
+  };
+
   if (!pedidoActivo) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
@@ -122,9 +171,9 @@ function Seguimiento() {
             <path d="M8 16h.01" />
           </svg>
         </div>
-        <h2 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
+        <h1 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
           No tienes pedidos activos en esta mesa
-        </h2>
+        </h1>
         <p className="text-sm text-texto-suave max-w-xs mb-6">
           Cuando confirmes un pedido desde el carrito, podrás ver su estado y avance aquí.
         </p>
@@ -163,12 +212,12 @@ function Seguimiento() {
             role="status"
             aria-live="polite"
             className={`bg-superficie-2 px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg border ${
-              esLimite ? 'border-[#6B6B6B]' : 'border-acento'
+              esLimite ? 'border-[#969696]' : 'border-acento'
             } text-texto`}
           >
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
-                esLimite ? 'bg-[#6B6B6B]' : 'bg-acento'
+                esLimite ? 'bg-[#969696]' : 'bg-acento'
               }`}
             />
             <span>{mensaje}</span>
@@ -316,8 +365,58 @@ function Seguimiento() {
               {formatearPrecio(pedidoActivo.total)}
             </span>
           </div>
+
+          {puedeCancelarPedido(pedidoActivo, { yo: comensal }) && (
+            <div className="pt-2">
+              <Button
+                type="button"
+                variante="secundario"
+                onClick={() => abrirConfirmarCancelar(pedidoActivo.id_pedido)}
+                disabled={cancelando || quitando}
+                className="w-full text-primario-texto border-primario/40 hover:border-primario hover:bg-primario/10 active:bg-primario/20 min-h-11 py-2 text-sm"
+              >
+                {cancelando && idPedidoACancelar === pedidoActivo.id_pedido
+                  ? 'Cancelando...'
+                  : 'Cancelar pedido'}
+              </Button>
+            </div>
+          )}
         </section>
       )}
+
+      {/* Modal de confirmación para cancelar todo el pedido */}
+      <Modal
+        abierto={Boolean(idPedidoACancelar)}
+        onCerrar={cerrarConfirmarCancelar}
+        titulo="¿Cancelar todo el pedido?"
+      >
+        <div className="p-4 space-y-4">
+          <p className="text-xs text-texto-suave">
+            Se cancelarán todos tus platos de este pedido. Esta acción no se puede deshacer.
+          </p>
+
+          <div className="flex flex-col sm:flex-row-reverse gap-2.5 pt-2">
+            <Button
+              type="button"
+              variante="primario"
+              onClick={confirmarCancelarPedido}
+              disabled={cancelando}
+              className="flex-1 min-h-11 py-2.5 text-sm"
+            >
+              {cancelando ? 'Cancelando...' : 'Sí, cancelar'}
+            </Button>
+            <Button
+              type="button"
+              variante="secundario"
+              onClick={cerrarConfirmarCancelar}
+              disabled={cancelando}
+              className="flex-1 min-h-11 py-2.5 text-sm"
+            >
+              Volver
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Diálogo nativo de confirmación para quitar un plato */}
       <dialog

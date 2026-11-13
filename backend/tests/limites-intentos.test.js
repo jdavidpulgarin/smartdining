@@ -241,8 +241,8 @@ test('d-11: el 429 tiene la misma forma de JSON que el resto de errores', async 
 
   const res = await hasta429(app, { email: 'ana@mail.com', password: 'mala' });
 
-  assert.deepStrictEqual(Object.keys(res.body), ['error']);
-  assert.strictEqual(res.body.error, MENSAJE_LOGIN);
+  // { error, motivo }: el motivo se agregó en la D-19.
+  assert.deepStrictEqual(res.body, { error: MENSAJE_LOGIN, motivo: 'demasiadas_peticiones' });
 });
 
 test('d-11: el 429 no dice cuántos intentos quedan ni para qué cuenta', async () => {
@@ -289,8 +289,7 @@ test('d-11: el 429 del QR tampoco cuenta nada de más', async () => {
 
   const res = await hasta429(app, {});
 
-  assert.deepStrictEqual(Object.keys(res.body), ['error']);
-  assert.strictEqual(res.body.error, MENSAJE_QR);
+  assert.deepStrictEqual(res.body, { error: MENSAJE_QR, motivo: 'demasiadas_peticiones' });
   assert.ok(!/\d/.test(JSON.stringify(res.body)));
 });
 

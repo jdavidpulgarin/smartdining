@@ -237,7 +237,8 @@ test('issue-132: otro 23503 que no sea la categoria no se disfraza', async () =>
     const res = await crear(CUERPO_MINIMO);
 
     assert.strictEqual(res.status, 500, 'un 23502 sigue siendo un fallo de verdad');
-    assert.strictEqual(res.body.motivo, undefined);
+    // El motivo genérico del 500 (D-19), no categoria_inexistente.
+    assert.strictEqual(res.body.motivo, 'error_interno');
   } finally {
     redis.restaurar();
     db.restaurar();

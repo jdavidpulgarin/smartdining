@@ -37,12 +37,14 @@ const app = require('../../server');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const { construirTokenQr } = require('../helpers/fake-db');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 const MESA_BASE = parseInt(process.env.MESA_NUMERO_CANCELA_PEDIDO || '1000', 10);
 const MARCA_MESA = 'PRUEBA comensal-cancela-pedido';
 
 let sonda = null;
 let hayBase = false;
+let catalogo = null; // el de plato-prueba.js, con su limpiar()
 let plato = null;
 let constructor = null;
 let siguienteMesa = MESA_BASE;
@@ -90,62 +92,16 @@ async function limpiar() {
   await sonda.query('DELETE FROM mesas WHERE id_mesa = ANY($1::int[])', [ids]);
 }
 
-/** Una opción disponible y con receta por paso obligatorio, y una 'extra' en uno opcional. */
-async function seleccionConstructor() {
-  const { rows } = await sonda.query(
-    `SELECT pc.id_plato, pc.id_paso, pc.min_sel,
-            (SELECT i.id_ingrediente FROM ingredientes i
-              WHERE i.id_paso = pc.id_paso AND i.disponible AND i.stock_suficiente
-                AND EXISTS (SELECT 1 FROM recetas_ingrediente ri WHERE ri.id_ingrediente = i.id_ingrediente)
-              ORDER BY i.id_ingrediente LIMIT 1) AS id_ingrediente
-       FROM pasos_constructor pc
-      WHERE pc.id_plato = (SELECT min(p2.id_plato) FROM platos p2
-                            WHERE p2.personalizable AND p2.disponible AND p2.stock_suficiente
-                              AND EXISTS (SELECT 1 FROM pasos_constructor x WHERE x.id_plato = p2.id_plato))
-      ORDER BY pc.orden`
-  );
-  if (rows.length === 0) return null;
-  const ingredientes = [];
-  let extraPuesta = false;
-  for (const paso of rows) {
-    if (!paso.id_ingrediente) {
-      if (paso.min_sel > 0) return null;
-      continue;
-    }
-    if (paso.min_sel > 0) ingredientes.push({ id_ingrediente: paso.id_ingrediente, porcion: 'normal' });
-    else if (!extraPuesta) {
-      ingredientes.push({ id_ingrediente: paso.id_ingrediente, porcion: 'extra' });
-      extraPuesta = true;
-    }
-  }
-  return { id_plato: rows[0].id_plato, ingredientes };
-}
-
 test.before(async () => {
   // Sin base configurada salta; configurada y sin responder, falla (#165).
   sonda = await abrirSonda();
   if (!sonda) return;
-  // Un plato con receta que NO es el que eligen las otras suites (el primero
-  // disponible por id), y entre los demás el que más unidades deja servir.
-  const p = await sonda.query(
-    `WITH comun AS (
-       SELECT id_plato FROM platos
-        WHERE disponible AND stock_suficiente AND NOT personalizable
-        ORDER BY id_plato LIMIT 1
-     )
-     SELECT p.id_plato FROM platos p
-      WHERE p.disponible AND p.stock_suficiente AND NOT p.personalizable AND p.precio >= 1000
-        AND p.id_plato NOT IN (SELECT id_plato FROM comun)
-        AND EXISTS (SELECT 1 FROM recetas_plato rp WHERE rp.id_plato = p.id_plato)
-      ORDER BY (SELECT min(floor(s.stock_actual / rp.cantidad)) FROM recetas_plato rp
-                  JOIN insumos s ON s.id_insumo = rp.id_insumo WHERE rp.id_plato = p.id_plato) DESC,
-               p.id_plato
-      LIMIT 1`
-  );
-  plato = p.rows[0] || null;
-  constructor = await seleccionConstructor();
-  hayBase = Boolean(plato);
-  if (!hayBase) return;
+  // Plato con receta y plato del constructor PROPIOS (tests/helpers/plato-prueba.js),
+  // sobre un insumo propio con stock alto: nada del seed, nada compartido.
+  catalogo = await crearCatalogoPrueba(sonda, 'comensal-cancela-pedido', { receta: true, conConstructor: true });
+  plato = catalogo.plato;
+  constructor = catalogo.constructor;
+  hayBase = true;
   await limpiar();
 });
 
@@ -156,6 +112,7 @@ test.afterEach(async () => {
 test.after(async () => {
   try {
     if (hayBase) await limpiar();
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();

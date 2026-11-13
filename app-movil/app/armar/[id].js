@@ -23,6 +23,7 @@ import {
 import { useCarrito } from '../../src/context/CarritoContext';
 import { generarIdLinea } from '../../src/utils/id';
 import { formatearPrecio } from '../../src/utils/formato';
+import { urlImagen } from '../../src/utils/imagenes';
 import { ALERGENOS_MAP } from '../../src/constants/dieta';
 import { colores, espaciado, radios } from '../../src/theme';
 import Card from '../../src/components/ui/Card';
@@ -159,13 +160,15 @@ export default function ArmarPlatoScreen() {
     router.replace('/(tabs)/carrito');
   };
 
+  const imagenHeroUrl = urlImagen(plato.url_imagen);
+
   return (
     <View style={styles.pantalla}>
       <ScrollView contentContainerStyle={styles.contenido}>
         <View style={styles.heroCard}>
-          {plato.url_imagen ? (
+          {imagenHeroUrl ? (
             <Image
-              source={{ uri: plato.url_imagen }}
+              source={{ uri: imagenHeroUrl }}
               style={styles.heroImagen}
               resizeMode="cover"
             />

@@ -50,7 +50,7 @@ export default function LineaTiempo({ estado, info: infoProp }) {
 
             const fondo = hecho ? info.color : '#161616';
             const borde = hecho || enCurso ? info.color : '#3A3A3A';
-            const texto = hecho || enCurso ? info.color : '#6B6B6B';
+            const texto = hecho || enCurso ? info.color : '#969696';
 
             return (
               <li key={paso.clave} className="flex flex-col items-center gap-2">

@@ -8,7 +8,7 @@ import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 
 const FOTO_PORTADA_INICIO =
-  'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1200&q=80&auto=format';
+  'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=75&auto=format';
 
 function Inicio() {
   const navigate = useNavigate();
@@ -101,6 +101,10 @@ function Inicio() {
           src={FOTO_PORTADA_INICIO}
           alt=""
           aria-hidden="true"
+          width={800}
+          height={533}
+          fetchPriority="high"
+          decoding="async"
           className="w-full h-full object-cover opacity-35"
         />
         <div className="absolute inset-0 bg-gradient-to-b from-fondo/60 via-fondo/80 to-fondo" />
@@ -122,8 +126,9 @@ function Inicio() {
           </div>
         </header>
 
-        {/* Centro de la pantalla: ESTÁS EN LA / MESA N o ¡BIENVENIDO! */}
-        <div className="my-auto py-8 text-center select-none">
+        <main id="contenido-principal" className="flex-1 flex flex-col justify-between">
+          {/* Centro de la pantalla: ESTÁS EN LA / MESA N o ¡BIENVENIDO! */}
+          <div className="my-auto py-8 text-center select-none">
           {numeroMesaQr !== null ? (
             <div className="space-y-1">
               <p className="font-etiqueta uppercase text-sm sm:text-base font-bold text-white tracking-widest">
@@ -272,7 +277,7 @@ function Inicio() {
                       variante="secundario"
                       disabled={!validacion.valido || enviando}
                       onClick={manejarReintentar}
-                      className="w-full min-h-10 text-xs"
+                      className="w-full min-h-11 text-xs"
                     >
                       REINTENTAR
                     </Button>
@@ -364,6 +369,7 @@ function Inicio() {
             )}
           </Card>
         </div>
+        </main>
       </div>
     </div>
   );
