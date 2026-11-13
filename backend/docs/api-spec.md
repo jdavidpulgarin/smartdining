@@ -2060,7 +2060,7 @@ Notas de lo que quedó demostrado al escribirlas:
 | **GET** | **/pedidos/mesa/cuenta** | **comensal** | **Cuenta de SU mesa por comensal; la mesa sale del JWT** |
 | GET | /pedidos/:id | **admin, cajero, mesero, comensal** | Detalle con sus ítems; un comensal solo ve los de su mesa y de su visita (403 si no). **`cocina` no entra (S-26)** |
 | PATCH | /pedidos/:id/estado | admin, cajero, mesero | Cambia el estado (cualquiera de los 6 válidos) |
-| POST | /pedidos/:id/cancelar | admin, cajero, mesero | Atajo que fija `estado = cancelado`. **Desde `recibido`, `en_preparacion` o `listo`** (script 31); desde `entregado`/`pagado` responde 409 |
+| POST | /pedidos/:id/cancelar | admin, cajero, mesero, **comensal** | Personal: atajo que fija `estado = cancelado`. **Desde `recibido`, `en_preparacion` o `listo`** (script 31); desde `entregado`/`pagado` responde 409. **Comensal (D-12): cancela SU pedido completo, solo en `recibido`; no libera la mesa** |
 | **POST** | **/pedidos/:id/items/:id_detalle/cancelar** | **comensal, admin, mesero** | **D-13: quita UNA línea, entera. El comensal (J-14) solo las suyas y antes de que cocina empiece; admin y mesero cualquiera que no se haya servido, con `motivo` obligatorio (devolución o merma). Con cualquier pago completado, 409. No libera la mesa** |
 
 ### POST /pedidos
@@ -2396,6 +2396,47 @@ ve su pedido cerrado. Con cuenta pendiente o abono parcial, el pedido se queda e
 
 > Punto de integración con Roberto: en el código (marcado con un comentario `NOTA`)
 > es donde se debe emitir `order:created` / `order:status` hacia el socket-server.
+
+### POST /pedidos/:id/cancelar — personal y comensal (D-12)
+
+Una sola ruta y **decide el tipo de sesión del JWT**. Cocina no entra (403).
+
+**Personal (admin, cajero, mesero):** el de siempre, sin cambios. Es el atajo de `PATCH
+/pedidos/:id/estado` con `estado = cancelado`: historial con el usuario y las
+`observaciones` del cuerpo, y si la mesa se queda sin pedidos abiertos **se libera**
+(`mesa-liberada`). La respuesta es el pedido (como en `PATCH`).
+
+**Comensal (D-12, contrato aprobado por Juan):** cancela **su pedido completo**.
+
+- **Sin cuerpo:** nada o `{}`. Un campo cualquiera es **400** `{ "motivo": "cuerpo_invalido" }`;
+  un `:id` que no sea entero > 0, **400** `parametro_invalido`. La mesa y el comensal salen
+  del JWT.
+- En **una transacción**, con el pedido y después sus líneas bloqueados (`FOR UPDATE`, las
+  líneas en orden de `id_detalle`), y en este orden:
+
+| Paso | Si no se cumple |
+|---|---|
+| El pedido existe | **404** `{ "motivo": "no_encontrado" }` |
+| Es de la **mesa del JWT** y de su **visita actual** (`creado_en ≥ sesion_iniciada_en`, la regla del #180) | **403** `{ "motivo": "no_es_tuyo" }` |
+| No está ya cancelado (va **primero** entre los 409) | **409** `{ "motivo": "pedido_ya_cancelado" }` |
+| Todas sus líneas **vivas** (no canceladas) son **suyas**, comparando por la **clave** del alias (D-18b). Una línea viva de otro comensal, o sin comensal, lo impide; una ya quitada no cuenta | **409** `{ "motivo": "pedido_compartido" }` |
+| El pedido está en `recibido` y todas las líneas vivas en `pendiente` | **409** `{ "motivo": "no_cancelable" }` |
+| No tiene pagos `completada` | **409** `{ "motivo": "pago_registrado" }` |
+
+Si pasa, cancela las líneas vivas y después el pedido (`recibido → cancelado`, transición
+válida), con su fila en `historial_estados` (`id_usuario` NULL, *"Cancelado por el
+comensal"*). El stock vuelve como **devolución, una sola vez por línea**: cada línea se
+devuelve al cancelarla (`tr_devolver_inventario`, con el pedido aún en `recibido`), y al
+cerrar el pedido `tr_devolver_inventario_pedido` ya no vuelve a cerrarla
+(`fn_cerrar_reserva_detalle` no repite una línea con su devolución hecha). Lo ya quitado con
+el #180 tampoco se devuelve otra vez. **No libera la mesa**: el grupo sigue sentado.
+
+`200` con la **misma forma que el #180**: `{ "pedido": { id_pedido, codigo_pedido, estado:
+"cancelado", total (número, 0), items } }`, con cada ítem en `estado_item: "cancelado"`.
+
+Después del COMMIT sale **solo** el `POST /internal/order-status` (→ `cancelado`), con
+`origen: "comensal"` (ver *`origen` en `order-status`*); **no** un `item-cancelado` por
+línea, ni `mesa-liberada`.
 
 ### POST /pedidos/:id/items/:id_detalle/cancelar — comensal (D-13, J-14) y personal (D-13)
 
@@ -3220,11 +3261,31 @@ Contrato completo en [socket-server/EVENTS.md](../../socket-server/EVENTS.md).
 | Cuándo | Aviso |
 |---|---|
 | Se crea un pedido | `POST /internal/order-created` con el pedido y sus ítems |
-| Cambia el estado (pedidos y KDS) | `POST /internal/order-status` con `estado_anterior` |
+| Cambia el estado (pedidos y KDS) | `POST /internal/order-status` con `estado_anterior` (y `origen` si es una cancelación, ver abajo) |
 | **Un comensal o el personal quita una línea** (D-13) | `POST /internal/item-cancelado` con `origen` `"comensal"` o `"personal"` (**pendiente de Roberto**: hoy 404, solo log); si el pedido queda cancelado, además `order-status` |
+| **El comensal cancela su pedido** (D-12) | Solo `POST /internal/order-status` (→ `cancelado`, `origen: "comensal"`); ni `item-cancelado` por línea ni `mesa-liberada` |
 | Se abre una mesa con un token **nuevo** | `POST /internal/qr-rotado` → `qr:actualizado` a la tablet |
 | **La caja cobra** (efectivo, datáfono o abono parcial) | `POST /internal/payment-confirmed` → `payment:confirmed` |
 | Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada`, con `motivo` si la cerró un pago |
+
+### `origen` en `order-status` (pedido de Juan)
+
+Campo **opcional** de `POST /internal/order-status`: dice **quién canceló** el pedido. Va
+**solo** cuando el pedido pasa a `cancelado` por una cancelación:
+
+| Cuándo | `origen` |
+|---|---|
+| El comensal cancela su pedido (D-12, `POST /pedidos/:id/cancelar` con su sesión) | `"comensal"` |
+| El comensal quita la **última** línea viva (#180) | `"comensal"` |
+| El personal cancela la **última** línea viva (D-13) | `"personal"` |
+| El personal cancela el pedido (`POST /pedidos/:id/cancelar`, la ruta de siempre) | `"personal"` |
+
+En **todos los demás** cambios de estado (KDS, `PATCH /pedidos/:id/estado` del mesero —también
+a `cancelado`—, cierre por cobro…) **no se manda**. Valores: `"comensal"` o `"personal"`; el
+notificador valida el valor como en `item-cancelado` (si no es uno de los dos, o el estado no
+es `cancelado`, el campo no viaja y queda en el log; el aviso de estado sí sale). **Un
+consumidor que no lo reciba debe asumir `"personal"`.** El socket-server todavía no lo
+reenvía (lo hará Roberto); mandarlo antes no rompe nada porque lo ignora.
 
 ### Cobros de caja: `payment:confirmed` (EVENTS.md §8.6)
 

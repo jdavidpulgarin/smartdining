@@ -510,8 +510,13 @@ async function actualizarEstado(req, res, next) {
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
     // actualizarEstado devuelve el pedido ya con estado_anterior, que es lo que
-    // espera el payload de order:status.
-    socketNotifier.notificarCambioEstado(pedido);
+    // espera el payload de order:status. `origen` solo si se llegó por
+    // POST /:id/cancelar del personal y el pedido quedó cancelado; un
+    // PATCH /:id/estado normal (mesero, caja) no lo lleva.
+    const origen = res.locals.origenCancelacion;
+    socketNotifier.notificarCambioEstado(
+      origen && pedido.estado === 'cancelado' ? { ...pedido, origen } : pedido
+    );
 
     // El cierre del pedido pudo liberar la mesa (ya ocurrió en la transacción):
     // se avisa para que el socket-server cierre la sesión de esa mesa.
@@ -542,8 +547,72 @@ async function actualizarEstado(req, res, next) {
  * para que ese error llegue al manejador central.
  */
 async function cancelar(req, res, next) {
+  // D-12: una sesión de COMENSAL va por su propio camino (abajo). El del
+  // personal sigue siendo exactamente el de siempre.
+  if (esComensal(req)) return cancelarPedidoComensal(req, res, next);
   req.body = { ...req.body, estado: 'cancelado' };
+  // El order-status de esta cancelación lleva origen 'personal'.
+  res.locals.origenCancelacion = 'personal';
   return actualizarEstado(req, res, next);
+}
+
+const MENSAJES_CANCELAR_PEDIDO = {
+  pedido_ya_cancelado: 'Ese pedido ya estaba cancelado',
+  pedido_compartido: 'Ese pedido tiene platos de otras personas: quita solo los tuyos, o pídeselo al mesero',
+  no_cancelable: 'Ese pedido ya se está preparando: pídeselo al mesero',
+  pago_registrado: 'Ese pedido ya tiene un pago registrado: pídeselo al mesero',
+};
+
+/**
+ * POST /api/pedidos/:id/cancelar con sesión de COMENSAL — D-12 (contrato
+ * aprobado por Juan): el comensal cancela su pedido completo. Sin cuerpo; la
+ * mesa y el alias salen del JWT. Reglas en pedidosService.cancelarPedidoComensal.
+ * NO libera la mesa. Después del COMMIT, solo el order-status (cancelado): no
+ * un item-cancelado por línea.
+ */
+async function cancelarPedidoComensal(req, res, next) {
+  const params = z.object({ id: idDeUrl }).strict().safeParse(req.params);
+  if (!params.success) {
+    const issue = params.error.errors[0];
+    return res.status(400).json({ error: `${issue.path.join('.')}: ${issue.message}`, motivo: 'parametro_invalido' });
+  }
+  if (!cuerpoVacioSchema.safeParse(req.body ?? {}).success) {
+    return res.status(400).json({ error: 'Esta ruta no lleva cuerpo', motivo: 'cuerpo_invalido' });
+  }
+
+  try {
+    const r = await pedidosService.cancelarPedidoComensal(params.data.id, {
+      idMesa: req.user.id_mesa,
+      comensal: req.user.comensal,
+    });
+    if (r.noExiste) return res.status(404).json({ error: 'Pedido no encontrado', motivo: 'no_encontrado' });
+    if (r.noEsTuyo) {
+      return res.status(403).json({
+        error: 'Ese pedido no es de tu mesa',
+        motivo: pedidosService.MOTIVOS_CANCELAR_PEDIDO.noEsTuyo,
+      });
+    }
+    if (r.conflicto) {
+      return res.status(409).json({ error: MENSAJES_CANCELAR_PEDIDO[r.conflicto], motivo: r.conflicto });
+    }
+
+    const { pedido, estadoAnterior } = r;
+    socketNotifier.encadenarAvisos([
+      () => socketNotifier.notificarCambioEstado({ ...pedido, estado_anterior: estadoAnterior, origen: 'comensal' }),
+    ]);
+
+    return res.json({
+      pedido: {
+        id_pedido: pedido.id_pedido,
+        codigo_pedido: pedido.codigo_pedido,
+        estado: pedido.estado,
+        total: Number(pedido.total),
+        items: pedido.items,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
 }
 
 /** Un id de la URL: entero > 0 que cabe en un INTEGER de PostgreSQL. */
@@ -653,7 +722,11 @@ async function cancelarItem(req, res, next) {
       origen: delComensal ? 'comensal' : 'personal',
     })];
     if (pedidoCancelado) {
-      pasos.push(() => socketNotifier.notificarCambioEstado({ ...pedido, estado_anterior: estadoAnterior }));
+      pasos.push(() => socketNotifier.notificarCambioEstado({
+        ...pedido,
+        estado_anterior: estadoAnterior,
+        origen: delComensal ? 'comensal' : 'personal',
+      }));
     }
     socketNotifier.encadenarAvisos(pasos);
 

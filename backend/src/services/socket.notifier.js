@@ -306,16 +306,37 @@ async function notificarPedidoCreado(pedido, detalles) {
   });
 }
 
-/** POST /internal/order-status — cambio de estado hacia KDS, admin y la mesa. */
-async function notificarCambioEstado({ id_pedido, id_mesa, codigo_pedido, estado_anterior, estado }) {
-  return enviar('/internal/order-status', {
+/**
+ * POST /internal/order-status — cambio de estado hacia KDS, admin y la mesa.
+ *
+ * `origen` (pedido de Juan) es OPCIONAL y solo va cuando el pedido pasa a
+ * 'cancelado' por una cancelación: 'comensal' (D-12, o el #180 al quitar la
+ * última línea) o 'personal' (POST /pedidos/:id/cancelar del personal, o la
+ * D-13 al cancelar la última línea). En los demás cambios (KDS, mesero, cobro)
+ * no se pasa y no viaja. Un consumidor que no lo reciba asume 'personal'. El
+ * socket-server todavía no lo reenvía (Roberto); mandarlo antes no rompe nada.
+ *
+ * Validado como el de item-cancelado: un origen fuera del contrato, o en un
+ * estado que no es 'cancelado', no viaja y queda en el log; el aviso de estado
+ * sí sale (es el de siempre).
+ */
+async function notificarCambioEstado({ id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, origen }) {
+  const cuerpo = {
     eventId: nuevoEventId(),
     id_pedido,
     id_mesa,
     codigo_pedido: codigo_pedido ?? null,
     estado_anterior: estado_anterior ?? null,
     estado,
-  });
+  };
+  if (origen !== undefined && origen !== null) {
+    if (estado === 'cancelado' && ORIGENES_ITEM_CANCELADO.includes(origen)) {
+      cuerpo.origen = origen;
+    } else {
+      console.error(`[socket] /internal/order-status: origen no valido (${origen}) para estado ${estado}, no se envia el campo`);
+    }
+  }
+  return enviar('/internal/order-status', cuerpo);
 }
 
 /**

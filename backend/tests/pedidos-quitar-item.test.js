@@ -302,6 +302,7 @@ test('quitar el último plato vivo: el pedido pasa a cancelado con historial, av
     const estado = e.socket.buscar('/internal/order-status').cuerpo;
     assert.strictEqual(estado.estado, 'cancelado');
     assert.strictEqual(estado.estado_anterior, 'recibido');
+    assert.strictEqual(estado.origen, 'comensal', '#180: el comensal quitó la última línea');
     assert.strictEqual(e.socket.buscar('/internal/mesa-liberada'), undefined);
   } finally {
     e.restaurar();
