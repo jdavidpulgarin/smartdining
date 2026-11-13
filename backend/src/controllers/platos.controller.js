@@ -3,6 +3,7 @@ const platosService = require('../services/platos.service');
 const menuService = require('../services/menu.service');
 const { disponibilidadEfectiva } = require('../services/disponibilidad-efectiva');
 const socketNotifier = require('../services/socket.notifier');
+const { urlImagenSchema } = require('../utils/url-imagen');
 
 // Columnas segun docs/modelo-er.md: url_imagen (no "imagen_url"), id_categoria
 // y tiempo_preparacion_estimado. El modelo no tiene personalizaciones.
@@ -10,7 +11,9 @@ const platoSchema = z.object({
   nombre: z.string().min(1),
   descripcion: z.string().optional(),
   precio: z.number().positive(),
-  url_imagen: z.string().url().optional(),
+  // D-23: URL https o ruta /imagenes/<uuid>.webp de POST /api/imagenes
+  // (src/utils/url-imagen.js).
+  url_imagen: urlImagenSchema.optional(),
   id_categoria: z.number().int(),
   disponible: z.boolean().optional(),
   tiempo_preparacion_estimado: z.number().int().positive().optional(),

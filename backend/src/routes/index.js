@@ -15,6 +15,7 @@ const pagosRoutes = require('./pagos.routes');
 const reportesRoutes = require('./reportes.routes');
 const configuracionRoutes = require('./configuracion.routes');
 const inventarioRoutes = require('./inventario.routes');
+const imagenesRoutes = require('./imagenes.routes');
 
 const router = express.Router();
 
@@ -42,5 +43,8 @@ router.use('/configuracion', configuracionRoutes);
 // D-17 PR 2: insumos y movimientos de bodega, solo admin. Las recetas cuelgan
 // del plato y de la opcion (/api/platos/:id/receta, /api/ingredientes/:id/receta).
 router.use('/inventario', inventarioRoutes);
+// D-23: subida de imágenes del menú, solo admin. Devuelve /imagenes/<uuid>.webp,
+// que en producción sirve nginx y en desarrollo server.js.
+router.use('/imagenes', imagenesRoutes);
 
 module.exports = router;

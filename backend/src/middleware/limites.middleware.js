@@ -39,6 +39,8 @@ const MENSAJE_QR =
   'Demasiados intentos de abrir la sesión de la mesa. Espera un momento y vuelve a intentarlo.';
 const MENSAJE_GLOBAL =
   'Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo.';
+const MENSAJE_IMAGENES =
+  'Demasiadas imágenes subidas en poco tiempo. Espera un momento y vuelve a intentarlo.';
 
 /** Motivo de todos los 429 (D-19): se AGREGA al `error` de siempre. */
 const MOTIVO_429 = 'demasiadas_peticiones';
@@ -181,6 +183,31 @@ function crearLimitadorGlobal(env = process.env) {
   });
 }
 
+/**
+ * Limitador de la subida de imágenes (D-23): por USUARIO del JWT, no por IP.
+ *
+ * La ruta es solo de admin y re-codificar con sharp cuesta CPU: el límite es
+ * para que una sesión de admin (o un token robado) no pueda tumbar el servidor
+ * subiendo imágenes en bucle. Por usuario y no por IP porque el panel del local
+ * comparte IP con todo el personal y los comensales.
+ *
+ * Va DESPUÉS de requireAuth (necesita req.user). Por defecto 30 cada 10 min
+ * (RATE_LIMIT_IMAGENES_MAX, RATE_LIMIT_IMAGENES_VENTANA_MS). Mismo almacén que
+ * los demás (memoria del proceso, con la misma limitación) y el mismo 429, con
+ * `motivo: 'demasiadas_peticiones'`.
+ */
+function crearLimitadorImagenes(env = process.env) {
+  return rateLimit({
+    windowMs: entero(env.RATE_LIMIT_IMAGENES_VENTANA_MS, 10 * UN_MINUTO_MS),
+    limit: entero(env.RATE_LIMIT_IMAGENES_MAX, 30),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skip: () => enPruebas(env),
+    keyGenerator: (req) => `usuario:${req.user && req.user.id_usuario}`,
+    handler: responder429(MENSAJE_IMAGENES),
+  });
+}
+
 /* -------------------------------------------------------------------------- *
  * D-19 parte B: límites de las rutas de autenticación de CLIENTES.
  *
@@ -299,6 +326,8 @@ module.exports = {
   crearLimitadorLogin,
   crearLimitadorQr,
   crearLimitadorGlobal,
+  crearLimitadorImagenes,
+  MENSAJE_IMAGENES,
   crearLimitadoresClientes,
   MOTIVO_429,
   MENSAJE_CLIENTES,
