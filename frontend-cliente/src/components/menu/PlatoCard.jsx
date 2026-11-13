@@ -1,5 +1,6 @@
 import { formatearPrecio } from '../../utils/formato';
 import { ETIQUETAS_MAP } from '../../constants/dieta';
+import Imagen from '../ui/Imagen';
 
 function PlatoCard({ plato, onSeleccionar }) {
   const { nombre, descripcion, precio, imagen, etiquetas, disponible = true } = plato;
@@ -24,21 +25,14 @@ function PlatoCard({ plato, onSeleccionar }) {
     >
       {/* Contenedor de Imagen con overlay si está agotado */}
       <div className="relative w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-superficie-2 border border-borde">
-        {imagen ? (
-          <img
-            src={imagen}
-            alt={nombre}
-            width={96}
-            height={96}
-            className="w-full h-full object-cover"
-            loading="lazy"
-            decoding="async"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-texto-tenue font-etiqueta text-xs uppercase">
-            Sin foto
-          </div>
-        )}
+        <Imagen
+          src={imagen}
+          alt={nombre}
+          width={96}
+          height={96}
+          aspecto="1/1"
+          className="w-full h-full"
+        />
         {!disponible && (
           <span className="absolute inset-0 bg-black/70 backdrop-blur-[1px] flex items-center justify-center text-primario-texto text-xs font-etiqueta font-bold uppercase tracking-wider text-center px-1">
             AGOTADO

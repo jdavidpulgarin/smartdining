@@ -18,6 +18,7 @@ import BottomBar from '../components/ui/BottomBar';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import Imagen from '../components/ui/Imagen';
 import { useCarrito } from '../context/CarritoContext';
 import { obtenerApodo } from '../utils/apodo';
 import { generarIdLinea } from '../utils/id';
@@ -27,6 +28,7 @@ import {
   validarPaso,
 } from '../utils/calcularPlato';
 import { ALERGENOS_MAP } from '../constants/dieta';
+import { urlImagen } from '../utils/imagenes';
 
 const ETIQUETA_PORCION = {
   ligera: 'Ligera',
@@ -252,25 +254,27 @@ function Constructor() {
     navigate('/carrito');
   };
 
+  const portadaUrl = urlImagen(plato.url_imagen);
+
   return (
     <div className="space-y-4 pb-32">
       {/* Portada / Hero del plato */}
       <div className="-mx-4 -mt-4 mb-2 relative overflow-hidden rounded-b-3xl bg-superficie min-h-[160px]">
-        {plato.url_imagen && (
-          <div className="h-48 sm:h-56 w-full relative">
-            <img
-              src={plato.url_imagen}
-              alt={plato.nombre}
-              width={800}
-              height={533}
-              fetchPriority="high"
-              decoding="async"
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />
-          </div>
-        )}
-        <div className={plato.url_imagen ? 'absolute bottom-0 inset-x-0 p-4' : 'p-4'}>
+        <div className="h-48 sm:h-56 w-full relative">
+          <Imagen
+            src={portadaUrl}
+            alt={plato.nombre}
+            width={800}
+            height={533}
+            fetchPriority="high"
+            loading="eager"
+            aspecto="auto"
+            className="w-full h-full"
+            imgClassName="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20 pointer-events-none" />
+        </div>
+        <div className="absolute bottom-0 inset-x-0 p-4">
           <button
             type="button"
             onClick={() => navigate('/menu')}

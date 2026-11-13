@@ -1,4 +1,6 @@
 import { formatearPrecio } from '../../utils/formato';
+import { urlImagen } from '../../utils/imagenes';
+import Imagen from '../ui/Imagen';
 
 function LineaCarrito({
   linea,
@@ -12,7 +14,7 @@ function LineaCarrito({
     linea.subtotal !== undefined
       ? Number(linea.subtotal)
       : (Number(linea.precioUnitario) || 0) * (Number(linea.cantidad) || 0);
-  const imagenUrl = linea.imagen || linea.url_imagen;
+  const imagenUrl = urlImagen(linea.imagen || linea.url_imagen);
 
   const faltantesLista = Array.isArray(faltantes) ? faltantes : [];
   const tieneFaltante =
@@ -36,17 +38,14 @@ function LineaCarrito({
     >
       {/* Cabecera y cuerpo de la línea */}
       <div className="flex items-start gap-3">
-        {imagenUrl && (
-          <img
-            src={imagenUrl}
-            alt={linea.nombre}
-            width={64}
-            height={64}
-            loading="lazy"
-            decoding="async"
-            className="w-16 h-16 rounded-xl object-cover shrink-0 bg-superficie-2 border border-borde"
-          />
-        )}
+        <Imagen
+          src={imagenUrl}
+          alt={linea.nombre}
+          width={64}
+          height={64}
+          aspecto="1/1"
+          className="w-16 h-16 rounded-xl shrink-0 border border-borde"
+        />
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
             <div>
