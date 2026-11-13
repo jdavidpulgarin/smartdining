@@ -5,7 +5,8 @@ import {
   RefreshCw,
   FileCode,
 } from 'lucide-react'
-import { reportesApi } from '../services/api'
+import { reportesApi, transaccionesApi } from '../services/api'
+import { resumirMetodos, cuadreConCaja } from '../utils/reportes'
 
 const copFormatter = new Intl.NumberFormat('es-CO', {
   style: 'currency',
@@ -72,6 +73,9 @@ export function Reportes() {
   // true solo con datos de demostración (VITE_USE_MOCKS en desarrollo, P-13)
   const [contractPending, setContractPending] = useState(false)
   const [errorCarga, setErrorCarga] = useState(null)
+  // T6: «Recaudado hoy» de la Caja (GET /transacciones?desde=hoy), para
+  // mostrar si la suma por métodos cuadra. null = no se sabe.
+  const [recaudadoHoy, setRecaudadoHoy] = useState(null)
 
   const handleSelectRange = (range) => {
     if (range === timeRange) return
@@ -101,10 +105,25 @@ export function Reportes() {
         if (isMounted) setLoading(false)
       })
 
+    // Solo en «hoy»: «Recaudado hoy» es el cierre del día, no de 7 o 30 días.
+    if (timeRange === 'hoy') {
+      transaccionesApi
+        .delDia('hoy')
+        .then((d) => {
+          if (isMounted) setRecaudadoHoy(Number(d?.total))
+        })
+        .catch(() => {
+          if (isMounted) setRecaudadoHoy(null)
+        })
+    }
+
     return () => {
       isMounted = false
     }
   }, [timeRange])
+
+  const metodos = useMemo(() => resumirMetodos(reportData?.metodosPago), [reportData])
+  const cuadre = cuadreConCaja(metodos.total, recaudadoHoy)
 
   const currentData = reportData
 
@@ -355,36 +374,29 @@ export function Reportes() {
 
             {/* 6. Debajo (Secundario): Métodos de Pago y Horas Pico */}
             <div className="sd-reportes-secondary-grid">
-              {/* Métodos de Pago */}
-              <div className="sd-reportes-panel">
+              {/* Métodos de Pago (T6): montos por método, cada uno con su color, el
+                  total y, en «hoy», si cuadra con «Recaudado hoy» de la Caja. */}
+              <div className="sd-reportes-panel" data-testid="panel-metodos">
                 <h3 className="sd-reportes-panel-title">DISTRIBUCIÓN POR MÉTODO DE PAGO</h3>
-                {(currentData.metodosPago || []).length === 0 && (
+                {metodos.filas.length === 0 && (
                   <SinDatos>Sin pagos completados en este periodo.</SinDatos>
                 )}
                 <div className="sd-payment-methods-block">
-                  <div className="sd-payment-bar-track">
-                    {(currentData.metodosPago || []).map((mp, i) => (
+                  <div className="sd-payment-bar-track" role="img" aria-label="Montos cobrados por método de pago">
+                    {metodos.filas.map((mp) => (
                       <div
-                        key={i}
-                        style={{
-                          width: `${mp.porcentaje}%`,
-                          backgroundColor: i === 0 ? '#FFFFFF' : i === 1 ? 'var(--sd-gold)' : '#4A413D',
-                        }}
-                        title={`${mp.metodo}: ${mp.porcentaje}%`}
+                        key={mp.metodo}
+                        style={{ width: `${mp.porcentaje}%`, backgroundColor: mp.color }}
+                        title={`${mp.metodo}: ${formatoCOP(mp.monto)} (${mp.porcentaje}%)`}
                       />
                     ))}
                   </div>
 
                   <div className="sd-payment-legend-list">
-                    {(currentData.metodosPago || []).map((mp, i) => (
-                      <div key={i} className="sd-payment-legend-item">
+                    {metodos.filas.map((mp) => (
+                      <div key={mp.metodo} className="sd-payment-legend-item" data-testid={`metodo-${mp.metodo}`}>
                         <div className="sd-payment-legend-left">
-                          <span
-                            className="sd-payment-dot"
-                            style={{
-                              backgroundColor: i === 0 ? '#FFFFFF' : i === 1 ? 'var(--sd-gold)' : '#4A413D',
-                            }}
-                          />
+                          <span className="sd-payment-dot" style={{ backgroundColor: mp.color }} />
                           <span className="sd-payment-method-name">{mp.metodo}</span>
                         </div>
                         <div className="sd-payment-legend-right">
@@ -395,7 +407,28 @@ export function Reportes() {
                         </div>
                       </div>
                     ))}
+                    {metodos.filas.length > 0 && (
+                      <div className="sd-payment-legend-item" data-testid="metodos-total" style={{ borderTop: '1px solid var(--sd-border)', paddingTop: 8 }}>
+                        <div className="sd-payment-legend-left">
+                          <span className="sd-payment-method-name" style={{ fontWeight: 800 }}>TOTAL COBRADO</span>
+                        </div>
+                        <div className="sd-payment-legend-right">
+                          <strong className="sd-payment-amount">{formatoCOP(metodos.total)}</strong>
+                        </div>
+                      </div>
+                    )}
                   </div>
+                  {timeRange === 'hoy' && cuadre.estado !== 'sin_dato' && (
+                    <p
+                      data-testid="cuadre-caja"
+                      role={cuadre.estado === 'cuadra' ? 'status' : 'alert'}
+                      style={{ margin: '10px 0 0', fontSize: 13, color: cuadre.estado === 'cuadra' ? 'var(--sd-text-muted)' : 'var(--sd-red-text)' }}
+                    >
+                      {cuadre.estado === 'cuadra'
+                        ? `Cuadra con «Recaudado hoy» de la Caja (${formatoCOP(recaudadoHoy)}).`
+                        : `No cuadra con «Recaudado hoy» de la Caja (${formatoCOP(recaudadoHoy)}): diferencia de ${formatoCOP(Math.abs(cuadre.diferencia))}. Puede ser un cobro de hace menos de un minuto (el reporte se guarda 60 s).`}
+                    </p>
+                  )}
                 </div>
               </div>
 
