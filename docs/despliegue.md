@@ -360,7 +360,7 @@ Los logs de cada contenedor rotan solos (5 archivos de 10 MB).
 
 > El repositorio es **público**: los respaldos **jamás** van a GitHub. Viven
 > fuera de los clones (`/srv/respaldos`) y `.gitignore` ignora `*.dump` y
-> `*.tar.gz`.
+> los `diario-*.tar.gz` y `predeploy-*.tar.gz` de las imágenes.
 
 [`infra/scripts/respaldo.sh`](../infra/scripts/respaldo.sh) hace un
 `pg_dump -Fc` (ya comprimido) del postgres que esté corriendo: `smartdining` o
@@ -470,8 +470,9 @@ dc up -d --wait
 
 ### Imágenes de los platos (D-23)
 
-El backend recibe la foto en `POST /api/imagenes` (nginx deja pasar hasta
-3 MB solo ahí; el resto de la API sigue en 1 MB), la re-codifica a `.webp` y
+El backend recibe la foto en `POST /api/imagenes` (o `/api/v1/imagenes`
+desde el #199; nginx deja pasar hasta 3 MB solo en esas dos rutas exactas, el
+resto de la API sigue en 1 MB), la re-codifica a `.webp` y
 la escribe en `IMAGENES_DIR=/app/uploads/imagenes`. Devuelve
 `/imagenes/<uuid>.webp`, que nginx sirve **directo del volumen** en
 `https://api.DOMINIO/imagenes/<uuid>.webp`, sin pasar por el backend.

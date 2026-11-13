@@ -173,7 +173,10 @@ server {
 
     # Subida de la imagen de un plato (D-23): el único sitio con más de 1m. El
     # backend valida y re-codifica a .webp; aquí solo se deja pasar el archivo.
-    location = /api/imagenes {
+    # Regex ANCLADA en los dos extremos: solo /api/imagenes y /api/v1/imagenes
+    # (#199), ni subrutas ni nada parecido. Sin add_header propio: hereda las
+    # cabeceras de seguridad y la CSP del server.
+    location ~ ^/api(/v1)?/imagenes$ {
         client_max_body_size 3m;
         include /etc/nginx/snippets/proxy.conf;
         proxy_set_header Connection "";
