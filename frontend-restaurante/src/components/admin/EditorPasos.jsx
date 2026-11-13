@@ -16,6 +16,7 @@ import { constructorApi, platosApi, mensajeNoGuardado } from '../../services/api
 import { useSocketListener } from '../../hooks'
 import { crearUltimoPorId } from '../../utils/dedupeEventos'
 import { urlImagenGuardable, MENSAJE_URL_IMAGEN } from '../../utils/imagenes'
+import { SubirImagen } from './SubirImagen'
 
 export function EditorPasos({ dish, onClose, onDishUpdated }) {
   const [loading, setLoading] = useState(true)
@@ -41,6 +42,7 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
 
   // Estado del modal de ingrediente
   const [isIngModalOpen, setIsIngModalOpen] = useState(false)
+  const [subiendoImagen, setSubiendoImagen] = useState(false)
   const [targetPasoId, setTargetPasoId] = useState(null)
   const [editingIng, setEditingIng] = useState(null)
   const [ingForm, setIngForm] = useState({
@@ -880,6 +882,12 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                     placeholder="https://… o /imagenes/<código>.webp"
                     className="sd-input"
                   />
+                  <SubirImagen
+                    etiqueta="imagen del ingrediente"
+                    valor={ingForm.url_imagen}
+                    onCambio={(ruta) => setIngForm((f) => ({ ...f, url_imagen: ruta }))}
+                    onSubiendo={setSubiendoImagen}
+                  />
                 </div>
 
                 <div>
@@ -898,8 +906,8 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                   <button type="button" className="sd-btn sd-btn-secondary" onClick={() => setIsIngModalOpen(false)}>
                     CANCELAR
                   </button>
-                  <button type="submit" className="sd-btn sd-btn-primary">
-                    {editingIng ? 'ACTUALIZAR INGREDIENTE' : 'GUARDAR INGREDIENTE'}
+                  <button type="submit" className="sd-btn sd-btn-primary" disabled={subiendoImagen}>
+                    {subiendoImagen ? 'SUBIENDO IMAGEN...' : editingIng ? 'ACTUALIZAR INGREDIENTE' : 'GUARDAR INGREDIENTE'}
                   </button>
                 </div>
               </form>

@@ -162,6 +162,11 @@ export async function apiFetch(endpoint, options = {}) {
     'Content-Type': 'application/json',
     ...options.headers,
   }
+  // Un FormData (subida de imágenes) lleva su propio Content-Type con el
+  // boundary: lo pone el navegador. Con 'application/json' el backend no lo lee.
+  if (typeof FormData !== 'undefined' && options.body instanceof FormData) {
+    delete headers['Content-Type']
+  }
 
   if (!options.skipAuth) {
     const token = options.token || getAuthToken()
@@ -181,8 +186,9 @@ export async function apiFetch(endpoint, options = {}) {
     }, timeoutMs)
   }
 
+  const { manejar429, ...opcionesFetch } = options
   const config = {
-    ...options,
+    ...opcionesFetch,
     headers,
     signal: options.signal || (controller ? controller.signal : undefined),
   }
@@ -239,8 +245,10 @@ export async function apiFetch(endpoint, options = {}) {
     }
   }
 
-  // Manejo de 429: Rate limit excedido (H-04, H-27)
-  if (response.status === 429) {
+  // Manejo de 429: Rate limit excedido (H-04, H-27). manejar429: false lo deja
+  // en manos de quien llama: el límite de subida de imágenes es por usuario y
+  // solo frena las subidas, no tiene sentido sacar al admin al login.
+  if (response.status === 429 && manejar429 !== false) {
     const mensaje429 =
       typeof data === 'object' && data?.error
         ? data.error
@@ -661,6 +669,19 @@ export const categoriasApi = {
 }
 
 // Submódulo de Platos (CRUD completo)
+// Subida de imágenes del menú (D-23, #209). Solo admin. Devuelve { ruta } con
+// /imagenes/<uuid>.webp, que después se guarda en url_imagen del plato o del
+// ingrediente: la subida no toca la base.
+export const imagenesApi = {
+  async subir(archivo) {
+    const datos = new FormData()
+    datos.append('imagen', archivo)
+    // 30 s: hasta 2 MB por una red lenta del local. El 429 lo muestra el
+    // formulario (manejar429: false), sin mandar al login.
+    return apiFetch('/imagenes', { method: 'POST', body: datos, timeout: 30000, manejar429: false })
+  },
+}
+
 export const platosApi = {
   async listar(idCategoria = null) {
     const url = idCategoria ? `/platos?id_categoria=${idCategoria}` : '/platos'
