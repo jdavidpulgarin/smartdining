@@ -38,12 +38,14 @@ const app = require('../../server');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const { tokenStaff } = require('../helpers/fake-db');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 const MESA_BASE = parseInt(process.env.MESA_NUMERO_CANCELA_PERSONAL || '980', 10);
 const MARCA_MESA = 'PRUEBA personal-cancela-item';
 
 let sonda = null;
 let hayBase = false;
+let catalogo = null; // el de plato-prueba.js, con su limpiar()
 let plato = null;
 let admin = null; // { id, jwt }
 let siguienteMesa = MESA_BASE;
@@ -105,28 +107,14 @@ test.before(async () => {
   // Sin base configurada salta; configurada y sin responder, falla (#165).
   sonda = await abrirSonda();
   if (!sonda) return;
-  // Un plato con receta que NO es el que eligen las otras suites (el primero
-  // disponible por id), y entre los demás el que más unidades deja servir.
-  const p = await sonda.query(
-    `WITH comun AS (
-       SELECT id_plato FROM platos
-        WHERE disponible AND stock_suficiente AND NOT personalizable
-        ORDER BY id_plato LIMIT 1
-     )
-     SELECT p.id_plato FROM platos p
-      WHERE p.disponible AND p.stock_suficiente AND NOT p.personalizable AND p.precio >= 1000
-        AND p.id_plato NOT IN (SELECT id_plato FROM comun)
-        AND EXISTS (SELECT 1 FROM recetas_plato rp WHERE rp.id_plato = p.id_plato)
-      ORDER BY (SELECT min(floor(s.stock_actual / rp.cantidad)) FROM recetas_plato rp
-                  JOIN insumos s ON s.id_insumo = rp.id_insumo WHERE rp.id_plato = p.id_plato) DESC,
-               p.id_plato
-      LIMIT 1`
-  );
   const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' AND activo ORDER BY id_usuario LIMIT 1");
-  plato = p.rows[0] || null;
   admin = u.rows[0] ? { id: u.rows[0].id_usuario, jwt: tokenStaff(u.rows[0].id_usuario, 'admin') } : null;
-  hayBase = Boolean(plato && admin);
-  if (!hayBase) return;
+  if (!admin) return;
+  // Plato con receta PROPIO (tests/helpers/plato-prueba.js), sobre un insumo
+  // propio con stock alto: nada del seed, nada compartido con otra suite.
+  catalogo = await crearCatalogoPrueba(sonda, 'personal-cancela-item', { receta: true });
+  plato = catalogo.plato;
+  hayBase = true;
   await limpiar();
 });
 
@@ -137,6 +125,7 @@ test.afterEach(async () => {
 test.after(async () => {
   try {
     if (hayBase) await limpiar();
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();
