@@ -184,6 +184,11 @@ const TABLA = [
     cuerpo: { nombre: 'SmartDining' },
   },
 
+  // --- D-23: subida de imágenes del menú (solo admin) ------------------------
+  // Sin archivo: el admin pasa la guarda y recibe 400 sin_archivo; la subida
+  // de verdad está en imagenes.test.js.
+  { metodo: 'POST', patron: '/api/imagenes', url: '/api/imagenes', roles: ['admin'], cuerpo: {} },
+
   // --- D-16: administración de usuarios del personal (solo admin) -----------
   { metodo: 'GET', patron: '/api/usuarios', url: '/api/usuarios', roles: ['admin'] },
   {

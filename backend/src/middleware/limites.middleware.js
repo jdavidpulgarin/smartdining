@@ -38,13 +38,20 @@ const MENSAJE_QR =
   'Demasiados intentos de abrir la sesión de la mesa. Espera un momento y vuelve a intentarlo.';
 const MENSAJE_GLOBAL =
   'Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo.';
+const MENSAJE_IMAGENES =
+  'Demasiadas imágenes subidas en poco tiempo. Espera un momento y vuelve a intentarlo.';
+
+/** `motivo` del 429 en las rutas que ya responden { error, motivo }. */
+const MOTIVO_DEMASIADAS_PETICIONES = 'demasiadas_peticiones';
 
 /**
  * Respuesta del 429. express-rate-limit ya pone Retry-After; aquí solo se da
  * un cuerpo con la misma forma que el resto de errores de la API ({ error }).
+ * Con `motivo`, se añade (las rutas nuevas responden siempre { error, motivo });
+ * los limitadores de antes siguen igual.
  */
-function responder429(mensaje) {
-  return (req, res) => res.status(429).json({ error: mensaje });
+function responder429(mensaje, motivo) {
+  return (req, res) => res.status(429).json(motivo ? { error: mensaje, motivo } : { error: mensaje });
 }
 
 /**
@@ -177,10 +184,38 @@ function crearLimitadorGlobal(env = process.env) {
   });
 }
 
+/**
+ * Limitador de la subida de imágenes (D-23): por USUARIO del JWT, no por IP.
+ *
+ * La ruta es solo de admin y re-codificar con sharp cuesta CPU: el límite es
+ * para que una sesión de admin (o un token robado) no pueda tumbar el servidor
+ * subiendo imágenes en bucle. Por usuario y no por IP porque el panel del local
+ * comparte IP con todo el personal y los comensales.
+ *
+ * Va DESPUÉS de requireAuth (necesita req.user). Por defecto 30 cada 10 min
+ * (RATE_LIMIT_IMAGENES_MAX, RATE_LIMIT_IMAGENES_VENTANA_MS). Mismo almacén que
+ * los demás (memoria del proceso, con la misma limitación) y el mismo 429, con
+ * `motivo: 'demasiadas_peticiones'`.
+ */
+function crearLimitadorImagenes(env = process.env) {
+  return rateLimit({
+    windowMs: entero(env.RATE_LIMIT_IMAGENES_VENTANA_MS, 10 * UN_MINUTO_MS),
+    limit: entero(env.RATE_LIMIT_IMAGENES_MAX, 30),
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skip: () => enPruebas(env),
+    keyGenerator: (req) => `usuario:${req.user && req.user.id_usuario}`,
+    handler: responder429(MENSAJE_IMAGENES, MOTIVO_DEMASIADAS_PETICIONES),
+  });
+}
+
 module.exports = {
   crearLimitadorLogin,
   crearLimitadorQr,
   crearLimitadorGlobal,
+  crearLimitadorImagenes,
+  MENSAJE_IMAGENES,
+  MOTIVO_DEMASIADAS_PETICIONES,
   enPruebas,
   entero,
   rutaExenta,

@@ -4,6 +4,7 @@ const platosService = require('../services/platos.service');
 const menuService = require('../services/menu.service');
 const { disponibilidadEfectiva } = require('../services/disponibilidad-efectiva');
 const socketNotifier = require('../services/socket.notifier');
+const { esUrlImagenValida, MENSAJE_URL_IMAGEN } = require('../utils/url-imagen');
 
 /**
  * CRUD de pasos e ingredientes del constructor de platos (D-04).
@@ -38,11 +39,15 @@ const MAX_URL_IMAGEN = 255;
  * `url_imagen` es VARCHAR(255) y acepta NULL, pero el panel la inicializa en
  * cadena vacía. Guardar '' sería basura que el constructor intentaría cargar
  * como imagen, así que '' (y solo espacios) se convierte en null.
+ *
+ * Con valor, D-23: una URL http(s) o una ruta /imagenes/<uuid>.webp de
+ * POST /api/imagenes, la misma regla que los platos (src/utils/url-imagen.js).
  */
 const urlImagen = z
   .string()
   .max(MAX_URL_IMAGEN)
   .transform((v) => (v.trim() === '' ? null : v))
+  .refine((v) => v === null || esUrlImagenValida(v), MENSAJE_URL_IMAGEN)
   .nullable()
   .optional();
 

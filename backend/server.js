@@ -7,6 +7,7 @@ const { manejadorErrores } = require('./src/middleware/errores.middleware');
 const { exigirEntornoValido } = require('./src/config/verificar-entorno');
 const { opcionesCors } = require('./src/config/cors');
 const { crearLimitadorGlobal } = require('./src/middleware/limites.middleware');
+const { servirImagenesLocales } = require('./src/middleware/imagenes-estaticas');
 const pool = require('./src/config/db');
 const { redisClient } = require('./src/config/redis');
 const inventarioAvisos = require('./src/services/inventario-avisos');
@@ -56,6 +57,12 @@ app.use(crearLimitadorGlobal());
 app.use(express.json());
 
 app.use('/api', routes);
+
+// D-23: las imágenes subidas (/imagenes/<uuid>.webp). SOLO fuera de producción:
+// en producción las sirve nginx desde el volumen y el backend no monta esta
+// ruta (ver src/middleware/imagenes-estaticas.js).
+const imagenesLocales = servirImagenesLocales();
+if (imagenesLocales) app.use('/imagenes', imagenesLocales);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada' });
