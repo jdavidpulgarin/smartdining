@@ -592,14 +592,15 @@ llegó. El detalle, en [docs/api-spec.md](docs/api-spec.md).
 npm test
 ```
 
-Más de **1.700** pruebas con `node --test` + `supertest`. **La cifra exacta no se fija
+Más de **2.100** pruebas con `node --test` + `supertest`. **La cifra exacta no se fija
 aquí a propósito**: cada PR suma pruebas y un número escrito en el README queda obsoleto a
-la semana siguiente (este decía "119" cuando ya iban más de mil, y "1.200" cuando ya iban
-1.737). El número real lo dice el resumen de `npm test`, que en noviembre de 2026 daba:
+la semana siguiente (este decía "119" cuando ya iban más de mil, "1.200" cuando ya iban
+1.737, y "1.737" cuando ya iban 2.113). El número real lo dice el resumen de `npm test`,
+que el 13 de noviembre de 2026 (`develop` en `5adc729`) daba:
 
 ```
-ℹ tests 1737
-ℹ pass 1737
+ℹ tests 2113
+ℹ pass 2113
 ℹ fail 0
 ℹ cancelled 0
 ```
@@ -631,13 +632,13 @@ falten los scripts 26 a 28 fallan en bloque. Y **si no hay base, se saltan solas
 dice `skipped` y el comando termina con **código 0**, así que
 
 ```
-ℹ tests 29
+ℹ tests 124
 ℹ pass 0
-ℹ skipped 29
+ℹ skipped 124
 ```
 
 no es "todo bien", es "no se probó nada" —normalmente porque las credenciales del `.env` no
-conectan—. Lo que hay que ver es `pass 29`. Ojo también con a qué base apuntan: usan la
+conectan—. Lo que hay que ver es `pass 124` (el 13 de noviembre de 2026, sobre `5adc729`). Ojo también con a qué base apuntan: usan la
 `PGDATABASE` del `.env` y **escriben en ella** (crean y borran platos y mesas con números
 altos); para no tocar tu base de desarrollo, `PGDATABASE=otra npm run test:integracion`.
 
