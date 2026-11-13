@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
+import Imagen from '../ui/Imagen';
 import { formatearPrecio } from '../../utils/formato';
 import { ETIQUETAS_MAP, ALERGENOS_MAP } from '../../constants/dieta';
 import SelectorPersonalizacion from './SelectorPersonalizacion';
@@ -90,15 +91,12 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
     <Modal abierto={abierto} onCerrar={onCerrar} titulo={plato.nombre}>
       <div>
         {/* 1. Imagen grande: ancho completo, proporción 4:3, object-cover */}
-        {plato.imagen && (
-          <div className="relative w-full aspect-[4/3] bg-superficie-2 overflow-hidden border-b border-borde">
-            <img
-              src={plato.imagen}
-              alt={plato.nombre}
-              className="w-full h-full object-cover"
-            />
-          </div>
-        )}
+        <Imagen
+          src={plato.imagen}
+          alt={plato.nombre}
+          aspecto="4/3"
+          className="w-full border-b border-borde"
+        />
 
         <div className="p-4 space-y-4 text-texto">
           {/* 2. Aviso de agotado si disponible === false */}
