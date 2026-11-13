@@ -19,6 +19,11 @@ WORKDIR /app
 COPY --from=dependencias --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json server.js ./
 COPY --chown=node:node src ./src
+# Carpeta de las imágenes (D-23), del usuario node (UID 1000) ANTES del USER:
+# un volumen con nombre vacío copia el dueño y los permisos (755) de la carpeta
+# de la imagen la primera vez que se monta, así el backend puede escribir en él
+# sin correr como root. nginx (otro UID) solo lee: archivos 644, carpeta 755.
+RUN mkdir -p /app/uploads/imagenes && chown -R node:node /app/uploads
 USER node
 EXPOSE 4000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \

@@ -16,8 +16,23 @@ const POSIX = process.platform !== 'win32';
 //   FALSO_DUMP_VACIO=1         pg_dump no escribe nada
 //   FALSO_LISTA_FALLA=1        pg_restore --list no puede leerlo
 //   FALSO_SIN_MIGRACIONES=1    el TOC no trae schema_migraciones
+//   FALSO_VOL                  nombre del volumen "imagenes" del proyecto (vacío: no existe)
+//   FALSO_IMG_DIR              carpeta que hace de volumen (la empaqueta el tar real)
+//   FALSO_TAR=falla|vacio|corrupto|sin_raiz   el tar del contenedor temporal falla así
+//   FALSO_RUN                  archivo donde se anotan los argumentos de docker run
 const DOCKER_FALSO = `#!/bin/sh
 case "$1" in
+  volume)
+    [ -z "\${FALSO_VOL:-}" ] || printf '%s\\n' "$FALSO_VOL" ;;
+  run)
+    [ -z "\${FALSO_RUN:-}" ] || printf '%s\\n' "$*" >> "$FALSO_RUN"
+    case "\${FALSO_TAR:-}" in
+      falla) echo "tar: error" >&2; exit 1 ;;
+      vacio) ;;
+      corrupto) printf 'esto no es gzip\\n' ;;
+      sin_raiz) d=$(mktemp -d); : > "$d/a.webp"; tar -czf - -C "$d" a.webp; rm -rf "$d" ;;
+      *) tar -czf - -C "$FALSO_IMG_DIR" . ;;
+    esac ;;
   ps)
     for a in "$@"; do
       case "$a" in
@@ -27,6 +42,7 @@ case "$1" in
     done
     echo ;;
   inspect)
+    case "$*" in *Config.Image*) echo postgres:16-alpine; exit 0 ;; esac
     eval "id=\\$$#"
     case "$id" in
       pg-prod*) echo smartdining ;;
@@ -204,4 +220,110 @@ test('permisos: archivo 640 y carpeta 750 (nadie fuera del grupo los lee)', { sk
   const [f] = e.archivos('smartdining-staging', 'diario');
   assert.strictEqual(fs.statSync(path.join(d, f)).mode & 0o777, 0o640);
   assert.strictEqual(fs.statSync(d).mode & 0o777, 0o750);
+});
+
+// --- Volumen de imágenes (D-23) ------------------------------------------------
+function conImagenes(extra = {}) {
+  const e0 = entorno();
+  const img = path.join(e0.raiz, 'volumen');
+  fs.mkdirSync(img);
+  fs.writeFileSync(path.join(img, '0f8c2d1e-3b4a-4c5d-8e9f-a0b1c2d3e4f5.webp'), 'RIFF....WEBP');
+  fs.writeFileSync(path.join(img, '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d.webp'), 'RIFF....WEBP');
+  const run = path.join(e0.raiz, 'run.txt');
+  const e = entorno({
+    RESPALDO_CONTENEDOR: 'pg-stg-1', FALSO_VOL: 'smartdining-staging_imagenes', FALSO_IMG_DIR: img, FALSO_RUN: run, ...extra,
+  });
+  return { ...e, run };
+}
+
+test('imágenes: guarda el tar.gz con el mismo nombre del dump y lo valida', () => {
+  const e = conImagenes();
+  const r = e.correr('predeploy', '95ca756');
+  assert.strictEqual(r.status, 0, r.stderr);
+  const a = e.archivos('smartdining-staging', 'predeploy');
+  assert.strictEqual(a.length, 2, a.join(', '));
+  const [dump, tar] = a;
+  assert.match(dump, /^predeploy-\d{8}-\d{6}-95ca756\.dump$/);
+  assert.strictEqual(tar, dump.replace(/\.dump$/, '.tar.gz'));
+  assert.match(r.stdout, /\.tar\.gz \(\d+ bytes, 2 imágenes \.webp\)/);
+  const lista = spawnSync('tar', ['-tzf', '-'], {
+    input: fs.readFileSync(path.join(e.respaldos, 'smartdining-staging', 'predeploy', tar)), encoding: 'utf8',
+  });
+  assert.strictEqual(lista.status, 0, lista.stderr);
+  assert.match(lista.stdout, /0f8c2d1e-3b4a-4c5d-8e9f-a0b1c2d3e4f5\.webp/);
+});
+
+test('imágenes: el volumen se monta en solo lectura, sin red y con la imagen del postgres', () => {
+  const e = conImagenes();
+  const r = e.correr('diario');
+  assert.strictEqual(r.status, 0, r.stderr);
+  const run = fs.readFileSync(e.run, 'utf8');
+  assert.match(run, /--network none/);
+  assert.match(run, /--pull never/);
+  assert.match(run, /-v smartdining-staging_imagenes:\/imagenes:ro /);
+  assert.match(run, /--entrypoint tar postgres:16-alpine -czf - -C \/imagenes \./);
+});
+
+test('imágenes: un volumen vacío también se respalda (tar con solo la carpeta raíz)', () => {
+  const img = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-vacio-'));
+  const v = entorno({ RESPALDO_CONTENEDOR: 'pg-stg-1', FALSO_VOL: 'smartdining-staging_imagenes', FALSO_IMG_DIR: img });
+  const r = v.correr('diario');
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(v.archivos('smartdining-staging', 'diario').length, 2);
+  assert.match(r.stdout, /0 imágenes \.webp/);
+});
+
+test('imágenes: sin volumen todavía, respalda solo la base y lo avisa', () => {
+  const e = entorno({ RESPALDO_CONTENEDOR: 'pg-stg-1' });
+  const r = e.correr('diario');
+  assert.strictEqual(r.status, 0, r.stderr);
+  const a = e.archivos('smartdining-staging', 'diario');
+  assert.strictEqual(a.length, 1);
+  assert.match(a[0], /\.dump$/);
+  assert.match(r.stderr, /todavía no tiene el volumen de imágenes/);
+});
+
+for (const [modo, mensaje] of [
+  ['falla', /no se pudo empaquetar el volumen/],
+  ['vacio', /salió vacío/],
+  ['corrupto', /está corrupto \(gzip -t\)/],
+  ['sin_raiz', /no trae la carpeta raíz/],
+]) {
+  test(`imágenes: si el tar ${modo === 'falla' ? 'falla' : `sale ${modo}`}, sale con 1 y no deja ni dump ni tar ni .tmp`, () => {
+    const e = conImagenes({ FALSO_TAR: modo });
+    const r = e.correr('predeploy', '95ca756');
+    assert.strictEqual(r.status, 1);
+    assert.match(r.stderr, mensaje);
+    assert.deepStrictEqual(e.archivos('smartdining-staging', 'predeploy'), []);
+  });
+}
+
+test('imágenes: la rotación de los tar.gz es igual a la de los dumps y no se cruzan', () => {
+  const e = conImagenes({ CONSERVAR_DIARIO: '2' });
+  const d = path.join(e.respaldos, 'smartdining-staging', 'diario');
+  fs.mkdirSync(d, { recursive: true });
+  for (const v of ['diario-20260101-033000', 'diario-20260102-033000', 'diario-20260103-033000']) {
+    fs.writeFileSync(path.join(d, `${v}.dump`), 'x');
+    fs.writeFileSync(path.join(d, `${v}.tar.gz`), 'x');
+  }
+  fs.writeFileSync(path.join(d, 'diario-20260104-033000.dump'), 'x'); // dump sin tar (antes de D-23)
+  const r = e.correr('diario');
+  assert.strictEqual(r.status, 0, r.stderr);
+  const a = e.archivos('smartdining-staging', 'diario');
+  const dumps = a.filter((f) => f.endsWith('.dump'));
+  const tars = a.filter((f) => f.endsWith('.tar.gz'));
+  assert.strictEqual(dumps.length, 2);
+  assert.strictEqual(tars.length, 2);
+  assert.strictEqual(dumps[0], 'diario-20260104-033000.dump');
+  assert.strictEqual(tars[0], 'diario-20260103-033000.tar.gz');
+});
+
+test('imágenes: el tar.gz queda con 640, como el dump', { skip: !POSIX && 'sin permisos POSIX en Windows' }, () => {
+  const e = conImagenes();
+  const r = e.correr('diario');
+  assert.strictEqual(r.status, 0, r.stderr);
+  const d = path.join(e.respaldos, 'smartdining-staging', 'diario');
+  for (const f of e.archivos('smartdining-staging', 'diario')) {
+    assert.strictEqual(fs.statSync(path.join(d, f)).mode & 0o777, 0o640, f);
+  }
 });

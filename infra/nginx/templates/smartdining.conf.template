@@ -139,8 +139,9 @@ server {
     root /usr/share/nginx/html/cocina;
     client_max_body_size 64k;
 
-    # La pantalla de cocina no carga fuentes externas.
-    set $csp "default-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'";
+    # La pantalla de cocina no carga fuentes externas. Las fotos de los platos
+    # (D-23) vienen de api.${DOMINIO}/imagenes/ (app. y staff. ya permiten https:).
+    set $csp "default-src 'self'; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO}; img-src 'self' data: https://api.${DOMINIO}; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'";
     include /etc/nginx/snippets/cabeceras-sitio.conf;
     include /etc/nginx/snippets/bloqueo-interno.conf;
 
@@ -168,6 +169,47 @@ server {
         include /etc/nginx/snippets/proxy.conf;
         proxy_set_header Connection "";
         proxy_pass http://backend;
+    }
+
+    # Subida de la imagen de un plato (D-23): el único sitio con más de 1m. El
+    # backend valida y re-codifica a .webp; aquí solo se deja pasar el archivo.
+    # Regex ANCLADA en los dos extremos: solo /api/imagenes y /api/v1/imagenes
+    # (#199), ni subrutas ni nada parecido. Sin add_header propio: hereda las
+    # cabeceras de seguridad y la CSP del server.
+    location ~ ^/api(/v1)?/imagenes$ {
+        client_max_body_size 3m;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_set_header Connection "";
+        proxy_read_timeout 30s;
+        proxy_pass http://backend;
+    }
+
+    # Imágenes de los platos, directo del volumen "imagenes" (solo lectura). El
+    # backend solo genera /imagenes/<uuid>.webp: nada más se sirve, y nunca
+    # llega al backend. El uuid no se reutiliza, así que se cachea un año.
+    # Esta location tiene add_header propio (Cache-Control) y NO hereda los del
+    # server: por eso repite seguridad.conf (HSTS, nosniff...) y la CSP.
+    # Cache-Control va sin "always" para no cachear un 404 durante un año.
+    location ~ "^/imagenes/[0-9a-f-]{36}\.webp$" {
+        if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+        root /usr/share/nginx;
+        try_files $uri =404;
+        autoindex off;
+        # Solo .webp: el tipo no depende de mime.types.
+        types { }
+        default_type image/webp;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        include /etc/nginx/snippets/seguridad.conf;
+        add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
+    }
+    # Cualquier otra cosa bajo /imagenes/ (otra extensión, otro nombre, la
+    # carpeta): 404 sin tocar el backend. Prefijo normal, no ^~, para que la
+    # regex de arriba gane cuando coincide.
+    location /imagenes/ {
+        return 404;
+    }
+    location = /imagenes {
+        return 404;
     }
     location / {
         include /etc/nginx/snippets/proxy.conf;

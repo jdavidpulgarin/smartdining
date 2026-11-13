@@ -91,6 +91,14 @@ services:
       RATE_LIMIT_LOGIN_VENTANA_MS: ${RATE_LIMIT_LOGIN_VENTANA_MS:-60000}
       RATE_LIMIT_GLOBAL_MAX: ${RATE_LIMIT_GLOBAL_MAX:-4000}
       RATE_LIMIT_GLOBAL_VENTANA_MS: ${RATE_LIMIT_GLOBAL_VENTANA_MS:-60000}
+      # Imágenes de los platos (D-23): el backend las re-codifica a .webp y las
+      # escribe aquí; nginx las sirve en api.${DOMINIO}/imagenes/<uuid>.webp.
+      IMAGENES_DIR: /app/uploads/imagenes
+    # Volumen con nombre: sobrevive a `up -d --build` y a `down` (NUNCA `down -v`:
+    # borra las imágenes; docs/despliegue.md). Docker le antepone el proyecto:
+    # smartdining_imagenes y smartdining-staging_imagenes no se mezclan.
+    volumes:
+      - imagenes:/app/uploads/imagenes
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -160,6 +168,8 @@ services:
     volumes:
       - certificados:/etc/letsencrypt:ro
       - acme:/var/www/certbot:ro
+      # Solo lectura: nginx sirve las imágenes, solo el backend escribe.
+      - imagenes:/usr/share/nginx/imagenes:ro
     depends_on:
       backend: { condition: service_healthy }
       socket-server: { condition: service_healthy }
@@ -192,3 +202,5 @@ volumes:
   redisdata:
   certificados:
   acme:
+  # Imágenes de los platos (D-23). La respalda respaldo.sh (tar.gz junto al dump).
+  imagenes:

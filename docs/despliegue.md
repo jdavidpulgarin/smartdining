@@ -10,7 +10,7 @@ diaria. Para desarrollo local, ver el [README](../README.md#-levantar-smartdinin
 Internet ──► :80 / :443  nginx ──┬─► app.DOMINIO     PWA del comensal (estático)
                                  ├─► staff.DOMINIO   panel del restaurante (estático)
                                  ├─► cocina.DOMINIO  pantalla de cocina (estático: frontend-kds)
-                                 ├─► api.DOMINIO  ──► backend:4000
+                                 ├─► api.DOMINIO  ──► backend:4000 (y /imagenes/ desde el volumen "imagenes")
                                  └─► rt.DOMINIO   ──► socket-server:4001 (WebSocket, QR, push, pagos)
 
 red "datos" (interna, sin Internet): postgres:5432, redis:6379
@@ -356,16 +356,25 @@ alias dc='docker compose -f docker-compose.prod.yml --env-file infra/.env'
 
 Los logs de cada contenedor rotan solos (5 archivos de 10 MB).
 
-### Respaldos de la base (R-18)
+### Respaldos de la base y de las imágenes (R-18, D-23)
 
 > El repositorio es **público**: los respaldos **jamás** van a GitHub. Viven
-> fuera de los clones (`/srv/respaldos`) y `.gitignore` ignora `*.dump`.
+> fuera de los clones (`/srv/respaldos`) y `.gitignore` ignora `*.dump` y
+> los `diario-*.tar.gz` y `predeploy-*.tar.gz` de las imágenes.
 
 [`infra/scripts/respaldo.sh`](../infra/scripts/respaldo.sh) hace un
 `pg_dump -Fc` (ya comprimido) del postgres que esté corriendo: `smartdining` o
 `smartdining-staging`. Si están los dos o ninguno, falla. Solo guarda el
 archivo si `pg_dump` terminó bien, no está vacío y `pg_restore --list` lo lee
 con `schema_migraciones`.
+
+En la misma corrida guarda el volumen de imágenes de los platos
+([más abajo](#imágenes-de-los-platos-d-23)) en un `.tar.gz` con el **mismo
+nombre** que el dump (`diario-AAAAMMDD-HHMMSS.tar.gz`, `predeploy-…-<sha7>.tar.gz`),
+con los mismos permisos y la misma rotación. Solo los guarda si el tar no está
+vacío, pasa `gzip -t` y `tar -t` lo lista con su carpeta raíz; si algo falla
+no queda **ni** el dump **ni** el tar (y un despliegue se detiene). Si el
+proyecto todavía no tiene el volumen, guarda solo la base y lo avisa.
 
 | Tipo | Cuándo | Dónde | Se conservan |
 | :--- | :--- | :--- | :--- |
@@ -423,7 +432,8 @@ Si el VPS se pierde, los respaldos que estaban en él se pierden con él. Una
 tarea programada en el PC del responsable baja los diarios nuevos por SFTP con
 el usuario `respaldos`, que solo puede leer `/srv/respaldos`: no tiene
 terminal, no puede escribir y no ve nada más del servidor. La llave privada de
-ese usuario solo existe en ese PC.
+ese usuario solo existe en ese PC. Baja los `.dump` (comprueba la firma
+`PGDMP`) y los `.tar.gz` (comprueba la cabecera gzip `1F 8B 08`).
 
 #### Simulacro de restauración (antes de cada release y una vez al mes)
 
@@ -439,8 +449,12 @@ levanta un postgres **temporal** sin red y sin volúmenes (los datos van en un `
 imagen que el de producción. Restaura ahí el respaldo (`pg_restore
 --exit-on-error`) y compara con la base en vivo la cantidad de tablas en
 `public` y la cantidad y última fila de `schema_migraciones`, que deben ser
-iguales. `usuarios` y `pedidos` se muestran como referencia. Al final borra
-el contenedor, también si algo falla. No toca la base real.
+iguales. `usuarios` y `pedidos` se muestran como referencia. Si junto al dump
+está su `.tar.gz`, lo valida (`gzip -t`, carpeta raíz, ninguna ruta absoluta
+ni con `..`), lo extrae dentro del contenedor temporal y comprueba que salgan
+todas las `.webp` que lista; la cantidad del volumen en vivo es referencia.
+Sin `.tar.gz` (respaldos anteriores a D-23) solo lo avisa. Al final borra el
+contenedor, también si algo falla. No toca la base real ni el volumen.
 
 #### Restaurar de verdad (sobrescribe los datos actuales)
 
@@ -453,6 +467,46 @@ dc stop backend socket-server
 dc exec -T postgres pg_restore -U smartdining -d smartdining --clean --if-exists < /srv/respaldos/smartdining/diario/ARCHIVO.dump
 dc up -d --wait
 ```
+
+### Imágenes de los platos (D-23)
+
+El backend recibe la foto en `POST /api/imagenes` (o `/api/v1/imagenes`
+desde el #199; nginx deja pasar hasta 3 MB solo en esas dos rutas exactas, el
+resto de la API sigue en 1 MB), la re-codifica a `.webp` y
+la escribe en `IMAGENES_DIR=/app/uploads/imagenes`. Devuelve
+`/imagenes/<uuid>.webp`, que nginx sirve **directo del volumen** en
+`https://api.DOMINIO/imagenes/<uuid>.webp`, sin pasar por el backend.
+
+| | |
+| :--- | :--- |
+| Volumen | `imagenes` del compose: `smartdining_imagenes` en producción y `smartdining-staging_imagenes` en staging (no se mezclan) |
+| Backend | lectura y escritura en `/app/uploads/imagenes`, como `node` (UID 1000, no root). La carpeta nace en la imagen con ese dueño, así el volumen nuevo también |
+| nginx | solo lectura (`:ro`) en `/usr/share/nginx/imagenes` |
+| Qué se sirve | solo `GET`/`HEAD` de `/imagenes/<uuid>.webp` (36 caracteres `0-9a-f-`), como `image/webp`, `Cache-Control: public, max-age=31536000, immutable`, `nosniff` y las cabeceras de seguridad. Cualquier otra ruta bajo `/imagenes/` da 404 sin tocar el backend; otro método, 405 |
+| CSP | `app.` y `staff.` ya permiten `img-src https:`; `cocina.` permite `https://api.DOMINIO` |
+
+> ⚠️ **NUNCA `down -v`.** `-v` borra los volúmenes con nombre: la base, los
+> certificados **y todas las imágenes**. Para apagar o cambiar entre staging y
+> producción usa `down` sin `-v` (§6.1). `up -d --build` no toca el volumen.
+
+**Respaldo.** Lo hace `respaldo.sh` en cada despliegue y cada noche (tar.gz
+junto al dump, ver arriba). A mano: `sudo systemctl start smartdining-respaldo.service`.
+
+**Restaurar** (sobrescribe las imágenes actuales). Primero un respaldo del
+estado actual y el simulacro con ese archivo; luego, desde el clon:
+
+```bash
+vol=$(docker volume ls -q --filter label=com.docker.compose.project=smartdining --filter label=com.docker.compose.volume=imagenes)
+echo "$vol"                         # smartdining_imagenes (en staging: project=smartdining-staging)
+dc stop backend                     # nadie escribe mientras tanto
+docker run --rm -i --network none -v "$vol:/imagenes" --entrypoint sh postgres:16-alpine \
+  -c 'find /imagenes -mindepth 1 -delete && tar -xzf - -C /imagenes && chown -R 1000:1000 /imagenes' \
+  < /srv/respaldos/smartdining/diario/ARCHIVO.tar.gz
+dc up -d --wait
+```
+
+`chown 1000:1000` deja todo del usuario `node` del backend. nginx lee igual
+(carpetas 755, archivos 644).
 
 ### Monitoreo externo (UptimeRobot)
 
@@ -564,7 +618,8 @@ dc exec -T postgres psql -U smartdining -d smartdining -c "SELECT count(*) FROM 
 Un script ya aplicado **nunca** se edita: `migrar.sh` compara checksums y se
 detiene sin aplicar nada si alguno cambió.
 
-`dc down -v` borra la base entera. No lo uses en producción.
+`dc down -v` borra la base entera, los certificados y las imágenes. No lo uses
+nunca (tampoco en staging).
 
 ## 5. Problemas comunes
 
@@ -602,7 +657,8 @@ archivo de variables y otro nombre de proyecto de compose. Sigue la rama
 | Environment de GitHub | `produccion` | `staging` |
 
 Volúmenes, redes y contenedores quedan como `smartdining-staging_*`: la base,
-Redis y los certificados de staging no se mezclan con los de producción.
+Redis, los certificados y las imágenes de staging no se mezclan con los de
+producción.
 
 ### 6.1 Staging y producción NO corren a la vez
 
@@ -613,7 +669,7 @@ nginx en la que confía `TRUST_PROXY`). Por eso:
   `Deploy` aborta si `smartdining-staging` está corriendo. Ninguno toca nada.
 - Para pasar de uno a otro se apaga con **`down` SIN `-v`**: `stop` deja la red
   creada (y producción no podría crear la suya: `Pool overlaps`), y `-v`
-  borraría la base y los certificados.
+  borraría la base, los certificados y las imágenes.
 
 ### 6.2 Primera instalación
 
