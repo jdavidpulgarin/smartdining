@@ -578,6 +578,19 @@ export const pedidosApi = {
       body: JSON.stringify({ razon }),
     })
   },
+
+  /**
+   * D-13, camino del personal (admin y mesero): cancela UNA línea entera.
+   * POST /api/pedidos/:id/items/:id_detalle/cancelar con { motivo } (obligatorio,
+   * 1 a 200 caracteres; va al historial). La base decide devolución o merma.
+   * @returns {Promise<{ pedido: { id_pedido: number, codigo_pedido: string, estado: string, total: number, items: Array<object> } }>}
+   */
+  async cancelarItem(idPedido, idDetalle, motivo) {
+    return apiFetch(`/pedidos/${idPedido}/items/${idDetalle}/cancelar`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+    })
+  },
 }
 
 // Submódulo de Transacciones / Caja

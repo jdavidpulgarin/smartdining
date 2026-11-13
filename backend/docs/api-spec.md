@@ -5144,6 +5144,212 @@ contraseña incluido**. Para los clientes, no repetir eso:
 
 ---
 
+## D-20a · Despacho y repartidor
+
+Lo que necesita la P-24 del panel: despachar los pedidos a domicilio y que el repartidor los
+lleve. Sobre el script 36 (`pedidos_domicilio`, `zonas_envio`, rol `repartidor`). **Crear**
+pedidos para llevar o a domicilio, el pago anticipado y su vencimiento son la **D-20b**: no
+están aquí.
+
+Todas las rutas de esta sección están en el router compartido (**`/api` y `/api/v1`**) y
+**todo error responde `{ error, motivo }`**, también los genéricos (404, 422, 500…). El log
+de estas rutas no lleva nombres, teléfonos ni direcciones: solo código, método y camino.
+
+### El rol `repartidor`
+
+Es personal: está en `ROLES_STAFF` (registro, cambio de rol con `PATCH /usuarios/:id` y login
+como cualquiera), y en el CHECK `usuarios_rol_check` del script 36. **No está en ningún
+`requireRole` del panel**: en todo lo que no es suyo recibe **403** `prohibido` (lo comprueba
+la matriz de roles sobre todas las rutas).
+
+### Zonas para el admin
+
+| Método y ruta | Rol | Cuerpo | Respuesta |
+|---|---|---|---|
+| `GET /zonas-envio` | admin | — | **200** `{ zonas }`, **todas** (también las inactivas) |
+| `POST /zonas-envio` | admin | `{ nombre, barrios, costo_envio, tiempo_estimado_min, activa? }` | **201** `{ zona }` |
+| `PATCH /zonas-envio/:id` | admin | los mismos campos, al menos uno | **200** `{ zona }` · 404 `no_encontrado` |
+
+`zona` es `{ id_zona, nombre, barrios, costo_envio, tiempo_estimado_min, activa, creado_en,
+actualizado_en }`. Es una ruta distinta de la pública `GET /api/v1/zonas` (D-19, solo las
+activas, para la app).
+
+- zod `.strict()`: `nombre` y cada barrio se recortan (1 a 80 caracteres); **al menos un
+  barrio**; `costo_envio` de 0 a 99.999.999,99 con dos decimales como mucho;
+  `tiempo_estimado_min` entero de 1 a 600; `activa` booleano (por defecto `true`). Si no,
+  **400** `cuerpo_invalido`.
+- **No se borran**: se desactivan con `PATCH { activa: false }` (`pedidos_domicilio` las
+  referencia con `ON DELETE RESTRICT`).
+- Los choques los decide el trigger `fn_tr_validar_zona_envio` y se traducen sin exponer el
+  detalle de PostgreSQL:
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **409** | `barrio_en_otra_zona` | Un barrio (comparado con `fn_clave_barrio`) ya está en **otra zona activa**. La respuesta trae `barrio` (la clave normalizada) y `zona` (la otra) |
+| **409** | `zona_duplicada` | Ya existe una zona con ese nombre |
+| **400** | `barrio_repetido` | El mismo barrio dos veces en la zona (trae `barrio`) |
+
+Una zona **inactiva** puede repetir barrios de una activa; activarla después da el mismo 409.
+
+### Despacho (admin y cajero)
+
+| Método y ruta | Cuerpo | Respuesta |
+|---|---|---|
+| `GET /domicilios?estado_entrega=a,b` | — | **200** `{ domicilios }` |
+| `PATCH /domicilios/:id_pedido/repartidor` | `{ id_repartidor }` | **200** `{ domicilio }` |
+| `GET /usuarios/repartidores` | — | **200** `{ repartidores: [{ id_usuario, nombre }] }`, solo los activos |
+
+- `estado_entrega`: uno o varios de `por_asignar`, `asignado`, `en_camino`, `entregado`,
+  `fallido`, separados por coma. **Sin el parámetro, los no terminados** (`por_asignar`,
+  `asignado`, `en_camino`). Un estado que no existe, o otro parámetro, es **400**
+  `cuerpo_invalido`. **Nunca** salen los pedidos en `por_pagar` (todavía no llegan a cocina)
+  ni los `cancelado`.
+- Cada `domicilio`:
+
+```json
+{
+  "pedido": { "id_pedido": 87, "codigo_pedido": "A1B2C3", "estado": "listo", "total": 35000 },
+  "cliente": { "nombre": "Ana", "telefono": "3001234567" },
+  "direccion": { "direccion": "Calle 1 # 2-3", "barrio": "Centro", "referencia": "Portón azul",
+                 "lat": null, "lng": null, "telefono_contacto": "3001234567" },
+  "zona": { "id_zona": 1, "nombre": "Norte" },
+  "costo_envio": 5000,
+  "repartidor": { "id_usuario": 40, "nombre": "Rafa" },
+  "estado_entrega": "asignado",
+  "motivo_fallo": null,
+  "tiempos": { "creado_en": "...", "asignado_en": "...", "en_camino_en": null,
+               "entregado_en": null, "fallido_en": null }
+}
+```
+
+  Del cliente salen **solo nombre y teléfono** ([Datos personales](#datos-personales)), y la
+  dirección es la **copiada** en `pedidos_domicilio` al crear el pedido, no la libreta del
+  cliente. `repartidor` es `null` mientras no hay uno.
+- **Asignar o reasignar** solo con el **pedido pagado y sin entregar** y la entrega en
+  `por_asignar` o `asignado`. Se decide con el pedido y la entrega ya bloqueados (pedido antes
+  que `pedidos_domicilio`), en este orden:
+
+  | Status | `motivo` | Cuándo |
+  |---|---|---|
+  | **409** | `pedido_sin_pagar` | El pedido está en `por_pagar`: el pago (siempre anticipado) no se ha confirmado |
+  | **409** | `pedido_no_asignable` | El pedido está en `cancelado`, `entregado` o `pagado` |
+  | **409** | `entrega_ya_salio` | La entrega ya está en `en_camino`, `entregado` o `fallido` |
+  | **409** | `repartidor_no_valido` | No es un usuario activo con rol `repartidor` (también si lo rechaza el trigger porque lo desactivaron en medio) |
+
+  O sea: solo con el pedido en `recibido`, `en_preparacion` o `listo`. Un pedido que no es
+  domicilio o no existe: **404** `no_encontrado`. `asignado_en` se pone en cada asignación.
+  (Antes de este arreglo un pedido en `por_pagar` se podía asignar y el cancelado respondía
+  `pedido_cancelado`; ese motivo ya no existe.)
+
+### Repartidor
+
+| Método y ruta | Cuerpo | Respuesta |
+|---|---|---|
+| `GET /domicilios/mios` | — | **200** `{ domicilios }`: las suyas sin terminar (sin las de pedidos cancelados ni en `por_pagar`, como el despacho) y las que terminó **hoy** (hora de Bogotá) |
+| `POST /domicilios/:id_pedido/salir` | ninguno | **200** `{ domicilio }` |
+| `POST /domicilios/:id_pedido/entregar` | ninguno | **200** `{ domicilio }` |
+| `POST /domicilios/:id_pedido/fallar` | `{ motivo }` (1 a 200 caracteres) | **200** `{ domicilio }` |
+
+Mismo objeto `domicilio` que el despacho. Errores: **403** `no_es_tu_entrega` (no es suya),
+**409** `transicion_invalida` (la transición no vale, o ya se hizo: sin efectos), **409**
+`pedido_no_listo`, **404** `no_encontrado`, **400** `parametro_invalido` (el id) o
+`cuerpo_invalido` (un cuerpo en salir/entregar, o el motivo de fallar).
+
+### Las transiciones de la entrega
+
+El trigger `fn_tr_validar_pedido_domicilio` (script 36) **no impone un orden**: solo exige un
+pedido de canal `domicilio`, que `id_repartidor` sea un usuario activo con rol `repartidor`, que
+una entrega `entregado` o `fallido` **no cambie más** de estado, y pone las marcas de tiempo la
+primera vez que se entra a cada estado. Además `ck_domicilio_repartidor` exige repartidor fuera de
+`por_asignar` y `ck_domicilio_fallo` un motivo en `fallido`. **El orden lo impone el backend**, y
+estas son las únicas transiciones:
+
+| De | A | Quién | Condición |
+|---|---|---|---|
+| `por_asignar` | `asignado` | admin, cajero | pedido en `recibido`, `en_preparacion` o `listo`; repartidor activo |
+| `asignado` | `asignado` | admin, cajero | reasignar, con la misma condición |
+| `asignado` | `en_camino` | el repartidor asignado | **el pedido está en `listo`** (si no, 409 `pedido_no_listo`) |
+| `en_camino` | `entregado` | el repartidor asignado | el pedido pasa a `entregado` en la misma transacción |
+| `en_camino` | `fallido` | el repartidor asignado | con `motivo`; **final** |
+
+### Las decisiones (acordadas con Jarrison)
+
+- **Salir solo en `listo`.** La entrega pasa a `en_camino` únicamente si el pedido está en
+  `listo`; si no, **409** `pedido_no_listo`.
+- **En camino nadie cancela.** Con la entrega `en_camino`, **ningún** camino cancela el pedido:
+  `PATCH /pedidos/:id/estado` a `cancelado`, `POST /pedidos/:id/cancelar` (personal y comensal)
+  y `POST /pedidos/:id/items/:id_detalle/cancelar` responden **409** `entrega_en_camino` sin
+  tocar nada. En el último se bloquea **cualquier** línea, no solo la última (la comida ya va
+  en la bolsa; quitar la última, además, cancelaría el pedido). Antes de decidir se bloquea la
+  fila de `pedidos_domicilio`.
+- **En un domicilio, la entrega la marca solo el repartidor.** El paso del pedido a
+  `entregado` lo hace únicamente `POST /domicilios/:id_pedido/entregar`.
+  `PATCH /pedidos/:id/estado` con `estado: "entregado"` sobre un pedido de canal `domicilio`
+  responde **409** `entrega_por_repartidor` ("En un domicilio la entrega la marca el
+  repartidor"), **en cualquier estado de la entrega** y para cualquier rol, sin tocar nada. Se
+  bloquea igual que el resto: el pedido y después su fila de `pedidos_domicilio`. Mesa y para
+  llevar no cambian. (El paso a `pagado` solo es legal desde `entregado`, así que tampoco hay
+  otro camino para cerrar un domicilio: ver abajo.)
+- **Entregado cierra.** `en_camino -> entregado` pasa el pedido `listo -> entregado` en la
+  **misma transacción**, firmado por el repartidor en `historial_estados` (la transición
+  requiere usuario), y aplica la **misma regla de cierre** que el mesero
+  (`cerrarSiEntregadoYPagado`: entregado + `estado_pago` `pagado` + saldo 0 -> `pagado`, también
+  firmado por el repartidor). Sin mesa no se bloquea ni se libera ninguna.
+- **Fallido es final.** No hay reintentos ni reasignación. El pedido se queda en `listo` y lo
+  único que puede hacer el admin es **cancelarlo** (`listo -> cancelado`): lo cocinado es
+  **merma** (scripts 27 y 31). El **reembolso es aparte**, con `reembolsar_pago()`: no se
+  automatiza.
+- **Pago siempre anticipado.** El repartidor no cobra.
+- **ORDEN DE BLOQUEOS**, en todo lo que toca las dos tablas (asignar, salir, entregar, fallar
+  y todas las cancelaciones):
+
+  ```
+  mesas -> pedidos -> pedidos_domicilio -> detalles_pedido
+  ```
+
+  La mesa sigue antes del pedido, como en los pagos (un domicilio no tiene mesa). Con un solo
+  orden, una cancelación y un `salir` del mismo pedido se ponen en fila en el bloqueo del
+  pedido: gana el primero y el segundo decide con lo que aquel confirmó (`pedido_no_listo` si
+  ganó la cancelación, `entrega_en_camino` si ganó la salida). Nunca los dos.
+
+### Quién puede llevar un domicilio a `entregado` o `pagado`
+
+Revisado camino por camino:
+
+| Camino | ¿Puede con un domicilio? |
+|---|---|
+| `POST /domicilios/:id_pedido/entregar` (repartidor) | **Sí: el único** a `entregado` (y, con el pago cubierto, a `pagado` en la misma transacción) |
+| `PATCH /pedidos/:id/estado` y `POST /pedidos/:id/cancelar` | No: `entregado` da 409 `entrega_por_repartidor`; `pagado` solo es legal desde `entregado` |
+| `PATCH /kds/comandas/:id/estado` | No: el KDS solo pide `en_preparacion` o `listo` |
+| Pagos (`POST /transacciones`, el interno del socket-server, el cobro de mesa en caja) | Solo `entregado -> pagado` (la base no deja otra transición a `pagado`), o sea después de que el repartidor entregó; el cobro de mesa ni siquiera ve pedidos sin mesa |
+| Función de la base `cambiar_estado_pedido()` (script 03) | **Podría** (`listo -> entregado` respetando `transiciones_validas`), pero **ni el backend ni el socket-server la llaman**; queda anotada |
+
+### Los pedidos sin mesa en los listados (LEFT JOIN)
+
+Desde el script 36 `pedidos.id_mesa` admite `NULL`. Los listados **generales** pasan a
+`LEFT JOIN mesas` (solo se agregan campos; nada de lo que ya salía cambia):
+
+| Listado | Cambio |
+|---|---|
+| `GET /kds/comandas` | sale con `mesa_numero: null` y el nuevo `canal` |
+| `GET /pedidos/activos` | `mesa_numero: null`; `p.*` ya trae `canal` e `id_cliente` |
+| `GET /transacciones` (caja, "Recaudado hoy") | `numero_mesa: null` y el nuevo `canal` en cada fila |
+
+**No cambian**, porque son de **una mesa** a propósito y un pedido sin mesa no tiene nada que
+hacer ahí: la cuenta y el cobro de una mesa (`transacciones.service`, `WHERE p.id_mesa = $1`)
+y el conteo de pedidos abiertos para liberar una mesa (`mesas.service`, dos consultas). Los
+reportes leen vistas que no unen con mesas.
+
+### Avisos por socket
+
+En la D-20a **no hay avisos nuevos** de domicilio, y los existentes (`order:status` e
+`item:cancelado`) **no se envían** para un pedido sin mesa: el socket-server de hoy exige
+`id_mesa` en esos contratos. No lanzan ni cambian la respuesta HTTP. Los avisos de domicilio
+llegan con la **R-23** de Roberto. (Su `socket-server/src/auth.js` tampoco acepta hoy un JWT con
+`rol: "repartidor"`: hay que agregarlo allí cuando el repartidor necesite tiempo real.)
+
+---
+
 ## Pendiente por acordar con el equipo
 
 Ya resueltos contra el `schema.sql` de Jarrison: `mesas.estado` es

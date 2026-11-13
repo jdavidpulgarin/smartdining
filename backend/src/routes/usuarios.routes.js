@@ -1,5 +1,6 @@
 const express = require('express');
 const ctrl = require('../controllers/usuarios.controller');
+const domiciliosCtrl = require('../controllers/domicilios.controller');
 const { requireAuth, requireRole } = require('../middleware/auth.middleware');
 
 const router = express.Router();
@@ -18,6 +19,10 @@ const router = express.Router();
  * petición (H-09).
  */
 router.get('/', requireAuth, requireRole('admin'), ctrl.listar);
+// D-20a: la ÚNICA lectura que no es solo de admin. El despacho (admin y cajero)
+// necesita a quién asignar una entrega: solo id y nombre de los repartidores
+// activos, nada más de la tabla.
+router.get('/repartidores', requireAuth, requireRole('admin', 'cajero'), domiciliosCtrl.listarRepartidores);
 router.patch('/:id', requireAuth, requireRole('admin'), ctrl.actualizar);
 
 // POST y no PATCH: no es editar un campo, es ejecutar un cambio de credencial.

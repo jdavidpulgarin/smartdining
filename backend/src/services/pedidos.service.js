@@ -3,6 +3,7 @@ const pool = require('../config/db');
 const mesasService = require('./mesas.service');
 const aliasComensal = require('./alias-comensal');
 const { traducirAutorInexistente } = require('./autor-inexistente');
+const { errorConMotivo } = require('../utils/error-con-motivo');
 
 /**
  * Dominio del CHECK de pedidos.estado. Se usa solo para validar que el body
@@ -217,15 +218,18 @@ const ESTADOS_ACTIVOS = ['recibido', 'en_preparacion', 'listo', 'entregado'];
  * (compatible hacia atrás) y lo nuevo se agrega al lado.
  *
  * Se une con mesas para dar `mesa_numero`, que es lo que el panel muestra: el
- * número que el personal ve en el salón, no el id interno. Es un JOIN y no un
- * LEFT JOIN porque pedidos.id_mesa es NOT NULL con FK a mesas: todo pedido
- * tiene su mesa. Mismo alias y mismo nombre de campo que kds.service, para que
- * el panel y el KDS hablen igual.
+ * número que el personal ve en el salón, no el id interno. Mismo alias y mismo
+ * nombre de campo que kds.service, para que el panel y el KDS hablen igual.
+ *
+ * LEFT JOIN desde la D-20a: el script 36 dejó pedidos.id_mesa NULLABLE (los
+ * pedidos a domicilio y para llevar no tienen mesa) y con JOIN esos pedidos
+ * desaparecían del panel. Salen con mesa_numero null; `p.*` ya trae `canal` e
+ * `id_cliente`, así que no hace falta pedirlos aparte.
  */
 const SQL_PEDIDOS_ACTIVOS = `
   SELECT p.*, m.numero AS mesa_numero
   FROM pedidos p
-  JOIN mesas m ON m.id_mesa = p.id_mesa
+  LEFT JOIN mesas m ON m.id_mesa = p.id_mesa
   WHERE p.estado = ANY($1::text[])
   ORDER BY p.creado_en ASC`;
 
@@ -274,6 +278,100 @@ const ESTADO_PAGO_CUBIERTO = 'pagado';
  */
 const ESTADOS_QUE_BLOQUEAN_LA_MESA = [...ESTADOS_CIERRE, ESTADO_ENTREGADO];
 
+/* -------------------------------------------------------------------------- *
+ * D-20a: domicilios.
+ *
+ * ORDEN DE BLOQUEOS (todos los caminos que tocan las dos tablas):
+ *
+ *     mesas -> pedidos -> pedidos_domicilio -> detalles_pedido
+ *
+ * La mesa sigue yendo antes del pedido, como en los pagos (un pedido a
+ * domicilio no tiene mesa, así que ahí ese paso no existe). Después, SIEMPRE
+ * el pedido antes que su fila de pedidos_domicilio: lo hacen las cancelaciones
+ * (actualizarEstado a 'cancelado', cancelarItem y cancelarPedidoComensal) y
+ * todo domicilios.service (asignar, salir, entregar y fallar). Con un solo
+ * orden, una cancelación y un "salir" del mismo pedido se ponen en fila en el
+ * bloqueo del pedido y nunca se interbloquean: gana el primero y el segundo
+ * decide con lo que aquel confirmó.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * En un pedido de canal 'domicilio' el paso a 'entregado' lo hace SOLO el
+ * repartidor (POST /domicilios/:id/entregar, que además mueve la entrega a
+ * 'entregado' en la misma transacción). PATCH /pedidos/:id/estado a 'entregado'
+ * sobre un domicilio es 409 entrega_por_repartidor, esté como esté la entrega.
+ */
+const MOTIVO_ENTREGA_POR_REPARTIDOR = 'entrega_por_repartidor';
+const MENSAJE_ENTREGA_POR_REPARTIDOR = 'En un domicilio la entrega la marca el repartidor';
+
+const MOTIVO_ENTREGA_EN_CAMINO = 'entrega_en_camino';
+const MENSAJE_ENTREGA_EN_CAMINO =
+  'El pedido ya salió con el repartidor: no se puede cancelar mientras la entrega está en camino';
+
+/**
+ * ¿La entrega a domicilio de este pedido está en camino? Bloquea su fila de
+ * pedidos_domicilio (FOR UPDATE). Hay que llamarla con el PEDIDO YA
+ * BLOQUEADO (orden de arriba). Un pedido de mesa no tiene fila: false.
+ */
+async function entregaEnCamino(client, idPedido) {
+  const { rows } = await client.query(
+    'SELECT estado_entrega FROM pedidos_domicilio WHERE id_pedido = $1::int FOR UPDATE',
+    [idPedido]
+  );
+  return Boolean(rows[0]) && rows[0].estado_entrega === 'en_camino';
+}
+
+/**
+ * REGLA DE CIERRE: un pedido pasa a 'pagado' cuando está entregado Y
+ * totalmente pagado, en cualquiera de los dos órdenes. Aquí se resuelve el
+ * orden "primero se paga, después sale la comida", que es el del pago en
+ * línea: el cobro ya ocurrió y dejó la cuenta en cero sin poder mover el
+ * estado (el trigger solo deja pasar a 'pagado' desde 'entregado'), así que
+ * el pedido se cierra en el momento en que se entrega.
+ *
+ * Sin esto la mesa se quedaba ocupada para siempre: el pedido nunca volvía a
+ * 'pagado', liberarSiNoQuedanPedidosAbiertos lo seguía contando como abierto
+ * y ni el mesero ni la caja podían cerrar la mesa (medido: 409 "pedidos
+ * abiertos" incluso después de entregar).
+ *
+ * Se mira estado_pago, que mantiene la base (al tocar transacciones, script
+ * 22, y al cambiar el total, script 33), y se confirma con
+ * obtener_saldo_pendiente antes de cerrar. Dos fuentes de acuerdo para
+ * mover dinero: si alguna vez una se quedara atrás, con una sola se podría
+ * cerrar un pedido con saldo vivo.
+ *
+ * La usan actualizarEstado (el mesero entrega) y, desde la D-20a, la entrega
+ * a domicilio del repartidor (domicilios.service), en la misma transacción
+ * que el cambio a 'entregado'.
+ *
+ * @param {object} pedido     la fila que dejó el UPDATE a 'entregado' (RETURNING *)
+ * @param {number|null} idUsuario autor del cierre en historial_estados
+ * @param {{idPedido?: number|string, estadoNuevo?: string}} [opciones] el id y el
+ *   estado que se pidió, si no son los de la fila (actualizarEstado los pasa)
+ * @returns {Promise<{pedido: object, cerradoPorPago: boolean}>}
+ */
+async function cerrarSiEntregadoYPagado(client, pedido, idUsuario, opciones = {}) {
+  const id = opciones.idPedido ?? pedido.id_pedido;
+  const estadoNuevo = opciones.estadoNuevo ?? pedido.estado;
+  if (estadoNuevo !== ESTADO_ENTREGADO || pedido.estado_pago !== ESTADO_PAGO_CUBIERTO) {
+    return { pedido, cerradoPorPago: false };
+  }
+  const saldo = await client.query('SELECT obtener_saldo_pendiente($1) <= 0 AS liquidado', [id]);
+  if (saldo.rows[0]?.liquidado !== true) return { pedido, cerradoPorPago: false };
+
+  const cerrado = await client.query(
+    `UPDATE pedidos SET estado = 'pagado' WHERE id_pedido = $1 RETURNING *`,
+    [id]
+  );
+  await client.query(
+    `INSERT INTO historial_estados
+      (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones)
+     VALUES ($1, $2, $3, 'pagado', 'Cuenta ya cubierta al entregar')`,
+    [id, idUsuario, ESTADO_ENTREGADO]
+  );
+  return { pedido: { ...pedido, ...(cerrado.rows[0] || {}), estado: ESTADO_PAGADO }, cerradoPorPago: true };
+}
+
 /**
  * Cambia el estado del pedido y lo registra en historial_estados.
  *
@@ -318,6 +416,29 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
       );
     }
 
+    // D-20a: con la entrega a domicilio EN CAMINO nadie cancela el pedido. Se
+    // bloquea el pedido y DESPUÉS su fila de pedidos_domicilio (el orden de
+    // todos los caminos, ver arriba) antes de decidir: así un "salir" del
+    // repartidor y esta cancelación nunca pasan los dos.
+    if (estado === 'cancelado') {
+      await client.query('SELECT id_pedido FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [id]);
+      if (await entregaEnCamino(client, id)) {
+        throw errorConMotivo(409, MOTIVO_ENTREGA_EN_CAMINO, MENSAJE_ENTREGA_EN_CAMINO);
+      }
+    }
+
+    // D-20a: en un DOMICILIO el paso a 'entregado' es solo del repartidor
+    // (domicilios.service, entregar), en cualquier estado de la entrega. Mismo
+    // orden de bloqueos: el pedido y después su fila de pedidos_domicilio.
+    // Mesa y para llevar siguen como siempre.
+    if (estado === ESTADO_ENTREGADO) {
+      const p = await client.query('SELECT id_pedido, canal FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [id]);
+      if (p.rows[0] && p.rows[0].canal === 'domicilio') {
+        await client.query('SELECT id_pedido FROM pedidos_domicilio WHERE id_pedido = $1::int FOR UPDATE', [id]);
+        throw errorConMotivo(409, MOTIVO_ENTREGA_POR_REPARTIDOR, MENSAJE_ENTREGA_POR_REPARTIDOR);
+      }
+    }
+
     const result = await client.query(
       'UPDATE pedidos SET estado = $1 WHERE id_pedido = $2 RETURNING *',
       [estado, id]
@@ -330,50 +451,22 @@ async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
       [id, id_usuario, estadoAnterior, estado, observaciones || null]
     );
 
-    let pedido = result.rows[0];
-
-    // REGLA DE CIERRE: un pedido pasa a 'pagado' cuando está entregado Y
-    // totalmente pagado, en cualquiera de los dos órdenes. Aquí se resuelve el
-    // orden "primero se paga, después sale la comida", que es el del pago en
-    // línea: el cobro ya ocurrió y dejó la cuenta en cero sin poder mover el
-    // estado (el trigger solo deja pasar a 'pagado' desde 'entregado'), así que
-    // el pedido se cierra en el momento en que el mesero lo entrega.
-    //
-    // Sin esto la mesa se quedaba ocupada para siempre: el pedido nunca volvía a
-    // 'pagado', liberarSiNoQuedanPedidosAbiertos lo seguía contando como abierto
-    // y ni el mesero ni la caja podían cerrar la mesa (medido: 409 "pedidos
-    // abiertos" incluso después de entregar).
-    //
-    // Se mira estado_pago, que mantiene la base (al tocar transacciones, script
-    // 22, y al cambiar el total, script 33), y se confirma con
-    // obtener_saldo_pendiente antes de cerrar. Dos fuentes de acuerdo para
-    // mover dinero: si alguna vez una se quedara atrás, con una sola se podría
-    // cerrar un pedido con saldo vivo.
-    let cerradoPorPago = false;
-    if (estado === ESTADO_ENTREGADO && pedido.estado_pago === ESTADO_PAGO_CUBIERTO) {
-      const saldo = await client.query('SELECT obtener_saldo_pendiente($1) <= 0 AS liquidado', [id]);
-      if (saldo.rows[0]?.liquidado === true) {
-        const cerrado = await client.query(
-          `UPDATE pedidos SET estado = 'pagado' WHERE id_pedido = $1 RETURNING *`,
-          [id]
-        );
-        pedido = { ...pedido, ...(cerrado.rows[0] || {}), estado: ESTADO_PAGADO };
-        await client.query(
-          `INSERT INTO historial_estados
-            (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones)
-           VALUES ($1, $2, $3, 'pagado', 'Cuenta ya cubierta al entregar')`,
-          [id, id_usuario, ESTADO_ENTREGADO]
-        );
-        cerradoPorPago = true;
-      }
-    }
+    // REGLA DE CIERRE (entregado + pagado + saldo 0 -> 'pagado'): ver
+    // cerrarSiEntregadoYPagado, que comparte con la entrega a domicilio.
+    const cierre = await cerrarSiEntregadoYPagado(client, result.rows[0], id_usuario, {
+      idPedido: id,
+      estadoNuevo: estado,
+    });
+    const pedido = cierre.pedido;
+    const { cerradoPorPago } = cierre;
 
     // Si el pedido se cerró y la mesa no tiene otros pedidos abiertos, la mesa
     // se libera en esta misma transacción: el QR impreso deja de valer y las
     // sesiones de comensal de ese grupo caen. Se mira el estado FINAL, que con
-    // la regla de cierre puede no ser el que pidió quien llamó.
+    // la regla de cierre puede no ser el que pidió quien llamó. Un pedido sin
+    // mesa (domicilio, para llevar) no tiene mesa que liberar.
     let mesaLiberada = false;
-    if (ESTADOS_CIERRE.includes(pedido.estado)) {
+    if (ESTADOS_CIERRE.includes(pedido.estado) && pedido.id_mesa !== null && pedido.id_mesa !== undefined) {
       mesaLiberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, pedido.id_mesa);
     }
 
@@ -555,6 +648,12 @@ async function cancelarItem(idPedido, idDetalle, actor) {
       if (!(await esDeSuMesaYVisita(client, pedido, actor.idMesa))) return await salir({ noEsTuyo: true });
       if (!esDelComensal(linea.comensal, actor.comensal)) return await salir({ noEsTuyo: true });
     }
+
+    // 2b. D-20a: con la entrega a domicilio en camino no se toca el pedido (ni
+    // una línea: la comida ya va en la bolsa; y quitar la última lo
+    // cancelaría). pedidos_domicilio se bloquea DESPUÉS del pedido (orden de
+    // bloqueos, arriba). Un pedido de mesa no tiene fila y sigue igual.
+    if (await entregaEnCamino(client, idPedido)) return await salir({ conflicto: MOTIVO_ENTREGA_EN_CAMINO });
 
     // 3. Conflictos. 'item_ya_cancelado' va primero: un reintento no debe
     // contestarse como si cocina lo hubiera empezado.
@@ -742,6 +841,14 @@ async function cancelarPedidoComensal(idPedido, { idMesa, comensal }) {
     // 2. Su mesa y su visita.
     if (!(await esDeSuMesaYVisita(client, pedido, idMesa))) return await salir({ noEsTuyo: true });
 
+    // 2b. D-20a: la misma guarda que las demás cancelaciones. Un comensal de
+    // mesa nunca es dueño de un pedido a domicilio (no tiene mesa), así que en
+    // la práctica no llega aquí; se deja para que NINGÚN camino cancele una
+    // entrega en camino.
+    if (await entregaEnCamino(client, idPedido)) {
+      return await salir({ conflicto: MOTIVO_ENTREGA_EN_CAMINO });
+    }
+
     const l = await client.query(
       `SELECT id_detalle, comensal, estado_item FROM detalles_pedido
         WHERE id_pedido = $1::int ORDER BY id_detalle FOR UPDATE`,
@@ -830,4 +937,11 @@ module.exports = {
   cancelarPedidoComensal,
   MOTIVOS_QUITAR_ITEM,
   MOTIVOS_CANCELAR_PEDIDO,
+  // D-20a
+  entregaEnCamino,
+  cerrarSiEntregadoYPagado,
+  MOTIVO_ENTREGA_EN_CAMINO,
+  MENSAJE_ENTREGA_EN_CAMINO,
+  MOTIVO_ENTREGA_POR_REPARTIDOR,
+  MENSAJE_ENTREGA_POR_REPARTIDOR,
 };

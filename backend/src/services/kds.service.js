@@ -69,15 +69,18 @@ const HORAS_VISIBLES_LISTO = 12;
  */
 async function comandasActivas() {
   const pedidosResult = await pool.query(
+    // D-20a: LEFT JOIN mesas. Un pedido a domicilio o para llevar no tiene
+    // mesa (script 36) y con JOIN desaparecía del tablero: sale con
+    // mesa_numero null y `canal` dice de dónde viene.
     `SELECT p.id_pedido, p.codigo_pedido, p.id_mesa, p.estado, p.notas_generales,
-            p.creado_en, m.numero AS mesa_numero,
+            p.creado_en, m.numero AS mesa_numero, p.canal,
             EXTRACT(EPOCH FROM (NOW() - p.creado_en)) / 60 AS minutos_transcurridos,
             -- Cuándo pasó a 'listo': con esto el KDS cuenta el tiempo EN EL PASE
             -- y no el total desde que se pidió, que son dos cosas distintas.
             -- pedidos.actualizado_en no sirve: cambia con cualquier UPDATE.
             h.fecha_cambio AS listo_en
      FROM pedidos p
-     JOIN mesas m ON m.id_mesa = p.id_mesa
+     LEFT JOIN mesas m ON m.id_mesa = p.id_mesa
      LEFT JOIN LATERAL (
        SELECT he.fecha_cambio
        FROM historial_estados he
