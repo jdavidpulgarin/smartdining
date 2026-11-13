@@ -83,7 +83,8 @@ function crearServidor(config, deps = {}) {
     // y socket.data. Un celular sin red mientras se liberaba su mesa volvía a
     // room:mesa-N y leía y escribía el carrito del grupo siguiente sin pasar
     // por sesionVigente. Cada reconexión es un socket nuevo que se autentica de
-    // cero; el cliente hace join:table y reemplaza su carrito (EVENTS.md §3.3).
+    // cero; el cliente hace join:table y reemplaza su carrito (EVENTS.md §3.3),
+    // y la gracia de presencia (sala.js) cubre que el panel no lo vea salir.
     // Prueba de regresión: tests/reconexion-sin-recuperacion.test.js.
     // Un mensaje más grande que esto se rechaza y se cierra esa conexión.
     maxHttpBufferSize: MAX_BUFFER_BYTES,
@@ -123,7 +124,14 @@ function crearServidor(config, deps = {}) {
     pasarela: deps.pasarela || (config.wompi ? verificarImplementacion(crearPasarelaWompi(config.wompi)) : null),
     almacenPagos: cliente ? crearAlmacenPagosRedis({ cliente }) : crearAlmacenPagosMemoria(),
     limites: cliente ? crearLimitesRedis({ cliente }) : crearLimitesMemoria(),
-    presencia: crearPresencia({ io, estadoMesas, ...(deps.presencia || {}) }),
+    presencia: crearPresencia({
+      io,
+      estadoMesas,
+      graciaMs: config.presenciaGraciaMs,
+      // ctx.mesaLiberada se define más abajo; se lee al desconectarse alguien.
+      mesaLiberada: (idMesa) => Boolean(ctx.mesaLiberada && ctx.mesaLiberada(idMesa)),
+      ...(deps.presencia || {}),
+    }),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),
     suscripciones: cliente
@@ -163,6 +171,9 @@ function crearServidor(config, deps = {}) {
     if (mesasLiberadas.has(idMesa)) return { duplicado: true };
     mesasLiberadas.add(idMesa);
     ctx.rotador.cerrar(idMesa);
+    // Quien estaba en gracia era del grupo que se va: no debe aparecer en la
+    // presencia de la sesión siguiente.
+    ctx.presencia.cancelarGracias(idMesa);
     await ctx.qr.revocarMesa(idMesa);
     // ANTES de vaciar el carrito: quien lo reciba todavía puede mostrar qué
     // quedó sin pedir. Al panel le sirve para pintar la mesa libre al instante.
@@ -212,6 +223,7 @@ function crearServidor(config, deps = {}) {
       alCambiarSala: ctx.presencia.programar,
       // Con el primer comensal en la sala, el QR de la mesa deja de rotar.
       alEntrarComensal: ctx.rotador.fijar,
+      alVolverComensal: ctx.presencia.volverComensal,
     });
     // El personal que entra a room:admin (o recarga el panel) recibe la
     // presencia de todas las mesas con algo, solo en ESTE socket, 500 ms
