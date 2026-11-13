@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const routes = require('./src/routes');
+const { montarApi } = require('./src/routes/montaje');
 const { manejadorErrores } = require('./src/middleware/errores.middleware');
 const { exigirEntornoValido } = require('./src/config/verificar-entorno');
 const { opcionesCors } = require('./src/config/cors');
@@ -56,7 +56,10 @@ app.use(crearLimitadorGlobal());
 
 app.use(express.json());
 
-app.use('/api', routes);
+// D-19: la API en /api (como siempre) y también en /api/v1, con el mismo router
+// y los mismos límites. Detalles y lo que queda fuera de v1 en
+// src/routes/montaje.js.
+montarApi(app);
 
 // D-23: las imágenes subidas (/imagenes/<uuid>.webp). SOLO fuera de producción:
 // en producción las sirve nginx desde el volumen y el backend no monta esta
@@ -65,7 +68,8 @@ const imagenesLocales = servirImagenesLocales();
 if (imagenesLocales) app.use('/imagenes', imagenesLocales);
 
 app.use((req, res) => {
-  res.status(404).json({ error: 'Ruta no encontrada' });
+  // `motivo` se agregó en la D-19: el `error` de siempre no cambia.
+  res.status(404).json({ error: 'Ruta no encontrada', motivo: 'no_encontrado' });
 });
 
 // Manejador de errores centralizado: traduce los RAISE EXCEPTION de los

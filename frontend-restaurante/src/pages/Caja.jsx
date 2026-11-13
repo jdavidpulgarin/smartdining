@@ -23,6 +23,9 @@ import {
   descartarIdCobro,
   agruparCobros,
   horaBogota,
+  usaVoucher,
+  voucherDelCobro,
+  VOUCHER_MAX,
 } from '../utils/caja'
 
 function formatCOP(monto) {
@@ -381,6 +384,14 @@ function CajaRegistradora() {
       return
     }
 
+    // Voucher del datáfono (script 35): solo con tarjeta; se revisa el formato
+    // antes de enviar para no gastar un intento en un 400.
+    const voucher = voucherDelCobro(paymentMethod, authCode)
+    if (voucher.error) {
+      setErrorCobro(voucher.error)
+      return
+    }
+
     // La propina no entra en el monto: el backend solo cubre el saldo de los
     // pedidos (un monto mayor es 409 excede). Queda en el recibo.
     const datos = {
@@ -396,7 +407,7 @@ function CajaRegistradora() {
     setProcessingPayment(true)
 
     try {
-      const res = await transaccionesApi.cobrarMesa({ ...datos, id_cobro: cobro.id_cobro })
+      const res = await transaccionesApi.cobrarMesa({ ...datos, id_cobro: cobro.id_cobro, voucher: voucher.voucher })
       // Confirmado (201, o 200 si ya se había cobrado): el próximo cobro es otro.
       cobroPendiente.current = null
 
@@ -417,7 +428,10 @@ function CajaRegistradora() {
         total: financialDetails.total,
         cashGiven: paymentMethod === 'efectivo' ? numericCash : null,
         changeDue: paymentMethod === 'efectivo' ? changeDue : null,
-        voucher: authCode.trim() || null,
+        // El que guardó el backend. En un duplicado vale el del primer envío,
+        // que esta respuesta no trae: no se muestra uno que quizá no se guardó.
+        voucher: transacciones.find((t) => t.voucher)?.voucher
+          ?? (res?.duplicado ? null : voucher.voucher),
         saldoRestante: Number(res?.saldo_restante) || 0,
         mesaLiberada: Boolean(res?.mesa_liberada),
         hora: getCurrentTime(),
@@ -769,18 +783,24 @@ function CajaRegistradora() {
                       </div>
                     )}
 
-                    {(paymentMethod === 'tarjeta_debito' || paymentMethod === 'tarjeta_credito') && (
+                    {usaVoucher(paymentMethod) && (
                       <div className="sd-card-details-box" style={{ marginBottom: 20 }}>
                         <div className="sd-input-group">
                           <label htmlFor="auth-code-input" className="sd-input-label">
                             NRO. APROBACIÓN VOUCHER (OPCIONAL):
                           </label>
+                          {/* Se guarda en mayúsculas, como lo deja el backend.
+                              Letras, números y guiones; el formato se revisa
+                              al cobrar (handleProcessPayment). */}
                           <input
                             id="auth-code-input"
                             type="text"
                             placeholder="Ej. AP-94812"
+                            maxLength={VOUCHER_MAX}
+                            autoComplete="off"
+                            spellCheck={false}
                             value={authCode}
-                            onChange={(e) => setAuthCode(e.target.value)}
+                            onChange={(e) => setAuthCode(e.target.value.toUpperCase())}
                             className="sd-input"
                           />
                         </div>
@@ -883,7 +903,14 @@ function CajaRegistradora() {
                       <td style={{ padding: '12px 14px' }}>{horaBogota(cobro.fecha)}</td>
                       <td style={{ padding: '12px 14px', fontWeight: 700 }}>Mesa {cobro.numero_mesa}</td>
                       <td style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>{cobro.comensal || 'Mesa'}</td>
-                      <td style={{ padding: '12px 14px', textTransform: 'uppercase' }}>{String(cobro.metodo_pago || '').replace('_', ' ')}</td>
+                      <td style={{ padding: '12px 14px', textTransform: 'uppercase' }}>
+                        {String(cobro.metodo_pago || '').replace('_', ' ')}
+                        {cobro.voucher && (
+                          <small style={{ display: 'block', color: 'var(--sd-text-muted)', textTransform: 'none' }}>
+                            Voucher {cobro.voucher}
+                          </small>
+                        )}
+                      </td>
                       <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700 }}>{formatCOP(cobro.monto)}</td>
                       <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                         <span className="sd-badge sd-badge-white">Completada</span>

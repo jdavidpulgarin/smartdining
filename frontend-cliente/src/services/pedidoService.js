@@ -140,6 +140,33 @@ export async function cancelarItem(idPedido, idDetalle) {
   });
 }
 
+/**
+ * Cancela el pedido completo del comensal mientras siga `recibido` (D-12).
+ * Envía POST sin cuerpo con el JWT del comensal en `Authorization`.
+ *
+ * @param {number|string} idPedido
+ * @returns {Promise<{ pedido: object }>}
+ */
+export async function cancelarPedido(idPedido) {
+  const idP = Number(idPedido);
+  if (!Number.isInteger(idP) || idP <= 0) {
+    throw new Error('Identificador de pedido inválido');
+  }
+
+  if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+    const { cancelarPedidoSimulado } = await import('./pedidoSimulado');
+    return cancelarPedidoSimulado(idP);
+  }
+
+  const sesion = obtenerSesion();
+  const token = sesion?.token;
+
+  return pedirJson(`/pedidos/${idP}/cancelar`, {
+    method: 'POST',
+    token,
+  });
+}
+
 export default {
   NOTAS_MAX_SERVIDOR,
   NOTAS_GENERALES_MAX_SERVIDOR,
@@ -147,4 +174,5 @@ export default {
   crearPedido,
   listarPedidosMesa,
   cancelarItem,
+  cancelarPedido,
 };

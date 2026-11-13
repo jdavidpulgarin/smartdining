@@ -20,6 +20,7 @@ import {
 } from '../../src/services/menuService';
 import { colores, espaciado, radios } from '../../src/theme';
 import { formatearPrecio } from '../../src/utils/formato';
+import { urlImagen } from '../../src/utils/imagenes';
 import CategoriaFiltro from '../../src/components/menu/CategoriaFiltro';
 import PlatoCard from '../../src/components/menu/PlatoCard';
 import Card from '../../src/components/ui/Card';
@@ -157,43 +158,46 @@ export default function MenuScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.armablesLista}
           >
-            {armables.map((plato) => (
-              <Card key={plato.id_plato} style={styles.armableCard}>
-                {plato.url_imagen ? (
-                  <Image
-                    source={{ uri: plato.url_imagen }}
-                    style={styles.armableImagen}
-                    resizeMode="cover"
-                  />
-                ) : null}
-                <Text style={styles.armableNombre} numberOfLines={1}>
-                  {plato.nombre}
-                </Text>
-                <View style={styles.armableMeta}>
-                  <Text style={styles.armablePrecio}>
-                    Desde {formatearPrecio(plato.precio)}
-                  </Text>
-                  {plato.calorias != null ? (
-                    <Text style={styles.armableCalorias}>
-                      ≈ {plato.calorias} kcal
-                    </Text>
+            {armables.map((plato) => {
+              const armableUrl = urlImagen(plato.url_imagen);
+              return (
+                <Card key={plato.id_plato} style={styles.armableCard}>
+                  {armableUrl ? (
+                    <Image
+                      source={{ uri: armableUrl }}
+                      style={styles.armableImagen}
+                      resizeMode="cover"
+                    />
                   ) : null}
-                </View>
-                <Button
-                  onPress={() => router.push(`/armar/${plato.id_plato}`)}
-                  style={styles.armableBtn}
-                >
-                  Armar mi plato
-                </Button>
-                <Button
-                  variante="secundario"
-                  onPress={() => router.push(`/plato/${plato.id_plato}`)}
-                  style={styles.armableBtn}
-                >
-                  Ver detalle
-                </Button>
-              </Card>
-            ))}
+                  <Text style={styles.armableNombre} numberOfLines={1}>
+                    {plato.nombre}
+                  </Text>
+                  <View style={styles.armableMeta}>
+                    <Text style={styles.armablePrecio}>
+                      Desde {formatearPrecio(plato.precio)}
+                    </Text>
+                    {plato.calorias != null ? (
+                      <Text style={styles.armableCalorias}>
+                        ≈ {plato.calorias} kcal
+                      </Text>
+                    ) : null}
+                  </View>
+                  <Button
+                    onPress={() => router.push(`/armar/${plato.id_plato}`)}
+                    style={styles.armableBtn}
+                  >
+                    Armar mi plato
+                  </Button>
+                  <Button
+                    variante="secundario"
+                    onPress={() => router.push(`/plato/${plato.id_plato}`)}
+                    style={styles.armableBtn}
+                  >
+                    Ver detalle
+                  </Button>
+                </Card>
+              );
+            })}
           </ScrollView>
         </View>
       )}

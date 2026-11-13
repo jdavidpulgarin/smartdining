@@ -113,6 +113,24 @@ describe('Pedidos en tiempo real (order:created)', () => {
     expect(screen.queryByText('Pedido 87 cambió a: listo')).toBeNull()
   })
 
+  it('un order:status a cancelado saca el pedido de la lista sin recargar (no lo deja como Pendiente)', async () => {
+    await montar()
+    act(() => oyentes['order:created'](eventoOrderCreated(pedidoNuevo)))
+    expect(await screen.findAllByText(/PED-260922-K3F9AQ/)).not.toHaveLength(0)
+
+    act(() =>
+      oyentes['order:status']({
+        eventId: 'evt-cancelado', id_pedido: 87, id_mesa: 5, codigo_pedido: pedidoNuevo.codigo_pedido,
+        estado_anterior: 'recibido', estado: 'cancelado', emitidoEn: new Date().toISOString(),
+      })
+    )
+
+    expect(screen.getByText('Pedido PED-260922-K3F9AQ cancelado')).toBeInTheDocument()
+    // El código solo queda en el aviso: la tarjeta ya no está.
+    expect(screen.getAllByText(/PED-260922-K3F9AQ/)).toHaveLength(1)
+    expect(screen.queryAllByText(/Bowl/)).toHaveLength(0)
+  })
+
   it('ignora un evento sin pedido válido', async () => {
     await montar()
 

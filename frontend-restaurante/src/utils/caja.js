@@ -36,10 +36,49 @@ export function comensalDelCobro(seleccion) {
   return seleccion
 }
 
+/** Métodos con datáfono: los únicos que llevan voucher (script 35). */
+export const METODOS_CON_VOUCHER = ['tarjeta_debito', 'tarjeta_credito']
+
+/** Largo máximo del voucher: transacciones.voucher VARCHAR(40). */
+export const VOUCHER_MAX = 40
+
+/** El mismo formato del CHECK ck_transacciones_voucher y del backend. */
+const FORMATO_VOUCHER = /^[A-Z0-9-]{1,40}$/
+
+export function usaVoucher(metodo) {
+  return METODOS_CON_VOUCHER.includes(metodo)
+}
+
+/** Lo que escribe el cajero → como lo guarda el backend: sin espacios en los extremos y en mayúsculas. */
+export function normalizarVoucher(texto) {
+  return typeof texto === 'string' ? texto.trim().toUpperCase() : ''
+}
+
+/**
+ * El voucher que va en el cobro: `{ voucher }` (null si no va) o `{ error }`.
+ * Solo con tarjeta: con efectivo o transferencia nunca se manda, aunque el
+ * campo tenga algo escrito de antes (el backend respondería 400
+ * voucher_no_aplica). Vacío = sin voucher. El formato es el del contrato, para
+ * avisar antes de enviar; el backend lo vuelve a comprobar.
+ */
+export function voucherDelCobro(metodo, texto) {
+  if (!usaVoucher(metodo)) return { voucher: null }
+  const voucher = normalizarVoucher(texto)
+  if (voucher === '') return { voucher: null }
+  if (!FORMATO_VOUCHER.test(voucher)) {
+    return { error: `El voucher solo admite letras, números y guiones, hasta ${VOUCHER_MAX} caracteres.` }
+  }
+  return { voucher }
+}
+
 /**
  * Lo que identifica UN cobro. Mientras no cambie, un reintento (doble clic,
  * error de red) reutiliza el mismo id_cobro; si cambia la mesa, la persona, el
  * monto o el método, es otro cobro y lleva un id nuevo.
+ *
+ * El voucher NO entra: corregirlo tras un error de red sigue siendo el MISMO
+ * cobro y no puede cobrar dos veces. Si el primer envío sí había entrado, el
+ * backend responde duplicado y conserva el voucher de ese primer envío.
  */
 export function claveDeCobro({ id_mesa, comensal, monto, metodo_pago }) {
   return JSON.stringify([id_mesa, comensal ?? null, Number(monto), metodo_pago])
@@ -63,7 +102,8 @@ export function idCobroParaEnviar(pendiente, datos, generar = nuevoIdCobro) {
  * `referencia_pago` (`caja:<id_cobro>`, o la referencia de Wompi): se juntan en
  * una, con la suma de sus montos y todos sus id. Una fila sin referencia es un
  * cobro por sí sola. Lo más reciente primero, como lo devuelve el backend.
- * Los montos se suman en centavos para no arrastrar coma flotante.
+ * Los montos se suman en centavos para no arrastrar coma flotante. El voucher
+ * (script 35) es el mismo en todas las filas de un cobro: sale una vez.
  */
 export function agruparCobros(transacciones = []) {
   const grupos = new Map()
@@ -78,12 +118,14 @@ export function agruparCobros(transacciones = []) {
         numero_mesa: t.numero_mesa,
         comensal: t.comensal ?? null,
         metodo_pago: t.metodo_pago,
+        voucher: t.voucher ?? null,
         centavos,
         fecha: t.fecha,
       })
     } else {
       g.ids.push(t.id_transaccion)
       g.centavos += centavos
+      if (!g.voucher && t.voucher) g.voucher = t.voucher
       if (t.fecha > g.fecha) g.fecha = t.fecha
     }
   }
@@ -125,6 +167,10 @@ export function mensajeDeErrorCobro(err, formatear = (n) => String(n)) {
       return 'La mesa ya no existe.'
     case 'autor_inexistente':
       return 'Tu usuario ya no existe; vuelve a iniciar sesión.'
+    case 'voucher_invalido':
+      return `No se cobró: el voucher solo admite letras, números y guiones, hasta ${VOUCHER_MAX} caracteres.`
+    case 'voucher_no_aplica':
+      return 'No se cobró: el voucher solo va con tarjeta débito o crédito.'
     case 'cuerpo_invalido':
       return `No se pudo cobrar: ${err.message}`
     default:

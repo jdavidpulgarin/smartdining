@@ -7,11 +7,15 @@ const assert = require('node:assert');
  * podría: devolver el stock (tr_devolver_inventario: devolución, no merma),
  * recalcular el total, la transición a 'cancelado' y el bloqueo frente al KDS.
  *
- * STOCK "EXACTO" CON SUITES EN PARALELO: otras suites piden los mismos platos a
- * la vez, así que el stock GLOBAL de un insumo no es comparable entre dos
- * lecturas. Se mira el LIBRO de cada detalle: reserva (-X) + devolución (+X)
- * suman 0 y no hay merma. Como SUM(movimientos) = stock_actual es la regla del
- * libro (27_inventario.sql), eso es exactamente "el stock vuelve igual".
+ * CATÁLOGO PROPIO (tests/helpers/plato-prueba.js): un plato con receta, un
+ * plato del constructor y su insumo con stock alto, creados en el `before` y
+ * borrados en el `after`. Antes se elegía un plato del seed "por consulta" y,
+ * en paralelo, podía tocar el que otra suite acababa de crear: al limpiar esa
+ * otra sus movimientos, la reserva de aquí desaparecía (`[]`).
+ *
+ * Se mira el LIBRO de cada detalle: reserva (-X) + devolución (+X) suman 0 y
+ * no hay merma. Como SUM(movimientos) = stock_actual es la regla del libro
+ * (27_inventario.sql), eso es exactamente "el stock vuelve igual".
  *
  * MESAS PROPIAS (criterio de #146): una por caso, desde MESA_NUMERO_QUITA (960
  * por omisión, rango de 20), marcadas en `ubicacion`. Se limpia después de
@@ -41,12 +45,14 @@ const app = require('../../server');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const { construirTokenQr } = require('../helpers/fake-db');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 const MESA_BASE = parseInt(process.env.MESA_NUMERO_QUITA || '960', 10);
 const MARCA_MESA = 'PRUEBA quitar-item';
 
 let sonda = null;
 let hayBase = false;
+let catalogo = null; // el de plato-prueba.js, con su limpiar()
 let plato = null; // normal, con receta
 let constructor = null; // { id_plato, ingredientes: [{id_ingrediente, porcion}] }
 let siguienteMesa = MESA_BASE;
@@ -94,66 +100,16 @@ async function limpiar() {
   await sonda.query('DELETE FROM mesas WHERE id_mesa = ANY($1::int[])', [ids]);
 }
 
-/** Una opción disponible y con receta por paso obligatorio, y una 'extra' en uno opcional. */
-async function seleccionConstructor() {
-  const { rows } = await sonda.query(
-    `SELECT pc.id_plato, pc.id_paso, pc.min_sel,
-            (SELECT i.id_ingrediente FROM ingredientes i
-              WHERE i.id_paso = pc.id_paso AND i.disponible AND i.stock_suficiente
-                AND EXISTS (SELECT 1 FROM recetas_ingrediente ri WHERE ri.id_ingrediente = i.id_ingrediente)
-              ORDER BY i.id_ingrediente LIMIT 1) AS id_ingrediente
-       FROM pasos_constructor pc
-       JOIN platos p ON p.id_plato = pc.id_plato
-      WHERE p.personalizable AND p.disponible AND p.stock_suficiente
-        AND pc.id_plato = (SELECT min(p2.id_plato) FROM platos p2
-                            WHERE p2.personalizable AND p2.disponible AND p2.stock_suficiente
-                              AND EXISTS (SELECT 1 FROM pasos_constructor x WHERE x.id_plato = p2.id_plato))
-      ORDER BY pc.orden`
-  );
-  if (rows.length === 0) return null;
-  const ingredientes = [];
-  let extraPuesta = false;
-  for (const paso of rows) {
-    if (!paso.id_ingrediente) {
-      if (paso.min_sel > 0) return null; // un paso obligatorio sin opción con receta
-      continue;
-    }
-    if (paso.min_sel > 0) ingredientes.push({ id_ingrediente: paso.id_ingrediente, porcion: 'normal' });
-    else if (!extraPuesta) {
-      ingredientes.push({ id_ingrediente: paso.id_ingrediente, porcion: 'extra' });
-      extraPuesta = true;
-    }
-  }
-  return { id_plato: rows[0].id_plato, ingredientes };
-}
-
 test.before(async () => {
   // Sin base configurada salta; configurada y sin responder, falla (#165).
   sonda = await abrirSonda();
   if (!sonda) return;
-  // Un plato con receta, pero NO el que eligen las otras suites (el primero
-  // disponible por id): corren en paralelo y comparten su stock, que en el
-  // seed alcanza para pocas unidades. Entre los demás, el que más unidades
-  // deja servir con el stock de hoy.
-  const p = await sonda.query(
-    `WITH comun AS (
-       SELECT id_plato FROM platos
-        WHERE disponible AND stock_suficiente AND NOT personalizable
-        ORDER BY id_plato LIMIT 1
-     )
-     SELECT p.id_plato FROM platos p
-      WHERE p.disponible AND p.stock_suficiente AND NOT p.personalizable AND p.precio >= 1000
-        AND p.id_plato NOT IN (SELECT id_plato FROM comun)
-        AND EXISTS (SELECT 1 FROM recetas_plato rp WHERE rp.id_plato = p.id_plato)
-      ORDER BY (SELECT min(floor(s.stock_actual / rp.cantidad)) FROM recetas_plato rp
-                  JOIN insumos s ON s.id_insumo = rp.id_insumo WHERE rp.id_plato = p.id_plato) DESC,
-               p.id_plato
-      LIMIT 1`
-  );
-  plato = p.rows[0] || null;
-  constructor = await seleccionConstructor();
-  hayBase = Boolean(plato);
-  if (!hayBase) return;
+  // Plato con receta y plato del constructor PROPIOS, sobre un insumo propio
+  // con stock alto: nada del seed, nada que otra suite pueda tocar.
+  catalogo = await crearCatalogoPrueba(sonda, 'quitar-item', { receta: true, conConstructor: true });
+  plato = catalogo.plato;
+  constructor = catalogo.constructor;
+  hayBase = true;
   await limpiar();
 });
 
@@ -166,6 +122,7 @@ test.afterEach(async () => {
 test.after(async () => {
   try {
     if (hayBase) await limpiar();
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();
@@ -415,9 +372,9 @@ test('e. reintento sobre una línea ya cancelada: 409 item_ya_cancelado y el sto
   assert.strictEqual((await filaPedido(idPedido)).total, totalAntes);
 });
 
-// pago_registrado ESTRICTO (revisión de Jarrison): CUALQUIER transacción
-// completada bloquea, grande o pequeña. Antes solo bloqueaba si el total nuevo
-// quedaba por debajo de lo pagado.
+// pago_registrado ESTRICTO para el COMENSAL, por decisión de producto
+// (Jarrison): CUALQUIER transacción completada bloquea, grande o pequeña. El
+// personal tiene otra regla (personal-cancela-item-sql, casos e1 a e4).
 for (const [nota, montoDe] of [
   ['un pago grande (más que lo que quedaría sin la línea)', (total, subtotal) => total - subtotal + 500],
   ['un pago parcial PEQUEÑO (100), que antes no bloqueaba', () => 100],

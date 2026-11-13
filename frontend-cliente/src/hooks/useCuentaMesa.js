@@ -5,6 +5,18 @@ import { obtenerCuenta } from '../services/cuentaService';
 import { normalizarCuenta, aplicarPagoConfirmado } from '../utils/cuenta';
 
 /**
+ * Determina si un evento order:status debe provocar la recarga de la cuenta de la mesa.
+ * Solo recarga cuando el estado del pedido es 'cancelado' (sin importar mayúsculas).
+ *
+ * @param {object|null|undefined} evento
+ * @returns {boolean}
+ */
+export function debeRecargarCuentaPorEstado(evento) {
+  if (!evento || typeof evento !== 'object') return false;
+  return String(evento.estado || '').trim().toLowerCase() === 'cancelado';
+}
+
+/**
  * Hook para cargar y sincronizar la cuenta de la mesa en tiempo real (J-08).
  *
  * Escucha payment:confirmed, order:created e item:cancelado para actualizar saldos y comensales.
@@ -136,10 +148,25 @@ export function useCuentaMesa() {
       }
     });
 
+    const bajaOrderStatus = socketOn('order:status', (data) => {
+      if (!data || esDuplicado(data.eventId)) return;
+      if (!debeRecargarCuentaPorEstado(data)) return;
+
+      if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+        import('../services/cuentaSimulada').then(({ refrescarCuentaSimulada }) => {
+          refrescarCuentaSimulada?.(data.id_mesa);
+          cargarCuenta();
+        });
+      } else {
+        cargarCuenta();
+      }
+    });
+
     return () => {
       bajaPayment?.();
       bajaCreated?.();
       bajaItemCancelado?.();
+      bajaOrderStatus?.();
     };
   }, [socketOn, esDuplicado, cargarCuenta]);
 

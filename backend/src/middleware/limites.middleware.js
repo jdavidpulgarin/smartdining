@@ -1,5 +1,6 @@
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { enPruebas } = require('../config/entorno');
+const { hashDeRefresh } = require('../utils/refresh-token');
 
 /**
  * Límites de peticiones: uno por ruta para las dos públicas que se pueden
@@ -41,17 +42,15 @@ const MENSAJE_GLOBAL =
 const MENSAJE_IMAGENES =
   'Demasiadas imágenes subidas en poco tiempo. Espera un momento y vuelve a intentarlo.';
 
-/** `motivo` del 429 en las rutas que ya responden { error, motivo }. */
-const MOTIVO_DEMASIADAS_PETICIONES = 'demasiadas_peticiones';
+/** Motivo de todos los 429 (D-19): se AGREGA al `error` de siempre. */
+const MOTIVO_429 = 'demasiadas_peticiones';
 
 /**
  * Respuesta del 429. express-rate-limit ya pone Retry-After; aquí solo se da
- * un cuerpo con la misma forma que el resto de errores de la API ({ error }).
- * Con `motivo`, se añade (las rutas nuevas responden siempre { error, motivo });
- * los limitadores de antes siguen igual.
+ * el cuerpo, `{ error, motivo }` como el resto de errores con motivo.
  */
-function responder429(mensaje, motivo) {
-  return (req, res) => res.status(429).json(motivo ? { error: mensaje, motivo } : { error: mensaje });
+function responder429(mensaje) {
+  return (req, res) => res.status(429).json({ error: mensaje, motivo: MOTIVO_429 });
 }
 
 /**
@@ -205,8 +204,122 @@ function crearLimitadorImagenes(env = process.env) {
     legacyHeaders: false,
     skip: () => enPruebas(env),
     keyGenerator: (req) => `usuario:${req.user && req.user.id_usuario}`,
-    handler: responder429(MENSAJE_IMAGENES, MOTIVO_DEMASIADAS_PETICIONES),
+    handler: responder429(MENSAJE_IMAGENES),
   });
+}
+
+/* -------------------------------------------------------------------------- *
+ * D-19 parte B: límites de las rutas de autenticación de CLIENTES.
+ *
+ * Cada ruta lleva DOS contadores independientes (docs/api-spec.md, "Límites de
+ * las rutas de clientes"): el principal cuenta por la CUENTA (email
+ * normalizado, o el hash del refresh token) y el de IP es un freno de abuso
+ * alto, porque muchos clientes legítimos comparten IP (el wifi del local, el
+ * NAT del operador móvil). Superar cualquiera da 429 `demasiadas_peticiones`
+ * con Retry-After.
+ *
+ *   registro: email 5 / h      + IP 100 / h      (todos los intentos)
+ *   login:    email 10 / 15 min + IP 200 / 15 min (solo los FALLIDOS)
+ *   refresh y logout (el MISMO contador): hash del token 10 / min + IP 600 / min
+ *
+ * Si el cuerpo no trae el campo de la cuenta como texto, solo cuenta el de IP
+ * (y la validación responde 400). El contador nunca guarda el token: guarda su
+ * SHA-256, el mismo que la base. Mismo almacén en memoria que los de arriba
+ * (con la misma limitación de varias instancias) y desactivados en pruebas.
+ * -------------------------------------------------------------------------- */
+
+const MENSAJE_CLIENTES =
+  'Demasiados intentos. Espera un momento y vuelve a intentarlo.';
+
+const UNA_HORA_MS = 60 * UN_MINUTO_MS;
+
+/** Email del cuerpo normalizado como en la base (trim + minúsculas), o null. */
+function emailDelCuerpo(req) {
+  const email = req.body && req.body.email;
+  return typeof email === 'string' ? email.trim().toLowerCase() : null;
+}
+
+/** SHA-256 del refresh_token del cuerpo, o null si no hay un texto. */
+function hashDelRefreshDelCuerpo(req) {
+  const token = req.body && req.body.refresh_token;
+  return typeof token === 'string' ? hashDeRefresh(token) : null;
+}
+
+/**
+ * Un par de limitadores [IP, cuenta] para una ruta de clientes.
+ * `claveDeCuenta(req)` devuelve la clave de la cuenta o null (entonces el de
+ * cuenta no cuenta esa petición).
+ */
+function parDeLimitadores(env, { prefijo, ventanaPorDefecto, ipPorDefecto, cuentaPorDefecto, variables, claveDeCuenta, soloFallidos }) {
+  const ventana = entero(env[variables.ventana], ventanaPorDefecto);
+  const comunes = {
+    windowMs: ventana,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skipSuccessfulRequests: Boolean(soloFallidos),
+    handler: responder429(MENSAJE_CLIENTES),
+  };
+  const porIp = rateLimit({
+    ...comunes,
+    limit: entero(env[variables.ip], ipPorDefecto),
+    skip: () => enPruebas(env),
+    keyGenerator: (req) => `${prefijo}:ip:${ipKeyGenerator(req.ip)}`,
+  });
+  const porCuenta = rateLimit({
+    ...comunes,
+    limit: entero(env[variables.cuenta], cuentaPorDefecto),
+    skip: (req) => enPruebas(env) || !claveDeCuenta(req),
+    keyGenerator: (req) => `${prefijo}:cuenta:${claveDeCuenta(req)}`,
+  });
+  return [porIp, porCuenta];
+}
+
+/**
+ * Los limitadores de las rutas de clientes, creados UNA vez (al cargar las
+ * rutas). `logout` es el mismo par que `refresh`: comparten contador.
+ */
+function crearLimitadoresClientes(env = process.env) {
+  const refresh = parDeLimitadores(env, {
+    prefijo: 'clientes-refresh',
+    ventanaPorDefecto: UN_MINUTO_MS,
+    ipPorDefecto: 600,
+    cuentaPorDefecto: 10,
+    variables: {
+      ventana: 'RATE_LIMIT_CLIENTES_REFRESH_VENTANA_MS',
+      ip: 'RATE_LIMIT_CLIENTES_REFRESH_IP_MAX',
+      cuenta: 'RATE_LIMIT_CLIENTES_REFRESH_TOKEN_MAX',
+    },
+    claveDeCuenta: hashDelRefreshDelCuerpo,
+  });
+  return {
+    registro: parDeLimitadores(env, {
+      prefijo: 'clientes-registro',
+      ventanaPorDefecto: UNA_HORA_MS,
+      ipPorDefecto: 100,
+      cuentaPorDefecto: 5,
+      variables: {
+        ventana: 'RATE_LIMIT_CLIENTES_REGISTRO_VENTANA_MS',
+        ip: 'RATE_LIMIT_CLIENTES_REGISTRO_IP_MAX',
+        cuenta: 'RATE_LIMIT_CLIENTES_REGISTRO_EMAIL_MAX',
+      },
+      claveDeCuenta: emailDelCuerpo,
+    }),
+    login: parDeLimitadores(env, {
+      prefijo: 'clientes-login',
+      ventanaPorDefecto: 15 * UN_MINUTO_MS,
+      ipPorDefecto: 200,
+      cuentaPorDefecto: 10,
+      variables: {
+        ventana: 'RATE_LIMIT_CLIENTES_LOGIN_VENTANA_MS',
+        ip: 'RATE_LIMIT_CLIENTES_LOGIN_IP_MAX',
+        cuenta: 'RATE_LIMIT_CLIENTES_LOGIN_EMAIL_MAX',
+      },
+      claveDeCuenta: emailDelCuerpo,
+      soloFallidos: true,
+    }),
+    refresh,
+    logout: refresh,
+  };
 }
 
 module.exports = {
@@ -215,7 +328,9 @@ module.exports = {
   crearLimitadorGlobal,
   crearLimitadorImagenes,
   MENSAJE_IMAGENES,
-  MOTIVO_DEMASIADAS_PETICIONES,
+  crearLimitadoresClientes,
+  MOTIVO_429,
+  MENSAJE_CLIENTES,
   enPruebas,
   entero,
   rutaExenta,

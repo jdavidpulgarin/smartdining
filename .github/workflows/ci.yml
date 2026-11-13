@@ -145,6 +145,88 @@ jobs:
           fi
       - run: npm run build
 
+  # Pruebas de integración del backend contra PostgreSQL real
+  # (backend/tests/integracion). Job APARTE: no está en el `needs` de
+  # deploy-staging ni de ningún otro, así que no frena el resto del CI; si
+  # vuelve a ser requerido se decide en la protección de ramas.
+  backend-integracion:
+    name: backend · integración (con PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: backend
+    # El mismo PostgreSQL que el job infra. "prueba" es la contraseña de este
+    # contenedor de un solo uso, no un secreto: no hay secrets ni vars del repo.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: prueba
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    # Las suites leen las variables estándar de PostgreSQL (tests/helpers/
+    # base-prueba.js): con PGHOST definida, una base que no responde es un
+    # FALLO, no un salto. Sin Redis a propósito: las suites que lo usan ponen
+    # su propio doble y el resto sigue sin caché, como en producción con Redis
+    # caído.
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: prueba
+      PGDATABASE: smartdining_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            socket-server/package-lock.json
+      - run: npm ci
+      - name: npm ci en socket-server (lo usa mesas-rotacion-sql)
+        # Esa suite carga el servicio QR real de socket-server/src (qr.js,
+        # rotacion.js, backend.js), que necesita sus dependencias (jsonwebtoken).
+        # Sin ellas la suite entera falla con "Cannot find module".
+        working-directory: socket-server
+        run: npm ci
+      - name: psql en el runner
+        # ubuntu-latest ya lo trae (el job infra lo usa); si una imagen nueva
+        # no lo trajera, se instala el cliente.
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q postgresql-client
+          fi
+          psql --version
+      - name: Crear y migrar la base (todos los scripts de database/scripts)
+        # migrar.sh sobre una base vacía carga la línea base (schema, scripts y
+        # seed) y después los scripts nuevos. El inventario de la demo se carga
+        # a mano, como en local: las suites cuentan con sus insumos y recetas.
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -d postgres -c "CREATE DATABASE $PGDATABASE"
+          sh "$GITHUB_WORKSPACE/database/migrar.sh"
+          psql -X -q -v ON_ERROR_STOP=1 -f "$GITHUB_WORKSPACE/database/seed_inventario_demo.sql"
+      - name: JWT_SECRET aleatorio para esta corrida
+        # Se genera aquí y se enmascara en el log; nada viene de un .env ni de
+        # los secretos del repo.
+        run: |
+          secreto="$(openssl rand -hex 32)"
+          echo "::add-mask::$secreto"
+          echo "JWT_SECRET=$secreto" >> "$GITHUB_ENV"
+      - name: npm run test:integracion (falla si hay fallidas, canceladas o saltadas)
+        # La salida completa queda en el log: si falla una prueba intermitente
+        # (p. ej. quitar-item-sql d y f, o reportes-consumo-sql), aquí está el
+        # error exacto.
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/integracion-sin-saltadas.sh"
+
   # Despliegue a staging: solo en un push a develop, si TODO lo anterior pasó y
   # el dueño del repo activó la variable DEPLOY_STAGING=true (mientras no exista
   # el environment "staging" con sus secretos, el job queda "skipped" y el CI

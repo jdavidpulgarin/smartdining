@@ -178,6 +178,8 @@ test('d-11: el comensal no entra en ninguna ruta del catálogo ni de mesas', asy
     '/api/pedidos', '/api/pedidos/mesa', '/api/pedidos/mesa/cuenta', '/api/pedidos/:id',
     // D-13 por el comensal (J-14): quitar UNA línea suya.
     '/api/pedidos/:id/items/:id_detalle/cancelar',
+    // D-12: cancelar su pedido completo.
+    '/api/pedidos/:id/cancelar',
   ];
   const ajenas = protegidas.filter((f) => !suyas.includes(f.patron));
 
