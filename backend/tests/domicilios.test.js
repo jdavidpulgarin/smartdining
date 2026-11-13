@@ -23,10 +23,11 @@ const LUCHO = () => tokenStaff(OTRO_REPARTIDOR, 'repartidor');
 function crearEstado() {
   return {
     pedidos: {
-      87: { id_pedido: 87, codigo_pedido: 'D-87', estado: 'listo', estado_pago: 'pagado', total: 30000, id_mesa: null, id_cliente: 7 },
-      88: { id_pedido: 88, codigo_pedido: 'D-88', estado: 'en_preparacion', estado_pago: 'pagado', total: 20000, id_mesa: null, id_cliente: 7 },
-      89: { id_pedido: 89, codigo_pedido: 'D-89', estado: 'por_pagar', estado_pago: 'pendiente', total: 10000, id_mesa: null, id_cliente: 7 },
-      90: { id_pedido: 90, codigo_pedido: 'M-90', estado: 'listo', estado_pago: 'pendiente', total: 10000, id_mesa: 5, id_cliente: null },
+      87: { id_pedido: 87, codigo_pedido: 'D-87', estado: 'listo', estado_pago: 'pagado', total: 30000, id_mesa: null, id_cliente: 7, canal: 'domicilio' },
+      88: { id_pedido: 88, codigo_pedido: 'D-88', estado: 'en_preparacion', estado_pago: 'pagado', total: 20000, id_mesa: null, id_cliente: 7, canal: 'domicilio' },
+      89: { id_pedido: 89, codigo_pedido: 'D-89', estado: 'por_pagar', estado_pago: 'pendiente', total: 10000, id_mesa: null, id_cliente: 7, canal: 'domicilio' },
+      90: { id_pedido: 90, codigo_pedido: 'M-90', estado: 'listo', estado_pago: 'pendiente', total: 10000, id_mesa: 5, id_cliente: null, canal: 'mesa' },
+      91: { id_pedido: 91, codigo_pedido: 'L-91', estado: 'listo', estado_pago: 'pendiente', total: 10000, id_mesa: null, id_cliente: 7, canal: 'para_llevar' },
     },
     domicilios: {
       87: entrega(87),
@@ -92,7 +93,7 @@ function instalar(estado = crearEstado(), { extra } = {}) {
     }
     if (sql.includes('FROM pedidos WHERE id_pedido = $1::int FOR UPDATE')) {
       const p = e.pedidos[Number(params[0])];
-      return { rows: p ? [{ id_pedido: p.id_pedido, estado: p.estado }] : [] };
+      return { rows: p ? [{ id_pedido: p.id_pedido, estado: p.estado, canal: p.canal }] : [] };
     }
     if (sql.includes('FROM pedidos_domicilio WHERE id_pedido = $1::int FOR UPDATE')) {
       const d = e.domicilios[Number(params[0])];
@@ -288,12 +289,53 @@ test('despacho: si el trigger lo rechaza (lo desactivaron en medio) también es 
     }
   ));
 
-test('despacho: pedido cancelado -> 409 pedido_cancelado; pedido que no es domicilio o no existe -> 404', () =>
-  con(async ({ estado }) => {
-    estado.pedidos[87].estado = 'cancelado';
-    const c = await admin.patch('/domicilios/87/repartidor', { id_repartidor: REPARTIDOR });
-    assert.strictEqual(c.status, 409);
-    assert.strictEqual(c.body.motivo, 'pedido_cancelado');
+test('despacho: un pedido en por_pagar NO se asigna -> 409 pedido_sin_pagar, sin tocar la entrega', () =>
+  con(async ({ estado, db }) => {
+    const desde = db.ejecutadas.length;
+    const res = await admin.patch('/domicilios/89/repartidor', { id_repartidor: REPARTIDOR });
+    assert.strictEqual(res.status, 409);
+    assert.deepStrictEqual(res.body, {
+      error: 'El pedido todavía no está pagado: no se le asigna repartidor hasta que se confirme el pago',
+      motivo: 'pedido_sin_pagar',
+    });
+    assert.strictEqual(estado.domicilios[89].estado_entrega, 'por_asignar');
+    assert.strictEqual(estado.domicilios[89].id_repartidor, null);
+    assert.strictEqual(indice(db, 'UPDATE pedidos_domicilio', desde), -1);
+    assert.ok(indice(db, 'ROLLBACK', desde) >= 0);
+  }));
+
+for (const est of ['cancelado', 'entregado', 'pagado']) {
+  test(`despacho: un pedido en ${est} no se asigna ni se reasigna -> 409 pedido_no_asignable`, () =>
+    con(async ({ estado }) => {
+      estado.pedidos[87].estado = est;
+      for (const entregaEstado of ['por_asignar', 'asignado']) {
+        Object.assign(estado.domicilios[87], {
+          estado_entrega: entregaEstado,
+          id_repartidor: entregaEstado === 'asignado' ? REPARTIDOR : null,
+        });
+        const res = await cajero.patch('/domicilios/87/repartidor', { id_repartidor: OTRO_REPARTIDOR });
+        assert.strictEqual(res.status, 409, `${est}/${entregaEstado}`);
+        assert.deepStrictEqual(res.body, {
+          error: 'El pedido ya está cancelado, entregado o pagado: no se le asigna repartidor',
+          motivo: 'pedido_no_asignable',
+        });
+        assert.notStrictEqual(estado.domicilios[87].id_repartidor, OTRO_REPARTIDOR);
+      }
+    }));
+}
+
+for (const est of ['recibido', 'en_preparacion', 'listo']) {
+  test(`despacho: un pedido en ${est} sí se asigna (200)`, () =>
+    con(async ({ estado }) => {
+      estado.pedidos[87].estado = est;
+      const res = await admin.patch('/domicilios/87/repartidor', { id_repartidor: REPARTIDOR });
+      assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+      assert.strictEqual(estado.domicilios[87].estado_entrega, 'asignado');
+    }));
+}
+
+test('despacho: un pedido que no es domicilio o no existe -> 404', () =>
+  con(async () => {
     for (const id of [90, 12345]) {
       const r = await admin.patch(`/domicilios/${id}/repartidor`, { id_repartidor: REPARTIDOR });
       assert.strictEqual(r.status, 404, String(id));
@@ -341,6 +383,8 @@ test('repartidor: GET /domicilios/mios filtra por SU id y con el día de Bogotá
     assert.deepStrictEqual(res.body.domicilios.map((d) => d.pedido.id_pedido), [87]);
     const q = db.buscar('pd.id_repartidor = $1::int');
     assert.deepStrictEqual(q.params, [REPARTIDOR, 'America/Bogota']);
+    // Las no terminadas, sin pedidos sin pagar ni cancelados (como el despacho).
+    assert.match(q.sql, /\('asignado', 'en_camino'\) AND p\.estado NOT IN \('por_pagar', 'cancelado'\)/);
     assert.deepStrictEqual((await lucho.get('/domicilios/mios')).body.domicilios, [], 'Lucho no ve las de Rafa');
   }));
 
@@ -529,6 +573,55 @@ test('antes de salir (asignado), el admin SÍ cancela el pedido', () =>
       },
     }
   ));
+
+// ---------------------------------------------------------------------------
+// En un domicilio solo el repartidor marca la entrega
+// ---------------------------------------------------------------------------
+
+for (const est of ['por_asignar', 'asignado', 'en_camino', 'entregado', 'fallido']) {
+  test(`domicilio con la entrega en ${est}: PATCH /pedidos/:id/estado a entregado -> 409 entrega_por_repartidor, sin tocar nada`, () =>
+    con(async ({ estado, db }) => {
+      Object.assign(estado.domicilios[87], {
+        estado_entrega: est,
+        id_repartidor: est === 'por_asignar' ? null : REPARTIDOR,
+      });
+      const desde = db.ejecutadas.length;
+      const res = await cajero.patch('/pedidos/87/estado', { estado: 'entregado' });
+      assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+      assert.deepStrictEqual(res.body, {
+        error: 'En un domicilio la entrega la marca el repartidor',
+        motivo: 'entrega_por_repartidor',
+      });
+      assert.strictEqual(estado.pedidos[87].estado, 'listo');
+      assert.strictEqual(estado.domicilios[87].estado_entrega, est);
+      const iPedido = indice(db, 'SELECT id_pedido, canal FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', desde);
+      const iDomicilio = indice(db, 'FROM pedidos_domicilio WHERE id_pedido = $1::int FOR UPDATE', desde);
+      assert.ok(iPedido >= 0 && iPedido < iDomicilio, 'pedido antes que pedidos_domicilio');
+      assert.strictEqual(indice(db, 'UPDATE pedidos SET estado', desde), -1);
+      assert.ok(indice(db, 'ROLLBACK', desde) >= 0);
+    }));
+}
+
+for (const [canal, id] of [['mesa', 90], ['para_llevar', 91]]) {
+  test(`${canal}: PATCH /pedidos/:id/estado a entregado sigue funcionando (200)`, () =>
+    con(
+      async ({ db }) => {
+        const desde = db.ejecutadas.length;
+        const res = await admin.patch(`/pedidos/${id}/estado`, { estado: 'entregado' });
+        assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+        assert.strictEqual(res.body.estado, 'entregado');
+        assert.ok(indice(db, 'UPDATE pedidos SET estado = $1 WHERE id_pedido = $2', desde) >= 0);
+      },
+      {
+        extra: (sql, params) => {
+          if (sql.includes('UPDATE pedidos SET estado = $1 WHERE id_pedido = $2')) {
+            return { rows: [{ id_pedido: id, estado: params[0], id_mesa: id === 90 ? 5 : null, estado_pago: 'pendiente', canal }] };
+          }
+          return undefined;
+        },
+      }
+    ));
+}
 
 // ---------------------------------------------------------------------------
 // Socket: los pedidos sin mesa no se avisan

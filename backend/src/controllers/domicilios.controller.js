@@ -6,7 +6,7 @@
  *   400 cuerpo_invalido | parametro_invalido
  *   403 no_es_tu_entrega (y prohibido/no_autenticado de requireAuth/requireRole)
  *   404 no_encontrado
- *   409 pedido_cancelado | entrega_ya_salio | repartidor_no_valido
+ *   409 pedido_sin_pagar | pedido_no_asignable | entrega_ya_salio | repartidor_no_valido
  *       | transicion_invalida | pedido_no_listo
  *
  * Por socket NO se avisa nada en la D-20a: los avisos de domicilio llegan con

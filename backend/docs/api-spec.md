@@ -5225,17 +5225,27 @@ Una zona **inactiva** puede repetir barrios de una activa; activarla después da
   Del cliente salen **solo nombre y teléfono** ([Datos personales](#datos-personales)), y la
   dirección es la **copiada** en `pedidos_domicilio` al crear el pedido, no la libreta del
   cliente. `repartidor` es `null` mientras no hay uno.
-- **Asignar o reasignar** solo con la entrega en `por_asignar` o `asignado`; después, **409**
-  `entrega_ya_salio`. El repartidor tiene que ser un usuario **activo con rol `repartidor`**:
-  si no, **409** `repartidor_no_valido` (también si lo rechaza el trigger porque lo
-  desactivaron en medio). Pedido cancelado: **409** `pedido_cancelado`. Un pedido que no es
+- **Asignar o reasignar** solo con el **pedido pagado y sin entregar** y la entrega en
+  `por_asignar` o `asignado`. Se decide con el pedido y la entrega ya bloqueados (pedido antes
+  que `pedidos_domicilio`), en este orden:
+
+  | Status | `motivo` | Cuándo |
+  |---|---|---|
+  | **409** | `pedido_sin_pagar` | El pedido está en `por_pagar`: el pago (siempre anticipado) no se ha confirmado |
+  | **409** | `pedido_no_asignable` | El pedido está en `cancelado`, `entregado` o `pagado` |
+  | **409** | `entrega_ya_salio` | La entrega ya está en `en_camino`, `entregado` o `fallido` |
+  | **409** | `repartidor_no_valido` | No es un usuario activo con rol `repartidor` (también si lo rechaza el trigger porque lo desactivaron en medio) |
+
+  O sea: solo con el pedido en `recibido`, `en_preparacion` o `listo`. Un pedido que no es
   domicilio o no existe: **404** `no_encontrado`. `asignado_en` se pone en cada asignación.
+  (Antes de este arreglo un pedido en `por_pagar` se podía asignar y el cancelado respondía
+  `pedido_cancelado`; ese motivo ya no existe.)
 
 ### Repartidor
 
 | Método y ruta | Cuerpo | Respuesta |
 |---|---|---|
-| `GET /domicilios/mios` | — | **200** `{ domicilios }`: las suyas sin terminar (sin las de pedidos cancelados) y las que terminó **hoy** (hora de Bogotá) |
+| `GET /domicilios/mios` | — | **200** `{ domicilios }`: las suyas sin terminar (sin las de pedidos cancelados ni en `por_pagar`, como el despacho) y las que terminó **hoy** (hora de Bogotá) |
 | `POST /domicilios/:id_pedido/salir` | ninguno | **200** `{ domicilio }` |
 | `POST /domicilios/:id_pedido/entregar` | ninguno | **200** `{ domicilio }` |
 | `POST /domicilios/:id_pedido/fallar` | `{ motivo }` (1 a 200 caracteres) | **200** `{ domicilio }` |
@@ -5256,8 +5266,8 @@ estas son las únicas transiciones:
 
 | De | A | Quién | Condición |
 |---|---|---|---|
-| `por_asignar` | `asignado` | admin, cajero | pedido no cancelado; repartidor activo |
-| `asignado` | `asignado` | admin, cajero | reasignar |
+| `por_asignar` | `asignado` | admin, cajero | pedido en `recibido`, `en_preparacion` o `listo`; repartidor activo |
+| `asignado` | `asignado` | admin, cajero | reasignar, con la misma condición |
 | `asignado` | `en_camino` | el repartidor asignado | **el pedido está en `listo`** (si no, 409 `pedido_no_listo`) |
 | `en_camino` | `entregado` | el repartidor asignado | el pedido pasa a `entregado` en la misma transacción |
 | `en_camino` | `fallido` | el repartidor asignado | con `motivo`; **final** |
@@ -5272,6 +5282,14 @@ estas son las únicas transiciones:
   tocar nada. En el último se bloquea **cualquier** línea, no solo la última (la comida ya va
   en la bolsa; quitar la última, además, cancelaría el pedido). Antes de decidir se bloquea la
   fila de `pedidos_domicilio`.
+- **En un domicilio, la entrega la marca solo el repartidor.** El paso del pedido a
+  `entregado` lo hace únicamente `POST /domicilios/:id_pedido/entregar`.
+  `PATCH /pedidos/:id/estado` con `estado: "entregado"` sobre un pedido de canal `domicilio`
+  responde **409** `entrega_por_repartidor` ("En un domicilio la entrega la marca el
+  repartidor"), **en cualquier estado de la entrega** y para cualquier rol, sin tocar nada. Se
+  bloquea igual que el resto: el pedido y después su fila de `pedidos_domicilio`. Mesa y para
+  llevar no cambian. (El paso a `pagado` solo es legal desde `entregado`, así que tampoco hay
+  otro camino para cerrar un domicilio: ver abajo.)
 - **Entregado cierra.** `en_camino -> entregado` pasa el pedido `listo -> entregado` en la
   **misma transacción**, firmado por el repartidor en `historial_estados` (la transición
   requiere usuario), y aplica la **misma regla de cierre** que el mesero
@@ -5293,6 +5311,18 @@ estas son las únicas transiciones:
   orden, una cancelación y un `salir` del mismo pedido se ponen en fila en el bloqueo del
   pedido: gana el primero y el segundo decide con lo que aquel confirmó (`pedido_no_listo` si
   ganó la cancelación, `entrega_en_camino` si ganó la salida). Nunca los dos.
+
+### Quién puede llevar un domicilio a `entregado` o `pagado`
+
+Revisado camino por camino:
+
+| Camino | ¿Puede con un domicilio? |
+|---|---|
+| `POST /domicilios/:id_pedido/entregar` (repartidor) | **Sí: el único** a `entregado` (y, con el pago cubierto, a `pagado` en la misma transacción) |
+| `PATCH /pedidos/:id/estado` y `POST /pedidos/:id/cancelar` | No: `entregado` da 409 `entrega_por_repartidor`; `pagado` solo es legal desde `entregado` |
+| `PATCH /kds/comandas/:id/estado` | No: el KDS solo pide `en_preparacion` o `listo` |
+| Pagos (`POST /transacciones`, el interno del socket-server, el cobro de mesa en caja) | Solo `entregado -> pagado` (la base no deja otra transición a `pagado`), o sea después de que el repartidor entregó; el cobro de mesa ni siquiera ve pedidos sin mesa |
+| Función de la base `cambiar_estado_pedido()` (script 03) | **Podría** (`listo -> entregado` respetando `transiciones_validas`), pero **ni el backend ni el socket-server la llaman**; queda anotada |
 
 ### Los pedidos sin mesa en los listados (LEFT JOIN)
 
