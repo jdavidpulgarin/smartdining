@@ -1,6 +1,8 @@
 const express = require('express');
 
 const clientesAuthRoutes = require('./clientes-auth.routes');
+const clientesRoutes = require('./clientes.routes');
+const zonasRoutes = require('./zonas.routes');
 
 /**
  * D-19 parte B: las rutas que existen SOLO en /api/v1 (las de los clientes de
@@ -14,6 +16,8 @@ const clientesAuthRoutes = require('./clientes-auth.routes');
 const router = express.Router();
 
 router.use('/auth/clientes', clientesAuthRoutes);
+router.use('/clientes', clientesRoutes);
+router.use('/zonas', zonasRoutes);
 
 // Los prefijos de arriba, vistos desde la app, están en src/config/rutas-clientes.js
 // (PREFIJOS_CLIENTES): si se agrega un router aquí, hay que agregarlo allí.
