@@ -669,7 +669,7 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
     );
   });
 
-  it('muestra "El restaurante canceló este pedido." cuando el origen es desconocido tras recargar', () => {
+  it('muestra "Este pedido fue cancelado." cuando el origen es desconocido tras recargar', () => {
     const pedidoOrigenDesconocido = {
       id_pedido: 7,
       estado: 'cancelado',
@@ -679,7 +679,7 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
       ],
     };
     expect(mensajeEstadoTarjeta(pedidoOrigenDesconocido, 5)).toBe(
-      'El restaurante canceló este pedido.'
+      'Este pedido fue cancelado.'
     );
   });
 

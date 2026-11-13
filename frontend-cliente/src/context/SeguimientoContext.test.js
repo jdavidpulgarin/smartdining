@@ -505,7 +505,7 @@ describe('SeguimientoContext: aislamiento de sesión entre grupos de la mesa', (
       expect(activoTrasRecargar.id_pedido).toBe('A');
       expect(activoTrasRecargar.estado).toBe('cancelado');
       expect(mensajeEstadoTarjeta(activoTrasRecargar, 5)).toBe(
-        'El restaurante canceló este pedido.'
+        'Este pedido fue cancelado.'
       );
 
       // Si después de recargar ese pedido ya no existe en la lista, deja el comportamiento actual
