@@ -38,6 +38,8 @@ Thumbs.db
 *.sqlite
 *.sql.backup
 *.dump
+# Respaldo del volumen de imágenes (infra/scripts/respaldo.sh)
+*.tar.gz
 
 # Monorepo: ignorar carpetas autogeneradas en cualquier subdirectorio
 **/dev-dist/

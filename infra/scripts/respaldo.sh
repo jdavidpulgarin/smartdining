@@ -2,8 +2,9 @@
 # ==============================================================================
 # SmartDining · infra/scripts/respaldo.sh (R-18)
 #
-# Respaldo de la base (pg_dump -Fc, ya comprimido) del proyecto que esté
-# corriendo en el VPS: smartdining (producción) o smartdining-staging.
+# Respaldo de la base (pg_dump -Fc, ya comprimido) y del volumen de imágenes
+# de los platos (tar.gz, D-23) del proyecto que esté corriendo en el VPS:
+# smartdining (producción) o smartdining-staging.
 #
 #   sh infra/scripts/respaldo.sh predeploy <sha>   # deploy.yml y deploy-staging.yml, ANTES de migrar.sh
 #   sh infra/scripts/respaldo.sh diario            # timer smartdining-respaldo (systemd)
@@ -13,6 +14,7 @@
 # smartdining-staging (nunca corren a la vez; si están los dos, falla).
 #
 # Destino: $RESPALDOS_DIR/<proyecto>/<tipo>/<tipo>-AAAAMMDD-HHMMSS[-sha7].dump
+#          y, con el mismo nombre, .tar.gz con el volumen de imágenes.
 #   RESPALDOS_DIR        por defecto /srv/respaldos (lo crea instalar-respaldos.sh)
 #   CONSERVAR_DIARIO     por defecto 7
 #   CONSERVAR_PREDEPLOY  por defecto 5
@@ -23,8 +25,14 @@
 #
 # El dump se escribe en un .tmp y solo se renombra si pg_dump terminó bien, el
 # archivo no está vacío y pg_restore --list lo lee y trae schema_migraciones.
+# Las imágenes salen del volumen "imagenes" del proyecto (lo ubican las
+# etiquetas de compose), montado en SOLO LECTURA en un contenedor temporal
+# sin red con la misma imagen del postgres en marcha (ya está en el VPS: no
+# se descarga nada). El tar.gz va a otro .tmp y se valida (no vacío, gzip -t
+# y tar -t con la carpeta raíz); los dos se renombran solo si todo pasó.
 # Si algo falla sale con 1 sin dejar nada a medias, y el despliegue se detiene
-# antes de migrar.
+# antes de migrar. Si el proyecto todavía no tiene el volumen (antes del
+# primer despliegue que lo crea), respalda solo la base y lo avisa.
 #
 # Los respaldos JAMÁS van al repositorio (es público): viven fuera de los
 # clones y .gitignore ignora *.dump.
@@ -106,12 +114,16 @@ fi
 destino=$RESPALDOS_DIR/$proyecto/$TIPO
 mkdir -p "$destino"
 # Restos de una corrida que murió de golpe (kill -9, apagón).
-find "$destino" -name '*.dump.tmp' -mmin +60 -exec rm -f {} + 2>/dev/null || true
+find "$destino" \( -name '*.dump.tmp' -o -name '*.tar.gz.tmp' \) -mmin +60 -exec rm -f {} + 2>/dev/null || true
 
-final=$destino/$TIPO-$(date +%Y%m%d-%H%M%S)$sufijo.dump
+base=$destino/$TIPO-$(date +%Y%m%d-%H%M%S)$sufijo
+final=$base.dump
+final_img=$base.tar.gz
 [ ! -e "$final" ] || fallar "ya existe $final"
+[ ! -e "$final_img" ] || fallar "ya existe $final_img"
 tmp=$final.tmp
-trap 'rm -f "$tmp"' EXIT
+tmp_img=$final_img.tmp
+trap 'rm -f "$tmp" "$tmp_img"' EXIT
 trap 'exit 1' HUP INT TERM
 
 # --- 3. Dump y validación --------------------------------------------------------
@@ -124,13 +136,40 @@ lista=$("$DOCKER" exec -i "$id" pg_restore --list < "$tmp") \
   || fallar "pg_restore no puede leer el respaldo de $proyecto; no se guardó"
 printf '%s\n' "$lista" | grep -q ' TABLE public schema_migraciones ' \
   || fallar "el respaldo de $proyecto no trae la tabla schema_migraciones; no se guardó"
-mv "$tmp" "$final"
 
-# --- 4. Rotación (por nombre: la fecha va en él) --------------------------------
-ls -1 "$destino" \
-  | grep -E "^$TIPO-[0-9]{8}-[0-9]{6}(-[0-9a-f]{7})?\.dump\$" \
-  | sort -r \
-  | tail -n +"$((conservar + 1))" \
-  | while read -r viejo; do rm -f "$destino/$viejo"; done
+# --- 4. Volumen de imágenes (D-23) ------------------------------------------------
+vol=$("$DOCKER" volume ls -q --filter "label=com.docker.compose.project=$proyecto" --filter "label=com.docker.compose.volume=imagenes") \
+  || fallar "no se pudo consultar los volúmenes de Docker"
+n_img=0
+if [ -n "$vol" ]; then
+  [ "$(printf '%s\n' "$vol" | grep -c .)" -eq 1 ] || fallar "hay más de un volumen de imágenes de $proyecto"
+  imagen=$("$DOCKER" inspect -f '{{.Config.Image}}' "$id") \
+    || fallar "no se pudo leer la imagen del postgres de $proyecto"
+  "$DOCKER" run --rm --pull never --network none -v "$vol:/imagenes:ro" --entrypoint tar "$imagen" \
+    -czf - -C /imagenes . > "$tmp_img" \
+    || fallar "no se pudo empaquetar el volumen $vol; no se guardó nada"
+  [ -s "$tmp_img" ] || fallar "el tar.gz de $vol salió vacío; no se guardó nada"
+  gzip -t < "$tmp_img" 2>/dev/null || fallar "el tar.gz de $vol está corrupto (gzip -t); no se guardó nada"
+  entradas=$(tar -tzf - < "$tmp_img" 2>/dev/null) || fallar "el tar.gz de $vol no se puede listar; no se guardó nada"
+  printf '%s\n' "$entradas" | grep -qx '\./' || fallar "el tar.gz de $vol no trae la carpeta raíz; no se guardó nada"
+  n_img=$(printf '%s\n' "$entradas" | grep -c '\.webp$' || true)
+else
+  echo "respaldo: aviso: $proyecto todavía no tiene el volumen de imágenes; solo se respalda la base" >&2
+fi
+
+mv "$tmp" "$final"
+[ -z "$vol" ] || mv "$tmp_img" "$final_img"
+
+# --- 5. Rotación (por nombre: la fecha va en él; dumps y tar.gz por separado) ------
+rotar() {
+  ls -1 "$destino" \
+    | grep -E "^$TIPO-[0-9]{8}-[0-9]{6}(-[0-9a-f]{7})?\\.$1\$" \
+    | sort -r \
+    | tail -n +"$((conservar + 1))" \
+    | while read -r viejo; do rm -f "$destino/$viejo"; done
+}
+rotar 'dump'
+rotar 'tar\.gz'
 
 echo "respaldo: $proyecto $TIPO -> $final ($(wc -c < "$final" | tr -d ' ') bytes; se conservan $conservar)"
+[ -z "$vol" ] || echo "respaldo: $proyecto $TIPO -> $final_img ($(wc -c < "$final_img" | tr -d ' ') bytes, $n_img imágenes .webp)"
