@@ -15,6 +15,7 @@ import {
 import { constructorApi, platosApi, mensajeNoGuardado } from '../../services/api'
 import { useSocketListener } from '../../hooks'
 import { crearUltimoPorId } from '../../utils/dedupeEventos'
+import { urlImagenGuardable, MENSAJE_URL_IMAGEN } from '../../utils/imagenes'
 
 export function EditorPasos({ dish, onClose, onDishUpdated }) {
   const [loading, setLoading] = useState(true)
@@ -249,6 +250,11 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
     e.preventDefault()
     if (!ingForm.nombre.trim()) {
       showToast('El nombre del ingrediente es requerido', true)
+      return
+    }
+    // Lo mismo que acepta el backend (#209): vacío, https:// o /imagenes/<uuid>.webp.
+    if (!urlImagenGuardable(ingForm.url_imagen)) {
+      showToast(MENSAJE_URL_IMAGEN, true)
       return
     }
 
@@ -863,12 +869,15 @@ export function EditorPasos({ dish, onClose, onDishUpdated }) {
                 </div>
 
                 <div>
-                  <label className="sd-input-label">URL IMAGEN (UNSPLASH / PEXELS):</label>
+                  <label className="sd-input-label">URL IMAGEN:</label>
+                  {/* type="text": una imagen subida se guarda como /imagenes/<uuid>.webp,
+                      que el type="url" del navegador no deja enviar. */}
                   <input
-                    type="url"
+                    type="text"
+                    inputMode="url"
                     value={ingForm.url_imagen}
                     onChange={(e) => setIngForm({ ...ingForm, url_imagen: e.target.value })}
-                    placeholder="https://images.unsplash.com/..."
+                    placeholder="https://… o /imagenes/<código>.webp"
                     className="sd-input"
                   />
                 </div>
