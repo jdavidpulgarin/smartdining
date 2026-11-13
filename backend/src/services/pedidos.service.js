@@ -4,6 +4,7 @@ const mesasService = require('./mesas.service');
 const aliasComensal = require('./alias-comensal');
 const { traducirAutorInexistente } = require('./autor-inexistente');
 const { errorConMotivo } = require('../utils/error-con-motivo');
+const { anotarDisponibles } = require('./disponible-sin-stock');
 
 /**
  * Dominio del CHECK de pedidos.estado. Se usa solo para validar que el body
@@ -186,6 +187,10 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     } catch (errRollback) {
       console.error('[pedidos] el ROLLBACK fallo tras un error:', errRollback && errRollback.message);
     }
+    // T5: en un SD001 (sin stock) se anota cuánto se puede pedir de cada
+    // faltante, con una lectura aparte por el pool: esta transacción ya está
+    // abortada. Nunca lanza; si falla, el 409 sale igual sin `disponible`.
+    await anotarDisponibles(err, items);
     // El AUTOR (review de #144): el INSERT de historial_estados de más arriba
     // guarda el id del JWT, y la columna tiene su `fk_historial_usuario` contra
     // `usuarios`. Si ese usuario ya se borró, el 23503 salía como el 409
