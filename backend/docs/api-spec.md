@@ -796,7 +796,7 @@ Si no se envían, **el comportamiento no cambia**: el plato conserva lo que ten�
 | `nombre` | Sí | Texto, 1–120 |
 | `precio` | Sí | Número > 0. Cabe en `DECIMAL(10,2)`: más allá es **422** (desbordamiento), no 500 |
 | `id_categoria` | Sí | Entero. Si la categoría no existe, **409 `categoria_inexistente`** |
-| `descripcion`, `url_imagen` | No | Texto. `url_imagen`: una URL **http(s)** absoluta o una ruta **`/imagenes/<uuid>.webp`** de [`POST /imagenes`](#imágenes-del-menú-d-23), hasta 255 caracteres (otro esquema, `..`, otra carpeta u otra extensión: **400**). Son **nullable**: ponerlas en `null` las borra |
+| `descripcion`, `url_imagen` | No | Texto. `url_imagen`: una URL **https** absoluta o una ruta **`/imagenes/<uuid>.webp`** de [`POST /imagenes`](#imágenes-del-menú-d-23), hasta 255 caracteres (`http:` u otro esquema, `..`, otra carpeta u otra extensión: **400**; https solo por la CSP de producción, ver D-23). Son **nullable**: ponerlas en `null` las borra |
 | `disponible` | No (por omisión `true`) | Booleano |
 | `tiempo_preparacion_estimado` | **No** | Entero > 0. **Si no se envía, queda en 15**, el `DEFAULT` de la columna (`database/schema.sql:105`) |
 | `personalizable` | No (por omisión `false`) | Booleano. Decide si el plato se arma por pasos en el constructor |
@@ -1001,9 +1001,14 @@ El contenido del archivo y su nombre original **nunca** van al log.
 ### `url_imagen` relativa y cómo se muestra
 
 `url_imagen` (platos y ingredientes del constructor) acepta **dos formas**: una URL
-**http(s)** absoluta, como hasta ahora, o la ruta **relativa** que devuelve este endpoint,
-exactamente `^/imagenes/<uuid en minúsculas>\.webp$`. Sin `..`, sin otras carpetas, sin otra
-extensión ni nada detrás; hasta 255 caracteres.
+**https** absoluta o la ruta **relativa** que devuelve este endpoint, exactamente
+`^/imagenes/<uuid en minúsculas>\.webp$`. Sin `..`, sin otras carpetas, sin otra extensión ni
+nada detrás; hasta 255 caracteres.
+
+**Solo https, no http** (pedido de Roberto): en producción la CSP de `app.` y `staff.` solo
+permite `img-src https:`, así que una foto `http://` quedaría **bloqueada por el navegador sin
+aviso** (el plato se vería sin imagen). Por eso se rechaza al guardarla con **400**. El esquema
+no distingue mayúsculas: `HTTPS://ejemplo.com/a.png` vale y `HTTP://ejemplo.com/a.png` no.
 
 **El cliente (PWA y panel) antepone el origen de la API** cuando la ruta empieza por
 `/imagenes/`: `https://api.<dominio>/imagenes/<uuid>.webp` en producción,
@@ -1309,7 +1314,7 @@ está en §[La frontera entre 400 y 422](#la-frontera-entre-400-y-422-h-11)):
 | `precio_extra` | número ≥ 0 |
 | `calorias` | entero ≥ 0 |
 | `alergenos` | arreglo de texto |
-| `url_imagen` | URL **http(s)** absoluta o ruta **`/imagenes/<uuid>.webp`** (D-23, la misma regla que los platos), hasta 255 caracteres |
+| `url_imagen` | URL **https** absoluta (http no, por la CSP de producción) o ruta **`/imagenes/<uuid>.webp`** (D-23, la misma regla que los platos), hasta 255 caracteres |
 
 **Normalización de lo que manda el panel:**
 

@@ -11,7 +11,7 @@ const platoSchema = z.object({
   nombre: z.string().min(1),
   descripcion: z.string().optional(),
   precio: z.number().positive(),
-  // D-23: URL http(s) o ruta /imagenes/<uuid>.webp de POST /api/imagenes
+  // D-23: URL https o ruta /imagenes/<uuid>.webp de POST /api/imagenes
   // (src/utils/url-imagen.js).
   url_imagen: urlImagenSchema.optional(),
   id_categoria: z.number().int(),

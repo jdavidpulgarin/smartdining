@@ -487,12 +487,14 @@ test('review-144 (medido): al CREAR un plato ese 23503 no puede salir', async ()
 });
 
 // ---------------------------------------------------------------------------
-// D-23: url_imagen acepta una URL http(s) o una ruta /imagenes/<uuid>.webp
+// D-23: url_imagen acepta una URL https o una ruta /imagenes/<uuid>.webp.
+// http NO (la CSP de producción solo permite img-src https:). El esquema no
+// distingue mayúsculas: HTTPS:// vale y HTTP:// no.
 // ---------------------------------------------------------------------------
 
 const UUID_IMAGEN = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
-for (const url of ['https://cdn.ejemplo.com/arepa.jpg', 'http://localhost:4000/x.png', `/imagenes/${UUID_IMAGEN}.webp`]) {
+for (const url of ['https://cdn.ejemplo.com/arepa.jpg', 'HTTPS://ejemplo.com/a.png', `/imagenes/${UUID_IMAGEN}.webp`]) {
   test(`d-23: plato con url_imagen ${url} -> 201 (POST) y 200 (PUT), y se guarda tal cual`, async () => {
     const db = fakePlatos();
     const redis = instalarFakeRedis();
@@ -524,6 +526,8 @@ for (const [caso, url] of [
   ['con una subcarpeta', `/imagenes/a/${UUID_IMAGEN}.webp`],
   ['con algo detrás', `/imagenes/${UUID_IMAGEN}.webp?x=1`],
   ['relativa sin barra', `imagenes/${UUID_IMAGEN}.webp`],
+  ['http: (la CSP la bloquearía)', 'http://localhost:4000/x.png'],
+  ['HTTP: en mayúsculas', 'HTTP://ejemplo.com/a.png'],
   ['javascript:', 'javascript:alert(1)'],
   ['ftp:', 'ftp://ejemplo.com/a.jpg'],
   ['de más de 255', `https://cdn.ejemplo.com/${'a'.repeat(250)}.jpg`],

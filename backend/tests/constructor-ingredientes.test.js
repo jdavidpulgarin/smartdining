@@ -560,12 +560,14 @@ test('review-144: el traductor del constructor no se come los otros errores', ()
 });
 
 // ---------------------------------------------------------------------------
-// D-23: url_imagen acepta una URL http(s) o una ruta /imagenes/<uuid>.webp
+// D-23: url_imagen acepta una URL https o una ruta /imagenes/<uuid>.webp.
+// http NO (la CSP de producción solo permite img-src https:). El esquema no
+// distingue mayúsculas: HTTPS:// vale y HTTP:// no.
 // ---------------------------------------------------------------------------
 
 const UUID_IMAGEN = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
-for (const url of ['https://cdn.ejemplo.com/arroz.webp', `/imagenes/${UUID_IMAGEN}.webp`]) {
+for (const url of ['https://cdn.ejemplo.com/arroz.webp', 'HTTPS://ejemplo.com/a.png', `/imagenes/${UUID_IMAGEN}.webp`]) {
   test(`d-23: ingrediente con url_imagen ${url} -> 201 y se guarda tal cual`, async () => {
     const db = instalarFakeDb(dbIngredientes());
     try {
@@ -584,6 +586,8 @@ for (const [caso, url] of [
   ['con otra extensión', `/imagenes/${UUID_IMAGEN}.png`],
   ['sin uuid', '/imagenes/arroz.webp'],
   ['que no es URL ni ruta', 'arroz.webp'],
+  ['http: (la CSP la bloquearía)', 'http://localhost:4000/x.png'],
+  ['HTTP: en mayúsculas', 'HTTP://ejemplo.com/a.png'],
   ['javascript:', 'javascript:alert(1)'],
 ]) {
   test(`d-23: ingrediente con url_imagen ${caso} -> 400 (POST y PUT) y no se escribe`, async () => {

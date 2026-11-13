@@ -40,7 +40,7 @@ const MAX_URL_IMAGEN = 255;
  * cadena vacía. Guardar '' sería basura que el constructor intentaría cargar
  * como imagen, así que '' (y solo espacios) se convierte en null.
  *
- * Con valor, D-23: una URL http(s) o una ruta /imagenes/<uuid>.webp de
+ * Con valor, D-23: una URL https o una ruta /imagenes/<uuid>.webp de
  * POST /api/imagenes, la misma regla que los platos (src/utils/url-imagen.js).
  */
 const urlImagen = z
