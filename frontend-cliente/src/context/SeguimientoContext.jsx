@@ -67,7 +67,12 @@ export function procesarOrderCreated(prevLista, data, comensal) {
  */
 export function SeguimientoProvider({ children }) {
   const { mesa, idMesa, comensal, valida, token, cargando: cargandoSesion } = useMesaSession();
-  const { on: socketOn, estado: estadoSocket, enviar } = useMesaSocketContext();
+  const {
+    on: socketOn,
+    estado: estadoSocket,
+    enviar,
+    resync,
+  } = useMesaSocketContext();
 
   const claveSesion = useMemo(
     () => (valida ? calcularClaveSesion(idMesa, token) : null),
@@ -250,6 +255,15 @@ export function SeguimientoProvider({ children }) {
     }
     estadoAnteriorRef.current = estadoSocket;
   }, [valida, idMesa, estadoSocket, recargar]);
+
+  // Recargar al volver de segundo plano (visibilidad, BFCache, online)
+  const resyncAnteriorRef = useRef(resync);
+  useEffect(() => {
+    if (resyncAnteriorRef.current !== resync && valida && idMesa) {
+      recargar();
+    }
+    resyncAnteriorRef.current = resync;
+  }, [resync, valida, idMesa, recargar]);
 
   useEffect(() => {
     if (!socketOn) return undefined;
