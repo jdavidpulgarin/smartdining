@@ -38,12 +38,14 @@ const app = require('../../server');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const { tokenStaff } = require('../helpers/fake-db');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 const MESA_BASE = parseInt(process.env.MESA_NUMERO_CANCELA_PERSONAL || '980', 10);
 const MARCA_MESA = 'PRUEBA personal-cancela-item';
 
 let sonda = null;
 let hayBase = false;
+let catalogo = null; // el de plato-prueba.js, con su limpiar()
 let plato = null;
 let admin = null; // { id, jwt }
 let siguienteMesa = MESA_BASE;
@@ -105,28 +107,14 @@ test.before(async () => {
   // Sin base configurada salta; configurada y sin responder, falla (#165).
   sonda = await abrirSonda();
   if (!sonda) return;
-  // Un plato con receta que NO es el que eligen las otras suites (el primero
-  // disponible por id), y entre los demás el que más unidades deja servir.
-  const p = await sonda.query(
-    `WITH comun AS (
-       SELECT id_plato FROM platos
-        WHERE disponible AND stock_suficiente AND NOT personalizable
-        ORDER BY id_plato LIMIT 1
-     )
-     SELECT p.id_plato FROM platos p
-      WHERE p.disponible AND p.stock_suficiente AND NOT p.personalizable AND p.precio >= 1000
-        AND p.id_plato NOT IN (SELECT id_plato FROM comun)
-        AND EXISTS (SELECT 1 FROM recetas_plato rp WHERE rp.id_plato = p.id_plato)
-      ORDER BY (SELECT min(floor(s.stock_actual / rp.cantidad)) FROM recetas_plato rp
-                  JOIN insumos s ON s.id_insumo = rp.id_insumo WHERE rp.id_plato = p.id_plato) DESC,
-               p.id_plato
-      LIMIT 1`
-  );
   const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' AND activo ORDER BY id_usuario LIMIT 1");
-  plato = p.rows[0] || null;
   admin = u.rows[0] ? { id: u.rows[0].id_usuario, jwt: tokenStaff(u.rows[0].id_usuario, 'admin') } : null;
-  hayBase = Boolean(plato && admin);
-  if (!hayBase) return;
+  if (!admin) return;
+  // Plato con receta PROPIO (tests/helpers/plato-prueba.js), sobre un insumo
+  // propio con stock alto: nada del seed, nada compartido con otra suite.
+  catalogo = await crearCatalogoPrueba(sonda, 'personal-cancela-item', { receta: true });
+  plato = catalogo.plato;
+  hayBase = true;
   await limpiar();
 });
 
@@ -137,6 +125,7 @@ test.afterEach(async () => {
 test.after(async () => {
   try {
     if (hayBase) await limpiar();
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();
@@ -312,26 +301,86 @@ test('d2. última línea con el pedido en "listo" (script 31): el pedido se canc
   assert.strictEqual(mesa[0].estado, 'ocupada', 'la mesa no se libera');
 });
 
-test('e. con CUALQUIER pago completado (uno parcial pequeño): 409 pago_registrado y nada cambia', async (t) => {
-  if (!hayBase) return t.skip('sin base de datos');
-  const idMesa = await mesaAbierta();
-  const { idPedido, detalles: [primera] } = await pedidoCon(idMesa, dos());
-  // Regla estricta (revisión de Jarrison): basta un pago, aunque el total
-  // nuevo siguiera cubriéndolo de sobra.
-  const monto = 100;
+// pago_registrado del PERSONAL (decisión de Jarrison): se permite si lo ya
+// pagado NO supera el total nuevo (sin la línea). El estado_pago lo recalcula
+// la base al cambiar el total (script 33). `dos()` deja una línea doble y una
+// sencilla del mismo plato: al quitar la doble, queda el subtotal de la sencilla.
+
+async function pagar(idPedido, monto) {
   await sonda.query(
     `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion)
      VALUES ($1::int, 'efectivo', $2::numeric, 'completada')`,
     [idPedido, monto]
   );
-  const antes = await filaPedido(idPedido);
+}
 
-  const res = await cancelar(idPedido, primera.id_detalle, { motivo: 'cliente cambió de idea' });
+test('e1. cobro parcial MENOR que lo que queda: 200, el total baja y estado_pago queda "parcial"', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const { idPedido, detalles: [doble, sencilla] } = await pedidoCon(idMesa, dos());
+  await pagar(idPedido, sencilla.subtotal / 2);
+  assert.strictEqual((await filaPedido(idPedido)).estado_pago, 'parcial');
+
+  const res = await cancelar(idPedido, doble.id_detalle, { motivo: 'cliente cambió de idea' });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.strictEqual((await estadoItem(doble.id_detalle)).estado_item, 'cancelado');
+  assert.strictEqual((await libroDe(doble.id_detalle)).devolucion.filas > 0, true, 'el stock vuelve (devolución)');
+  assert.deepStrictEqual(await filaPedido(idPedido), { estado: 'recibido', total: sencilla.subtotal, estado_pago: 'parcial' });
+});
+
+test('e2. cobro IGUAL a lo que queda: 200 (igual vale) y estado_pago pasa a "pagado" (script 33); el estado de cocina no cambia', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const { idPedido, detalles: [doble, sencilla] } = await pedidoCon(idMesa, dos());
+  await pagar(idPedido, sencilla.subtotal);
+  assert.strictEqual((await filaPedido(idPedido)).estado_pago, 'parcial');
+
+  const res = await cancelar(idPedido, doble.id_detalle);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.deepStrictEqual(await filaPedido(idPedido), { estado: 'recibido', total: sencilla.subtotal, estado_pago: 'pagado' });
+  const { rows } = await sonda.query('SELECT obtener_saldo_pendiente($1::int)::numeric AS saldo', [idPedido]);
+  assert.strictEqual(Number(rows[0].saldo), 0, 'saldo 0');
+});
+
+test('e3. cobro MAYOR que lo que quedaría: 409 pago_registrado y nada cambia (línea viva, stock, total y estado_pago)', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const { idPedido, detalles: [doble, sencilla] } = await pedidoCon(idMesa, dos());
+  // Un centavo por encima: la comparación es en centavos enteros.
+  await pagar(idPedido, sencilla.subtotal + 0.01);
+  const antes = await filaPedido(idPedido);
+  const libroAntes = await libroDe(doble.id_detalle);
+
+  const res = await cancelar(idPedido, doble.id_detalle, { motivo: 'cliente cambió de idea' });
   assert.strictEqual(res.status, 409, JSON.stringify(res.body));
   assert.strictEqual(res.body.motivo, 'pago_registrado');
-  assert.strictEqual((await estadoItem(primera.id_detalle)).estado_item, 'pendiente');
-  assert.deepStrictEqual(Object.keys(await libroDe(primera.id_detalle)), ['reserva']);
+  assert.strictEqual((await estadoItem(doble.id_detalle)).estado_item, 'pendiente', 'la línea sigue viva');
+  // Stock "igual" por el libro del detalle (criterio de la suite: el stock
+  // global lo pueden mover otras suites en paralelo): el ROLLBACK deshizo la
+  // devolución, así que solo queda la reserva.
+  assert.deepStrictEqual(await libroDe(doble.id_detalle), libroAntes);
+  assert.deepStrictEqual(Object.keys(libroAntes), ['reserva']);
+  assert.deepStrictEqual(await filaPedido(idPedido), antes, 'total y estado_pago iguales');
+  const { rows: hist } = await sonda.query(
+    "SELECT count(*)::int AS n FROM historial_estados WHERE id_pedido = $1::int AND estado_nuevo = 'cancelado'",
+    [idPedido]
+  );
+  assert.strictEqual(hist[0].n, 0);
+});
+
+test('e4. ÚLTIMA línea viva con algo pagado: 409 pago_registrado y el pedido NO se cancela', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const { idPedido, detalles: [unica] } = await pedidoCon(idMesa, [{ id_plato: plato.id_plato, cantidad: 1, comensal: 'Ana' }]);
+  await pagar(idPedido, 100);
+  const antes = await filaPedido(idPedido);
+
+  const res = await cancelar(idPedido, unica.id_detalle, { motivo: 'El cliente se fue' });
+  assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+  assert.strictEqual(res.body.motivo, 'pago_registrado');
+  assert.strictEqual((await estadoItem(unica.id_detalle)).estado_item, 'pendiente');
   assert.deepStrictEqual(await filaPedido(idPedido), antes);
+  assert.strictEqual(antes.estado, 'recibido');
 });
 
 test('f. reintento sobre una línea ya cancelada: 409 item_ya_cancelado sin doble devolución', async (t) => {

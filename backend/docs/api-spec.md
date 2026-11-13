@@ -86,9 +86,11 @@ Los dos órdenes existen de verdad y cada uno lo cierra un endpoint distinto:
   volvía a `pagado`, así que seguía contando como abierto y ni el mesero ni la caja
   podían cerrar la mesa.
 - El cierre pide que **las dos fuentes digan lo mismo**: `estado_pago = 'pagado'` y
-  `obtener_saldo_pendiente(:id) <= 0`. `estado_pago` se recalcula al tocar
-  `transacciones`, así que es esa columna la que podría quedarse atrás respecto del
-  total; con una sola fuente se podría cerrar un pedido con saldo vivo.
+  `obtener_saldo_pendiente(:id) <= 0`. `estado_pago` lo recalcula la base al tocar
+  `transacciones` (script 22) y, desde el **script 33**, también cuando cambia el total
+  (`tr_estado_pago_al_cambiar_total`, p. ej. al quitar un plato). Se piden las dos igual:
+  con una sola fuente, si alguna vez se quedara atrás, se podría cerrar un pedido con saldo
+  vivo.
 - **La mesa se libera al entregar y pagar, nunca solo al pagar.** Pagar antes de recibir
   la comida no suelta la mesa ni invalida el QR: el comensal sigue sentado y su sesión
   tiene que seguir en pie.
@@ -2060,7 +2062,7 @@ Notas de lo que quedó demostrado al escribirlas:
 | **GET** | **/pedidos/mesa/cuenta** | **comensal** | **Cuenta de SU mesa por comensal; la mesa sale del JWT** |
 | GET | /pedidos/:id | **admin, cajero, mesero, comensal** | Detalle con sus ítems; un comensal solo ve los de su mesa y de su visita (403 si no). **`cocina` no entra (S-26)** |
 | PATCH | /pedidos/:id/estado | admin, cajero, mesero | Cambia el estado (cualquiera de los 6 válidos) |
-| POST | /pedidos/:id/cancelar | admin, cajero, mesero | Atajo que fija `estado = cancelado`. **Desde `recibido`, `en_preparacion` o `listo`** (script 31); desde `entregado`/`pagado` responde 409 |
+| POST | /pedidos/:id/cancelar | admin, cajero, mesero, **comensal** | Personal: atajo que fija `estado = cancelado`. **Desde `recibido`, `en_preparacion` o `listo`** (script 31); desde `entregado`/`pagado` responde 409. **Comensal (D-12): cancela SU pedido completo, solo en `recibido`; no libera la mesa** |
 | **POST** | **/pedidos/:id/items/:id_detalle/cancelar** | **comensal, admin, mesero** | **D-13: quita UNA línea, entera. El comensal (J-14) solo las suyas y antes de que cocina empiece; admin y mesero cualquiera que no se haya servido, con `motivo` obligatorio (devolución o merma). Con cualquier pago completado, 409. No libera la mesa** |
 
 ### POST /pedidos
@@ -2397,6 +2399,47 @@ ve su pedido cerrado. Con cuenta pendiente o abono parcial, el pedido se queda e
 > Punto de integración con Roberto: en el código (marcado con un comentario `NOTA`)
 > es donde se debe emitir `order:created` / `order:status` hacia el socket-server.
 
+### POST /pedidos/:id/cancelar — personal y comensal (D-12)
+
+Una sola ruta y **decide el tipo de sesión del JWT**. Cocina no entra (403).
+
+**Personal (admin, cajero, mesero):** el de siempre, sin cambios. Es el atajo de `PATCH
+/pedidos/:id/estado` con `estado = cancelado`: historial con el usuario y las
+`observaciones` del cuerpo, y si la mesa se queda sin pedidos abiertos **se libera**
+(`mesa-liberada`). La respuesta es el pedido (como en `PATCH`).
+
+**Comensal (D-12, contrato aprobado por Juan):** cancela **su pedido completo**.
+
+- **Sin cuerpo:** nada o `{}`. Un campo cualquiera es **400** `{ "motivo": "cuerpo_invalido" }`;
+  un `:id` que no sea entero > 0, **400** `parametro_invalido`. La mesa y el comensal salen
+  del JWT.
+- En **una transacción**, con el pedido y después sus líneas bloqueados (`FOR UPDATE`, las
+  líneas en orden de `id_detalle`), y en este orden:
+
+| Paso | Si no se cumple |
+|---|---|
+| El pedido existe | **404** `{ "motivo": "no_encontrado" }` |
+| Es de la **mesa del JWT** y de su **visita actual** (`creado_en ≥ sesion_iniciada_en`, la regla del #180) | **403** `{ "motivo": "no_es_tuyo" }` |
+| No está ya cancelado (va **primero** entre los 409) | **409** `{ "motivo": "pedido_ya_cancelado" }` |
+| Todas sus líneas **vivas** (no canceladas) son **suyas**, comparando por la **clave** del alias (D-18b). Una línea viva de otro comensal, o sin comensal, lo impide; una ya quitada no cuenta | **409** `{ "motivo": "pedido_compartido" }` |
+| El pedido está en `recibido` y todas las líneas vivas en `pendiente` | **409** `{ "motivo": "no_cancelable" }` |
+| No tiene pagos `completada` | **409** `{ "motivo": "pago_registrado" }` |
+
+Si pasa, cancela las líneas vivas y después el pedido (`recibido → cancelado`, transición
+válida), con su fila en `historial_estados` (`id_usuario` NULL, *"Cancelado por el
+comensal"*). El stock vuelve como **devolución, una sola vez por línea**: cada línea se
+devuelve al cancelarla (`tr_devolver_inventario`, con el pedido aún en `recibido`), y al
+cerrar el pedido `tr_devolver_inventario_pedido` ya no vuelve a cerrarla
+(`fn_cerrar_reserva_detalle` no repite una línea con su devolución hecha). Lo ya quitado con
+el #180 tampoco se devuelve otra vez. **No libera la mesa**: el grupo sigue sentado.
+
+`200` con la **misma forma que el #180**: `{ "pedido": { id_pedido, codigo_pedido, estado:
+"cancelado", total (número, 0), items } }`, con cada ítem en `estado_item: "cancelado"`.
+
+Después del COMMIT sale **solo** el `POST /internal/order-status` (→ `cancelado`), con
+`origen: "comensal"` (ver *`origen` en `order-status`*); **no** un `item-cancelado` por
+línea, ni `mesa-liberada`.
+
 ### POST /pedidos/:id/items/:id_detalle/cancelar — comensal (D-13, J-14) y personal (D-13)
 
 Quita **una línea** de un pedido, entera. Dos caminos en la misma ruta, y **decide el tipo de
@@ -2427,11 +2470,12 @@ en ese orden), y en este orden de comprobación:
 | El pedido sigue en `recibido` y la línea en `pendiente` | **409** `{ "motivo": "item_en_preparacion" }` |
 | El pedido **no tiene ninguna** transacción `completada` (ver abajo) | **409** `{ "motivo": "pago_registrado" }` |
 
-> **`pago_registrado` es estricto** (revisión de Jarrison), en los dos caminos: basta
-> **cualquier** transacción `completada`, aunque el total nuevo siguiera cubriendo lo
-> pagado. El `estado_pago` del pedido (script 22) no se recalcula cuando baja el total, así
-> que tocar un pedido con pagos lo dejaría mal. Se queda así **hasta que se arregle
-> `estado_pago` en la base**; con un pago, hay que reembolsar antes.
+> **Para el comensal, `pago_registrado` es estricto por decisión de producto** (Jarrison):
+> basta **cualquier** transacción `completada`, aunque el total nuevo siguiera cubriendo lo
+> pagado. No es una limitación de la base (desde el script 33 `estado_pago` se recalcula al
+> bajar el total): desde el teléfono no se decide sobre dinero ya cobrado, y con un pago el
+> comensal se lo pide al mesero. El personal tiene otra regla (ver
+> [Camino del personal](#camino-del-personal-d-13)).
 
 > **Doble clic:** el segundo envío sobre la misma línea espera al primero (el bloqueo de la
 > línea) y responde **409** `item_ya_cancelado`; el stock no se devuelve dos veces.
@@ -2498,7 +2542,8 @@ cada uno con su `estado_item`. `total` es un número:
 #### Camino del personal (D-13)
 
 > **Contrato con los ajustes de la revisión de Jarrison** (motivo obligatorio, solo admin y
-> mesero, `pago_registrado` estricto).
+> mesero) y su decisión sobre `pago_registrado`: para el personal **no** es estricto, se
+> permite mientras lo pagado no supere el total nuevo.
 
 Admin y mesero cancelan **cualquier línea** de **cualquier mesa** (no hay regla de dueño),
 también cuando cocina ya la empezó.
@@ -2520,7 +2565,7 @@ movimientos de inventario que escriben los triggers lleven al usuario:
 | El pedido existe y `id_detalle` es de ese pedido | **404** `{ "motivo": "no_encontrado" }` |
 | La línea no estaba ya cancelada (va **primero**) | **409** `{ "motivo": "item_ya_cancelado" }` |
 | La línea no está `servido` y el pedido no está `entregado`, `pagado` ni `cancelado` | **409** `{ "motivo": "item_no_cancelable" }` |
-| El pedido no tiene **ninguna** transacción `completada` (estricto, igual que el comensal) | **409** `{ "motivo": "pago_registrado" }` |
+| Después de cancelar la línea: lo **ya pagado** (transacciones `completada` del pedido) **no supera** el **total nuevo** (ver abajo) | **409** `{ "motivo": "pago_registrado" }` y `ROLLBACK` |
 | Si es la **última** línea viva: el pedido puede pasar a `cancelado` desde su estado según `transiciones_validas` | **409** `{ "motivo": "item_no_cancelable" }` (ver abajo) |
 | El usuario del JWT existe | **409** `{ "motivo": "autor_inexistente" }` (el helper de siempre) |
 
@@ -2555,11 +2600,29 @@ Si era la **última línea viva**, el pedido pasa a `cancelado` con su fila en
 `estado_pedido` puede ser `recibido`, `en_preparacion`, `listo` o `cancelado` (Roberto los
 acepta en su #181). Si el pedido quedó cancelado, también el `order:status` de siempre.
 
-> El `estado_pago` del pedido (script 22) solo lo recalcula un trigger sobre
-> `transacciones`, no cuando baja el total. Por eso `pago_registrado` bloquea con cualquier
-> pago completado: así ninguna cancelación de línea deja un pedido con pagos y su
-> `estado_pago` desfasado. Es de la base; queda anotado para Jarrison, y cuando se arregle
-> se puede volver a permitir quitar líneas que el pago siga cubriendo.
+**`pago_registrado` del personal: lo pagado contra el total nuevo.** En la misma
+transacción, con el pedido bloqueado (`FOR UPDATE`), se cancela la línea y se lee el total
+que deja `tr_actualizar_total_pedido` (sin las líneas canceladas). Se compara en **centavos
+enteros** calculados por la base, sin coma flotante:
+
+- **pagado ≤ total nuevo** → se permite (**igual vale**). Un pedido **sin pagos** sigue como
+  siempre.
+- **pagado > total nuevo** → **409** `pago_registrado` y `ROLLBACK`: la línea sigue viva y su
+  movimiento de stock y el total se deshacen. Hay que reembolsar antes.
+- **Última línea viva con algo pagado** → el total nuevo es 0 y cualquier pago lo supera:
+  **409** `pago_registrado`. Un pedido con pagos no se cancela por aquí.
+
+`estado_pago` queda bien solo: desde el **script 33** la base lo recalcula al cambiar el total
+(`calcular_estado_pago`, la regla del script 22):
+
+| Caso | `estado_pago` después |
+|---|---|
+| Sin pagos | `pendiente` |
+| 0 < pagado < total nuevo | `parcial` |
+| pagado = total nuevo | `pagado` (saldo 0). El `estado` de cocina **no** cambia: el pedido se cierra al entregarlo, como cualquier pedido ya cubierto |
+
+La ruta del personal para cancelar el **pedido completo** (`POST /pedidos/:id/cancelar`) no
+cambia con esta regla.
 
 ---
 
@@ -2979,12 +3042,12 @@ Errores, todos **400** `{ "error": "...", "motivo": "consulta_invalida" }`:
     {
       "id_transaccion": 41, "id_pedido": 87, "codigo_pedido": "PED-261110-7K2Q9",
       "id_mesa": 5, "numero_mesa": 5, "monto": 34000, "metodo_pago": "efectivo",
-      "comensal": "Ana", "fecha": "2026-11-11T01:12:40.512Z",
+      "comensal": "Ana", "voucher": null, "fecha": "2026-11-11T01:12:40.512Z",
       "referencia_pago": null
     },
     { "id_transaccion": 40, "id_pedido": 86, "codigo_pedido": "PED-261110-3M8ZT",
       "id_mesa": 2, "numero_mesa": 2, "monto": 24000, "metodo_pago": "tarjeta_debito",
-      "comensal": null, "fecha": "2026-11-10T18:03:11.004Z", "referencia_pago": null }
+      "comensal": null, "voucher": "AB-12", "fecha": "2026-11-10T18:03:11.004Z", "referencia_pago": null }
   ]
 }
 ```
@@ -2999,6 +3062,10 @@ Errores, todos **400** `{ "error": "...", "motivo": "consulta_invalida" }`:
 - `fecha` es el instante en ISO 8601 UTC (`Z`); el cliente lo muestra en su hora local.
 - `comensal` es quien pagó cuando la mesa dividió la cuenta; `null` en un cobro de la mesa
   completa.
+- `voucher` (script 35) es el comprobante del datáfono de un cobro con tarjeta en caja
+  (`POST /transacciones/mesa`), ya normalizado (`AB-12`); `null` en efectivo, transferencia,
+  pago en línea o un cobro con tarjeta sin voucher. Todas las filas de un mismo cobro llevan el
+  mismo. La clave sale siempre, aunque sea `null`.
 - **`referencia_pago`** identifica el **pago** al que pertenece la fila, para agrupar. Un
   pago a la mesa se reparte entre varios pedidos y deja **una fila por pedido**; todas llevan
   el mismo `referencia_pago`. Pasa con los dos pagos de mesa: el de Wompi (la referencia de la
@@ -3220,11 +3287,31 @@ Contrato completo en [socket-server/EVENTS.md](../../socket-server/EVENTS.md).
 | Cuándo | Aviso |
 |---|---|
 | Se crea un pedido | `POST /internal/order-created` con el pedido y sus ítems |
-| Cambia el estado (pedidos y KDS) | `POST /internal/order-status` con `estado_anterior` |
+| Cambia el estado (pedidos y KDS) | `POST /internal/order-status` con `estado_anterior` (y `origen` si es una cancelación, ver abajo) |
 | **Un comensal o el personal quita una línea** (D-13) | `POST /internal/item-cancelado` con `origen` `"comensal"` o `"personal"` (**pendiente de Roberto**: hoy 404, solo log); si el pedido queda cancelado, además `order-status` |
+| **El comensal cancela su pedido** (D-12) | Solo `POST /internal/order-status` (→ `cancelado`, `origen: "comensal"`); ni `item-cancelado` por línea ni `mesa-liberada` |
 | Se abre una mesa con un token **nuevo** | `POST /internal/qr-rotado` → `qr:actualizado` a la tablet |
 | **La caja cobra** (efectivo, datáfono o abono parcial) | `POST /internal/payment-confirmed` → `payment:confirmed` |
 | Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada`, con `motivo` si la cerró un pago |
+
+### `origen` en `order-status` (pedido de Juan)
+
+Campo **opcional** de `POST /internal/order-status`: dice **quién canceló** el pedido. Va
+**solo** cuando el pedido pasa a `cancelado` por una cancelación:
+
+| Cuándo | `origen` |
+|---|---|
+| El comensal cancela su pedido (D-12, `POST /pedidos/:id/cancelar` con su sesión) | `"comensal"` |
+| El comensal quita la **última** línea viva (#180) | `"comensal"` |
+| El personal cancela la **última** línea viva (D-13) | `"personal"` |
+| El personal cancela el pedido (`POST /pedidos/:id/cancelar`, la ruta de siempre) | `"personal"` |
+
+En **todos los demás** cambios de estado (KDS, `PATCH /pedidos/:id/estado` del mesero —también
+a `cancelado`—, cierre por cobro…) **no se manda**. Valores: `"comensal"` o `"personal"`; el
+notificador valida el valor como en `item-cancelado` (si no es uno de los dos, o el estado no
+es `cancelado`, el campo no viaja y queda en el log; el aviso de estado sí sale). **Un
+consumidor que no lo reciba debe asumir `"personal"`.** El socket-server todavía no lo
+reenvía (lo hará Roberto); mandarlo antes no rompe nada porque lo ignora.
 
 ### Cobros de caja: `payment:confirmed` (EVENTS.md §8.6)
 
@@ -3493,6 +3580,29 @@ la mesa»; `POST /transacciones` sigue siendo el cobro de **un pedido** concreto
 | `metodo_pago` | Sí | `efectivo`, `tarjeta_debito`, `tarjeta_credito` o `transferencia`. **`online` no**: es solo de Wompi |
 | `comensal` | No | Las mismas reglas que en `POST /transacciones`: texto de 1 a 40, o `null`. Es de quién se descuenta en la cuenta por persona; sin él, el cobro es «de la mesa» |
 | `id_cobro` | Sí | **UUID**. Ver abajo |
+| `voucher` | No | El número del comprobante del **datáfono**, solo con `tarjeta_debito` o `tarjeta_credito`. Texto; `null` o ausente = sin voucher. Ver abajo |
+
+**`voucher` (script 35, `transacciones.voucher VARCHAR(40)`).** El backend lo **normaliza**
+antes de validarlo: `trim()` (también los espacios Unicode, como el de no separación) y
+`toUpperCase()`, así que `"  ab-12 "` se guarda `"AB-12"`. Vacío o solo espacios cuenta como
+**sin voucher** (`null`), con cualquier método. Las comprobaciones van en este orden y la
+primera que falla decide:
+
+1. **Tipo**: ausente o `null` → sin voucher. Cualquier otra cosa que no sea texto (número,
+   booleano, objeto, arreglo) → **400 `voucher_invalido`**.
+2. **Normalización**: `trim()` + mayúsculas; si queda vacío → sin voucher (y se acaba aquí).
+3. **Método**: con contenido y un `metodo_pago` que no es tarjeta (`efectivo`,
+   `transferencia`) → **400 `voucher_no_aplica`**. Va antes que el formato: si el voucher sobra,
+   da igual cómo esté escrito.
+4. **Formato**: tiene que cumplir `^[A-Z0-9-]{1,40}$` (letras sin tilde, números y guiones,
+   hasta 40) → si no, **400 `voucher_invalido`**.
+
+Es la misma regla que el `CHECK ck_transacciones_voucher` de la base, que queda como última
+defensa: efectivo y transferencia nunca mandan voucher a la base. El **mismo voucher va en
+todas las filas** del cobro (una por pedido repartido). Un **reintento** con el mismo
+`id_cobro` responde `duplicado` y **no cambia** el voucher guardado, aunque traiga otro: vale
+el del primer envío. El voucher **no** viaja en los avisos de tiempo real ni se escribe en los
+logs. El resto del cuerpo sigue siendo `.strict()`.
 
 **`id_cobro`: generarlo una vez y reutilizarlo en los reintentos.** La caja genera un UUID v4
 (`crypto.randomUUID()`) **cuando el cajero pulsa «Cobrar»**, no en cada envío, y si la petición
@@ -3537,21 +3647,23 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
   "mesa_liberada": true,
   "pagados": [91, 92],
   "transacciones": [
-    { "id_transaccion": 120, "id_pedido": 91, "monto": 34000, "comensal": null },
-    { "id_transaccion": 121, "id_pedido": 92, "monto": 34000, "comensal": null }
+    { "id_transaccion": 120, "id_pedido": 91, "monto": 34000, "comensal": null, "voucher": "AB-12" },
+    { "id_transaccion": 121, "id_pedido": 92, "monto": 34000, "comensal": null, "voucher": "AB-12" }
   ]
 }
 ```
 
 - `saldo_restante` es el saldo de **la mesa** tras el cobro, en pesos (número). `pagados` son
   los `id_pedido` que pasaron a `pagado` con este cobro. `transacciones`, las filas creadas, con
-  `monto` en pesos.
+  `monto` en pesos y `voucher` ya normalizado (`null` si no hubo).
 
 | Status | Cuerpo | Cuándo |
 |---|---|---|
 | **200** | `{ "duplicado": true, "saldo_restante": 34000 }` | Ese `id_cobro` ya se cobró **en esta mesa**: no se cobra ni se avisa otra vez |
 | **409** | `{ "error": "Ese id_cobro ya se usó en otra mesa; genera uno nuevo", "motivo": "id_cobro_en_uso" }` | Ese `id_cobro` ya se usó en **otra** mesa. No se escribe nada |
 | **400** | `{ "error", "motivo": "cuerpo_invalido" }` | Cuerpo inválido (tabla de arriba) |
+| **400** | `{ "error", "motivo": "voucher_invalido" }` | `voucher` no es texto, o tiene caracteres fuera de `A-Z 0-9 -` o más de 40. No se escribe nada |
+| **400** | `{ "error", "motivo": "voucher_no_aplica" }` | `voucher` con contenido y un método que no es tarjeta. No se escribe nada |
 | **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
 | **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
 | **409** | `{ "error", "motivo": "excede", "saldo": 68000 }` | El monto supera el saldo de la mesa (`saldo` en pesos). No se escribe nada |
@@ -3574,7 +3686,10 @@ Un `duplicado` no avisa nada. Si el socket-server no responde, el cobro ya está
 Cobertura: `tests/transacciones-mesa.test.js` (roles, validación, centavos, cada respuesta,
 avisos) y `tests/integracion/transacciones-mesa-sql.test.js` contra PostgreSQL (reparto entre
 pedidos, pago parcial, pedido en cocina, excede, `id_cobro` repetido en serie y a la vez, caja y
-Wompi a la vez, autor inexistente, historial).
+Wompi a la vez, autor inexistente, historial). El voucher: `tests/transacciones-voucher.test.js`
+(normalización, orden de validación, los dos 400, que no viaja en el aviso) y
+`tests/integracion/transacciones-voucher-sql.test.js` (mismo voucher en todas las filas,
+reintento que no lo cambia, efectivo en NULL, `GET /transacciones`).
 
 ### POST /pagos/intentos-fallidos/interno
 
@@ -4476,6 +4591,387 @@ tarde sí sirve**. Un 500 sugiere un bug del servidor y no invita a nada.
 Es el segundo caso —con el 409 de concurrencia— en que reintentar tiene sentido, pero la
 espera no es la misma: ante un 409 de concurrencia el cliente puede reintentar **ya, una
 vez**; ante un 503 conviene dejar pasar unos segundos, porque lo que sobra es carga.
+
+---
+
+## API v1 · Clientes (D-19)
+
+> **Contrato. Implementación después de la P-23.** Nada de esta sección existe todavía en
+> el código: es el acuerdo para que la app móvil (Juan) y la base (Jarrison) puedan
+> avanzar en paralelo. **Todo va bajo `/api/v1`, nada en `/api`.**
+
+### El prefijo `/api/v1` (ya montado, D-19 parte A)
+
+La API completa responde también en `/api/v1/...` con el **mismo router**
+(`src/routes/montaje.js`): mismas rutas, auth, roles, CORS, 404 y errores. `/api` sigue igual
+y es compatible hacia atrás (PWA, panel y KDS no cambian). Los **límites de peticiones son
+compartidos**: `/api/x` y `/api/v1/x` gastan el mismo cupo (el global cuenta por IP; los de
+login y QR son la misma instancia en los dos prefijos). **Fuera de v1** queda el canal
+interno servidor-a-servidor (`.../internal`, `.../interno`): lo llama el socket-server con URL
+fija y `x-internal-key`; en `/api/v1` responde 404. Las rutas de clientes de abajo nacen
+**solo** en `/api/v1`.
+
+### Sesión del cliente: JWT corto + refresh token
+
+| | Valor |
+|---|---|
+| JWT (`token`) | `rol: "cliente"`, `sub: id_cliente`. Vida corta: **15 min** (`JWT_CLIENTE_EXPIRES_IN`, configurable). **Mismo algoritmo y secreto** que hoy: HS256 (`ALGORITMO_JWT`) con `JWT_SECRET`. |
+| `refresh_token` | **Opaco y aleatorio** (32 bytes, `crypto.randomBytes`, en base64url: **43 caracteres** `[A-Za-z0-9_-]`). En la base se guarda **solo su hash SHA-256**, nunca el valor. Vida **30 días** desde que se emite (`REFRESH_CLIENTE_DIAS`, configurable). Pertenece a una **familia** (la de su primer login) para detectar reuso. |
+| Ventana de gracia | **30 s** (`REFRESH_CLIENTE_GRACIA_SEGUNDOS`, configurable; `0` la apaga). Ver [la ventana de gracia del refresh](#la-ventana-de-gracia-del-refresh). |
+| `expira_en` | Cuándo vence el `token`, en ISO 8601 UTC. |
+
+- **Separación de roles:** un JWT de cliente **no entra** a rutas de staff ni de comensal
+  (`requireRole` no tiene `cliente` en ninguna de ellas → 403), y un JWT de staff o de
+  comensal **no entra** a las de cliente (403).
+- **Contraseñas:** el **mismo algoritmo y costo** que el login del personal: **bcrypt con
+  costo 10** (`COSTO_BCRYPT` en `auth.controller.js`), y las mismas reglas de clave nueva
+  (`utils/clave-bcrypt.js`): **mínimo 8 caracteres** y **máximo 72 bytes** en UTF-8 (bcrypt
+  ignora en silencio lo que pasa de 72 bytes; una tilde ocupa 2 y un emoji 4).
+- **Límites de peticiones propios** (además del global): registro y login por `email`, refresh
+  por token, y en los tres un tope alto por IP. Ver
+  [Límites de las rutas de clientes](#límites-de-las-rutas-de-clientes).
+- **Errores:** en las rutas de clientes **todo** error responde `{ error, motivo }`. Ver
+  [Errores de las rutas de clientes](#errores-de-las-rutas-de-clientes).
+
+### Autenticación
+
+| Método y ruta | Cuerpo | Éxito | Errores |
+|---|---|---|---|
+| `POST /api/v1/auth/clientes/registro` | `{ nombre, email, password, telefono? }` | **201** `{ cliente, token, refresh_token, expira_en }` | **409** `email_registrado` · **400** `nombre_invalido`, `email_invalido`, `clave_corta`, `clave_larga`, `telefono_invalido`, `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/login` | `{ email, password }` | **200** `{ cliente, token, refresh_token, expira_en }` | **401** `credenciales_invalidas` · 400 `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/refresh` | `{ refresh_token }` | **200** `{ token, refresh_token, expira_en }` | **401** `refresh_invalido` (no existe o venció) · **401** `sesion_revocada` (reuso) · 400 `cuerpo_invalido` · 429 |
+| `POST /api/v1/auth/clientes/logout` | `{ refresh_token }`, **sin** `Authorization` | **204** sin cuerpo | 400 `cuerpo_invalido` · 429 |
+
+El campo es **`email`**, igual que en `POST /api/auth/login` del personal. El `email` se compara
+sin distinguir mayúsculas (se guarda y se busca por `lower(email)`). Los cuerpos son zod
+`.strict()`.
+
+- **Login sin enumeración:** el **mismo 401 y el mismo mensaje** si el `email` no existe o si
+  la clave falla, y el **mismo tiempo de respuesta**: con un `email` que no existe se compara
+  contra un hash ficticio del mismo costo (como `HASH_FICTICIO` en el login del personal).
+- **Rotación del refresh:** cada uso emite un `refresh_token` **nuevo** (misma familia) y el
+  anterior queda rotado (`reemplazado_por` y `rotado_en`). Si llega uno **ya rotado** fuera de
+  la [ventana de gracia](#la-ventana-de-gracia-del-refresh) (reuso: alguien copió un token
+  viejo), se **revoca toda la familia** y se responde **401** `sesion_revocada`; el cliente
+  vuelve a iniciar sesión.
+- `cliente` es `{ id_cliente, nombre, email, telefono, verificado }`, nunca el hash.
+
+#### Logout
+
+`POST /api/v1/auth/clientes/logout` pide **solo** `{ refresh_token }` y **no exige
+`Authorization`**: el JWT puede haber vencido ya (vive 15 min) y el cliente tiene que poder
+cerrar sesión igual. Si la app manda la cabecera, se ignora. Quien tiene el refresh token es
+quien puede revocarlo; no hace falta más prueba.
+
+- Responde **204** sin cuerpo **siempre que el cuerpo sea válido**: también si el token **no
+  existe**, ya estaba **revocado**, ya estaba **rotado** o **venció**. Así la respuesta no
+  revela si un token existe ni en qué estado está.
+- **400** `cuerpo_invalido` si falta `refresh_token`, no es texto o no tiene el formato
+  (43 caracteres base64url), o si sobra un campo.
+- Revoca **ese** token y nada más: `UPDATE ... SET revocado_en = now() WHERE hash = $1::char(64)
+  AND revocado_en IS NULL`. **No** la familia ni las otras sesiones del cliente (otro
+  teléfono sigue conectado). No cambia `reemplazado_por` ni `rotado_en`.
+- El JWT que ya tenga la app sigue valiendo hasta su vencimiento corto (15 min); la app lo
+  borra al cerrar sesión.
+- Si después llega a `/refresh` ese token revocado por logout, es reuso: se revoca la familia
+  y **401** `sesion_revocada` (ver abajo).
+
+#### La ventana de gracia del refresh
+
+**El problema:** la app manda `/refresh`, el servidor rota y responde, pero la respuesta se
+pierde (red móvil). La app solo tiene el token viejo, lo reenvía, y sin gracia eso sería
+reuso: familia revocada y el cliente expulsado sin haber hecho nada malo. Como en la base se
+guarda **solo el hash**, el servidor **no puede reenviar** el token nuevo que ya emitió: no lo
+conoce. Por eso la gracia emite un par **nuevo** y anula el que se perdió.
+
+**La regla.** Llega a `/refresh` un token que **ya fue rotado** (tiene `reemplazado_por`):
+
+- Se aplica la gracia si se cumplen **las dos**:
+  - **a)** la rotación fue hace **30 s o menos**: `now() - viejo.rotado_en <=
+    REFRESH_CLIENTE_GRACIA_SEGUNDOS`, medido con el reloj de la base;
+  - **b)** su reemplazo **no se ha usado**: el reemplazo no tiene `reemplazado_por` y no
+    está revocado (`revocado_en IS NULL`).
+
+  Entonces:
+  1. se **revoca el reemplazo** (`revocado_en = now()`): el cliente nunca lo recibió;
+  2. se emite un par **nuevo** en la **misma familia**, con su vida completa de 30 días;
+  3. el viejo queda con `reemplazado_por` apuntando al **nuevo**. Su `rotado_en` **no se
+     toca**: la ventana se cuenta desde la **primera** rotación, así que reintentar no la
+     alarga.
+  4. Responde **200** normal, igual que un refresh cualquiera.
+- **Cualquier otro reuso** → se **revoca toda la familia** y **401** `sesion_revocada`:
+  - pasaron más de 30 s desde la rotación;
+  - el reemplazo **ya se usó** (ya rotó a su vez, o fue revocado);
+  - el token llegó **revocado** (`revocado_en` puesto: logout, familia ya revocada o
+    reemplazo anulado por una gracia anterior), tenga o no `reemplazado_por`.
+
+**El orden completo** en `/refresh`, **en una sola transacción**:
+
+1. Formato del cuerpo → si no, **400** `cuerpo_invalido`.
+2. `SELECT ... FROM refresh_tokens_cliente WHERE hash = $1::char(64) FOR UPDATE`. No existe →
+   **401** `refresh_invalido`.
+3. Vencido (`expira_en <= now()`) → **401** `refresh_invalido`. No revoca nada: un token
+   vencido ya no sirve para nada.
+4. Revocado (`revocado_en IS NOT NULL`) → revocar la familia, **401** `sesion_revocada`.
+5. Rotado (`reemplazado_por IS NOT NULL`) → bloquear también el reemplazo (`FOR UPDATE`,
+   siempre en el orden viejo → nuevo) y aplicar la regla de gracia de arriba.
+6. Vigente → rotación normal: insertar el nuevo y marcar el viejo con `reemplazado_por` y
+   `rotado_en = now()`.
+
+El `FOR UPDATE` sobre la fila del token **serializa dos refresh simultáneos con el mismo
+token**: el segundo espera al primero y, cuando sigue, ya ve el token rotado. **Nunca quedan
+dos ramas vivas**: si el segundo cae en la gracia, anula el reemplazo del primero y emite el
+suyo; en la familia queda **un solo** refresh token vigente.
+
+**El trade-off, aceptado:** un token **robado** sirve como mucho **30 s más** dentro de esa
+ventana: si el ladrón lo usa antes que el cliente legítimo y dentro de los 30 s de una
+rotación cuyo reemplazo no se ha usado, obtiene un par válido. Fuera de la ventana, o en
+cuanto el cliente legítimo use su token, el reuso revoca la familia como antes. Se puede
+apagar con `REFRESH_CLIENTE_GRACIA_SEGUNDOS=0`.
+
+**Lo que asume de la app:** hace **un solo refresh a la vez** (una promesa compartida: las
+peticiones que reciben 401 a la vez esperan el mismo refresh) y guarda el token nuevo **antes**
+de usarlo. Si mandara dos refresh en paralelo con el mismo token, el segundo anularía el token
+que devolvió el primero, y usar después ese token anulado revocaría la sesión.
+
+### Perfil
+
+| Método y ruta | Auth | Cuerpo | Respuesta |
+|---|---|---|---|
+| `GET /api/v1/clientes/yo` | cliente | — | **200** `{ cliente }` |
+| `PATCH /api/v1/clientes/yo` | cliente | `{ nombre?, telefono? }` (zod `.strict()`, al menos uno) | **200** `{ cliente }` · 400 `cuerpo_invalido` |
+
+El cliente sale del JWT (`sub`); no hay `:id` en la ruta.
+
+### Direcciones
+
+| Método y ruta | Auth | Respuesta |
+|---|---|---|
+| `GET /api/v1/clientes/yo/direcciones` | cliente | **200** `{ direcciones }` (la principal primero) |
+| `POST /api/v1/clientes/yo/direcciones` | cliente | **201** `{ direccion }` |
+| `PATCH /api/v1/clientes/yo/direcciones/:id` | cliente | **200** `{ direccion }` |
+| `DELETE /api/v1/clientes/yo/direcciones/:id` | cliente | **204** |
+
+- Campos: `direccion` (obligatorio), `barrio` (obligatorio), `referencia?`, `lat?`, `lng?`
+  (los dos o ninguno; rango válido), `principal` (booleano).
+- **Una sola principal por cliente**: marcar una como `principal: true` desmarca la anterior
+  en la misma transacción. La primera dirección de un cliente nace principal.
+- **404** si `:id` no existe **o no es del cliente** (no se distingue, para no revelar
+  direcciones ajenas). 400 `cuerpo_invalido` con zod `.strict()`.
+
+### Zonas de entrega
+
+| Método y ruta | Auth | Respuesta |
+|---|---|---|
+| `GET /api/v1/zonas` | **pública** | **200** `{ zonas: [{ id_zona, nombre, barrios, costo_envio, tiempo_estimado_min }] }`, **solo las activas** |
+| `GET /api/v1/zonas/cotizar?id_direccion=N` | cliente | **200** `{ zona: { id_zona, nombre, tiempo_estimado_min }, costo_envio }` · **422** `fuera_de_cobertura` · 404 si la dirección no es del cliente |
+
+`costo_envio` es un número JSON en pesos, como el resto de montos del panel; `barrios` es una
+lista de textos.
+
+**Cotizar compara barrios normalizados contra normalizados**, con la regla de la **base**
+(`normalizar_barrio(text)`, ver [Lo que necesita la base](#lo-que-necesita-la-base-p-23)), no
+con una regla propia del backend ni de la app: `direcciones.barrio` normalizado contra cada
+elemento normalizado de `zonas_envio.barrios`. Así `"  Los   Álamos "` y `"los alamos"` son el
+mismo barrio en la app, en la API y en la base. La app puede normalizar para mostrar o
+sugerir, pero quien decide la cobertura es la base.
+
+### Datos personales
+
+- **Quién los lee:** `nombre`, `email`, `telefono` y las **direcciones** de un cliente solo los
+  lee **el propio cliente** (las rutas `/api/v1/clientes/yo...`) y el **admin**. Ningún otro
+  rol (`mesero`, `cajero`, `cocina`, `repartidor`) tiene una ruta que liste clientes ni sus
+  direcciones.
+- **El repartidor (D-20)** ve solo la dirección **copiada** en `pedidos_domicilio` de **sus**
+  entregas, no el perfil del cliente ni sus otras direcciones.
+- **Respaldos:** estos datos van en los respaldos de la base (los de Roberto,
+  `infra/scripts/respaldo.sh`, ver `docs/despliegue.md` § *Respaldos de la base*), así que se
+  rigen por esas mismas reglas de acceso y retención.
+- **Nunca en logs:** ni el cuerpo de las peticiones de clientes, ni el perfil, ni direcciones,
+  ni contraseñas o tokens. Un error se registra con su código y la ruta, no con los datos.
+
+### Límites de las rutas de clientes
+
+Además del global (2000 / minuto por IP, compartido entre `/api` y `/api/v1`), cada ruta de
+autenticación tiene **dos** contadores independientes. El principal cuenta por la
+**cuenta** (email o token); el de IP es un **freno de abuso alto**, porque muchos clientes
+legítimos comparten IP (el wifi del restaurante, una universidad, el NAT del operador móvil).
+Superar cualquiera de los dos da **429** `demasiadas_peticiones` con `Retry-After`.
+
+| Ruta | Contador principal (por defecto) | Freno por IP (por defecto) | Qué cuenta |
+|---|---|---|---|
+| `POST .../registro` | **email normalizado**: 5 por hora | 100 por hora | Todos los intentos |
+| `POST .../login` | **email normalizado**: 10 por 15 min | 200 por 15 min | Solo los **fallidos**, como el login del personal |
+| `POST .../refresh` y `.../logout` | **hash del `refresh_token`**: 10 por minuto | 600 por minuto | Todos los intentos |
+
+- **Email normalizado:** `trim()` y minúsculas, el mismo valor que se busca en
+  `lower(email)`. Si el cuerpo no trae un `email` de texto, solo cuenta el freno por IP (y la
+  validación responde 400).
+- **Hash del `refresh_token`:** SHA-256, el mismo que se guarda en la base: el contador nunca
+  guarda el token. Una app sana refresca una vez cada 15 min; 10 por minuto solo frena a
+  quien reintenta en bucle. Logout comparte el contador de refresh.
+- **El riesgo de contar por email**, aceptado: quien conoce un email puede gastar los 10
+  fallos y bloquear el login de esa cuenta hasta 15 min. A cambio, el wifi de un local no
+  bloquea a todos sus clientes porque uno se equivocó de clave, y probar claves contra una
+  cuenta queda frenado sin importar desde cuántas IP se haga.
+- Mismo almacén que los límites de hoy (`limites.middleware.js`) y se desactivan solos dentro
+  de las pruebas.
+
+**Variables sugeridas** (no existen todavía; se implementan en la parte B):
+
+| Variable | Por defecto |
+|---|---|
+| `RATE_LIMIT_CLIENTES_REGISTRO_EMAIL_MAX` | `5` |
+| `RATE_LIMIT_CLIENTES_REGISTRO_IP_MAX` | `100` |
+| `RATE_LIMIT_CLIENTES_REGISTRO_VENTANA_MS` | `3600000` (1 h) |
+| `RATE_LIMIT_CLIENTES_LOGIN_EMAIL_MAX` | `10` |
+| `RATE_LIMIT_CLIENTES_LOGIN_IP_MAX` | `200` |
+| `RATE_LIMIT_CLIENTES_LOGIN_VENTANA_MS` | `900000` (15 min) |
+| `RATE_LIMIT_CLIENTES_REFRESH_TOKEN_MAX` | `10` |
+| `RATE_LIMIT_CLIENTES_REFRESH_IP_MAX` | `600` |
+| `RATE_LIMIT_CLIENTES_REFRESH_VENTANA_MS` | `60000` (1 min) |
+
+### Errores de las rutas de clientes
+
+En las rutas de clientes (`/api/v1/auth/clientes/...`, `/api/v1/clientes/...`,
+`/api/v1/zonas...`) **todo** error responde `{ "error": "...", "motivo": "..." }`, **también
+los genéricos**. La app decide por `motivo`; `error` es texto para mostrar o registrar y
+puede cambiar.
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **400** | `cuerpo_invalido`, o el específico (`nombre_invalido`, `email_invalido`, `clave_corta`, `clave_larga`, `telefono_invalido`) | Cuerpo o query inválidos |
+| **401** | `no_autenticado` | Ruta de cliente sin JWT, con JWT inválido o vencido. La app renueva con `/refresh` y reintenta |
+| **401** | `credenciales_invalidas` | Login: email o clave incorrectos (el mismo para los dos) |
+| **401** | `sesion_revocada` | Refresh: reuso fuera de la gracia o token revocado; la familia queda revocada |
+| **401** | `refresh_invalido` | Refresh: el token no existe o venció |
+| **403** | `prohibido` | JWT válido pero de otro rol (staff o comensal) |
+| **404** | `no_encontrado` | El recurso no existe o no es del cliente (no se distingue); también una ruta que no existe |
+| **409** | `email_registrado` | Registro con un email que ya tiene cuenta |
+| **422** | `fuera_de_cobertura` | Cotizar: la dirección no cae en ninguna zona activa |
+| **429** | `demasiadas_peticiones` | Algún límite, con cabecera `Retry-After` en segundos |
+| **500** | `error_interno` | Cualquier fallo no previsto. El detalle va al log del servidor, nunca a la respuesta |
+
+**Hoy no es así en todo:** el **404** de ruta inexistente (`server.js`), el **429** de los
+límites (`limites.middleware.js`) y el **500** del manejador global responden solo
+`{ error }`, igual que el 401/403 de `requireAuth`/`requireRole`. En la **parte B** se les
+agrega `motivo` (y las rutas de clientes usan su propio middleware de sesión con
+`no_autenticado` y `prohibido`). Es **compatible hacia atrás**: solo se agrega un campo, y
+la PWA, el panel y el KDS siguen leyendo `error` como hasta ahora.
+
+### Diferencias con `app-movil/src/services/authService.js`
+
+Lo que Juan debe ajustar en la app para usar este contrato (el archivo hoy solo define los
+contratos esperados y no llama a nada):
+
+| Hoy en la app | En el contrato |
+|---|---|
+| `POST /api/auth/clientes/registro`, `/login`, `/refresh`, `/logout` | Prefijo **`/api/v1`**: `POST /api/v1/auth/clientes/...` |
+| Respuesta `{ usuario, token, refreshToken }` | `{ cliente, token, refresh_token, expira_en }` (**`usuario` → `cliente`**, **`refreshToken` → `refresh_token`**, y llega **`expira_en`**) |
+| `refrescarToken(refreshToken)` → `{ token, refreshToken? }` | Cuerpo `{ refresh_token }` → `{ token, refresh_token, expira_en }`: el refresh **siempre** rota, así que hay que **guardar el nuevo** cada vez. Si la respuesta se pierde, reenviar el **mismo** token viejo **antes de 30 s** funciona (ventana de gracia: llega un par nuevo); pasado eso, o si el token nuevo ya se usó, el viejo revoca la sesión con 401 `sesion_revocada`. **Un solo refresh a la vez** (una promesa compartida) |
+| `cerrarSesion(token)` | `POST /api/v1/auth/clientes/logout` con cuerpo **`{ refresh_token }`** y **sin `Authorization`** (funciona aunque el JWT haya vencido); responde **204** sin cuerpo siempre que el cuerpo sea válido, aunque el token ya no sirva. Después, borrar `token` y `refresh_token` del almacenamiento |
+| `registrarUsuario({ nombre, correo, password })` e `iniciarSesion({ correo, password })` | **`correo` → `email`** (como el login del personal): `{ nombre, email, password, telefono? }` y `{ email, password }`; el objeto `cliente` también trae `email` (y `verificado`). La clave necesita **8 caracteres** como mínimo y **72 bytes** como máximo |
+| Errores sin motivo | **Todo** error de estas rutas trae `{ error, motivo }`, también 404, 429 y 500: decidir siempre por `motivo` ([la tabla](#errores-de-las-rutas-de-clientes)). Ante un 429 `demasiadas_peticiones`, esperar lo que diga `Retry-After` |
+| Sin manejo de vencimiento | El `token` vive **15 min**: renovar con `/refresh` ante un 401 `no_autenticado` o antes de `expira_en`. Con `sesion_revocada` o `refresh_invalido`, volver al login |
+
+### Lo que necesita la base (P-23)
+
+**Propuesta para Jarrison, no un script.** Las tablas y columnas son las del **plan 5.5**
+(`clientes`, `direcciones`, `zonas_envio`). Lo marcado como **sugerido, además del plan** son
+extras de este contrato (columnas, tipos e índices) que Jarrison puede tomar o no. La tabla de
+**refresh tokens es NUEVA**: la P-23 no la tiene.
+
+```sql
+-- clientes  (plan 5.5: id_cliente, nombre, email UNIQUE, telefono, password_hash, verificado, creado_en)
+id_cliente      SERIAL PRIMARY KEY
+nombre          VARCHAR(80)  NOT NULL
+email           VARCHAR(254) NOT NULL          -- UNIQUE sobre lower(email)
+telefono        VARCHAR(20)  NULL
+password_hash   VARCHAR(60)  NOT NULL          -- bcrypt costo 10 ($2b$10$...)
+verificado      BOOLEAN      NOT NULL DEFAULT FALSE
+creado_en       TIMESTAMPTZ  NOT NULL DEFAULT now()
+activo          BOOLEAN      NOT NULL DEFAULT TRUE    -- sugerido, además del plan
+actualizado_en  TIMESTAMPTZ  NOT NULL DEFAULT now()   -- sugerido, además del plan
+-- índice: UNIQUE (lower(email))  (el plan pide email UNIQUE; sobre lower() es lo sugerido)
+
+-- direcciones  (plan 5.5: id_direccion, id_cliente, direccion, barrio, referencia, lat, lng, principal)
+id_direccion    SERIAL PRIMARY KEY
+id_cliente      INTEGER NOT NULL REFERENCES clientes(id_cliente) ON DELETE CASCADE
+direccion       VARCHAR(200) NOT NULL
+barrio          VARCHAR(80)  NOT NULL
+referencia      VARCHAR(200) NULL
+lat             NUMERIC(9,6) NULL              -- sugerido: CHECK entre -90 y 90; lat y lng los dos o ninguno
+lng             NUMERIC(9,6) NULL              -- sugerido: CHECK entre -180 y 180
+principal       BOOLEAN NOT NULL DEFAULT FALSE
+creado_en       TIMESTAMPTZ NOT NULL DEFAULT now()   -- sugerido, además del plan
+-- índices sugeridos: (id_cliente); UNIQUE (id_cliente) WHERE principal  -> una sola principal
+
+-- zonas_envio  (plan 5.5: id_zona, nombre, barrios TEXT[], costo_envio, tiempo_estimado_min, activa;
+--               primera versión por barrios, sin mapa)
+id_zona              SERIAL PRIMARY KEY
+nombre               VARCHAR(80) NOT NULL UNIQUE
+barrios              TEXT[] NOT NULL DEFAULT '{}'
+costo_envio          NUMERIC(10,2) NOT NULL CHECK (costo_envio >= 0)
+tiempo_estimado_min  INTEGER NOT NULL CHECK (tiempo_estimado_min > 0)
+activa               BOOLEAN NOT NULL DEFAULT TRUE
+-- índices sugeridos: (activa); GIN sobre los barrios NORMALIZADOS (ver normalizar_barrio abajo)
+
+-- refresh_tokens_cliente  (NUEVA: la P-23 no la tiene)
+id               BIGSERIAL PRIMARY KEY
+id_cliente       INTEGER NOT NULL REFERENCES clientes(id_cliente) ON DELETE CASCADE
+hash             CHAR(64) NOT NULL UNIQUE      -- SHA-256 en hex del refresh token; nunca el valor
+familia          UUID NOT NULL                 -- la del primer login; se hereda al rotar
+creado_en        TIMESTAMPTZ NOT NULL DEFAULT now()
+expira_en        TIMESTAMPTZ NOT NULL
+rotado_en        TIMESTAMPTZ NULL              -- cuándo se rotó por PRIMERA vez: mide la ventana de gracia
+reemplazado_por  BIGINT NULL REFERENCES refresh_tokens_cliente(id)  -- el reemplazo vigente (la gracia lo cambia)
+revocado_en      TIMESTAMPTZ NULL              -- logout, reuso (toda la familia) o reemplazo anulado por la gracia;
+                                               -- la rotación normal NO lo pone
+-- sugerido: CHECK ((rotado_en IS NULL) = (reemplazado_por IS NULL))
+-- índices: UNIQUE (hash); (familia); (id_cliente); (expira_en) para la limpieza de vencidos
+```
+
+Cómo se usa la tabla de refresh tokens: buscar por `hash` (el UNIQUE es el índice de la
+búsqueda) con `FOR UPDATE`.
+
+- **Rotación normal**, en una transacción: insertar el nuevo con la misma `familia` y marcar
+  el viejo con `reemplazado_por = <nuevo>` y `rotado_en = now()`.
+- **La ventana de gracia usa `rotado_en`**, una columna propia, y no `revocado_en`: así
+  `revocado_en` significa solo "revocado a propósito" (logout, reuso, reemplazo anulado), y
+  un token rotado se distingue de uno revocado sin mirar dos columnas a la vez. `rotado_en`
+  no se mueve cuando la gracia cambia `reemplazado_por`, así que la ventana no se alarga
+  reintentando.
+- **Reuso**: `UPDATE ... SET revocado_en = now() WHERE familia = $1::uuid AND revocado_en IS
+  NULL` y 401 `sesion_revocada`.
+- **Logout**: `revocado_en = now()` solo en la fila de ese `hash`, si aún no lo tenía.
+
+La regla completa está en [la ventana de gracia del refresh](#la-ventana-de-gracia-del-refresh).
+
+**Barrios: la normalización vive en la base** (sugerido). Para que la app y la API coincidan,
+una sola regla estable, definida en la base:
+
+- Una función `normalizar_barrio(text) RETURNS text IMMUTABLE`: **sin tildes** (`unaccent`),
+  **minúsculas**, espacios **recortados** en los extremos y los de en medio **colapsados** a
+  uno (`"  Los   Álamos "` → `"los alamos"`).
+- Aplicada a los **dos lados**: `direcciones.barrio` y cada elemento de `zonas_envio.barrios`.
+  Dos formas de guardarlo, a elección de Jarrison: un **índice de expresión** (y un GIN sobre
+  el arreglo normalizado), o una **columna normalizada** (`barrio_normalizado`, y
+  `barrios_normalizados TEXT[]` en zonas) que mantiene un trigger o una columna generada.
+- **Cotizar compara normalizado contra normalizado**; el backend no reimplementa la regla, la
+  llama. (Si se usa `unaccent` en una función `IMMUTABLE`, conviene fijar el diccionario,
+  `unaccent('unaccent', ...)`, para que el índice no dependa del `search_path`.)
+
+**Auditoría** (sugerido). Hoy `usuarios` se audita con `fn_tr_auditar_cambios`, que guarda la
+**fila completa** (`to_jsonb(NEW)` / `to_jsonb(OLD)`) en `auditoria_cambios`, **hash de la
+contraseña incluido**. Para los clientes, no repetir eso:
+
+- `clientes`: **o no auditarla**, **o** auditarla **sin** `password_hash` y sin lo que no haga
+  falta para saber qué cambió (p. ej. guardar solo `id_cliente`, la operación y los nombres de
+  las columnas cambiadas, o la fila sin `password_hash`, `email` ni `telefono`).
+- `refresh_tokens_cliente`: el `hash` del token **nunca** va a la auditoría. Es una tabla de
+  mucho movimiento (cada refresh inserta y actualiza); lo razonable es no auditarla y dejar el
+  rastro en sus propias columnas (`creado_en`, `rotado_en`, `revocado_en`).
+- `direcciones`: los mismos datos personales; si se audita, sin la dirección en claro.
 
 ---
 

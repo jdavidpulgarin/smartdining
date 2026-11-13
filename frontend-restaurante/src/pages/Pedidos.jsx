@@ -139,6 +139,15 @@ export function Pedidos() {
   // Escuchar eventos en vivo desde el socket-server / backend
   useSocketListener('order:status', (data) => {
     if (statusVisto(data?.eventId)) return
+    // Un pedido cancelado ya no es una comanda activa: sale de la lista (y del
+    // detalle, si estaba abierto), igual que en TablesContext. Antes se quedaba
+    // con backendEstadoAUI('cancelado'), que cae en 'Pendiente', hasta recargar.
+    if (data?.id_pedido && data.estado === 'cancelado') {
+      setOrdersList((prev) => prev.filter((ord) => ord.rawId !== data.id_pedido))
+      setSelectedOrder((sel) => (sel?.rawId === data.id_pedido ? null : sel))
+      showToast(`Pedido ${data.codigo_pedido || data.id_pedido} cancelado`)
+      return
+    }
     if (data?.id_pedido) {
       setOrdersList((prev) =>
         prev.map((ord) =>

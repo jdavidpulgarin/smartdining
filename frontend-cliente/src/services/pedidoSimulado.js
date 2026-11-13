@@ -5,6 +5,7 @@ import { obtenerSesion } from '../utils/sesion';
 export const CLAVE_PEDIDOS_SIMULADOS = 'smartdining_pedidos_simulados';
 export const CLAVE_SIM_PEDIDO = 'smartdining_sim_pedido';
 export const CLAVE_SIM_QUITAR = 'smartdining_sim_quitar';
+export const CLAVE_SIM_CANCELAR = 'smartdining_sim_cancelar';
 
 export const FALTANTES_SIMULADOS_DEFAULT = [
   { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
@@ -338,12 +339,127 @@ export async function cancelarItemSimulado(idPedido, idDetalle) {
   };
 }
 
+const ERRORES_SIM_CANCELAR = {
+  pedido_compartido: {
+    status: 409,
+    motivo: 'pedido_compartido',
+    mensaje: 'Hay platos de otras personas en este pedido. Pídele ayuda al mesero.',
+  },
+  no_cancelable: {
+    status: 409,
+    motivo: 'no_cancelable',
+    mensaje: 'La cocina ya empezó tu pedido; ya no se puede cancelar.',
+  },
+  pago_registrado: {
+    status: 409,
+    motivo: 'pago_registrado',
+    mensaje: 'Ya hay un pago registrado; pídele ayuda al mesero.',
+  },
+  pedido_ya_cancelado: {
+    status: 409,
+    motivo: 'pedido_ya_cancelado',
+    mensaje: 'El pedido ya fue cancelado',
+  },
+  no_es_tuyo: {
+    status: 403,
+    motivo: 'no_es_tuyo',
+    mensaje: 'Solo puedes cancelar pedidos de tu mesa',
+  },
+};
+
+/**
+ * Simula `POST /api/pedidos/:id/cancelar` en modo de prueba (solo DEV).
+ * Soporta errores forzados mediante `sessionStorage.getItem('smartdining_sim_cancelar')`.
+ *
+ * @param {number|string} idPedido
+ * @returns {Promise<{ pedido: object }>}
+ */
+export async function cancelarPedidoSimulado(idPedido) {
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+    let simCancelar = null;
+    try {
+      simCancelar = sessionStorage.getItem(CLAVE_SIM_CANCELAR);
+    } catch {
+      simCancelar = null;
+    }
+
+    if (simCancelar && ERRORES_SIM_CANCELAR[simCancelar]) {
+      throw new ErrorApi(ERRORES_SIM_CANCELAR[simCancelar]);
+    }
+  }
+
+  const lista = listarPedidosMesaSimulados(null);
+  const idxPedido = lista.findIndex(
+    (p) => String(p.id_pedido) === String(idPedido)
+  );
+  if (idxPedido === -1) {
+    throw new ErrorApi({
+      status: 404,
+      motivo: 'no_encontrado',
+      mensaje: 'Pedido no encontrado en esta mesa',
+    });
+  }
+
+  const pedido = lista[idxPedido];
+  if (String(pedido.estado || '').toLowerCase() === 'cancelado') {
+    throw new ErrorApi(ERRORES_SIM_CANCELAR.pedido_ya_cancelado);
+  }
+
+  const rawItems = Array.isArray(pedido.detalles)
+    ? pedido.detalles
+    : Array.isArray(pedido.items)
+      ? pedido.items
+      : [];
+
+  const itemsActualizados = rawItems.map((d) => {
+    const platoNombre = d.plato_nombre || d.nombre || 'Plato';
+    return {
+      ...d,
+      plato_nombre: platoNombre,
+      estado_item: 'cancelado',
+      origen_cancelacion: 'comensal',
+      ingredientes: Array.isArray(d.ingredientes) ? d.ingredientes : [],
+    };
+  });
+
+  const pedidoGuardado = {
+    ...pedido,
+    estado: 'cancelado',
+    cancelado_por: 'comensal',
+    total: 0,
+    detalles: itemsActualizados,
+    items: itemsActualizados,
+  };
+
+  try {
+    const nuevaLista = lista.map((p, i) => (i === idxPedido ? pedidoGuardado : p));
+    sessionStorage.setItem(CLAVE_PEDIDOS_SIMULADOS, JSON.stringify(nuevaLista));
+    sessionStorage.removeItem('smartdining_cuenta_simulada');
+  } catch {
+    // Ignorar errores de almacenamiento
+  }
+
+  return {
+    pedido: {
+      id_pedido: pedido.id_pedido,
+      codigo_pedido: pedido.codigo_pedido,
+      estado: 'cancelado',
+      total: 0,
+      items: itemsActualizados,
+    },
+  };
+}
+
 export default {
   CLAVE_PEDIDOS_SIMULADOS,
   CLAVE_SIM_PEDIDO,
   CLAVE_SIM_QUITAR,
+  CLAVE_SIM_CANCELAR,
   FALTANTES_SIMULADOS_DEFAULT,
   listarPedidosMesaSimulados,
   crearPedidoSimulado,
   cancelarItemSimulado,
+  cancelarPedidoSimulado,
 };

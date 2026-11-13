@@ -5,7 +5,9 @@ import {
   incorporarPedido,
   reemplazarPedido,
   puedeQuitar,
+  puedeCancelarPedido,
   accionErrorQuitar,
+  accionErrorCancelarPedido,
   etiquetaItemCancelado,
   mensajeEstadoTarjeta,
   haceCuanto,
@@ -617,11 +619,11 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
       ],
     };
     expect(mensajeEstadoTarjeta(pedido, 5)).toBe(
-      'Quitaste todos los platos de este pedido.'
+      'Cancelaste este pedido.'
     );
   });
 
-  it('dice "Cancelado por el restaurante" si lo cancelo el restaurante por order:status o por origen personal', () => {
+  it('dice "El restaurante canceló este pedido." si lo cancelo el restaurante por order:status o por origen personal', () => {
     const porOrderStatus = aplicarCambioEstado(
       [
         {
@@ -634,7 +636,7 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
       { id_pedido: 2, estado: 'cancelado' }
     )[0];
     expect(mensajeEstadoTarjeta(porOrderStatus, 5)).toBe(
-      'Cancelado por el restaurante'
+      'El restaurante canceló este pedido.'
     );
 
     const porOrigenPersonal = {
@@ -646,7 +648,7 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
       ],
     };
     expect(mensajeEstadoTarjeta(porOrigenPersonal, 5)).toBe(
-      'Cancelado por el restaurante'
+      'El restaurante canceló este pedido.'
     );
   });
 
@@ -676,7 +678,7 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
     );
   });
 
-  it('conserva "Quitaste todos los platos de este pedido." si el evento order:status trae origen comensal', () => {
+  it('conserva "Cancelaste este pedido." si el evento order:status trae origen comensal', () => {
     const porOrderStatusComensal = aplicarCambioEstado(
       [
         {
@@ -689,11 +691,11 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
       { id_pedido: 8, estado: 'cancelado', origen: 'comensal' }
     )[0];
     expect(mensajeEstadoTarjeta(porOrderStatusComensal, 5)).toBe(
-      'Quitaste todos los platos de este pedido.'
+      'Cancelaste este pedido.'
     );
   });
 
-  it('conserva "Quitaste todos los platos de este pedido." aunque llegue despues order:status cancelado', () => {
+  it('conserva "Cancelaste este pedido." aunque llegue despues order:status cancelado', () => {
     const trasItem = aplicarItemCancelado(
       [
         {
@@ -710,7 +712,7 @@ describe('mensajeEstadoTarjeta (J-14)', () => {
       estado: 'cancelado',
     });
     expect(mensajeEstadoTarjeta(trasOrderStatus[0], 5)).toBe(
-      'Quitaste todos los platos de este pedido.'
+      'Cancelaste este pedido.'
     );
   });
 });
@@ -855,5 +857,146 @@ describe('incorporarPedido y conteo en vivo de Mis pedidos (J-14)', () => {
     const idPedidoUsado = itemAConfirmar.id_pedido ?? pedidoActivoActual.id_pedido;
     expect(idPedidoUsado).toBe(42);
     expect(idPedidoUsado).not.toBe(pedidoActivoActual.id_pedido);
+  });
+
+  describe('puedeCancelarPedido (D-12)', () => {
+    it('true solo si pedido en recibido, tiene lineas vivas y todas son pendientes y del comensal', () => {
+      const pedidoValido = {
+        id_pedido: 101,
+        estado: 'recibido',
+        detalles: [
+          { id_detalle: 1, comensal: 'Ana', estado_item: 'pendiente' },
+          { id_detalle: 2, comensal: 'Ana', estado_item: 'pendiente' },
+        ],
+      };
+      expect(puedeCancelarPedido(pedidoValido, { yo: 'Ana' })).toBe(true);
+      expect(puedeCancelarPedido(pedidoValido, { yo: 'ana' })).toBe(true);
+      expect(puedeCancelarPedido(pedidoValido, { yo: 'Beto' })).toBe(false);
+    });
+
+    it('false si el pedido no esta en recibido', () => {
+      const pedidoCocina = {
+        id_pedido: 102,
+        estado: 'en_preparacion',
+        detalles: [{ id_detalle: 3, comensal: 'Ana', estado_item: 'pendiente' }],
+      };
+      expect(puedeCancelarPedido(pedidoCocina, { yo: 'Ana' })).toBe(false);
+    });
+
+    it('false si no tiene lineas vivas (todas canceladas o vacio)', () => {
+      const pedidoSinLineas = {
+        id_pedido: 103,
+        estado: 'recibido',
+        detalles: [],
+      };
+      expect(puedeCancelarPedido(pedidoSinLineas, { yo: 'Ana' })).toBe(false);
+
+      const pedidoTodasCanceladas = {
+        id_pedido: 104,
+        estado: 'recibido',
+        detalles: [{ id_detalle: 4, comensal: 'Ana', estado_item: 'cancelado' }],
+      };
+      expect(puedeCancelarPedido(pedidoTodasCanceladas, { yo: 'Ana' })).toBe(false);
+    });
+
+    it('ignora lineas canceladas al evaluar si las vivas son pendientes y mias', () => {
+      const pedidoMixto = {
+        id_pedido: 105,
+        estado: 'recibido',
+        detalles: [
+          { id_detalle: 5, comensal: 'Beto', estado_item: 'cancelado' },
+          { id_detalle: 6, comensal: 'Ana', estado_item: 'pendiente' },
+        ],
+      };
+      expect(puedeCancelarPedido(pedidoMixto, { yo: 'Ana' })).toBe(true);
+    });
+
+    it('false si alguna linea viva no es de Ana o no esta pendiente', () => {
+      const compartido = {
+        id_pedido: 106,
+        estado: 'recibido',
+        detalles: [
+          { id_detalle: 7, comensal: 'Ana', estado_item: 'pendiente' },
+          { id_detalle: 8, comensal: 'Beto', estado_item: 'pendiente' },
+        ],
+      };
+      expect(puedeCancelarPedido(compartido, { yo: 'Ana' })).toBe(false);
+
+      const unaEnPreparacion = {
+        id_pedido: 107,
+        estado: 'recibido',
+        detalles: [
+          { id_detalle: 9, comensal: 'Ana', estado_item: 'pendiente' },
+          { id_detalle: 10, comensal: 'Ana', estado_item: 'en_preparacion' },
+        ],
+      };
+      expect(puedeCancelarPedido(unaEnPreparacion, { yo: 'Ana' })).toBe(false);
+    });
+  });
+
+  describe('accionErrorCancelarPedido (D-12)', () => {
+    it('pedido_ya_cancelado -> silencioso con recargar: true', () => {
+      const r = accionErrorCancelarPedido({ motivo: 'pedido_ya_cancelado' });
+      expect(r).toEqual({ tipo: 'silencioso', mensaje: null, recargar: true });
+    });
+
+    it('pedido_compartido -> mensaje de otras personas y recargar: false', () => {
+      const r = accionErrorCancelarPedido({ motivo: 'pedido_compartido' });
+      expect(r).toEqual({
+        tipo: 'pedido_compartido',
+        mensaje: 'Hay platos de otras personas en este pedido. Pídele ayuda al mesero.',
+        recargar: false,
+      });
+    });
+
+    it('no_cancelable -> mensaje de cocina y recargar: true', () => {
+      const r = accionErrorCancelarPedido({ motivo: 'no_cancelable' });
+      expect(r).toEqual({
+        tipo: 'no_cancelable',
+        mensaje: 'La cocina ya empezó tu pedido; ya no se puede cancelar.',
+        recargar: true,
+      });
+    });
+
+    it('pago_registrado -> mensaje de pago y recargar: false', () => {
+      const r = accionErrorCancelarPedido({ motivo: 'pago_registrado' });
+      expect(r).toEqual({
+        tipo: 'pago_registrado',
+        mensaje: 'Ya hay un pago registrado; pídele ayuda al mesero.',
+        recargar: false,
+      });
+    });
+
+    it('no_es_tuyo / no_encontrado (o 403 / 404) -> mensaje no encontramos y recargar: true', () => {
+      expect(accionErrorCancelarPedido({ motivo: 'no_es_tuyo' })).toEqual({
+        tipo: 'no_encontrado',
+        mensaje: 'No encontramos ese pedido en tu mesa.',
+        recargar: true,
+      });
+      expect(accionErrorCancelarPedido({ motivo: 'no_encontrado' })).toEqual({
+        tipo: 'no_encontrado',
+        mensaje: 'No encontramos ese pedido en tu mesa.',
+        recargar: true,
+      });
+      expect(accionErrorCancelarPedido({ status: 403 })).toEqual({
+        tipo: 'no_encontrado',
+        mensaje: 'No encontramos ese pedido en tu mesa.',
+        recargar: true,
+      });
+      expect(accionErrorCancelarPedido({ status: 404 })).toEqual({
+        tipo: 'no_encontrado',
+        mensaje: 'No encontramos ese pedido en tu mesa.',
+        recargar: true,
+      });
+    });
+
+    it('otro error o red -> mensaje generico y recargar: false', () => {
+      const r = accionErrorCancelarPedido(new Error('Fallo de red'));
+      expect(r).toEqual({
+        tipo: 'error',
+        mensaje: 'No pudimos cancelar el pedido. Intenta de nuevo.',
+        recargar: false,
+      });
+    });
   });
 });

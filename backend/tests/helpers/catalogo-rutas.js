@@ -369,9 +369,10 @@ const TABLA = [
   },
   {
     metodo: 'POST',
+    // El personal, como siempre; D-12: el comensal, su pedido completo.
     patron: '/api/pedidos/:id/cancelar',
     url: '/api/pedidos/87/cancelar',
-    roles: ['admin', 'cajero', 'mesero'],
+    roles: ['admin', 'cajero', 'mesero', 'comensal'],
     cuerpo: {},
   },
   {
