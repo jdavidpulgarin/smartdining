@@ -1,173 +1,462 @@
-# 📖 SmartDining — Manual Operativo del Personal
+# Manual del Personal — Panel del Restaurante
 
-**Proyecto:** SmartDining - Sistema Integral de Digitalización de Salón, Cocina y Facturación  
-**Autor:** Jarrinson Pulgarin (Líder de Base de Datos y Frontend Restaurante)  
-**Versión:** 1.0  
-**Audiencia:** Administradores, Meseros, Cajeros y Personal de Cocina  
+**Versión 2.** Para el administrador, el cajero y el mesero.
+La cocina trabaja en su propia pantalla: ver [manual-cocina.md](manual-cocina.md).
 
 ---
 
-## 🎯 1. Introducción y Arquitectura Operativa
+## 1. Para qué sirve el panel
 
-SmartDining es una solución web de alta disponibilidad diseñada para optimizar los flujos de atención gastronómica en tiempo real. Conecta la experiencia del comensal desde su teléfono móvil (vía código QR dinámico), el panel de control del salón (`frontend-restaurante`), las pantallas táctiles de la cocina (`frontend-kds`) y la pasarela de cobros en caja.
+Desde el panel se atiende el salón: abres las mesas, ves los pedidos, cobras y
+administras la carta, el inventario y el personal.
 
-### Roles de Usuario y Control de Acceso (RBAC)
+El panel se actualiza solo. Cuando un cliente pide, cancela o paga, lo ves sin
+recargar la página.
 
-| Rol | Pantallas Autorizadas | Responsabilidad Principal |
-|---|---|---|
-| **Mesero** | `/mesas`, `/pedidos` | Gestión de sala, apertura/rotación de QR y atención de comandas. |
-| **Cajero** | `/caja`, `/pedidos` | Cobro de cuentas, pagos mixtos/parciales, emisión de recibos y cierre de mesas. |
-| **Cocina** | Pantalla KDS (`frontend-kds`), `/pedidos` | Preparación en tiempo real, control de tiempos y despacho de platillos. |
-| **Administrador** | `/`, `/mesas`, `/pedidos`, `/caja`, `/menu`, `/reportes` | Control total del sistema, configuración de catálogo, constructor de platos y auditoría financiera. |
+Cada rol ve solo lo que le toca:
 
----
+| Rol | Lo que usa |
+|---|---|
+| **Administrador** | Todo: Mesas, Pedidos, Caja, Menú, Reportes, Inventario y Configuración |
+| **Cajero** | Mesas, Pedidos y Caja. El Menú, solo para consultar la carta |
+| **Mesero** | Mesas, Pedidos y Tomar pedido. El Menú, solo para consultar la carta |
+| **Cocina** | Nada del panel: trabaja en la pantalla de cocina (ver 2.2) |
 
-## 🍽️ 2. Guía Operativa: Mesero (Gestión de Sala y Mesas)
-
-### 2.1 Vista General de Sala (`/mesas`)
-1. Inicie sesión con sus credenciales institucionales de rol `mesero`.
-2. Acceda a la pestaña **Mesas** en la barra lateral.
-3. El plano de sala muestra cada mesa identificada con su número, capacidad, ubicación y color de estado operativo:
-   - 🟢 **Disponible:** Mesa lista para recibir nuevos comensales.
-   - 🔵 **Ocupada:** Mesa con comensales activos y orden en proceso.
-   - 🟡 **Reservada:** Mesa apartada previamente.
-   - 🔴 **Mantenimiento / Bloqueada:** Mesa fuera de servicio.
-
-### 2.2 Rotación y Entrega del Código QR a Comensales
-1. Al sentarse nuevos clientes en la mesa, seleccione la tarjeta de la mesa.
-2. Haga clic en el botón **"Generar / Rotar QR"**.
-3. El sistema generará criptográficamente un nuevo token con versión incremental (`version_qr`), invalidando cualquier código QR anterior para prevenir accesos no autorizados fuera del restaurante.
-4. Muestre el código QR al cliente o imprímalo para que los comensales accedan al menú digital desde su navegador móvil.
-
-### 2.3 Monitoreo de Comandas en Salón (`/pedidos`)
-1. Ingrese a la vista de **Pedidos** para visualizar el estado de cada comanda:
-   - `recibido` &rarr; La orden fue emitida por los comensales o el mesero.
-   - `en_preparacion` &rarr; La cocina ha tomado la orden en la pantalla KDS.
-   - `listo` &rarr; El platillo está preparado en barra de despacho (se recibe alerta sonora o visual).
-   - `entregado` &rarr; El mesero ha llevado los platillos a la mesa física.
-2. Si un cliente solicita apoyo para ordenar directamente, el mesero puede crear o modificar la comanda seleccionando la mesa y agregando los ítems correspondientes.
+Crear, editar o apagar platos, ver los Reportes, el Inventario y la
+Configuración son del administrador. Encender o apagar un plato también lo
+puede hacer la cocina desde su pantalla.
 
 ---
 
-## 💳 3. Guía Operativa: Cajero (Facturación y Liquidación)
+## 2. Entrar y salir
 
-### 3.1 Consulta de Cuentas por Cobrar (`/caja`)
-1. Ingrese con credenciales de `cajero` o `admin`.
-2. En el panel **Caja**, la columna izquierda lista todas las mesas con cuentas abiertas y saldo pendiente.
-3. Al hacer clic sobre una mesa, el panel central desglosa la comanda consolidada:
-   - Ítems solicitados con cantidad y precio congelado.
-   - Recargos por ingredientes extra o personalizaciones de constructor.
-   - Historial de pagos parciales ya abonados por la mesa.
-   - **Total a pagar** y **Saldo restante**.
+### 2.1 Entrar
 
-### 3.2 Registro de Pagos
-El sistema admite tres métodos de pago certificados:
+![Pantalla para entrar](capturas-personal/01_login_1280x800.png)
 
-#### A. Pago en Efectivo
-1. Seleccione la pestaña **Efectivo**.
-2. Ingrese el monto entregado por el cliente en el campo **"Monto Recibido"**.
-3. El sistema calculará automáticamente el **Cambio / Vuelto** a entregar al cliente.
-4. Presione **"Confirmar Pago en Efectivo"**.
+Escribe tu correo y tu contraseña, y toca **Ingresar al Sistema**.
 
-#### B. Pago con Tarjeta (Datáfono)
-1. Seleccione la pestaña **Tarjeta**.
-2. Procese la transacción en el datáfono físico del restaurante.
-3. Ingrese en el campo **"Referencia de Transacción"** los últimos 4 dígitos o el número de aprobación del voucher.
-4. Presione **"Registrar Cobro con Tarjeta"**.
+- Si el correo o la contraseña están mal, la pantalla te lo dice.
+- Si lo intentas muchas veces seguidas con la contraseña mal, el panel te pide
+  esperar un momento antes de volver a intentar. Es una protección.
+- Si el administrador desactiva tu usuario, tu sesión se cierra y vuelves a esta
+  pantalla.
 
-#### C. Transferencia Bancaria
-1. Seleccione **Transferencia**.
-2. Verifique en la app bancaria del restaurante la acreditación del dinero.
-3. Ingrese el número de comprobante o referencia digital.
-4. Presione **"Registrar Transferencia"**.
+### 2.2 Si tu usuario es de cocina
 
-### 3.3 Pagos Divididos / Parciales
-Si los comensales solicitan pagar por separado:
-1. Active la opción **"Pago Parcial"**.
-2. Ingrese el monto específico que abonará el comensal actual.
-3. Confirme el pago; el estado de pago del pedido cambiará a `parcial`.
-4. El saldo restante quedará pendiente hasta que se cubra el 100% de la comanda.
-5. **Regla de liberación de mesa (H-03):** La mesa física se libera automáticamente cuando se cumplen simultáneamente ambas condiciones: el saldo total de la comanda queda cubierto a $0.00 (`pagado`) **Y** todos los platillos han sido servidos físicamente en la mesa (`entregado`). Si los comensales pagan por adelantado en caja mientras la cocina aún prepara sus pedidos, la mesa permanece `ocupada` y el código QR continúa activo para no interrumpir la sesión ni invalidar el seguimiento de quienes aún esperan su comida.
+![Aviso para el usuario de cocina](capturas-personal/02_cocina_aviso_1280x800.png)
 
-### 3.4 Emisión de Comprobantes
-- Al confirmarse cada pago, se genera automáticamente el ticket digital de recibo.
-- Presione **"Imprimir Recibo"** para enviar la orden a la impresora térmica de comandas.
+Este panel no es para la cocina. Si entras con un usuario de cocina, sale el
+aviso **"ESTE PANEL ES DE SALA Y CAJA"** y a los 5 segundos te lleva a la
+pantalla de cocina. Si no quieres esperar, toca **IR A LA PANTALLA DE COCINA**.
+
+Allá vuelves a entrar con el mismo usuario. En el panel no queda ninguna sesión
+abierta.
+
+### 2.3 Salir
+
+Al terminar tu turno toca **Cerrar sesión**, arriba a la derecha. Si el equipo
+es compartido, no dejes la sesión abierta.
 
 ---
 
-## 🍳 4. Guía Operativa: Cocina / Operador de Pantalla KDS
+## 3. Mesero
 
-### 4.1 Recepción de Comandas
-1. La pantalla táctil KDS en cocina recibe las comandas en tiempo real vía WebSockets tan pronto son confirmadas por el cliente o mesero.
-2. Cada tarjeta de comanda muestra:
-   - Número de mesa y código de pedido (ej. `#ORD-0042`).
-   - Minutos transcurridos desde la orden.
-   - Ítems a preparar con cantidad y notas especiales (ej. *"sin cebolla"*, *"alérgico al maní"*).
-   - Desglose de platos armables ("Constructor"): base, proteínas elegidas, salsas y especificación de porciones (`extra`, `ligera`, `normal`).
+### 3.1 Las mesas
 
-### 4.2 Flujo de Preparación
-1. Al iniciar la cocción de un ítem o comanda, toque el botón **"En Preparación"**.
-2. Al culminar el emplatado, presione **"Marcar como Listo"**.
-3. El sistema:
-   - Notifica instantáneamente a los meseros en salón para el retiro del plato.
-   - Registra en la base de datos (`kds_metricas`) el tiempo real de preparación comparándolo con el tiempo objetivo de la carta.
-   - Calcula la variación porcentual de eficiencia.
+![Mesas en vivo](capturas-personal/03_mesas_1280x800.png)
 
-### 4.3 Alertas de Demora y Semaforización
-- **Verde:** Tiempo transcurrido dentro del rango contractual (&le; 15 min).
-- **Amarillo:** Preparación próxima al límite estimado.
-- **Rojo:** Comanda demorada por encima del umbral. Se emite una alerta en el panel de supervisión (`kds_alertas`).
+La pantalla **Mesas** muestra todas las mesas con su número, su zona y cuántas
+personas caben. Arriba están los filtros **TODAS**, **DISPONIBLES**,
+**OCUPADAS** y **CON ALERTA**, cada uno con su cantidad, y un buscador.
+
+- Una mesa **Disponible** dice "Lista para asignar" y tiene el botón **ABRIR / QR**.
+- Una mesa **Ocupada** dice "Sesión activa · QR generado" y tiene **VER QR** y
+  **LIBERAR**.
+
+### 3.2 Abrir una mesa y entregar el QR
+
+![Abrir la mesa](capturas-personal/04a_abrir_mesa_1280x800.png)
+
+Cuando se sienta un grupo:
+
+1. En la mesa, toca **ABRIR / QR**.
+2. Toca **ABRIR MESA Y GENERAR QR**. La mesa pasa a **Ocupada**.
+
+![El QR de la mesa](capturas-personal/04b_qr_1280x800.png)
+
+3. Muestra el código al grupo. Cada persona lo escanea con su celular, escribe
+   su nombre y pide desde ahí.
+
+Mientras la mesa todavía no tiene comensales, el código **cambia solo cada 3
+minutos**, así una foto vieja del QR ya no sirve. Desde esa misma ventana puedes:
+
+- **NUEVO QR**: cambiarlo ya.
+- **PAUSAR**: detener el cambio automático.
+- **IMPRIMIR** o **GUARDAR SVG**: tenerlo en papel.
+- **LIBERAR MESA**: cerrarla (ver 3.4).
+
+Si la mesa tiene una tablet fija, **LANZAR PANTALLA** abre la vista de la tablet,
+que muestra el QR y se actualiza sola cuando el código cambia.
+
+### 3.3 Ver una mesa ocupada
+
+![Detalle de una mesa](capturas-personal/05_detalle_mesa_1280x800.png)
+
+Toca una mesa ocupada para ver su cuenta:
+
+- **Consumo Mesa** y **Saldo Pendiente**.
+- **Cuenta dividida por comensal**: lo que pidió cada persona.
+- **Comandas en curso**, con su estado y sus platos.
+
+Desde ahí puedes **TOMAR PEDIDO**, **COBRAR EN CAJA** (solo admin y cajero),
+**VER / ROTAR QR** o **LIBERAR**.
+
+### 3.4 Liberar una mesa
+
+La mesa se libera **sola** cuando todo está pagado **y** todos sus pedidos
+están entregados.
+
+Si se pagó por adelantado y la cocina todavía no ha entregado todo, la mesa
+sigue ocupada y el QR sigue sirviendo. Así nadie pierde el seguimiento de su
+pedido.
+
+**LIBERAR** es para cerrarla a mano, por ejemplo si el grupo se fue sin pedir.
+
+### 3.5 Cuando una mesa llama
+
+![Una mesa llama al mesero](capturas-personal/16_alerta_mesa_1280x800.png)
+
+Cuando un cliente toca **Llamar al mesero** en su celular, la mesa aparece en
+**CON ALERTA** y el aviso sale en **ALERTAS**, con la hora. Suena un aviso; el
+sonido se apaga con **Silenciar sonido**.
+
+Cuando la atiendas, toca **ATENDIDA**.
+
+También llega aquí la petición de la cuenta.
+
+### 3.6 Tomar un pedido por el cliente
+
+![Tomar pedido](capturas-personal/06_tomar_pedido_1280x800.png)
+
+Úsalo cuando un cliente prefiere pedirte a ti, o cuando no trae celular.
+
+1. En la mesa, toca **TOMAR PEDIDO**.
+2. Elige **para quién es el pedido**: alguien de **COMENSALES EN LA MESA**, o
+   registra a alguien que no trae celular en **REGISTRAR A ALGUIEN SIN
+   CELULAR**. Escribe su nombre o un apodo y toca **REGISTRAR Y PEDIR**.
+
+   Así su pedido queda a su nombre y cuenta bien al dividir la cuenta en partes
+   iguales.
+3. Agrega los platos con **Agregar** (o **Personalizar** si el plato se arma) y
+   pon notas para la cocina si hace falta.
+4. Toca **Enviar comanda a cocina**.
+
+Un plato agotado sale como **AGOTADO** y no se puede agregar.
+
+### 3.7 Los pedidos
+
+![Pedidos en vivo](capturas-personal/07_pedidos_1280x800.png)
+
+La pantalla **Pedidos** muestra cada comanda con su mesa, su código, su hora,
+quién la pidió y sus platos. Los filtros de arriba separan **PENDIENTES**,
+**EN COCINA**, **POR SERVIR** y **ENTREGADAS**.
+
+El botón de cada comanda la avanza al siguiente paso: **A COCINA** →
+**Marcar Listo** → **Entregar**. Cuando ya se sirvió, dice **Servido**.
+
+Si se cancela un pedido, desaparece de la lista sola, con un aviso.
+
+### 3.8 Cancelar un plato (admin y mesero)
+
+![El detalle de la comanda](capturas-personal/08a_detalle_comanda_1280x800.png)
+
+Si el cliente ya no quiere un plato:
+
+1. Toca la comanda para abrir su detalle.
+2. En el plato, toca **CANCELAR PLATO**.
+
+![Cancelar un plato con su motivo](capturas-personal/08b_cancelar_plato_1280x800.png)
+
+3. Escribe el **motivo**. Es obligatorio y queda en el historial del pedido.
+4. Toca **CONFIRMAR CANCELACIÓN**.
+
+La pantalla te dice qué pasa con el inventario antes de confirmar:
+
+- Si la cocina **no lo ha empezado**, lo reservado **vuelve al inventario**.
+- Si la cocina **ya lo empezó**, queda como **merma**: no vuelve.
+
+El plato queda tachado y el total se actualiza. Si era el último plato del
+pedido, el pedido entero se cancela; la mesa sigue ocupada.
+
+No se puede cancelar:
+
+- un plato ya servido, ni nada de un pedido entregado o pagado;
+- si lo ya pagado queda por encima del total nuevo. En ese caso hay que
+  devolver el dinero antes.
+
+El cajero no ve este botón.
+
+### 3.9 Lo que hace el cliente desde su celular
+
+- **Quitar** un plato suyo, mientras la cocina no lo haya empezado.
+- **Cancelar pedido**: su pedido completo, solo mientras está recibido, si todo
+  es suyo y no tiene pagos.
+
+En los dos casos lo ves en vivo: el plato se tacha o el pedido sale de la lista.
 
 ---
 
-## ⚙️ 5. Guía Operativa: Administrador (Catálogo, Constructor y BI)
+## 4. Cajero
 
-### 5.1 Administración del Catálogo de Menú (`/menu`)
-1. **Creación de Platos:**  
-   Acceda a `/menu`, presione **"Nuevo Plato"**, defina nombre, categoría, precio base, tiempo estimado de cocina y descripción.
-2. **Disponibilidad Inmediata (RF-11):**  
-   Si se agota un insumo o plato en cocina, active o desactive el selector **"Disponible"** en la tarjeta del plato. Esto actualizará inmediatamente la visibilidad en los menús QR de los clientes.
-3. **Platos Personalizables ("Arma tu plato"):**  
-   Al crear o editar un plato, marque la casilla **"Plato Personalizable (Constructor)"**.
+### 4.1 La caja
 
-### 5.2 Configuración del Constructor con el Editor de Pasos (RF-20)
-1. En la lista de platos, ubique aquellos marcados con la insignia verde **"Arma tu plato"**.
-2. Haga clic en el botón de configuración **"Configurar Pasos"**.
-3. Se abrirá el modal interactivo **Editor de Pasos (`EditorPasos.jsx`)**:
-   - **Paso 1 (ej. "Elige tu Base"):** Configure selección mínima (1), máxima (1), marque como *Obligatorio*. Agregue opciones: Arroz integral ($0), Quinoa ($1.50), Lechugas mixtas ($0).
-   - **Paso 2 (ej. "Elige tu Proteína"):** Selección mínima (1), máxima (2). Agregue: Pollo grillé ($0), Salmón sellado (+$3.00), Tofu marinado ($0).
-   - **Paso 3 (ej. "Toppings y Salsas"):** Opciones con recargos por porción extra.
-4. Presione **"Guardar Configuración de Pasos"** para sincronizar las reglas de validación en base de datos.
+![La caja](capturas-personal/09a_caja_cuenta_1280x800.png)
 
-### 5.3 Módulo de Métricas y Business Intelligence (`/reportes` / RF-21)
-1. Acceda a la vista **Reportes** en la barra de navegación lateral.
-2. Seleccione el rango de análisis deseado:
-   - **Hoy:** Control de turno y servicio diario en tiempo real.
-   - **Esta Semana:** Tendencia semanal acumulada.
-   - **Este Mes:** Cierre contable y rendimiento del período.
-3. **Indicadores Principales (KPIs):**
-   - **Ingresos Totales:** Facturación bruta recaudada en salón.
-   - **Comandas Atendidas:** Volumen de órdenes procesadas y liquidadas.
-   - **Tiempo Medio Cocina (KDS):** Promedio de despacho por cocina contra la meta objetivo.
-   - **Ocupación de Sala:** Porcentaje de uso de mesas y tasa de rotación.
-4. **Métricas Especializadas de Base de Datos:**
-   - **Platos Más Vendidos (`v_platos_top`):** Ranking Top 5 de demanda y recaudación por línea de producto.
-   - **Distribución de Métodos de Pago:** Desglose porcentual y montos recaudados entre Tarjeta, Efectivo y Transferencia.
-   - **Horas Pico de Afluencia:** Distribución de volumen de pedidos por franja horaria para planificar turnos del personal.
-   - **Ingredientes Más Populares del Constructor (`v_ingredientes_top`):** Frecuencia de selección de ingredientes, demanda de porciones extra e ingresos adicionales recaudados por recargos.
-   - **Eficiencia y Métricas KDS (`v_tiempos_kds`):** Comparativa de tiempos estimados vs. reales y desviación porcentual.
-5. **Impresión de Informes:**  
-   Presione **"Imprimir Informe"** para generar la versión impresa de balance para gerencia y auditoría contable.
+La pantalla **Caja** tiene dos pestañas: **CUENTAS POR COBRAR** y **HISTORIAL
+DE PAGOS**. Arriba ves lo **RECAUDADO HOY**, cuántas cuentas faltan y cuánto hay
+**POR COBRAR**.
+
+A la izquierda están las mesas con saldo. Al tocar una ves su cuenta:
+
+- el **saldo pendiente de la mesa**;
+- lo que pidió cada persona;
+- los platos consumidos.
+
+### 4.2 Cobrar
+
+1. Elige qué cobras: **TODA LA MESA** o una persona (división de cuenta). Las
+   personas que ya pagaron dicen **PAGADO ✔**.
+2. Si el cliente la acepta, marca **INCLUIR PROPINA VOLUNTARIA SUGERIDA (10%)**.
+   La propina sale en el recibo, pero no se suma a la cuenta de los pedidos.
+3. Elige el método de pago:
+   - **EFECTIVO**: escribe lo recibido y el panel calcula el **CAMBIO / VUELTOS**.
+   - **T. DÉBITO** o **T. CRÉDITO**: cobra en el datáfono (ver 4.3).
+   - **TRANSFERENCIA**: confirma en la app del banco que el dinero llegó antes
+     de cobrar.
+4. Toca **COBRAR**.
+
+Si se cae la conexión justo al cobrar, vuelve a tocar **COBRAR**: el mismo
+cobro no se cobra dos veces.
+
+Si el monto ya no coincide (alguien pagó mientras tanto), el panel te avisa con
+el saldo real y recarga las cuentas.
+
+### 4.3 Cobro con tarjeta y voucher
+
+![Cobro con tarjeta](capturas-personal/09b_caja_tarjeta_1280x800.png)
+
+Con tarjeta aparece el campo **NRO. APROBACIÓN VOUCHER (OPCIONAL)**. Copia el
+número del voucher del datáfono. Solo admite letras, números y guiones, hasta
+40 caracteres, y se escribe en mayúsculas solo.
+
+Es opcional: si el datáfono no lo imprimió, cobra igual.
+
+### 4.4 El recibo
+
+![El recibo](capturas-personal/09c_recibo_1280x800.png)
+
+Después de cobrar sale el recibo, con el número de transacción, la mesa, el
+método, los pedidos, el voucher (si hubo) y el **saldo de la mesa**. Si la mesa
+quedó pagada y servida, dice **PAGADA · mesa liberada**.
+
+Toca **IMPRIMIR RECIBO** para imprimirlo.
+
+### 4.5 El historial del día
+
+![Historial de pagos](capturas-personal/09d_historial_1280x800.png)
+
+**HISTORIAL DE PAGOS** muestra lo cobrado hoy, del más reciente al más viejo:
+número, hora, mesa, quién, método (con su voucher) y monto. Un cobro que se
+repartió entre varios pedidos sale en una sola fila. Abajo está el **TOTAL DEL
+DÍA**, que coincide con lo recaudado hoy.
+
+**IMPRIMIR CUADRE DE CAJA** lo imprime para el cierre.
 
 ---
 
-## 🔒 6. Protocolos de Seguridad y Contingencia
+## 5. Administrador
 
-1. **Protección contra Fuerza Bruta (H-04 / H-27):**  
-   Si se ingresan 5 contraseñas erróneas en un minuto, el sistema bloqueará temporalmente los intentos devolviendo un estado HTTP 429 con contador de espera (*Retry-After*).
-2. **Sesión Activa de Personal (H-09):**  
-   Si un usuario es desactivado administrativamente, sus credenciales quedarán revocadas en un plazo máximo de 60 segundos por sincronización de caché.
-3. **Mitigación de Pagos Fraudulentos (H-08):**  
-   Cualquier anomalía o transacción sospechosa repetitiva es auditada en `intentos_pago_fallidos` registrando la dirección IP y la sesión de origen.
-4. **Modo Contingencia en Reportes:**  
-   Si el servidor de analíticas experimenta tareas de mantenimiento, el panel de reportes activa un banner discreto de simulación sin bloquear las operaciones de sala ni de caja.
+### 5.1 El menú
+
+![El menú](capturas-personal/10a_menu_1280x800.png)
+
+En **Menú** están todos los platos, también los agotados, por categoría. Arriba
+están las categorías (**CATEGORÍAS**), el botón **NUEVO PLATO**, los filtros
+por categoría, **SOLO DISPONIBLES** y el buscador.
+
+En cada plato puedes:
+
+- **DISPONIBLE**: apagarlo o encenderlo a mano. Al apagarlo, los clientes dejan
+  de verlo en el menú al instante.
+- **Ver historial**: sus cambios de precio (ver 5.4).
+- **Editar plato** o **Eliminar plato**.
+- **Configurar pasos**: en los platos que se arman (ver 5.3).
+
+Un plato que sale **AGOTADO · SIN STOCK** se quedó sin algún insumo del
+inventario. Vuelve solo cuando registras una entrada de ese insumo (ver 5.6).
+
+### 5.2 Crear o editar un plato
+
+![Nuevo plato](capturas-personal/10b_nuevo_plato_1280x800.png)
+
+Llena nombre, categoría, precio, tiempo estimado, descripción y, si quieres,
+calorías y la **URL DE IMAGEN**.
+
+- Si no pones imagen, el plato queda **sin foto**. En la tarjeta se ve una foto
+  genérica, pero no se guarda como suya.
+- **HABILITAR COMO PERSONALIZABLE ("ARMA TU PLATO")** hace que el cliente arme
+  el plato por pasos.
+- **DISPONIBLE DE INMEDIATO PARA PEDIDOS** lo publica apenas lo crees.
+
+Un cambio de precio no toca los pedidos ya hechos: cada uno conserva el precio
+que tenía.
+
+### 5.3 Platos que se arman ("Arma tu plato")
+
+![Constructor de plato](capturas-personal/10c_editor_pasos_1280x800.png)
+
+El **Constructor de plato** define los pasos que sigue el cliente, por ejemplo
+Base → Proteína → Toppings → Salsas. Cada paso tiene:
+
+- cuántas opciones se eligen como mínimo (**Mín**) y como máximo (**Máx**);
+- si es **OBLIGATORIO** u **OPCIONAL**;
+- sus ingredientes, cada uno con su recargo (o **Sin recargo**) y sus calorías.
+
+Agrega pasos con **NUEVO PASO**. Guarda con **GUARDAR ESTADO**.
+
+### 5.4 Historial de precios
+
+![Historial de precios](capturas-personal/10d_historial_precios_1280x800.png)
+
+**Ver historial** muestra cada cambio de precio del plato y quién lo hizo. Si
+nunca cambió, lo dice.
+
+### 5.5 Inventario: insumos
+
+![Insumos](capturas-personal/11a_insumos_1280x800.png)
+
+**Inventario** tiene tres pestañas: **INSUMOS**, **RECETAS** y **CONSUMO**.
+
+En **INSUMOS** está lo que hay en bodega, con su stock y su estado. Arriba dice
+cuántos insumos están **bajo el mínimo** y cuántos **agotados**. Los filtros son
+**ACTIVOS**, **BAJO EL MÍNIMO** e **INACTIVOS**.
+
+Cuando un insumo llega al mínimo o se agota, sale un **aviso en vivo** arriba de
+la lista.
+
+![Nuevo insumo](capturas-personal/11d_nuevo_insumo_1280x800.png)
+
+**NUEVO INSUMO**: nombre, unidad (porción, unidad, gramos o mililitros), stock
+mínimo y, si ya llegó, el **stock inicial**. El stock inicial queda en el
+historial como una entrada.
+
+### 5.6 Registrar un movimiento
+
+![Movimiento de un insumo](capturas-personal/11b_movimiento_1280x800.png)
+
+El stock no se edita a mano: se mueve con movimientos. En el insumo, toca
+**Movimiento** y elige el tipo:
+
+- **ENTRADA**: llegó mercancía. Suma al stock y devuelve a la carta los platos
+  que estaban sin stock.
+- **MERMA**: se dañó o se botó. Resta.
+- **AJUSTE POR CONTEO**: contaste y el número real es otro. Puede sumar o
+  restar.
+
+Escribe la cantidad y, si quieres, un motivo. Toca **REGISTRAR**.
+
+![Historial de un insumo](capturas-personal/11c_historial_insumo_1280x800.png)
+
+**Historial** muestra cada movimiento: fecha, tipo, cantidad, en cuánto quedó,
+quién lo hizo y el motivo. Los pedidos también aparecen: la **reserva** de cada
+plato, y su devolución o su merma si se canceló.
+
+### 5.7 Recetas
+
+![Recetas](capturas-personal/12a_recetas_1280x800.png)
+
+La receta dice cuánto gasta **una unidad** de un plato. Con ella el sistema
+descuenta el inventario en cada pedido y sabe cuándo un plato queda sin stock.
+
+**RECETAS** lista los platos por categoría, con su estado: **CON RECETA** o sin
+ella. Los platos que se arman consumen por sus opciones, así que la receta va en
+cada opción, en **OPCIONES DEL CONSTRUCTOR**. **SOLO LO QUE FALTA** deja ver
+solo lo que no tiene receta.
+
+![Editar una receta](capturas-personal/12b_editor_receta_1280x800.png)
+
+En **EDITAR RECETA** (o **AGREGAR RECETA**) eliges cada insumo y su cantidad.
+**AGREGAR INSUMO** suma una fila y la papelera la quita. La columna **HAY**
+muestra cuánto queda de ese insumo. Guarda con **GUARDAR RECETA**.
+
+### 5.8 Consumo
+
+![Consumo de inventario](capturas-personal/13_consumo_1280x800.png)
+
+**CONSUMO** dice cuánto se gastó de cada insumo en un rango de días:
+
+1. Elige **DESDE** y **HASTA**, o un atajo: **HOY**, **ÚLTIMOS 7 DÍAS** o
+   **ESTE MES**. El rango puede tener hasta 31 días y no puede ser futuro.
+2. Si quieres, elige un solo **INSUMO**.
+3. Toca **CONSULTAR**.
+
+Por cada insumo, en su unidad:
+
+| Columna | Qué es |
+|---|---|
+| **CONSUMO** | Lo usado en platos vendidos. Un plato quitado antes de que la cocina lo empezara no cuenta. |
+| **MERMA** | Las mermas registradas a mano, más lo de los platos cancelados cuando ya se cocinaban. |
+| **ENTRADAS** | Lo que llegó. |
+| **AJUSTES** | Los ajustes por conteo, con su signo (+ o −). |
+
+**VER DÍAS** abre el detalle de cada día. Los días son los de Bogotá.
+
+### 5.9 Configuración
+
+![Configuración: mesas](capturas-personal/14a_config_mesas_1280x800.png)
+
+**MESAS**: crea una mesa con su número, capacidad y ubicación (**CREAR MESA**),
+edítala o desactívala. Una mesa ocupada no se puede desactivar.
+
+![Configuración: personal](capturas-personal/14b_config_personal_1280x800.png)
+
+**PERSONAL**: crea usuarios con nombre, email, **CLAVE INICIAL** y rol
+(Administrador, Mesero, Cajero o Cocina). En cada persona puedes cambiar el rol,
+**RESTABLECER CLAVE** o **DESACTIVAR**. Sobre ti mismo no puedes hacer esas
+acciones: sale marcado **(tú)**.
+
+![Configuración: restaurante](capturas-personal/14c_config_restaurante_1280x800.png)
+
+**RESTAURANTE**: nombre, teléfono, correo, dirección, logo, propina sugerida,
+moneda, redes (Instagram, Facebook, TikTok, WhatsApp) y el horario de cada día.
+Guarda con **GUARDAR CAMBIOS**.
+
+### 5.10 Reportes
+
+![Reportes](capturas-personal/15_reportes_1280x800.png)
+
+**Reportes** muestra cómo va el negocio: **HOY**, **ÚLTIMOS 7 DÍAS** o
+**ÚLTIMOS 30 DÍAS**.
+
+- **Ventas**, **pedidos**, **ticket promedio** y **tiempo de preparación**.
+- **Platos** e **ingredientes más pedidos**.
+- **Métodos de pago**, **horas pico** y la **eficiencia de la cocina**.
+
+**IMPRIMIR INFORME** lo imprime.
+
+Si el servidor no responde, el reporte lo dice: nunca muestra cifras
+inventadas.
+
+---
+
+## 6. Problemas comunes
+
+| Qué pasa | Qué hacer |
+|---|---|
+| Un aviso dice **"Sin conexión"** | El panel no llega al servidor y lo que hiciste **no se guardó**. Revisa el internet e inténtalo otra vez. |
+| Un plato no se puede pedir | Está apagado a mano o **AGOTADO · SIN STOCK**. Revisa su receta o registra la entrada del insumo. |
+| El cliente dice que el QR no sirve | Toca **NUEVO QR** y muéstrale el nuevo: el de la foto ya venció. |
+| La caja dice que el monto supera lo que se debe | Alguien pagó mientras tanto. Toca **ACTUALIZAR** y cobra el saldo real. |
+| No se deja cancelar un plato | Ya se sirvió, el pedido está entregado o pagado, o lo pagado supera el total nuevo. |
+| Entré con el usuario de cocina | Es normal: el panel te lleva a la pantalla de cocina. |
