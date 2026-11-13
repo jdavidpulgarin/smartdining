@@ -37,6 +37,7 @@ const app = require('../../server');
 const pool = require('../../src/config/db');
 const socketNotifier = require('../../src/services/socket.notifier');
 const pedidosService = require('../../src/services/pedidos.service');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 const MESA_BASE = parseInt(process.env.MESA_NUMERO_VOUCHER || '1040', 10);
 const MARCA_MESA = 'PRUEBA voucher-caja';
@@ -44,7 +45,8 @@ const MARCA_MESA = 'PRUEBA voucher-caja';
 let sonda = null;
 let hayBase = false;
 let socket = null;
-let plato = null; // { id_plato, precio_centavos }
+let catalogo = null; // el de plato-prueba.js, con su limpiar()
+let plato = null; // { id_plato, precio, precio_centavos }
 let usuario = null; // { id_usuario, token }
 let siguienteMesa = MESA_BASE;
 
@@ -95,24 +97,24 @@ test.before(async () => {
   // Sin base configurada salta; configurada y sin responder, falla (#165).
   sonda = await abrirSonda();
   if (!sonda) return;
-  const p = await sonda.query(
-    `SELECT id_plato, ROUND(precio * 100)::bigint AS precio_centavos FROM platos
-      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
-      ORDER BY id_plato LIMIT 1`
-  );
   const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' AND activo ORDER BY id_usuario LIMIT 1");
-  plato = p.rows[0] ? { id_plato: p.rows[0].id_plato, precio_centavos: Number(p.rows[0].precio_centavos) } : null;
   usuario = u.rows[0] ? { id_usuario: u.rows[0].id_usuario, token: tokenStaff(u.rows[0].id_usuario, 'admin') } : null;
-  hayBase = Boolean(plato && usuario);
-  if (!hayBase) return;
+  if (!usuario) return;
   socket = instalarFakeSocket(() => ({ ok: true }));
   await limpiar();
+  // Plato PROPIO SIN receta (tests/helpers/plato-prueba.js): aquí se prueba el
+  // voucher, no el inventario. Antes era el primero del seed (Nachos Supremos),
+  // que compartía su poco stock con las demás suites.
+  catalogo = await crearCatalogoPrueba(sonda, 'transacciones-voucher', { precio: 24000 });
+  plato = catalogo.plato;
+  hayBase = true;
 });
 
 test.after(async () => {
   try {
     await socketNotifier.esperarAvisos();
     if (hayBase) await limpiar();
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (socket) socket.restaurar();
     if (sonda) await sonda.end();

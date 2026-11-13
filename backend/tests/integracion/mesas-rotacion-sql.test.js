@@ -49,6 +49,7 @@ const aliasComensal = require('../../src/services/alias-comensal');
 const pedidosService = require('../../src/services/pedidos.service');
 const { tokenStaff } = require('../helpers/fake-db');
 const { instalarFakeRedis } = require('../helpers/fake-redis');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 const SOCKET = path.resolve(B, '..', 'socket-server', 'src');
 const { crearServicioQr } = require(path.join(SOCKET, 'qr'));
@@ -67,6 +68,7 @@ const original = {
 let sonda = null;
 let hayBase = false;
 let admin = null;
+let catalogo = null; // el de plato-prueba.js, con su limpiar()
 let plato = null;
 let siguienteMesa = MESA_BASE;
 
@@ -103,14 +105,15 @@ test.before(async () => {
   sonda = await abrirSonda();
   if (!sonda) return;
   const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' AND activo ORDER BY id_usuario LIMIT 1");
-  const p = await sonda.query(
-    `SELECT id_plato FROM platos WHERE disponible AND stock_suficiente AND NOT personalizable ORDER BY id_plato LIMIT 1`
-  );
   admin = u.rows[0] ? tokenStaff(u.rows[0].id_usuario, 'admin') : null;
-  plato = p.rows[0] || null;
-  hayBase = Boolean(admin && plato);
-  if (!hayBase) return;
+  if (!admin) return;
   await limpiar();
+  // Plato PROPIO SIN receta (tests/helpers/plato-prueba.js): aquí solo hace
+  // falta "un pedido en la mesa", no inventario. Antes era el primero del seed
+  // (Nachos Supremos), que compartía su poco stock con las demás suites.
+  catalogo = await crearCatalogoPrueba(sonda, 'mesas-rotacion');
+  plato = catalogo.plato;
+  hayBase = true;
 
   // Los dos puntos backend <-> socket-server, contra el servicio QR real.
   socketNotifier.generarTokenQr = async (idMesa) => {
@@ -129,6 +132,7 @@ test.after(async () => {
   Object.assign(socketNotifier, original);
   try {
     if (hayBase) await limpiar();
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();
