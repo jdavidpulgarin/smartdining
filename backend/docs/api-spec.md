@@ -416,6 +416,10 @@ por segundo sostenidos no los hace ningún comensal.
 `RATE_LIMIT_QR_VENTANA_MS`, `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS`. Los
 tres límites se desactivan solos dentro de las pruebas.
 
+Aparte, la subida de imágenes (D-23, `POST /imagenes`) tiene su propio límite **por usuario**
+(30 cada 10 min, `RATE_LIMIT_IMAGENES_MAX` y `RATE_LIMIT_IMAGENES_VENTANA_MS`), con el mismo
+429 más `motivo: "demasiadas_peticiones"`. Ver [Imágenes del menú](#imágenes-del-menú-d-23).
+
 > **Detrás de un proxy** (nginx, Docker), `req.ip` es la IP del proxy y el límite contaría
 > a todo el mundo como un solo visitante. Hay que poner **`TRUST_PROXY`** (`true`, un
 > número de saltos, o una lista de IPs/rangos). Está **apagada por defecto**: confiar en
@@ -792,7 +796,7 @@ Si no se envían, **el comportamiento no cambia**: el plato conserva lo que ten�
 | `nombre` | Sí | Texto, 1–120 |
 | `precio` | Sí | Número > 0. Cabe en `DECIMAL(10,2)`: más allá es **422** (desbordamiento), no 500 |
 | `id_categoria` | Sí | Entero. Si la categoría no existe, **409 `categoria_inexistente`** |
-| `descripcion`, `url_imagen` | No | Texto; `url_imagen` tiene que ser una URL. Son **nullable**: ponerlas en `null` las borra |
+| `descripcion`, `url_imagen` | No | Texto. `url_imagen`: una URL **http(s)** absoluta o una ruta **`/imagenes/<uuid>.webp`** de [`POST /imagenes`](#imágenes-del-menú-d-23), hasta 255 caracteres (otro esquema, `..`, otra carpeta u otra extensión: **400**). Son **nullable**: ponerlas en `null` las borra |
 | `disponible` | No (por omisión `true`) | Booleano |
 | `tiempo_preparacion_estimado` | **No** | Entero > 0. **Si no se envía, queda en 15**, el `DEFAULT` de la columna (`database/schema.sql:105`) |
 | `personalizable` | No (por omisión `false`) | Booleano. Decide si el plato se arma por pasos en el constructor |
@@ -934,6 +938,90 @@ que usa el panel. La caché sí se invalida en los dos casos.
 **La bitácora la escribe la base.** El trigger `tr_auditar_cambios` audita todo `UPDATE` de
 `platos` en `auditoria_cambios` (modelo-er.md §11); el backend no registra nada por su
 cuenta.
+
+---
+
+## Imágenes del menú (D-23)
+
+Diseño acordado con Roberto: el **backend** recibe, valida, re-codifica y guarda; el
+**volumen, nginx, la CSP y los respaldos** son de su PR de infra.
+
+### POST /imagenes
+
+También en **`/api/v1/imagenes`** en cuanto entre el prefijo v1 (D-19 parte A, #199): v1 monta
+el mismo router.
+
+- **Quién:** solo **admin**. Sin token **401**; `mesero`, `cajero`, `cocina` o un comensal,
+  **403** (los cuerpos de siempre de `requireAuth`/`requireRole`).
+- **Cuerpo:** `multipart/form-data` con **UN** archivo en el campo **`imagen`** y **nada
+  más**: ni otros campos de texto ni un segundo archivo.
+- **Límites** (multer en **memoria**, nunca a disco directo): archivo de hasta
+  **2 MB** (`IMAGENES_MAX_BYTES`, por defecto `2097152`), 1 archivo, 0 campos, como mucho 2
+  partes.
+- **Límite de peticiones:** **por usuario** del JWT, no por IP: **30 cada 10 minutos**
+  (`RATE_LIMIT_IMAGENES_MAX`, `RATE_LIMIT_IMAGENES_VENTANA_MS`). Mismo almacén que los demás
+  límites (memoria del proceso) y el mismo 429 con `Retry-After`, más `motivo`.
+- **Tipo por el contenido:** se decide por los **primeros bytes** (magic numbers), **no** por
+  el `Content-Type` ni por la extensión: **JPEG** (`FF D8 FF`), **PNG**
+  (`89 50 4E 47 0D 0A 1A 0A`) y **WebP** (`RIFF....WEBP`). Cualquier otra cosa → **415**. Un
+  PNG de verdad mandado como `text/plain` y `documento.txt` se acepta; un texto o un `.exe`
+  mandado como `image/png` y `foto.png`, no.
+- **Re-codificación SIEMPRE** (sharp): lo que se guarda nunca es el archivo original.
+  - `.rotate()`: aplica la orientación EXIF (una foto de móvil girada queda derecha);
+  - como mucho **1200 px** de lado (`fit: 'inside'`), **sin agrandar** las pequeñas;
+  - salida **WebP**, calidad 80, **sin metadatos**: ni EXIF (GPS incluido), ni ICC, ni XMP;
+  - tope de **40 millones de píxeles** de entrada contra las bombas de descompresión.
+- **Nombre:** lo genera el servidor, `crypto.randomUUID() + '.webp'`. El nombre del archivo
+  subido no se usa nunca, ni en la ruta ni en el disco.
+- **Disco:** `IMAGENES_DIR` (producción `/app/uploads/imagenes`, el volumen; desarrollo
+  `backend/uploads/imagenes`, ignorado por git). La carpeta se crea al primer uso. Escritura
+  **atómica**: un temporal en la misma carpeta y `rename`; permisos `0644`.
+- **No toca la base.** El cliente guarda la ruta devuelta en `url_imagen` con el
+  `POST`/`PUT` del plato o del ingrediente.
+
+**201:**
+
+```json
+{ "ruta": "/imagenes/0f8fad5b-d9cb-469f-a165-70867728950e.webp" }
+```
+
+**Errores**, siempre `{ "error": "...", "motivo": "..." }`:
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **400** | `sin_archivo` | Sin archivo, el archivo en otro campo, dos archivos, campos de texto de más o un multipart mal formado |
+| **413** | `archivo_muy_grande` | Más de `IMAGENES_MAX_BYTES`. Lo corta multer al leer; nunca llega como 500 |
+| **415** | `tipo_no_permitido` | Los primeros bytes no son de JPEG, PNG ni WebP |
+| **422** | `imagen_invalida` | La cabecera es válida pero sharp no la puede leer: corrupta, truncada o por encima del tope de píxeles |
+| **429** | `demasiadas_peticiones` | El límite por usuario, con `Retry-After` |
+| **500** | `error_interno` | No se pudo escribir en `IMAGENES_DIR` (p. ej. el volumen sin permisos). El log lleva solo el código del error |
+
+El contenido del archivo y su nombre original **nunca** van al log.
+
+### `url_imagen` relativa y cómo se muestra
+
+`url_imagen` (platos y ingredientes del constructor) acepta **dos formas**: una URL
+**http(s)** absoluta, como hasta ahora, o la ruta **relativa** que devuelve este endpoint,
+exactamente `^/imagenes/<uuid en minúsculas>\.webp$`. Sin `..`, sin otras carpetas, sin otra
+extensión ni nada detrás; hasta 255 caracteres.
+
+**El cliente (PWA y panel) antepone el origen de la API** cuando la ruta empieza por
+`/imagenes/`: `https://api.<dominio>/imagenes/<uuid>.webp` en producción,
+`http://localhost:4000/imagenes/<uuid>.webp` en desarrollo. Una URL absoluta se usa tal cual.
+
+**Quién sirve `/imagenes/`:**
+
+- **Producción:** **nginx**, directo desde el volumen (PR de Roberto). El backend **no** monta
+  la ruta.
+- **Desarrollo** (`NODE_ENV` distinto de `production`): el backend sirve
+  `GET /imagenes/<uuid>.webp` desde `IMAGENES_DIR`: solo ese patrón (cualquier otra cosa es
+  404), sin listar la carpeta, con `X-Content-Type-Options: nosniff` y
+  `Cross-Origin-Resource-Policy: cross-origin` (para que la PWA en otro puerto la pueda
+  mostrar).
+
+**Al reemplazar la imagen de un plato, la vieja NO se borra** (acuerdo con Roberto): queda
+huérfana en el volumen. La limpieza de huérfanas (archivos de `IMAGENES_DIR` que ninguna
+`url_imagen` usa) se hace después, aparte.
 
 ---
 
@@ -1221,7 +1309,7 @@ está en §[La frontera entre 400 y 422](#la-frontera-entre-400-y-422-h-11)):
 | `precio_extra` | número ≥ 0 |
 | `calorias` | entero ≥ 0 |
 | `alergenos` | arreglo de texto |
-| `url_imagen` | hasta 255 caracteres |
+| `url_imagen` | URL **http(s)** absoluta o ruta **`/imagenes/<uuid>.webp`** (D-23, la misma regla que los platos), hasta 255 caracteres |
 
 **Normalización de lo que manda el panel:**
 
