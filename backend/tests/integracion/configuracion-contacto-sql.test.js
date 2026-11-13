@@ -30,7 +30,7 @@ const assert = require('node:assert');
 const B = require('path').resolve(__dirname, '../..');
 require('dotenv').config({ path: `${B}/.env` });
 
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const servicio = require('../../src/services/configuracion.service');
 const { configuracionSchema } = require('../../src/controllers/configuracion.controller');
@@ -115,20 +115,17 @@ async function restaurar() {
 }
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    const tiene = await sonda.query(
-      `SELECT count(*)::int AS n FROM information_schema.columns
-        WHERE table_name = 'configuracion_restaurante' AND column_name IN ('correo', 'redes')`
-    );
-    const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' ORDER BY id_usuario LIMIT 1");
-    usuario = u.rows[0] ? u.rows[0].id_usuario : null;
-    hayBase = tiene.rows[0].n === 2 && usuario !== null;
-    if (hayBase) original = await filaActual();
-  } catch {
-    hayBase = false;
-  }
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  const tiene = await sonda.query(
+    `SELECT count(*)::int AS n FROM information_schema.columns
+      WHERE table_name = 'configuracion_restaurante' AND column_name IN ('correo', 'redes')`
+  );
+  const u = await sonda.query("SELECT id_usuario FROM usuarios WHERE rol = 'admin' ORDER BY id_usuario LIMIT 1");
+  usuario = u.rows[0] ? u.rows[0].id_usuario : null;
+  hayBase = tiene.rows[0].n === 2 && usuario !== null;
+  if (hayBase) original = await filaActual();
 });
 
 test.after(async () => {

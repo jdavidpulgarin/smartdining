@@ -4,7 +4,10 @@ import Header from './Header';
 import { useMesaSession } from '../../hooks/useMesaSession';
 import { useCarrito } from '../../context/CarritoContext';
 import { useMesaSocketContext } from '../../context/MesaSocketContext';
-import { formatearMensajePedidoCreado } from '../../utils/notificacionesMesa';
+import {
+  formatearMensajePedidoCreado,
+  formatearMensajeItemCancelado,
+} from '../../utils/notificacionesMesa';
 import { esPedidoMio } from '../../utils/seguimiento';
 import { textoPagoConfirmado } from '../../utils/cuenta';
 import { crearDeduplicador } from '../../utils/deduplicador';
@@ -76,10 +79,23 @@ function Layout({ children }) {
       }
     });
 
+    const bajaItemCancelado = socketOn('item:cancelado', (data) => {
+      if (!data || deduplicador.visto(data.eventId)) return;
+      const mensaje = formatearMensajeItemCancelado(data, comensal);
+      if (mensaje) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        setToastPedido({ tipo: 'item_cancelado', mensaje });
+        timerRef.current = setTimeout(() => {
+          setToastPedido(null);
+        }, 5000);
+      }
+    });
+
     return () => {
       bajaCreated?.();
       bajaStatus?.();
       bajaPayment?.();
+      bajaItemCancelado?.();
     };
   }, [socketOn, comensal, deduplicador]);
 
@@ -112,7 +128,9 @@ function Layout({ children }) {
           className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-md bg-superficie-2 border p-3.5 rounded-2xl flex items-center justify-between gap-2.5 text-xs font-semibold shadow-2xl animate-fadeIn ${
             toastPedido.tipo === 'sale_caliente'
               ? 'border-primario text-white'
-              : 'border-exito text-texto'
+              : toastPedido.tipo === 'item_cancelado'
+                ? 'border-acento text-texto'
+                : 'border-exito text-texto'
           }`}
         >
           <div className="flex items-center gap-2.5 min-w-0">
@@ -120,7 +138,9 @@ function Layout({ children }) {
               className={`w-2 h-2 rounded-full shrink-0 ${
                 toastPedido.tipo === 'sale_caliente'
                   ? 'bg-primario'
-                  : 'bg-exito'
+                  : toastPedido.tipo === 'item_cancelado'
+                    ? 'bg-acento'
+                    : 'bg-exito'
               }`}
             />
             <span className="truncate">

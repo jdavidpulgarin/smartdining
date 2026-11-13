@@ -1,5 +1,5 @@
 import IlustracionEstado from './IlustracionEstado';
-import { infoEstado } from '../../utils/seguimiento';
+import { infoEstado, mensajeEstadoTarjeta } from '../../utils/seguimiento';
 
 /**
  * Formatea una fecha o timestamp a formato hh:mm a. m. / p. m.
@@ -33,6 +33,7 @@ export default function TarjetaEstado({ pedido, numeroMesa = null }) {
   if (!pedido) return null;
 
   const info = infoEstado(pedido.estado, numeroMesa);
+  const mensajeTarjeta = mensajeEstadoTarjeta(pedido, numeroMesa);
   const hora = formatearHora(pedido.creado_en);
 
   const codigoRaw = pedido.codigo_pedido || (pedido.id_pedido ? `PED-${pedido.id_pedido}` : '');
@@ -94,7 +95,7 @@ export default function TarjetaEstado({ pedido, numeroMesa = null }) {
               COCINA
             </span>
             <span className="text-[15px] text-white leading-snug">
-              {info.mensaje}
+              {mensajeTarjeta}
             </span>
           </div>
         </div>

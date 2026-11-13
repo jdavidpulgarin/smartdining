@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolverApodo } from './apodo';
+import { resolverApodo, claveAlias } from './apodo';
 
 function crearJwtConAlias(alias) {
   const encode = (obj) =>
@@ -39,5 +39,16 @@ describe('resolverApodo', () => {
     expect(resolverApodo(null)).toBe('');
     expect(resolverApodo(undefined)).toBe('');
     expect(resolverApodo({})).toBe('');
+  });
+});
+
+describe('claveAlias', () => {
+  it('normaliza mayusculas, tildes y separadores igual que el backend', () => {
+    expect(claveAlias('Ana')).toBe('ana');
+    expect(claveAlias('ana')).toBe('ana');
+    expect(claveAlias('Ána María')).toBe('anamaria');
+    expect(claveAlias('ana  maria')).toBe('anamaria');
+    expect(claveAlias(null)).toBe('');
+    expect(claveAlias('   ')).toBe('');
   });
 });

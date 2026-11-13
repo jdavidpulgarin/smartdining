@@ -2884,6 +2884,7 @@ antes fue retirado por Jarrison.
 | Método | Ruta | Roles | Respuesta | Errores |
 |---|---|---|---|---|
 | GET | `/reportes?rango=hoy\|semana\|mes` | **admin** | 200, el reporte del rango | 400 rango inválido · 401 · 403 |
+| **GET** | **`/reportes/consumo?desde=AAAA-MM-DD&hasta=AAAA-MM-DD[&id_insumo=N]`** | **admin** | **200, consumo, merma, entradas y ajustes por insumo y día (plan v1.1, D-17 P3)** | **400 `consulta_invalida` · 404 insumo · 401 · 403** |
 
 **Solo `admin`.** Son cifras de negocio —ventas, ticket promedio, reparto por método de
 pago— y ni la cocina ni la caja las necesitan para trabajar. `cajero`, `mesero`, `cocina` y
@@ -3178,6 +3179,77 @@ activa cuando la ruta da 404 o falla la red.
 > dibujar barras. Los campos que no se pintan se devuelven igual, porque el contrato los pide
 > y son datos legítimos del reporte.
 
+### GET /reportes/consumo — consumo de inventario (plan v1.1, D-17 P3) — admin
+
+Cuánto se gastó de cada insumo, por día, en un rango. Solo backend; la pantalla la hace
+Jarrison. **Solo `admin`** (mesero, cajero, cocina y comensal: **403**).
+
+**Filtros** (query, zod `.strict()`: cualquier otro parámetro es 400):
+
+| Parámetro | Regla |
+|---|---|
+| `desde` | **Obligatorio**, `AAAA-MM-DD` que exista (no 2026-02-30). |
+| `hasta` | **Obligatorio**, `AAAA-MM-DD` que exista; `hasta >= desde`; como mucho **31 días** contando los dos extremos (del 1 al 31 de un mes cabe); **no futura** respecto a hoy en Bogotá (eso lo decide la base, con su "hoy"). |
+| `id_insumo` | Opcional, entero > 0. Si no existe: **404** `{ "motivo": "no_encontrado" }`. |
+
+Cualquier fallo de la query: **400** `{ "error", "motivo": "consulta_invalida" }`.
+
+**Días de Bogotá**, calculados en SQL como en `GET /transacciones?desde=` (#158): el rango es
+`creado_en >= 00:00 de desde` y `creado_en < 00:00 del día siguiente a hasta`, en
+`America/Bogota`, sin funciones sobre la columna (así sirven los índices de
+`movimientos_inventario`). Un movimiento a las 20:00 de Bogotá cuenta en ese día aunque en UTC
+ya sea el siguiente.
+
+**Cada columna**, en **positivo** y en la **unidad del insumo** (salvo `ajustes`, que lleva su
+signo). Los signos reales de `movimientos_inventario` (script 27) son: `reserva` −X (con
+`id_detalle`), `devolucion` +X (exactamente lo reservado), `merma` **0** con `id_detalle` (la
+cancelación en cocina: la reserva no vuelve), `merma` −X sin `id_detalle` (manual),
+`entrada` +X y `ajuste` ±X.
+
+| Columna | Cómo se calcula | Día |
+|---|---|---|
+| `consumo` | Lo gastado en platos **vendidos**: lo reservado por las reservas cuya línea **no tiene cierre**. Las devueltas (plato quitado antes de cocina) no cuentan: la devolución vuelve exactamente su reserva, así que es "reservas menos devoluciones" sin días negativos. Las de líneas **canceladas en cocina** tampoco: eso no se vendió | el de la reserva |
+| `merma` | Mermas manuales **más lo reservado de las líneas canceladas en cocina**. Esa cancelación deja una merma en **0** (el stock ya salió con la reserva y no vuelve); aquí cuenta por la cantidad de su reserva (misma `id_detalle` e `id_insumo`) | el de la merma (la cancelación) |
+| `entradas` | Entradas registradas | el de la entrada |
+| `ajustes` | Ajustes **con su signo**: puede ser negativo | el del ajuste |
+
+> **La cancelación en cocina cuenta como MERMA, no como consumo.** Un plato que se canceló
+> cuando ya se cocinaba gastó sus insumos, pero no se vendió: sale en `merma` por lo que su
+> reserva se llevó, y no en `consumo`.
+
+Todo va en **una transacción de solo lectura** (`REPEATABLE READ`): la comprobación de "hoy"
+e `id_insumo` y los datos ven la misma foto. Los **totales los calcula la base**, no se suman
+en el cliente, así que cuadran exactamente con la suma de los días.
+
+`200`:
+
+```json
+{
+  "desde": "2026-11-01",
+  "hasta": "2026-11-10",
+  "insumos": [
+    {
+      "id_insumo": 3, "nombre": "Arroz integral", "unidad": "g",
+      "total": { "consumo": 450, "merma": 20, "entradas": 1000, "ajustes": -50 },
+      "dias": [
+        { "fecha": "2026-11-02", "consumo": 300, "merma": 0, "entradas": 1000, "ajustes": -50 },
+        { "fecha": "2026-11-05", "consumo": 150, "merma": 20, "entradas": 0, "ajustes": 0 }
+      ]
+    }
+  ]
+}
+```
+
+- Todos los números son **número JSON**.
+- Solo salen los insumos con **algún movimiento** en el rango, más el pedido en `id_insumo`
+  aunque no tenga (con totales en 0 y `dias: []`).
+- `dias` solo trae los días con movimientos, **ordenados**; los insumos van **por nombre**.
+- Sin movimientos en el rango: `"insumos": []`.
+
+Errores: **400** `consulta_invalida` (fechas inexistentes o con otro formato, `hasta < desde`,
+más de 31 días, `hasta` futura, un parámetro de más, `id_insumo` no entero > 0) · **404**
+`id_insumo` que no existe · **401** sin sesión · **403** cualquier rol que no sea admin.
+
 ---
 
 ## Tiempo real (socket-server)
@@ -3284,6 +3356,20 @@ registra el motivo y sigue. Un socket-server caído no hace fallar un pedido ni 
 
 En `order:created` los ítems se envían con `nombre` (no `plato_nombre`), que es el nombre
 de campo del contrato de Roberto.
+
+Cada ítem lleva además, primero, **`id_detalle`** (entero) y **`estado_item`**
+(`"pendiente"` al crear; `null` solo si la base no lo trajera):
+
+```json
+"items": [
+  { "id_detalle": 512, "id_plato": 3, "estado_item": "pendiente", "nombre": "Hamburguesa Smart Angus",
+    "cantidad": 2, "comensal": "Ana", "notas_especiales": "sin cebolla", "ingredientes": [] }
+]
+```
+
+Los otros comensales de la mesa y el KDS reciben las líneas **solo** por este evento: sin
+`id_detalle` no podían relacionar un `item:cancelado` posterior con su línea y no la
+tachaban hasta recargar.
 
 Cada ingrediente de un ítem va con `id_ingrediente`, `nombre`, `porcion`, `precio_aplicado`
 y **`paso`**, el nombre del paso del constructor al que pertenece:
