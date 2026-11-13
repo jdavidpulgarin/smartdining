@@ -13,7 +13,9 @@ import {
   TomarPedido,
   Configuracion,
   Inventario,
+  SoloCocina,
 } from './pages'
+import { esCocina } from './utils/kds'
 import { useSocket, useAuth } from './hooks'
 import { AuthProvider } from './context/AuthContext'
 import { TablesProvider } from './context/TablesContext'
@@ -44,6 +46,11 @@ function AppContent() {
 
   if (!user) {
     return <Navigate to="/login" replace />
+  }
+
+  // El rol cocina no usa el panel: aviso y paso al KDS, en cualquier ruta.
+  if (esCocina(user.rol)) {
+    return <SoloCocina />
   }
 
   return (

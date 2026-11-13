@@ -262,6 +262,8 @@ function CajaRegistradora() {
   // Escuchar eventos de WebSockets en tiempo real para mantener la caja sincronizada
   useSocketListener('order:created', () => cargarCuentas())
   useSocketListener('order:status', () => cargarCuentas())
+  // Un plato cancelado (D-13 o el comensal) baja el saldo de la mesa.
+  useSocketListener('item:cancelado', () => cargarCuentas())
   useSocketListener('payment:confirmed', (data) => {
     cargarCuentas()
     // Cualquier cobro (esta caja, otra, o un pago en línea) cambia lo recaudado.
