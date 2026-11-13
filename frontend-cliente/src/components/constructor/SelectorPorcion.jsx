@@ -31,7 +31,7 @@ function SelectorPorcion({
             role="radio"
             aria-checked={activa}
             onClick={() => onCambiar && onCambiar(opcion.valor)}
-            className={`min-h-10 px-2 py-1.5 rounded-lg text-xs font-etiqueta uppercase tracking-wider font-bold flex flex-col items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario ${
+            className={`min-h-11 px-2 py-1.5 rounded-lg text-xs font-etiqueta uppercase tracking-wider font-bold flex flex-col items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario ${
               activa
                 ? 'bg-primario text-white shadow-sm'
                 : 'bg-transparent text-texto-suave hover:text-texto hover:bg-superficie'

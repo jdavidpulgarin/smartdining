@@ -38,6 +38,7 @@ const { abrirSonda } = require('../helpers/base-prueba');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const transaccionesService = require('../../src/services/transacciones.service');
+const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 
 const ZONA = 'America/Bogota';
 const MESA_NUMERO = parseInt(process.env.MESA_NUMERO_CAJA || '902', 10);
@@ -47,6 +48,8 @@ let sonda = null;
 let hayBase = false;
 let mesa = null;
 let pedido = null;
+let catalogo = null; // el de plato-prueba.js, con su limpiar()
+let plato = null;
 /** id_transaccion por nombre de caso, para las aserciones y la limpieza. */
 const creadas = {};
 
@@ -142,15 +145,14 @@ test.before(async () => {
   // Sin base configurada salta; configurada y sin responder, falla (#165).
   sonda = await abrirSonda();
   if (!sonda) return;
-  const p = await sonda.query(
-    `SELECT id_plato FROM platos
-      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
-      ORDER BY id_plato LIMIT 1`
-  );
-  hayBase = p.rows.length > 0;
-  if (!hayBase) return;
-
   await limpiar();
+  // Plato PROPIO SIN receta (tests/helpers/plato-prueba.js): aquí se prueba la
+  // caja, no el inventario. Antes era el primero del seed (Nachos Supremos),
+  // que compartía su poco stock con las demás suites.
+  catalogo = await crearCatalogoPrueba(sonda, 'transacciones-del-dia', { precio: 24000 });
+  plato = catalogo.plato;
+  hayBase = true;
+
   const m = await sonda.query(
     'INSERT INTO mesas (numero, capacidad, ubicacion) VALUES ($1, 4, $2) RETURNING id_mesa',
     [MESA_NUMERO, MARCA_MESA]
@@ -159,7 +161,7 @@ test.before(async () => {
   pedido = await pedidosService.crearConDetalles({
     id_mesa: mesa.id_mesa,
     id_usuario: null,
-    items: [{ id_plato: p.rows[0].id_plato, cantidad: 1 }],
+    items: [{ id_plato: plato.id_plato, cantidad: 1 }],
   });
 
   // Montos chicos y distintos: la suma de las completadas (1.000) cabe en el
@@ -201,6 +203,7 @@ test.before(async () => {
 test.after(async () => {
   try {
     if (hayBase) await limpiar();
+    if (catalogo) await catalogo.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();
@@ -390,11 +393,6 @@ test('referencia_pago: un pago en linea repartido en 3 pedidos sale con la misma
   if (!hayBase) return t.skip('sin base de datos');
 
   const crypto = require('node:crypto');
-  const { rows: pl } = await sonda.query(
-    `SELECT id_plato FROM platos
-      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
-      ORDER BY id_plato LIMIT 1`
-  );
   const { rows: us } = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
   const idUsuario = us[0].id_usuario;
 
@@ -402,7 +400,7 @@ test('referencia_pago: un pago en linea repartido en 3 pedidos sale con la misma
   const nuevos = [];
   for (let i = 0; i < 3; i++) {
     const p = await pedidosService.crearConDetalles({
-      id_mesa: mesa.id_mesa, id_usuario: idUsuario, items: [{ id_plato: pl[0].id_plato, cantidad: 1 }],
+      id_mesa: mesa.id_mesa, id_usuario: idUsuario, items: [{ id_plato: plato.id_plato, cantidad: 1 }],
     });
     if (i < 2) {
       for (const e of ['en_preparacion', 'listo', 'entregado']) {
@@ -470,11 +468,6 @@ test('referencia_pago: un cobro de mesa en caja repartido sale con "caja:<id_cob
   if (!hayBase) return t.skip('sin base de datos');
 
   const crypto = require('node:crypto');
-  const { rows: pl } = await sonda.query(
-    `SELECT id_plato FROM platos
-      WHERE disponible AND stock_suficiente AND NOT personalizable AND precio >= 5000
-      ORDER BY id_plato LIMIT 1`
-  );
   const { rows: us } = await sonda.query('SELECT id_usuario FROM usuarios ORDER BY id_usuario LIMIT 1');
   const idUsuario = us[0].id_usuario;
 
@@ -483,7 +476,7 @@ test('referencia_pago: un cobro de mesa en caja repartido sale con "caja:<id_cob
   // pruebas anteriores de esta suite).
   for (let i = 0; i < 2; i++) {
     const p = await pedidosService.crearConDetalles({
-      id_mesa: mesa.id_mesa, id_usuario: idUsuario, items: [{ id_plato: pl[0].id_plato, cantidad: 1 }],
+      id_mesa: mesa.id_mesa, id_usuario: idUsuario, items: [{ id_plato: plato.id_plato, cantidad: 1 }],
     });
     for (const e of ['en_preparacion', 'listo', 'entregado']) {
       await pedidosService.actualizarEstado(p.id_pedido, e, null, idUsuario);

@@ -94,6 +94,8 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
         <Imagen
           src={plato.imagen}
           alt={plato.nombre}
+          width={640}
+          height={480}
           aspecto="4/3"
           className="w-full border-b border-borde"
         />

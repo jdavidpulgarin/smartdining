@@ -9,7 +9,11 @@ import {
 } from 'react';
 import useMesaSession from '../hooks/useMesaSession';
 import { useMesaSocketContext } from './MesaSocketContext';
-import { listarPedidosMesa, cancelarItem } from '../services/pedidoService';
+import {
+  listarPedidosMesa,
+  cancelarItem,
+  cancelarPedido as cancelarPedidoService,
+} from '../services/pedidoService';
 import {
   CLAVE_ULTIMO_PEDIDO,
   normalizarPedido,
@@ -432,6 +436,27 @@ export function SeguimientoProvider({ children }) {
     [comensal, actualizarListaPedidos]
   );
 
+  const cancelarPedido = useCallback(
+    async (idPedido) => {
+      const respuesta = await cancelarPedidoService(idPedido);
+      const pedidoActualizado = respuesta?.pedido || respuesta;
+      if (pedidoActualizado) {
+        const conOrigen = {
+          ...pedidoActualizado,
+          cancelado_por: 'comensal',
+        };
+        actualizarListaPedidos((prev) =>
+          reemplazarPedido(prev, conOrigen, comensal)
+        );
+        if (pedidoActualizado.id_pedido != null) {
+          setIdSeleccionado(pedidoActualizado.id_pedido);
+        }
+      }
+      return pedidoActualizado;
+    },
+    [comensal, actualizarListaPedidos]
+  );
+
   const valor = useMemo(
     () => ({
       pedidos,
@@ -446,6 +471,7 @@ export function SeguimientoProvider({ children }) {
       llamarMesero,
       recargar,
       quitarPlato,
+      cancelarPedido,
       registrarPedido,
       mesa,
       comensal,
@@ -462,6 +488,7 @@ export function SeguimientoProvider({ children }) {
       llamarMesero,
       recargar,
       quitarPlato,
+      cancelarPedido,
       registrarPedido,
       mesa,
       comensal,

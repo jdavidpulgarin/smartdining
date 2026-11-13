@@ -28,6 +28,8 @@ function PlatoCard({ plato, onSeleccionar }) {
         <Imagen
           src={imagen}
           alt={nombre}
+          width={96}
+          height={96}
           aspecto="1/1"
           className="w-full h-full"
         />

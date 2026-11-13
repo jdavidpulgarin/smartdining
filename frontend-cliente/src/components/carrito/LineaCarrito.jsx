@@ -41,6 +41,8 @@ function LineaCarrito({
         <Imagen
           src={imagenUrl}
           alt={linea.nombre}
+          width={64}
+          height={64}
           aspecto="1/1"
           className="w-16 h-16 rounded-xl shrink-0 border border-borde"
         />
