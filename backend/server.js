@@ -61,7 +61,8 @@ app.use(express.json());
 montarApi(app);
 
 app.use((req, res) => {
-  res.status(404).json({ error: 'Ruta no encontrada' });
+  // `motivo` se agregó en la D-19: el `error` de siempre no cambia.
+  res.status(404).json({ error: 'Ruta no encontrada', motivo: 'no_encontrado' });
 });
 
 // Manejador de errores centralizado: traduce los RAISE EXCEPTION de los

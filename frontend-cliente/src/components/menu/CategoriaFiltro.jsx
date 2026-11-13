@@ -12,8 +12,9 @@ function CategoriaFiltro({
         {/* Chip Todas */}
         <button
           type="button"
+          aria-pressed={esTodasSeleccionada}
           onClick={() => onSeleccionar && onSeleccionar(null)}
-          className={`min-h-10 px-4 py-1.5 rounded-full text-sm font-etiqueta uppercase tracking-wider inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto ${
+          className={`min-h-11 px-4 py-1.5 rounded-full text-sm font-etiqueta uppercase tracking-wider inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto ${
             esTodasSeleccionada
               ? 'bg-primario text-white font-bold shadow-sm border border-primario'
               : 'bg-superficie-2 text-texto-suave border border-borde hover:text-texto hover:bg-superficie font-semibold'
@@ -29,8 +30,9 @@ function CategoriaFiltro({
             <button
               key={cat.id}
               type="button"
+              aria-pressed={esActiva}
               onClick={() => onSeleccionar && onSeleccionar(cat.id)}
-              className={`min-h-10 px-4 py-1.5 rounded-full text-sm font-etiqueta uppercase tracking-wider inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto ${
+              className={`min-h-11 px-4 py-1.5 rounded-full text-sm font-etiqueta uppercase tracking-wider inline-flex items-center justify-center transition-all cursor-pointer select-none shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto ${
                 esActiva
                   ? 'bg-primario text-white font-bold shadow-sm border border-primario'
                   : 'bg-superficie-2 text-texto-suave border border-borde hover:text-texto hover:bg-superficie font-semibold'

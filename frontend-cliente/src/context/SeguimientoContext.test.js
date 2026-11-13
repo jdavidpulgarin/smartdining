@@ -10,6 +10,10 @@ import {
   puedeQuitar,
   aplicarItemCancelado,
   normalizarPedido,
+  separarPedidos,
+  pedidoPrincipal,
+  accionErrorCancelarPedido,
+  mensajeEstadoTarjeta,
 } from '../utils/seguimiento';
 import { CLAVE_SESION } from '../utils/sesion';
 
@@ -392,6 +396,163 @@ describe('SeguimientoContext: aislamiento de sesión entre grupos de la mesa', (
       expect(listaActualizada[0].detalles[0].origen_cancelacion).toBe('comensal');
       // La línea de Beto sigue pendiente
       expect(listaActualizada[0].detalles[1].estado_item).toBe('pendiente');
+    });
+
+    it('pedido ya existente CON lineas + order:created { eventId, pedido } SIN detalles -> procesarOrderCreated devuelve la lista sin cambios', () => {
+      const pedidoExistente = normalizarPedido(
+        {
+          id_pedido: 705,
+          codigo_pedido: 'PED-705',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [
+            {
+              id_detalle: 50,
+              plato_nombre: 'Ajiaco Santafereño',
+              comensal: 'Ana',
+              cantidad: 1,
+              subtotal: 28000,
+              estado_item: 'pendiente',
+            },
+          ],
+        },
+        'Ana'
+      );
+
+      const listaPrev = [pedidoExistente];
+
+      const eventoSinDetalles = {
+        eventId: 'evt-order-created-sin-detalles',
+        pedido: {
+          id_pedido: 705,
+          codigo_pedido: 'PED-705',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [],
+        },
+      };
+
+      const resultado = procesarOrderCreated(listaPrev, eventoSinDetalles, 'Ana');
+
+      expect(resultado).toBe(listaPrev);
+      expect(resultado[0].detalles).toHaveLength(1);
+      expect(resultado[0].detalles[0].id_detalle).toBe(50);
+      expect(resultado[0].detalles[0].estado_item).toBe('pendiente');
+    });
+
+    it('lista con pedidos A y B, se intenta cancelar A, llega pedido_ya_cancelado y la recarga trae A cancelado → la selección queda en A', async () => {
+      const pedidoA = normalizarPedido(
+        {
+          id_pedido: 'A',
+          codigo_pedido: 'PED-A',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [
+            {
+              id_detalle: 1,
+              plato_nombre: 'Hamburguesa',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+          ],
+        },
+        'Ana'
+      );
+
+      const pedidoB = normalizarPedido(
+        {
+          id_pedido: 'B',
+          codigo_pedido: 'PED-B',
+          estado: 'recibido',
+          comensal: 'Ana',
+          detalles: [
+            {
+              id_detalle: 2,
+              plato_nombre: 'Papas',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+          ],
+        },
+        'Ana'
+      );
+
+      let listaEstado = [pedidoA, pedidoB];
+      let idSeleccionado = null;
+
+      const setIdSeleccionado = (id) => {
+        idSeleccionado = id;
+      };
+
+      const obtenerPedidoActivo = () => {
+        const { misPedidos, otrosPedidos } = separarPedidos(listaEstado, 'Ana');
+        if (misPedidos.length > 0) {
+          return pedidoPrincipal(misPedidos, idSeleccionado);
+        }
+        return otrosPedidos[0] || null;
+      };
+
+      // Inicialmente, sin idSeleccionado, pedidoPrincipal escoge el primer activo (A)
+      expect(obtenerPedidoActivo().id_pedido).toBe('A');
+
+      // Se simula abrir el diálogo de cancelación para A (guarda targetId)
+      const targetId = 'A';
+
+      // Mock de cancelarPedidoService que rechaza con 409 pedido_ya_cancelado
+      const mockCancelarPedidoService = vi.fn().mockRejectedValue({
+        status: 409,
+        motivo: 'pedido_ya_cancelado',
+      });
+
+      // Mock de recargar que trae A cancelado y B recibido
+      const recargar = vi.fn().mockImplementation(async () => {
+        listaEstado = [
+          normalizarPedido(
+            {
+              id_pedido: 'A',
+              codigo_pedido: 'PED-A',
+              estado: 'cancelado',
+              comensal: 'Ana',
+              detalles: [
+                {
+                  id_detalle: 1,
+                  plato_nombre: 'Hamburguesa',
+                  estado_item: 'cancelado',
+                  comensal: 'Ana',
+                },
+              ],
+            },
+            'Ana'
+          ),
+          pedidoB,
+        ];
+      });
+
+      // Lógica de cancelación y manejo de error tras pedido_ya_cancelado
+      try {
+        await mockCancelarPedidoService(targetId);
+      } catch (err) {
+        const accion = accionErrorCancelarPedido(err);
+        if (accion.recargar) {
+          await recargar();
+          if (targetId != null) {
+            setIdSeleccionado(targetId);
+          }
+        }
+      }
+
+      // La recarga fue ejecutada y la selección queda en A
+      expect(recargar).toHaveBeenCalledTimes(1);
+      const activoTrasRecargar = obtenerPedidoActivo();
+      expect(activoTrasRecargar.id_pedido).toBe('A');
+      expect(activoTrasRecargar.estado).toBe('cancelado');
+      expect(mensajeEstadoTarjeta(activoTrasRecargar, 5)).toBe(
+        'Este pedido fue cancelado.'
+      );
+
+      // Si después de recargar ese pedido ya no existe en la lista, deja el comportamiento actual
+      listaEstado = [pedidoB];
+      expect(obtenerPedidoActivo().id_pedido).toBe('B');
     });
   });
 });

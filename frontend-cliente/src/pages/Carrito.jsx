@@ -171,9 +171,9 @@ function Carrito() {
         >
           🛒
         </div>
-        <h2 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
+        <h1 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
           Tu carrito está vacío
-        </h2>
+        </h1>
         <p className="text-sm text-texto-suave max-w-xs mb-6">
           Aún no has agregado ningún plato a tu pedido. Revisa nuestro menú para
           elegir tus favoritos.
@@ -193,8 +193,12 @@ function Carrito() {
       {/* Portada Hero Carrito */}
       <div className="-mx-4 -mt-4 mb-2 relative h-40 sm:h-48 overflow-hidden rounded-b-3xl bg-superficie">
         <img
-          src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=1200&q=80&auto=format"
+          src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=75&auto=format"
           alt="Comida fresca"
+          width={800}
+          height={533}
+          fetchPriority="high"
+          decoding="async"
           className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />
@@ -322,7 +326,7 @@ function Carrito() {
             </p>
             <Link
               to="/menu"
-              className="inline-block text-xs font-bold text-primario-texto hover:underline"
+              className="min-h-11 inline-flex items-center justify-center px-3 text-xs font-bold text-primario-texto hover:underline"
             >
               + Agregar platos desde el menú
             </Link>
