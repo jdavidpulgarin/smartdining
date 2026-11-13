@@ -46,7 +46,8 @@ const ZONA = 'America/Bogota';
 
 const MOTIVOS = Object.freeze({
   noEncontrado: 'no_encontrado',
-  pedidoCancelado: 'pedido_cancelado',
+  pedidoSinPagar: 'pedido_sin_pagar',
+  pedidoNoAsignable: 'pedido_no_asignable',
   entregaYaSalio: 'entrega_ya_salio',
   repartidorNoValido: 'repartidor_no_valido',
   noEsTuEntrega: 'no_es_tu_entrega',
@@ -56,7 +57,8 @@ const MOTIVOS = Object.freeze({
 
 const MENSAJES = Object.freeze({
   noEncontrado: 'Ese pedido no es un domicilio',
-  pedidoCancelado: 'El pedido está cancelado',
+  pedidoSinPagar: 'El pedido todavía no está pagado: no se le asigna repartidor hasta que se confirme el pago',
+  pedidoNoAsignable: 'El pedido ya está cancelado, entregado o pagado: no se le asigna repartidor',
   entregaYaSalio: 'La entrega ya salió: no se puede cambiar el repartidor',
   repartidorNoValido: 'Ese usuario no es un repartidor activo',
   noEsTuEntrega: 'Esa entrega no es tuya',
@@ -128,14 +130,15 @@ async function listarDespacho(estados = ESTADOS_NO_TERMINADOS) {
 
 /**
  * GET /domicilios/mios: las entregas del repartidor que todavía no terminaron
- * (sin las de pedidos cancelados) y las que terminó HOY, en hora de Bogotá.
+ * (sin las de pedidos cancelados ni sin pagar, igual que el despacho) y las que
+ * terminó HOY, en hora de Bogotá.
  */
 async function listarMias(idRepartidor) {
   const { rows } = await pool.query(
     `${SQL_DOMICILIO}
       WHERE pd.id_repartidor = $1::int
         AND (
-          (pd.estado_entrega IN ('asignado', 'en_camino') AND p.estado <> 'cancelado')
+          (pd.estado_entrega IN ('asignado', 'en_camino') AND p.estado NOT IN ('por_pagar', 'cancelado'))
           OR (pd.estado_entrega IN ('entregado', 'fallido')
               AND COALESCE(pd.entregado_en, pd.fallido_en)
                   >= (date_trunc('day', now() AT TIME ZONE $2::text) AT TIME ZONE $2::text))
@@ -195,15 +198,26 @@ const esRepartidorInvalidoDelTrigger = (err) =>
   Boolean(err) && err.code === '23514' && /no es un repartidor activo/.test(err.message || '');
 
 /**
+ * Estados del PEDIDO en los que se asigna o reasigna repartidor: ya pagado (el
+ * pago es siempre anticipado: 'por_pagar' -> 'recibido' lo hace
+ * registrar_pago_anticipado) y todavía sin entregar. 'por_pagar' es 409
+ * pedido_sin_pagar; 'cancelado', 'entregado' y 'pagado', 409 pedido_no_asignable.
+ */
+const ESTADOS_PEDIDO_ASIGNABLES = Object.freeze(['recibido', 'en_preparacion', 'listo']);
+
+/**
  * PATCH /domicilios/:id_pedido/repartidor (admin y cajero): asigna o reasigna
- * mientras la entrega esté en 'por_asignar' o 'asignado'. asignado_en se pone
- * en cada asignación (la última es la que vale para el despacho).
+ * mientras el pedido esté en ESTADOS_PEDIDO_ASIGNABLES y la entrega en
+ * 'por_asignar' o 'asignado'. Se decide con el pedido y la entrega ya
+ * bloqueados (pedido antes que pedidos_domicilio). asignado_en se pone en cada
+ * asignación (la última es la que vale para el despacho).
  */
 async function asignar(idPedido, idRepartidor) {
   try {
     return await enTransaccion(async (client) => {
       const { pedido, entrega } = await bloquear(client, idPedido);
-      if (pedido.estado === 'cancelado') throw errorDe(409, 'pedidoCancelado');
+      if (pedido.estado === 'por_pagar') throw errorDe(409, 'pedidoSinPagar');
+      if (!ESTADOS_PEDIDO_ASIGNABLES.includes(pedido.estado)) throw errorDe(409, 'pedidoNoAsignable');
       if (!['por_asignar', 'asignado'].includes(entrega.estado_entrega)) throw errorDe(409, 'entregaYaSalio');
 
       const r = await client.query(
@@ -329,6 +343,7 @@ async function listarRepartidores() {
 module.exports = {
   ESTADOS_ENTREGA,
   ESTADOS_NO_TERMINADOS,
+  ESTADOS_PEDIDO_ASIGNABLES,
   MOTIVOS,
   SQL_DOMICILIO,
   listarDespacho,
