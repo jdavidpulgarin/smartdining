@@ -60,6 +60,7 @@
 ### Rendimiento (`perf(cliente): mejorar la carga de la pwa`)
 - **Code splitting por ruta (`src/App.jsx`):** `Menu`, `Constructor`, `Carrito`, `Seguimiento`, `Pago`, `Despedida` y `UiShowcase` pasan a `React.lazy` + `<Suspense>`, dejando solo `Inicio` en el chunk inicial.
   - El JS principal (`dist/assets/index-*.js`) bajó de **`476.70 kB`** (`139.60 kB` gzip) a **`268.37 kB`** (`83.20 kB` gzip) en el build final (**-43.7 %**).
+  - Recuperación tras despliegue: ErrorBoundary con botón Recargar + recarga automática una vez en vite:preloadError.
 - **Fuentes y preconnect (`index.html` y `src/index.css`):** Se eliminó el `@import url(...)` bloqueante dentro de `src/index.css` y se movió a `<link rel="stylesheet">` en `index.html` acompañado de `preconnect` a `fonts.googleapis.com`, `fonts.gstatic.com` e `images.unsplash.com`.
 - **Imágenes (`Inicio.jsx`, `Menu.jsx`, `Carrito.jsx`, `Constructor.jsx`, `Imagen.jsx`, `PlatoCard.jsx`, `PlatoDetalleModal.jsx`, `LineaCarrito.jsx`):**
   - Hero/LCP: ajuste de `w=1200` → `w=800&q=75`, `fetchPriority="high"`, `decoding="async"`, `width`/`height` explícitos y `<link rel="preload" as="image">` en `index.html` para la imagen de portada.

@@ -7,6 +7,7 @@ import { SeguimientoProvider } from './context/SeguimientoContext'
 import Layout from './components/layout/Layout'
 import Inicio from './pages/Inicio'
 import { obtenerMetadatosRuta } from './utils/metadatosRuta'
+import ErrorBoundary from './components/ui/ErrorBoundary'
 import './styles/seguimiento.css'
 import './styles/cuenta.css'
 
@@ -50,6 +51,11 @@ function MetadatosRuta() {
   return null
 }
 
+function RutasConBoundary({ children }) {
+  const { pathname } = useLocation()
+  return <ErrorBoundary key={pathname}>{children}</ErrorBoundary>
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -58,60 +64,62 @@ function App() {
         <MesaSocketProvider>
           <CarritoProvider>
             <SeguimientoProvider>
-              <Suspense fallback={<CargandoRuta />}>
-          <Routes>
-            <Route path="/" element={<Inicio />} />
-            <Route
-              path="/menu"
-              element={
-                <Layout>
-                  <Menu />
-                </Layout>
-              }
-            />
-            <Route
-              path="/armar/:idPlato"
-              element={
-                <Layout>
-                  <Constructor />
-                </Layout>
-              }
-            />
-            <Route
-              path="/carrito"
-              element={
-                <Layout>
-                  <Carrito />
-                </Layout>
-              }
-            />
-            <Route
-              path="/seguimiento"
-              element={
-                <Layout>
-                  <Seguimiento />
-                </Layout>
-              }
-            />
-            <Route
-              path="/pago"
-              element={
-                <Layout>
-                  <Pago />
-                </Layout>
-              }
-            />
-            <Route path="/despedida" element={<Despedida />} />
-            {import.meta.env.DEV && (
-              <Route path="/dev/ui" element={<UiShowcase />} />
-            )}
-          </Routes>
-              </Suspense>
+              <RutasConBoundary>
+                <Suspense fallback={<CargandoRuta />}>
+                  <Routes>
+                    <Route path="/" element={<Inicio />} />
+                    <Route
+                      path="/menu"
+                      element={
+                        <Layout>
+                          <Menu />
+                        </Layout>
+                      }
+                    />
+                    <Route
+                      path="/armar/:idPlato"
+                      element={
+                        <Layout>
+                          <Constructor />
+                        </Layout>
+                      }
+                    />
+                    <Route
+                      path="/carrito"
+                      element={
+                        <Layout>
+                          <Carrito />
+                        </Layout>
+                      }
+                    />
+                    <Route
+                      path="/seguimiento"
+                      element={
+                        <Layout>
+                          <Seguimiento />
+                        </Layout>
+                      }
+                    />
+                    <Route
+                      path="/pago"
+                      element={
+                        <Layout>
+                          <Pago />
+                        </Layout>
+                      }
+                    />
+                    <Route path="/despedida" element={<Despedida />} />
+                    {import.meta.env.DEV && (
+                      <Route path="/dev/ui" element={<UiShowcase />} />
+                    )}
+                  </Routes>
+                </Suspense>
+              </RutasConBoundary>
             </SeguimientoProvider>
-        </CarritoProvider>
-      </MesaSocketProvider>
-    </SesionProvider>
-  </BrowserRouter>
+          </CarritoProvider>
+        </MesaSocketProvider>
+      </SesionProvider>
+    </BrowserRouter>
   )
 }
 
