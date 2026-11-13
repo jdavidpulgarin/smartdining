@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const mesasService = require('../services/mesas.service');
 const usuarioActivo = require('../services/usuario-activo');
+const clienteActivo = require('../services/cliente-activo');
 const { extraerSid } = require('../services/qr.token');
 
 /**
@@ -15,6 +16,14 @@ const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina'];
  * { id_mesa, rol: 'comensal' } — no tiene id_usuario.
  */
 const ROL_COMENSAL = 'comensal';
+
+/**
+ * D-19 parte B: rol del cliente de la app. Tampoco existe en `usuarios`: su
+ * cuenta está en `clientes` y su JWT es `{ rol: 'cliente', sub: '<id_cliente>' }`.
+ * Ninguna ruta del personal ni del comensal lo lista en requireRole, así que
+ * ahí recibe 403; y las rutas de clientes solo listan este rol.
+ */
+const ROL_CLIENTE = 'cliente';
 
 /**
  * Motivos de los 401 y 403 de este middleware. Solo se AGREGAN al `error` de
@@ -70,6 +79,23 @@ async function requireAuth(req, res, next) {
 
   req.user = payload;
 
+  if (payload.rol === ROL_CLIENTE) {
+    // D-19: el cliente tiene que existir y seguir activo, igual que el personal
+    // (H-09). Su id viaja en `sub` como texto; se deja en req.user.id_cliente
+    // como número, que es lo único que leen las rutas de clientes.
+    const idCliente = idClienteDelPayload(payload);
+    if (!idCliente) return no401(res, 'Token inválido o expirado');
+    try {
+      if (!(await clienteActivo.estaActivo(idCliente))) {
+        return no401(res, MENSAJE_CUENTA_CLIENTE_INACTIVA);
+      }
+    } catch (err) {
+      return next(err);
+    }
+    req.user = { rol: ROL_CLIENTE, id_cliente: idCliente };
+    return next();
+  }
+
   if (payload.rol !== ROL_COMENSAL) {
     // H-09: un JWT válido no basta. El token vive 8 horas y no se puede
     // retirar, así que tras desactivar a alguien su token seguía abriendo la
@@ -101,6 +127,15 @@ async function requireAuth(req, res, next) {
 
 const MENSAJE_SESION_CERRADA = 'Sesión de mesa cerrada, escanea el QR de nuevo';
 const MENSAJE_CUENTA_INACTIVA = 'Tu cuenta está desactivada, habla con administración';
+const MENSAJE_CUENTA_CLIENTE_INACTIVA = 'Tu cuenta no está activa';
+
+/** El id del cliente de un JWT de cliente: `sub` con un entero positivo, o null. */
+function idClienteDelPayload(payload) {
+  const sub = payload && payload.sub;
+  if (typeof sub !== 'string' || !/^[1-9][0-9]{0,9}$/.test(sub)) return null;
+  const id = Number(sub);
+  return id <= 2147483647 ? id : null;
+}
 
 /**
  * ¿El JWT de este comensal corresponde al QR que la mesa tiene ahora?
@@ -148,8 +183,11 @@ module.exports = {
   ALGORITMO_JWT,
   ROLES_STAFF,
   ROL_COMENSAL,
+  ROL_CLIENTE,
   MOTIVO_NO_AUTENTICADO,
   MOTIVO_PROHIBIDO,
   MENSAJE_SESION_CERRADA,
   MENSAJE_CUENTA_INACTIVA,
+  MENSAJE_CUENTA_CLIENTE_INACTIVA,
+  idClienteDelPayload,
 };
