@@ -242,6 +242,23 @@ describe('pedidoPrincipal', () => {
     const principal = pedidoPrincipal(misPedidos, null);
     expect(principal.id_pedido).toBe(2);
   });
+
+  it('mantiene la seleccion en un pedido cancelado si idSeleccionado coincide', () => {
+    const misPedidos = [
+      { id_pedido: 'A', estado: 'cancelado' },
+      { id_pedido: 'B', estado: 'recibido' },
+    ];
+    const principal = pedidoPrincipal(misPedidos, 'A');
+    expect(principal.id_pedido).toBe('A');
+  });
+
+  it('si el pedido seleccionado no existe tras recargar, cae al primer pedido activo', () => {
+    const misPedidos = [
+      { id_pedido: 'B', estado: 'recibido' },
+    ];
+    const principal = pedidoPrincipal(misPedidos, 'A');
+    expect(principal.id_pedido).toBe('B');
+  });
 });
 
 describe('haceCuanto', () => {
