@@ -728,8 +728,8 @@ En los dos casos:
   pago se anota y después comprueba la revocación, deshaciendo la anotación si la ve.
 - El personal y la pantalla no cuentan.
 - No lleva `eventId`: es un estado completo; quédate siempre con el último.
-- La PWA lo usa para mostrar cuánto es «igual» antes de pedir la intención
-  ([§8.1](#81-post-pagosintencion)).
+- La PWA y el panel lo usan para mostrar quién ya pagó. (Antes la PWA calculaba con él el
+  modo «igual», que se retiró en T2: [§8.1](#81-post-pagosintencion).)
 
 **Campo `sin_celular`** (Estable desde R-19.2; compatible hacia atrás). Las
 personas sin celular las agrega el personal con
@@ -1025,7 +1025,7 @@ reintento termina de quitar las líneas del carrito sin volver a emitir la coman
 
 Alguien en la mesa no tiene celular y el mesero (o el admin) pide por esa persona desde el panel
 (D-18: `POST /api/mesas/:id/comensales` en el backend). Debe contar como persona en
-[`mesa:presencia`](#52-mesapresencia) y en «igual» ([§8.1](#81-post-pagosintencion)), y puede
+[`mesa:presencia`](#52-mesapresencia) y en la rotación del QR, y puede
 pagar en caja con su alias ([§8.6](#86-cobros-de-caja-post-internalpayment-confirmed)).
 
 **Quién la llama:** el backend, **después del COMMIT** de D-18, tanto al agregar como al quitar.
@@ -1118,10 +1118,9 @@ Defensa doble: además, el backend envía el alias guardado en la reserva (D-18b
   ([§5.2](#52-mesapresencia)).
 - La lista vive en `sd:mesa:{ID}:sin_celular` con TTL de 24 h, igual que `pagaron`, y se borra al
   liberarse la mesa, en el mismo momento que `pagaron`.
-- **«Igual»:** cuenta a los sin celular porque van en `comensales`.
 - **Cobro en caja:** el `comensal` se normaliza con la regla del alias antes de anotarlo en
   `pagaron` (§8.6), así «Abuela » de la cuenta marca a «Abuela». Si después de normalizar no
-  coincide con el alias de `sin_celular`, esa persona sigue contando en «igual».
+  coincide con el alias de `sin_celular`, esa persona no aparece como que ya pagó.
 - **Rotación del QR:** con un sin celular `total` es mayor que 0 y el QR deja de rotar, igual que
   con el primer comensal conectado: hay alguien sentado.
 - **Mesa solo con sin celular:** al liberarla no sale `mesa:presencia`, porque no hay comensales
@@ -1193,12 +1192,12 @@ intención y verifica el resultado. Todo va detrás de la interfaz `PasarelaPago
 Auth: `Authorization: Bearer <JWT del comensal>` (sesión de mesa vigente). La mesa sale del JWT.
 
 ```json
-{ "modo": "igual", "eventId": "4b0d…" }
+{ "modo": "propio", "eventId": "4b0d…" }
 ```
 
 | Campo | Reglas |
 |---|---|
-| `modo` | `total` (saldo de la mesa), `igual` (saldo ÷ personas que aún no pagaron, fórmula abajo), `propio` (lo de ese comensal) |
+| `modo` | `propio` («pagar lo mío»: lo de ese comensal) o `total` («pagar toda la cuenta»: el saldo de la mesa). **`igual` ya no existe** (T2): responde `400 PAYLOAD_INVALIDO` con un mensaje que lo explica |
 | `eventId` | UUID. Repetirlo devuelve la **misma** respuesta, salvo que esa intención ya no siga vigente (ver abajo): entonces se trata como una petición nueva |
 | `comensal` | Opcional. Quien paga es el alias **del JWT**; si viene uno distinto → `403 NO_AUTORIZADO` (nadie paga ni consulta "lo propio" de otro) |
 
@@ -1210,7 +1209,7 @@ servidor con la cuenta del backend.
 ```json
 {
   "referencia": "SD-5-1760212345678-Qm9vX2FfdGVzdF9f",
-  "monto_en_centavos": 3333300,
+  "monto_en_centavos": 2000000,
   "moneda": "COP",
   "llave_publica": "pub_test_…",
   "firma_integridad": "37c8407747e5…",
@@ -1220,7 +1219,7 @@ servidor con la cuenta del backend.
 
 | Error | Cuándo |
 |---|---|
-| `400 PAYLOAD_INVALIDO` | `modo` o `eventId` inválidos |
+| `400 PAYLOAD_INVALIDO` | `modo` o `eventId` inválidos. `modo: "igual"` da el mensaje «El modo «igual» (dividir la cuenta) ya no existe: usa «propio» (pagar lo tuyo) o «total» (pagar toda la cuenta)». Se valida antes de todo: no consulta la cuenta ni gasta el límite de 5 por minuto |
 | `401 NO_AUTORIZADO` | Sin JWT, JWT inválido o la mesa ya se liberó |
 | `401 TOKEN_INVALIDO` | JWT de comensal antiguo, sin alias: volver a escanear el QR |
 | `403 NO_AUTORIZADO` | No es comensal, o `comensal` distinto del alias del JWT. Cualquier valor que no sea ese alias, aunque esté mal formado (`""`, `123`, `null`), es `403` y nunca `400` |
@@ -1229,49 +1228,17 @@ servidor con la cuenta del backend.
 | `502/503 ERROR_INTERNO` | El backend no respondió o respondió mal |
 | `503 NO_CONFIGURADO` | Pagos apagados (sin `WOMPI_*`) |
 
-Reglas de la cuenta dividida:
+Reglas de los modos:
 
 - **total**: el saldo completo de la mesa.
-- **igual**: el **saldo** que queda, entre las personas presentes que **aún no han pagado**
-  más quien paga. Así ningún pago `propio` o de caja deja saldo sin dueño, ni a uno le toca
-  la parte de otro. Quien se va sin pagar deja de contar. Fórmula exacta, en centavos
-  enteros (la PWA debe replicarla tal cual con los datos de `mesa:presencia` y la cuenta):
-
-  ```js
-  // saldo:      saldo_centavos de la cuenta de la mesa
-  // comensales: mesa:presencia.comensales · pagaron: mesa:presencia.pagaron
-  // yo:         alias de quien paga (el del JWT)
-  const pendientes = new Set(comensales.filter((a) => !pagaron.includes(a)));
-  pendientes.add(yo);                 // quien paga siempre cuenta
-  const n = Math.max(1, pendientes.size);
-  const parte = Math.round(saldo / n / 100) * 100;   // a pesos; .5 redondea hacia arriba
-  const monto = (n === 1 || parte <= 0 || parte >= saldo) ? saldo : parte;
-  ```
-
-  Con `saldo` = 0 → `409 SIN_SALDO`. El último (n = 1) paga el saldo exacto, centavos
-  incluidos; nunca se cobra más que el saldo. Ejemplos:
-
-  | Mesa | Pagos (en orden) |
-  |---|---|
-  | 2 personas, $85.000 | Ana propio $20.000 → Beto igual **$65.000** |
-  | 3 personas, $100.000 | Ana propio $30.000 → Beto igual **$35.000** → Carlos igual **$35.000** |
-  | 4 personas, $120.000 | Ana propio $45.000 → Beto, Carlos y Dani igual **$25.000** c/u |
-  | 4 personas, $120.000 | Ana propio $10.000 → Beto **$36.667** → Carlos **$36.667** → Dani **$36.666** |
-  | 3 personas, $100.000 | Ana **$33.333** → Beto **$33.334** → Carlos **$33.333** (todos igual) |
-
-  Las «personas presentes» incluyen los alias de `sin_celular`
-  ([§5.2](#52-mesapresencia)), que ya van en `comensales`; la PWA debe usar `comensales` y
-  `pagaron` de `mesa:presencia`, tal como dice la fórmula, y no calcular con `total`. Ejemplo:
-  3 personas (1 sin celular), $90.000, nadie ha pagado → igual **$30.000** cada uno.
-
-  Si la presencia o `pagaron` cambian entre lo que mostró la PWA y la petición, manda el
-  cálculo del servidor (y una pendiente anterior se reemplaza, ver abajo).
 - **propio**: el saldo de ese alias según el backend (nunca más que el saldo de la mesa).
+  Cuando el último paga su parte, la cuenta queda en 0; si alguien prefiere invitar o
+  completar lo que falta, usa `total`.
 - **Una sola intención pendiente por comensal**, reutilizada **solo si sigue valiendo**. En
   cada petición el servidor consulta la cuenta y recalcula el monto:
   - mismo `modo` **y** mismo monto recalculado, y `expira_en` a más de 5 min → `200` con la
     misma intención (misma referencia y firma);
-  - otro `modo`, el monto cambió (pedido nuevo, otro pago, cambio de presencia en `igual`) o
+  - otro `modo`, el monto cambió (pedido nuevo, otro pago) o
     está por vencer → `201` con una intención **nueva**. La vieja no se borra: queda `reemplazada` 7 días y
     su webhook se sigue aceptando por **su** monto exacto (§8.3), por si ya se pagó en otra
     pestaña;
@@ -1403,8 +1370,8 @@ x-internal-key: <INTERNAL_API_KEY>
   "pasarela": "wompi",
   "id_mesa": 5,
   "comensal": "Ana",
-  "modo": "igual",
-  "monto_centavos": 3333300,
+  "modo": "propio",
+  "monto_centavos": 2000000,
   "moneda": "COP",
   "metodo_pago": "online"
 }
@@ -1560,7 +1527,7 @@ Respuestas:
 
 **`comensal` y `pagaron` (R-19.2):** si queda saldo, el `comensal` se anota en `pagaron`
 ([§5.2](#52-mesapresencia)) **normalizado** con la regla del alias (§6.4): «Abuela » se anota
-como «Abuela» y deja de contar en «igual». Si no es un alias válido (p. ej. «Mesa #5»), se anota
+como «Abuela». Si no es un alias válido (p. ej. «Mesa #5»), se anota
 tal cual, como antes: el cobro nunca falla por esto. `payment:confirmed` lleva el `comensal`
 tal como llegó.
 
@@ -1646,3 +1613,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `pago:alerta` · cuánto y quién (pedido del panel) | Solo `eventId`, `id_mesa`, referencias, `motivo` y `emitidoEn`: el panel no podía mostrar cuánto ni quién | Agrega `comensal` (alias de la intención o `null`), `monto_centavos` (lo cobrado, según la API o el evento) y `monto_esperado_centavos` (de la intención o `null`). Sin datos de tarjeta ni del pagador; sigue yendo solo a `room:admin` (§8.5) | Panel: mostrarlos si quiere; los campos nuevos no rompen nada |
 | `mesa:presencia` · al conectar el panel | El panel recibía la presencia solo cuando cambiaba algo: al conectar o recargar no sabía quién estaba sentado | **500 ms** después de que un socket de personal entra a `room:admin`, recibe solo él un `mesa:presencia` por cada mesa con algo, incluidas las mesas sin ningún socket (índice `sd:mesas:con-estado`, 24 h). Si se desconecta antes, no se envía. Mismo evento y payload (§5.2) | Nadie: el panel ya lo guarda por `id_mesa`. Es el respaldo de `mesa:presencia:solicitar` |
 | `mesa:presencia:solicitar` (nuevo) | — | El personal pide la presencia de todas las mesas con algo y la recibe en el ack `{ ok, mesas }`, sin depender de listeners. Comensal, tablet y cocina → `NO_AUTORIZADO`; 1 por socket cada 2 s (`RATE_LIMIT`) (§4) | Panel (recomendado): pedirla en cada `connect`, después de registrar los listeners (ejemplo en §4) |
+| `POST /pagos/intencion` · sin modo `igual` (T2) | Tres modos: `total`, `igual` (saldo ÷ personas que aún no pagaron) y `propio` | Dos modos: `propio` («pagar lo mío») y `total` («pagar toda la cuenta»). `modo: "igual"` → `400 PAYLOAD_INVALIDO` con un mensaje que lo explica, sin consultar la cuenta ni gastar el límite. `mesa:presencia.pagaron` sigue igual (§8.1) | PWA (Juan, en el mismo bloque de merges): quitar «Dividir» y no mandar `igual`. Una PWA vieja que lo mande recibe el `400` con el mensaje |
