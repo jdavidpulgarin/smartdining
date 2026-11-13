@@ -168,9 +168,9 @@ function Seguimiento() {
             <path d="M8 16h.01" />
           </svg>
         </div>
-        <h2 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
+        <h1 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
           No tienes pedidos activos en esta mesa
-        </h2>
+        </h1>
         <p className="text-sm text-texto-suave max-w-xs mb-6">
           Cuando confirmes un pedido desde el carrito, podrás ver su estado y avance aquí.
         </p>
@@ -209,12 +209,12 @@ function Seguimiento() {
             role="status"
             aria-live="polite"
             className={`bg-superficie-2 px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg border ${
-              esLimite ? 'border-[#6B6B6B]' : 'border-acento'
+              esLimite ? 'border-[#969696]' : 'border-acento'
             } text-texto`}
           >
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
-                esLimite ? 'bg-[#6B6B6B]' : 'bg-acento'
+                esLimite ? 'bg-[#969696]' : 'bg-acento'
               }`}
             />
             <span>{mensaje}</span>

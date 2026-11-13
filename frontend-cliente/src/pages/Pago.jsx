@@ -310,10 +310,13 @@ function Pago() {
   if (error && !cuenta) {
     return (
       <div className="py-12 px-4 max-w-md mx-auto text-center space-y-4">
-        <div className="bg-superficie border border-borde rounded-2xl p-6 space-y-3">
-          <h2 className="font-titulo text-2xl text-primario uppercase tracking-wide">
+        <div
+          role="alert"
+          className="bg-superficie border border-borde rounded-2xl p-6 space-y-3"
+        >
+          <h1 className="font-titulo text-2xl text-primario uppercase tracking-wide">
             No pudimos cargar la cuenta
-          </h2>
+          </h1>
           <p className="text-sm text-texto-suave">
             {error.mensaje || error.message || 'Ocurrió un error al consultar los pedidos de la mesa.'}
           </p>
@@ -515,7 +518,7 @@ function Pago() {
           aria-live="polite"
           className={`bg-superficie border ${
             avisoMesero?.tipo === 'advertencia'
-              ? 'border-[#2A2A2A] text-[#6B6B6B]'
+              ? 'border-[#2A2A2A] text-[#969696]'
               : avisoMesero?.tipo === 'error'
               ? 'border-primario text-white'
               : 'border-exito text-white'
@@ -524,7 +527,7 @@ function Pago() {
           <span
             className={`w-2 h-2 rounded-full shrink-0 ${
               avisoMesero?.tipo === 'advertencia'
-                ? 'bg-[#6B6B6B]'
+                ? 'bg-[#969696]'
                 : avisoMesero?.tipo === 'error'
                 ? 'bg-primario'
                 : 'bg-exito'
@@ -700,7 +703,7 @@ function Pago() {
                       <span className="font-etiqueta font-bold text-sm tracking-wider uppercase">
                         {TITULOS_MODO[k]}
                       </span>
-                      <span className="text-[11px] opacity-85">
+                      <span className="text-[11px]">
                         {formatoPesos(montos[k])}
                       </span>
                     </button>
@@ -886,9 +889,9 @@ function Pago() {
               avisoCuenta.estado === 'error'
                 ? 'border-primario text-primario hover:bg-primario/10 cursor-pointer'
                 : avisoCuenta.estado === 'rate_limit'
-                ? 'border-[#2A2A2A] bg-[#1A1A1A] text-[#6B6B6B] cursor-not-allowed opacity-80'
+                ? 'border-[#3A3A3A] bg-[#1A1A1A] text-[#969696] cursor-not-allowed'
                 : avisoCuenta.deshabilitado
-                ? 'border-[#3A3A3A] bg-transparent text-texto-suave opacity-70 cursor-not-allowed'
+                ? 'border-[#3A3A3A] bg-transparent text-texto-suave cursor-not-allowed'
                 : 'border-[#3A3A3A] bg-transparent text-texto-suave hover:border-texto-suave hover:text-white cursor-pointer'
             }`}
           >
@@ -901,8 +904,8 @@ function Pago() {
                 avisoCuenta.estado === 'error'
                   ? '#E3242B'
                   : avisoCuenta.estado === 'rate_limit'
-                  ? '#6B6B6B'
-                  : '#A3A3A3'
+                  ? '#969696'
+                  : '#B5B5B5'
               }
               strokeWidth="2"
               strokeLinecap="round"
@@ -1083,7 +1086,7 @@ function Pago() {
 
           <p
             className={`m-0 text-[15px] ${
-              avisoCuenta.estado === 'error' ? 'text-primario font-semibold' : 'text-white'
+              avisoCuenta.estado === 'error' ? 'text-primario-texto font-semibold' : 'text-white'
             }`}
             role={avisoCuenta.estado === 'error' ? 'alert' : undefined}
           >
@@ -1093,7 +1096,7 @@ function Pago() {
             <button
               type="button"
               onClick={handlePedirCuenta}
-              className="min-h-[36px] px-3 rounded-lg border border-primario bg-transparent text-primario text-xs font-semibold hover:bg-primario/10 cursor-pointer transition-colors"
+              className="min-h-[44px] px-3 rounded-lg border border-primario bg-transparent text-primario-texto text-xs font-semibold hover:bg-primario/10 cursor-pointer transition-colors"
             >
               Reintentar aviso al mesero
             </button>

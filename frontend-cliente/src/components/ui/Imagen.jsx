@@ -21,6 +21,11 @@ function Imagen({
   className = '',
   imgClassName = '',
   srcRespaldo = IMAGEN_RESPALDO,
+  loading = 'lazy',
+  decoding = 'async',
+  width = 400,
+  height = 300,
+  fetchPriority,
   ...rest
 }) {
   const [srcFallido, setSrcFallido] = useState(null);
@@ -42,7 +47,11 @@ function Imagen({
       <img
         src={mostrarRespaldo ? srcRespaldo : src}
         alt={alt || 'Imagen del plato'}
-        loading="lazy"
+        width={width}
+        height={height}
+        loading={loading}
+        decoding={decoding}
+        fetchPriority={fetchPriority}
         onError={() => {
           if (src && srcFallido !== src) {
             setSrcFallido(src);
