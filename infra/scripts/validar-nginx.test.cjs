@@ -13,7 +13,7 @@ const SCRIPT = path.join(__dirname, 'validar-nginx.sh');
 const DOCKER_FALSO = `#!/bin/sh
 case "$*" in
   *" config nginx"*) cat "$FALSO_CONFIG" ;;
-  *" exec "*) printf '%s\\n' "$*" >> "$FALSO_EXEC"; exit "\${FALSO_T:-0}" ;;
+  *" exec "*) printf '%s\\n' "$*" >> "$FALSO_EXEC"; cat > "$FALSO_STDIN"; exit "\${FALSO_T:-0}" ;;
 esac
 `;
 
@@ -35,13 +35,15 @@ function correr(config, extra = {}) {
   fs.writeFileSync(archivoConfig, config);
   const exec = path.join(raiz, 'exec.txt');
   fs.writeFileSync(exec, '');
+  const stdin = path.join(raiz, 'stdin.bin');
+  fs.writeFileSync(stdin, '');
   const r = spawnSync('sh', [SCRIPT], {
     env: {
-      ...process.env, DOCKER: docker, FALSO_CONFIG: archivoConfig, FALSO_EXEC: exec, ...extra,
+      ...process.env, DOCKER: docker, FALSO_CONFIG: archivoConfig, FALSO_EXEC: exec, FALSO_STDIN: stdin, ...extra,
     },
     encoding: 'utf8',
   });
-  return { ...r, exec: fs.readFileSync(exec, 'utf8') };
+  return { ...r, exec: fs.readFileSync(exec, 'utf8'), stdin: fs.readFileSync(stdin) };
 }
 
 test('pasa al nginx en marcha los NGINX_* que resuelve compose (sin comillas) y corre nginx -t', () => {
@@ -55,6 +57,35 @@ test('pasa al nginx en marcha los NGINX_* que resuelve compose (sin comillas) y 
   assert.match(r.exec, / nginx sh -c /);
   assert.match(r.exec, /nginx -t -c/);
   assert.match(r.stdout, /OK: aplica con:.*up -d nginx/);
+});
+
+test('sin PLANTILLAS: valida las de la imagen y no manda nada por stdin', () => {
+  const r = correr(CONFIG);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stdin.length, 0);
+  assert.doesNotMatch(r.exec, /-e SD_PLANTILLAS_STDIN=1/);
+});
+
+test('PLANTILLAS: manda por stdin un tar con SOLO los .template de esa carpeta', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-plantillas-'));
+  fs.writeFileSync(path.join(dir, 'smartdining.conf.template'), 'server_tokens off;\n');
+  fs.writeFileSync(path.join(dir, 'notas.txt'), 'no va\n');
+  const r = correr(CONFIG, { PLANTILLAS: dir, ENV_FILE: 'infra/.env.staging' });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.exec, /-e SD_PLANTILLAS_STDIN=1 /);
+  const lista = spawnSync('tar', ['-tf', '-'], { input: r.stdin, encoding: 'utf8' });
+  assert.deepStrictEqual(lista.stdout.trim().split('\n'), ['./smartdining.conf.template']);
+  assert.match(r.stdout, /OK: las plantillas de .* son válidas con infra\/\.env\.staging/);
+});
+
+test('PLANTILLAS sin .template o que no existe: sale con 1 sin llamar a docker', () => {
+  const vacia = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-plantillas-'));
+  for (const p of [vacia, path.join(vacia, 'no-existe')]) {
+    const r = correr(CONFIG, { PLANTILLAS: p });
+    assert.strictEqual(r.status, 1);
+    assert.match(r.stderr, /PLANTILLAS no es una carpeta|No hay archivos \.template/);
+    assert.strictEqual(r.exec, '');
+  }
 });
 
 test('ENV_FILE elige el .env (staging)', () => {
