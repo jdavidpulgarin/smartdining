@@ -453,6 +453,27 @@ const TABLA = [
     cuerpo: { activa: false },
   },
 
+  // --- Despacho de domicilios y repartidor (D-20a) ---------------------------
+  { metodo: 'GET', patron: '/api/domicilios', url: '/api/domicilios', roles: ['admin', 'cajero'] },
+  {
+    metodo: 'PATCH',
+    patron: '/api/domicilios/:id_pedido/repartidor',
+    url: '/api/domicilios/87/repartidor',
+    roles: ['admin', 'cajero'],
+    cuerpo: { id_repartidor: 40 },
+  },
+  { metodo: 'GET', patron: '/api/usuarios/repartidores', url: '/api/usuarios/repartidores', roles: ['admin', 'cajero'] },
+  { metodo: 'GET', patron: '/api/domicilios/mios', url: '/api/domicilios/mios', roles: ['repartidor'] },
+  { metodo: 'POST', patron: '/api/domicilios/:id_pedido/salir', url: '/api/domicilios/87/salir', roles: ['repartidor'] },
+  { metodo: 'POST', patron: '/api/domicilios/:id_pedido/entregar', url: '/api/domicilios/87/entregar', roles: ['repartidor'] },
+  {
+    metodo: 'POST',
+    patron: '/api/domicilios/:id_pedido/fallar',
+    url: '/api/domicilios/87/fallar',
+    roles: ['repartidor'],
+    cuerpo: { motivo: 'No había nadie en la dirección' },
+  },
+
   // --- Reportes (D-07): cifras de negocio, solo admin -----------------------
   { metodo: 'GET', patron: '/api/reportes', url: '/api/reportes?rango=hoy', roles: ['admin'] },
   // Consumo de inventario (plan v1.1, D-17 P3).
