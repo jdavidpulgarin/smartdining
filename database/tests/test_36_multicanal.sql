@@ -311,7 +311,10 @@ SELECT pg_temp.exigir(NOT pg_temp.rechaza(format(
     'INSERT INTO refresh_tokens_cliente (id_cliente, hash, familia, expira_en) VALUES (%s, %L, gen_random_uuid(), now() + interval %L)',
     pg_temp.id('cliente'), 'token-en-claro', '30 days')),
     'Z: refresh token solo como hash SHA-256 en hex');
-SELECT pg_temp.exigir(NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid IN ('clientes'::regclass, 'refresh_tokens_cliente'::regclass) AND NOT tgisinternal),
+-- Ningún trigger de AUDITORÍA (los de validación, como el del script 37, sí pueden estar).
+SELECT pg_temp.exigir(NOT EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_proc f ON f.oid = t.tgfoid
+                                   WHERE t.tgrelid IN ('clientes'::regclass, 'refresh_tokens_cliente'::regclass)
+                                     AND NOT t.tgisinternal AND f.proname ILIKE '%auditar%'),
     'Z: clientes y refresh tokens no se auditan con la fila completa (sin el hash en la auditoría)');
 SELECT pg_temp.exigir(EXISTS (SELECT 1 FROM usuarios WHERE id_usuario = pg_temp.id('repartidor') AND rol = 'repartidor'),
     'Z: usuarios admite el rol repartidor');
