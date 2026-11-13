@@ -23,10 +23,34 @@ function Modal({ abierto = false, onCerrar, titulo, children }) {
     // Foco al contenedor del modal
     modalRef.current?.focus();
 
-    // Listener para tecla Escape
+    // Listener para Escape y focus trap con Tab / Shift+Tab dentro del modal
+    const selectorFoco =
+      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
         onCerrarRef.current?.();
+        return;
+      }
+
+      if (event.key === 'Tab' && modalRef.current) {
+        const enfocables = Array.from(modalRef.current.querySelectorAll(selectorFoco)).filter(
+          (el) => el.offsetParent !== null || el === document.activeElement
+        );
+        if (enfocables.length === 0) {
+          event.preventDefault();
+          modalRef.current.focus();
+          return;
+        }
+        const primero = enfocables[0];
+        const ultimo = enfocables[enfocables.length - 1];
+        if (event.shiftKey && (document.activeElement === primero || document.activeElement === modalRef.current)) {
+          event.preventDefault();
+          ultimo.focus();
+        } else if (!event.shiftKey && document.activeElement === ultimo) {
+          event.preventDefault();
+          primero.focus();
+        }
       }
     };
 

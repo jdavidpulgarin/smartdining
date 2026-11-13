@@ -28,8 +28,11 @@ function PlatoCard({ plato, onSeleccionar }) {
           <img
             src={imagen}
             alt={nombre}
+            width={96}
+            height={96}
             className="w-full h-full object-cover"
             loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-texto-tenue font-etiqueta text-xs uppercase">

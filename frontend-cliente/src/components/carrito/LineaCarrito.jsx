@@ -40,6 +40,10 @@ function LineaCarrito({
           <img
             src={imagenUrl}
             alt={linea.nombre}
+            width={64}
+            height={64}
+            loading="lazy"
+            decoding="async"
             className="w-16 h-16 rounded-xl object-cover shrink-0 bg-superficie-2 border border-borde"
           />
         )}
