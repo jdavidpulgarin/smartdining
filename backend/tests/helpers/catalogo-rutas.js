@@ -436,6 +436,23 @@ const TABLA = [
     },
   },
 
+  // --- Zonas de entrega para el admin (D-20a) --------------------------------
+  { metodo: 'GET', patron: '/api/zonas-envio', url: '/api/zonas-envio', roles: ['admin'] },
+  {
+    metodo: 'POST',
+    patron: '/api/zonas-envio',
+    url: '/api/zonas-envio',
+    roles: ['admin'],
+    cuerpo: { nombre: 'Norte', barrios: ['Centro'], costo_envio: 5000, tiempo_estimado_min: 30 },
+  },
+  {
+    metodo: 'PATCH',
+    patron: '/api/zonas-envio/:id',
+    url: '/api/zonas-envio/3',
+    roles: ['admin'],
+    cuerpo: { activa: false },
+  },
+
   // --- Reportes (D-07): cifras de negocio, solo admin -----------------------
   { metodo: 'GET', patron: '/api/reportes', url: '/api/reportes?rango=hoy', roles: ['admin'] },
   // Consumo de inventario (plan v1.1, D-17 P3).
