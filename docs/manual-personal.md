@@ -146,8 +146,8 @@ También llega aquí la petición de la cuenta.
    registra a alguien que no trae celular en **REGISTRAR A ALGUIEN SIN
    CELULAR**. Escribe su nombre o un apodo y toca **REGISTRAR Y PEDIR**.
 
-   Así su pedido queda a su nombre y cuenta bien al dividir la cuenta en partes
-   iguales.
+   Así su pedido queda a su nombre y en la Caja se le puede cobrar solo lo
+   suyo.
 3. Agrega los platos con **Agregar** (o **Personalizar** si el plato se arma) y
    pon notas para la cocina si hace falta.
 4. Toca **Enviar comanda a cocina**.
