@@ -84,14 +84,14 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
     expect(nuevas.every((u) => /\/platos\/101$/.test(u))).toBe(true)
   })
 
-  it('Menú: un aviso de apagado MANUAL se muestra como AGOTADO, no como sin stock', async () => {
+  it('Menú: un aviso de apagado MANUAL se muestra como NO DISPONIBLE, no como sin stock', async () => {
     render(<AuthContext.Provider value={ADMIN}><MemoryRouter><Menu /></MemoryRouter></AuthContext.Provider>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
 
     ponerEnBase({ disponible: false, stock_suficiente: true })
     await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: false, emitidoEn: t(1) }))
     const tarjeta = tarjetaDe('Hamburguesa Doble Queso')
-    await waitFor(() => expect(within(tarjeta).getByText('AGOTADO')).toBeInTheDocument())
+    await waitFor(() => expect(within(tarjeta).getByText('NO DISPONIBLE')).toBeInTheDocument())
     expect(within(tarjeta).queryByText('AGOTADO · SIN STOCK')).not.toBeInTheDocument()
   })
 
@@ -151,7 +151,7 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
     await act(async () => oyentes['plato:disponibilidad']({ id_plato: 101, disponible: true, emitidoEn: t(3) }))
 
     expect(fetchSpy.mock.calls.length).toBe(llamadas)
-    expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('AGOTADO')).toBeInTheDocument()
+    expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('NO DISPONIBLE')).toBeInTheDocument()
   })
 
   it('Menú: ignora un aviso mal formado', async () => {
