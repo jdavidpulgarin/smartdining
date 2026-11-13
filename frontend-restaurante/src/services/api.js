@@ -519,6 +519,40 @@ export const mesasApi = {
 }
 
 // Submódulo de Pedidos
+// P-24 · Domicilios (D-20a, #231). Despacho: admin y cajero. Repartidor: las suyas.
+export const domiciliosApi = {
+  /** GET /domicilios?estado_entrega=a,b → { domicilios }. Sin estados, los no terminados. */
+  async despacho(estados = null, options = {}) {
+    const q = estados && estados.length ? `?estado_entrega=${estados.map(encodeURIComponent).join(',')}` : ''
+    return apiFetch(`/domicilios${q}`, options)
+  },
+  /** PATCH /domicilios/:id/repartidor { id_repartidor } → { domicilio } */
+  async asignar(idPedido, idRepartidor) {
+    return apiFetch(`/domicilios/${idPedido}/repartidor`, {
+      method: 'PATCH',
+      body: JSON.stringify({ id_repartidor: Number(idRepartidor) }),
+    })
+  },
+  /** GET /usuarios/repartidores → { repartidores: [{ id_usuario, nombre }] } */
+  async repartidores(options = {}) {
+    return apiFetch('/usuarios/repartidores', options)
+  },
+  /** GET /domicilios/mios → { domicilios } (sin terminar y las terminadas hoy) */
+  async mios(options = {}) {
+    return apiFetch('/domicilios/mios', options)
+  },
+  // salir y entregar van SIN cuerpo: con uno, el backend da 400 cuerpo_invalido.
+  async salir(idPedido) {
+    return apiFetch(`/domicilios/${idPedido}/salir`, { method: 'POST' })
+  },
+  async entregar(idPedido) {
+    return apiFetch(`/domicilios/${idPedido}/entregar`, { method: 'POST' })
+  },
+  async fallar(idPedido, motivo) {
+    return apiFetch(`/domicilios/${idPedido}/fallar`, { method: 'POST', body: JSON.stringify({ motivo: motivo.trim() }) })
+  },
+}
+
 export const pedidosApi = {
   /**
    * Crea un nuevo pedido / comanda: POST /api/pedidos

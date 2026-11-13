@@ -14,11 +14,14 @@ import {
   TomarPedido,
   Configuracion,
   Inventario,
+  Entregas,
+  Despacho,
 } from './pages'
 import { useSocket, useAuth } from './hooks'
 import { AuthProvider } from './context/AuthContext'
 import { TablesProvider } from './context/TablesContext'
 import { esCocina } from './utils/kds'
+import { esRepartidor, puedeDespachar } from './utils/domicilios'
 
 /** Cierra una sesión de cocina (estado, almacenamiento y socket) y va al aviso del login. */
 function CerrarSesionDeCocina() {
@@ -65,6 +68,22 @@ function AppContent() {
     return <CerrarSesionDeCocina />
   }
 
+  // P-24: el repartidor solo tiene su pantalla de entregas. Cualquier otra
+  // dirección del panel lo devuelve allí (el backend le da 403 en todo lo demás).
+  if (esRepartidor(user.rol)) {
+    return (
+      <div className="app-shell">
+        <Topbar />
+        <main className="sd-page-wrapper">
+          <Routes>
+            <Route path="/entregas" element={<Entregas />} />
+            <Route path="*" element={<Navigate to="/entregas" replace />} />
+          </Routes>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
       <Topbar />
@@ -80,6 +99,9 @@ function AppContent() {
           <Route path="/reportes" element={<Reportes />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/inventario" element={<Inventario />} />
+          {/* P-24: despacho de domicilios, solo admin y cajero (como el backend). */}
+          <Route path="/despacho" element={puedeDespachar(user.rol) ? <Despacho /> : <Navigate to="/" replace />} />
+          <Route path="/entregas" element={<Navigate to="/" replace />} />
           <Route path="/pantalla/mesa/:id" element={<PantallaMesa />} />
           <Route path="/pantalla/:id" element={<PantallaMesa />} />
           <Route path="/login" element={<Login />} />

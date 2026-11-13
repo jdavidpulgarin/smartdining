@@ -13,7 +13,8 @@ import {
   Sparkles,
   RefreshCw,
 } from 'lucide-react'
-import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
+import { mesasApi, pedidosApi, transaccionesApi, domiciliosApi, getAuthToken } from '../services/api'
+import { ubicacionPedido, indexarPorPedido, ESTADOS_ENTREGA } from '../utils/domicilios'
 import { useAuth, useSocketListener, useTables } from '../hooks'
 import {
   puedeUsarCaja,
@@ -130,6 +131,19 @@ function CajaRegistradora() {
   }, [])
 
   const cobrosDelDia = useMemo(() => agruparCobros(dia?.transacciones || []), [dia])
+  // P-24: zona y dirección de los cobros de domicilio (pago anticipado). Se
+  // leen todos los estados: un domicilio cobrado puede estar ya entregado.
+  const [domPorPedido, setDomPorPedido] = useState(() => new Map())
+  const hayDomicilios = cobrosDelDia.some((c) => c.canal === 'domicilio')
+  useEffect(() => {
+    if (!hayDomicilios) return undefined
+    let vivo = true
+    domiciliosApi
+      .despacho(ESTADOS_ENTREGA)
+      .then((r) => { if (vivo) setDomPorPedido(indexarPorPedido(r?.domicilios || [])) })
+      .catch(() => {})
+    return () => { vivo = false }
+  }, [hayDomicilios, dia])
 
   /**
    * Carga las cuentas activas directamente desde la API para todas las mesas ocupadas
@@ -903,8 +917,15 @@ function CajaRegistradora() {
                         {cobro.ids.map((id) => `TRX-${id}`).join(' · ')}
                       </td>
                       <td style={{ padding: '12px 14px' }}>{horaBogota(cobro.fecha)}</td>
-                      <td style={{ padding: '12px 14px', fontWeight: 700 }}>Mesa {cobro.numero_mesa}</td>
-                      <td style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>{cobro.comensal || 'Mesa'}</td>
+                      <td style={{ padding: '12px 14px', fontWeight: 700 }}>
+                        {ubicacionPedido(cobro).texto}
+                        {ubicacionPedido(cobro, domPorPedido.get(Number(cobro.id_pedido))).detalle && (
+                          <small style={{ display: 'block', color: 'var(--sd-text-muted)', fontWeight: 400 }}>
+                            {ubicacionPedido(cobro, domPorPedido.get(Number(cobro.id_pedido))).detalle}
+                          </small>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>{cobro.comensal || (cobro.canal === 'domicilio' ? 'Pago anticipado' : 'Mesa')}</td>
                       <td style={{ padding: '12px 14px', textTransform: 'uppercase' }}>
                         {String(cobro.metodo_pago || '').replace('_', ' ')}
                         {cobro.voucher && (

@@ -3,12 +3,16 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Bell, LogOut } from 'lucide-react'
 import { useAuth, useTables } from '../hooks'
 import { ROLES_CAJA } from '../utils/caja'
+import { ROLES_DESPACHO, ROL_REPARTIDOR, esRepartidor, enlaceVisible } from '../utils/domicilios'
 
 const navLinks = [
   { label: 'MESAS', path: '/mesas' },
   { label: 'PEDIDOS', path: '/pedidos' },
   // Solo admin y cajero (el backend da 403 al mesero y a cocina).
   { label: 'CAJA', path: '/caja', roles: ROLES_CAJA },
+  // P-24: despacho de domicilios (admin y cajero) y las entregas del repartidor.
+  { label: 'DESPACHO', path: '/despacho', roles: ROLES_DESPACHO },
+  { label: 'ENTREGAS', path: '/entregas', roles: [ROL_REPARTIDOR] },
   { label: 'MENÚ', path: '/menu' },
   { label: 'REPORTES', path: '/reportes' },
   // P-21: solo para admin (el backend también lo exige).
@@ -42,7 +46,11 @@ export function Topbar() {
   return (
     <header className="sd-topbar">
       {/* 1. Logo y Marca a la izquierda */}
-      <Link to="/mesas" className="sd-topbar-brand" aria-label="Ir a Mesas SmartDining">
+      <Link
+        to={esRepartidor(user?.rol) ? '/entregas' : '/mesas'}
+        className="sd-topbar-brand"
+        aria-label={esRepartidor(user?.rol) ? 'Ir a mis entregas' : 'Ir a Mesas SmartDining'}
+      >
         <div className="sd-brand-badge" aria-hidden="true">
           <span>SD</span>
         </div>
@@ -51,7 +59,7 @@ export function Topbar() {
 
       {/* 2. Menú de navegación principal en el centro */}
       <nav className="sd-topbar-nav" aria-label="Navegación principal del restaurante">
-        {navLinks.filter((item) => (item.roles ? item.roles.includes(user?.rol) : !item.soloAdmin || user?.rol === 'admin')).map((item) => {
+        {navLinks.filter((item) => enlaceVisible(item, user?.rol)).map((item) => {
           const isActive =
             location.pathname === item.path ||
             (item.path === '/mesas' && location.pathname === '/')

@@ -7,6 +7,7 @@ import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
+import { esRepartidor } from '../utils/domicilios'
 
 function normalizarMesa(backendMesa, prev = {}) {
   const id = backendMesa.id_mesa || backendMesa.numero
@@ -44,7 +45,11 @@ function normalizarMesa(backendMesa, prev = {}) {
 export function TablesProvider({ children }) {
   // Sesión del personal. Tolerante a no tener AuthProvider (pruebas que montan
   // solo este contexto): en ese caso se usa el token guardado.
-  const tokenSesion = useContext(AuthContext)?.user?.token || null
+  const sesion = useContext(AuthContext)?.user
+  const tokenSesion = sesion?.token || null
+  // P-24: el repartidor no ve mesas ni pedidos del salón (el backend le da 403):
+  // no se cargan para no llenar su pantalla de errores.
+  const sinSalon = esRepartidor(sesion?.rol)
   const [tables, setTables] = useState(() => {
     try {
       const stored = sessionStorage.getItem('smartdining_tables_state')
@@ -153,6 +158,7 @@ export function TablesProvider({ children }) {
   useEffect(() => {
     let isSubscribed = true
     const token = tokenSesion || getAuthToken()
+    if (sinSalon) return
     if (!token) return
 
     const fetchInitialData = async () => {
@@ -187,7 +193,7 @@ export function TablesProvider({ children }) {
     return () => {
       isSubscribed = false
     }
-  }, [tokenSesion])
+  }, [tokenSesion, sinSalon])
 
 
   // order:created y order:status pueden llegar repetidos si el servidor

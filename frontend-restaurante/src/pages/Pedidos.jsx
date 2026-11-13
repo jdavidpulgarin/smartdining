@@ -14,7 +14,7 @@ import {
   Ban,
 } from 'lucide-react'
 import { StatusBadge } from '../components/ui/Badge'
-import { pedidosApi } from '../services/api'
+import { pedidosApi, domiciliosApi } from '../services/api'
 import { useSocketListener, useSocketEmit, useAuth } from '../hooks'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
 import {
@@ -24,6 +24,17 @@ import {
   mensajeErrorCancelarPlato,
   MOTIVO_MAX,
 } from '../utils/cancelarPlato'
+import {
+  ubicacionPedido,
+  loEntregaElRepartidor,
+  etiquetaEntrega,
+  indexarPorPedido,
+  puedeDespachar,
+} from '../utils/domicilios'
+
+// Las entregas de los pedidos que siguen activos: un domicilio entregado se
+// cierra (pagado) y sale de la lista; un fallido se queda en 'listo'.
+const ESTADOS_ENTREGA_ACTIVOS = ['por_asignar', 'asignado', 'en_camino', 'fallido']
 
 function backendEstadoAUI(estado) {
   switch (estado) {
@@ -90,8 +101,11 @@ function normalizarPedido(p) {
   return {
     id: p.codigo_pedido || `#${p.id_pedido}`,
     rawId: p.id_pedido,
-    table: p.mesa_numero ? `Mesa ${p.mesa_numero}` : p.id_mesa ? `Mesa ${p.id_mesa}` : 'Barra',
+    // P-24: un pedido sin mesa (domicilio, para llevar) ya no sale como «Barra».
+    table: ubicacionPedido(p).texto,
     numeroMesa: p.mesa_numero || p.id_mesa || '?',
+    canal: p.canal || 'mesa',
+    loEntregaRepartidor: loEntregaElRepartidor(p),
     client: lineas.find((d) => d.comensal)?.comensal || 'Comensal General',
     waiter: p.mesero || 'Mesero Asignado',
     state: backendEstadoAUI(p.estado),
@@ -126,6 +140,20 @@ export function Pedidos() {
   const emit = useSocketEmit()
   const { user } = useAuth()
   const puedeCancelar = puedeCancelarPlato(user?.rol)
+  // P-24: zona y dirección de los domicilios. Solo admin y cajero pueden leer el
+  // despacho; el mesero ve «Domicilio» sin más (el backend le da 403).
+  const [domPorPedido, setDomPorPedido] = useState(() => new Map())
+  const hayDomicilios = ordersList.some((o) => o.canal === 'domicilio')
+  const leeDespacho = puedeDespachar(user?.rol)
+  useEffect(() => {
+    if (!hayDomicilios || !leeDespacho) return undefined
+    let vivo = true
+    domiciliosApi
+      .despacho(ESTADOS_ENTREGA_ACTIVOS)
+      .then((r) => { if (vivo) setDomPorPedido(indexarPorPedido(r?.domicilios || [])) })
+      .catch(() => {})
+    return () => { vivo = false }
+  }, [hayDomicilios, leeDespacho, ordersList])
 
   const showToast = (msg) => {
     setToastMsg(msg)
@@ -459,6 +487,10 @@ export function Pedidos() {
               {filteredOrders.map((order) => {
                 const urgency = getUrgencyClass(order.elapsedMin)
                 const isDelivered = order.state.toLowerCase() === 'entregado'
+                // P-24: un domicilio listo lo entrega el repartidor, no este botón.
+                const loLlevaRepartidor = order.loEntregaRepartidor && order.state === 'Por servir'
+                const entrega = domPorPedido.get(order.rawId)
+                const detalleLugar = ubicacionPedido({ canal: order.canal }, entrega).detalle
 
                 return (
                   <div
@@ -471,6 +503,7 @@ export function Pedidos() {
                     <div className="sd-pedidos-card-top">
                       <div>
                         <strong className="sd-pedidos-mesa-title">{order.table}</strong>
+                        {detalleLugar && <small style={{ display: 'block', color: 'var(--sd-text-muted)' }}>{detalleLugar}</small>}
                         <span className="sd-pedidos-code-time">
                           {order.id} · {order.time}
                         </span>
@@ -522,7 +555,11 @@ export function Pedidos() {
                       <strong className="sd-pedidos-total">{order.total}</strong>
 
                       <div className="kds-action-btn-wrap">
-                        {!isDelivered ? (
+                        {loLlevaRepartidor ? (
+                          <span data-testid={`lo-lleva-repartidor-${order.rawId}`} style={{ fontSize: 13, fontWeight: 700 }}>
+                            Lo entrega el repartidor{entrega ? ` · ${etiquetaEntrega(entrega.estado_entrega)}` : ''}
+                          </span>
+                        ) : !isDelivered ? (
                           <button
                             type="button"
                             className="sd-btn sd-btn-primary"
@@ -698,7 +735,7 @@ export function Pedidos() {
               >
                 Imprimir Comanda
               </button>
-              {selectedOrder.state !== 'Entregado' && (
+              {selectedOrder.state !== 'Entregado' && !(selectedOrder.loEntregaRepartidor && selectedOrder.state === 'Por servir') && (
                 <button
                   type="button"
                   className="sd-btn sd-btn-primary"

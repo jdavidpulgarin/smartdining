@@ -3,6 +3,7 @@ import { AuthContext } from './authContextDef'
 import { authApi, EVENT_UNAUTHORIZED } from '../services/api'
 import { conectarSocket, desconectarSocket } from '../hooks/useSocket'
 import { esCocina } from '../utils/kds'
+import { esRepartidor } from '../utils/domicilios'
 
 const CLAVE_USUARIO = 'smartdining_staff_user'
 const CLAVE_TOKEN = 'smartdining_token'
@@ -12,6 +13,7 @@ const ROLE_LABELS = {
   mesero: 'Mesero de Sala',
   cajero: 'Caja & Facturación',
   cocina: 'Jefe de Cocina',
+  repartidor: 'Repartidor',
 }
 
 export function AuthProvider({ children }) {
@@ -44,11 +46,15 @@ export function AuthProvider({ children }) {
   // El socket sigue a la sesión: conecta con su token al iniciar sesión (o al
   // recargar con sesión guardada), se reconecta si cambia el usuario y se cierra
   // al salir. Antes se conectaba en /login sin token y se quedaba rechazado.
+  // P-24: el repartidor no se conecta: el socket-server no acepta ese rol (su
+  // ROLES_PERSONAL) y lo rechazaría en bucle. Sus avisos en vivo llegan con la
+  // R-23; mientras, su pantalla relee la lista cada pocos segundos.
   const tokenSesion = user?.token || null
+  const conSocket = Boolean(tokenSesion) && !esRepartidor(user?.rol)
   useEffect(() => {
-    if (tokenSesion) conectarSocket(tokenSesion)
+    if (conSocket) conectarSocket(tokenSesion)
     else desconectarSocket()
-  }, [tokenSesion])
+  }, [conSocket, tokenSesion])
 
   const logout = useCallback(() => {
     setUser(null)
