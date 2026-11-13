@@ -6,9 +6,16 @@ const { extraerSid } = require('../services/qr.token');
 
 /**
  * Roles del personal del restaurante. Son los unicos valores que pueden
- * quedar guardados en usuarios.rol (ver docs/modelo-er.md).
+ * quedar guardados en usuarios.rol (ver docs/modelo-er.md y el CHECK
+ * usuarios_rol_check del script 36).
+ *
+ * D-20a: `repartidor` lleva los domicilios. Se registra, se le cambia el rol e
+ * inicia sesión como el resto del personal, pero NO está en ningún requireRole
+ * del panel: solo entra a las rutas /domicilios/mios y /domicilios/:id/salir,
+ * /entregar y /fallar. En todo lo demás recibe 403.
  */
-const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina'];
+const ROL_REPARTIDOR = 'repartidor';
+const ROLES_STAFF = ['admin', 'mesero', 'cajero', 'cocina', ROL_REPARTIDOR];
 
 /**
  * Rol del comensal. NO existe en la tabla usuarios: solo vive dentro del JWT
@@ -182,6 +189,7 @@ module.exports = {
   sesionDeMesaVigente,
   ALGORITMO_JWT,
   ROLES_STAFF,
+  ROL_REPARTIDOR,
   ROL_COMENSAL,
   ROL_CLIENTE,
   MOTIVO_NO_AUTENTICADO,

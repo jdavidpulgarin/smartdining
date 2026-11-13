@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { SoloCocina } from './SoloCocina'
 import { ShieldCheck, ShieldAlert, Mail, Lock, LogIn, Clock } from 'lucide-react'
 import { useAuth } from '../hooks'
 import {
@@ -14,6 +15,10 @@ import {
 export function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  // Rol cocina: aviso y paso al KDS, sin sesión en el panel. Llega por el login
+  // ({ cocina: true }) o desde AppContent, si había una sesión de cocina vieja.
+  const [avisoCocina, setAvisoCocina] = useState(() => Boolean(location.state?.cocina))
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -89,8 +94,12 @@ export function Login() {
     setLoading(true)
 
     try {
-      await login(email, password)
+      const resultado = await login(email, password)
       clearStoredRateLimit()
+      if (resultado?.cocina) {
+        setAvisoCocina(true)
+        return
+      }
       navigate('/')
     } catch (err) {
       if (err.status === 429 || err.retryAfter) {
@@ -104,6 +113,8 @@ export function Login() {
       setLoading(false)
     }
   }
+
+  if (avisoCocina) return <SoloCocina />
 
   return (
     <div className="sd-login-page">

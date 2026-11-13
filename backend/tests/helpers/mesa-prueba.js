@@ -29,6 +29,9 @@ const RANGOS = Object.freeze({
   'cierre-pedido-pago': { desde: 9200, hasta: 9399 },
   'deadlock-pago-estado': { desde: 9400, hasta: 9599 },
   'mesas-sql': { desde: 9600, hasta: 9799 },
+  // D-20a: el pedido de mesa con el que domicilios-sql comprueba que la mesa
+  // sigue marcando 'entregado' como siempre.
+  'domicilios-sql': { desde: 9800, hasta: 9899 },
 });
 
 const PG_UNIQUE = '23505';

@@ -14,8 +14,9 @@ const { COSTO_BCRYPT } = require('./auth.controller');
  * la restricción de rol se aplica en las rutas (ver usuarios.routes.js).
  *
  * Los roles válidos son ROLES_STAFF, los mismos que acepta el registro y los
- * mismos del CHECK de la tabla: `comensal` no está, porque no es una fila de
- * `usuarios` sino un rol que solo existe dentro del JWT de una mesa.
+ * mismos del CHECK de la tabla (con `repartidor` desde la D-20a): `comensal` no
+ * está, porque no es una fila de `usuarios` sino un rol que solo existe dentro
+ * del JWT de una mesa.
  */
 
 /**
