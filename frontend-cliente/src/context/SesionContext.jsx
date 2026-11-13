@@ -10,7 +10,12 @@ import { useNavigate } from 'react-router-dom';
 import { setManejadorSesionInvalida } from '../services/api';
 import { crearSesion } from '../services/sesionService';
 import { aliasDelToken } from '../services/clienteMesa';
-import { CLAVE_SESION, leerExpiracionJwt, validarNombre } from '../utils/sesion';
+import {
+  CLAVE_SESION,
+  validarNombre,
+  borrarSesionDeStorages,
+  leerSesionAlmacenada,
+} from '../utils/sesion';
 import { CLAVE_ULTIMO_PEDIDO } from '../utils/seguimiento';
 
 const SesionContext = createContext(null);
@@ -18,38 +23,7 @@ const SesionContext = createContext(null);
 const CLAVES_OBSOLETAS = [
   'smartdining_mesa_session',
   'smartdining_apodo',
-  CLAVE_SESION,
 ];
-
-function leerSesionAlmacenada() {
-  try {
-    const crudo = sessionStorage.getItem(CLAVE_SESION);
-    if (!crudo) return null;
-    const datos = JSON.parse(crudo);
-    if (!datos || !datos.token || !datos.idMesa) {
-      sessionStorage.removeItem(CLAVE_SESION);
-      return null;
-    }
-
-    const expMs = leerExpiracionJwt(datos.token);
-    if (expMs !== null && expMs <= Date.now()) {
-      sessionStorage.removeItem(CLAVE_SESION);
-      return null;
-    }
-
-    const aliasJwt = aliasDelToken(datos.token);
-
-    return {
-      token: datos.token,
-      comensal: aliasJwt || datos.comensal || '',
-      idMesa: Number(datos.idMesa),
-      numeroMesa: Number(datos.numeroMesa ?? datos.idMesa),
-      expiraEn: datos.expiraEn || null,
-    };
-  } catch {
-    return null;
-  }
-}
 
 function obtenerEstadoInicial() {
   let tokenUrl = null;
@@ -140,18 +114,13 @@ export function SesionProvider({ children }) {
   const cerrarSesion = useCallback((motivo = null) => {
     setState((prev) => {
       const idMesaActual = prev.sesion?.idMesa;
-      try {
-        sessionStorage.removeItem(CLAVE_SESION);
-      } catch {
-        // Ignorar errores de sessionStorage
-      }
+      borrarSesionDeStorages();
       try {
         sessionStorage.removeItem(CLAVE_ULTIMO_PEDIDO);
       } catch {
         // Ignorar errores de sessionStorage
       }
       try {
-        localStorage.removeItem(CLAVE_SESION);
         if (idMesaActual !== undefined && idMesaActual !== null) {
           localStorage.removeItem(`smartdining_carrito_mesa_${idMesaActual}`);
         }
@@ -265,7 +234,12 @@ export function SesionProvider({ children }) {
         };
 
         try {
-          sessionStorage.setItem(CLAVE_SESION, JSON.stringify(nuevaSesion));
+          localStorage.setItem(CLAVE_SESION, JSON.stringify(nuevaSesion));
+        } catch {
+          // Ignorar si localStorage no está disponible
+        }
+        try {
+          sessionStorage.removeItem(CLAVE_SESION);
         } catch {
           // Ignorar si sessionStorage no está disponible
         }

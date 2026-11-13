@@ -1,3 +1,5 @@
+import { aliasDelToken } from '../services/clienteMesa';
+
 export const CLAVE_SESION = 'smartdining_sesion';
 
 const REGEX_CARACTERES_PERMITIDOS = /^[\p{L}\p{N}\s._'-]+$/u;
@@ -71,12 +73,106 @@ export function leerExpiracionJwt(token) {
   }
 }
 
-export function obtenerSesion() {
+export function borrarSesionDeStorages(
+  storageLocal = typeof window !== 'undefined' ? window.localStorage : null,
+  storageSession = typeof window !== 'undefined' ? window.sessionStorage : null
+) {
   try {
-    if (typeof window === 'undefined') return null;
-    const raw = sessionStorage.getItem(CLAVE_SESION);
+    storageLocal?.removeItem(CLAVE_SESION);
+  } catch {
+    // Ignorar
+  }
+  try {
+    storageSession?.removeItem(CLAVE_SESION);
+  } catch {
+    // Ignorar
+  }
+}
+
+export function migrarSesionStorage(
+  storageLocal = typeof window !== 'undefined' ? window.localStorage : null,
+  storageSession = typeof window !== 'undefined' ? window.sessionStorage : null
+) {
+  try {
+    if (!storageLocal || !storageSession) return;
+    const sesionLocal = storageLocal.getItem(CLAVE_SESION);
+    const sesionSession = storageSession.getItem(CLAVE_SESION);
+    if (!sesionLocal && sesionSession) {
+      storageLocal.setItem(CLAVE_SESION, sesionSession);
+      storageSession.removeItem(CLAVE_SESION);
+    }
+  } catch {
+    // Ignorar errores de acceso a storage
+  }
+}
+
+export function leerSesionAlmacenada(
+  storageLocal = typeof window !== 'undefined' ? window.localStorage : null,
+  storageSession = typeof window !== 'undefined' ? window.sessionStorage : null
+) {
+  try {
+    let local = storageLocal;
+    let session = storageSession;
+    if (!local && typeof window !== 'undefined' && window.localStorage) local = window.localStorage;
+    if (!session && typeof window !== 'undefined' && window.sessionStorage) session = window.sessionStorage;
+    migrarSesionStorage(local, session);
+
+    const crudo = local?.getItem(CLAVE_SESION) || session?.getItem(CLAVE_SESION);
+    if (!crudo) return null;
+    const datos = JSON.parse(crudo);
+    if (!datos || !datos.token || !datos.idMesa) {
+      borrarSesionDeStorages(local, session);
+      return null;
+    }
+
+    const expMs = leerExpiracionJwt(datos.token);
+    if (expMs !== null && expMs <= Date.now()) {
+      borrarSesionDeStorages(local, session);
+      return null;
+    }
+
+    const aliasJwt = aliasDelToken(datos.token);
+
+    return {
+      token: datos.token,
+      comensal: aliasJwt || datos.comensal || '',
+      idMesa: Number(datos.idMesa),
+      numeroMesa: Number(datos.numeroMesa ?? datos.idMesa),
+      expiraEn: datos.expiraEn || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function obtenerSesion(
+  storageLocal = typeof window !== 'undefined' ? window.localStorage : null,
+  storageSession = typeof window !== 'undefined' ? window.sessionStorage : null
+) {
+  try {
+    let local = storageLocal;
+    let session = storageSession;
+    if (!local && typeof window !== 'undefined' && window.localStorage) {
+      local = window.localStorage;
+    }
+    if (!session && typeof window !== 'undefined' && window.sessionStorage) {
+      session = window.sessionStorage;
+    }
+    migrarSesionStorage(local, session);
+
+    const raw = local?.getItem(CLAVE_SESION) || session?.getItem(CLAVE_SESION);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.token) {
+      borrarSesionDeStorages(local, session);
+      return null;
+    }
+    const expMs = leerExpiracionJwt(parsed.token);
+    if (expMs !== null && expMs <= Date.now()) {
+      borrarSesionDeStorages(local, session);
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -87,4 +183,6 @@ export default {
   validarNombre,
   leerExpiracionJwt,
   obtenerSesion,
+  borrarSesionDeStorages,
+  migrarSesionStorage,
 };
