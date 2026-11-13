@@ -79,6 +79,7 @@ para `develop`:
    (abre un PR primero). Los nombres exactos son:
    - `backend · pruebas`
    - `socket-server · pruebas (con Redis)`
+   - `backend · integración (con PostgreSQL)`
    - `frontend-cliente · lint y build`
    - `frontend-restaurante · lint y build`
    - `infra · scripts de despliegue`
