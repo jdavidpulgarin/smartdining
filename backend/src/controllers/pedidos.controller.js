@@ -536,10 +536,10 @@ async function actualizarEstado(req, res, next) {
 }
 
 /**
- * Atajo de PATCH /:id/estado con estado = 'cancelado'. Cancelar solo es legal
- * desde 'recibido' o 'en_preparacion' (transiciones_validas); desde 'listo' o
- * 'entregado' el trigger responde 409, así que hay que propagar next para que
- * ese error llegue al manejador central.
+ * Atajo de PATCH /:id/estado con estado = 'cancelado'. Cancelar es legal desde
+ * 'recibido', 'en_preparacion' o 'listo' (transiciones_validas, script 31); desde
+ * 'entregado' o 'pagado' el trigger responde 409, así que hay que propagar next
+ * para que ese error llegue al manejador central.
  */
 async function cancelar(req, res, next) {
   req.body = { ...req.body, estado: 'cancelado' };
@@ -555,18 +555,39 @@ const idDeUrl = z
 
 const paramsQuitarItemSchema = z.object({ id: idDeUrl, id_detalle: idDeUrl }).strict();
 
-/** Sin cuerpo: `{}` o nada. Un campo cualquiera es un 400. */
+/** Sin cuerpo: `{}` o nada. Un campo cualquiera es un 400. (Comensal.) */
 const cuerpoVacioSchema = z.object({}).strict();
 
 /**
- * POST /api/pedidos/:id/items/:id_detalle/cancelar — D-13 por el comensal
- * (J-14): el comensal quita UNA línea de su pedido, entera. Solo con sesión de
- * comensal; la mesa y el alias salen del JWT, nunca del cuerpo. Las reglas viven
- * en pedidosService.cancelarItemComensal.
+ * Cuerpo del PERSONAL: `motivo` OBLIGATORIO (revisión de Jarrison), para el
+ * historial. Un problema con el motivo (falta, vacío, más de 200, no es texto)
+ * es 400 `motivo_requerido`; un campo de más o un cuerpo que no es un objeto,
+ * el `cuerpo_invalido` de siempre.
+ */
+const cuerpoPersonalSchema = z
+  .object({
+    motivo: z
+      .string({ required_error: 'motivo es obligatorio', invalid_type_error: 'motivo debe ser texto' })
+      .trim()
+      .min(1, 'motivo no puede estar vacío')
+      .max(200, 'motivo no puede pasar de 200 caracteres'),
+  })
+  .strict();
+
+const MOTIVO_REQUERIDO = 'motivo_requerido';
+
+/**
+ * POST /api/pedidos/:id/items/:id_detalle/cancelar — D-13: quitar UNA línea de
+ * un pedido, entera. Dos caminos, y decide el TIPO DE SESIÓN del JWT (el rol ya
+ * lo filtró requireRole: comensal, admin o mesero; cajero y cocina no entran):
+ *   - comensal (J-14): sin cuerpo; la mesa y el alias salen del JWT, nunca del
+ *     cuerpo. Reglas en pedidosService.cancelarItemComensal.
+ *   - personal: cuerpo opcional `{ motivo }`; el autor sale del JWT. Reglas en
+ *     pedidosService.cancelarItemPersonal. El motivo va al historial, NO al aviso.
  *
  * Los avisos salen DESPUÉS del commit y sin esperarlos: primero
- * /internal/item-cancelado (pendiente de Roberto) y, si el pedido quedó
- * cancelado, el order:status de siempre.
+ * /internal/item-cancelado (pendiente de Roberto), con `origen` según el camino,
+ * y, si el pedido quedó cancelado, el order:status de siempre.
  */
 async function cancelarItem(req, res, next) {
   const params = paramsQuitarItemSchema.safeParse(req.params);
@@ -574,16 +595,35 @@ async function cancelarItem(req, res, next) {
     const issue = params.error.errors[0];
     return res.status(400).json({ error: `${issue.path.join('.')}: ${issue.message}`, motivo: 'parametro_invalido' });
   }
-  if (!cuerpoVacioSchema.safeParse(req.body ?? {}).success) {
-    return res.status(400).json({ error: 'Esta ruta no lleva cuerpo', motivo: 'cuerpo_invalido' });
+
+  const delComensal = esComensal(req);
+  let r;
+  try {
+    if (delComensal) {
+      if (!cuerpoVacioSchema.safeParse(req.body ?? {}).success) {
+        return res.status(400).json({ error: 'Esta ruta no lleva cuerpo', motivo: 'cuerpo_invalido' });
+      }
+      r = await pedidosService.cancelarItemComensal(params.data.id, params.data.id_detalle, {
+        idMesa: req.user.id_mesa,
+        comensal: req.user.comensal,
+      });
+    } else {
+      const cuerpo = cuerpoPersonalSchema.safeParse(req.body ?? {});
+      if (!cuerpo.success) {
+        const issue = cuerpo.error.errors[0];
+        const delMotivo = issue.path[0] === 'motivo';
+        return res.status(400).json({ error: issue.message, motivo: delMotivo ? MOTIVO_REQUERIDO : 'cuerpo_invalido' });
+      }
+      r = await pedidosService.cancelarItemPersonal(params.data.id, params.data.id_detalle, {
+        idUsuario: req.user.id_usuario,
+        motivo: cuerpo.data.motivo,
+      });
+    }
+  } catch (err) {
+    return next(err);
   }
 
   try {
-    const r = await pedidosService.cancelarItemComensal(params.data.id, params.data.id_detalle, {
-      idMesa: req.user.id_mesa,
-      comensal: req.user.comensal,
-    });
-
     if (r.noExiste) {
       return res.status(404).json({ error: 'Ese plato no está en ese pedido', motivo: 'no_encontrado' });
     }
@@ -594,7 +634,8 @@ async function cancelarItem(req, res, next) {
       });
     }
     if (r.conflicto) {
-      return res.status(409).json({ error: MENSAJES_QUITAR_ITEM[r.conflicto], motivo: r.conflicto });
+      const mensajes = delComensal ? MENSAJES_QUITAR_ITEM : MENSAJES_QUITAR_ITEM_PERSONAL;
+      return res.status(409).json({ error: mensajes[r.conflicto], motivo: r.conflicto });
     }
 
     const { pedido, linea, pedidoCancelado, estadoAnterior } = r;
@@ -608,7 +649,8 @@ async function cancelarItem(req, res, next) {
       comensal: linea.comensal,
       total: pedido.total,
       estado_pedido: pedido.estado,
-      origen: 'comensal',
+      // Quién lo quitó. El motivo del personal NO viaja: es del historial.
+      origen: delComensal ? 'comensal' : 'personal',
     })];
     if (pedidoCancelado) {
       pasos.push(() => socketNotifier.notificarCambioEstado({ ...pedido, estado_anterior: estadoAnterior }));
@@ -632,7 +674,14 @@ async function cancelarItem(req, res, next) {
 const MENSAJES_QUITAR_ITEM = {
   item_ya_cancelado: 'Ese plato ya estaba quitado del pedido',
   item_en_preparacion: 'Ese plato ya se está preparando: pídeselo al mesero',
-  pago_registrado: 'El pedido ya tiene un pago que quedaría por encima del total: pídeselo al mesero',
+  pago_registrado: 'El pedido ya tiene un pago registrado: pídeselo al mesero',
+};
+
+const MENSAJES_QUITAR_ITEM_PERSONAL = {
+  item_ya_cancelado: 'Esa línea ya estaba cancelada',
+  item_no_cancelable: 'Esa línea ya no se puede cancelar: ya se sirvió, o el pedido está entregado, pagado o '
+    + 'cancelado, o es la última línea de un pedido que no puede pasar a cancelado desde su estado',
+  pago_registrado: 'El pedido ya tiene un pago registrado: hay que reembolsarlo antes de cancelar una línea',
 };
 
 /**

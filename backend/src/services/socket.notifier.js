@@ -148,6 +148,12 @@ function esperarAvisos() {
  * Los ingredientes mantienen el orden que trae la consulta (pasos_constructor
  * .orden), así que agrupar por `paso` respeta el orden del constructor sin que
  * el receptor tenga que ordenar nada.
+ *
+ * Cada ítem lleva también `id_detalle` (primero) y `estado_item` ('pendiente'
+ * al crear). Los otros comensales de la mesa y el KDS reciben las líneas SOLO
+ * por este evento: sin `id_detalle` no podían relacionar un `item:cancelado`
+ * posterior con su línea, y no la tachaban hasta recargar. Los dos vienen en
+ * `detalles` porque SQL_DETALLES_CON_INGREDIENTES lee `dp.*`.
  */
 function armarPedido(pedido, detalles = []) {
   return {
@@ -158,7 +164,9 @@ function armarPedido(pedido, detalles = []) {
     total: pedido.total,
     notas_generales: pedido.notas_generales ?? null,
     items: detalles.map((d) => ({
+      id_detalle: d.id_detalle,
       id_plato: d.id_plato,
+      estado_item: d.estado_item ?? null,
       nombre: d.plato_nombre ?? null,
       cantidad: d.cantidad,
       comensal: d.comensal ?? null,

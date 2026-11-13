@@ -9,6 +9,8 @@
 -- CASOS:
 --  1. Sin duplicados: 34 insumos, 20 recetas de plato, 39 de opción, y UNA
 --     sola entrada inicial por insumo (aunque el seed se haya corrido dos veces).
+--     Cuenta solo las del seed (motivo 'Carga inicial de la demo (G-07)'): las
+--     reposiciones posteriores, como la del E2E de la demo, no son duplicados.
 --  2. El libro cuadra: SUM(movimientos.cantidad) = stock_actual en cada insumo.
 --  3. Arepa de chócolo sale en v_stock_bajo desde el inicio (2 con mínimo 4).
 --  4. Panceta Crujiente del Bowl: apagada a mano ('manual'), no por stock.
@@ -55,7 +57,10 @@ BEGIN
     SELECT count(*) INTO v_n FROM recetas_ingrediente;
     IF v_n <> 39 THEN RAISE EXCEPTION 'Caso 1: se esperaban 39 recetas de opción, hay %', v_n; END IF;
     SELECT count(*) INTO v_n FROM (
-        SELECT id_insumo FROM movimientos_inventario WHERE tipo = 'entrada'
+        -- Solo las entradas DEL SEED: una entrada de reposición posterior (la
+        -- del paso 9 de la demo E2E, o la de un admin) es legítima.
+        SELECT id_insumo FROM movimientos_inventario
+        WHERE tipo = 'entrada' AND motivo = 'Carga inicial de la demo (G-07)'
         GROUP BY id_insumo HAVING count(*) > 1) t;
     IF v_n <> 0 THEN RAISE EXCEPTION 'Caso 1: % insumos tienen más de una entrada inicial', v_n; END IF;
     RAISE NOTICE 'Caso 1 OK: 34 insumos, 20 + 39 recetas, una entrada por insumo';

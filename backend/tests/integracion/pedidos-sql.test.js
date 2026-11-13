@@ -48,6 +48,7 @@ const pedidosService = require('../../src/services/pedidos.service');
 const kdsService = require('../../src/services/kds.service');
 const transaccionesService = require('../../src/services/transacciones.service');
 const autorInexistente = require('../../src/services/autor-inexistente');
+const socketNotifier = require('../../src/services/socket.notifier');
 
 /** Número de la mesa de prueba. No puede chocar con una mesa de verdad. */
 const MESA_NUMERO = parseInt(process.env.MESA_NUMERO || '901', 10);
@@ -247,6 +248,26 @@ test('POST /pedidos con un usuario que existe: entra y deja su linea de historia
   );
   assert.strictEqual(rows[0].id_usuario, usuarioReal.id_usuario);
   assert.strictEqual(rows[0].estado_nuevo, 'recibido');
+});
+
+test('order:created con datos reales: cada linea lleva su id_detalle y estado_item pendiente', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  // Lo mismo que hace POST /pedidos: notificarPedidoCreado(pedido, pedido.detalles)
+  // da forma al aviso con armarPedido. Aquí los detalles salen de la base de verdad.
+  const pedido = await crearConUsuarioReal();
+  const { items } = socketNotifier.armarPedido(pedido, pedido.detalles);
+
+  const { rows } = await sonda.query(
+    'SELECT id_detalle FROM detalles_pedido WHERE id_pedido = $1::int ORDER BY id_detalle',
+    [pedido.id_pedido]
+  );
+  assert.ok(items.length > 0);
+  assert.deepStrictEqual(items.map((i) => i.id_detalle).sort((a, b) => a - b), rows.map((r) => r.id_detalle));
+  for (const item of items) {
+    assert.ok(Number.isInteger(item.id_detalle), 'id_detalle es entero');
+    assert.strictEqual(item.estado_item, 'pendiente');
+  }
 });
 
 test('PATCH /pedidos/:id/estado con el autor borrado: 409 autor_inexistente', async (t) => {

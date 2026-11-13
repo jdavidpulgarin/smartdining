@@ -36,7 +36,7 @@ process.env.REDIS_URL = '';
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
-const { Pool } = require('pg');
+const { abrirSonda } = require('../helpers/base-prueba');
 const app = require('../../server');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
@@ -128,37 +128,33 @@ async function seleccionConstructor() {
 }
 
 test.before(async () => {
-  try {
-    sonda = new Pool({ connectionTimeoutMillis: 2000 });
-    await sonda.query('SELECT 1');
-    // Un plato con receta, pero NO el que eligen las otras suites (el primero
-    // disponible por id): corren en paralelo y comparten su stock, que en el
-    // seed alcanza para pocas unidades. Entre los demás, el que más unidades
-    // deja servir con el stock de hoy.
-    const p = await sonda.query(
-      `WITH comun AS (
-         SELECT id_plato FROM platos
-          WHERE disponible AND stock_suficiente AND NOT personalizable
-          ORDER BY id_plato LIMIT 1
-       )
-       SELECT p.id_plato FROM platos p
-        WHERE p.disponible AND p.stock_suficiente AND NOT p.personalizable AND p.precio >= 1000
-          AND p.id_plato NOT IN (SELECT id_plato FROM comun)
-          AND EXISTS (SELECT 1 FROM recetas_plato rp WHERE rp.id_plato = p.id_plato)
-        ORDER BY (SELECT min(floor(s.stock_actual / rp.cantidad)) FROM recetas_plato rp
-                    JOIN insumos s ON s.id_insumo = rp.id_insumo WHERE rp.id_plato = p.id_plato) DESC,
-                 p.id_plato
-        LIMIT 1`
-    );
-    plato = p.rows[0] || null;
-    constructor = await seleccionConstructor();
-    hayBase = Boolean(plato);
-    if (!hayBase) return;
-    await limpiar();
-  } catch (err) {
-    if (err && typeof err.message === 'string' && err.message.includes('MESA_NUMERO')) throw err;
-    hayBase = false;
-  }
+  // Sin base configurada salta; configurada y sin responder, falla (#165).
+  sonda = await abrirSonda();
+  if (!sonda) return;
+  // Un plato con receta, pero NO el que eligen las otras suites (el primero
+  // disponible por id): corren en paralelo y comparten su stock, que en el
+  // seed alcanza para pocas unidades. Entre los demás, el que más unidades
+  // deja servir con el stock de hoy.
+  const p = await sonda.query(
+    `WITH comun AS (
+       SELECT id_plato FROM platos
+        WHERE disponible AND stock_suficiente AND NOT personalizable
+        ORDER BY id_plato LIMIT 1
+     )
+     SELECT p.id_plato FROM platos p
+      WHERE p.disponible AND p.stock_suficiente AND NOT p.personalizable AND p.precio >= 1000
+        AND p.id_plato NOT IN (SELECT id_plato FROM comun)
+        AND EXISTS (SELECT 1 FROM recetas_plato rp WHERE rp.id_plato = p.id_plato)
+      ORDER BY (SELECT min(floor(s.stock_actual / rp.cantidad)) FROM recetas_plato rp
+                  JOIN insumos s ON s.id_insumo = rp.id_insumo WHERE rp.id_plato = p.id_plato) DESC,
+               p.id_plato
+      LIMIT 1`
+  );
+  plato = p.rows[0] || null;
+  constructor = await seleccionConstructor();
+  hayBase = Boolean(plato);
+  if (!hayBase) return;
+  await limpiar();
 });
 
 // Después de CADA caso, no solo al final: así las líneas que quedan vivas no
@@ -419,30 +415,38 @@ test('e. reintento sobre una línea ya cancelada: 409 item_ya_cancelado y el sto
   assert.strictEqual((await filaPedido(idPedido)).total, totalAntes);
 });
 
-test('f. con un pago que quedaría por encima del total nuevo: 409 pago_registrado y nada cambia', async (t) => {
-  if (!hayBase) return t.skip('sin base de datos');
-  const { idMesa, jwtComensal } = await mesaConComensal('Ana');
-  const { idPedido, detalles: [deAna] } = await pedidoCon(idMesa, [
-    { id_plato: plato.id_plato, cantidad: 1, comensal: 'Ana' },
-    { id_plato: plato.id_plato, cantidad: 1, comensal: 'Beto' },
-  ]);
-  const antes = await filaPedido(idPedido);
-  // Pagado: más que lo que quedaría (el total sin la línea de Ana), sin pasar del total.
-  const monto = antes.total - deAna.subtotal + 500;
-  assert.ok(monto <= antes.total);
-  await sonda.query(
-    `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion)
-     VALUES ($1::int, 'efectivo', $2::numeric, 'completada')`,
-    [idPedido, monto]
-  );
+// pago_registrado ESTRICTO (revisión de Jarrison): CUALQUIER transacción
+// completada bloquea, grande o pequeña. Antes solo bloqueaba si el total nuevo
+// quedaba por debajo de lo pagado.
+for (const [nota, montoDe] of [
+  ['un pago grande (más que lo que quedaría sin la línea)', (total, subtotal) => total - subtotal + 500],
+  ['un pago parcial PEQUEÑO (100), que antes no bloqueaba', () => 100],
+]) {
+  test(`f. con ${nota}: 409 pago_registrado y nada cambia`, async (t) => {
+    if (!hayBase) return t.skip('sin base de datos');
+    const { idMesa, jwtComensal } = await mesaConComensal('Ana');
+    const { idPedido, detalles: [deAna] } = await pedidoCon(idMesa, [
+      { id_plato: plato.id_plato, cantidad: 1, comensal: 'Ana' },
+      { id_plato: plato.id_plato, cantidad: 1, comensal: 'Beto' },
+    ]);
+    const antes = await filaPedido(idPedido);
+    const monto = montoDe(antes.total, deAna.subtotal);
+    assert.ok(monto > 0 && monto <= antes.total);
+    await sonda.query(
+      `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion)
+       VALUES ($1::int, 'efectivo', $2::numeric, 'completada')`,
+      [idPedido, monto]
+    );
+    const conPago = await filaPedido(idPedido);
 
-  const res = await quitar(jwtComensal, idPedido, deAna.id_detalle);
-  assert.strictEqual(res.status, 409, JSON.stringify(res.body));
-  assert.strictEqual(res.body.motivo, 'pago_registrado');
-  assert.strictEqual((await estadoItem(deAna.id_detalle)).estado_item, 'pendiente');
-  assert.deepStrictEqual(Object.keys(await libroDe(deAna.id_detalle)), ['reserva']);
-  assert.deepStrictEqual(await filaPedido(idPedido), antes);
-});
+    const res = await quitar(jwtComensal, idPedido, deAna.id_detalle);
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.strictEqual(res.body.motivo, 'pago_registrado');
+    assert.strictEqual((await estadoItem(deAna.id_detalle)).estado_item, 'pendiente');
+    assert.deepStrictEqual(Object.keys(await libroDe(deAna.id_detalle)), ['reserva']);
+    assert.deepStrictEqual(await filaPedido(idPedido), conPago);
+  });
+}
 
 test('g. otro comensal de la misma mesa no quita lo de Ana; con otra mayúscula y tilde Ana sí', async (t) => {
   if (!hayBase) return t.skip('sin base de datos');
