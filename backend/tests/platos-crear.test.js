@@ -486,3 +486,63 @@ test('review-144 (medido): al CREAR un plato ese 23503 no puede salir', async ()
     db.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// D-23: url_imagen acepta una URL https o una ruta /imagenes/<uuid>.webp.
+// http NO (la CSP de producción solo permite img-src https:). El esquema no
+// distingue mayúsculas: HTTPS:// vale y HTTP:// no.
+// ---------------------------------------------------------------------------
+
+const UUID_IMAGEN = '0f8fad5b-d9cb-469f-a165-70867728950e';
+
+for (const url of ['https://cdn.ejemplo.com/arepa.jpg', 'HTTPS://ejemplo.com/a.png', `/imagenes/${UUID_IMAGEN}.webp`]) {
+  test(`d-23: plato con url_imagen ${url} -> 201 (POST) y 200 (PUT), y se guarda tal cual`, async () => {
+    const db = fakePlatos();
+    const redis = instalarFakeRedis();
+    try {
+      const res = await crear({ ...CUERPO_MINIMO, url_imagen: url });
+      assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+      assert.strictEqual(insert(db).params[4], url);
+
+      const put = await request(app)
+        .put('/api/platos/77')
+        .set('Authorization', `Bearer ${admin()}`)
+        .send({ url_imagen: url });
+      assert.strictEqual(put.status, 200, JSON.stringify(put.body));
+      assert.strictEqual(db.buscar('UPDATE platos').params[4], url);
+    } finally {
+      redis.restaurar();
+      db.restaurar();
+    }
+  });
+}
+
+for (const [caso, url] of [
+  ['con ..', '/imagenes/../x.webp'],
+  ['con .. y uuid', `/imagenes/../${UUID_IMAGEN}.webp`],
+  ['de otra carpeta', `/otra/${UUID_IMAGEN}.webp`],
+  ['con otra extensión', `/imagenes/${UUID_IMAGEN}.png`],
+  ['sin uuid', '/imagenes/foto.webp'],
+  ['con el uuid en mayúsculas', `/imagenes/${UUID_IMAGEN.toUpperCase()}.webp`],
+  ['con una subcarpeta', `/imagenes/a/${UUID_IMAGEN}.webp`],
+  ['con algo detrás', `/imagenes/${UUID_IMAGEN}.webp?x=1`],
+  ['relativa sin barra', `imagenes/${UUID_IMAGEN}.webp`],
+  ['http: (la CSP la bloquearía)', 'http://localhost:4000/x.png'],
+  ['HTTP: en mayúsculas', 'HTTP://ejemplo.com/a.png'],
+  ['javascript:', 'javascript:alert(1)'],
+  ['ftp:', 'ftp://ejemplo.com/a.jpg'],
+  ['de más de 255', `https://cdn.ejemplo.com/${'a'.repeat(250)}.jpg`],
+]) {
+  test(`d-23: plato con url_imagen ${caso} -> 400 y no se escribe`, async () => {
+    const db = fakePlatos();
+    const redis = instalarFakeRedis();
+    try {
+      const res = await crear({ ...CUERPO_MINIMO, url_imagen: url });
+      assert.strictEqual(res.status, 400, `${url} -> ${res.status}`);
+      assert.strictEqual(insert(db), undefined);
+    } finally {
+      redis.restaurar();
+      db.restaurar();
+    }
+  });
+}

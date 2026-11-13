@@ -558,3 +558,52 @@ test('review-144: el traductor del constructor no se come los otros errores', ()
   assert.strictEqual(traducido.motivo, undefined);
   assert.match(traducido.message, /ya hay otro ingrediente/i);
 });
+
+// ---------------------------------------------------------------------------
+// D-23: url_imagen acepta una URL https o una ruta /imagenes/<uuid>.webp.
+// http NO (la CSP de producción solo permite img-src https:). El esquema no
+// distingue mayúsculas: HTTPS:// vale y HTTP:// no.
+// ---------------------------------------------------------------------------
+
+const UUID_IMAGEN = '0f8fad5b-d9cb-469f-a165-70867728950e';
+
+for (const url of ['https://cdn.ejemplo.com/arroz.webp', 'HTTPS://ejemplo.com/a.png', `/imagenes/${UUID_IMAGEN}.webp`]) {
+  test(`d-23: ingrediente con url_imagen ${url} -> 201 y se guarda tal cual`, async () => {
+    const db = instalarFakeDb(dbIngredientes());
+    try {
+      const res = await crear({ nombre: 'Arroz', url_imagen: url });
+      assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+      assert.strictEqual(columnasDelInsert(db.buscar(SQL_INSERT_ING)).url_imagen, url);
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+for (const [caso, url] of [
+  ['con ..', '/imagenes/../x.webp'],
+  ['de otra carpeta', `/otra/${UUID_IMAGEN}.webp`],
+  ['con otra extensión', `/imagenes/${UUID_IMAGEN}.png`],
+  ['sin uuid', '/imagenes/arroz.webp'],
+  ['que no es URL ni ruta', 'arroz.webp'],
+  ['http: (la CSP la bloquearía)', 'http://localhost:4000/x.png'],
+  ['HTTP: en mayúsculas', 'HTTP://ejemplo.com/a.png'],
+  ['javascript:', 'javascript:alert(1)'],
+]) {
+  test(`d-23: ingrediente con url_imagen ${caso} -> 400 (POST y PUT) y no se escribe`, async () => {
+    const db = instalarFakeDb(dbIngredientes());
+    try {
+      const res = await crear({ nombre: 'Arroz', url_imagen: url });
+      assert.strictEqual(res.status, 400, `${url} -> ${res.status}`);
+      const put = await request(app)
+        .put(`/api/ingredientes/${ID_INGREDIENTE}`)
+        .set('Authorization', jwtAdmin())
+        .send({ url_imagen: url });
+      assert.strictEqual(put.status, 400, `PUT ${url} -> ${put.status}`);
+      assert.strictEqual(db.buscar(SQL_INSERT_ING), undefined);
+      assert.strictEqual(db.buscar(SQL_UPDATE_ING), undefined);
+    } finally {
+      db.restaurar();
+    }
+  });
+}

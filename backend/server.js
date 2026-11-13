@@ -7,6 +7,7 @@ const { manejadorErrores } = require('./src/middleware/errores.middleware');
 const { exigirEntornoValido } = require('./src/config/verificar-entorno');
 const { opcionesCors } = require('./src/config/cors');
 const { crearLimitadorGlobal } = require('./src/middleware/limites.middleware');
+const { servirImagenesLocales } = require('./src/middleware/imagenes-estaticas');
 const pool = require('./src/config/db');
 const { redisClient } = require('./src/config/redis');
 const inventarioAvisos = require('./src/services/inventario-avisos');
@@ -59,6 +60,12 @@ app.use(express.json());
 // y los mismos límites. Detalles y lo que queda fuera de v1 en
 // src/routes/montaje.js.
 montarApi(app);
+
+// D-23: las imágenes subidas (/imagenes/<uuid>.webp). SOLO fuera de producción:
+// en producción las sirve nginx desde el volumen y el backend no monta esta
+// ruta (ver src/middleware/imagenes-estaticas.js).
+const imagenesLocales = servirImagenesLocales();
+if (imagenesLocales) app.use('/imagenes', imagenesLocales);
 
 app.use((req, res) => {
   // `motivo` se agregó en la D-19: el `error` de siempre no cambia.

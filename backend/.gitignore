@@ -1,2 +1,5 @@
 node_modules/
 .env
+
+# D-23: imagenes subidas en desarrollo (IMAGENES_DIR por defecto)
+uploads/
