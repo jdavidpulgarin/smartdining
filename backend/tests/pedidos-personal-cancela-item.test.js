@@ -40,6 +40,9 @@ function fakePersonal({
   // centavos, como los devuelve pg (bigint -> texto). Por omisión, sin pagos.
   pagadoCentavos = 0,
   totalNuevoCentavos = null,
+  // T4: los comensales con un pago completado en la visita actual de la mesa,
+  // tal como los devuelve la consulta (texto o null = «General»/mesa completa).
+  pagosDeComensales = [],
   vivas = 1,
   transicionValida = true,
   falloEn = null,
@@ -52,6 +55,7 @@ function fakePersonal({
     if (sql.includes('pagado_centavos')) {
       return { rows: [{ total_centavos: String(totalNuevo), pagado_centavos: String(pagadoCentavos) }] };
     }
+    if (sql.includes('SELECT DISTINCT t.comensal')) return { rows: pagosDeComensales.map((comensal) => ({ comensal })) };
     if (sql.includes('FROM transacciones t')) return { rows: [{ bloquea: pagoBloquea }] };
     if (sql.includes('count(*)::int AS n FROM detalles_pedido')) return { rows: [{ n: vivas }] };
     if (sql.includes('FROM transiciones_validas')) return { rows: [{ ok: transicionValida }] };
@@ -243,6 +247,89 @@ test('personal cancela plato: el pago se compara DESPUÉS de cancelar la línea,
     assert.ok(iLinea >= 0 && iCuenta > iLinea, 'primero se cancela la línea (el trigger deja el total nuevo)');
     assert.ok(iVivas > iCuenta, 'y se compara antes de decidir si el pedido se cancela');
     assert.strictEqual(e.db.buscar('EXISTS (SELECT 1 FROM transacciones'), undefined, 'el personal no usa la regla estricta');
+  } finally {
+    e.restaurar();
+  }
+});
+
+// --- T4 (review de #235): el dueño de la línea ya pagó ------------------------
+
+const MENSAJE_YA_PAGO = 'Ese comensal ya pagó: reembolsa antes de cancelar su plato';
+
+test('t4: el plato de Ana con Ana pagada -> 409 pago_registrado con el mensaje claro, ANTES de tocar la línea, y sin avisos', async () => {
+  const e = escenario({ linea: lineaEn('cocinando', { comensal: 'Ana' }), pagosDeComensales: ['Ana'] });
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.deepStrictEqual(res.body, { error: MENSAJE_YA_PAGO, motivo: 'pago_registrado' });
+    assert.strictEqual(e.db.buscar("UPDATE detalles_pedido SET estado_item = 'cancelado'"), undefined, 'la línea no se toca');
+    assert.strictEqual(e.db.buscar('pagado_centavos'), undefined, 'no llega a la regla del #206');
+    sinCancelar(e);
+    await socketNotifier.esperarAvisos();
+    assert.strictEqual(e.socket.avisos.length, 0);
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4: la consulta busca pagos completados de la MESA en la visita actual (sesion_iniciada_en), y los del propio pedido', async () => {
+  const e = escenario({ linea: lineaEn('cocinando', { comensal: 'Beto' }), pagosDeComensales: ['Ana'] });
+  try {
+    assert.strictEqual((await cancelar('admin')).status, 200);
+    const q = e.db.buscar('SELECT DISTINCT t.comensal');
+    assert.ok(q, 'mira de quién son los pagos');
+    assert.ok(q.sql.includes("t.estado_transaccion = 'completada'"));
+    assert.ok(q.sql.includes('t.creado_en >= (SELECT m.sesion_iniciada_en FROM mesas m'), 'la visita actual');
+    assert.ok(q.sql.includes('t.id_pedido = $1::int'), 'siempre los del propio pedido');
+    assert.ok(q.sql.includes('p.id_mesa = $2::int'), 'y cualquier pedido de la mesa');
+    assert.deepStrictEqual(q.params, [PEDIDO, 9]);
+    const sqls = e.db.ejecutadas.map((x) => x.sql);
+    const iPagos = sqls.findIndex((s) => s.includes('SELECT DISTINCT t.comensal'));
+    const iLinea = sqls.findIndex((s) => s.includes("UPDATE detalles_pedido SET estado_item = 'cancelado'"));
+    assert.ok(iPagos >= 0 && iPagos < iLinea, 'antes de cancelar la línea');
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4: el plato de Beto sin pagar -> 200 aunque Ana y la mesa completa hayan pagado', async () => {
+  const e = escenario({ linea: lineaEn('cocinando', { comensal: 'Beto' }), pagosDeComensales: ['Ana', null] });
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.ok(e.db.buscar("UPDATE detalles_pedido SET estado_item = 'cancelado'"));
+    assert.ok(e.db.buscar('pagado_centavos'), 'la regla del #206 se sigue comprobando');
+  } finally {
+    e.restaurar();
+  }
+});
+
+for (const [caso, comensalLinea, pagos, esperado] of [
+  ['el alias se compara por su clave (« aná » pagó, la línea es de «Ana»)', 'Ana', [' aná '], 409],
+  ['línea «General» con un pago de la mesa completa (comensal null)', null, [null], 409],
+  ['línea «General» con un pago a nombre de «General»', null, ['General'], 409],
+  ['línea «General» con solo pagos de comensales con nombre', null, ['Ana'], 200],
+  ['línea de Ana con solo un pago de la mesa completa (lo cubre el #206)', 'Ana', [null], 200],
+  ['sin ningún pago en la visita', 'Ana', [], 200],
+]) {
+  test(`t4: ${caso} -> ${esperado}`, async () => {
+    const e = escenario({ linea: lineaEn('cocinando', { comensal: comensalLinea }), pagosDeComensales: pagos });
+    try {
+      const res = await cancelar('mesero');
+      assert.strictEqual(res.status, esperado, JSON.stringify(res.body));
+      if (esperado === 409) assert.strictEqual(res.body.error, MENSAJE_YA_PAGO);
+    } finally {
+      e.restaurar();
+    }
+  });
+}
+
+test('t4: el mensaje del #206 (pagado > total nuevo) no cambia', async () => {
+  const e = escenario({ pagadoCentavos: 2000001 });
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.status, 409);
+    assert.match(res.body.error, /supera el total que quedaría/);
   } finally {
     e.restaurar();
   }

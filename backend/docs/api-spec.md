@@ -2644,7 +2644,8 @@ cada uno con su `estado_item`. `total` es un número:
 
 > **Contrato con los ajustes de la revisión de Jarrison** (motivo obligatorio, solo admin y
 > mesero) y su decisión sobre `pago_registrado`: para el personal **no** es estricto, se
-> permite mientras lo pagado no supere el total nuevo.
+> permite mientras lo pagado no supere el total nuevo **y** el dueño de la línea no haya
+> pagado en la visita actual (T4, review de #235).
 
 Admin y mesero cancelan **cualquier línea** de **cualquier mesa** (no hay regla de dueño),
 también cuando cocina ya la empezó.
@@ -2666,6 +2667,7 @@ movimientos de inventario que escriben los triggers lleven al usuario:
 | El pedido existe y `id_detalle` es de ese pedido | **404** `{ "motivo": "no_encontrado" }` |
 | La línea no estaba ya cancelada (va **primero**) | **409** `{ "motivo": "item_ya_cancelado" }` |
 | La línea no está `servido` y el pedido no está `entregado`, `pagado` ni `cancelado` | **409** `{ "motivo": "item_no_cancelable" }` |
+| **T4:** el comensal **dueño de la línea** no tiene un pago `completada` en la visita actual de la mesa (ver abajo) | **409** `{ "error": "Ese comensal ya pagó: reembolsa antes de cancelar su plato", "motivo": "pago_registrado" }`, sin tocar nada |
 | Después de cancelar la línea: lo **ya pagado** (transacciones `completada` del pedido) **no supera** el **total nuevo** (ver abajo) | **409** `{ "motivo": "pago_registrado" }` y `ROLLBACK` |
 | Si es la **última** línea viva: el pedido puede pasar a `cancelado` desde su estado según `transiciones_validas` | **409** `{ "motivo": "item_no_cancelable" }` (ver abajo) |
 | El usuario del JWT existe | **409** `{ "motivo": "autor_inexistente" }` (el helper de siempre) |
@@ -2701,7 +2703,23 @@ Si era la **última línea viva**, el pedido pasa a `cancelado` con su fila en
 `estado_pedido` puede ser `recibido`, `en_preparacion`, `listo` o `cancelado` (Roberto los
 acepta en su #181). Si el pedido quedó cancelado, también el `order:status` de siempre.
 
-**`pago_registrado` del personal: lo pagado contra el total nuevo.** En la misma
+**`pago_registrado` del personal (T4): el dueño de la línea ya pagó.** Antes de tocar la
+línea: si el comensal de la línea tiene una transacción `completada` en la **visita actual**
+de la mesa, **409** `pago_registrado` y nada cambia. Sin esta regla, su pago quedaba como
+crédito de toda la mesa y terminaba pagando lo de los demás. Las reglas:
+
+- Cuenta un pago del comensal en **cualquier pedido de la mesa** («pagar lo mío» reparte
+  entre pedidos) con `transacciones.creado_en >= mesas.sesion_iniciada_en`, y siempre los
+  del propio pedido (un domicilio no tiene mesa; una mesa sin sesión delimitada, solo este
+  pedido).
+- El comensal se compara por la **clave del alias** (D-18b): «Ana», « ana » y «Aná» son la
+  misma persona. Es el mismo agrupamiento que la cuenta (`obtener_cuenta_mesa`).
+- Una línea **«General»** (sin comensal) se bloquea con cualquier pago «General» o de la
+  **mesa completa** (`comensal` NULL). Un pago de la mesa completa **no** bloquea la línea de
+  un comensal con nombre: para eso sigue la regla de abajo.
+- Hay que reembolsar ese pago antes de cancelar el plato.
+
+**`pago_registrado` del personal: lo pagado contra el total nuevo (#206).** Se mantiene. En la misma
 transacción, con el pedido bloqueado (`FOR UPDATE`), se cancela la línea y se lee el total
 que deja `tr_actualizar_total_pedido` (sin las líneas canceladas). Se compara en **centavos
 enteros** calculados por la base, sin coma flotante:

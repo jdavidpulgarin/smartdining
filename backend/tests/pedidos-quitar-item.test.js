@@ -213,6 +213,21 @@ test('quitar plato: pago_registrado es ESTRICTO, cualquier transacción completa
   }
 });
 
+test('t4: el comensal sigue ESTRICTO: su mensaje de siempre y sin la regla del dueño que pagó (es del personal)', async () => {
+  const e = escenario('Ana', { pagoBloquea: true });
+  try {
+    const res = await quitar(e.jwtComensal);
+    assert.strictEqual(res.status, 409);
+    assert.deepStrictEqual(res.body, {
+      error: 'El pedido ya tiene un pago registrado: pídeselo al mesero',
+      motivo: 'pago_registrado',
+    });
+    assert.strictEqual(e.db.buscar('SELECT DISTINCT t.comensal'), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
 for (const [caso, cuerpo] of [['un campo', { motivo: 'no lo quiero' }], ['un arreglo', [1]]]) {
   test(`quitar plato: cuerpo con ${caso} -> 400 cuerpo_invalido`, async () => {
     const e = escenario();

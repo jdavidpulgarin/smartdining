@@ -563,6 +563,26 @@ function esDelComensal(aliasDeLaLinea, aliasDelJwt) {
 }
 
 /**
+ * T4 (review de #235): la clave con que se agrupa un comensal en la CUENTA.
+ *
+ * obtener_cuenta_mesa (script 20) junta líneas y pagos por
+ * COALESCE(NULLIF(btrim(comensal), ''), 'General'): NULL o vacío es «General»,
+ * y un pago con comensal NULL (cobro de la mesa completa) cae ahí. Aquí se
+ * hace lo mismo, pero comparando por la clave del alias (D-18b), como el resto
+ * del backend, para que «Ana», « ana » y «Aná» sean la misma persona. Un texto
+ * que la normalización no acepta (dato viejo, a mano) se compara por su texto
+ * recortado y en minúsculas, nunca se descarta.
+ */
+function claveDeCuenta(comensal) {
+  if (typeof comensal !== 'string' || comensal.trim() === '') return aliasComensal.CLAVE_RESERVADA;
+  const n = aliasComensal.normalizarAlias(comensal);
+  if (n.clave) return n.clave; // incluye «General» escrito a mano: clave reservada
+  return comensal.trim().toLowerCase();
+}
+
+const MENSAJE_COMENSAL_YA_PAGO = 'Ese comensal ya pagó: reembolsa antes de cancelar su plato';
+
+/**
  * El comensal quita UNA línea de su pedido, entera (aunque tenga cantidad > 1).
  *
  * TODO en una transacción, con el pedido y después la línea bloqueados (FOR
@@ -594,8 +614,9 @@ function esDelComensal(aliasDeLaLinea, aliasDelJwt) {
  *     (los movimientos lo llevan) y en historial_estados, con el motivo.
  *
  * pago_registrado: el comensal, ESTRICTO (cualquier pago completado); el
- * personal, solo si lo pagado supera el total que queda sin la línea. Ver el
- * paso 3 y el 4b.
+ * personal, si el comensal dueño de la línea ya pagó en la visita actual de la
+ * mesa (T4) o si lo pagado supera el total que queda sin la línea (#206). Ver
+ * los pasos 3, 3b y 4b.
  *
  * @param {number} idPedido
  * @param {number} idDetalle
@@ -682,6 +703,36 @@ async function cancelarItem(idPedido, idDetalle, actor) {
         [idPedido]
       );
       if (pago.rows[0].bloquea) return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado });
+    }
+
+    // 3b. PERSONAL (T4, review de #235): el comensal DUEÑO de la línea ya pagó
+    // en la visita actual de la mesa -> 409 pago_registrado, y nada cambia.
+    // Sin esto, el mesero le cancelaba el plato y su pago quedaba como crédito
+    // de toda la mesa: lo de Ana pagaba lo de Beto y Caro (la mesa debía
+    // 40.000 y los demás sumaban 52.000), y devolverlo por Wompi no es viable.
+    //
+    // Cuenta un pago COMPLETADO de ese comensal en CUALQUIER pedido de la mesa
+    // («pagar lo mío» reparte entre pedidos) hecho desde que empezó la sesión
+    // vigente (t.creado_en >= mesas.sesion_iniciada_en, la visita de
+    // obtener_cuenta_mesa), y siempre los del propio pedido (un domicilio no
+    // tiene mesa; una mesa sin sesión delimitada, solo este pedido). Una línea
+    // «General» (sin comensal) se bloquea con cualquier pago «General» o de la
+    // mesa completa (comensal NULL). La regla del #206 (paso 4b) sigue igual.
+    if (esPersonal) {
+      const pagos = await client.query(
+        `SELECT DISTINCT t.comensal
+           FROM transacciones t
+           JOIN pedidos p ON p.id_pedido = t.id_pedido
+          WHERE t.estado_transaccion = 'completada'
+            AND (t.id_pedido = $1::int
+                 OR (p.id_mesa = $2::int
+                     AND t.creado_en >= (SELECT m.sesion_iniciada_en FROM mesas m WHERE m.id_mesa = $2::int)))`,
+        [idPedido, pedido.id_mesa]
+      );
+      const dueno = claveDeCuenta(linea.comensal);
+      if (pagos.rows.some((t) => claveDeCuenta(t.comensal) === dueno)) {
+        return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado, mensaje: MENSAJE_COMENSAL_YA_PAGO });
+      }
     }
 
     // 4. La línea COMPLETA. La base decide el stock (devolución o merma, según
@@ -937,6 +988,9 @@ module.exports = {
   cancelarPedidoComensal,
   MOTIVOS_QUITAR_ITEM,
   MOTIVOS_CANCELAR_PEDIDO,
+  // T4
+  claveDeCuenta,
+  MENSAJE_COMENSAL_YA_PAGO,
   // D-20a
   entregaEnCamino,
   cerrarSiEntregadoYPagado,
