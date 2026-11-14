@@ -5423,7 +5423,7 @@ contraseña incluido**. Para los clientes, no repetir eso:
 Lo que necesita la P-24 del panel: despachar los pedidos a domicilio y que el repartidor los
 lleve. Sobre el script 36 (`pedidos_domicilio`, `zonas_envio`, rol `repartidor`). **Crear**
 pedidos para llevar o a domicilio, el pago anticipado y su vencimiento son la **D-20b**: no
-están aquí.
+están aquí ([D-20b](#d-20b--pedidos-para-llevar-y-a-domicilio-desde-la-app)).
 
 Todas las rutas de esta sección están en el router compartido (**`/api` y `/api/v1`**) y
 **todo error responde `{ error, motivo }`**, también los genéricos (404, 422, 500…). El log
@@ -5621,6 +5621,210 @@ En la D-20a **no hay avisos nuevos** de domicilio, y los existentes (`order:stat
 `id_mesa` en esos contratos. No lanzan ni cambian la respuesta HTTP. Los avisos de domicilio
 llegan con la **R-23** de Roberto. (Su `socket-server/src/auth.js` tampoco acepta hoy un JWT con
 `rol: "repartidor"`: hay que agregarlo allí cuando el repartidor necesite tiempo real.)
+
+---
+
+## D-20b · Pedidos para llevar y a domicilio desde la app
+
+> **Contrato para revisar** (Juan: la app; Roberto: el cobro en el socket-server). Sobre el
+> script 36: `por_pagar`, `registrar_pago_anticipado`, `cancelar_por_pagar_vencidos`,
+> `cancelar_pedido_por_pagar`, `cotizar_zona` y `pagos_por_devolver`. **Sin cambios en la base.**
+
+El cliente de la app (D-19) pide **para llevar** o **a domicilio**. El pedido nace en
+**`por_pagar`**: no llega a cocina ni al despacho hasta que el pago **anticipado** se confirma
+(`por_pagar → recibido`). Si no se paga a tiempo, se cancela solo y el stock vuelve.
+
+```
+app ──POST /api/v1/pedidos-domicilio──▶ backend: pedido en por_pagar (15 min)
+app ──(intención de pago)──▶ socket-server ──GET  .../:id/cobro/interno──▶ backend: monto y referencia
+Wompi ──webhook──▶ socket-server ──POST .../:id/pago/interno──▶ backend: registrar_pago_anticipado
+                                                                 por_pagar → recibido (llega a cocina)
+backend: cada minuto, cancelar_por_pagar_vencidos()              por_pagar → cancelado (el stock vuelve)
+```
+
+### Rutas del cliente (`/api/v1`, JWT de cliente)
+
+Solo en `/api/v1` (en `/api` dan 404), como las demás de clientes. Un JWT de staff o de comensal
+recibe **403** `prohibido`. **Todo** error responde `{ error, motivo }`
+([Errores de las rutas de clientes](#errores-de-las-rutas-de-clientes)).
+
+| Método y ruta | Cuerpo | Éxito |
+|---|---|---|
+| `POST /api/v1/pedidos-domicilio` | ver abajo | **201** `{ pedido }` |
+| `GET /api/v1/pedidos-domicilio/mios` | — | **200** `{ pedidos }` |
+| `POST /api/v1/pedidos-domicilio/:id/cancelar` | ninguno | **200** `{ pedido }` |
+
+#### `POST /api/v1/pedidos-domicilio`
+
+```json
+{
+  "canal": "domicilio",
+  "id_direccion": 12,
+  "notas_generales": "Sin cebolla",
+  "items": [
+    { "id_plato": 4, "cantidad": 2, "notas": "bien asado" },
+    { "id_plato": 9, "cantidad": 1, "ingredientes": [ { "id_ingrediente": 31, "porcion": "extra" } ] }
+  ]
+}
+```
+
+- zod `.strict()`. `canal`: `para_llevar` o `domicilio`. `id_direccion`: **obligatorio** con
+  `domicilio` y **prohibido** con `para_llevar`. `items`: las **mismas reglas que
+  `POST /pedidos`** (platos, cantidad de 1 a 20 por línea y 50 ítems por pedido, notas,
+  ingredientes y porciones del constructor), **sin** `comensal` (el pedido es del cliente).
+- **Domicilio:** la dirección tiene que ser **del cliente** (si no, **404** `no_encontrado`, sin
+  distinguir de una que no existe). Su barrio se cotiza con **`cotizar_zona`** (la base decide la
+  cobertura): sin zona activa, **422** `fuera_de_cobertura`.
+- **En una transacción**, con el orden de bloqueos de siempre
+  (`pedidos → pedidos_domicilio → detalles_pedido`):
+  1. el pedido: `canal`, `id_cliente`, **sin mesa** y en **`por_pagar`**;
+  2. con domicilio, su fila de `pedidos_domicilio`: la **copia** de la dirección (dirección,
+     barrio, referencia, coordenadas), el teléfono del cliente como contacto, la zona y el
+     `costo_envio` cotizado. El envío **entra en el total** (script 36);
+  3. las líneas, con la **misma validación** que `POST /pedidos`: el constructor, la
+     disponibilidad y el **stock**. Sin stock: **409** `sin_stock` con `faltantes` (y su
+     `disponible`), igual que en la mesa. Nada queda a medias.
+- **15 minutos para pagar**: `configuracion_restaurante.minutos_pago_anticipado` (15 por
+  defecto, de 5 a 120). `vence_en = creado_en + esos minutos`, calculado por la base.
+
+```json
+201 {
+  "pedido": {
+    "id_pedido": 87, "codigo_pedido": "PED-261114-A1B2C", "canal": "domicilio",
+    "estado": "por_pagar", "total": 41000, "costo_envio": 5000,
+    "vence_en": "2026-11-14T20:25:00.000Z",
+    "entrega": { "direccion": "Calle 1 # 2-3", "barrio": "Centro", "zona": "Norte", "estado_entrega": "por_asignar" },
+    "items": [ … ]
+  }
+}
+```
+
+`total` y `costo_envio` en pesos (números JSON). `entrega` es `null` en `para_llevar`.
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **400** | `cuerpo_invalido` | Cuerpo inválido (también `id_direccion` con `para_llevar`, o sin él con `domicilio`) |
+| **404** | `no_encontrado` | La dirección no existe o no es del cliente |
+| **422** | `fuera_de_cobertura` | El barrio de la dirección no está en ninguna zona activa |
+| **409** | `sin_stock` | Falta stock (con `faltantes`), como en `POST /pedidos` |
+| **409** / **422** | los de `POST /pedidos` | Plato o ingrediente no disponible, constructor incompleto, etc. (mismos motivos) |
+
+#### `GET /api/v1/pedidos-domicilio/mios`
+
+Los pedidos para llevar y a domicilio **del cliente**, del más nuevo al más viejo (**50** como
+mucho). Cada uno con la forma de arriba: `vence_en` solo mientras está en `por_pagar` (si no,
+`null`) y `entrega` con el `estado_entrega` actual (sin el repartidor ni datos de otros).
+
+#### `POST /api/v1/pedidos-domicilio/:id/cancelar`
+
+Sin cuerpo. El cliente cancela **su** pedido **solo mientras está en `por_pagar`**, con
+`cancelar_pedido_por_pagar` (bloquea el pedido: su guarda es la misma que la del pago y la del
+vencimiento, así que **nunca pasan dos**). El stock vuelve (devolución).
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **200** | — | `{ pedido }` en `cancelado` |
+| **404** | `no_encontrado` | No existe, no es del cliente o es de mesa. Un `:id` que no es entero positivo, también |
+| **409** | `pedido_pagado` | Ya no está en `por_pagar` porque **se pagó** (está en cocina o después): no se cancela por aquí |
+| **409** | `pedido_ya_cancelado` | Ya estaba cancelado (lo canceló antes el cliente o venció) |
+| **400** | `cuerpo_invalido` | Llegó un cuerpo con campos |
+
+### Rutas internas (socket-server, `x-internal-key`, fuera de v1)
+
+Como el resto del canal interno: solo en `/api`, con `x-internal-key` (**401** sin ella o
+errada, **503** sin `INTERNAL_API_KEY` en el servidor); en `/api/v1` dan 404. Montos en
+**centavos enteros**; la conversión a pesos la hace la base.
+
+#### (a) Validar el cobro: `GET /api/pedidos-domicilio/:id/cobro/interno?id_cliente=N`
+
+Lo pide el socket-server antes de crear la intención de Wompi del cliente `N` (que saca del JWT
+de la app). Solo lee: la decisión real se toma al confirmar.
+
+```json
+200 { "id_pedido": 87, "id_cliente": 5, "moneda": "COP", "monto_centavos": 4100000,
+      "referencia": "SD-P-87-A1B2C", "vence_en": "2026-11-14T20:25:00.000Z" }
+```
+
+- **`monto_centavos`** es `pedidos.total × 100` (el envío incluido), calculado en SQL.
+- **Una sola intención por pedido:** la `referencia` es **siempre la misma para ese pedido**:
+  `SD-P-<id_pedido>-<los 5 caracteres aleatorios de codigo_pedido>`. Pedirla dos veces da la
+  misma. *(A confirmar con Roberto: si Wompi rechaza un intento y el cliente reintenta, ¿la
+  pasarela acepta la misma referencia? Si no, hace falta un contador de intentos, que sería un
+  cambio de base.)*
+- El socket-server debería usar `vence_en` como `expirationTime` del widget: después, el pedido
+  lo cancela el vencimiento.
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **404** | `no_encontrado` | El pedido no existe, **no es de ese cliente** o es de mesa |
+| **409** | `pedido_no_por_pagar` | Ya no está en `por_pagar` (pagado o cancelado); trae `estado` |
+| **409** | `pedido_vencido` | Sigue en `por_pagar` pero ya pasó `vence_en` (el vencimiento lo cancela en el próximo minuto) |
+| **400** | `parametro_invalido` | `:id` o `id_cliente` no son enteros positivos, o sobra un parámetro |
+
+#### (b) Confirmar el pago: `POST /api/pedidos-domicilio/:id/pago/interno`
+
+Lo llama el socket-server cuando Wompi aprueba (webhook verificado), como hoy
+`POST /transacciones/internal` en la mesa.
+
+```json
+{ "referencia_externa": "SD-P-87-A1B2C", "id_transaccion_pasarela": "1132-903100443-27458",
+  "pasarela": "wompi", "monto_centavos": 4100000, "moneda": "COP", "metodo_pago": "online" }
+```
+
+- Llama **`registrar_pago_anticipado(id_pedido, monto, metodo, referencia)`**, que bloquea el
+  pedido y decide **la base**:
+  - sigue en `por_pagar` y el monto es su total → transacción `completada` y
+    **`por_pagar → recibido`** (llega a cocina): **`confirmado`**;
+  - ya está cancelado (venció o lo canceló el cliente), ya salió de `por_pagar` o el monto no es
+    el total → **no se aplica**: queda en **`pagos_por_devolver`** con su motivo
+    (`pedido_cancelado`, `pedido_no_por_pagar`, `monto_distinto`): **`por_devolver`**.
+- **Nunca rechaza un pago aprobado**: ni 409 por estado ni por monto.
+- **Idempotente por `referencia_externa`** (la función la busca en `transacciones` y en
+  `pagos_por_devolver`): un reintento responde **200** con el **mismo resultado**, sin registrar
+  dos veces. Dos confirmaciones a la vez se ponen en fila en el bloqueo del pedido.
+- `referencia_externa` tiene que ser la de **ese** pedido (`SD-P-<id>-…`); otra cosa es **400**
+  `referencia_invalida` (un error del llamador, no un pago que se pierde: el socket-server lo deja
+  en revisión, §8.7).
+
+```json
+201 { "ok": true, "duplicado": false, "resultado": "confirmado",
+      "id_transaccion": 812, "id_por_devolver": null, "motivo_devolucion": null }
+201 { "ok": true, "duplicado": false, "resultado": "por_devolver",
+      "id_transaccion": null, "id_por_devolver": 15, "motivo_devolucion": "pedido_cancelado" }
+200 { "ok": true, "duplicado": true, "resultado": "confirmado", … }
+```
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **404** | `no_encontrado` | El pedido no existe |
+| **400** | `cuerpo_invalido` / `referencia_invalida` / `parametro_invalido` | Cuerpo inválido (`moneda` solo `COP`, `monto_centavos` entero > 0) / referencia de otro pedido / `:id` |
+
+### Vencimiento
+
+Una tarea del backend llama **`cancelar_por_pagar_vencidos()`** **cada minuto**: cancela solo lo
+que **sigue** en `por_pagar` pasado su plazo y salta lo que otra transacción tiene bloqueado (un
+pago en curso, `SKIP LOCKED`). Así `por_pagar → recibido` y `por_pagar → cancelado` **nunca
+pasan los dos**; un pago que llega después del vencimiento queda en `pagos_por_devolver`.
+
+- **Sin solaparse:** si una pasada sigue corriendo cuando toca la siguiente, esa se salta.
+- **Apagado limpio:** el temporizador no retiene el proceso (`unref`) y se detiene al apagar el
+  servidor, antes de cerrar el pool; una pasada en curso termina.
+- **Desactivado en las pruebas:** solo lo arranca `server.js` cuando es el proceso del servidor
+  (como el oyente del canal `inventario`); `require('../server')` en una prueba no lo arranca.
+- Al log va solo **cuántos** pedidos canceló, no cuáles ni de quién.
+
+### Avisos
+
+- **Pedido pagado** (`confirmado`): después del COMMIT, por la **cadena de avisos** del notifier
+  (no espera ni cambia la respuesta), el **mismo formato que `order:created`** (el pedido y sus
+  ítems) con **`origen: "domicilio"`**, `id_mesa: null`, `canal` e `id_cliente`, a
+  **`POST /internal/order-created`**. **Pendiente de Roberto:** hoy esa ruta exige `id_mesa`
+  (`socket-server/src/pedidos.js`) y responde **400** a un pedido sin mesa; el backend lo deja en
+  el log y sigue. Hasta que el socket-server lo acepte, la cocina ve el pedido al recargar
+  (`GET /kds/comandas` ya trae los pedidos sin mesa).
+- Crear, cancelar o vencer un pedido en `por_pagar` **no avisa nada**: todavía no llegó a cocina.
+- `payment:confirmed` para la app: también es del socket-server (lo emite al confirmar el
+  webhook, como en la mesa); su `auth.js` todavía **no acepta** un JWT de cliente (D-19).
 
 ---
 
