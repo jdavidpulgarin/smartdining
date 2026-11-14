@@ -435,6 +435,19 @@ const TABLA = [
       id_cobro: '3f2b8c1e-4d5a-4b6c-9e7f-0a1b2c3d4e5f',
     },
   },
+  // T4: excedentes de pagos en línea de mesa (la Caja los devuelve en efectivo).
+  {
+    metodo: 'GET',
+    patron: '/api/excedentes-pago-en-linea',
+    url: '/api/excedentes-pago-en-linea?estado=pendiente',
+    roles: ['admin', 'cajero'],
+  },
+  {
+    metodo: 'PATCH',
+    patron: '/api/excedentes-pago-en-linea/:id/devuelto',
+    url: '/api/excedentes-pago-en-linea/1/devuelto',
+    roles: ['admin', 'cajero'],
+  },
 
   // --- Zonas de entrega para el admin (D-20a) --------------------------------
   { metodo: 'GET', patron: '/api/zonas-envio', url: '/api/zonas-envio', roles: ['admin'] },

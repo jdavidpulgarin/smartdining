@@ -36,7 +36,7 @@ const tresMinutos = async () => {
   for (let i = 0; i < 7; i++) await act(async () => { await vi.advanceTimersByTimeAsync(30000) })
 }
 
-describe('PantallaMesa: rotación del QR (T3)', { timeout: 20000 }, () => {
+describe('PantallaMesa: la tablet no rota el QR por su cuenta (T3)', { timeout: 20000 }, () => {
   beforeEach(() => {
     vi.useFakeTimers()
     rotar.mockReset()
@@ -46,30 +46,25 @@ describe('PantallaMesa: rotación del QR (T3)', { timeout: 20000 }, () => {
     vi.restoreAllMocks()
   })
 
-  it('la rotación automática (3 min) pide solo_si_vacia', async () => {
+  it('pasan 6 minutos y la tablet NO llama a rotar-qr (lo hace el socket-server con la mesa vacía)', async () => {
     rotar.mockResolvedValue({ token: 'tok-nuevo', url: 'http://192.168.1.36:5174/mesa/1?token=tok-nuevo' })
     montar()
     await tresMinutos()
-    expect(rotar).toHaveBeenCalledTimes(1)
-    expect(rotar).toHaveBeenCalledWith(1, undefined, { soloSiVacia: true })
+    await tresMinutos()
+    expect(rotar).not.toHaveBeenCalled()
   })
 
-  it('si el backend dice 409 mesa_con_comensales, el QR se queda y no sale ningún error', async () => {
-    const aviso = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    rotar.mockRejectedValue(Object.assign(new Error('La mesa tiene comensales'), { status: 409, motivo: 'mesa_con_comensales' }))
-    montar()
-    await tresMinutos()
-    expect(rotar).toHaveBeenCalledWith(1, undefined, { soloSiVacia: true })
-    expect(aviso).not.toHaveBeenCalled()
-    // y sigue intentándolo en el ciclo siguiente
-    await tresMinutos()
-    expect(rotar).toHaveBeenCalledTimes(2)
-  })
-
-  it('el botón manual sigue forzando la rotación (sin solo_si_vacia)', async () => {
+  it('el botón manual pide solo_si_vacia', async () => {
     rotar.mockResolvedValue({ token: 'tok-nuevo', url: 'http://192.168.1.36:5174/mesa/1?token=tok-nuevo' })
     montar()
     await act(async () => { fireEvent.click(screen.getByTitle('Rotar código QR')) })
-    expect(rotar).toHaveBeenCalledWith(1, undefined, { soloSiVacia: false })
+    expect(rotar).toHaveBeenCalledWith(1, undefined, { soloSiVacia: true })
+  })
+
+  it('con gente en la mesa (409 mesa_con_comensales) el QR se queda y lo dice', async () => {
+    rotar.mockRejectedValue(Object.assign(new Error('La mesa tiene comensales'), { status: 409, motivo: 'mesa_con_comensales' }))
+    montar()
+    await act(async () => { fireEvent.click(screen.getByTitle('Rotar código QR')) })
+    expect(screen.getByText('La mesa ya tiene comensales: el QR queda fijo.')).toBeInTheDocument()
   })
 })

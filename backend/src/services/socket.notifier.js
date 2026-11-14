@@ -888,7 +888,92 @@ function notificarMesaComensal(id_mesa, alias, accion, clave) {
   );
 }
 
+/* -------------------------------------------------------------------------- *
+ * T4: GET /internal/pagos-en-curso (EVENTS.md §6.6, #260)
+ * -------------------------------------------------------------------------- */
+
+/** Timeout de la consulta: lo fija el contrato (§6.6), no SOCKET_TIMEOUT_MS. */
+const TIMEOUT_PAGOS_EN_CURSO_MS = 1500;
+
+/**
+ * ¿Hay un pago en línea en curso en la mesa que impida cancelar un plato?
+ *
+ * A diferencia de los avisos, aquí el resultado DECIDE: se consulta antes de
+ * cancelar, y ante la duda se responde que no se pudo verificar. Nunca lanza.
+ *
+ *   - 200 con `enCurso` booleano     -> 'en_curso' | 'libre'
+ *   - timeout, falla de red, 5xx (incluido el 503 NO_CONFIGURADO) o un 200
+ *     que no se entiende              -> 'sin_verificar'
+ *   - 4xx                             -> 'sin_verificar' y ERROR en el log
+ *     (consulta mal armada o clave errada: es un bug nuestro)
+ *   - sin SOCKET_URL                  -> 'omitido' (advertencia en el log),
+ *     salvo NODE_ENV=production, donde es 'sin_verificar'
+ *   - con SOCKET_URL y sin INTERNAL_API_KEY -> 'sin_verificar' y ERROR en el
+ *     log (el socket-server respondería 401: mal configurado)
+ *
+ * Al log va solo el status y el `codigo` del socket-server, nunca la clave.
+ *
+ * @param {number} idMesa
+ * @param {string|null} comensal  alias de la línea, o null para «General»
+ * @returns {Promise<{estado: 'libre'|'en_curso'|'sin_verificar'|'omitido'}>}
+ */
+async function consultarPagosEnCurso(idMesa, comensal = null) {
+  const { url, clave } = config();
+  if (!url) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[socket] pagos-en-curso: sin SOCKET_URL en produccion; no se puede verificar');
+      return { estado: 'sin_verificar' };
+    }
+    console.warn('[socket] pagos-en-curso: sin SOCKET_URL, se omite la verificacion (fuera de produccion)');
+    return { estado: 'omitido' };
+  }
+  if (!clave) {
+    console.error('[socket] pagos-en-curso: hay SOCKET_URL pero no INTERNAL_API_KEY; no se puede verificar');
+    return { estado: 'sin_verificar' };
+  }
+
+  const params = new URLSearchParams({ mesa: String(idMesa) });
+  if (comensal) params.set('comensal', comensal);
+
+  try {
+    const res = await fetch(`${url}/internal/pagos-en-curso?${params.toString()}`, {
+      method: 'GET',
+      headers: { 'x-internal-key': clave },
+      signal: AbortSignal.timeout(TIMEOUT_PAGOS_EN_CURSO_MS),
+    });
+    const texto = await res.text();
+    let respuesta = null;
+    try {
+      respuesta = texto ? JSON.parse(texto) : null;
+    } catch {
+      respuesta = null;
+    }
+    const codigo = respuesta && typeof respuesta.codigo === 'string' ? respuesta.codigo : '';
+
+    if (res.status >= 400 && res.status < 500) {
+      console.error(`[socket] pagos-en-curso respondio ${res.status} ${codigo}: consulta mal armada o clave errada`.trim());
+      return { estado: 'sin_verificar' };
+    }
+    if (!res.ok) {
+      console.error(`[socket] pagos-en-curso respondio ${res.status} ${codigo}: no se puede verificar`.trim());
+      return { estado: 'sin_verificar' };
+    }
+    if (!respuesta || typeof respuesta.enCurso !== 'boolean') {
+      console.error('[socket] pagos-en-curso: respuesta sin enCurso; no se puede verificar');
+      return { estado: 'sin_verificar' };
+    }
+    return { estado: respuesta.enCurso ? 'en_curso' : 'libre' };
+  } catch (err) {
+    const motivo = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'TIMEOUT' : 'INALCANZABLE';
+    const sistema = err && err.cause && typeof err.cause.code === 'string' ? `/${err.cause.code}` : '';
+    console.error(`[socket] pagos-en-curso no respondio (${motivo}${sistema}): no se puede verificar`);
+    return { estado: 'sin_verificar' };
+  }
+}
+
 module.exports = {
+  consultarPagosEnCurso,
+  TIMEOUT_PAGOS_EN_CURSO_MS,
   nuevoEventId,
   notificarInventarioAlerta,
   armarPedido,

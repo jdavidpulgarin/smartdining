@@ -133,6 +133,11 @@ async function crearIntencionPago(req, res, ctx) {
   const pendiente = await ctx.almacenPagos.obtenerPendiente(idMesa, comensal);
   if (pendiente) {
     const vigente = await ctx.almacenPagos.obtener(pendiente);
+    // Wompi ya la aprobó y todavía no se pudo registrar (EVENTS.md §8.1): otra
+    // intención sería un segundo cobro. La marca se va al registrarse o al vencer.
+    if (vigente && vigente.estado === EN_REVISION) {
+      throw new ErrorHttp(409, 'PAGO_EN_REVISION', 'Tu pago anterior se está confirmando. Espera un momento o pregúntale al mesero');
+    }
     if (vigente && vigente.estado === 'pendiente' && sigueVigente(vigente.expira_en)
       && vigente.modo === cuerpo.modo && vigente.monto_centavos === monto.montoCentavos) {
       return responder({ ...vigente, referencia: pendiente }, 200);
@@ -213,7 +218,10 @@ async function anotarPagoEnSesion(ctx, idMesa, alias, desde) {
   return true;
 }
 
-const ESTADOS_COBRABLES = ['pendiente', 'reemplazada'];
+// en_revision: Wompi la aprobó pero el registro falló (5xx, sin respuesta o un
+// 4xx). Sigue siendo cobrable para que el reintento de Wompi la registre.
+const EN_REVISION = 'en_revision';
+const ESTADOS_COBRABLES = ['pendiente', 'reemplazada', EN_REVISION];
 const ESTADOS_FALLIDOS = { DECLINED: 'rechazada', ERROR: 'error', VOIDED: 'anulada' };
 
 /**
@@ -242,9 +250,10 @@ const aPesos = (centavos) => centavos / 100;
  * Así el panel y la mesa reciben siempre el mismo payload, venga de donde venga.
  */
 function emitirPagoConfirmado(io, {
-  eventId, idMesa, comensal, montoCentavos, saldoCentavos, referencia,
+  eventId, idMesa, comensal, montoCentavos, saldoCentavos, referencia, aplicado, excedente, soloAdmin = false,
 }) {
-  io.to(SALA_ADMIN).to(salaMesa(idMesa)).emit('payment:confirmed', {
+  const destino = soloAdmin ? io.to(SALA_ADMIN) : io.to(SALA_ADMIN).to(salaMesa(idMesa));
+  destino.emit('payment:confirmed', {
     eventId,
     id_mesa: idMesa,
     comensal: comensal ?? null,
@@ -253,6 +262,32 @@ function emitirPagoConfirmado(io, {
     monto_centavos: montoCentavos,
     saldo_restante_centavos: saldoCentavos,
     referencia_externa: referencia ?? null,
+    // Contrato del excedente: solo si el backend los dio (§8.1).
+    ...(aplicado !== undefined ? {
+      aplicado: aPesos(aplicado), aplicado_centavos: aplicado, excedente: aPesos(excedente), excedente_centavos: excedente,
+    } : {}),
+    emitidoEn: new Date().toISOString(),
+  });
+}
+
+/**
+ * pago:excedente (solo room:admin): un pago en línea aprobado cubrió menos de
+ * lo cobrado; la Caja devuelve la diferencia en efectivo. eventId fijo por
+ * transacción: un reintento de Wompi no crea otra alerta en el panel.
+ */
+function emitirPagoExcedente(io, {
+  tx, intencion, referencia, registro,
+}) {
+  io.to(SALA_ADMIN).emit('pago:excedente', {
+    eventId: `${tx.id}:excedente`,
+    id_mesa: intencion.id_mesa,
+    comensal: intencion.comensal ?? null,
+    monto_centavos: tx.monto_centavos,
+    aplicado_centavos: registro.aplicado,
+    excedente_centavos: registro.excedente,
+    motivo_excedente: registro.motivoExcedente,
+    id_transaccion: registro.idTransaccion,
+    referencia_externa: referencia,
     emitidoEn: new Date().toISOString(),
   });
 }
@@ -280,6 +315,9 @@ async function registrarEnBackend(ctx, { evento, tx, intencion }) {
     monto_centavos: tx.monto_centavos,
     moneda: tx.moneda,
     metodo_pago: 'online',
+    // Para que el backend aplique el pago a la visita de la intención y no a
+    // la del grupo que se sentó después (contrato del excedente, §8.1).
+    intencion_creada_en: typeof intencion.creada_en === 'string' ? intencion.creada_en : null,
   });
   if (r.status >= 500) throw Object.assign(new Error(`el backend respondió ${r.status}`), { codigo: 'BACKEND_ERROR' });
   if (!r.ok) return { rechazado: r.status };
@@ -289,7 +327,40 @@ async function registrarEnBackend(ctx, { evento, tx, intencion }) {
     // saldo. Se reintenta (el backend es idempotente por referencia_externa).
     throw Object.assign(new Error('respuesta del backend sin saldo_restante_centavos'), { codigo: 'BACKEND_ERROR' });
   }
-  return { registrado: true, saldo };
+  return { registrado: true, saldo, ...leerExcedente(r.cuerpo, tx.monto_centavos) };
+}
+
+const MOTIVOS_EXCEDENTE = ['excede_saldo_comensal', 'excede_saldo_mesa', 'sin_cuenta', 'otra_visita'];
+
+/**
+ * Lo aplicado y el excedente de la respuesta del backend (contrato del
+ * excedente). Solo se toman si son coherentes: aplicado + excedente = monto.
+ * Un backend que todavía no los manda (o que manda algo raro) → {}, y el pago
+ * se anuncia como siempre.
+ */
+function leerExcedente(cuerpo, monto) {
+  const c = cuerpo || {};
+  const aplicado = c.aplicado_centavos;
+  const excedente = c.excedente_centavos;
+  if (!Number.isSafeInteger(aplicado) || !Number.isSafeInteger(excedente) || aplicado < 0 || excedente < 0
+    || aplicado + excedente !== monto) return {};
+  return {
+    aplicado,
+    excedente,
+    motivoExcedente: excedente > 0 && MOTIVOS_EXCEDENTE.includes(c.motivo_excedente) ? c.motivo_excedente : null,
+    idTransaccion: Number.isSafeInteger(c.id_transaccion) && c.id_transaccion > 0 ? c.id_transaccion : null,
+  };
+}
+
+/** La intención pasa a en_revision (solo si seguía cobrable). Nunca lanza. */
+async function marcarEnRevision(ctx, referencia) {
+  try {
+    const intencion = await ctx.almacenPagos.obtener(referencia);
+    if (!intencion || !ESTADOS_COBRABLES.includes(intencion.estado)) return;
+    await ctx.almacenPagos.actualizarEstado(referencia, EN_REVISION, TTL_INTENCION_RESUELTA_SEG);
+  } catch (err) {
+    log.error('pagos: no se pudo marcar la intención en revisión', { codigo: err.codigo || err.message });
+  }
 }
 
 /**
@@ -339,6 +410,29 @@ async function alertarPago(ctx, { evento, tx, intencion, motivo }) {
   });
 }
 
+/**
+ * El backend no respondió al registrar un pago ya aprobado: aviso SOLO al panel
+ * (no se guarda como intento fallido: el backend es justo lo que no responde).
+ * Mismo eventId en cada reintento de Wompi. Nunca lanza.
+ */
+function avisarBackendNoDisponible(ctx, { evento, tx, intencion }) {
+  try {
+    ctx.io.to(SALA_ADMIN).emit('pago:alerta', {
+      eventId: `${evento.id_transaccion}:backend_no_disponible`,
+      id_mesa: intencion.id_mesa,
+      comensal: intencion.comensal ?? null,
+      monto_centavos: centavosONull(tx.monto_centavos),
+      monto_esperado_centavos: centavosONull(intencion.monto_centavos),
+      referencia_externa: evento.referencia,
+      id_transaccion_pasarela: evento.id_transaccion,
+      motivo: 'backend_no_disponible',
+      emitidoEn: new Date().toISOString(),
+    });
+  } catch (err) {
+    log.error('pagos: no se pudo avisar al panel', { codigo: err.message });
+  }
+}
+
 /** Al panel no se le muestra un monto que no sea un entero seguro: null. */
 const centavosONull = (v) => (Number.isSafeInteger(v) ? v : null);
 
@@ -346,6 +440,10 @@ const centavosONull = (v) => (Number.isSafeInteger(v) ? v : null);
 async function registrarFallo(ctx, evento) {
   const intencion = await ctx.almacenPagos.obtener(evento.referencia);
   if (!intencion || !ESTADOS_COBRABLES.includes(intencion.estado)) return;
+  // Una en_revision ya tiene un cobro APROBADO esperando registro: el fallo de
+  // otro intento con la misma referencia no la cierra (si no, el reintento de
+  // la aprobada ya no se registraría).
+  if (intencion.estado === EN_REVISION) return;
   await ctx.almacenPagos.actualizarEstado(evento.referencia, ESTADOS_FALLIDOS[evento.estado] || 'fallida', TTL_INTENCION_RESUELTA_SEG);
   // Si era una reemplazada, la marca apunta a la nueva y no se toca.
   await ctx.almacenPagos.liberarPendiente(intencion.id_mesa, intencion.comensal, evento.referencia);
@@ -392,16 +490,31 @@ async function recibirEventoPasarela(req, res, ctx) {
       await alertarPago(ctx, {
         evento, tx, intencion, motivo: problema,
       });
+      // Cobro aprobado (lo confirma la API) que no cuadra con su intención: la
+      // intención no se queda en pendiente, la revisa el personal (§8.1).
+      if (intencion && tx && tx.estado === 'APPROVED' && ['monto_distinto', 'moneda_distinta'].includes(problema)) {
+        await marcarEnRevision(ctx, evento.referencia);
+      }
       // 200: reintentar no lo arreglaría (la pasarela devolvería lo mismo).
       return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
     }
 
-    const registro = await registrarEnBackend(ctx, { evento, tx, intencion });
+    let registro;
+    try {
+      registro = await registrarEnBackend(ctx, { evento, tx, intencion });
+    } catch (err) {
+      // Aprobado por Wompi y sin registrar: en_revision (sigue cobrable para el
+      // reintento) y aviso al panel, sin llamar al backend, que no responde.
+      await marcarEnRevision(ctx, evento.referencia);
+      avisarBackendNoDisponible(ctx, { evento, tx, intencion });
+      throw err;
+    }
     if (registro.rechazado) {
       log.warn('pagos: el backend rechazó el registro', { id_transaccion: tx.id, status: registro.rechazado });
       await alertarPago(ctx, {
         evento, tx, intencion, motivo: `backend_rechazo_${registro.rechazado}`,
       });
+      await marcarEnRevision(ctx, evento.referencia);
       return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
     }
 
@@ -421,6 +534,8 @@ async function recibirEventoPasarela(req, res, ctx) {
 
     // Recién ahora, con el pago guardado en la base, se anuncia. Si el saldo
     // llegó a 0, el backend libera la mesa y avisa por /internal/mesa-liberada.
+    // Un pago de un grupo que ya se fue no se anuncia en la mesa del grupo
+    // nuevo: solo lo ve el panel (y su excedente).
     emitirPagoConfirmado(ctx.io, {
       eventId: tx.id,
       idMesa: intencion.id_mesa,
@@ -428,7 +543,15 @@ async function recibirEventoPasarela(req, res, ctx) {
       montoCentavos: tx.monto_centavos,
       saldoCentavos: registro.saldo,
       referencia: evento.referencia,
+      aplicado: registro.aplicado,
+      excedente: registro.excedente,
+      soloAdmin: registro.motivoExcedente === 'otra_visita',
     });
+    if (registro.excedente > 0) {
+      emitirPagoExcedente(ctx.io, {
+        tx, intencion, referencia: evento.referencia, registro,
+      });
+    }
     // La mesa ve al instante quién ya pagó (la PWA recalcula "igual").
     ctx.presencia.programar(intencion.id_mesa);
     return enviarJson(res, 200, { ok: true, duplicado: false, registrado: true });

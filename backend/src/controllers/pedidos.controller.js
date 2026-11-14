@@ -598,7 +598,11 @@ async function cancelarPedidoComensal(req, res, next) {
       });
     }
     if (r.conflicto) {
-      return res.status(409).json({ error: MENSAJES_CANCELAR_PEDIDO[r.conflicto], motivo: r.conflicto });
+      // T4: pago_en_curso trae su mensaje, y `detalle: 'sin_verificar'` si el
+      // socket-server no pudo contestar.
+      const cuerpo = { error: r.mensaje || MENSAJES_CANCELAR_PEDIDO[r.conflicto], motivo: r.conflicto };
+      if (r.detalle) cuerpo.detalle = r.detalle;
+      return res.status(409).json(cuerpo);
     }
 
     const { pedido, estadoAnterior } = r;
@@ -709,9 +713,13 @@ async function cancelarItem(req, res, next) {
     }
     if (r.conflicto) {
       // T4: el servicio puede traer un mensaje más preciso para el mismo motivo
-      // (pago_registrado porque el dueño de la línea ya pagó).
+      // (pago_registrado porque el dueño de la línea ya pagó), y en
+      // pago_en_curso un `detalle` ('sin_verificar') cuando el socket-server no
+      // pudo contestar. Sin `detalle` si no lo trae.
       const mensajes = delComensal ? MENSAJES_QUITAR_ITEM : MENSAJES_QUITAR_ITEM_PERSONAL;
-      return res.status(409).json({ error: r.mensaje || mensajes[r.conflicto], motivo: r.conflicto });
+      const cuerpo = { error: r.mensaje || mensajes[r.conflicto], motivo: r.conflicto };
+      if (r.detalle) cuerpo.detalle = r.detalle;
+      return res.status(409).json(cuerpo);
     }
 
     const { pedido, linea, pedidoCancelado, estadoAnterior } = r;
