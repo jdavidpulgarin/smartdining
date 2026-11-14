@@ -6,6 +6,8 @@ const { traducirAutorInexistente } = require('./autor-inexistente');
 const { errorConMotivo } = require('../utils/error-con-motivo');
 const { anotarDisponibles } = require('./disponible-sin-stock');
 const socketNotifier = require('./socket.notifier');
+// La zona del restaurante (America/Bogota): una sola constante para todo el backend.
+const { ZONA } = require('./reportes.service');
 
 /**
  * Dominio del CHECK de pedidos.estado. Se usa solo para validar que el body
@@ -54,11 +56,33 @@ const SQL_DETALLES_CON_INGREDIENTES = `
   ORDER BY dp.id_detalle ASC`;
 
 /**
+ * El día AAMMDD de un instante EN BOGOTÁ, sin depender de la zona del servidor.
+ * Se arma con formatToParts (no con el texto formateado, cuyo orden y
+ * separadores dependen del locale). Un solo formateador para todo el proceso.
+ */
+const FORMATO_DIA_BOGOTA = new Intl.DateTimeFormat('en-US', {
+  timeZone: ZONA,
+  year: '2-digit',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function diaEnBogota(fecha) {
+  const partes = Object.fromEntries(
+    FORMATO_DIA_BOGOTA.formatToParts(fecha).map((p) => [p.type, p.value])
+  );
+  return `${partes.year}${partes.month}${partes.day}`;
+}
+
+/**
  * codigo_pedido es VARCHAR(16) UNIQUE en el schema de Jarrison:
  * 'PED-' (4) + AAMMDD (6) + '-' (1) + 5 hex = 16 caracteres exactos.
+ *
+ * AAMMDD es el día de BOGOTÁ. Antes salía de toISOString(), o sea el día UTC:
+ * un pedido de las 7 p. m. en adelante (UTC-5) salía con la fecha de mañana.
  */
 function generarCodigoPedido(fecha = new Date()) {
-  const dia = fecha.toISOString().slice(2, 10).replace(/-/g, '');
+  const dia = diaEnBogota(fecha);
   const aleatorio = crypto.randomBytes(3).toString('hex').toUpperCase().slice(0, 5);
   return `PED-${dia}-${aleatorio}`;
 }
