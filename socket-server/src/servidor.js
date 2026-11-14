@@ -185,6 +185,10 @@ function crearServidor(config, deps = {}) {
     });
     await ctx.suscripciones.limpiarMesa(idMesa);
     await ctx.estadoMesas.limpiarMesa(idMesa);
+    // Pagos en curso del grupo que se va (T4, §6.6): sin esto, el grupo
+    // siguiente heredaba sus intenciones y el backend no podía cancelarle un
+    // plato hasta que vencieran (PAGOS_TTL_MINUTOS).
+    await ctx.almacenPagos.limpiarMesa(idMesa);
     await ctx.carritos.vaciar(idMesa);
     // Solo se echa a los comensales: la pantalla de la mesa sigue conectada
     // para mostrar el QR del siguiente grupo, y el personal sigue vigilando.

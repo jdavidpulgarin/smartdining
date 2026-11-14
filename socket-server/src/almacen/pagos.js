@@ -17,6 +17,10 @@ const { PREFIJO } = require('./redis');
  * con la que el webhook encuentra qué se esperaba cobrar; por eso el monto
  * esperado vive aquí y no en el cliente.
  *
+ * Al liberar la mesa, `limpiarMesa` borra el índice y las marcas de pendiente
+ * que lista (las intenciones eran del grupo que se fue). Los registros
+ * sd:pago:ref:* se quedan: un webhook tardío se tiene que seguir registrando.
+ *
  * Una intención pendiente que ya no sirve (otro modo u otro monto) no se
  * borra: queda `reemplazada` con `reemplazada_por`, porque el comensal pudo
  * haberla pagado en otra pestaña y su webhook todavía tiene que registrarse.
@@ -101,6 +105,12 @@ function crearAlmacenPagosMemoria({ ahora = Date.now } = {}) {
       }
       if (mesa.size === 0) indice.delete(idMesa);
       return salida;
+    },
+    /** La mesa se liberó: borra su índice y las marcas que lista (no los registros sd:pago:ref:*). */
+    async limpiarMesa(idMesa) {
+      const mesa = indice.get(idMesa);
+      if (mesa) for (const comensal of mesa.keys()) datos.delete(llavePendiente(idMesa, comensal));
+      indice.delete(idMesa);
     },
   };
 }
@@ -198,6 +208,15 @@ function crearAlmacenPagosRedis({ cliente }) {
         if (referencia) salida.push({ comensal, referencia });
       }
       return salida;
+    },
+    /**
+     * La mesa se liberó: borra su índice y las marcas que lista, en un solo DEL
+     * y sin SCAN. Los registros sd:pago:ref:* se quedan (webhook tardío).
+     */
+    async limpiarMesa(idMesa) {
+      const k = llaveMesa(idMesa);
+      const comensales = Object.keys(await cliente.hGetAll(k));
+      await cliente.del([k, ...comensales.map((c) => llavePendiente(idMesa, c))]);
     },
   };
 }

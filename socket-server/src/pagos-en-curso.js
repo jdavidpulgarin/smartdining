@@ -9,7 +9,10 @@ const { normalizarAlias } = require('./alias');
  * pago vigente que la cubra. Solo lectura.
  *
  * Vigente = la marca sd:pago:pendiente:{mesa}:{comensal} existe, su intención
- * está en estado 'pendiente' y su expira_en todavía no pasó.
+ * está en estado 'pendiente', su expira_en todavía no pasó y se creó DESPUÉS
+ * de la última liberación de la mesa. Liberar borra las marcas
+ * (almacenPagos.limpiarMesa); mirar `creada_en` cubre además una intención que
+ * se escribió mientras se liberaba la mesa.
  *
  * - Con `comensal`: enCurso si ESE comensal (por la clave del alias, la misma
  *   regla que alias.js y claveAlias) tiene una vigente, o si CUALQUIERA de la
@@ -58,11 +61,14 @@ const claveDe = (comensal) => {
 /** Intenciones vigentes de la mesa, ya en la forma de la respuesta. */
 async function vigentesDeLaMesa(ctx, mesa, ahora = Date.now()) {
   const marcas = await ctx.almacenPagos.listarPendientesMesa(mesa);
+  const liberadaEn = await ctx.qr.ultimaLiberacion(mesa);
   const pagos = [];
   for (const { referencia } of marcas) {
     const intencion = await ctx.almacenPagos.obtener(referencia);
     if (!intencion || intencion.estado !== 'pendiente' || intencion.id_mesa !== mesa) continue;
     if (!(Date.parse(intencion.expira_en) > ahora)) continue;
+    // Del grupo anterior: se creó antes de liberar la mesa.
+    if (liberadaEn !== null && !(Date.parse(intencion.creada_en) > liberadaEn)) continue;
     pagos.push({
       comensal: intencion.comensal,
       modo: intencion.modo,

@@ -210,3 +210,88 @@ for (const [nombre, crear] of Object.entries(ALMACENES)) {
     assert.strictEqual((await json(s, '?mesa=5&comensal=Caro')).enCurso, false, 'el total de Beto ya no cuenta');
   });
 }
+
+// Liberar la mesa termina la sesión: las intenciones del grupo que se fue no
+// deben bloquear al siguiente (revisión de #260).
+const liberarMesa = (s, idMesa) => fetch(`${s.url}/internal/mesa-liberada`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'x-internal-key': CLAVE_INTERNA },
+  body: JSON.stringify({ id_mesa: idMesa }),
+});
+
+for (const [nombre, crear] of Object.entries(ALMACENES)) {
+  test(`[${nombre}] liberar la mesa borra sus pagos en curso; el registro sd:pago:ref queda para el webhook`, async (t) => {
+    const { falso, deps } = crear();
+    const s = await levantar({}, deps);
+    t.after(() => s.cerrar());
+    const refAna = await intencion(s, { mesa: 5, comensal: 'Ana', modo: 'propio' });
+    await intencion(s, { mesa: 5, comensal: 'Luis', modo: 'total' });
+    await intencion(s, { mesa: 6, comensal: 'Caro', modo: 'propio' });
+    assert.strictEqual((await json(s, '?mesa=5')).enCurso, true);
+
+    assert.strictEqual((await liberarMesa(s, 5)).status, 200);
+
+    assert.deepStrictEqual(await json(s, '?mesa=5'), { mesa: 5, enCurso: false, pagos: [] });
+    assert.strictEqual((await json(s, '?mesa=5&comensal=Ana')).enCurso, false, 'una Ana del grupo siguiente no hereda nada');
+    assert.strictEqual((await json(s, '?mesa=6')).enCurso, true, 'otra mesa no se toca');
+    assert.strictEqual(await s.almacenPagos.obtenerPendiente(5, 'Ana'), null);
+    assert.strictEqual(await s.almacenPagos.obtenerPendiente(5, 'Luis'), null);
+    assert.ok(await s.almacenPagos.obtener(refAna), 'el registro sigue: un webhook tardío lo encuentra');
+    if (falso) {
+      const llaves = falso.llaves();
+      assert.ok(!llaves.includes('sd:pago:mesa:5'));
+      assert.ok(!llaves.some((k) => k.startsWith('sd:pago:pendiente:5:')));
+      assert.ok(llaves.includes('sd:pago:mesa:6'));
+      assert.ok(llaves.includes(`sd:pago:ref:${refAna}`));
+    }
+  });
+
+  test(`[${nombre}] una intención creada antes de la liberación no cuenta aunque su marca siga (carrera)`, async (t) => {
+    const { deps } = crear();
+    const s = await levantar({}, deps);
+    t.after(() => s.cerrar());
+    assert.strictEqual((await liberarMesa(s, 5)).status, 200);
+    // Escrita como si la petición hubiera pasado la validación antes de liberar
+    // y guardado la marca después de limpiarMesa.
+    contador += 1;
+    const referencia = `SD-5-${Date.now()}-carrera${contador}`;
+    await s.almacenPagos.guardarIntencion(referencia, {
+      id_mesa: 5, comensal: 'Ana', modo: 'total', monto_centavos: 100000, estado: 'pendiente',
+      creada_en: new Date(Date.now() - 60 * 1000).toISOString(),
+      expira_en: new Date(Date.now() + 25 * MIN).toISOString(),
+    }, 26 * 3600);
+    await s.almacenPagos.reservarPendiente(5, 'Ana', referencia, 1800);
+    assert.strictEqual((await json(s, '?mesa=5')).enCurso, false);
+    // Una del grupo nuevo, sí.
+    await new Promise((r) => setTimeout(r, 5));
+    await intencion(s, { mesa: 5, comensal: 'Beto', modo: 'propio' });
+    assert.deepStrictEqual((await json(s, '?mesa=5')).pagos.map((p) => p.comensal), ['Beto']);
+  });
+}
+
+const REDIS_URL = process.env.REDIS_URL;
+test('Redis real: liberar la mesa borra sd:pago:mesa y sus marcas, deja sd:pago:ref', { skip: !REDIS_URL && 'sin REDIS_URL' }, async (t) => {
+  const redis = crearConexionRedis({ url: REDIS_URL, log: silencioso });
+  await redis.conectar();
+  const s = await levantar({}, { redis });
+  const mesa = 800000 + Math.floor(Math.random() * 90000);
+  const otra = mesa + 1;
+  t.after(async () => {
+    await s.almacenPagos.limpiarMesa(otra);
+    await s.estadoMesas.limpiarMesa(mesa);
+    await s.cerrar();
+  });
+  const ref = await intencion(s, { mesa, comensal: 'Ana', modo: 'propio' });
+  await intencion(s, { mesa, comensal: 'Luis', modo: 'total' });
+  await intencion(s, { mesa: otra, comensal: 'Caro', modo: 'propio' });
+  assert.strictEqual((await json(s, `?mesa=${mesa}`)).enCurso, true);
+  assert.strictEqual((await liberarMesa(s, mesa)).status, 200);
+  assert.deepStrictEqual(await json(s, `?mesa=${mesa}`), { mesa, enCurso: false, pagos: [] });
+  const c = s.redis.cliente;
+  assert.strictEqual(await c.exists(`sd:pago:mesa:${mesa}`), 0);
+  assert.strictEqual(await c.exists(`sd:pago:pendiente:${mesa}:Ana`), 0);
+  assert.strictEqual(await c.exists(`sd:pago:pendiente:${mesa}:Luis`), 0);
+  assert.strictEqual(await c.exists(`sd:pago:ref:${ref}`), 1);
+  assert.strictEqual((await json(s, `?mesa=${otra}`)).enCurso, true);
+  await c.del(`sd:pago:ref:${ref}`);
+});
