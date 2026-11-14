@@ -1,5 +1,6 @@
 const { exito, fallo, manejar } = require('./ack');
 const { log } = require('./log');
+const { claveAlias } = require('./alias');
 const { ROL_COMENSAL } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
 const {
@@ -20,6 +21,15 @@ const PREFIJO_SALA_MESA = 'room:mesa-';
 const RETRASO_PRESENCIA_INICIAL_MS = 500;
 // mesa:presencia:solicitar: como mucho una por socket cada 2 s.
 const LIMITE_SOLICITUD_PRESENCIA_MS = 2000;
+// Periodo de gracia de un comensal que se cae (PRESENCIA_GRACIA_MS, ver
+// config.js): un celular que pasa a segundo plano pierde el socket a los ~45 s
+// y vuelve al desbloquearse. Durante la gracia sigue sentado para todos.
+const PRESENCIA_GRACIA_POR_DEFECTO_MS = 60 * 1000;
+// Solo un corte de red da gracia. Salir a propósito ('client namespace
+// disconnect'), que lo eche el servidor al liberar la mesa ('server namespace
+// disconnect') o el cierre del servidor ('server shutting down') avisan al
+// instante, como siempre.
+const MOTIVOS_CON_GRACIA = new Set(['transport close', 'transport error', 'ping timeout']);
 
 /**
  * Presencia de comensales por mesa, calculada de los sockets que de verdad
@@ -30,18 +40,30 @@ const LIMITE_SOLICITUD_PRESENCIA_MS = 2000;
  * - total: personas en la mesa = alias distintos + sockets de comensal sin
  *   alias (dos pestañas de "Ana" cuentan como una persona).
  * - pagaron: alias que ya pagaron algo en esta sesión de mesa (estén o no
- *   sentados), ordenados. Con esto la PWA calcula "igual" como el servidor.
+ *   sentados), ordenados. Con esto la PWA sabe quién ya pagó.
  * - sin_celular: alias que agregó el personal (POST /internal/mesa-comensal),
  *   ordenados; también entran en comensales y en total.
  *
  * `programar(idMesa)` emite `mesa:presencia` a room:admin y a la sala de esa
  * mesa al instante si no hubo aviso reciente; si lo hubo, deja uno pendiente
  * para el final de la ventana, así el último estado siempre llega.
+ *
+ * Gracia (EVENTS.md §5.2): cuando el socket de un comensal se cae por la red,
+ * su alias sigue contando `graciaMs` (en comensales, en total, en la guarda de
+ * rotación del QR). Si el mismo comensal (misma mesa y alias)
+ * vuelve antes, no se avisa nada; si no, al vencer sale como siempre. Liberar
+ * la mesa cancela todas sus gracias. `programarGracia`/`cancelarGracia` son el
+ * reloj, inyectable en las pruebas.
  */
 function crearPresencia({
   io, estadoMesas, ventanaMs = VENTANA_PRESENCIA_MS, retrasoInicialMs = RETRASO_PRESENCIA_INICIAL_MS,
+  graciaMs = PRESENCIA_GRACIA_POR_DEFECTO_MS,
+  programarGracia = (fn, ms) => setTimeout(fn, ms),
+  cancelarGracia = (h) => clearTimeout(h),
+  mesaLiberada = () => false,
 }) {
   const ventanas = new Map(); // idMesa -> { pendiente: boolean, temporizador }
+  const gracias = new Map(); // idMesa -> Map(alias -> temporizador)
 
   async function calcular(idMesa) {
     const sockets = await io.in(salaMesa(idMesa)).fetchSockets();
@@ -52,8 +74,10 @@ function crearPresencia({
       if (s.data.alias) alias.add(s.data.alias);
       else anonimos += 1;
     }
+    // Quien está en su periodo de gracia sigue sentado.
+    for (const a of (gracias.get(idMesa) || new Map()).keys()) alias.add(a);
     // Los sin celular (§6.4) cuentan como personas sentadas: van en
-    // comensales y en total, así «igual» y la rotación del QR los ven sin
+    // comensales y en total, así el panel y la rotación del QR los ven sin
     // lógica aparte.
     const sinCelular = Object.values(await estadoMesas.sinCelular(idMesa)).sort((a, b) => a.localeCompare(b));
     for (const a of sinCelular) alias.add(a);
@@ -65,7 +89,7 @@ function crearPresencia({
   }
 
   // A la mesa también: sus comensales necesitan quién está y quién pagó para
-  // mostrar cuánto es "igual". Solo llevan datos de esa misma mesa.
+  // mostrar quién falta por pagar. Solo llevan datos de esa misma mesa.
   async function emitir(idMesa) {
     const presencia = await calcular(idMesa);
     io.to(SALA_ADMIN).to(salaMesa(idMesa)).emit('mesa:presencia', presencia);
@@ -92,6 +116,69 @@ function crearPresencia({
     emitir(idMesa).catch((err) => log.error('presencia: no se pudo emitir', { id_mesa: idMesa, error: err }));
   }
 
+  function quitarGracia(idMesa, alias) {
+    const porAlias = gracias.get(idMesa);
+    if (!porAlias || !porAlias.has(alias)) return false;
+    cancelarGracia(porAlias.get(alias));
+    porAlias.delete(alias);
+    if (porAlias.size === 0) gracias.delete(idMesa);
+    return true;
+  }
+
+  function iniciarGracia(idMesa, alias) {
+    quitarGracia(idMesa, alias);
+    let porAlias = gracias.get(idMesa);
+    if (!porAlias) { porAlias = new Map(); gracias.set(idMesa, porAlias); }
+    const h = programarGracia(() => {
+      const actual = gracias.get(idMesa);
+      if (!actual || actual.get(alias) !== h) return; // ya volvió o se liberó la mesa
+      actual.delete(alias);
+      if (actual.size === 0) gracias.delete(idMesa);
+      programar(idMesa); // ahora sí: salió de la mesa
+    }, graciaMs);
+    // No mantiene vivo el proceso (cierre ordenado).
+    if (h && h.unref) h.unref();
+    porAlias.set(alias, h);
+  }
+
+  /**
+   * Se cayó el socket de un comensal de `idMesa` (ya fuera de la sala).
+   * - Salida a propósito, expulsión o gracia desactivada: aviso al instante.
+   * - Si otra pestaña del mismo alias sigue en la sala, nada cambia y no se
+   *   avisa. Si no, empieza su gracia (tampoco se avisa: sigue contando).
+   */
+  async function salirComensal(idMesa, alias, motivo) {
+    if (!alias || graciaMs <= 0 || !MOTIVOS_CON_GRACIA.has(motivo) || mesaLiberada(idMesa)) {
+      programar(idMesa);
+      return;
+    }
+    const sockets = await io.in(salaMesa(idMesa)).fetchSockets();
+    if (sockets.some((s) => s.data.alias === alias && s.data.identidad?.rol === ROL_COMENSAL)) return;
+    // La mesa pudo liberarse mientras se consultaba: no se ensucia la sesión siguiente.
+    if (mesaLiberada(idMesa)) {
+      programar(idMesa);
+      return;
+    }
+    iniciarGracia(idMesa, alias);
+  }
+
+  /**
+   * El comensal hizo join:table. true si volvía dentro de su gracia: para los
+   * demás nunca se fue y no hay que avisar.
+   */
+  const volverComensal = (idMesa, alias) => quitarGracia(idMesa, alias);
+
+  /** La mesa se liberó: sus gracias no pasan a la sesión siguiente. */
+  function cancelarGracias(idMesa) {
+    const porAlias = gracias.get(idMesa);
+    if (!porAlias) return;
+    for (const h of porAlias.values()) cancelarGracia(h);
+    gracias.delete(idMesa);
+  }
+
+  /** Alias en gracia en esa mesa (para pruebas y diagnóstico). */
+  const enGracia = (idMesa) => [...(gracias.get(idMesa) || new Map()).keys()].sort((a, b) => a.localeCompare(b));
+
   /**
    * Presencia de cada mesa con algo, ordenada por id_mesa.
    *
@@ -105,6 +192,8 @@ function crearPresencia({
    */
   async function listarConEstado() {
     const candidatas = new Set(await estadoMesas.mesasConEstado());
+    // Una mesa cuyo único comensal está en gracia ya no tiene sala.
+    for (const idMesa of gracias.keys()) candidatas.add(idMesa);
     for (const sala of io.of('/').adapter.rooms.keys()) {
       const m = /^room:mesa-(\d+)$/.exec(sala);
       if (m) candidatas.add(Number(m[1]));
@@ -143,6 +232,7 @@ function crearPresencia({
 
   return {
     calcular, programar, listarConEstado, enviarInicial, programarInicial,
+    salirComensal, volverComensal, cancelarGracias, enGracia,
   };
 }
 // Una mesa puede llamar al mesero una vez por minuto: suficiente para pedir
@@ -155,7 +245,7 @@ const TTL_SIN_CELULAR_MS = 24 * 60 * 60 * 1000;
 function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
   const llamadas = new Map(); // idMesa -> ms en que vence el bloqueo
   const cuentas = new Set(); // mesas que pidieron la cuenta
-  const pagos = new Map(); // idMesa -> Set de alias que ya pagaron
+  const pagos = new Map(); // idMesa -> Map(clave del alias -> alias) de quienes ya pagaron
   const sinCelular = new Map(); // idMesa -> { ms en que vence, Map(clave -> alias) }
   // Como sd:mesas:con-estado en Redis: idMesa -> ms en que vence (24 h desde la
   // última vez que se anotó un pago o un sin celular).
@@ -200,19 +290,23 @@ function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
       if (e.alias.size === 0) sinCelular.delete(idMesa);
       return true;
     },
+    // Por la clave del alias (como sin_celular): «Ana» y «ana» son una persona
+    // en pagaron; se muestra el primer alias con el que se anotó.
     marcarPago(idMesa, alias) {
-      if (!pagos.has(idMesa)) pagos.set(idMesa, new Set());
-      pagos.get(idMesa).add(alias);
+      if (!pagos.has(idMesa)) pagos.set(idMesa, new Map());
+      const p = pagos.get(idMesa);
+      const clave = claveAlias(alias) ?? alias;
+      if (!p.has(clave)) p.set(clave, alias);
       anotarEnIndice(idMesa);
     },
     /** Deshace un marcarPago que llegó tarde a una mesa ya liberada (ver anotarPagoEnSesion en pagos.js). */
     desmarcarPago(idMesa, alias) {
       const p = pagos.get(idMesa);
-      if (p) p.delete(alias);
+      if (p) p.delete(claveAlias(alias) ?? alias);
       if (p && p.size === 0) pagos.delete(idMesa);
       if (!pagos.has(idMesa) && !listaSinCelular(idMesa)) conEstado.delete(idMesa);
     },
-    pagaron(idMesa) { return [...(pagos.get(idMesa) || [])].sort((a, b) => a.localeCompare(b)); },
+    pagaron(idMesa) { return [...(pagos.get(idMesa) || new Map()).values()].sort((a, b) => a.localeCompare(b)); },
     reservarLlamada(idMesa, segundos) {
       if ((llamadas.get(idMesa) || 0) > ahora()) return false;
       llamadas.set(idMesa, ahora() + segundos * 1000);
@@ -249,8 +343,11 @@ function registrarSala(socket, ctx) {
       .filter((r) => r.startsWith(PREFIJO_SALA_MESA))
       .map((r) => Number(r.slice(PREFIJO_SALA_MESA.length)));
   });
-  socket.on('disconnect', () => {
-    for (const idMesa of mesasAlSalir) ctx.presencia.programar(idMesa);
+  socket.on('disconnect', (motivo) => {
+    for (const idMesa of mesasAlSalir) {
+      ctx.presencia.salirComensal(idMesa, socket.data.alias, motivo)
+        .catch((err) => log.error('presencia: no se pudo procesar la salida', { id_mesa: idMesa, error: err }));
+    }
   });
 
   /**
@@ -453,5 +550,5 @@ const rutasSala = {
 
 module.exports = {
   rutasSala, MAX_NOMBRE_INSUMO, MAX_UNIDAD_INSUMO,
-  registrarSala, crearEstadoMesasMemoria, crearPresencia, VENTANA_PRESENCIA_MS, RETRASO_PRESENCIA_INICIAL_MS, LIMITE_SOLICITUD_PRESENCIA_MS, validarComensalEnSala, LIMITE_LLAMADA_SEG, MAX_MOTIVO,
+  registrarSala, crearEstadoMesasMemoria, crearPresencia, VENTANA_PRESENCIA_MS, PRESENCIA_GRACIA_POR_DEFECTO_MS, MOTIVOS_CON_GRACIA, RETRASO_PRESENCIA_INICIAL_MS, LIMITE_SOLICITUD_PRESENCIA_MS, validarComensalEnSala, LIMITE_LLAMADA_SEG, MAX_MOTIVO,
 };

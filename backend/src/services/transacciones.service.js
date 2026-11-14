@@ -4,6 +4,10 @@ const mesasService = require('./mesas.service');
 // sola constante para que el corte de caja y los reportes digan el mismo "hoy".
 const { ZONA } = require('./reportes.service');
 const { traducirAutorInexistente } = require('./autor-inexistente');
+// La clave con que la cuenta agrupa a un comensal (T4): la misma normalización
+// del alias que usa cancelarItem para saber si el dueño de una línea ya pagó.
+const { claveDeCuenta } = require('./pedidos.service');
+const { CLAVE_RESERVADA } = require('./alias-comensal');
 
 // Tabla transacciones (docs/modelo-er.md): id_transaccion, id_pedido,
 // metodo_pago, monto, estado_transaccion, referencia_externa, creado_en.
@@ -242,6 +246,60 @@ async function saldoDeLaMesaEnCentavos(ejecutor, idMesa) {
 }
 
 /**
+ * Consumo y pagos de cada comensal en la VISITA actual, en centavos, tal como
+ * los guarda la base (el texto del alias, sin normalizar: eso va en JS).
+ *
+ * Los mismos pedidos que la cuenta (obtener_cuenta_mesa y SQL_PEDIDOS_CON_SALDO:
+ * de la mesa, no cancelados, desde sesion_iniciada_en) y los mismos pagos (los
+ * 'completada' de esos pedidos), pero SIN las líneas canceladas: hasta que
+ * entre el script 41 (#235), obtener_cuenta_mesa todavía las suma, y con ellas
+ * a Ana le seguiría "debiendo" el plato que el mesero le canceló.
+ */
+const SQL_CUENTA_POR_COMENSAL = `
+  WITH visita AS (
+    SELECT p.id_pedido
+      FROM pedidos p
+      JOIN mesas m ON m.id_mesa = p.id_mesa
+     WHERE p.id_mesa = $1::int
+       AND p.estado <> 'cancelado'
+       AND (m.sesion_iniciada_en IS NULL OR p.creado_en >= m.sesion_iniciada_en)
+  )
+  SELECT 'consumo'::text AS tipo, dp.comensal, ROUND(SUM(dp.subtotal) * 100)::bigint AS centavos
+    FROM detalles_pedido dp
+    JOIN visita v ON v.id_pedido = dp.id_pedido
+   WHERE dp.estado_item <> 'cancelado'
+   GROUP BY dp.comensal
+  UNION ALL
+  SELECT 'pagado'::text, t.comensal, ROUND(SUM(t.monto) * 100)::bigint
+    FROM transacciones t
+    JOIN visita v ON v.id_pedido = t.id_pedido
+   WHERE t.estado_transaccion = 'completada'
+   GROUP BY t.comensal`;
+
+/**
+ * Saldo PROPIO de un comensal en la visita, en centavos: sus líneas vivas menos
+ * sus pagos completados, nunca negativo. El alias se compara por la clave de
+ * la cuenta (claveDeCuenta, T4): «Ana», « ana » y «Aná» son la misma persona.
+ */
+async function saldoPropioEnCentavos(ejecutor, idMesa, comensal) {
+  const clave = claveDeCuenta(comensal);
+  const { rows } = await ejecutor.query(SQL_CUENTA_POR_COMENSAL, [idMesa]);
+  let consumo = 0;
+  let pagado = 0;
+  for (const f of rows) {
+    if (claveDeCuenta(f.comensal) !== clave) continue;
+    if (f.tipo === 'consumo') consumo += Number(f.centavos);
+    else pagado += Number(f.centavos);
+  }
+  return Math.max(0, consumo - pagado);
+}
+
+/** ¿Es un cobro A NOMBRE de un comensal? Sin alias o «General» es de la mesa. */
+function esCobroDeComensal(comensal) {
+  return typeof comensal === 'string' && comensal.trim() !== '' && claveDeCuenta(comensal) !== CLAVE_RESERVADA;
+}
+
+/**
  * Referencia de cada fila del reparto.
  *
  * `transacciones.referencia_externa` tiene un índice único
@@ -379,6 +437,9 @@ async function repartirPagoDeMesa(client, {
   // null). El MISMO en todas las filas del cobro. Un reintento con la misma
   // referencia sale antes (duplicado) y no lo toca: se queda el del primero.
   voucher = null,
+  // Solo la CAJA lo enciende (cobrarMesaEnCaja): un cobro a nombre de un
+  // comensal no puede superar su saldo propio. Ver el paso de abajo.
+  limitarAlSaldoDelComensal = false,
 }) {
   // La fila de la mesa se bloquea de entrada: dos webhooks de Wompi para la
   // misma mesa (o un webhook y un cobro en caja) se serializan, así no se
@@ -425,10 +486,52 @@ async function repartirPagoDeMesa(client, {
 
   if (pedidos.length === 0) return { sinCuenta: true };
 
+  // «Pagar lo mío» en la caja: el monto no supera el saldo PROPIO de ese
+  // comensal (sus líneas vivas menos sus pagos). Sin esto, si el mesero le
+  // cancelaba el plato a Ana y después la caja le cobraba "lo suyo", solo se
+  // miraba el saldo de la MESA y la plata de Ana cubría lo de los demás. Con
+  // saldo propio 0, cualquier monto lo supera. Va con la mesa y los pedidos ya
+  // bloqueados (el mismo orden que cancelarItem del personal: mesa primero),
+  // así que una cancelación y este cobro se ponen en fila y el segundo decide
+  // con lo que el primero confirmó. Un cobro sin comensal o a «General» sigue
+  // como siempre (solo el saldo de la mesa).
+  if (limitarAlSaldoDelComensal && esCobroDeComensal(comensal)) {
+    const saldoPropio = await saldoPropioEnCentavos(client, id_mesa, comensal);
+    if (monto_centavos > saldoPropio) return { excedeComensal: true, saldo_centavos: saldoPropio };
+  }
+
   const saldoMesa = pedidos.reduce((s, p) => s + p.saldo_centavos, 0);
   if (monto_centavos > saldoMesa) return { excede: true, saldo_centavos: saldoMesa };
 
-  // Reparto: cada pedido recibe hasta su saldo, empezando por el más viejo.
+  const { pagados, transacciones } = await aplicarEnPedidos(client, pedidos, monto_centavos, {
+    referencia_externa, comensal, metodo_pago, voucher, id_usuario, observacion,
+  });
+
+  // Si esta pasada cerró el último pedido abierto, la mesa se libera en la
+  // misma transacción (igual que al cobrar en caja).
+  let mesa_liberada = false;
+  if (pagados.length > 0) {
+    mesa_liberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, id_mesa);
+  }
+
+  const saldo_restante_centavos = await saldoDeLaMesaEnCentavos(client, id_mesa);
+
+  return { duplicado: false, saldo_restante_centavos, mesa_liberada, pagados, transacciones };
+}
+
+/**
+ * El REPARTO de un monto entre los pedidos de la mesa (ya bloqueados y con su
+ * saldo en centavos, del más viejo al más nuevo): cada pedido recibe hasta su
+ * saldo. Una fila de `transacciones` por pedido tocado, con la referencia del
+ * pago ('ref', 'ref#2'…), y el paso a 'pagado' del que queda en cero y ya está
+ * entregado. Lo comparten el cobro de mesa en caja y el pago en línea.
+ *
+ * `monto_centavos` nunca supera la suma de los saldos: lo garantiza quien llama
+ * (y, por encima, tr_validar_transaccion_financiera).
+ */
+async function aplicarEnPedidos(client, pedidos, monto_centavos, {
+  referencia_externa, comensal, metodo_pago, voucher = null, id_usuario, observacion,
+}) {
   let restante = monto_centavos;
   const pagados = [];
   const transacciones = [];
@@ -482,16 +585,7 @@ async function repartirPagoDeMesa(client, {
     }
   }
 
-  // Si esta pasada cerró el último pedido abierto, la mesa se libera en la
-  // misma transacción (igual que al cobrar en caja).
-  let mesa_liberada = false;
-  if (pagados.length > 0) {
-    mesa_liberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, id_mesa);
-  }
-
-  const saldo_restante_centavos = await saldoDeLaMesaEnCentavos(client, id_mesa);
-
-  return { duplicado: false, saldo_restante_centavos, mesa_liberada, pagados, transacciones };
+  return { pagados, transacciones };
 }
 
 /**
@@ -532,45 +626,211 @@ async function cobrarMesa(pago) {
   }
 }
 
+/* -------------------------------------------------------------------------- *
+ * Pago en línea con EXCEDENTE (T4, socket-server/EVENTS.md §8.4 y §8.7)
+ * -------------------------------------------------------------------------- */
+
+/** Por qué sobró un pago en línea (CHECK de excedentes_pago_en_linea, script 44). */
+const MOTIVOS_EXCEDENTE = Object.freeze({
+  comensal: 'excede_saldo_comensal',
+  mesa: 'excede_saldo_mesa',
+  sinCuenta: 'sin_cuenta',
+  otraVisita: 'otra_visita',
+});
+
+/** El modo de la intención en el que el tope es el saldo PROPIO del comensal. */
+const MODO_PROPIO = 'propio';
+
 /**
- * Registra un pago de la pasarela (lo llama el socket-server, EVENTS.md §8.4).
+ * Lo que ya quedó registrado de un pago en línea, por su referencia: cuánto se
+ * aplicó (sus filas de transacciones: 'ref', 'ref#2'…), su primera transacción
+ * y su excedente (si hubo). null si esa referencia no se registró nunca.
  *
- * Es el núcleo compartido (`repartirPagoDeMesa`) sin autor en el historial y
- * con la observación 'Pago en linea'. Devuelve EXACTAMENTE las mismas claves
- * que antes de extraer el núcleo: la lista de transacciones que también arma el
- * núcleo no sale por aquí.
- *
- * @returns { noExiste: true }
- *        | { duplicado: true, saldo_restante_centavos }
- *        | { sinCuenta: true } | { excede: true, saldo_centavos }
- *        | { duplicado: false, saldo_restante_centavos, mesa_liberada, pagados }
+ * Es lo que hace idempotente el registro: un reintento del webhook responde
+ * EXACTAMENTE lo mismo, también cuando todo fue excedente (no hay ninguna fila
+ * en transacciones, solo en excedentes_pago_en_linea).
  */
-async function registrarPagoInterno({
+async function pagoEnLineaRegistrado(ejecutor, referencia) {
+  const { rows } = await ejecutor.query(
+    `SELECT
+       (SELECT COALESCE(SUM(ROUND(t.monto * 100)), 0)::bigint
+          FROM transacciones t
+         WHERE t.referencia_externa = $1::text
+            OR (left(t.referencia_externa, char_length($1::text) + 1) = $1::text || '#'
+                AND substr(t.referencia_externa, char_length($1::text) + 2) ~ '^[1-9][0-9]*$')) AS aplicado,
+       (SELECT t.id_transaccion FROM transacciones t WHERE t.referencia_externa = $1::text) AS id_primera,
+       e.excedente_centavos, e.motivo, e.id_transaccion AS id_del_excedente
+     FROM (SELECT 1) AS x
+     LEFT JOIN excedentes_pago_en_linea e ON e.referencia_externa = $1::text`,
+    [referencia]
+  );
+  const f = rows[0];
+  // La consulta siempre devuelve una fila (FROM (SELECT 1)); sin ella, nada registrado.
+  if (!f) return null;
+  const aplicado = Number(f.aplicado);
+  const tieneExcedente = f.excedente_centavos !== null && f.excedente_centavos !== undefined;
+  if (aplicado === 0 && f.id_primera === null && !tieneExcedente) return null;
+  return {
+    aplicado_centavos: aplicado,
+    excedente_centavos: tieneExcedente ? Number(f.excedente_centavos) : 0,
+    motivo_excedente: tieneExcedente ? f.motivo : null,
+    id_transaccion: f.id_primera ?? f.id_del_excedente ?? null,
+  };
+}
+
+/**
+ * NÚCLEO del pago en línea de una mesa (el webhook de Wompi, vía socket-server).
+ * Recibe el `client` dentro de una transacción. Un pago aprobado NUNCA se
+ * rechaza (§8.7, regla a): se aplica lo que se debía y lo que sobra va a
+ * excedentes_pago_en_linea, en esta MISMA transacción.
+ *
+ * Orden de bloqueos, el de todos los cobros: la mesa y después sus pedidos.
+ *
+ *   1. La mesa (404 si no existe). En la misma sentencia, si la intención es de
+ *      OTRA visita: la sesión vigente empezó DESPUÉS de crearse la intención
+ *      (`intencion_creada_en < sesion_iniciada_en`). Sin intencion_creada_en
+ *      (un socket-server anterior) o sin sesión abierta, no se decide por aquí.
+ *   2. Idempotencia por referencia (transacciones y excedentes): un reintento
+ *      devuelve el mismo resultado.
+ *   3. Los pedidos de la mesa (FOR UPDATE, por id) y su saldo, de la visita.
+ *   4. El tope:
+ *        - otra visita            -> 0 (todo es excedente, `otra_visita`);
+ *        - la mesa sin saldo      -> 0 (`sin_cuenta`);
+ *        - modo 'propio' con alias -> el saldo PROPIO de ese comensal (alias
+ *          normalizado, como en T4), nunca más que el de la mesa
+ *          (`excede_saldo_comensal`);
+ *        - 'total', 'igual' u otro -> el saldo de la mesa (`excede_saldo_mesa`).
+ *   5. Se aplica min(monto, tope) entre los pedidos (aplicarEnPedidos) y el
+ *      resto, si lo hay, se guarda como excedente con la primera transacción.
+ *   6. La mesa se libera si este pago cerró el último pedido (como siempre).
+ *
+ * Los triggers siguen siendo la autoridad: cada fila aplica como mucho el saldo
+ * de su pedido, y tr_validar_transaccion_financiera lo vuelve a comprobar.
+ */
+async function registrarPagoEnLinea(client, {
   referencia_externa,
+  id_transaccion_pasarela = null,
   id_mesa,
   comensal = null,
+  modo = null,
   monto_centavos,
   metodo_pago = 'online',
+  intencion_creada_en = null,
 }) {
-  const r = await cobrarMesa({
-    referencia_externa,
-    id_mesa,
-    comensal,
-    monto_centavos,
-    metodo_pago,
-    id_usuario: null,
-    observacion: OBSERVACION_PAGO_EN_LINEA,
-  });
-  // El pago en línea NO cambia de contrato: una referencia ya registrada es
-  // duplicado sea de la mesa que sea (`otraMesa` es solo para la caja y no
-  // sale por aquí).
-  if (r.duplicado === true) {
-    const { otraMesa, ...igualQueAntes } = r;
-    return igualQueAntes;
+  const mesa = await client.query(
+    `SELECT id_mesa,
+            ($2::timestamptz IS NOT NULL AND sesion_iniciada_en IS NOT NULL
+             AND $2::timestamptz < sesion_iniciada_en) AS otra_visita
+       FROM mesas WHERE id_mesa = $1::int FOR UPDATE`,
+    [id_mesa, intencion_creada_en]
+  );
+  if (mesa.rows.length === 0) return { noExiste: true };
+
+  const previo = await pagoEnLineaRegistrado(client, referencia_externa);
+  if (previo) {
+    return { duplicado: true, saldo_restante_centavos: await saldoDeLaMesaEnCentavos(client, id_mesa), ...previo };
   }
-  if (r.duplicado !== false) return r;
-  const { transacciones, ...igualQueAntes } = r;
-  return igualQueAntes;
+
+  await client.query(
+    `SELECT id_pedido FROM pedidos
+      WHERE id_mesa = $1 AND estado <> 'cancelado'
+      ORDER BY id_pedido ASC
+      FOR UPDATE`,
+    [id_mesa]
+  );
+
+  let pedidos = [];
+  let tope = 0;
+  let motivo;
+  if (mesa.rows[0].otra_visita) {
+    motivo = MOTIVOS_EXCEDENTE.otraVisita;
+  } else {
+    pedidos = (await client.query(SQL_PEDIDOS_CON_SALDO, [id_mesa])).rows
+      .map((p) => ({ ...p, saldo_centavos: Number(p.saldo_centavos) }))
+      .filter((p) => p.saldo_centavos > 0);
+    const saldoMesa = pedidos.reduce((s, p) => s + p.saldo_centavos, 0);
+    if (saldoMesa === 0) {
+      motivo = MOTIVOS_EXCEDENTE.sinCuenta;
+    } else if (modo === MODO_PROPIO && esCobroDeComensal(comensal)) {
+      tope = Math.min(await saldoPropioEnCentavos(client, id_mesa, comensal), saldoMesa);
+      motivo = MOTIVOS_EXCEDENTE.comensal;
+    } else {
+      tope = saldoMesa;
+      motivo = MOTIVOS_EXCEDENTE.mesa;
+    }
+  }
+
+  const aplicado_centavos = Math.min(monto_centavos, tope);
+  const excedente_centavos = monto_centavos - aplicado_centavos;
+
+  const { pagados, transacciones } = aplicado_centavos > 0
+    ? await aplicarEnPedidos(client, pedidos, aplicado_centavos, {
+      referencia_externa, comensal, metodo_pago, id_usuario: null, observacion: OBSERVACION_PAGO_EN_LINEA,
+    })
+    : { pagados: [], transacciones: [] };
+  const id_transaccion = transacciones.length > 0 ? transacciones[0].id_transaccion : null;
+
+  if (excedente_centavos > 0) {
+    // Tipos explícitos en cada parámetro.
+    await client.query(
+      `INSERT INTO excedentes_pago_en_linea
+         (id_mesa, comensal, referencia_externa, id_transaccion_pasarela, id_transaccion,
+          monto_centavos, aplicado_centavos, excedente_centavos, motivo)
+       VALUES ($1::int, $2::text, $3::text, $4::text, $5::int, $6::bigint, $7::bigint, $8::bigint, $9::text)`,
+      [id_mesa, comensal, referencia_externa, id_transaccion_pasarela, id_transaccion,
+        monto_centavos, aplicado_centavos, excedente_centavos, motivo]
+    );
+  }
+
+  let mesa_liberada = false;
+  if (pagados.length > 0) {
+    mesa_liberada = await mesasService.liberarSiNoQuedanPedidosAbiertos(client, id_mesa);
+  }
+
+  return {
+    duplicado: false,
+    saldo_restante_centavos: await saldoDeLaMesaEnCentavos(client, id_mesa),
+    mesa_liberada,
+    pagados,
+    aplicado_centavos,
+    excedente_centavos,
+    motivo_excedente: excedente_centavos > 0 ? motivo : null,
+    id_transaccion,
+  };
+}
+
+/**
+ * Registra un pago de la pasarela (lo llama el socket-server, EVENTS.md §8.4):
+ * la TRANSACCIÓN alrededor de registrarPagoEnLinea. COMMIT solo si se registró
+ * algo nuevo; ROLLBACK en el duplicado y en la mesa inexistente.
+ *
+ * Dos webhooks del mismo pago a la vez se ponen en fila en la mesa y el segundo
+ * ve el primero como duplicado. Si aun así chocara el índice único de una
+ * referencia (23505), cuenta como duplicado y se responde lo registrado.
+ *
+ * @returns { noExiste: true }
+ *        | { duplicado: boolean, saldo_restante_centavos, mesa_liberada?, pagados?,
+ *            aplicado_centavos, excedente_centavos, motivo_excedente, id_transaccion }
+ */
+async function registrarPagoInterno(pago) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await registrarPagoEnLinea(client, pago);
+    await client.query(r.duplicado === false ? 'COMMIT' : 'ROLLBACK');
+    return r;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err && err.code === '23505') {
+      const previo = await pagoEnLineaRegistrado(pool, pago.referencia_externa);
+      if (previo) {
+        return { duplicado: true, saldo_restante_centavos: await saldoDeLaMesaEnCentavos(pool, pago.id_mesa), ...previo };
+      }
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -595,6 +855,7 @@ async function cobrarMesaEnCaja({
     id_usuario,
     observacion: OBSERVACION_PAGO_EN_CAJA,
     voucher,
+    limitarAlSaldoDelComensal: true,
   });
   // Un id_cobro ya usado en OTRA mesa no es un reintento de este cobro: si se
   // contestara "duplicado", la caja creería que cobró sin haber cobrado nada.
@@ -773,4 +1034,8 @@ module.exports = {
   referenciaDelPago,
   ESTADO_COBRADO,
   ESTADO_ENTREGADO,
+  saldoPropioEnCentavos,
+  // T4: pago en línea con excedente
+  MOTIVOS_EXCEDENTE,
+  pagoEnLineaRegistrado,
 };

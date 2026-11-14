@@ -165,9 +165,11 @@ El usuario `deploy` ya existe y está en el grupo `docker` (lo creó
 `preparar-servidor.sh`).
 
 ```bash
+# como un usuario con sudo: la carpeta, como la de staging (deploy:deploy, 750)
+sudo install -d -o deploy -g deploy -m 750 /srv/smartdining
 sudo -iu deploy
-git clone https://github.com/jdavidpulgarin/smartdining.git ~/smartdining
-cd ~/smartdining && git checkout main
+git clone https://github.com/jdavidpulgarin/smartdining.git /srv/smartdining
+cd /srv/smartdining && git checkout main
 ```
 
 Si el repositorio es privado, agrega una *deploy key* de solo lectura
@@ -192,9 +194,18 @@ nano infra/.env
 ### 2.3 Primer arranque con HTTPS
 
 ```bash
-STAGING=1 SEED_DEMO=1 sh infra/scripts/primer-certificado.sh   # ensayo: certificado de prueba
-sh infra/scripts/primer-certificado.sh                         # certificado real
+ENTORNO=produccion STAGING=1 SEED_DEMO=1 sh infra/scripts/primer-certificado.sh   # ensayo: certificado de prueba
+ENTORNO=produccion sh infra/scripts/primer-certificado.sh                         # certificado real
 ```
+
+`ENTORNO` (`staging` o `produccion`) es obligatorio en los scripts del VPS
+(`primer-certificado.sh`, `respaldo.sh`, `instalar-respaldos.sh` y
+`simulacro-restauracion.sh`), como variable o con `--entorno`. No tiene valor
+por defecto: sin él, o con otro valor, el script sale sin tocar nada. De él
+salen el clon (`/srv/smartdining` o `/srv/smartdining-staging`), el archivo de
+variables (`infra/.env` o `infra/.env.staging`), el proyecto de compose
+(`smartdining` o `smartdining-staging`), la carpeta de respaldos y el timer.
+`STAGING=1` es otra cosa: el certificado de **prueba** de Let's Encrypt.
 
 En orden, el script:
 
@@ -328,7 +339,7 @@ quieres aprobar cada despliegue.
 | `VPS_USER` | `deploy` |
 | `VPS_SSH_KEY` | la llave **privada** de 3.1 (la carga el dueño con `gh secret set` y la borra) |
 | `VPS_KNOWN_HOSTS` | la línea que imprimió `ssh-keyscan` |
-| `VPS_RUTA` | `/home/deploy/smartdining` |
+| `VPS_RUTA` | `/srv/smartdining` |
 
 | Variable del environment | Valor |
 | :--- | :--- |
@@ -363,8 +374,11 @@ Los logs de cada contenedor rotan solos (5 archivos de 10 MB).
 > los `diario-*.tar.gz` y `predeploy-*.tar.gz` de las imágenes.
 
 [`infra/scripts/respaldo.sh`](../infra/scripts/respaldo.sh) hace un
-`pg_dump -Fc` (ya comprimido) del postgres que esté corriendo: `smartdining` o
-`smartdining-staging`. Si están los dos o ninguno, falla. Solo guarda el
+`pg_dump -Fc` (ya comprimido) del postgres del entorno que se le indica con
+`ENTORNO`: `produccion` (proyecto `smartdining`) o `staging`
+(`smartdining-staging`). Si no está corriendo, o el contenedor que le pasan es
+del otro entorno, falla sin escribir nada: un entorno nunca escribe en la
+carpeta del otro. Solo guarda el
 archivo si `pg_dump` terminó bien, no está vacío y `pg_restore --list` lo lee
 con `schema_migraciones`.
 
@@ -379,24 +393,44 @@ proyecto todavía no tiene el volumen, guarda solo la base y lo avisa.
 | Tipo | Cuándo | Dónde | Se conservan |
 | :--- | :--- | :--- | :--- |
 | `predeploy` | En cada despliegue (Deploy y Deploy staging), **antes** de `migrar.sh`. Si falla, el despliegue se aborta sin levantar el backend nuevo. | `/srv/respaldos/<proyecto>/predeploy/predeploy-AAAAMMDD-HHMMSS-<sha7>.dump` | 5 |
-| `diario` | Timer `smartdining-respaldo`, 03:30 de Bogotá. Si el VPS estaba apagado, corre al arrancar. | `/srv/respaldos/<proyecto>/diario/diario-AAAAMMDD-HHMMSS.dump` | 7 |
+| `diario` | Timer `smartdining-respaldo@<entorno>` (uno por entorno), 03:30 de Bogotá. Si el VPS estaba apagado, corre al arrancar. | `/srv/respaldos/<proyecto>/diario/diario-AAAAMMDD-HHMMSS.dump` | 7 |
+
+`<proyecto>` es el de compose: `smartdining-staging` para `ENTORNO=staging` y
+`smartdining` para `ENTORNO=produccion` (así los lista `bajar-respaldos.ps1`).
 
 Permisos: archivos 640 y carpetas 750, de `deploy` con el grupo `sd-respaldos`.
 En ese grupo solo está el usuario `respaldos`, que los lee por SFTP. Nadie más.
 
-#### Instalación (una vez por VPS, y otra vez si cambia `respaldo.sh` o `infra/systemd/`)
+#### Instalación (una vez por entorno, y otra vez si cambia `respaldo.sh` o `infra/systemd/`)
 
-Desde la raíz de cualquier clon, con un usuario con sudo:
+Desde la raíz del clon **de ese entorno**, con un usuario con sudo:
 
 ```bash
-sudo sh infra/scripts/instalar-respaldos.sh --llave-lectura 'ssh-ed25519 AAAA... sd-respaldos-pc'
+cd /srv/smartdining-staging && sudo ENTORNO=staging sh infra/scripts/instalar-respaldos.sh --llave-lectura 'ssh-ed25519 AAAA... sd-respaldos-pc'
+cd /srv/smartdining && sudo ENTORNO=produccion sh infra/scripts/instalar-respaldos.sh
 ```
 
-Crea el grupo y el usuario `respaldos` y las carpetas. Configura el SFTP de
+Crea el grupo y el usuario `respaldos` y la carpeta del proyecto. Configura el SFTP de
 solo lectura (`sshd_config.d/10-respaldos.conf`, con chroot en `/srv/respaldos`,
 `internal-sftp -R` y la llave con `restrict`; antes de recargar comprueba que
-`roberto` y `deploy` siguen entrando). Instala el timer. Sin `--llave-lectura`
-hace todo menos la llave.
+`roberto` y `deploy` siguen entrando). Instala el timer
+`smartdining-respaldo@<entorno>` y crea `/etc/smartdining/respaldo-<entorno>.env`.
+Sin `--llave-lectura` hace todo menos la llave (la llave es una sola para los
+dos entornos).
+
+**Del timer viejo al de cada entorno.** Antes había un solo timer,
+`smartdining-respaldo`, sin entorno (era el de staging). La primera vez que se
+corre con `ENTORNO=staging`, lo desactiva y lo reemplaza por
+`smartdining-respaldo@staging`, y copia el viejo `/etc/smartdining/respaldo.env`
+a `respaldo-staging.env` (el check de staging sigue siendo el mismo; el viejo
+no se borra). Con `ENTORNO=produccion` y el timer viejo todavía instalado, se
+detiene y pide instalar staging primero. Los respaldos no se tocan.
+
+**Solo el entorno que está corriendo tiene su timer activo.** El del entorno
+apagado fallaría cada noche (no hay postgres que respaldar) y su check de
+healthchecks.io avisaría. Al apagar un entorno:
+`sudo systemctl disable --now smartdining-respaldo@<entorno>.timer` (sus
+respaldos se quedan).
 
 Mientras no esté instalado, **cada despliegue falla** en el respaldo previo con
 un mensaje que remite aquí.
@@ -404,13 +438,15 @@ un mensaje que remite aquí.
 #### Respaldo a mano y registro
 
 ```bash
-sudo systemctl start smartdining-respaldo.service     # el diario, ahora
-journalctl -u smartdining-respaldo -n 20 --no-pager    # qué pasó
-systemctl list-timers smartdining-respaldo.timer       # próxima corrida
+sudo systemctl start smartdining-respaldo@produccion.service    # el diario, ahora (o @staging)
+journalctl -u smartdining-respaldo@produccion -n 20 --no-pager   # qué pasó
+systemctl list-timers 'smartdining-respaldo@*'                   # próxima corrida de cada entorno
 sudo ls -l /srv/respaldos/*/*/
 ```
 
 #### Aviso si el respaldo diario no llega (healthchecks.io)
+
+Un check **por entorno** (`respaldo-staging` y `respaldo-produccion`).
 
 1. En healthchecks.io crea un check con *Schedule* `Cron`, expresión
    `30 3 * * *`, zona `America/Bogota` y *Grace time* de 1 hora. Agrega los
@@ -419,10 +455,12 @@ sudo ls -l /srv/respaldos/*/*/
    así no queda en el historial):
 
    ```bash
-   sudo sh -c 'umask 077; read -r url; printf "HEALTHCHECKS_URL=%s\n" "$url" > /etc/smartdining/respaldo.env'
+   sudo sh -c 'umask 077; read -r url; printf "HEALTHCHECKS_URL=%s\n" "$url" > /etc/smartdining/respaldo-produccion.env'
    ```
 
-`/etc/smartdining/respaldo.env` es 600 de root y **nunca** va en el repo. El
+   (en staging, `respaldo-staging.env`).
+
+`/etc/smartdining/respaldo-<entorno>.env` es 600 de root y **nunca** va en el repo. El
 timer avisa a la URL al terminar bien y a `<URL>/fail` si falla. Si no se
 avisa nada a tiempo, healthchecks.io manda el correo.
 
@@ -439,9 +477,9 @@ ese usuario solo existe en ese PC. Baja los `.dump` (comprueba la firma
 
 ```bash
 sudo -iu deploy
-cd /srv/smartdining-staging        # o ~/smartdining en producción
-sh infra/scripts/simulacro-restauracion.sh                 # el diario más reciente
-sh infra/scripts/simulacro-restauracion.sh /srv/respaldos/smartdining/predeploy/ARCHIVO.dump
+cd /srv/smartdining-staging        # o /srv/smartdining en producción
+ENTORNO=staging sh infra/scripts/simulacro-restauracion.sh                 # el diario más reciente
+ENTORNO=produccion sh infra/scripts/simulacro-restauracion.sh /srv/respaldos/smartdining/predeploy/ARCHIVO.dump
 ```
 
 [`simulacro-restauracion.sh`](../infra/scripts/simulacro-restauracion.sh)
@@ -458,7 +496,7 @@ contenedor, también si algo falla. No toca la base real ni el volumen.
 
 #### Restaurar de verdad (sobrescribe los datos actuales)
 
-1. Haz antes un respaldo del estado actual: `sudo systemctl start smartdining-respaldo.service`.
+1. Haz antes un respaldo del estado actual: `sudo systemctl start smartdining-respaldo@<entorno>.service`.
 2. Pasa el simulacro con el archivo que vas a restaurar.
 3. Detén lo que escribe en la base, restaura y vuelve a levantar:
 
@@ -490,7 +528,7 @@ la escribe en `IMAGENES_DIR=/app/uploads/imagenes`. Devuelve
 > producción usa `down` sin `-v` (§6.1). `up -d --build` no toca el volumen.
 
 **Respaldo.** Lo hace `respaldo.sh` en cada despliegue y cada noche (tar.gz
-junto al dump, ver arriba). A mano: `sudo systemctl start smartdining-respaldo.service`.
+junto al dump, ver arriba). A mano: `sudo systemctl start smartdining-respaldo@<entorno>.service`.
 
 **Restaurar** (sobrescribe las imágenes actuales). Primero un respaldo del
 estado actual y el simulacro con ese archivo; luego, desde el clon:
@@ -598,6 +636,39 @@ Para volver a los valores por defecto, borra esas líneas de `infra/.env` y repi
 pasos 2 y 3. Las capacidades de las mesas no se revierten solas: cámbialas desde el panel
 si hace falta.
 
+### Logs de nginx sin tokens (T13)
+
+El access log de nginx **no guarda tokens QR**. Cada `server` escribe con el formato
+`sd_sin_token`, que es el `main` de la imagen con dos cambios: en la petición y en el
+`Referer` se reemplaza por `***`:
+
+- el token de la ruta `/api(/v1)/mesas/qr/<token>/…`;
+- el valor de hasta dos parámetros cuyo nombre termina en `token` (`?token=`, `access_token=`…).
+  El enlace del QR (`app.<dominio>/?token=…`) llega como `Referer` en todo lo que pide la PWA.
+
+Dónde está: los `map` y el `log_format` al principio de
+`infra/nginx/templates/smartdining.conf.template`. Prueba: `infra/scripts/nginx-log.test.cjs`.
+
+- **Dónde se guarda:** el log va al stdout del contenedor (driver `json-file`, como mucho
+  5 archivos de 10 MB por contenedor) y **se pierde al recrear el contenedor** nginx, por
+  ejemplo en cada despliegue que lo reconstruye. El `error_log` no tiene formato propio.
+- **Validar una plantilla que aún no está en la imagen**, p. ej. la de una rama: copia la
+  carpeta al VPS y pásala con `PLANTILLAS`. Se valida con el mismo nginx en marcha, sin
+  tocar lo que sirve:
+
+  ```bash
+  PLANTILLAS=/tmp/rama/infra/nginx/templates ENV_FILE=infra/.env.staging sh infra/scripts/validar-nginx.sh
+  ```
+
+- **Comprobar tras desplegar:** una petición con un token inventado no debe dejar el token
+  en el log:
+
+  ```bash
+  curl -s -o /dev/null -X POST "https://api.<dominio>/api/mesas/qr/v1.PRUEBA-T13/sesion"
+  dc logs --since 2m nginx | grep -c 'PRUEBA-T13'     # 0
+  dc logs --since 2m nginx | grep -c '/mesas/qr/\*\*\*/sesion'   # 1 o más
+  ```
+
 ### Cambios de esquema
 
 Con el volumen vacío, `database/docker-init.sh` corre `database/migrar.sh`, que
@@ -617,6 +688,22 @@ dc exec -T postgres psql -U smartdining -d smartdining -c "SELECT count(*) FROM 
 
 Un script ya aplicado **nunca** se edita: `migrar.sh` compara checksums y se
 detiene sin aplicar nada si alguno cambió.
+
+**Ajustes de la base (`ALTER DATABASE … SET`) y el backend.** Un ajuste así (p. ej.
+la zona horaria `America/Bogota`, script 43) solo lo toman las sesiones **nuevas**: el
+pool del backend y su conexión `LISTEN` del canal `inventario` siguen con el valor de
+antes hasta que el backend se reinicia. Por eso Deploy staging recrea el backend
+(`up -d --force-recreate --no-deps backend`) cuando `migrar.sh` aplicó algún script,
+aunque su imagen no haya cambiado. Si se migra a mano, recrea el backend después:
+
+```bash
+dc up -d --force-recreate --no-deps --wait backend
+dc exec -T postgres psql -U smartdining -d smartdining -Atc "SHOW timezone"   # America/Bogota
+```
+
+> **Producción:** el workflow `Deploy` todavía no hace esa recreación: el primer
+> despliegue a producción con el script 43 tiene que recrear el backend (ver el
+> paso a producción).
 
 `dc down -v` borra la base entera, los certificados y las imágenes. No lo uses
 nunca (tampoco en staging).
@@ -650,7 +737,9 @@ archivo de variables y otro nombre de proyecto de compose. Sigue la rama
 | :--- | :--- | :--- |
 | Dominio | `smartdining.com.co` | `staging.smartdining.com.co` (`app.staging.…`, `api.staging.…`, etc.) |
 | Rama | `main` | `develop` |
-| Carpeta en el VPS | `/home/deploy/smartdining` | `/srv/smartdining-staging` |
+| Carpeta en el VPS | `/srv/smartdining` | `/srv/smartdining-staging` |
+| `ENTORNO` de los scripts | `produccion` | `staging` |
+| Respaldos | `/srv/respaldos/smartdining`, timer `smartdining-respaldo@produccion` | `/srv/respaldos/smartdining-staging`, timer `smartdining-respaldo@staging` |
 | Variables | `infra/.env` | `infra/.env.staging` (plantilla: [`infra/.env.staging.example`](../infra/.env.staging.example)) |
 | Proyecto compose | `smartdining` (`name:` del compose) | `smartdining-staging` (`COMPOSE_PROJECT_NAME` dentro de `infra/.env.staging`) |
 | Workflow | `Deploy` (`deploy.yml`) | `Deploy staging` (`deploy-staging.yml`, llamado desde `ci.yml`) |
@@ -692,8 +781,8 @@ staging y producción.
 
 ```bash
 alias dcs='docker compose -f docker-compose.prod.yml --env-file infra/.env.staging'
-ENV_FILE=infra/.env.staging STAGING=1 SEED_DEMO=1 sh infra/scripts/primer-certificado.sh   # ensayo
-ENV_FILE=infra/.env.staging sh infra/scripts/primer-certificado.sh                         # certificado real
+ENTORNO=staging STAGING=1 SEED_DEMO=1 sh infra/scripts/primer-certificado.sh   # ensayo
+ENTORNO=staging sh infra/scripts/primer-certificado.sh                         # certificado real
 ENV_FILE=infra/.env.staging sh infra/scripts/passwords-demo.sh cambiar                     # si el paso 2 lo pide
 ```
 

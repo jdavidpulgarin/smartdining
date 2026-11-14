@@ -1,0 +1,15 @@
+# SmartDining · respaldo diario a las 03:30 de Bogotá de UN entorno (R-18).
+# Plantilla: smartdining-respaldo@staging.timer o smartdining-respaldo@produccion.timer.
+# Persistent: si el VPS estaba apagado a esa hora, corre al arrancar.
+#   Próxima corrida: systemctl list-timers 'smartdining-respaldo@*'
+[Unit]
+Description=SmartDining: respaldo diario de la base a las 03:30 (%i, R-18)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 America/Bogota
+RandomizedDelaySec=5min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -7,6 +7,12 @@ const assert = require('node:assert');
  * lo decide la base: devolución o MERMA (tr_devolver_inventario), el autor del
  * movimiento (app.id_usuario), el total y la transición del pedido.
  *
+ * T4 (review de #235, casos t4-*): el personal no cancela el plato de un
+ * comensal que ya pagó en la visita actual. El pago de Ana entra por la Caja
+ * real (POST /transacciones/mesa); el caso de Jarrison (Ana 12.000, Caro
+ * 28.000, Beto 24.000) usa un plato propio a 4.000 (catálogo
+ * 'personal-cancela-pagado').
+ *
  * STOCK "EXACTO" CON SUITES EN PARALELO: como en quitar-item-sql, se mira el
  * LIBRO de cada detalle (reserva + devolución = 0, o una merma de cantidad 0
  * que deja el stock sin volver), no el stock global.
@@ -39,6 +45,9 @@ const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
 const { tokenStaff } = require('../helpers/fake-db');
 const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
+const crypto = require('node:crypto');
+
+let catalogoT4 = null; // T4: plato propio a 4.000
 
 const MESA_BASE = parseInt(process.env.MESA_NUMERO_CANCELA_PERSONAL || '980', 10);
 const MARCA_MESA = 'PRUEBA personal-cancela-item';
@@ -114,6 +123,9 @@ test.before(async () => {
   // propio con stock alto: nada del seed, nada compartido con otra suite.
   catalogo = await crearCatalogoPrueba(sonda, 'personal-cancela-item', { receta: true });
   plato = catalogo.plato;
+  // T4: un plato propio a 4.000 para los números exactos de Jarrison
+  // (Ana 3 = 12.000, Caro 7 = 28.000, Beto 6 = 24.000).
+  catalogoT4 = await crearCatalogoPrueba(sonda, 'personal-cancela-pagado', { receta: true, precio: 4000 });
   hayBase = true;
   await limpiar();
 });
@@ -126,6 +138,7 @@ test.after(async () => {
   try {
     if (hayBase) await limpiar();
     if (catalogo) await catalogo.limpiar();
+    if (catalogoT4) await catalogoT4.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();
@@ -409,4 +422,218 @@ test('g. el personal cancela la línea de cualquier comensal (sin regla de dueñ
   ]);
   assert.strictEqual((await cancelar(idPedido, deBeto.id_detalle)).status, 200);
   assert.strictEqual((await cancelar(idPedido, sinDueno.id_detalle)).status, 200);
+});
+
+// --- T4 (review de #235): el personal no cancela el plato de quien ya pagó ----
+
+const MENSAJE_YA_PAGO = 'Ese comensal ya pagó: reembolsa antes de cancelar su plato';
+
+/** El caso de Jarrison: Ana 12.000, Caro 28.000 y Beto 24.000 en un pedido. */
+async function mesaDeJarrison() {
+  const idMesa = await mesaAbierta();
+  const p = catalogoT4.plato.id_plato;
+  const { idPedido, detalles: [deAna, deCaro, deBeto] } = await pedidoCon(idMesa, [
+    { id_plato: p, cantidad: 3, comensal: 'Ana' },
+    { id_plato: p, cantidad: 7, comensal: 'Caro' },
+    { id_plato: p, cantidad: 6, comensal: 'Beto' },
+  ]);
+  return { idMesa, idPedido, deAna, deCaro, deBeto };
+}
+
+/** «Pagar lo mío» en la Caja, por la ruta real (POST /transacciones/mesa). */
+const pagarEnCaja = (idMesa, monto, comensal) => request(app)
+  .post('/api/transacciones/mesa')
+  .set('Authorization', `Bearer ${admin.jwt}`)
+  .send({ id_mesa: idMesa, monto, metodo_pago: 'efectivo', comensal, id_cobro: crypto.randomUUID() });
+
+/** La cuenta de la mesa como la ve la Caja: comensal -> { subtotal, pagado, saldo }. */
+async function cuentaDe(idMesa) {
+  const { rows } = await sonda.query('SELECT * FROM obtener_cuenta_mesa($1::int)', [idMesa]);
+  return Object.fromEntries(rows.map((r) => [r.comensal, {
+    subtotal: Number(r.subtotal), pagado: Number(r.pagado), saldo: Number(r.saldo),
+  }]));
+}
+
+test('t4-a. el plato de Ana con Ana pagada (en la Caja): 409 pago_registrado y NADA cambia; el caso de Jarrison ya no se reproduce', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa, idPedido, deAna } = await mesaDeJarrison();
+  const pago = await pagarEnCaja(idMesa, 12000, 'Ana');
+  assert.strictEqual(pago.status, 201, JSON.stringify(pago.body));
+  const antes = await filaPedido(idPedido);
+  const libroAntes = await libroDe(deAna.id_detalle);
+  const cuentaAntes = await cuentaDe(idMesa);
+  assert.strictEqual(cuentaAntes.Ana.saldo, 0, 'Ana quedó al día');
+  assert.strictEqual(cuentaAntes['TOTAL MESA'].saldo, 52000);
+
+  const res = await cancelar(idPedido, deAna.id_detalle, { motivo: 'Ana ya no lo quiere' });
+  assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+  assert.deepStrictEqual(res.body, { error: MENSAJE_YA_PAGO, motivo: 'pago_registrado' });
+
+  assert.strictEqual((await estadoItem(deAna.id_detalle)).estado_item, 'pendiente', 'la línea sigue viva');
+  assert.deepStrictEqual(await libroDe(deAna.id_detalle), libroAntes, 'sin devolución de stock');
+  assert.deepStrictEqual(await filaPedido(idPedido), antes, 'total y estado_pago iguales');
+  const cuenta = await cuentaDe(idMesa);
+  assert.deepStrictEqual(cuenta, cuentaAntes, 'la cuenta de la Caja no se mueve');
+  // Lo que Jarrison vio era: la mesa debe 40.000 y Beto + Caro suman 52.000.
+  assert.strictEqual(cuenta['TOTAL MESA'].saldo, cuenta.Beto.saldo + cuenta.Caro.saldo, 'la mesa debe lo que deben los demás');
+});
+
+test('t4-b. el plato de Beto sin pagar (Ana ya pagó): 200 y la cuenta sigue cuadrando', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa, idPedido, deBeto } = await mesaDeJarrison();
+  assert.strictEqual((await pagarEnCaja(idMesa, 12000, 'Ana')).status, 201);
+
+  const res = await cancelar(idPedido, deBeto.id_detalle, { motivo: 'Beto se fue' });
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  assert.strictEqual((await estadoItem(deBeto.id_detalle)).estado_item, 'cancelado');
+  assert.strictEqual(Number((await filaPedido(idPedido)).total), 40000);
+  // El saldo del PEDIDO (obtener_saldo_pendiente, sobre pedidos.total): lo de
+  // Caro. No se mira obtener_cuenta_mesa: hasta el script 41 (#235) esa
+  // función todavía suma las líneas canceladas.
+  const { rows } = await sonda.query('SELECT obtener_saldo_pendiente($1::int)::numeric AS saldo', [idPedido]);
+  assert.strictEqual(Number(rows[0].saldo), 28000, 'lo de Caro');
+});
+
+test('t4-c. el pago de Ana en OTRO pedido de la misma mesa y visita, con el alias escrito distinto, también bloquea', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const p = catalogoT4.plato.id_plato;
+  const primero = await pedidoCon(idMesa, [{ id_plato: p, cantidad: 2, comensal: 'Beto' }]);
+  const segundo = await pedidoCon(idMesa, [
+    { id_plato: p, cantidad: 3, comensal: 'Ana' },
+    { id_plato: p, cantidad: 1, comensal: 'Caro' },
+  ]);
+  // Directo en la base: el pago de Ana quedó en el PRIMER pedido (así reparte
+  // «pagar lo mío» entre pedidos), escrito « aná ».
+  await sonda.query(
+    `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion, comensal)
+     VALUES ($1::int, 'efectivo', 1000, 'completada', ' aná ')`,
+    [primero.idPedido]
+  );
+  const res = await cancelar(segundo.idPedido, segundo.detalles[0].id_detalle);
+  assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+  assert.strictEqual(res.body.error, MENSAJE_YA_PAGO);
+  assert.strictEqual((await estadoItem(segundo.detalles[0].id_detalle)).estado_item, 'pendiente');
+});
+
+test('t4-d. un pago de Ana de una visita ANTERIOR de la mesa no bloquea su plato de la visita actual', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const p = catalogoT4.plato.id_plato;
+  const vieja = await pedidoCon(idMesa, [{ id_plato: p, cantidad: 1, comensal: 'Ana' }]);
+  await sonda.query(
+    `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion, comensal)
+     VALUES ($1::int, 'efectivo', 1000, 'completada', 'Ana')`,
+    [vieja.idPedido]
+  );
+  // Empieza otra visita: la sesión vigente arranca DESPUÉS de ese pago.
+  await sonda.query('UPDATE mesas SET sesion_iniciada_en = clock_timestamp() WHERE id_mesa = $1::int', [idMesa]);
+  const nueva = await pedidoCon(idMesa, [
+    { id_plato: p, cantidad: 1, comensal: 'Ana' },
+    { id_plato: p, cantidad: 1, comensal: 'Beto' },
+  ]);
+  const res = await cancelar(nueva.idPedido, nueva.detalles[0].id_detalle);
+  assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+});
+
+test('t4-e. línea «General» (sin comensal) con un pago de la mesa completa: 409 aunque lo pagado no supere el total nuevo', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const p = catalogoT4.plato.id_plato;
+  const { idPedido, detalles: [general] } = await pedidoCon(idMesa, [
+    { id_plato: p, cantidad: 1 },
+    { id_plato: p, cantidad: 5, comensal: 'Ana' },
+  ]);
+  // 1.000 de la mesa completa: la regla del #206 lo dejaría pasar (1.000 <= 20.000).
+  await pagar(idPedido, 1000);
+  const res = await cancelar(idPedido, general.id_detalle);
+  assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+  assert.strictEqual(res.body.error, MENSAJE_YA_PAGO);
+  assert.strictEqual((await estadoItem(general.id_detalle)).estado_item, 'pendiente');
+});
+
+// --- T4: sin carrera con los cobros (la mesa se bloquea antes que el pedido) ---
+
+test('t4-carrera. un cobro de Ana en OTRO pedido de la mesa y el cancelar del mesero a la vez: nunca quedan los dos', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const p = catalogoT4.plato.id_plato;
+  const deBeto = await pedidoCon(idMesa, [{ id_plato: p, cantidad: 2, comensal: 'Beto' }]);
+  const conAna = await pedidoCon(idMesa, [
+    { id_plato: p, cantidad: 3, comensal: 'Ana' },
+    { id_plato: p, cantidad: 1, comensal: 'Caro' },
+  ]);
+  const lineaDeAna = conAna.detalles[0].id_detalle;
+
+  // El cobro, a medias: lo que hace registrarPago (POST /transacciones de la
+  // Caja) con los mismos bloqueos y en el mismo orden (la mesa, después SOLO
+  // su pedido), y el pago de Ana ya insertado pero SIN confirmar.
+  const cobro = await sonda.connect();
+  let confirmado = false;
+  try {
+    await cobro.query('BEGIN');
+    await cobro.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1::int FOR UPDATE', [idMesa]);
+    await cobro.query('SELECT id_pedido FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [deBeto.idPedido]);
+    await cobro.query(
+      `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion, comensal)
+       VALUES ($1::int, 'efectivo', 1000, 'completada', 'Ana')`,
+      [deBeto.idPedido]
+    );
+
+    // El mesero cancela el plato de Ana mientras el cobro sigue abierto.
+    let respondio = false;
+    const cancelacion = cancelar(conAna.idPedido, lineaDeAna, { motivo: 'carrera' })
+      .then((r) => { respondio = true; return r; });
+    await new Promise((listo) => setTimeout(listo, 500));
+    assert.strictEqual(respondio, false, 'la cancelación espera al cobro en la fila de la mesa');
+
+    await cobro.query('COMMIT');
+    confirmado = true;
+    const res = await cancelacion;
+    // Despierta con el pago de Ana ya confirmado: lo ve y no cancela.
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.strictEqual(res.body.motivo, 'pago_registrado');
+  } finally {
+    if (!confirmado) await cobro.query('ROLLBACK').catch(() => {});
+    cobro.release();
+  }
+
+  const pago = await sonda.query(
+    "SELECT count(*)::int AS n FROM transacciones WHERE id_pedido = $1::int AND comensal = 'Ana'",
+    [deBeto.idPedido]
+  );
+  const linea = await estadoItem(lineaDeAna);
+  assert.strictEqual(pago.rows[0].n, 1, 'el pago de Ana quedó');
+  assert.strictEqual(linea.estado_item, 'pendiente', 'y el plato de Ana sigue vivo: nunca los dos');
+});
+
+test('t4-carrera. si el cobro de Ana no se confirma (ROLLBACK), la cancelación que esperaba sigue y da 200', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const p = catalogoT4.plato.id_plato;
+  const deBeto = await pedidoCon(idMesa, [{ id_plato: p, cantidad: 2, comensal: 'Beto' }]);
+  const conAna = await pedidoCon(idMesa, [
+    { id_plato: p, cantidad: 3, comensal: 'Ana' },
+    { id_plato: p, cantidad: 1, comensal: 'Caro' },
+  ]);
+
+  const cobro = await sonda.connect();
+  try {
+    await cobro.query('BEGIN');
+    await cobro.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1::int FOR UPDATE', [idMesa]);
+    await cobro.query('SELECT id_pedido FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [deBeto.idPedido]);
+    await cobro.query(
+      `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion, comensal)
+       VALUES ($1::int, 'efectivo', 1000, 'completada', 'Ana')`,
+      [deBeto.idPedido]
+    );
+    const cancelacion = cancelar(conAna.idPedido, conAna.detalles[0].id_detalle, { motivo: 'carrera' });
+    await new Promise((listo) => setTimeout(listo, 300));
+    await cobro.query('ROLLBACK');
+    const res = await cancelacion;
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  } finally {
+    cobro.release();
+  }
+  assert.strictEqual((await estadoItem(conAna.detalles[0].id_detalle)).estado_item, 'cancelado');
 });

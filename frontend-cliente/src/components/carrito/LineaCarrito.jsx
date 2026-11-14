@@ -5,10 +5,13 @@ import Imagen from '../ui/Imagen';
 function LineaCarrito({
   linea,
   onActualizarCantidad,
+  onAjustarCantidad,
   onEliminar,
   soloLectura = false,
   mostrarComensal = false,
   faltantes = [],
+  disponible: disponibleProp,
+  puedeAjustar: puedeAjustarProp,
 }) {
   const subtotal =
     linea.subtotal !== undefined
@@ -27,6 +30,26 @@ function LineaCarrito({
     .filter(Boolean);
   const esPlatoConstructorConFaltante =
     ingredientesFaltantes.length > 0 || Boolean(linea.ingredienteAgotado);
+
+  const disponible =
+    disponibleProp !== undefined
+      ? disponibleProp
+      : (faltantesLista.find((f) => f?.disponible !== undefined)?.disponible ?? null);
+
+  const cantidadNum = Number(linea.cantidad) || 1;
+  const puedeAjustar =
+    puedeAjustarProp !== undefined
+      ? Boolean(puedeAjustarProp)
+      : Boolean(
+          disponible !== null &&
+          disponible > 0 &&
+          disponible < cantidadNum
+        );
+
+  const mensajeFaltante =
+    disponible !== null && disponible > 0
+      ? `Solo quedan ${disponible}`
+      : 'Agotado';
 
   return (
     <article
@@ -55,7 +78,7 @@ function LineaCarrito({
                 </h3>
                 {tieneFaltante && (
                   <span className="inline-flex items-center text-[11px] font-etiqueta uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-superficie-2 text-primario border border-primario">
-                    {faltantesLista.length > 0 ? 'Se acabó' : 'Agotado'}
+                    {mensajeFaltante}
                   </span>
                 )}
               </div>
@@ -113,21 +136,38 @@ function LineaCarrito({
         </div>
       </div>
 
-      {/* Acción rápida para quitar plato cuando se agotó el plato o un ingrediente del constructor */}
+      {/* Acción rápida para ajustar cantidad o quitar plato cuando hay faltante */}
       {!soloLectura && onEliminar && tieneFaltante && (
         <div className="flex items-center justify-between gap-2 pt-2 border-t border-borde/60">
           <span className="text-xs text-primario-texto font-medium">
-            {esPlatoConstructorConFaltante
-              ? 'Un ingrediente de este plato se acabó'
-              : 'Este plato se acabó'}
+            {disponible !== null && disponible > 0
+              ? `Solo quedan ${disponible}`
+              : (esPlatoConstructorConFaltante
+                  ? 'Un ingrediente de este plato se acabó'
+                  : 'Agotado')}
           </span>
-          <button
-            type="button"
-            onClick={() => onEliminar(linea.id_linea)}
-            className="min-h-11 px-3.5 py-2 rounded-xl bg-primario hover:bg-primario-hover text-white font-etiqueta uppercase tracking-wider font-bold text-xs transition-colors cursor-pointer shrink-0"
-          >
-            Quitar plato
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {puedeAjustar && (onAjustarCantidad || onActualizarCantidad) && (
+              <button
+                type="button"
+                onClick={() =>
+                  onAjustarCantidad
+                    ? onAjustarCantidad(linea.id_linea, disponible)
+                    : onActualizarCantidad?.(linea.id_linea, disponible)
+                }
+                className="min-h-11 px-3.5 py-2 rounded-xl bg-acento hover:bg-acento/90 text-fondo font-etiqueta uppercase tracking-wider font-bold text-xs transition-colors cursor-pointer shrink-0"
+              >
+                Ajustar a {disponible}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onEliminar(linea.id_linea)}
+              className="min-h-11 px-3.5 py-2 rounded-xl bg-primario hover:bg-primario-hover text-white font-etiqueta uppercase tracking-wider font-bold text-xs transition-colors cursor-pointer shrink-0"
+            >
+              Quitar plato
+            </button>
+          </div>
         </div>
       )}
 

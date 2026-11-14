@@ -254,17 +254,30 @@ async function main() {
   );
 
   // `faltantes` dice QUÉ QUITAR DEL CARRITO (el plato), no el insumo de bodega.
+  // T5: puede traer además `disponible` (cuántas se pueden pedir, para el
+  // "Ajustar a N" de la PWA): un entero entre 0 y las porciones iniciales. Si
+  // su cálculo falla, el backend lo omite, así que se acepta con o sin él.
+  const clavesBien = (f) => {
+    const claves = Object.keys(f).sort().join();
+    if (claves === 'id,nombre,tipo') return true;
+    return (
+      claves === 'disponible,id,nombre,tipo' &&
+      Number.isInteger(f.disponible) &&
+      f.disponible >= 0 &&
+      f.disponible <= PORCIONES
+    );
+  };
   const faltantesBien = sinStock.every(
     (r) =>
       Array.isArray(r.data.faltantes) &&
       r.data.faltantes.length === 1 &&
       r.data.faltantes[0].tipo === 'plato' &&
       Number(r.data.faltantes[0].id) === idPlato &&
-      Object.keys(r.data.faltantes[0]).sort().join() === 'id,nombre,tipo'
+      clavesBien(r.data.faltantes[0])
   );
   verificar(
     sinStock.length > 0 && faltantesBien,
-    'cada 409 trae faltantes = [el plato], solo con tipo, id y nombre (sin cantidades de bodega)',
+    'cada 409 trae faltantes = [el plato], con tipo, id, nombre y (si se pudo calcular) disponible; sin cantidades de bodega',
     `faltantes inesperados: ${JSON.stringify(sinStock.find((r) => !r.data?.faltantes)?.data || sinStock[0]?.data?.faltantes)}`
   );
 

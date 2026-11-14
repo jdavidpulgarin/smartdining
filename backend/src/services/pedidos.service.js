@@ -4,6 +4,10 @@ const mesasService = require('./mesas.service');
 const aliasComensal = require('./alias-comensal');
 const { traducirAutorInexistente } = require('./autor-inexistente');
 const { errorConMotivo } = require('../utils/error-con-motivo');
+const { anotarDisponibles } = require('./disponible-sin-stock');
+const socketNotifier = require('./socket.notifier');
+// La zona del restaurante (America/Bogota): una sola constante para todo el backend.
+const { ZONA } = require('./reportes.service');
 
 /**
  * Dominio del CHECK de pedidos.estado. Se usa solo para validar que el body
@@ -52,11 +56,33 @@ const SQL_DETALLES_CON_INGREDIENTES = `
   ORDER BY dp.id_detalle ASC`;
 
 /**
+ * El día AAMMDD de un instante EN BOGOTÁ, sin depender de la zona del servidor.
+ * Se arma con formatToParts (no con el texto formateado, cuyo orden y
+ * separadores dependen del locale). Un solo formateador para todo el proceso.
+ */
+const FORMATO_DIA_BOGOTA = new Intl.DateTimeFormat('en-US', {
+  timeZone: ZONA,
+  year: '2-digit',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function diaEnBogota(fecha) {
+  const partes = Object.fromEntries(
+    FORMATO_DIA_BOGOTA.formatToParts(fecha).map((p) => [p.type, p.value])
+  );
+  return `${partes.year}${partes.month}${partes.day}`;
+}
+
+/**
  * codigo_pedido es VARCHAR(16) UNIQUE en el schema de Jarrison:
  * 'PED-' (4) + AAMMDD (6) + '-' (1) + 5 hex = 16 caracteres exactos.
+ *
+ * AAMMDD es el día de BOGOTÁ. Antes salía de toISOString(), o sea el día UTC:
+ * un pedido de las 7 p. m. en adelante (UTC-5) salía con la fecha de mañana.
  */
 function generarCodigoPedido(fecha = new Date()) {
-  const dia = fecha.toISOString().slice(2, 10).replace(/-/g, '');
+  const dia = diaEnBogota(fecha);
   const aleatorio = crypto.randomBytes(3).toString('hex').toUpperCase().slice(0, 5);
   return `PED-${dia}-${aleatorio}`;
 }
@@ -181,11 +207,22 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     // COMMIT, PostgreSQL ya deshizo la transacción y este ROLLBACK solo avisa
     // "no hay transacción en curso"; si por lo que sea lanzara, el SD001 se
     // perdería y el cliente recibiría un 500 en vez de la lista de faltantes.
+    let rollbackHecho = false;
     try {
       await client.query('ROLLBACK');
+      rollbackHecho = true;
     } catch (errRollback) {
       console.error('[pedidos] el ROLLBACK fallo tras un error:', errRollback && errRollback.message);
     }
+    // T5: en un SD001 (sin stock) se anota cuánto se puede pedir de cada
+    // faltante. La lectura va por ESTA MISMA conexión, ya fuera de la
+    // transacción (el ROLLBACK la cerró) y antes del release del finally.
+    // NUNCA por el pool: con 50 pedidos a la vez por 10 porciones, los 40
+    // rechazados pedían cada uno una segunda conexión mientras retenían la
+    // suya, agotaban el pool (max 10) y salían 500 por connectionTimeout.
+    // Si el ROLLBACK falló, la conexión no está en un estado fiable y no se
+    // consulta. Nunca lanza; si falla, el 409 sale igual sin `disponible`.
+    if (rollbackHecho) await anotarDisponibles(err, items, client);
     // El AUTOR (review de #144): el INSERT de historial_estados de más arriba
     // guarda el id del JWT, y la columna tiene su `fk_historial_usuario` contra
     // `usuarios`. Si ese usuario ya se borró, el 23503 salía como el 409
@@ -381,6 +418,18 @@ async function cerrarSiEntregadoYPagado(client, pedido, idUsuario, opciones = {}
  * trigger. id_usuario va null si el cambio lo hizo un comensal.
  */
 async function actualizarEstado(id, estado, observaciones, id_usuario = null) {
+  // T4: cancelar el pedido ENTERO (POST /:id/cancelar del personal, o PATCH
+  // /:id/estado a 'cancelado') con un pago en línea en curso en su mesa -> 409
+  // pago_en_curso, antes de abrir la transacción. Sin comensal.
+  if (estado === 'cancelado') {
+    const enCurso = await conflictoPorPagoEnCursoDelPedido(id);
+    if (enCurso) {
+      const err = errorConMotivo(409, enCurso.conflicto, enCurso.mensaje);
+      if (enCurso.detalle) err.extra = { detalle: enCurso.detalle };
+      throw err;
+    }
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -533,6 +582,7 @@ const MOTIVOS_QUITAR_ITEM = Object.freeze({
   enPreparacion: 'item_en_preparacion',
   noCancelable: 'item_no_cancelable',
   pagoRegistrado: 'pago_registrado',
+  pagoEnCurso: 'pago_en_curso',
 });
 
 const OBSERVACION_CANCELADO_POR_COMENSAL = 'Cancelado por el comensal';
@@ -563,10 +613,120 @@ function esDelComensal(aliasDeLaLinea, aliasDelJwt) {
 }
 
 /**
+ * T4 (review de #235): la clave con que se agrupa un comensal en la CUENTA.
+ *
+ * obtener_cuenta_mesa (script 20) junta líneas y pagos por
+ * COALESCE(NULLIF(btrim(comensal), ''), 'General'): NULL o vacío es «General»,
+ * y un pago con comensal NULL (cobro de la mesa completa) cae ahí. Aquí se
+ * hace lo mismo, pero comparando por la clave del alias (D-18b), como el resto
+ * del backend, para que «Ana», « ana » y «Aná» sean la misma persona. Un texto
+ * que la normalización no acepta (dato viejo, a mano) se compara por su texto
+ * recortado y en minúsculas, nunca se descarta.
+ */
+function claveDeCuenta(comensal) {
+  if (typeof comensal !== 'string' || comensal.trim() === '') return aliasComensal.CLAVE_RESERVADA;
+  const n = aliasComensal.normalizarAlias(comensal);
+  if (n.clave) return n.clave; // incluye «General» escrito a mano: clave reservada
+  return comensal.trim().toLowerCase();
+}
+
+const MENSAJE_COMENSAL_YA_PAGO = 'Ese comensal ya pagó: reembolsa antes de cancelar su plato';
+
+/* T4: pagos en línea en curso (GET /internal/pagos-en-curso, EVENTS.md §6.6). */
+const MENSAJE_PAGO_EN_CURSO = 'Hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.';
+const MENSAJE_PAGO_SIN_VERIFICAR =
+  'No se pudo comprobar si hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.';
+/**
+ * `detalle` del 409 pago_en_curso cuando el socket-server no pudo contestar
+ * (campo aparte: `motivo` ya es pago_en_curso). Sin `detalle` cuando el
+ * socket-server SÍ confirmó un pago en curso.
+ */
+const DETALLE_SIN_VERIFICAR = 'sin_verificar';
+
+/**
+ * El alias que se manda a /internal/pagos-en-curso: null si la línea es de
+ * «General» (sin comensal) o si su texto no es un alias válido (un dato viejo):
+ * el socket-server lo rechazaría con 400 y, sin comensal, la consulta es la
+ * más prudente (cualquier pago vigente de la mesa).
+ */
+function comensalParaPagosEnCurso(comensal) {
+  if (typeof comensal !== 'string' || comensal.trim() === '') return null;
+  const n = aliasComensal.normalizarAlias(comensal);
+  return n.error ? null : n.alias;
+}
+
+/** Motivo del 409 cuando hay (o no se pudo descartar) un pago en línea en curso. */
+const MOTIVO_PAGO_EN_CURSO = 'pago_en_curso';
+
+/**
+ * T4 (#260, EVENTS.md §6.6): pregunta al socket-server si hay un pago en línea
+ * en curso en la mesa. `comensal` null consulta SIN comensal (cualquier pago
+ * vigente de la mesa). Devuelve null si se puede seguir, o
+ * { conflicto: 'pago_en_curso', mensaje, detalle? } (`detalle: 'sin_verificar'`
+ * solo si el socket-server no pudo contestar). Nunca lanza.
+ *
+ * SIEMPRE se llama ANTES de abrir la transacción: la consulta es de red (hasta
+ * 1500 ms) y no se retiene la mesa ni el pedido bloqueados esperándola.
+ */
+async function revisarPagoEnCurso(idMesa, comensal = null) {
+  const { estado } = await socketNotifier.consultarPagosEnCurso(idMesa, comensal);
+  if (estado === 'en_curso') return { conflicto: MOTIVO_PAGO_EN_CURSO, mensaje: MENSAJE_PAGO_EN_CURSO };
+  if (estado === 'sin_verificar') {
+    return { conflicto: MOTIVO_PAGO_EN_CURSO, mensaje: MENSAJE_PAGO_SIN_VERIFICAR, detalle: DETALLE_SIN_VERIFICAR };
+  }
+  return null; // 'libre' u 'omitido'
+}
+
+/**
+ * cancelarItem (T4): ¿se puede cancelar esta línea sin pisar un pago en línea
+ * en curso? Lee la línea sin bloquear (su pedido no cambia de mesa ni la línea
+ * de comensal) y consulta antes de la transacción.
+ *
+ *   - PERSONAL: con el alias de la LÍNEA (null si es «General»).
+ *   - COMENSAL: con SU alias (el del JWT), normalizado. Solo si el pedido es de
+ *     SU mesa: si no, la transacción responde el 403 de siempre y aquí no se le
+ *     dice nada de los pagos de otra mesa.
+ *
+ * No consulta sin mesa (domicilio), con la línea inexistente (el 404 lo da la
+ * transacción) ni ya cancelada (el 409 item_ya_cancelado va primero).
+ */
+async function conflictoPorPagoEnCurso(idPedido, idDetalle, actor) {
+  const { rows } = await pool.query(
+    `SELECT p.id_mesa, dp.comensal, dp.estado_item
+       FROM detalles_pedido dp JOIN pedidos p ON p.id_pedido = dp.id_pedido
+      WHERE dp.id_detalle = $1::int AND dp.id_pedido = $2::int`,
+    [idDetalle, idPedido]
+  );
+  const linea = rows[0];
+  if (!linea || linea.id_mesa === null || linea.estado_item === 'cancelado') return null;
+  if (actor.tipo === 'personal') {
+    return revisarPagoEnCurso(linea.id_mesa, comensalParaPagosEnCurso(linea.comensal));
+  }
+  if (linea.id_mesa !== actor.idMesa) return null;
+  return revisarPagoEnCurso(linea.id_mesa, comensalParaPagosEnCurso(actor.comensal));
+}
+
+/**
+ * Cancelar un PEDIDO ENTERO (T4): consulta SIN comensal, antes de la
+ * transacción. `idMesaDelActor` (solo el comensal): si el pedido no es de su
+ * mesa no consulta (la transacción da el 403). No consulta sin mesa
+ * (domicilio), con el pedido inexistente o ya cancelado (cada camino responde
+ * lo suyo).
+ */
+async function conflictoPorPagoEnCursoDelPedido(idPedido, idMesaDelActor = undefined) {
+  const { rows } = await pool.query('SELECT id_mesa, estado FROM pedidos WHERE id_pedido = $1::int', [idPedido]);
+  const pedido = rows[0];
+  if (!pedido || pedido.id_mesa === null || pedido.estado === 'cancelado') return null;
+  if (idMesaDelActor !== undefined && pedido.id_mesa !== idMesaDelActor) return null;
+  return revisarPagoEnCurso(pedido.id_mesa, null);
+}
+
+/**
  * El comensal quita UNA línea de su pedido, entera (aunque tenga cantidad > 1).
  *
  * TODO en una transacción, con el pedido y después la línea bloqueados (FOR
- * UPDATE, siempre en ese orden). El KDS cambia el estado con un UPDATE del
+ * UPDATE, siempre en ese orden; el personal bloquea antes la MESA, como los
+ * cobros: paso 0). El KDS cambia el estado con un UPDATE del
  * pedido, que toma el mismo bloqueo de fila: si cocina llega primero, aquí se
  * espera y al despertar se lee el estado YA confirmado ('en_preparacion' -> 409);
  * si llega primero el comensal, cocina espera a que la línea quede cancelada y
@@ -594,8 +754,9 @@ function esDelComensal(aliasDeLaLinea, aliasDelJwt) {
  *     (los movimientos lo llevan) y en historial_estados, con el motivo.
  *
  * pago_registrado: el comensal, ESTRICTO (cualquier pago completado); el
- * personal, solo si lo pagado supera el total que queda sin la línea. Ver el
- * paso 3 y el 4b.
+ * personal, si el comensal dueño de la línea ya pagó en la visita actual de la
+ * mesa (T4) o si lo pagado supera el total que queda sin la línea (#206). Ver
+ * los pasos 3, 3b y 4b.
  *
  * @param {number} idPedido
  * @param {number} idDetalle
@@ -607,6 +768,12 @@ function esDelComensal(aliasDeLaLinea, aliasDelJwt) {
  */
 async function cancelarItem(idPedido, idDetalle, actor) {
   const esPersonal = actor.tipo === 'personal';
+
+  // Paso -1 (T4), personal Y comensal: un pago en línea en curso (o que no se
+  // pudo verificar) -> 409 pago_en_curso, sin abrir la transacción.
+  const enCurso = await conflictoPorPagoEnCurso(idPedido, idDetalle, actor);
+  if (enCurso) return enCurso;
+
   const client = await pool.connect();
   const salir = async (resultado) => {
     await client.query('ROLLBACK');
@@ -620,6 +787,28 @@ async function cancelarItem(idPedido, idDetalle, actor) {
     // solo esta transacción, así no se filtra a la siguiente petición.
     if (esPersonal) {
       await client.query('SELECT set_config($1::text, $2::text, true)', ['app.id_usuario', String(actor.idUsuario)]);
+    }
+
+    // 0. PERSONAL (T4): la MESA antes que el pedido, el orden de los cobros
+    // (mesas -> pedidos -> pedidos_domicilio -> detalles_pedido; ver arriba).
+    // La regla del paso 3b mira pagos de TODOS los pedidos de la mesa, pero el
+    // FOR UPDATE del pedido solo frena los cobros de ESTE pedido: un pago de
+    // Ana en otro pedido de la mesa podía entrar entre la lectura y el COMMIT,
+    // y quedaban los dos (el pago y el plato cancelado). Todos los cobros
+    // (registrarPago, cobrarMesa en caja y el pago en línea) bloquean la mesa
+    // primero, así que ahora uno espera al otro y el segundo decide con lo que
+    // el primero confirmó.
+    //
+    // La mesa sale de una subconsulta en la misma sentencia (como en
+    // actualizarEstado): sin leer y después bloquear. Un domicilio no tiene
+    // mesa: la subconsulta da NULL, no hay fila y no se bloquea nada.
+    if (esPersonal) {
+      await client.query(
+        `SELECT m.id_mesa FROM mesas m
+          WHERE m.id_mesa = (SELECT p.id_mesa FROM pedidos p WHERE p.id_pedido = $1::int)
+          FOR UPDATE`,
+        [idPedido]
+      );
     }
 
     // 1. Pedido, y después la línea: siempre en este orden.
@@ -682,6 +871,36 @@ async function cancelarItem(idPedido, idDetalle, actor) {
         [idPedido]
       );
       if (pago.rows[0].bloquea) return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado });
+    }
+
+    // 3b. PERSONAL (T4, review de #235): el comensal DUEÑO de la línea ya pagó
+    // en la visita actual de la mesa -> 409 pago_registrado, y nada cambia.
+    // Sin esto, el mesero le cancelaba el plato y su pago quedaba como crédito
+    // de toda la mesa: lo de Ana pagaba lo de Beto y Caro (la mesa debía
+    // 40.000 y los demás sumaban 52.000), y devolverlo por Wompi no es viable.
+    //
+    // Cuenta un pago COMPLETADO de ese comensal en CUALQUIER pedido de la mesa
+    // («pagar lo mío» reparte entre pedidos) hecho desde que empezó la sesión
+    // vigente (t.creado_en >= mesas.sesion_iniciada_en, la visita de
+    // obtener_cuenta_mesa), y siempre los del propio pedido (un domicilio no
+    // tiene mesa; una mesa sin sesión delimitada, solo este pedido). Una línea
+    // «General» (sin comensal) se bloquea con cualquier pago «General» o de la
+    // mesa completa (comensal NULL). La regla del #206 (paso 4b) sigue igual.
+    if (esPersonal) {
+      const pagos = await client.query(
+        `SELECT DISTINCT t.comensal
+           FROM transacciones t
+           JOIN pedidos p ON p.id_pedido = t.id_pedido
+          WHERE t.estado_transaccion = 'completada'
+            AND (t.id_pedido = $1::int
+                 OR (p.id_mesa = $2::int
+                     AND t.creado_en >= (SELECT m.sesion_iniciada_en FROM mesas m WHERE m.id_mesa = $2::int)))`,
+        [idPedido, pedido.id_mesa]
+      );
+      const dueno = claveDeCuenta(linea.comensal);
+      if (pagos.rows.some((t) => claveDeCuenta(t.comensal) === dueno)) {
+        return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado, mensaje: MENSAJE_COMENSAL_YA_PAGO });
+      }
     }
 
     // 4. La línea COMPLETA. La base decide el stock (devolución o merma, según
@@ -787,6 +1006,7 @@ const MOTIVOS_CANCELAR_PEDIDO = Object.freeze({
   compartido: 'pedido_compartido',
   noCancelable: 'no_cancelable',
   pagoRegistrado: 'pago_registrado',
+  pagoEnCurso: 'pago_en_curso',
 });
 
 /**
@@ -821,6 +1041,11 @@ const MOTIVOS_CANCELAR_PEDIDO = Object.freeze({
  *   | {pedido: object, estadoAnterior: string}>}
  */
 async function cancelarPedidoComensal(idPedido, { idMesa, comensal }) {
+  // T4: un pago en línea en curso en SU mesa -> 409 pago_en_curso, antes de
+  // abrir la transacción. Pedido entero: se consulta sin comensal.
+  const enCurso = await conflictoPorPagoEnCursoDelPedido(idPedido, idMesa);
+  if (enCurso) return enCurso;
+
   const client = await pool.connect();
   const salir = async (resultado) => {
     await client.query('ROLLBACK');
@@ -937,6 +1162,12 @@ module.exports = {
   cancelarPedidoComensal,
   MOTIVOS_QUITAR_ITEM,
   MOTIVOS_CANCELAR_PEDIDO,
+  // T4
+  claveDeCuenta,
+  MENSAJE_COMENSAL_YA_PAGO,
+  MENSAJE_PAGO_EN_CURSO,
+  MENSAJE_PAGO_SIN_VERIFICAR,
+  DETALLE_SIN_VERIFICAR,
   // D-20a
   entregaEnCamino,
   cerrarSiEntregadoYPagado,

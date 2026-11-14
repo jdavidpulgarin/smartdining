@@ -1,4 +1,5 @@
 const { PREFIJO } = require('./redis');
+const { claveAlias } = require('../alias');
 
 // La marca de "cuenta pedida" es de la sesión de mesa; si la mesa nunca se
 // libera, que no quede para siempre.
@@ -36,23 +37,39 @@ function crearEstadoMesasRedis({ cliente, ahora = Date.now }) {
       await cliente.del([llave(idMesa, 'cuenta'), llave(idMesa, 'llamada'), llave(idMesa, 'pagaron'), llave(idMesa, 'sin_celular')]);
       await cliente.hDel(INDICE, String(idMesa));
     },
-    /** Anota que `alias` pagó en esta sesión (hash sd:mesa:{ID}:pagaron, idempotente). */
+    /**
+     * Anota que `alias` pagó en esta sesión (hash sd:mesa:{ID}:pagaron,
+     * idempotente). El campo es la CLAVE del alias: «Ana» y «ana» son una
+     * persona. HSETNX: se queda el primer alias con el que se anotó.
+     */
     async marcarPago(idMesa, alias) {
       const k = llave(idMesa, 'pagaron');
-      await cliente.hSet(k, alias, alias);
+      await cliente.hSetNX(k, claveAlias(alias) ?? alias, alias);
       await cliente.expire(k, TTL_CUENTA_SEG);
       await anotarEnIndice(idMesa);
     },
     /** Deshace un marcarPago que llegó tarde a una mesa ya liberada (ver anotarPagoEnSesion en pagos.js). */
     async desmarcarPago(idMesa, alias) {
-      await cliente.hDel(llave(idMesa, 'pagaron'), alias);
+      // Todo campo de esa persona: el de la clave y, si quedó de antes de anotar
+      // por clave, el del texto con el que se anotó («Ana»), aunque ahora se
+      // pida con otro («ANA»). El hash es de una mesa: unos pocos campos.
+      const k = llave(idMesa, 'pagaron');
+      const clave = claveAlias(alias) ?? alias;
+      const campos = Object.keys(await cliente.hGetAll(k)).filter((c) => (claveAlias(c) ?? c) === clave);
+      for (const c of campos) await cliente.hDel(k, c); // eslint-disable-line no-await-in-loop
       // Sin nada anotado, la mesa sale del índice (como al liberarla).
       const quedan = (await cliente.hLen(llave(idMesa, 'pagaron'))) + (await cliente.hLen(llave(idMesa, 'sin_celular')));
       if (quedan === 0) await cliente.hDel(INDICE, String(idMesa));
     },
     /** Alias que ya pagaron en esta sesión, ordenados. */
     async pagaron(idMesa) {
-      return (await cliente.hVals(llave(idMesa, 'pagaron'))).sort((a, b) => a.localeCompare(b));
+      // Un alias por persona, también con lo anotado antes por el texto exacto.
+      const porClave = new Map();
+      for (const a of await cliente.hVals(llave(idMesa, 'pagaron'))) {
+        const c = claveAlias(a) ?? a;
+        if (!porClave.has(c)) porClave.set(c, a);
+      }
+      return [...porClave.values()].sort((a, b) => a.localeCompare(b));
     },
     /**
      * Comensales sin celular (EVENTS.md §6.4): hash sd:mesa:{ID}:sin_celular,

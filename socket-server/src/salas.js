@@ -41,6 +41,7 @@ function resolverMesa(identidad, idPayload) {
  */
 function registrarSalas(socket, {
   obtenerSnapshot, sesionVigente = () => true, alCambiarSala = () => {}, alEntrarComensal = () => {},
+  alVolverComensal = () => false,
 } = {}) {
   const identidad = socket.data.identidad;
 
@@ -75,7 +76,9 @@ function registrarSalas(socket, {
     socket.join(salaMesa(idMesa));
     if (identidad.rol === ROL_COMENSAL) {
       alEntrarComensal(idMesa);
-      alCambiarSala(idMesa);
+      // Si volvía dentro de su periodo de gracia, para los demás nunca se fue:
+      // no se avisa la presencia (EVENTS.md §5.2).
+      if (!alVolverComensal(idMesa, identidad.comensal)) alCambiarSala(idMesa);
     }
     const respuesta = { id_mesa: idMesa, sala: salaMesa(idMesa) };
     if (obtenerSnapshot) respuesta.carrito = await obtenerSnapshot(idMesa);

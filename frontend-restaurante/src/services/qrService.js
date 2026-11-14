@@ -226,8 +226,10 @@ export async function solicitarTokenPantalla(idMesa) {
  * @returns {Promise<{ ok: true, token: string, url: string, expira_en: number|null }>}
  * @throws Error con .status si el backend rechaza (401/403/409/503)
  */
-export async function notificarQrRotado(idMesa) {
-  const data = await mesasApi.rotarQr(Number(idMesa))
+export async function notificarQrRotado(idMesa, { soloSiVacia = true } = {}) {
+  // Desde la tablet nunca se fuerza: con gente en la mesa el backend responde
+  // 409 mesa_con_comensales y el QR se queda (T3).
+  const data = await mesasApi.rotarQr(Number(idMesa), { soloSiVacia })
   // El backend solo devuelve la url; el token se lee de ahí para redibujar.
   let token = null
   try {

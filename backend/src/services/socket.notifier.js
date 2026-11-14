@@ -71,7 +71,11 @@ async function enviar(ruta, cuerpo) {
     // Incluye el timeout (AbortError) y que el socket-server no esté levantado.
     const motivo = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'TIMEOUT' : 'INALCANZABLE';
     console.error(`[socket] ${ruta} no se pudo notificar (${motivo}):`, err.message);
-    return { ok: false, motivo };
+    // El código del sistema (ECONNREFUSED, ECONNRESET, ETIMEDOUT, EAI_AGAIN…)
+    // viene en err.cause con el fetch de Node. Solo el código, para el log de
+    // quien reintenta (services/avisos-stock-cola.js).
+    const codigo = err && err.cause && typeof err.cause.code === 'string' ? err.cause.code : undefined;
+    return codigo ? { ok: false, motivo, codigo } : { ok: false, motivo };
   }
 }
 
@@ -544,6 +548,62 @@ async function notificarMesaLiberada(id_mesa, motivo) {
   return enviar('/internal/mesa-liberada', cuerpo);
 }
 
+/** Motivos de mesa-actualizada que manda el backend (EVENTS.md §5.7). */
+const MOTIVOS_MESA_ACTUALIZADA = Object.freeze({
+  abierta: 'abierta',
+  estado: 'estado',
+  creada: 'creada',
+  datos: 'datos',
+  liberada: 'liberada',
+  eliminada: 'eliminada',
+});
+
+/**
+ * Cuerpo de POST /internal/mesa-actualizada (T12, EVENTS.md §5.7) a partir de
+ * la fila de la mesa YA CONFIRMADA. Solo los campos del contrato, los mismos
+ * que GET /mesas: `token_qr` NUNCA viaja (de él solo sale `sesion_abierta`).
+ *
+ * Coherencia del contrato (si no, el socket-server responde 400 y no emite):
+ * 'liberada' con sesión abierta, o 'abierta' sin sesión, solo pueden pasar si
+ * alguien cambió la mesa entre el COMMIT y esta lectura. Entonces el aviso va
+ * SIN motivo: el panel recibe igual el estado actual, que es lo que importa.
+ *
+ * Con 'eliminada' la fila ya no existe: solo eventId, id_mesa y activa: false.
+ */
+function cuerpoMesaActualizada(mesa, motivo) {
+  if (motivo === MOTIVOS_MESA_ACTUALIZADA.eliminada) {
+    return { eventId: nuevoEventId(), id_mesa: mesa.id_mesa, activa: false, motivo };
+  }
+  const sesionAbierta = mesa.sesion_abierta !== undefined ? Boolean(mesa.sesion_abierta) : Boolean(mesa.token_qr);
+  const cuerpo = {
+    eventId: nuevoEventId(),
+    id_mesa: mesa.id_mesa,
+    numero: mesa.numero,
+    capacidad: mesa.capacidad,
+    estado: mesa.estado,
+    ubicacion: mesa.ubicacion,
+    activa: mesa.activa ?? true,
+    sesion_abierta: sesionAbierta,
+  };
+  const incoherente =
+    (motivo === MOTIVOS_MESA_ACTUALIZADA.liberada && sesionAbierta)
+    || (motivo === MOTIVOS_MESA_ACTUALIZADA.abierta && !sesionAbierta);
+  if (motivo && !incoherente) cuerpo.motivo = motivo;
+  return cuerpo;
+}
+
+/**
+ * POST /internal/mesa-actualizada — el panel ve en vivo que una mesa cambió.
+ * Con reintento ante 500/502/503 ERROR_INTERNO y el MISMO eventId (§5.7); nunca
+ * ante NO_CONFIGURADO ni un 4xx. Nunca lanza.
+ *
+ * @param {object} mesa  la fila confirmada (con token_qr o con sesion_abierta)
+ * @param {string} motivo  uno de MOTIVOS_MESA_ACTUALIZADA
+ */
+async function notificarMesaActualizada(mesa, motivo) {
+  return enviarConReintento('/internal/mesa-actualizada', cuerpoMesaActualizada(mesa, motivo));
+}
+
 /**
  * POST /internal/ingrediente-disponibilidad (D-05) — un ingrediente se agotó
  * (`false`) o volvió (`true`). El socket-server lo difunde a TODOS los sockets
@@ -828,7 +888,92 @@ function notificarMesaComensal(id_mesa, alias, accion, clave) {
   );
 }
 
+/* -------------------------------------------------------------------------- *
+ * T4: GET /internal/pagos-en-curso (EVENTS.md §6.6, #260)
+ * -------------------------------------------------------------------------- */
+
+/** Timeout de la consulta: lo fija el contrato (§6.6), no SOCKET_TIMEOUT_MS. */
+const TIMEOUT_PAGOS_EN_CURSO_MS = 1500;
+
+/**
+ * ¿Hay un pago en línea en curso en la mesa que impida cancelar un plato?
+ *
+ * A diferencia de los avisos, aquí el resultado DECIDE: se consulta antes de
+ * cancelar, y ante la duda se responde que no se pudo verificar. Nunca lanza.
+ *
+ *   - 200 con `enCurso` booleano     -> 'en_curso' | 'libre'
+ *   - timeout, falla de red, 5xx (incluido el 503 NO_CONFIGURADO) o un 200
+ *     que no se entiende              -> 'sin_verificar'
+ *   - 4xx                             -> 'sin_verificar' y ERROR en el log
+ *     (consulta mal armada o clave errada: es un bug nuestro)
+ *   - sin SOCKET_URL                  -> 'omitido' (advertencia en el log),
+ *     salvo NODE_ENV=production, donde es 'sin_verificar'
+ *   - con SOCKET_URL y sin INTERNAL_API_KEY -> 'sin_verificar' y ERROR en el
+ *     log (el socket-server respondería 401: mal configurado)
+ *
+ * Al log va solo el status y el `codigo` del socket-server, nunca la clave.
+ *
+ * @param {number} idMesa
+ * @param {string|null} comensal  alias de la línea, o null para «General»
+ * @returns {Promise<{estado: 'libre'|'en_curso'|'sin_verificar'|'omitido'}>}
+ */
+async function consultarPagosEnCurso(idMesa, comensal = null) {
+  const { url, clave } = config();
+  if (!url) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[socket] pagos-en-curso: sin SOCKET_URL en produccion; no se puede verificar');
+      return { estado: 'sin_verificar' };
+    }
+    console.warn('[socket] pagos-en-curso: sin SOCKET_URL, se omite la verificacion (fuera de produccion)');
+    return { estado: 'omitido' };
+  }
+  if (!clave) {
+    console.error('[socket] pagos-en-curso: hay SOCKET_URL pero no INTERNAL_API_KEY; no se puede verificar');
+    return { estado: 'sin_verificar' };
+  }
+
+  const params = new URLSearchParams({ mesa: String(idMesa) });
+  if (comensal) params.set('comensal', comensal);
+
+  try {
+    const res = await fetch(`${url}/internal/pagos-en-curso?${params.toString()}`, {
+      method: 'GET',
+      headers: { 'x-internal-key': clave },
+      signal: AbortSignal.timeout(TIMEOUT_PAGOS_EN_CURSO_MS),
+    });
+    const texto = await res.text();
+    let respuesta = null;
+    try {
+      respuesta = texto ? JSON.parse(texto) : null;
+    } catch {
+      respuesta = null;
+    }
+    const codigo = respuesta && typeof respuesta.codigo === 'string' ? respuesta.codigo : '';
+
+    if (res.status >= 400 && res.status < 500) {
+      console.error(`[socket] pagos-en-curso respondio ${res.status} ${codigo}: consulta mal armada o clave errada`.trim());
+      return { estado: 'sin_verificar' };
+    }
+    if (!res.ok) {
+      console.error(`[socket] pagos-en-curso respondio ${res.status} ${codigo}: no se puede verificar`.trim());
+      return { estado: 'sin_verificar' };
+    }
+    if (!respuesta || typeof respuesta.enCurso !== 'boolean') {
+      console.error('[socket] pagos-en-curso: respuesta sin enCurso; no se puede verificar');
+      return { estado: 'sin_verificar' };
+    }
+    return { estado: respuesta.enCurso ? 'en_curso' : 'libre' };
+  } catch (err) {
+    const motivo = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'TIMEOUT' : 'INALCANZABLE';
+    const sistema = err && err.cause && typeof err.cause.code === 'string' ? `/${err.cause.code}` : '';
+    console.error(`[socket] pagos-en-curso no respondio (${motivo}${sistema}): no se puede verificar`);
+    return { estado: 'sin_verificar' };
+  }
+}
+
 module.exports = {
+  consultarPagosEnCurso,
+  TIMEOUT_PAGOS_EN_CURSO_MS,
   nuevoEventId,
   notificarInventarioAlerta,
   armarPedido,
@@ -842,6 +987,9 @@ module.exports = {
   notificarItemCancelado,
   notificarPagoConfirmado,
   notificarMesaLiberada,
+  notificarMesaActualizada,
+  cuerpoMesaActualizada,
+  MOTIVOS_MESA_ACTUALIZADA,
   notificarIngredienteDisponibilidad,
   notificarPlatoDisponibilidad,
   notificarMesaComensal,

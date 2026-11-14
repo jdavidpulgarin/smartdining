@@ -13,13 +13,15 @@ import {
   Sparkles,
   RefreshCw,
 } from 'lucide-react'
-import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
+import { mesasApi, pedidosApi, transaccionesApi, excedentesApi, getAuthToken } from '../services/api'
 import { useAuth, useSocketListener, useTables } from '../hooks'
+import { crearUltimaPeticion } from '../utils/ultimaPeticion'
 import {
   puedeUsarCaja,
   comensalDelCobro,
   idCobroParaEnviar,
   mensajeDeErrorCobro,
+  recargarCuentasTrasError,
   descartarIdCobro,
   agruparCobros,
   horaBogota,
@@ -27,6 +29,7 @@ import {
   voucherDelCobro,
   VOUCHER_MAX,
 } from '../utils/caja'
+import { listaExcedentes, textoExcedente, yaNoPendiente, mensajeErrorDevuelto } from '../utils/excedentes'
 
 function formatCOP(monto) {
   const num = Number(monto) || 0
@@ -52,7 +55,7 @@ export function Caja() {
 }
 
 function CajaRegistradora() {
-  const { cargarMesas } = useTables()
+  const { cargarMesas, tables } = useTables()
   const [searchParams] = useSearchParams()
 
   const [loading, setLoading] = useState(() => Boolean(getAuthToken()))
@@ -131,30 +134,33 @@ function CajaRegistradora() {
 
   const cobrosDelDia = useMemo(() => agruparCobros(dia?.transacciones || []), [dia])
 
+  // Solo cuenta la última recarga de cuentas (T4): ver utils/ultimaPeticion.
+  const [ultimaCarga] = useState(() => crearUltimaPeticion())
+
   /**
-   * Carga las cuentas activas directamente desde la API para todas las mesas ocupadas
+   * Carga las cuentas de todas las mesas ocupadas desde la API.
+   *
+   * Varias recargas pueden salir seguidas (quitar dos platos, un cobro, el
+   * pedido que pasa a cancelado...) y responder en otro orden. Solo se aplica
+   * la respuesta de la ÚLTIMA: una vieja que llega tarde ya no pisa el saldo.
    */
   const cargarCuentas = useCallback(async () => {
     const token = getAuthToken()
     if (!token) return
 
+    const peticion = ultimaCarga.nueva()
     setLoading(true)
     setErrorMessage(null)
 
     try {
-      // 1. Obtener estado actual de las mesas
+      // 1. Estado actual de las mesas
       const mesasRes = await mesasApi.listar()
       const listaMesas = mesasRes?.mesas || []
 
-      // 2. Para cada mesa ocupada, consultar su cuenta desglosada
+      // 2. Para cada mesa ocupada, su cuenta desglosada
       const mesasOcupadas = listaMesas.filter(
         (m) => m.estado === 'ocupada' || Boolean(m.sesion_abierta)
       )
-
-      if (mesasOcupadas.length === 0) {
-        setCuentasMesas([])
-        return
-      }
 
       const promesas = mesasOcupadas.map(async (mesa) => {
         try {
@@ -176,6 +182,7 @@ function CajaRegistradora() {
         (c) => c && (Number(c.saldo_mesa) > 0 || Number(c.total_mesa) > 0)
       )
 
+      if (!peticion.vigente()) return
       setCuentasMesas(cuentas)
 
       // Seleccionar automáticamente la primera mesa si no hay una elegida
@@ -184,12 +191,13 @@ function CajaRegistradora() {
         return cuentas[0]?.id_mesa || null
       })
     } catch (err) {
+      if (!peticion.vigente()) return
       console.warn('Aviso al cargar cuentas de caja:', err.message)
       setErrorMessage('No se pudieron consultar las cuentas del salón.')
     } finally {
-      setLoading(false)
+      if (peticion.vigente()) setLoading(false)
     }
-  }, [])
+  }, [ultimaCarga])
 
   const handleSelectMesa = useCallback((mesaId) => {
     setSelectedMesaId(mesaId)
@@ -197,70 +205,73 @@ function CajaRegistradora() {
     setErrorCobro(null)
   }, [])
 
-  // Cargar cuentas al montar de forma asíncrona
+  // Cargar cuentas al montar, en la microtarea siguiente (fuera del cuerpo del
+  // efecto: el estado inicial ya es «cargando»). Al desmontar, lo que esté en
+  // vuelo se descarta.
+  useEffect(() => {
+    let montada = true
+    Promise.resolve().then(() => {
+      if (montada) cargarCuentas()
+    })
+    return () => {
+      montada = false
+      ultimaCarga.invalidar()
+    }
+  }, [cargarCuentas, ultimaCarga])
+
+  // T4 (§8.7): excedentes del pago en línea por devolver en efectivo. Se cargan
+  // al montar, al (re)conectar y con cada pago:excedente (solo llega al panel).
+  const [excedentes, setExcedentes] = useState([])
+  const [avisoExcedente, setAvisoExcedente] = useState(null)
+  const [devolviendo, setDevolviendo] = useState(null)
+  const cargarExcedentes = useCallback(async () => {
+    try {
+      setExcedentes(listaExcedentes(await excedentesApi.pendientes()))
+    } catch {
+      // Sin respuesta se queda la lista que había; el próximo aviso la recarga.
+    }
+  }, [])
   useEffect(() => {
     let cancel = false
-    const token = getAuthToken()
-    if (!token) return
-
-    mesasApi
-      .listar()
-      .then(async (mesasRes) => {
-        if (cancel) return
-        const listaMesas = mesasRes?.mesas || []
-        const mesasOcupadas = listaMesas.filter(
-          (m) => m.estado === 'ocupada' || Boolean(m.sesion_abierta)
-        )
-
-        if (mesasOcupadas.length === 0) {
-          if (!cancel) {
-            setCuentasMesas([])
-            setLoading(false)
-          }
-          return
-        }
-
-        const promesas = mesasOcupadas.map(async (mesa) => {
-          try {
-            const cuenta = await mesasApi.obtenerCuenta(mesa.id_mesa)
-            if (cuenta) {
-              return {
-                ...cuenta,
-                numero_mesa: mesa.numero,
-                ubicacion_mesa: mesa.ubicacion,
-              }
-            }
-          } catch {
-            // Ignorar
-          }
-          return null
-        })
-
-        const cuentas = (await Promise.all(promesas)).filter(
-          (c) => c && (Number(c.saldo_mesa) > 0 || Number(c.total_mesa) > 0)
-        )
-
-        if (!cancel) {
-          setCuentasMesas(cuentas)
-          setSelectedMesaId((prev) => {
-            if (prev && cuentas.some((c) => c.id_mesa === prev)) return prev
-            return cuentas[0]?.id_mesa || null
-          })
-          setLoading(false)
-        }
+    excedentesApi
+      .pendientes()
+      .then((r) => {
+        if (!cancel) setExcedentes(listaExcedentes(r))
       })
-      .catch((err) => {
-        if (!cancel) {
-          console.warn('Aviso al cargar cuentas de caja:', err.message)
-          setErrorMessage('No se pudieron consultar las cuentas del salón.')
-          setLoading(false)
-        }
+      .catch(() => {
+        // Sin respuesta: la lista vacía; el próximo aviso o la reconexión la cargan.
       })
-
     return () => {
       cancel = true
     }
   }, [])
+  useSocketListener('pago:excedente', () => cargarExcedentes())
+  const numeroMesa = useCallback(
+    (id) => (tables || []).find((t) => Number(t.id_mesa ?? t.id) === Number(id))?.numero ?? id,
+    [tables]
+  )
+  const marcarDevuelto = async (x) => {
+    setDevolviendo(x.id)
+    setAvisoExcedente(null)
+    try {
+      await excedentesApi.marcarDevuelto(x.id)
+      setExcedentes((l) => l.filter((e) => e.id !== x.id))
+    } catch (err) {
+      setAvisoExcedente(mensajeErrorDevuelto(err))
+      if (yaNoPendiente(err)) setExcedentes((l) => l.filter((e) => e.id !== x.id))
+    } finally {
+      setDevolviendo(null)
+      cargarExcedentes()
+    }
+  }
+
+  // Al (re)conectar el socket se recargan las cuentas y lo cobrado hoy: los
+  // avisos que llegaron con el socket caído se perdieron (T4).
+  useSocketListener('connect', () => {
+    cargarCuentas()
+    cargarDia()
+    cargarExcedentes()
+  })
 
   // Escuchar eventos de WebSockets en tiempo real para mantener la caja sincronizada
   useSocketListener('order:created', () => cargarCuentas())
@@ -454,7 +465,7 @@ function CajaRegistradora() {
       if (descartarIdCobro(err)) cobroPendiente.current = null
       setErrorCobro(mensajeDeErrorCobro(err, formatCOP))
       // El saldo cambió por otro lado: se recarga para que el cajero vea el real.
-      if (err?.motivo === 'excede' || err?.motivo === 'sin_cuenta') await cargarCuentas()
+      if (recargarCuentasTrasError(err)) await cargarCuentas()
     } finally {
       enviando.current = false
       setProcessingPayment(false)
@@ -526,6 +537,36 @@ function CajaRegistradora() {
             <span className="sd-counter-alert">{formatCOP(totalSaldoSalon)} POR COBRAR</span>
           </div>
         </header>
+
+        {(excedentes.length > 0 || avisoExcedente) && (
+          <section
+            aria-labelledby="titulo-excedentes"
+            data-testid="caja-excedentes"
+            className="table-toast-banner error"
+            role="alert"
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 10, marginBottom: 20 }}
+          >
+            {excedentes.length > 0 && (
+              <h2 id="titulo-excedentes" style={{ margin: 0, fontFamily: 'var(--sd-font-heading)', fontSize: 18, textTransform: 'uppercase' }}>
+                Devolver en efectivo ({excedentes.length})
+              </h2>
+            )}
+            {excedentes.map((x) => (
+              <div key={x.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <span>{textoExcedente(x, formatCOP, numeroMesa)}</span>
+                <button
+                  type="button"
+                  className="sd-btn sd-btn-primary"
+                  onClick={() => marcarDevuelto(x)}
+                  disabled={devolviendo === x.id}
+                >
+                  {devolviendo === x.id ? 'Marcando…' : 'Devuelto en efectivo'}
+                </button>
+              </div>
+            ))}
+            {avisoExcedente && <span>{avisoExcedente}</span>}
+          </section>
+        )}
 
         {errorMessage && (
           <div className="table-toast-banner info" style={{ marginBottom: 20 }}>
