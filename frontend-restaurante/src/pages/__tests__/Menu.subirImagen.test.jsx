@@ -149,3 +149,42 @@ describe('Menú: subir la imagen de un plato nuevo', () => {
     expect(JSON.parse(crear.config.body).url_imagen).toBe(RUTA)
   })
 })
+
+describe('SubirImagen: el formulario se cierra a mitad de la subida (revisión de Roberto en #230)', () => {
+  it('la subida que termina después NO escribe su ruta (onCambio no se llama) y el padre deja de estar «subiendo» al cerrar', async () => {
+    let soltar
+    backend({ subida: () => new Promise((r) => { soltar = () => r(json({ ruta: RUTA }, 201)) }) })
+    const onCambio = vi.fn()
+    const onSubiendo = vi.fn()
+    const { unmount } = render(<SubirImagen valor="" onCambio={onCambio} onSubiendo={onSubiendo} etiqueta="foto del plato" />)
+    elegir(png())
+    await waitFor(() => expect(onSubiendo).toHaveBeenCalledWith(true))
+    await waitFor(() => expect(subidas()).toHaveLength(1))
+
+    unmount()
+    expect(onSubiendo).toHaveBeenLastCalledWith(false)
+    const avisos = onSubiendo.mock.calls.length
+
+    soltar()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(onCambio).not.toHaveBeenCalled()
+    // La subida vieja ya no avisa nada: no apaga el «subiendo» de otra subida.
+    expect(onSubiendo.mock.calls.length).toBe(avisos)
+  })
+
+  it('si falla después de cerrar tampoco toca nada', async () => {
+    let fallar
+    backend({ subida: () => new Promise((_, rej) => { fallar = () => rej(new TypeError('Failed to fetch')) }) })
+    const onCambio = vi.fn()
+    const onSubiendo = vi.fn()
+    const { unmount } = render(<SubirImagen valor="" onCambio={onCambio} onSubiendo={onSubiendo} />)
+    elegir(png())
+    await waitFor(() => expect(subidas()).toHaveLength(1))
+    unmount()
+    const avisos = onSubiendo.mock.calls.length
+    fallar()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(onCambio).not.toHaveBeenCalled()
+    expect(onSubiendo.mock.calls.length).toBe(avisos)
+  })
+})

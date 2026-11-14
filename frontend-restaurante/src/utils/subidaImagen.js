@@ -58,7 +58,10 @@ export async function revisarArchivoImagen(archivo, maxBytes = MAX_BYTES_IMAGEN)
  */
 export function mensajeErrorSubida(err) {
   if (err?.sinConexion) return 'Sin conexión: la imagen no se subió.'
-  switch (err?.motivo) {
+  // Un 429 de nginx (limit_req de /api/imagenes) llega con cuerpo HTML y sin
+  // motivo: es el mismo límite que el del backend (revisión de Roberto en #230).
+  const motivo = err?.motivo || (err?.status === 429 ? 'demasiadas_peticiones' : null)
+  switch (motivo) {
     case 'archivo_muy_grande':
       return `La imagen supera el máximo de ${megas(MAX_BYTES_IMAGEN)} del servidor.`
     case 'tipo_no_permitido':

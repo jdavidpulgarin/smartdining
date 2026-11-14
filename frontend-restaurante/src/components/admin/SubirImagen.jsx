@@ -25,6 +25,26 @@ export function SubirImagen({ valor, onCambio, onSubiendo, etiqueta = 'imagen' }
   const [aviso, setAviso] = useState(null)
   const [falloVista, setFalloVista] = useState(null)
 
+  // ¿Sigue abierto el formulario? Si se cierra a mitad de una subida (clic en
+  // el fondo del modal) y se abre otro plato, la subida vieja NO puede escribir
+  // su ruta en el formulario nuevo (revisión de Roberto en #230).
+  // Al cerrarse con una subida en curso, el padre deja de estar «subiendo» en
+  // ese momento (no cuando termine), y la subida vieja ya no lo toca: así no
+  // apaga el «subiendo» de una subida nueva en el formulario siguiente.
+  const montado = useRef(true)
+  const enCurso = useRef(false)
+  const avisarSubiendo = useRef(onSubiendo)
+  useEffect(() => {
+    avisarSubiendo.current = onSubiendo
+  }, [onSubiendo])
+  useEffect(() => {
+    montado.current = true
+    return () => {
+      montado.current = false
+      if (enCurso.current) avisarSubiendo.current?.(false)
+    }
+  }, [])
+
   // La URL local del archivo elegido se libera al cambiarla o al desmontar.
   useEffect(() => () => { if (local) URL.revokeObjectURL(local) }, [local])
 
@@ -43,18 +63,24 @@ export function SubirImagen({ valor, onCambio, onSubiendo, etiqueta = 'imagen' }
     }
     setLocal(URL.createObjectURL(archivo))
     setSubiendo(true)
+    enCurso.current = true
     onSubiendo?.(true)
     try {
       const { ruta } = await imagenesApi.subir(archivo)
+      if (!montado.current) return
       onCambio(ruta)
       setAviso('Imagen subida. Se guarda al guardar.')
       setLocal(null)
     } catch (err) {
+      if (!montado.current) return
       setError(mensajeErrorSubida(err))
       setLocal(null)
     } finally {
-      setSubiendo(false)
-      onSubiendo?.(false)
+      enCurso.current = false
+      if (montado.current) {
+        setSubiendo(false)
+        onSubiendo?.(false)
+      }
     }
   }
 

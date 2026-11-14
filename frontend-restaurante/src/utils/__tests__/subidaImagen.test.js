@@ -56,6 +56,8 @@ describe('mensajeErrorSubida: el motivo del backend en palabras', () => {
     [{ motivo: 'imagen_invalida', status: 422 }, /dañada/],
     [{ motivo: 'sin_archivo', status: 400 }, /No llegó/],
     [{ motivo: 'demasiadas_peticiones', status: 429, retryAfter: 125 }, /Espera 3 min/],
+    // 429 de nginx (limit_req): cuerpo HTML, sin motivo → el mismo mensaje (revisión de Roberto en #230)
+    [{ status: 429, message: 'Error 429' }, /Subiste muchas imágenes seguidas. Espera 1 min/],
     [{ status: 403, message: 'Prohibido' }, /administrador/],
     [{ sinConexion: true }, /Sin conexión/],
     [{ status: 500, message: 'Error interno' }, /no se subió: Error interno/],
