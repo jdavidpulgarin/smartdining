@@ -222,3 +222,29 @@ test('importar la app no instala manejadores de senal', () => {
   assert.deepStrictEqual(process.listeners('SIGTERM'), []);
   assert.deepStrictEqual(process.listeners('SIGINT'), []);
 });
+
+test('d20b: el vencimiento de por_pagar se detiene (y se espera su pasada) ANTES de cerrar el pool', async () => {
+  const vencimiento = require('../src/services/vencimiento-por-pagar');
+  const traza = [];
+  const restaurar = instalarDobles(traza);
+  const detenerReal = vencimiento.tarea.detener;
+  vencimiento.tarea.detener = async () => {
+    await new Promise((r) => setTimeout(r, 10)); // una pasada que termina
+    traza.push('vencimiento');
+  };
+  const { codigos, salir } = recogerSalida();
+  try {
+    const alApagar = apagadoOrdenado(fakeServidor(traza), { log: silencio, salir });
+    await alApagar('SIGTERM');
+    assert.deepStrictEqual(traza, ['http', 'redis', 'vencimiento', 'pool']);
+    assert.deepStrictEqual(codigos, [0]);
+  } finally {
+    vencimiento.tarea.detener = detenerReal;
+    restaurar();
+  }
+});
+
+test('d20b: importar la app no arranca el vencimiento (desactivado en las pruebas)', () => {
+  const vencimiento = require('../src/services/vencimiento-por-pagar');
+  assert.strictEqual(vencimiento.tarea.estado().activo, false);
+});

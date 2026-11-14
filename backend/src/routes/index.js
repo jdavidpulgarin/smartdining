@@ -13,6 +13,7 @@ const kdsRoutes = require('./kds.routes');
 const transaccionesRoutes = require('./transacciones.routes');
 const excedentesRoutes = require('./excedentes.routes');
 const pagosRoutes = require('./pagos.routes');
+const pedidosDomicilioRoutes = require('./pedidos-domicilio.routes');
 const reportesRoutes = require('./reportes.routes');
 const configuracionRoutes = require('./configuracion.routes');
 const inventarioRoutes = require('./inventario.routes');
@@ -42,6 +43,9 @@ router.use('/transacciones', transaccionesRoutes);
 // como las demás rutas de cobro).
 router.use('/excedentes-pago-en-linea', excedentesRoutes);
 router.use('/pagos', pagosRoutes);
+// D-20b: el canal interno de los pedidos de la app (socket-server, x-internal-key).
+// Solo /api: el segmento `interno` lo deja fuera de v1 (montaje.js).
+router.use('/pedidos-domicilio', pedidosDomicilioRoutes.interno);
 // D-07: metricas del panel de administracion.
 router.use('/reportes', reportesRoutes);
 // D-16 parte B: configuracion del restaurante. GET / es publica; el resto, admin.

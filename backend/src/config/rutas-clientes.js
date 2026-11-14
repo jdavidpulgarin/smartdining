@@ -12,7 +12,10 @@
  * rutas de clientes", "Datos personales" y "D-20a · Despacho y repartidor").
  */
 
-const PREFIJOS_CLIENTES = Object.freeze(['/api/v1/auth/clientes', '/api/v1/clientes', '/api/v1/zonas']);
+// D-20b: /api/v1/pedidos-domicilio (los pedidos para llevar y a domicilio de la app).
+const PREFIJOS_CLIENTES = Object.freeze([
+  '/api/v1/auth/clientes', '/api/v1/clientes', '/api/v1/zonas', '/api/v1/pedidos-domicilio',
+]);
 
 /** D-20a. Cada uno en los dos prefijos de la API. */
 const PREFIJOS_DESPACHO = Object.freeze(

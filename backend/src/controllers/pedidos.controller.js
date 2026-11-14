@@ -823,4 +823,9 @@ module.exports = {
   cancelarItem,
   listarPorMesa,
   cuentaDeMiMesa,
+  // D-20b: los pedidos de la app validan los ítems con las MISMAS reglas.
+  itemSchema,
+  sinOverride,
+  MENSAJE_OVERRIDE,
+  MAX_ITEMS_POR_PEDIDO,
 };
