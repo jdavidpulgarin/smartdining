@@ -5,6 +5,11 @@ const { PREFIJO } = require('./redis');
  *
  *   sd:pago:ref:{referencia}             → { id_mesa, comensal, modo, monto_centavos, estado, creada_en, expira_en }
  *   sd:pago:pendiente:{mesa}:{comensal}  → referencia de su intención pendiente
+ *   sd:pago:mesa:{mesa}                  → hash comensal → '1': quién de la mesa
+ *                                          tiene (o tuvo hace poco) una marca de
+ *                                          pendiente. Solo para listarlas (T4,
+ *                                          GET /internal/pagos-en-curso) sin
+ *                                          recorrer todo Redis con SCAN.
  *
  * La marca dura PAGOS_TTL_MINUTOS: si nadie paga, el comensal puede pedir otra.
  * El registro dura más (ttlIntencionRegistroSeg, 26 h por defecto) porque el
@@ -18,6 +23,7 @@ const { PREFIJO } = require('./redis');
  */
 const llaveRef = (ref) => `${PREFIJO}pago:ref:${ref}`;
 const llavePendiente = (idMesa, comensal) => `${PREFIJO}pago:pendiente:${idMesa}:${comensal}`;
+const llaveMesa = (idMesa) => `${PREFIJO}pago:mesa:${idMesa}`;
 const esConflicto = (err) => err && err.name === 'WatchError';
 const MAX_REINTENTOS = 5;
 
@@ -30,6 +36,16 @@ function crearAlmacenPagosMemoria({ ahora = Date.now } = {}) {
     return e.valor;
   };
   const escribir = (k, valor, ttlSeg) => datos.set(k, { valor, expira: ahora() + ttlSeg * 1000 });
+  // Índice por mesa (ver arriba): comensal → vence. Se anota ANTES de fijar la
+  // marca, así toda marca que exista está en el índice; un nombre de más (la
+  // marca venció o la ganó otro) se ignora al listar.
+  const indice = new Map(); // idMesa -> Map(comensal -> expira)
+  const anotarEnMesa = (idMesa, comensal, ttlSeg) => {
+    if (!indice.has(idMesa)) indice.set(idMesa, new Map());
+    const expira = ahora() + ttlSeg * 1000;
+    const mesa = indice.get(idMesa);
+    mesa.set(comensal, Math.max(expira, mesa.get(comensal) || 0));
+  };
 
   return {
     async guardarIntencion(ref, intencion, ttlSeg) { escribir(llaveRef(ref), { ...intencion }, ttlSeg); },
@@ -41,6 +57,7 @@ function crearAlmacenPagosMemoria({ ahora = Date.now } = {}) {
     },
     /** Fija la pendiente solo si no hay otra. Devuelve la referencia ganadora. */
     async reservarPendiente(idMesa, comensal, ref, ttlSeg) {
+      anotarEnMesa(idMesa, comensal, ttlSeg);
       const k = llavePendiente(idMesa, comensal);
       const actual = leer(k);
       if (actual) return actual;
@@ -52,6 +69,7 @@ function crearAlmacenPagosMemoria({ ahora = Date.now } = {}) {
      * (si ya no hay ninguna, reserva `nueva`). Devuelve la referencia ganadora.
      */
     async reemplazarPendiente(idMesa, comensal, vieja, nueva, ttlSeg) {
+      anotarEnMesa(idMesa, comensal, ttlSeg);
       const k = llavePendiente(idMesa, comensal);
       const actual = leer(k);
       if (actual && actual !== vieja) return actual;
@@ -70,6 +88,19 @@ function crearAlmacenPagosMemoria({ ahora = Date.now } = {}) {
     async liberarPendiente(idMesa, comensal, ref) {
       const k = llavePendiente(idMesa, comensal);
       if (leer(k) === ref) datos.delete(k);
+    },
+    /** Las marcas de pendiente vigentes de la mesa: [{ comensal, referencia }]. */
+    async listarPendientesMesa(idMesa) {
+      const mesa = indice.get(idMesa);
+      if (!mesa) return [];
+      const salida = [];
+      for (const [comensal, expira] of [...mesa]) {
+        if (expira <= ahora()) { mesa.delete(comensal); continue; }
+        const referencia = leer(llavePendiente(idMesa, comensal));
+        if (referencia) salida.push({ comensal, referencia });
+      }
+      if (mesa.size === 0) indice.delete(idMesa);
+      return salida;
     },
   };
 }
@@ -90,6 +121,14 @@ async function compararYCambiar(cliente, llaves, fn) {
 }
 
 function crearAlmacenPagosRedis({ cliente }) {
+  // Índice por mesa: se anota ANTES de fijar la marca (ver la versión en
+  // memoria). El hash dura lo que la marca más nueva: cada anotación le renueva
+  // el plazo, y las marcas viejas vencen antes o a la vez.
+  const anotarEnMesa = async (idMesa, comensal, ttlSeg) => {
+    const k = llaveMesa(idMesa);
+    await cliente.hSet(k, comensal, '1');
+    await cliente.expire(k, ttlSeg);
+  };
   return {
     async guardarIntencion(ref, intencion, ttlSeg) {
       await cliente.set(llaveRef(ref), JSON.stringify(intencion), { EX: ttlSeg });
@@ -104,6 +143,7 @@ function crearAlmacenPagosRedis({ cliente }) {
       if (actual) await cliente.set(llaveRef(ref), JSON.stringify({ ...JSON.parse(actual), estado }), { EX: ttlSeg });
     },
     async reservarPendiente(idMesa, comensal, ref, ttlSeg) {
+      await anotarEnMesa(idMesa, comensal, ttlSeg);
       const k = llavePendiente(idMesa, comensal);
       // SET NX: si dos peticiones del mismo comensal llegan a la vez, una
       // sola intención queda como su pendiente.
@@ -111,6 +151,7 @@ function crearAlmacenPagosRedis({ cliente }) {
       return (await cliente.get(k)) || ref;
     },
     async reemplazarPendiente(idMesa, comensal, vieja, nueva, ttlSeg) {
+      await anotarEnMesa(idMesa, comensal, ttlSeg);
       const k = llavePendiente(idMesa, comensal);
       return compararYCambiar(cliente, k, async (iso) => {
         const actual = await iso.get(k);
@@ -146,6 +187,16 @@ function crearAlmacenPagosRedis({ cliente }) {
         await iso.multi().del(k).exec();
       });
     },
+    /** Las marcas de pendiente vigentes de la mesa: [{ comensal, referencia }]. */
+    async listarPendientesMesa(idMesa) {
+      const comensales = Object.keys(await cliente.hGetAll(llaveMesa(idMesa)));
+      const salida = [];
+      for (const comensal of comensales) {
+        const referencia = await cliente.get(llavePendiente(idMesa, comensal));
+        if (referencia) salida.push({ comensal, referencia });
+      }
+      return salida;
+    },
   };
 }
 
@@ -179,5 +230,5 @@ function crearLimitesRedis({ cliente }) {
 }
 
 module.exports = {
-  crearAlmacenPagosMemoria, crearAlmacenPagosRedis, crearLimitesMemoria, crearLimitesRedis, llaveRef, llavePendiente,
+  crearAlmacenPagosMemoria, crearAlmacenPagosRedis, crearLimitesMemoria, crearLimitesRedis, llaveRef, llavePendiente, llaveMesa,
 };
