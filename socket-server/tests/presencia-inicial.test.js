@@ -1,110 +1,20 @@
 // Presencia inicial: el personal que entra a room:admin (o recarga el panel)
 // recibe al instante mesa:presencia de cada mesa con algo, solo en su socket.
+// También el índice sd:mesas:con-estado. El retraso real de 500 ms va en
+// presencia-inicial-retraso.test.js y mesa:presencia:solicitar en
+// presencia-inicial-solicitar.test.js.
 const test = require('node:test');
 const assert = require('node:assert');
-const { randomUUID } = require('node:crypto');
-const { io: cliente } = require('socket.io-client');
 const {
-  levantar, emitir, tokenComensal, tokenPantalla, tokenPersonal, CLAVE_INTERNA,
+  levantar, tokenComensal, tokenPantalla, tokenPersonal,
 } = require('./helpers');
 const { crearConexionRedis } = require('../src/almacen/redis');
 const { crearEstadoMesasRedis, TTL_CUENTA_SEG } = require('../src/almacen/mesas-redis');
-const { crearEstadoMesasMemoria, RETRASO_PRESENCIA_INICIAL_MS, LIMITE_SOLICITUD_PRESENCIA_MS } = require('../src/sala');
 const { crearRedisFalso } = require('./redis-falso');
-
-const silencioso = { info() {}, error() {} };
-const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
-const REDIS_URL = process.env.REDIS_URL;
-const DIA_MS = TTL_CUENTA_SEG * 1000;
-// Retraso corto para las pruebas que solo miran QUÉ llega (el real es 500 ms);
-// las del retraso real están más abajo.
-const RETRASO_PRUEBA_MS = 50;
-// Lo que se espera que haya llegado: se espera bastante más que lo que tarda.
-const ESPERA_MS = 300;
-/** Espera (hasta 2 s) a que se cumpla `cond`: lo que debe llegar no depende de la carga de la máquina. */
-async function hasta(cond, ms = 2000) {
-  const fin = Date.now() + ms;
-  while (!cond() && Date.now() < fin) await pausa(20); // eslint-disable-line no-await-in-loop
-}
-
-/**
- * Conecta con el listener de mesa:presencia YA puesto: el servidor la manda
- * justo al conectar y un listener agregado después del 'connect' podría
- * perderla (el panel real registra sus listeners antes de conectar).
- */
-function conectarEscuchando(s, token) {
-  const c = cliente(s.url, {
-    auth: { token }, transports: ['websocket'], reconnection: false, autoConnect: false,
-  });
-  const recibidas = [];
-  c.on('mesa:presencia', (p) => recibidas.push(p));
-  return new Promise((resolve, reject) => {
-    c.on('connect', () => resolve({ c, recibidas }));
-    c.on('connect_error', reject);
-    c.connect();
-  });
-}
-
-const agregarSinCelular = (s, idMesa, alias) => fetch(`${s.url}/internal/mesa-comensal`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'x-internal-key': CLAVE_INTERNA },
-  body: JSON.stringify({
-    id_mesa: idMesa, alias, accion: 'agregar', eventId: randomUUID(),
-  }),
-});
-const liberar = (s, idMesa) => fetch(`${s.url}/internal/mesa-liberada`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'x-internal-key': CLAVE_INTERNA },
-  body: JSON.stringify({ id_mesa: idMesa }),
-});
-/** Solo las mesas de esta prueba: en Redis real otras pruebas escriben a la vez. */
-const deEstas = (recibidas, mesas) => recibidas.filter((p) => mesas.includes(p.id_mesa));
-
-/**
- * Mesas (con ids propios de cada corrida para Redis real):
- * - A: Ana sentada con celular;
- * - B: un "sin celular" y NINGÚN socket (ni comensal ni tablet);
- * - C: alguien que pagó y ningún socket;
- * - D: solo la tablet conectada (mesa vacía o cerrada): no se envía.
- */
-async function escenario(t, deps = {}, base = 10, retrasoInicialMs = RETRASO_PRUEBA_MS) {
-  const s = await levantar({}, { presencia: { ventanaMs: 30, retrasoInicialMs }, ...deps });
-  const mesas = { A: base + 1, B: base + 2, C: base + 3, D: base + 4 };
-  const abiertos = [];
-  t.after(async () => {
-    for (const c of abiertos) c.close();
-    for (const id of Object.values(mesas)) await s.estadoMesas.limpiarMesa(id);
-    await s.cerrar();
-  });
-  const ana = await s.conectar(tokenComensal(mesas.A, 'Ana'));
-  await emitir(ana, 'join:table', {});
-  assert.strictEqual((await agregarSinCelular(s, mesas.B, 'Abuela')).status, 200);
-  await s.estadoMesas.marcarPago(mesas.C, 'Beto');
-  await s.conectar(tokenPantalla(mesas.D));
-  await pausa(100); // se cierran las ventanas de presencia de los cambios de arriba
-  const conectar = async (token) => {
-    const r = await conectarEscuchando(s, token);
-    abiertos.push(r.c);
-    return r;
-  };
-  return { s, mesas, conectar };
-}
-
-const esperadas = (m) => [
-  { id_mesa: m.A, comensales: ['Ana'], total: 1, pagaron: [], sin_celular: [] },
-  { id_mesa: m.B, comensales: ['Abuela'], total: 1, pagaron: [], sin_celular: ['Abuela'] },
-  { id_mesa: m.C, comensales: [], total: 0, pagaron: ['Beto'], sin_celular: [] },
-];
-
-const ALMACENES = {
-  memoria: async () => ({}),
-  'Redis falso': async () => {
-    const falso = crearRedisFalso();
-    const redis = crearConexionRedis({ url: 'redis://falso:6379', crearCliente: falso.crearCliente, log: silencioso });
-    await redis.conectar();
-    return { redis };
-  },
-};
+const {
+  silencioso, pausa, REDIS_URL, DIA_MS, ESPERA_MS, hasta, conectarEscuchando, agregarSinCelular, liberar, deEstas,
+  RETRASO_PRUEBA_MS, escenario, esperadas, ALMACENES, almacenesConReloj,
+} = require('./presencia-inicial-helpers');
 
 for (const [nombre, crearDeps] of Object.entries(ALMACENES)) {
   test(`${nombre}: admin, mesero y cajero reciben al conectar una presencia por mesa con algo`, async (t) => {
@@ -183,18 +93,6 @@ test('Redis caído: el panel conecta igual y no recibe la presencia inicial', as
 
 // --- Índice sd:mesas:con-estado: vence a las 24 h y se renueva al anotar ------
 
-function almacenesConReloj() {
-  let ms = 1_000_000;
-  const reloj = { ahora: () => ms, avanzar: (d) => { ms += d; } };
-  const falso = crearRedisFalso({ ahora: reloj.ahora });
-  const conexion = crearConexionRedis({ url: 'redis://falso:6379', crearCliente: falso.crearCliente, log: silencioso });
-  return {
-    reloj,
-    memoria: crearEstadoMesasMemoria({ ahora: reloj.ahora }),
-    redis: crearEstadoMesasRedis({ cliente: conexion.cliente, ahora: reloj.ahora }),
-    conectar: () => conexion.conectar(),
-  };
-}
 
 for (const tipo of ['memoria', 'redis']) {
   test(`índice (${tipo}): anota pagos y sin celular, vence a las 24 h y se renueva al anotar`, async () => {
@@ -250,122 +148,4 @@ test('Redis real: el índice y la presencia inicial de una mesa sin sockets', { 
   const { recibidas } = await conectar(tokenPersonal('admin'));
   await hasta(() => deEstas(recibidas, Object.values(mesas)).length >= 3);
   assert.deepStrictEqual(deEstas(recibidas, Object.values(mesas)), esperadas(mesas));
-});
-
-// --- Opción 1: el retraso real de 500 ms cubre al panel que registra tarde ----
-
-/**
- * Como el panel real: socket creado con autoConnect (useSocket.js) y listener
- * registrado DESPUÉS, en un useEffect (useSocketListener.js).
- */
-async function abrirComoElPanel(s, token, listenerTrasMs) {
-  const c = cliente(s.url, { auth: { token }, transports: ['websocket', 'polling'], reconnection: false });
-  const recibidas = [];
-  await pausa(listenerTrasMs);
-  c.on('mesa:presencia', (p) => recibidas.push(p));
-  return { c, recibidas };
-}
-
-for (const listenerTrasMs of [16, 50]) {
-  test(`retraso de ${RETRASO_PRESENCIA_INICIAL_MS} ms: el panel con el listener a ${listenerTrasMs} ms recibe la presencia`, async (t) => {
-    const { s, mesas } = await escenario(t, {}, 10, RETRASO_PRESENCIA_INICIAL_MS);
-    const { c, recibidas } = await abrirComoElPanel(s, tokenPersonal('mesero'), listenerTrasMs);
-    t.after(() => c.close());
-    await hasta(() => recibidas.length >= 3, RETRASO_PRESENCIA_INICIAL_MS + 2000);
-    await pausa(50);
-    assert.strictEqual(c.connected, true);
-    assert.deepStrictEqual(recibidas, esperadas(mesas));
-  });
-}
-
-test('si el panel se desconecta antes del retraso, no se calcula ni se envía nada', async (t) => {
-  const { s } = await escenario(t, {}, 10, 400);
-  const original = s.presencia.listarConEstado;
-  let calculos = 0;
-  s.presencia.listarConEstado = (...a) => { calculos += 1; return original(...a); };
-  t.after(() => { s.presencia.listarConEstado = original; });
-  const { c } = await conectarEscuchando(s, tokenPersonal('admin'));
-  await pausa(100);
-  c.close();
-  await pausa(600);
-  assert.strictEqual(calculos, 0);
-});
-
-// --- Opción 2: mesa:presencia:solicitar devuelve la lista en el ack -----------
-
-/** Escenario sin envío automático en el tiempo de la prueba: solo se ve el ack. */
-const escenarioSolicitar = (t, deps) => escenario(t, deps, 10, 60_000);
-
-for (const rol of ['admin', 'mesero', 'cajero']) {
-  test(`solicitar (${rol}): el ack trae todas las mesas con algo y no se emite ningún evento suelto`, async (t) => {
-    const { mesas, conectar } = await escenarioSolicitar(t);
-    const { c, recibidas } = await conectar(tokenPersonal(rol));
-    const ack = await emitir(c, 'mesa:presencia:solicitar', {});
-    assert.deepStrictEqual(ack, { ok: true, mesas: esperadas(mesas) });
-    await pausa(ESPERA_MS);
-    assert.deepStrictEqual(recibidas, [], 'la respuesta va solo en el ack');
-  });
-}
-
-test('solicitar: también sin payload ni ack (emit sin callback) no rompe nada', async (t) => {
-  const { conectar } = await escenarioSolicitar(t);
-  const { c } = await conectar(tokenPersonal('admin'));
-  c.emit('mesa:presencia:solicitar');
-  await pausa(100);
-  assert.strictEqual(c.connected, true);
-});
-
-test('solicitar: aislamiento por rol (comensal, tablet y cocina → NO_AUTORIZADO, sin calcular)', async (t) => {
-  const { s, mesas, conectar } = await escenarioSolicitar(t);
-  const original = s.presencia.listarConEstado;
-  let calculos = 0;
-  s.presencia.listarConEstado = (...a) => { calculos += 1; return original(...a); };
-  t.after(() => { s.presencia.listarConEstado = original; });
-  const quienes = await Promise.all([
-    conectar(tokenComensal(mesas.A, 'Carla')),
-    conectar(tokenPantalla(mesas.A)),
-    conectar(tokenPersonal('cocina')),
-  ]);
-  for (const { c } of quienes) {
-    const ack = await emitir(c, 'mesa:presencia:solicitar', {});
-    assert.strictEqual(ack.ok, false);
-    assert.strictEqual(ack.codigo, 'NO_AUTORIZADO');
-    assert.ok(!('mesas' in ack));
-  }
-  assert.strictEqual(calculos, 0);
-});
-
-test(`solicitar: como mucho una cada ${LIMITE_SOLICITUD_PRESENCIA_MS / 1000} s por socket (RATE_LIMIT sin calcular)`, async (t) => {
-  const { s, mesas, conectar } = await escenarioSolicitar(t);
-  const original = s.presencia.listarConEstado;
-  let calculos = 0;
-  s.presencia.listarConEstado = (...a) => { calculos += 1; return original(...a); };
-  t.after(() => { s.presencia.listarConEstado = original; });
-  const uno = await conectar(tokenPersonal('admin'));
-  const otro = await conectar(tokenPersonal('mesero'));
-
-  assert.strictEqual((await emitir(uno.c, 'mesa:presencia:solicitar', {})).ok, true);
-  const repetida = await emitir(uno.c, 'mesa:presencia:solicitar', {});
-  assert.deepStrictEqual([repetida.ok, repetida.codigo, 'mesas' in repetida], [false, 'RATE_LIMIT', false]);
-  assert.strictEqual(calculos, 1, 'la rechazada no calcula nada');
-  // El límite es por socket: otro panel puede pedir.
-  assert.strictEqual((await emitir(otro.c, 'mesa:presencia:solicitar', {})).ok, true);
-
-  await pausa(LIMITE_SOLICITUD_PRESENCIA_MS + 50);
-  const despues = await emitir(uno.c, 'mesa:presencia:solicitar', {});
-  assert.deepStrictEqual(despues, { ok: true, mesas: esperadas(mesas) });
-});
-
-test('solicitar con Redis caído: ack ERROR_INTERNO y la conexión sigue', async (t) => {
-  const falso = crearRedisFalso();
-  const redis = crearConexionRedis({ url: 'redis://falso:6379', crearCliente: falso.crearCliente, log: silencioso });
-  await redis.conectar();
-  const s = await levantar({}, { redis, presencia: { retrasoInicialMs: 60_000 } });
-  t.after(() => s.cerrar());
-  const { c } = await conectarEscuchando(s, tokenPersonal('admin'));
-  t.after(() => c.close());
-  falso.caer();
-  const ack = await emitir(c, 'mesa:presencia:solicitar', {});
-  assert.deepStrictEqual([ack.ok, ack.codigo], [false, 'ERROR_INTERNO']);
-  assert.strictEqual(c.connected, true);
 });
