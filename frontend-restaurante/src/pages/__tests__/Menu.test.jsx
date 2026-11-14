@@ -4,6 +4,12 @@ import { MemoryRouter } from 'react-router-dom'
 import { Menu } from '../Menu'
 import { AuthContext } from '../../context/authContextDef'
 
+// T8: desactivar un plato se confirma. Por defecto se acepta; las pruebas de T8
+// cambian la respuesta.
+let respuestaConfirmar = true
+const preguntas = []
+window.confirm = (texto) => { preguntas.push(texto); return respuestaConfirmar }
+
 const json = (body, status = 200) => ({
   ok: status >= 200 && status < 300,
   status,
@@ -93,7 +99,7 @@ describe('Flujo de Menú en frontend-restaurante', () => {
       expect(screen.getByText('Limonada de Coco')).toBeInTheDocument()
     })
     expect(screen.getByText('$28.000')).toBeInTheDocument()
-    expect(within(tarjetaDe('Limonada de Coco')).getByText('AGOTADO')).toBeInTheDocument()
+    expect(within(tarjetaDe('Limonada de Coco')).getByText('NO DISPONIBLE')).toBeInTheDocument()
   })
 
   it('filtra los platos al buscar por nombre', async () => {
@@ -159,7 +165,7 @@ describe('Flujo de Menú en frontend-restaurante', () => {
       fireEvent.click(within(tarjetaDe('Limonada de Coco')).getByTitle('Alternar disponibilidad para comensales'))
 
       expect(await screen.findByRole('alert')).toHaveTextContent('No se guardó: No tienes permiso para esta acción')
-      expect(within(tarjetaDe('Limonada de Coco')).getByText('AGOTADO')).toBeInTheDocument()
+      expect(within(tarjetaDe('Limonada de Coco')).getByText('NO DISPONIBLE')).toBeInTheDocument()
     })
 
     it('agotar con el backend arriba deja el estado que devuelve el servidor', async () => {
@@ -174,7 +180,7 @@ describe('Flujo de Menú en frontend-restaurante', () => {
       fireEvent.click(within(tarjetaDe('Hamburguesa Doble Queso')).getByTitle('Alternar disponibilidad para comensales'))
 
       await waitFor(() =>
-        expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('AGOTADO')).toBeInTheDocument()
+        expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('NO DISPONIBLE')).toBeInTheDocument()
       )
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
@@ -217,13 +223,13 @@ describe('agotado por stock al cargar (stock_suficiente de GET /platos)', () => 
       { id_plato: 304, id_categoria: 1, nombre: 'Burger Vieja', precio: 21000, disponible: true },
     ]
 
-    it('encendido a mano pero sin stock sale "AGOTADO · SIN STOCK"; apagado a mano, "AGOTADO"', async () => {
+    it('encendido a mano pero sin stock sale "AGOTADO · SIN STOCK"; apagado a mano, "NO DISPONIBLE" (T8)', async () => {
       simularBackend({ categorias: categoriasBase, platos: platosStock, escrituras: () => json({}) })
       montar()
       await waitFor(() => expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument())
 
       expect(within(tarjetaDe('Hamburguesa Smart Angus')).getByText('AGOTADO · SIN STOCK')).toBeInTheDocument()
-      expect(within(tarjetaDe('Burger Apagada')).getByText('AGOTADO')).toBeInTheDocument()
+      expect(within(tarjetaDe('Burger Apagada')).getByText('NO DISPONIBLE')).toBeInTheDocument()
       expect(within(tarjetaDe('Burger Apagada')).queryByText('AGOTADO · SIN STOCK')).not.toBeInTheDocument()
       expect(within(tarjetaDe('Burger Normal')).getByText('DISPONIBLE')).toBeInTheDocument()
       expect(within(tarjetaDe('Burger Vieja')).getByText('DISPONIBLE')).toBeInTheDocument()
@@ -254,7 +260,7 @@ describe('agotado por stock al cargar (stock_suficiente de GET /platos)', () => 
       await waitFor(() =>
         expect(within(tarjetaDe('Hamburguesa Smart Angus')).queryByText('AGOTADO · SIN STOCK')).not.toBeInTheDocument()
       )
-      expect(within(tarjetaDe('Hamburguesa Smart Angus')).getByText('AGOTADO')).toBeInTheDocument()
+      expect(within(tarjetaDe('Hamburguesa Smart Angus')).getByText('NO DISPONIBLE')).toBeInTheDocument()
       const patch = spy.mock.calls.find(([, c]) => c?.method === 'PATCH')
       expect(patch[0]).toMatch(/\/platos\/301\/disponible$/)
       expect(JSON.parse(patch[1].body)).toEqual({ disponible: false })
@@ -278,7 +284,7 @@ describe('Menú de solo consulta para mesero y cajero (el backend les niega la g
     const estado = screen.getByTestId('disponibilidad-101')
     expect(estado.tagName).toBe('SPAN')
     expect(estado).toHaveTextContent('DISPONIBLE')
-    expect(screen.getByTestId('disponibilidad-201')).toHaveTextContent('AGOTADO')
+    expect(screen.getByTestId('disponibilidad-201')).toHaveTextContent('NO DISPONIBLE')
     expect(screen.getByText(/solo consulta/)).toBeInTheDocument()
   })
 
@@ -383,5 +389,67 @@ describe('Foto de respaldo: solo para pintar, nunca se guarda (revisión de Robe
     fireEvent.click(screen.getByText('GUARDAR CAMBIOS'))
     await waitFor(() => expect(escritas.some((e) => e.metodo === 'PUT' || e.metodo === 'PATCH')).toBe(true))
     expect(escritas.find((e) => e.metodo === 'PUT' || e.metodo === 'PATCH').body.url_imagen).toBe('https://images.unsplash.com/photo-propia?w=600')
+  })
+})
+
+describe('T8: interruptor «Disponible» del plato (solo admin)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.setItem('smartdining_token', 'test-token')
+    respuestaConfirmar = true
+    preguntas.length = 0
+  })
+
+  const interruptor = (nombre) => screen.getByRole('button', { name: `Disponible: ${nombre}` })
+
+  it('desactivar pide confirmación con el nombre; si se cancela, no se manda nada', async () => {
+    const spy = simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => json({ id_plato: 101, disponible: false }) })
+    montar('admin')
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+    respuestaConfirmar = false
+
+    fireEvent.click(interruptor('Hamburguesa Doble Queso'))
+
+    expect(preguntas).toHaveLength(1)
+    expect(preguntas[0]).toMatch(/«Hamburguesa Doble Queso» como NO DISPONIBLE/)
+    expect(spy.mock.calls.some(([, c]) => c?.method === 'PATCH')).toBe(false)
+    expect(interruptor('Hamburguesa Doble Queso')).toHaveAttribute('aria-pressed', 'true')
+    expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('DISPONIBLE')).toBeInTheDocument()
+  })
+
+  it('al confirmar: PATCH disponible false, etiqueta «NO DISPONIBLE», interruptor apagado y tarjeta atenuada', async () => {
+    const spy = simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => json({ id_plato: 101, disponible: false }) })
+    montar('admin')
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+
+    fireEvent.click(interruptor('Hamburguesa Doble Queso'))
+
+    await waitFor(() => expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('NO DISPONIBLE')).toBeInTheDocument())
+    const patch = spy.mock.calls.find(([, c]) => c?.method === 'PATCH')
+    expect(patch[0]).toMatch(/\/platos\/101\/disponible$/)
+    expect(JSON.parse(patch[1].body)).toEqual({ disponible: false })
+    expect(interruptor('Hamburguesa Doble Queso')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByText('Hamburguesa Doble Queso').closest('.sd-card').style.opacity).toBe('0.65')
+  })
+
+  it('activar no pide confirmación', async () => {
+    const spy = simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => json({ id_plato: 201, disponible: true }) })
+    montar('admin')
+    await waitFor(() => expect(screen.getByText('Limonada de Coco')).toBeInTheDocument())
+    expect(interruptor('Limonada de Coco')).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(interruptor('Limonada de Coco'))
+
+    await waitFor(() => expect(within(tarjetaDe('Limonada de Coco')).getByText('DISPONIBLE')).toBeInTheDocument())
+    expect(preguntas).toHaveLength(0)
+    expect(JSON.parse(spy.mock.calls.find(([, c]) => c?.method === 'PATCH')[1].body)).toEqual({ disponible: true })
+  })
+
+  it.each(['mesero', 'cajero'])('%s no ve el interruptor (solo la etiqueta)', async (rol) => {
+    simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => { throw new Error('no debería escribir') } })
+    montar(rol)
+    await waitFor(() => expect(screen.getByText('Limonada de Coco')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /^Disponible:/ })).toBeNull()
+    expect(screen.getByTestId('disponibilidad-201')).toHaveTextContent('NO DISPONIBLE')
   })
 })

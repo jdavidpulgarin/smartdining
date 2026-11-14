@@ -23,6 +23,7 @@ import { HistorialPrecios } from '../components/admin/HistorialPrecios'
 import { AuthContext } from '../context/authContextDef'
 import { useSocketListener } from '../hooks'
 import { crearUltimoPorId } from '../utils/dedupeEventos'
+import { confirmacionAlCambiar, ETIQUETA_DISPONIBILIDAD, NO_DISPONIBLE } from '../utils/disponibilidadPlato'
 import { urlImagen as urlParaPintar, urlImagenGuardable, MENSAJE_URL_IMAGEN } from '../utils/imagenes'
 
 /**
@@ -202,6 +203,9 @@ export function Menu() {
     const dish = dishesList.find((d) => d.id === dishId)
     if (!dish) return
     const nuevoEstado = !dish.available
+    // T8: desactivar se confirma (los comensales dejan de poder pedirlo).
+    const pregunta = confirmacionAlCambiar(dish, nuevoEstado)
+    if (pregunta && !window.confirm(pregunta)) return
     const ponerEstado = (estado) =>
       setDishesList((prev) => prev.map((d) => (d.id === dishId ? { ...d, available: estado } : d)))
 
@@ -691,7 +695,14 @@ export function Menu() {
                     {/* Disponibilidad (sin verde: disponible en BLANCO, agotado en ROJO) */}
                     <Disponibilidad
                       {...(esAdmin
-                        ? { type: 'button', onClick: () => handleToggleAvailability(dish.id), title: 'Alternar disponibilidad para comensales' }
+                        ? {
+                            type: 'button',
+                            onClick: () => handleToggleAvailability(dish.id),
+                            title: 'Alternar disponibilidad para comensales',
+                            // Interruptor: encendido = el admin lo dejó disponible.
+                            'aria-pressed': dish.available,
+                            'aria-label': `Disponible: ${dish.name}`,
+                          }
                         : { 'data-testid': `disponibilidad-${dish.id}` })}
                       style={{
                         padding: '6px 12px',
@@ -725,9 +736,11 @@ export function Menu() {
                           </span>
                         </>
                       ) : (
+                        // Apagado a mano (T8): no es falta de stock, así que no dice
+                        // «AGOTADO». Vuelve cuando el admin lo activa.
                         <>
                           <XCircle size={13} />
-                          <span>AGOTADO</span>
+                          <span>{ETIQUETA_DISPONIBILIDAD[NO_DISPONIBLE]}</span>
                         </>
                       )}
                     </Disponibilidad>
