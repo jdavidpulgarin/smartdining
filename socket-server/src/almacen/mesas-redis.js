@@ -50,10 +50,13 @@ function crearEstadoMesasRedis({ cliente, ahora = Date.now }) {
     },
     /** Deshace un marcarPago que llegó tarde a una mesa ya liberada (ver anotarPagoEnSesion en pagos.js). */
     async desmarcarPago(idMesa, alias) {
-      // La clave y, por si quedó de antes de anotar por clave, el texto.
+      // Todo campo de esa persona: el de la clave y, si quedó de antes de anotar
+      // por clave, el del texto con el que se anotó («Ana»), aunque ahora se
+      // pida con otro («ANA»). El hash es de una mesa: unos pocos campos.
+      const k = llave(idMesa, 'pagaron');
       const clave = claveAlias(alias) ?? alias;
-      await cliente.hDel(llave(idMesa, 'pagaron'), clave);
-      if (clave !== alias) await cliente.hDel(llave(idMesa, 'pagaron'), alias);
+      const campos = Object.keys(await cliente.hGetAll(k)).filter((c) => (claveAlias(c) ?? c) === clave);
+      for (const c of campos) await cliente.hDel(k, c); // eslint-disable-line no-await-in-loop
       // Sin nada anotado, la mesa sale del índice (como al liberarla).
       const quedan = (await cliente.hLen(llave(idMesa, 'pagaron'))) + (await cliente.hLen(llave(idMesa, 'sin_celular')));
       if (quedan === 0) await cliente.hDel(INDICE, String(idMesa));

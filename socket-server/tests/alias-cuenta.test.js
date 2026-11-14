@@ -81,8 +81,10 @@ test('[Redis falso] pagaron anotado antes por el texto exacto: no se duplica y s
   await falso.cliente.hSet('sd:mesa:5:pagaron', 'Ana', 'Ana'); // formato viejo: campo = texto
   await e.marcarPago(5, 'ana');
   assert.deepStrictEqual(await e.pagaron(5), ['Ana']);
-  await e.desmarcarPago(5, 'Ana');
+  // Se deshace con cualquier forma del alias, no solo con el texto viejo exacto.
+  await e.desmarcarPago(5, 'ÁNA');
   assert.deepStrictEqual(await e.pagaron(5), []);
+  assert.deepStrictEqual(await falso.cliente.hGetAll('sd:mesa:5:pagaron'), {}, 'no queda ningún campo');
 });
 
 test('POST /pagos/intencion «propio»: con la cuenta en « ana » y el JWT en «Ana», cobra lo de Ana (antes 409 SIN_SALDO)', async (t) => {
