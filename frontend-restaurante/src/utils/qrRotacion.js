@@ -63,6 +63,37 @@ export function puedeRotarSolo({ ocupada, tieneComensales, token }) {
 }
 
 /**
+ * ¿La tablet de la mesa (PantallaMesa) muestra «Mesa disponible» en vez del QR?
+ *
+ * Al liberar la mesa el backend deja token_qr en NULL y el socket-server
+ * revoca el QR: quien escanee el que sigue en la tablet ve un error. Desde
+ * mesa:liberada (o si la mesa ya está disponible) la tablet no muestra el QR,
+ * hasta que llegue uno nuevo (qr:actualizado, la rotación manual o la mesa
+ * ocupada con token desde el panel).
+ *
+ * @param {boolean} disponible lo que muestra ahora
+ * @param {{ tipo: 'mesa'|'mesa:liberada'|'qr', estado?: string, token_qr?: string }} evento
+ *   - 'mesa': los datos de la mesa en el panel (estado y token_qr);
+ *   - 'mesa:liberada': el evento del socket;
+ *   - 'qr': un QR nuevo (qr:actualizado o la rotación manual), con su token_qr.
+ * @returns {boolean} si muestra «Mesa disponible»
+ */
+export function tabletSinQr(disponible, evento) {
+  switch (evento?.tipo) {
+    case 'mesa:liberada':
+      return true
+    case 'qr':
+      return evento.token_qr ? false : disponible
+    case 'mesa':
+      if (evento.estado === 'disponible') return true
+      if (evento.estado === 'ocupada' && evento.token_qr) return false
+      return disponible
+    default:
+      return disponible
+  }
+}
+
+/**
  * Error de rotar-qr → { texto, reintentar }. Nunca se inventa un QR: si falla,
  * se dice por qué y, si es pasajero, se reintenta.
  */

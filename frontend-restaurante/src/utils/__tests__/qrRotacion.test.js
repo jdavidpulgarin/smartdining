@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { tokenDeUrl, puedeRotarSolo, errorDeRotacion, RENOVAR_CADA_SEGUNDOS, ROTACION_SOCKET_SEGUNDOS } from '../qrRotacion'
+import { tokenDeUrl, puedeRotarSolo, errorDeRotacion, tabletSinQr, RENOVAR_CADA_SEGUNDOS, ROTACION_SOCKET_SEGUNDOS } from '../qrRotacion'
 
 describe('utils/qrRotacion', () => {
   it('tokenDeUrl: saca el token del url del comensal', () => {
@@ -72,5 +72,33 @@ describe('qrService.rotarTokenQrMesa', () => {
     const { rotarTokenQrMesa } = await import('../../services/qrService')
     await expect(rotarTokenQrMesa(5)).rejects.toThrow(/no devolvió/)
     vi.doUnmock('../../services/api')
+  })
+})
+
+describe('tabletSinQr: la tablet no muestra un QR revocado', () => {
+  it('mesa:liberada → «Mesa disponible», aunque mostrara un QR', () => {
+    expect(tabletSinQr(false, { tipo: 'mesa:liberada' })).toBe(true)
+  })
+
+  it('vuelve el QR solo cuando llega uno nuevo', () => {
+    expect(tabletSinQr(true, { tipo: 'qr', token_qr: 'v1.nuevo' })).toBe(false)
+    expect(tabletSinQr(true, { tipo: 'qr' })).toBe(true)
+    expect(tabletSinQr(true, { tipo: 'qr', token_qr: '' })).toBe(true)
+  })
+
+  it('con los datos de la mesa: disponible oculta el QR; ocupada con token lo muestra', () => {
+    expect(tabletSinQr(false, { tipo: 'mesa', estado: 'disponible', token_qr: null })).toBe(true)
+    expect(tabletSinQr(true, { tipo: 'mesa', estado: 'ocupada', token_qr: 'v1.a' })).toBe(false)
+  })
+
+  it('ocupada sin token (la lista de mesas no lo trae) no cambia lo que se ve', () => {
+    expect(tabletSinQr(true, { tipo: 'mesa', estado: 'ocupada', token_qr: null })).toBe(true)
+    expect(tabletSinQr(false, { tipo: 'mesa', estado: 'ocupada', token_qr: null })).toBe(false)
+    expect(tabletSinQr(false, { tipo: 'mesa' })).toBe(false)
+  })
+
+  it('un evento desconocido no cambia nada', () => {
+    expect(tabletSinQr(true, { tipo: 'otro' })).toBe(true)
+    expect(tabletSinQr(false, null)).toBe(false)
   })
 })
