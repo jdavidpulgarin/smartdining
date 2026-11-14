@@ -20,7 +20,7 @@ código y este documento no coinciden, es un error y se corrige en el mismo PR.
 - [2. Salas](#2-salas-rooms)
 - [3. Convenciones](#3-convenciones): idempotencia, formato del ack, reconexión
 - [4. Eventos cliente → servidor](#4-eventos-cliente--servidor)
-- [5. Eventos servidor → cliente](#5-eventos-servidor--cliente) · [5.5. `inventario:alerta`](#55-inventarioalerta) · [5.6. `item:cancelado`](#56-itemcancelado)
+- [5. Eventos servidor → cliente](#5-eventos-servidor--cliente) · [5.5. `inventario:alerta`](#55-inventarioalerta) · [5.6. `item:cancelado`](#56-itemcancelado) · [5.7. `mesa:actualizada`](#57-mesaactualizada)
 - [6. Endpoints HTTP](#6-endpoints-http) · [6.4. Comensales sin celular](#64-comensales-sin-celular-post-internalmesa-comensal) · [6.6. Pagos en curso](#66-pagos-en-curso-get-internalpagos-en-curso)
 - [7. Web Push](#7-web-push)
 - [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox) · [8.6. Cobros de caja](#86-cobros-de-caja-post-internalpayment-confirmed) · [8.7. Excedente](#87-pago-en-línea-que-excede-el-saldo-contrato-del-excedente)
@@ -85,6 +85,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `ingrediente:disponibilidad` | todos los sockets | Opcional | Estable (el backend lo llama desde PR #70) | [§5.3](#53-ingredientedisponibilidad) |
 | `plato:disponibilidad` | todos los sockets | Opcional | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
 | `inventario:alerta` | `room:admin` | Sí | Estable (el backend la llama desde D-17; el panel la escucha, P-22) | [§5.5](#55-inventarioalerta) |
+| `mesa:actualizada` | `room:admin` | Sí | Espera backend (T12): el socket-server la emite; falta que el backend llame a `/internal/mesa-actualizada` y que el panel la escuche | [§5.7](#57-mesaactualizada) |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Caja: Estable vía `/internal/payment-confirmed` (PR #58). Wompi: Conectado (falta prueba E2E con Wompi sandbox), vía webhook con cuenta ([§8.2](#82-contrato-que-necesita-del-backend)) y registro ([§8.4](#84-contrato-de-registro-que-necesita-del-backend)) en el backend (PR #33) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6), [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 | `pago:alerta` | `room:admin` | Sí | Conectado (falta prueba E2E con Wompi sandbox); el backend guarda el intento (PR #33) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
 | `pago:excedente` | `room:admin` | Sí | Espera backend (contrato del excedente) y la Caja | [§8.7](#87-pago-en-línea-que-excede-el-saldo-contrato-del-excedente) |
@@ -107,6 +108,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `POST /internal/inventario-alerta` | backend (D-17, oyente del canal `inventario`) | Estable (el backend ya la llama, D-17) | [§5.5](#55-inventarioalerta) |
 | `POST /internal/item-cancelado` | backend (tras el COMMIT de J-14, el comensal quita un plato, o de D-13, el personal cancela uno) | Estable; el backend la llama desde #180 (J-14) y #186 (D-13) | [§5.6](#56-itemcancelado) |
 | `GET /internal/pagos-en-curso` | backend (antes de cancelar un plato, T4) | Espera backend (T4): el socket-server ya la da | [§6.6](#66-pagos-en-curso-get-internalpagos-en-curso) |
+| `POST /internal/mesa-actualizada` | backend (tras el COMMIT de abrir mesa, cambio de estado, crear, editar y borrar mesa, y de liberarla a mano o tras el cobro) | Espera backend (T12) | [§5.7](#57-mesaactualizada) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
 responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
@@ -610,6 +612,7 @@ cambio el panel funciona igual, con el envío automático de 500 ms como respald
 | `ingrediente:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_ingrediente, disponible, emitidoEn }` |
 | `plato:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_plato, disponible, emitidoEn }` |
 | `inventario:alerta` | `room:admin` | `{ eventId, id_insumo, nombre, unidad, stock_actual, stock_minimo, agotado, emitidoEn }` (§5.5) |
+| `mesa:actualizada` | `room:admin` | `{ eventId, id_mesa, numero, estado, capacidad, ubicacion, activa?, sesion_abierta?, motivo?, id_mesero?, emitidoEn }` (§5.7; con `motivo: "eliminada"`, solo `eventId`, `id_mesa`, `activa: false`, `motivo` y lo que venga; nunca `token_qr`) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | `{ id_mesa, motivo, emitidoEn }` (`motivo`: `pagada` o `liberada`) |
 
 Notas para el frontend:
@@ -950,6 +953,101 @@ está en `room:kds` y en `room:admin`, lo recibe una sola vez. Nunca a otras mes
 - **No se guarda:** quien estaba desconectado lo ve al recargar por REST (`GET /api/pedidos/...`
   o las comandas del KDS, que ya excluyen las líneas canceladas). Deduplica por `eventId`.
 
+### 5.7. `mesa:actualizada`
+
+> **Espera backend · T12.** Implementado en `src/mesa-actualizada.js` (pruebas:
+> `tests/mesa-actualizada.test.js`, `tests/mesa-actualizada-errores.test.js` y `tests/mesa-actualizada-sesion.test.js`). Falta que el backend la
+> llame y que el panel la escuche. Los campos son los de la tabla `mesas` (`database/schema.sql`).
+
+Cambió una mesa y el panel debe verlo en vivo, sin recargar. El backend avisa **después del
+COMMIT** de:
+
+- abrir la mesa con su QR (`motivo: "abierta"`);
+- `PATCH /api/mesas/:id/estado` (`motivo: "estado"`);
+- `POST /api/mesas` (`motivo: "creada"`) y `PATCH /api/mesas/:id` (`motivo: "datos"`);
+- la **liberación** de la mesa (`motivo: "liberada"`), en los dos caminos: la manual y la automática
+  tras el cobro (caja o Wompi). Sin este aviso el panel no ve que la mesa quedó libre: `mesa:liberada`
+  dice que terminó la sesión, no el estado nuevo de la mesa;
+- el **borrado** de la mesa, `DELETE /api/mesas/:id` (`motivo: "eliminada"`, con `activa: false`). El
+  backend solo deja borrar una mesa que no está ocupada y no tiene pedidos, así que no hay sesión
+  que cerrar;
+- más adelante, la asignación de mesero (`motivo: "mesero"`; hoy `mesas` no tiene esa columna).
+
+```http
+POST /internal/mesa-actualizada
+x-internal-key: <INTERNAL_API_KEY>
+Content-Type: application/json
+
+{ "eventId": "<uuid>", "id_mesa": 5, "numero": 5, "estado": "ocupada", "capacidad": 4, "ubicacion": "Terraza",
+  "activa": true, "sesion_abierta": true, "motivo": "abierta" }
+```
+
+Al borrar una mesa basta con esto (la fila ya no existe: `DELETE … RETURNING id_mesa`):
+
+```json
+{ "eventId": "<uuid>", "id_mesa": 5, "activa": false, "motivo": "eliminada" }
+```
+
+**Quién la llama:** solo el backend. Ningún frontend la llama; nginx responde 404 desde Internet
+(igual que toda `/internal/*`).
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `eventId` | Sí | UUID |
+| `id_mesa` | Sí | Entero de 1 a 2147483647 (`INTEGER`, `CHECK > 0`) |
+| `numero`, `capacidad` | Sí (no con `eliminada`) | Entero de 1 a 2147483647 (`INTEGER`, `CHECK > 0`) |
+| `estado` | Sí (no con `eliminada`) | `disponible`, `ocupada`, `reservada` o `mantenimiento` (el `CHECK` de la tabla) |
+| `ubicacion` | Sí (no con `eliminada`) | Texto de 1 a 50 caracteres (`VARCHAR(50)`, se cuentan caracteres; solo espacios → `400`) |
+| `activa` | No (sí con `eliminada`: `false`) | `true` o `false` |
+| `sesion_abierta` | No (el backend debería mandarlo siempre) | `true` si la mesa tiene una sesión de QR vigente (`token_qr` no nulo), `false` si no. Es lo que el panel necesita para saber si la mesa está abierta sin ver el token |
+| `motivo` | No | `abierta`, `estado`, `creada`, `datos`, `liberada`, `eliminada` o `mesero` |
+| `id_mesero` | No | `null` (sin mesero) o entero de 1 a 2147483647 |
+
+Opcional quiere decir que puede **no venir**; si viene, tiene que cumplir la regla (`activa: null`,
+`sesion_abierta: "true"` o `motivo: "otro"` → `400`).
+
+**Con `motivo: "eliminada"`** son obligatorios solo `eventId`, `id_mesa` y `activa: false`. `numero`,
+`estado`, `capacidad` y `ubicacion` pueden no venir; si vienen, se validan igual.
+
+**Coherencia** (`400 PAYLOAD_INVALIDO`, sin emitir): `eliminada` sin `activa: false`; `eliminada` o
+`liberada` con `sesion_abierta: true`; `abierta` con `sesion_abierta: false`.
+
+**Campos de más: se descartan, no se rechazan.** El backend puede mandar la fila entera; el evento
+se arma solo con los campos de la tabla de arriba. **`token_qr`, `sesion_iniciada_en`, datos de
+comensales o cualquier otro campo nunca salen del socket-server** (hay prueba de que el token no
+viaja). Aun así, lo correcto es que el backend no los mande.
+
+Errores, sin emitir nada en ningún caso: `400 PAYLOAD_INVALIDO` (el mensaje nombra el campo),
+`400 JSON_INVALIDO`, `401 NO_AUTORIZADO` (sin clave o clave errada, comparada en tiempo
+constante; se comprueba antes del cuerpo) y `503 NO_CONFIGURADO`.
+
+- Respuesta normal: `200 { "ok": true, "duplicado": false }`.
+- **Idempotencia:** clave propia `backend:mesa-actualizada:{eventId}`, TTL de 10 min. Repetido →
+  `200 { "ok": true, "duplicado": true }` sin reemitir. Todo se valida antes de reservar: un `4xx`
+  no consume el `eventId`. Se reserva, se emite y, si la emisión falla, se libera la clave y se
+  responde `500 ERROR_INTERNO` (también si Redis no responde).
+- **Reintentos:** el backend reintenta, con el mismo `eventId`, solo ante `500/502/503
+  ERROR_INTERNO`; nunca ante `503 NO_CONFIGURADO` ni ante un `4xx`. Un `eventId` nuevo por cada
+  cambio (no por mesa).
+
+Emite `mesa:actualizada` **solo a `room:admin`** (`admin`, `mesero` y `cajero`). Nunca a las
+mesas, a las pantallas de mesa, a `room:kds` ni a los clientes:
+
+```json
+{ "eventId": "7d3f0c52-8a41-4e6b-b1f7-3c9a2e5d6f10", "id_mesa": 5, "numero": 5, "estado": "ocupada", "capacidad": 4,
+  "ubicacion": "Terraza", "activa": true, "motivo": "abierta", "emitidoEn": "2026-11-13T20:15:00.000Z" }
+```
+
+- `eventId` es el del cuerpo (para deduplicar). `activa`, `sesion_abierta`, `motivo` e `id_mesero` van
+  **solo si el backend los mandó** (`id_mesero: null` también viaja). Con `eliminada`, lo mismo vale para
+  `numero`, `estado`, `capacidad` y `ubicacion`. `emitidoEn` lo pone el socket-server.
+- **`motivo: "eliminada"`:** el panel **quita** la fila de esa `id_mesa`, no la reemplaza.
+- Salvo con `eliminada`, el evento trae el **estado completo** de la mesa: el panel reemplaza su fila
+  por `id_mesa`, no suma cambios. Deduplica por `eventId`.
+- **No se guarda:** quien estaba desconectado lo ve al recargar por REST (`GET /api/mesas`).
+- No sustituye a `mesa:presencia` (quién está sentado) ni a `mesa:liberada` (fin de la sesión).
+- Ningún cliente puede emitirlo por socket.
+
 ---
 
 ## 6. Endpoints HTTP
@@ -974,6 +1072,7 @@ CORS con la misma política que el socket: la lista blanca `CORS_ORIGINS` y, sol
 | POST | `/internal/payment-confirmed` | Header `x-internal-key` | Solo backend. Cobro de caja (efectivo, datáfono o abono) ya registrado → emite `payment:confirmed` con el mismo payload que Wompi (§8.6) |
 | POST | `/internal/item-cancelado` | Header `x-internal-key` | Solo backend, tras el COMMIT de J-14 (el comensal quita un plato) o de D-13 (el personal cancela uno). `{ id_pedido, id_mesa, codigo_pedido, id_detalle, id_plato, nombre, comensal, total, estado_pedido, origen?, eventId }`, validación estricta (un campo de más → `400`) → emite `item:cancelado` a `room:kds`, `room:admin` y `room:mesa-{ID}` (§5.6) |
 | GET | `/internal/pagos-en-curso?mesa=<id>[&comensal=<alias>]` | Header `x-internal-key` | Solo backend, antes de cancelar un plato. `200 { mesa, enCurso, pagos: [{ comensal, modo, monto, venceEn }] }` con las intenciones de pago en línea vigentes; validación estricta (`400`). Sin referencias de Wompi ni tokens (§6.6) |
+| POST | `/internal/mesa-actualizada` | Header `x-internal-key` | Solo backend, tras el COMMIT de abrir, cambiar estado, crear, editar, borrar o liberar una mesa (a mano o tras el cobro). `{ eventId, id_mesa, numero, estado, capacidad, ubicacion, activa?, sesion_abierta?, motivo?, id_mesero? }` (`motivo`: `abierta`, `estado`, `creada`, `datos`, `liberada`, `eliminada` o `mesero`; con `eliminada` bastan `eventId`, `id_mesa` y `activa: false`); los campos de más (`token_qr` incluido) se descartan → emite `mesa:actualizada` solo a `room:admin` (§5.7) |
 | POST | `/pagos/intencion` | Bearer JWT `comensal` | Intención de pago (§8.1) |
 | POST | `/pagos/webhook` | Checksum de Wompi | Eventos de Wompi (§8.3) |
 
@@ -1842,3 +1941,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `GET /internal/pagos-en-curso` (nueva, T4) | El backend podía cancelar un plato mientras alguien lo pagaba en línea (el widget de Wompi abierto) y el cobro salía por el monto viejo | Nueva ruta de solo lectura: `{ mesa, enCurso, pagos }` con las intenciones vigentes (propio de ese comensal, o total/igual de cualquiera); validación estricta, sin referencias de Wompi. Liberar la mesa borra sus pagos en curso (no los registros que usa el webhook) (§6.6) | Backend (Daniel): consultarla antes de cancelar (timeout 1500 ms); `enCurso` → `409 pago_en_curso`; sin respuesta, error o 5xx → `409 pago_en_curso` motivo `sin_verificar` (con un 4xx, además, error en el log) |
 | Pagos en línea · contrato del excedente (T4) | Un pago aprobado que superaba el saldo se rechazaba con `409` (intento fallido, la intención quedaba en `pendiente` y se podía pagar dos veces); un 5xx también la dejaba en `pendiente`, y un webhook de un grupo anterior se repartía en el grupo nuevo | El registro manda `intencion_creada_en`; el backend nunca rechaza un aprobado y responde `aplicado_centavos`/`excedente_centavos`/`motivo_excedente`. La intención termina en `pagada` o `en_revision` (cobrable en el reintento); `409 PAGO_EN_REVISION` para no pagar dos veces; nuevo `pago:excedente` (solo `room:admin`); `payment:confirmed` con `aplicado`/`excedente`, y solo al panel con `otra_visita`; `pago:alerta` `backend_no_disponible` (§8.7) | Backend (Daniel): script 44 y el registro (§8.4, §8.7). Caja (Jarrinson): escuchar `pago:excedente` y cargar los pendientes. PWA (Juan): mostrar el `409 PAGO_EN_REVISION` |
 | Alias contra la cuenta · por clave | El socket-server buscaba al comensal en `por_comensal` por el texto exacto: «Ana» ≠ « ana », y «lo mío» daba `409 SIN_SALDO`. `pagaron` podía tener a la misma persona dos veces («Ana» y «ana») | Todo cruce de alias con la cuenta o con `pagaron` usa la clave de `normalizarAlias` (`claveAlias`). En «lo mío», las filas de la misma persona se suman. `pagaron` se guarda por clave (Redis: campo = clave, `HSETNX`; lo anotado antes por texto se deduplica al leer) (§5.2, §8.1, §8.2) | Nadie: mismo contrato. El backend puede seguir mandando el alias como lo guardó |
+| `POST /internal/mesa-actualizada` · `mesa:actualizada` (nuevos, T12) | El panel no se enteraba en vivo de que una mesa se abría, cambiaba de estado, se creaba o se editaba: tenía que recargar | Nueva ruta: validación por campo, idempotencia `backend:mesa-actualizada:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`), campos de más descartados (nunca `token_qr`). `sesion_abierta` (boolean) y `motivo: "eliminada"` (con `activa: false` y solo `id_mesa` obligatorio), con chequeos de coherencia. Emite solo a `room:admin` (§5.7) | Backend (Daniel): llamarla tras el COMMIT de abrir, `PATCH /:id/estado`, `POST /`, `PATCH /:id`, `DELETE /:id` (`motivo: "eliminada"`) y de las dos liberaciones (manual y tras el cobro, `motivo: "liberada"`), siempre con `sesion_abierta`. Panel (Jarrinson): escuchar `mesa:actualizada` en `room:admin`, reemplazar la fila por `id_mesa` y quitarla con `eliminada` |

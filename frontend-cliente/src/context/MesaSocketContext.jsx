@@ -66,6 +66,63 @@ export function esModoCompartido(token, socketUrl) {
   return true;
 }
 
+// oxlint-disable-next-line react/only-export-components
+export function registrarOyentesPrimerPlano(
+  callback,
+  tiempoDebounceMs = 300,
+  entorno = {}
+) {
+  const doc =
+    entorno.document !== undefined
+      ? entorno.document
+      : typeof document !== 'undefined'
+        ? document
+        : null;
+  const win =
+    entorno.window !== undefined
+      ? entorno.window
+      : typeof window !== 'undefined'
+        ? window
+        : null;
+
+  let timer = null;
+
+  const disparar = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      callback();
+    }, tiempoDebounceMs);
+  };
+
+  const onVisibilityChange = () => {
+    if (doc?.visibilityState === 'visible') {
+      disparar();
+    }
+  };
+
+  const onPageShow = (event) => {
+    if (event?.persisted || event?.persisted === undefined) {
+      disparar();
+    }
+  };
+
+  const onOnline = () => {
+    disparar();
+  };
+
+  doc?.addEventListener?.('visibilitychange', onVisibilityChange);
+  win?.addEventListener?.('pageshow', onPageShow);
+  win?.addEventListener?.('online', onOnline);
+
+  return () => {
+    if (timer) clearTimeout(timer);
+    doc?.removeEventListener?.('visibilitychange', onVisibilityChange);
+    win?.removeEventListener?.('pageshow', onPageShow);
+    win?.removeEventListener?.('online', onOnline);
+  };
+}
+
 export function MesaSocketProvider({ children }) {
   const { sesion, despedir } = useSesion();
   const token = sesion?.token;
@@ -84,6 +141,23 @@ export function MesaSocketProvider({ children }) {
   const [carrito, setCarrito] = useState(CARRITO_VACIO);
   const [presencia, setPresencia] = useState(null);
   const [errorMesaLlena, setErrorMesaLlena] = useState(null);
+  const [resync, setResync] = useState(0);
+
+  useEffect(() => {
+    const darDeBaja = registrarOyentesPrimerPlano(() => {
+      const cliente = clienteRef.current;
+      if (cliente?.socket && !cliente.socket.connected) {
+        try {
+          cliente.socket.connect();
+        } catch {
+          // ignora errores síncronos de llamada
+        }
+      }
+      setResync((c) => c + 1);
+    }, 300);
+
+    return darDeBaja;
+  }, []);
 
   const despedirRef = useRef(despedir);
   useEffect(() => {
@@ -182,8 +256,19 @@ export function MesaSocketProvider({ children }) {
       on,
       modo,
       errorMesaLlena,
+      resync,
     }),
-    [estado, carrito, presencia, comensal, enviar, on, modo, errorMesaLlena]
+    [
+      estado,
+      carrito,
+      presencia,
+      comensal,
+      enviar,
+      on,
+      modo,
+      errorMesaLlena,
+      resync,
+    ]
   );
 
   return (
