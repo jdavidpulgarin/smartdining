@@ -295,7 +295,6 @@ function Pago() {
     saldoMesa: saldo,
     miSaldo,
     miPagado,
-    presencia,
     cuenta,
   });
   const {

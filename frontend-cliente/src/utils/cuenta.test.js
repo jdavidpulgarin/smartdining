@@ -3,7 +3,7 @@ import {
   formatoPesos,
   MODOS_PAGO,
   TITULOS_MODO,
-  contarPersonasMesa,
+  contarComensalesCuenta,
   normalizarCuenta,
   montosPorModo,
   aplicarPagoConfirmado,
@@ -752,20 +752,26 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(TITULOS_MODO.igual).toBeUndefined();
     });
 
-    it('mesa con 3 personas → 2 opciones con montos correctos', () => {
+    it('3 comensales en la cuenta y presencia con solo 1 conectado → las dos opciones', () => {
       const cuenta = {
         saldo: 60000,
         mia: { saldo: 20000 },
+        comensales: [
+          { nombre: 'Ana', saldo: 20000, esMio: true },
+          { nombre: 'Beto', saldo: 20000 },
+          { nombre: 'Carlos', saldo: 20000 },
+        ],
       };
+      // Presencia reporta solo 1 conectado (los demás bloquearon la pantalla del celular)
       const presencia = {
-        comensales: ['Ana', 'Beto', 'Carlos'],
+        comensales: ['Ana'],
         sin_celular: [],
       };
       const res = estadoSelectorPago({
         saldoMesa: cuenta.saldo,
         miSaldo: cuenta.mia.saldo,
         miPagado: 0,
-        presencia,
+        presencia, // Ignorado: no se decide por conexiones de presencia
         cuenta,
       });
 
@@ -780,20 +786,16 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(montos.igual).toBeUndefined();
     });
 
-    it('1 persona → un botón y modo total con texto "Pagar la cuenta"', () => {
+    it('1 comensal en la cuenta → un botón y modo total con texto "Pagar la cuenta"', () => {
       const cuenta = {
         saldo: 30000,
         mia: { saldo: 30000 },
-      };
-      const presencia = {
-        comensales: ['Ana'],
-        sin_celular: [],
+        comensales: [{ nombre: 'Ana', saldo: 30000, esMio: true }],
       };
       const res = estadoSelectorPago({
         saldoMesa: cuenta.saldo,
         miSaldo: cuenta.mia.saldo,
         miPagado: 0,
-        presencia,
         cuenta,
       });
 
@@ -808,15 +810,14 @@ describe('utils/cuenta.js (J-08)', () => {
       const cuenta = {
         saldo: 50000,
         mia: { saldo: 50000 },
-      };
-      const presencia = {
-        comensales: ['Ana', 'Beto'],
-        sin_celular: [],
+        comensales: [
+          { nombre: 'Ana', saldo: 50000, esMio: true },
+          { nombre: 'Beto', saldo: 0 },
+        ],
       };
       const res = estadoSelectorPago({
         saldoMesa: 50000,
         miSaldo: 50000,
-        presencia,
         cuenta,
       });
 
@@ -826,20 +827,19 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res.textoBoton).toBe('Pagar la cuenta');
     });
 
-    it('2 personas pero lo mío pagado (miSaldo <= 0) → solo total', () => {
+    it('lo mío pagado (miSaldo <= 0) → solo total con "Pagar toda la cuenta"', () => {
       const cuenta = {
         saldo: 30000,
         mia: { saldo: 0, pagado: 20000 },
-      };
-      const presencia = {
-        comensales: ['Ana', 'Beto'],
-        pagaron: ['Ana'],
+        comensales: [
+          { nombre: 'Ana', saldo: 0, pagado: 20000, esMio: true },
+          { nombre: 'Beto', saldo: 30000, pagado: 0 },
+        ],
       };
       const res = estadoSelectorPago({
         saldoMesa: 30000,
         miSaldo: 0,
         miPagado: 20000,
-        presencia,
         cuenta,
       });
 
@@ -847,39 +847,50 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res.modosDisponibles).toEqual(['total']);
       expect(res.modo).toBe('total');
       expect(res.modosDisponibles).not.toContain('propio');
+      expect(res.textoBoton).toBe('Pagar toda la cuenta');
       expect(res.yaPague).toBe(true);
     });
 
-    it('cuenta sin_celular como persona en la mesa', () => {
-      const presenciaConSinCelular = {
-        comensales: ['Ana'],
-        sin_celular: ['Carlos'],
+    it('comensal sin celular (ej. "Abuela") cuenta como persona en la mesa', () => {
+      const cuenta = {
+        saldo: 50000,
+        mia: { saldo: 20000 },
+        comensales: [
+          { nombre: 'Ana', saldo: 20000, esMio: true },
+          { nombre: 'Abuela', saldo: 30000 }, // comensal sin celular con consumos en la cuenta
+        ],
       };
-      expect(contarPersonasMesa({ presencia: presenciaConSinCelular })).toBe(2);
+      expect(contarComensalesCuenta(cuenta)).toBe(2);
 
       const res = estadoSelectorPago({
         saldoMesa: 50000,
         miSaldo: 20000,
-        presencia: presenciaConSinCelular,
+        cuenta,
       });
       expect(res.mostrarSelector).toBe(true);
       expect(res.modosDisponibles).toEqual(['propio', 'total']);
+      expect(res.modoInicial).toBe('propio');
     });
 
-    it('sin_celular repetido con comensales no se duplica', () => {
-      const presenciaDuplicada = {
-        comensales: ['Ana'],
-        sin_celular: ['Ana'],
+    it('comensales con mismo alias normalizado no se duplican', () => {
+      const cuenta = {
+        saldo: 50000,
+        miSaldo: 20000,
+        comensales: [
+          { nombre: 'Ana' },
+          { nombre: 'ana' },
+        ],
       };
-      expect(contarPersonasMesa({ presencia: presenciaDuplicada })).toBe(1);
+      expect(contarComensalesCuenta(cuenta)).toBe(1);
 
       const res = estadoSelectorPago({
         saldoMesa: 50000,
         miSaldo: 20000,
-        presencia: presenciaDuplicada,
+        cuenta,
       });
       expect(res.mostrarSelector).toBe(false);
       expect(res.modo).toBe('total');
+      expect(res.textoBoton).toBe('Pagar la cuenta');
     });
 
     it('ningún camino devuelve modo igual', () => {

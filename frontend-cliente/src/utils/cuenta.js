@@ -5,6 +5,8 @@
  * pruebas unitarias exhaustivas con Vitest sin necesidad de simular el DOM.
  */
 
+import { claveAlias } from './apodo';
+
 /**
  * Formatea un valor numérico a pesos colombianos redondeados sin decimales.
  * Formato esperado: "$ 28.000"
@@ -112,36 +114,22 @@ export function normalizarCuenta(api = {}, miAlias = '') {
 }
 
 /**
- * Cuenta la cantidad de personas únicas en la mesa a partir de comensales y sin_celular
- * de mesa:presencia (o comensales de la cuenta como respaldo). Mínimo 1.
+ * Cuenta la cantidad de comensales distintos en la cuenta (excluyendo "General"
+ * si existiera), comparando con claveAlias. Mínimo 1.
  *
- * @param {object} [opciones]
- * @param {object} [opciones.presencia] - Estado de mesa:presencia
- * @param {object} [opciones.cuenta] - Cuenta normalizada de la mesa
+ * @param {object} [cuenta] - Cuenta normalizada de la mesa
  * @returns {number}
  */
-export function contarPersonasMesa({ presencia, cuenta } = {}) {
+export function contarComensalesCuenta(cuenta) {
   const personas = new Set();
-  if (presencia) {
-    for (const c of presencia.comensales || []) {
-      if (typeof c === 'string' && c.trim()) {
-        personas.add(c.trim().toLowerCase());
-      }
-    }
-    for (const s of presencia.sin_celular || []) {
-      if (typeof s === 'string' && s.trim()) {
-        personas.add(s.trim().toLowerCase());
-      }
-    }
-  }
-  if (personas.size === 0 && cuenta?.comensales) {
-    for (const c of cuenta.comensales) {
-      if (c && !c.esGeneral) {
-        const nombre = typeof c === 'string' ? c : (c.nombre || c.comensal);
-        if (typeof nombre === 'string' && nombre.trim()) {
-          personas.add(nombre.trim().toLowerCase());
-        }
-      }
+  const comensales = Array.isArray(cuenta?.comensales) ? cuenta.comensales : [];
+  for (const c of comensales) {
+    if (!c) continue;
+    if (c.esGeneral) continue;
+    const nombre = typeof c === 'string' ? c : (c.nombre || c.comensal || '');
+    const clave = claveAlias(nombre);
+    if (clave && clave !== 'general') {
+      personas.add(clave);
     }
   }
   return Math.max(1, personas.size);
@@ -709,7 +697,8 @@ export function eventIdParaIntento(previo, { modo, saldo } = {}, generar) {
 /**
  * Determina la configuración del selector de modos de pago y el botón de acción (T2).
  *
- * - Personas en la mesa = comensales + sin_celular de mesa:presencia (sin repetir).
+ * - Comensales en la mesa = comensales distintos de cuenta.comensales comparados con claveAlias.
+ *   NO usa mesa:presencia para no colapsar a total si otros bloquean el celular.
  * - Si hay 1 persona (o mi saldo = saldo de la mesa) → mostrarSelector false y modo 'total' con el texto "Pagar la cuenta".
  * - Si lo mío ya está pagado (miSaldo <= 0) → solo 'total' (no mostrar 'propio', ni siquiera deshabilitado).
  * - Si no → las dos opciones, con modo inicial 'propio'.
@@ -718,7 +707,6 @@ export function eventIdParaIntento(previo, { modo, saldo } = {}, generar) {
  * @param {number} [opciones.saldoMesa=0] - Saldo restante de la mesa
  * @param {number} [opciones.miSaldo=0] - Saldo personal del comensal
  * @param {number} [opciones.miPagado=0] - Monto ya pagado por el comensal
- * @param {object} [opciones.presencia] - Estado de mesa:presencia
  * @param {object} [opciones.cuenta] - Cuenta normalizada de la mesa
  * @param {number} [opciones.personas] - Número explícito de personas (para pruebas)
  * @returns {{
@@ -736,7 +724,6 @@ export function estadoSelectorPago({
   saldoMesa = 0,
   miSaldo = 0,
   miPagado = 0,
-  presencia = null,
   cuenta = null,
   personas = null,
 } = {}) {
@@ -748,7 +735,7 @@ export function estadoSelectorPago({
   const cantPersonas =
     typeof personas === 'number'
       ? Math.max(1, Math.round(personas))
-      : contarPersonasMesa({ presencia, cuenta });
+      : contarComensalesCuenta(cuenta);
 
   if (saldoM <= 0) {
     return {
@@ -987,7 +974,7 @@ export default {
   formatoPesos,
   MODOS_PAGO,
   TITULOS_MODO,
-  contarPersonasMesa,
+  contarComensalesCuenta,
   normalizarCuenta,
   montosPorModo,
   aplicarPagoConfirmado,
