@@ -158,7 +158,12 @@ function Pago({ errorPagoInicial = null } = {}) {
           : (evento.monto_centavos != null ? Number(evento.monto_centavos) / 100 : 0);
         setUltimoPago(monto);
         setTipoConfirmado(tipo);
-        if (tipo === 'propio') {
+        const esMio = Boolean(
+          comensal &&
+          evento.comensal &&
+          String(evento.comensal).trim().toLowerCase() === String(comensal).trim().toLowerCase()
+        );
+        if (tipo === 'propio' || (tipo === 'mesa' && esMio)) {
           setAvisoExcedente(avisoExcedentePago(evento));
         } else {
           setAvisoExcedente(null);
@@ -1071,9 +1076,16 @@ function Pago({ errorPagoInicial = null } = {}) {
               )}
             </div>
           ) : (
-            <p className="m-0 text-[15px] text-white">
-              La mesa quedó pagada.
-            </p>
+            <div className="flex flex-col gap-1">
+              <p className="m-0 text-[15px] text-white">
+                La mesa quedó pagada.
+              </p>
+              {avisoExcedente && (
+                <p className="m-0 text-sm text-acento font-semibold">
+                  {avisoExcedente}
+                </p>
+              )}
+            </div>
           )}
 
           <div className="w-full box-border bg-superficie-2 border border-borde rounded-xl p-3 flex justify-between items-center text-sm">

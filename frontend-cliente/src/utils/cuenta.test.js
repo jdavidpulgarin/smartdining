@@ -746,6 +746,40 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res.comprobante).toBeNull();
     });
 
+    it('tipo "propio" con excedente → incluye avisoExcedente', () => {
+      const res = textoDetalleConfirmacion({
+        tipo: 'propio',
+        monto: 50000,
+        evento: { excedente: 5000 },
+      });
+      expect(res.esPropio).toBe(true);
+      expect(res.avisoExcedente).toBe('Pagaste $ 5.000 de más; la Caja te lo devuelve en efectivo.');
+    });
+
+    it('tipo "mesa" con excedente y esMio true → incluye avisoExcedente', () => {
+      const res = textoDetalleConfirmacion({
+        tipo: 'mesa',
+        monto: 90000,
+        evento: { excedente: 10000 },
+        esMio: true,
+      });
+      expect(res.esPropio).toBe(false);
+      expect(res.mensaje).toBe('La mesa quedó pagada.');
+      expect(res.avisoExcedente).toBe('Pagaste $ 10.000 de más; la Caja te lo devuelve en efectivo.');
+    });
+
+    it('tipo "mesa" con excedente pero esMio false → no incluye avisoExcedente', () => {
+      const res = textoDetalleConfirmacion({
+        tipo: 'mesa',
+        monto: 90000,
+        evento: { excedente: 10000 },
+        esMio: false,
+      });
+      expect(res.esPropio).toBe(false);
+      expect(res.mensaje).toBe('La mesa quedó pagada.');
+      expect(res.avisoExcedente).toBeUndefined();
+    });
+
     it('cualquier otro caso ("otro", null, undefined) → "La mesa quedó pagada."', () => {
       expect(textoDetalleConfirmacion({ tipo: 'otro' })).toEqual({
         esPropio: false,

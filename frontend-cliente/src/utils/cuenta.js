@@ -720,9 +720,10 @@ export function mensajePagoConfirmado({ comensal, yo, saldoRestante } = {}) {
  * @param {function} [opciones.formato]
  * @returns {{ esPropio: boolean, mensaje: string, comprobante: string|null }}
  */
-export function textoDetalleConfirmacion({ tipo, monto = 0, formato = formatoPesos, evento = null } = {}) {
-  const aviso = (tipo === 'propio' && evento) ? avisoExcedentePago(evento, formato) : null;
-  if (tipo === 'propio') {
+export function textoDetalleConfirmacion({ tipo, monto = 0, formato = formatoPesos, evento = null, esMio = false } = {}) {
+  const esPropio = tipo === 'propio';
+  const aviso = ((esPropio || esMio) && evento) ? avisoExcedentePago(evento, formato) : null;
+  if (esPropio) {
     return {
       esPropio: true,
       mensaje: `Pagaste ${formato(monto)}.`,
@@ -735,6 +736,7 @@ export function textoDetalleConfirmacion({ tipo, monto = 0, formato = formatoPes
     esPropio: false,
     mensaje: 'La mesa quedó pagada.',
     comprobante: null,
+    ...(aviso ? { avisoExcedente: aviso } : {}),
   };
 }
 

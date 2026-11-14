@@ -176,13 +176,13 @@ export async function crearIntencion(
 
   if (!res.ok) {
     const status = res.status;
-    const codigo = data?.codigo || data?.error || 'ERROR_PAGO';
+    const codigo = typeof data?.codigo === 'string' ? data.codigo : (data?.error || 'ERROR_PAGO');
     const traduccion = traducirErrorPago(status, codigo);
     const mensaje =
       (typeof traduccion === 'object' ? traduccion?.mensaje : traduccion) ||
       data?.mensaje ||
       'Error al iniciar el pago';
-    const tipo = typeof traduccion === 'object' ? traduccion?.tipo : undefined;
+    const tipo = typeof traduccion === 'object' ? traduccion?.tipo : (data?.tipo || null);
     throw new ErrorApi({
       status,
       codigo,
