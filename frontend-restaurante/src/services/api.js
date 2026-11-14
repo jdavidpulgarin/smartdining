@@ -951,6 +951,16 @@ export const reportesApi = {
     const data = await apiFetch(`/reportes?rango=${encodeURIComponent(rango)}`)
     return { ...data, isFallback: false }
   },
+
+  /**
+   * Consumo de inventario (P-22, solo admin): GET /api/reportes/consumo.
+   * `consulta` ya armada (desde, hasta y, si se eligió, id_insumo): ver
+   * utils/consumo.js. Sin mocks: si falla, el error sube a la pantalla.
+   * @returns {Promise<{ desde: string, hasta: string, insumos: Array<{ id_insumo: number, nombre: string, unidad: string, total: { consumo: number, merma: number, entradas: number, ajustes: number }, dias: Array<{ fecha: string, consumo: number, merma: number, entradas: number, ajustes: number }> }> }>}
+   */
+  async consumo(consulta) {
+    return apiFetch(`/reportes/consumo?${consulta}`)
+  },
 }
 
 /**
