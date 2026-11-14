@@ -148,3 +148,118 @@ describe('Reportes es solo de admin', () => {
     expect(spy).not.toHaveBeenCalled()
   })
 })
+
+describe('T6: métodos de pago con su monto, su color y el cuadre con la Caja', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.setItem('smartdining_token', 'test-token')
+  })
+
+  const METODOS = [
+    { metodo: 'Efectivo', monto: 216000, porcentaje: 87.1 },
+    { metodo: 'Tarjeta', monto: 20000, porcentaje: 8.1 },
+    { metodo: 'Online', monto: 8000, porcentaje: 3.2 },
+    { metodo: 'Transferencia', monto: 4000, porcentaje: 1.6 },
+  ]
+
+  /** GET /reportes?rango=… y GET /transacciones?desde=hoy (recaudado). */
+  function backend({ recaudado = 248000 } = {}) {
+    const urls = []
+    vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      urls.push(url)
+      if (/\/transacciones\?desde=hoy$/.test(url)) {
+        return recaudado instanceof Error ? Promise.reject(recaudado) : json({ total: recaudado, cantidad: 5, transacciones: [] })
+      }
+      return json({ ...reporte(248000), metodosPago: METODOS })
+    })
+    return urls
+  }
+
+  const colorDe = (metodo) => screen.getByTestId(`metodo-${metodo}`).querySelector('.sd-payment-dot').style.backgroundColor
+
+  it('cada método con su nombre, su monto y un color distinto (antes del 3.º en adelante eran iguales)', async () => {
+    backend()
+    montar()
+    await waitFor(() => expect(screen.getByTestId('metodo-Transferencia')).toBeInTheDocument())
+    expect(screen.getByTestId('metodo-Tarjeta')).toHaveTextContent('$20.000')
+    expect(screen.getByTestId('metodo-Online')).toHaveTextContent('$8.000')
+    const colores = ['Efectivo', 'Tarjeta', 'Online', 'Transferencia'].map(colorDe)
+    expect(new Set(colores).size).toBe(4)
+  })
+
+  it('muestra el TOTAL COBRADO y, en «hoy», que cuadra con «Recaudado hoy» de la Caja', async () => {
+    backend({ recaudado: 248000 })
+    montar()
+    expect(await screen.findByTestId('metodos-total')).toHaveTextContent('$248.000')
+    expect(await screen.findByTestId('cuadre-caja')).toHaveTextContent('Cuadra con «Recaudado hoy» de la Caja ($248.000)')
+  })
+
+  it('si no cuadra lo dice con la diferencia', async () => {
+    backend({ recaudado: 260000 })
+    montar()
+    const aviso = await screen.findByTestId('cuadre-caja')
+    expect(aviso).toHaveTextContent('No cuadra')
+    expect(aviso).toHaveTextContent('diferencia de $12.000')
+    expect(aviso).toHaveAttribute('role', 'alert')
+  })
+
+  it('si la Caja no responde no afirma nada', async () => {
+    backend({ recaudado: new TypeError('Failed to fetch') })
+    montar()
+    await screen.findByTestId('metodos-total')
+    expect(screen.queryByTestId('cuadre-caja')).toBeNull()
+  })
+
+  it('en «últimos 7 días» no compara con «Recaudado hoy» (es el cierre de un solo día)', async () => {
+    const urls = backend()
+    montar()
+    await screen.findByTestId('cuadre-caja')
+    fireEvent.click(screen.getByRole('button', { name: 'Últimos 7 días' }))
+    await waitFor(() => expect(urls.some((u) => u.includes('rango=semana'))).toBe(true))
+    await waitFor(() => expect(screen.queryByTestId('cuadre-caja')).toBeNull())
+  })
+})
+
+describe('T6: «Ventas por día» con ventasPorDia de GET /reportes', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.setItem('smartdining_token', 'test-token')
+  })
+
+  const conDias = (ventasPorDia) => vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+    if (/\/transacciones\?desde=hoy$/.test(url)) return json({ total: 0, cantidad: 0, transacciones: [] })
+    return json({ ...reporte(342000), ventasPorDia })
+  })
+
+  it('pinta una barra por día, cada una con su fecha, su monto y la altura relativa', async () => {
+    conDias([
+      { fecha: '2026-11-11', total: 0, pedidos: 0 },
+      { fecha: '2026-11-12', total: 114000, pedidos: 4 },
+      { fecha: '2026-11-13', total: 228000, pedidos: 9 },
+    ])
+    montar()
+    const grafica = await screen.findByTestId('ventas-por-dia')
+    expect(grafica.children).toHaveLength(3)
+    const dia13 = screen.getByTestId('dia-2026-11-13')
+    expect(dia13).toHaveTextContent('$228.000')
+    expect(dia13).toHaveTextContent('13')
+    expect(dia13.getAttribute('title')).toMatch(/13 de noviembre: \$228\.000 · 9 pedidos/)
+    expect(screen.getByTestId('dia-2026-11-12').children[1].style.height).toBe('50%')
+    expect(screen.getByTestId('dia-2026-11-11').children[1].style.height).toBe('0%')
+    expect(screen.queryByText(/todavía no incluye las ventas por día/)).toBeNull()
+  })
+
+  it('sin el campo (backend anterior) sigue diciendo que el reporte no lo incluye', async () => {
+    conDias(undefined)
+    montar()
+    expect(await screen.findByText(/todavía no incluye las ventas por día/)).toBeInTheDocument()
+    expect(screen.queryByTestId('ventas-por-dia')).toBeNull()
+  })
+
+  it('con todos los días en 0 dice que no hubo ventas (no dibuja barras vacías)', async () => {
+    conDias([{ fecha: '2026-11-13', total: 0, pedidos: 0 }])
+    montar()
+    expect(await screen.findByText('Sin ventas en este periodo.')).toBeInTheDocument()
+    expect(screen.queryByTestId('ventas-por-dia')).toBeNull()
+  })
+})
