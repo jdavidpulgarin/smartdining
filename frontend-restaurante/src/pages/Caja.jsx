@@ -21,6 +21,7 @@ import {
   comensalDelCobro,
   idCobroParaEnviar,
   mensajeDeErrorCobro,
+  recargarCuentasTrasError,
   descartarIdCobro,
   agruparCobros,
   horaBogota,
@@ -416,7 +417,7 @@ function CajaRegistradora() {
       if (descartarIdCobro(err)) cobroPendiente.current = null
       setErrorCobro(mensajeDeErrorCobro(err, formatCOP))
       // El saldo cambió por otro lado: se recarga para que el cajero vea el real.
-      if (err?.motivo === 'excede' || err?.motivo === 'sin_cuenta') await cargarCuentas()
+      if (recargarCuentasTrasError(err)) await cargarCuentas()
     } finally {
       enviando.current = false
       setProcessingPayment(false)
