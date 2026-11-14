@@ -25,6 +25,7 @@ import {
   montoTuParte,
   transicionPantallaPago,
   decidirSalidaEspera,
+  decidirVisibilidadPago,
 } from './cuenta';
 
 describe('utils/cuenta.js (J-08)', () => {
@@ -1215,6 +1216,57 @@ describe('utils/cuenta.js (J-08)', () => {
         tipoEvento: 'pago_otro',
       });
       expect(res).toBe('mantener');
+    });
+  });
+
+  describe('decidirVisibilidadPago', () => {
+    it('1 persona con saldo → sección sí, selector no', () => {
+      const res = decidirVisibilidadPago({
+        saldoMesa: 30000,
+        miSaldo: 30000,
+        miPagado: 0,
+        personas: 1,
+      });
+      expect(res.mostrarSeccionPago).toBe(true);
+      expect(res.mostrarSelector).toBe(false);
+      expect(res.selector.modo).toBe('total');
+      expect(res.selector.textoBoton).toBe('Pagar la cuenta');
+    });
+
+    it('lo mío pagado y la mesa debe → sección sí (modo total), selector no', () => {
+      const res = decidirVisibilidadPago({
+        saldoMesa: 20000,
+        miSaldo: 0,
+        miPagado: 25000,
+        personas: 3,
+      });
+      expect(res.mostrarSeccionPago).toBe(true);
+      expect(res.mostrarSelector).toBe(false);
+      expect(res.selector.modo).toBe('total');
+      expect(res.selector.textoBoton).toBe('Pagar toda la cuenta');
+    });
+
+    it('3 personas con saldo → las dos (sección sí, selector sí)', () => {
+      const res = decidirVisibilidadPago({
+        saldoMesa: 60000,
+        miSaldo: 20000,
+        miPagado: 0,
+        personas: 3,
+      });
+      expect(res.mostrarSeccionPago).toBe(true);
+      expect(res.mostrarSelector).toBe(true);
+      expect(res.selector.modo).toBe('propio');
+    });
+
+    it('saldo 0 → sección no', () => {
+      const res = decidirVisibilidadPago({
+        saldoMesa: 0,
+        miSaldo: 0,
+        miPagado: 40000,
+        personas: 2,
+      });
+      expect(res.mostrarSeccionPago).toBe(false);
+      expect(res.mostrarSelector).toBe(false);
     });
   });
 });

@@ -970,6 +970,23 @@ export function transicionPantallaPago({
   }
 }
 
+export function decidirVisibilidadPago({ saldoMesa = 0, cuenta = null, personas = null, miSaldo = 0, miPagado = 0 } = {}) {
+  const saldoM = Math.max(0, Number(saldoMesa) || 0);
+  const selector = estadoSelectorPago({
+    saldoMesa: saldoM,
+    miSaldo,
+    miPagado,
+    cuenta,
+    personas,
+  });
+
+  return {
+    mostrarSeccionPago: saldoM > 0,
+    mostrarSelector: selector.mostrarSelector,
+    selector,
+  };
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
@@ -996,4 +1013,5 @@ export default {
   montoTuParte,
   transicionPantallaPago,
   decidirSalidaEspera,
+  decidirVisibilidadPago,
 };

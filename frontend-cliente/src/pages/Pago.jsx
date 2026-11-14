@@ -15,11 +15,11 @@ import {
   debeMostrarSugerenciaSinCelular,
   mensajePagoConfirmado,
   eventIdParaIntento,
-  estadoSelectorPago,
   infoTuParte,
   montoTuParte,
   transicionPantallaPago,
   decidirSalidaEspera,
+  decidirVisibilidadPago,
 } from '../utils/cuenta';
 import { crearDeduplicador } from '../utils/deduplicador';
 import { crearIntencion } from '../services/pagoService';
@@ -291,14 +291,14 @@ function Pago() {
   const miSubtotal = cuenta?.mia?.subtotal ?? 0;
   const miPagado = cuenta?.mia?.pagado ?? 0;
 
-  const selector = estadoSelectorPago({
+  const visibilidadPago = decidirVisibilidadPago({
     saldoMesa: saldo,
     miSaldo,
     miPagado,
     cuenta,
   });
+  const { mostrarSeccionPago, mostrarSelector, selector } = visibilidadPago;
   const {
-    mostrarSelector,
     yaPague,
     modoInicial,
     modosDisponibles,
@@ -663,55 +663,59 @@ function Pago() {
             </div>
           </section>
 
-          {/* Opciones de pago si hay saldo pendiente */}
-          {mostrarSelector && (
+          {/* Opciones y acciones de pago si hay saldo pendiente */}
+          {mostrarSeccionPago && (
             <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-3">
-              <h2 className="m-0 font-etiqueta font-bold text-sm tracking-wider text-white uppercase">
-                ¿CÓMO QUIERES PAGAR?
-              </h2>
+              {mostrarSelector && (
+                <>
+                  <h2 className="m-0 font-etiqueta font-bold text-sm tracking-wider text-white uppercase">
+                    ¿CÓMO QUIERES PAGAR?
+                  </h2>
 
-              <div
-                role="radiogroup"
-                aria-label="Modo de pago"
-                className="grid grid-cols-2 gap-1.5 bg-[#0B0B0B] border border-borde rounded-xl p-1"
-              >
-                {MODOS_PAGO.map((k) => {
-                  const activo = modo === k;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      role="radio"
-                      aria-checked={activo}
-                      onClick={() => {
-                        setModo(k);
-                        setErrorPago(null);
-                      }}
-                      className={`min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
-                        activo
-                          ? 'bg-primario text-white shadow-sm cursor-pointer'
-                          : 'bg-transparent text-texto-suave hover:text-white cursor-pointer'
-                      }`}
-                    >
-                      <span className="font-etiqueta font-bold text-sm tracking-wider uppercase">
-                        {TITULOS_MODO[k]}
-                      </span>
-                      <span className="text-[11px]">
-                        {formatoPesos(montos[k])}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                  <div
+                    role="radiogroup"
+                    aria-label="Modo de pago"
+                    className="grid grid-cols-2 gap-1.5 bg-[#0B0B0B] border border-borde rounded-xl p-1"
+                  >
+                    {MODOS_PAGO.map((k) => {
+                      const activo = modo === k;
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          role="radio"
+                          aria-checked={activo}
+                          onClick={() => {
+                            setModo(k);
+                            setErrorPago(null);
+                          }}
+                          className={`min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
+                            activo
+                              ? 'bg-primario text-white shadow-sm cursor-pointer'
+                              : 'bg-transparent text-texto-suave hover:text-white cursor-pointer'
+                          }`}
+                        >
+                          <span className="font-etiqueta font-bold text-sm tracking-wider uppercase">
+                            {TITULOS_MODO[k]}
+                          </span>
+                          <span className="text-[11px]">
+                            {formatoPesos(montos[k])}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-              <p className="m-0 text-xs text-texto-suave">
-                {ayudas[modo]}
-              </p>
+                  <p className="m-0 text-xs text-texto-suave">
+                    {ayudas[modo]}
+                  </p>
 
-              {mostrarSinCelular && (
-                <p className="m-0 text-xs text-texto-tenue">
-                  {TEXTO_SUGERENCIA_SIN_CELULAR}
-                </p>
+                  {mostrarSinCelular && (
+                    <p className="m-0 text-xs text-texto-tenue">
+                      {TEXTO_SUGERENCIA_SIN_CELULAR}
+                    </p>
+                  )}
+                </>
               )}
 
               {/* Tarjeta de aviso si pidió para varios (J-15) */}
