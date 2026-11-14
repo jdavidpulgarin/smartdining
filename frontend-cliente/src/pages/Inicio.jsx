@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSesion } from '../context/SesionContext';
-import { validarNombre } from '../utils/sesion';
+import {
+  validarNombre,
+  decidirDestinoInicio,
+  tienePedidosActivosGuardados,
+  obtenerSesionCerrada,
+  nombreSugerido,
+} from '../utils/sesion';
 import { leerMesaDelQr } from '../utils/qr';
 import { aliasDelToken } from '../services/clienteMesa';
 import Button from '../components/ui/Button';
@@ -21,6 +27,7 @@ function Inicio() {
     recienUnido,
     tokenQrPendiente,
     unirse,
+    cerrarSesion,
     limpiarError,
   } = useSesion();
 
@@ -43,6 +50,34 @@ function Inicio() {
       : null);
   const numeroMesaQr = leerMesaDelQr(tokenUrl);
 
+  const tienePedidos = useMemo(() => {
+    if (!sesion?.token || !sesion?.idMesa) return false;
+    return tienePedidosActivosGuardados(
+      sesion.comensal,
+      sesion.idMesa,
+      sesion.token
+    );
+  }, [sesion]);
+
+  const [sesionExistiaAlMontar] = useState(() => Boolean(sesion?.token && sesion?.idMesa));
+
+  const destino = useMemo(
+    () =>
+      decidirDestinoInicio({
+        tokenUrl,
+        sesion,
+        tienePedidosActivos: tienePedidos,
+        recienUnido: Boolean(recienUnido || !sesionExistiaAlMontar),
+      }),
+    [tokenUrl, sesion, tienePedidos, recienUnido, sesionExistiaAlMontar]
+  );
+
+  useEffect(() => {
+    if (destino.accion === 'redirigir' && destino.ruta) {
+      navigate(destino.ruta, { replace: true });
+    }
+  }, [destino, navigate]);
+
   useEffect(() => {
     if (import.meta.env.DEV && aliasDevUrl && estado === 'pide_nombre' && !enviando) {
       unirse(aliasDevUrl);
@@ -59,6 +94,11 @@ function Inicio() {
     error?.status === 503 ||
     error?.status === 0 ||
     error?.motivo === 'sin_conexion';
+
+  const aliasSesionCerrada = useMemo(
+    () => (esErrorAlias409 ? obtenerSesionCerrada() : null),
+    [esErrorAlias409]
+  );
 
   useEffect(() => {
     if (cuentaRegresiva <= 0) return;
@@ -80,16 +120,30 @@ function Inicio() {
     setTocado(true);
     if (!validacion.valido || enviando || cuentaRegresiva > 0) return;
     const res = await unirse(nombre);
-    if (res && !res.ok && res.error?.status === 429) {
-      setCuentaRegresiva(res.error.retryAfter || 60);
+    if (res && !res.ok) {
+      if (res.error?.status === 429) {
+        setCuentaRegresiva(res.error.retryAfter || 60);
+      } else if (res.error?.status === 409 || res.error?.motivo === 'alias_en_uso') {
+        const aliasCerrado = obtenerSesionCerrada();
+        if (aliasCerrado) {
+          setNombre(nombreSugerido(nombre || aliasCerrado));
+        }
+      }
     }
   };
 
   const manejarReintentar = async () => {
     if (!validacion.valido || enviando || cuentaRegresiva > 0) return;
     const res = await unirse(nombre);
-    if (res && !res.ok && res.error?.status === 429) {
-      setCuentaRegresiva(res.error.retryAfter || 60);
+    if (res && !res.ok) {
+      if (res.error?.status === 429) {
+        setCuentaRegresiva(res.error.retryAfter || 60);
+      } else if (res.error?.status === 409 || res.error?.motivo === 'alias_en_uso') {
+        const aliasCerrado = obtenerSesionCerrada();
+        if (aliasCerrado) {
+          setNombre(nombreSugerido(nombre || aliasCerrado));
+        }
+      }
     }
   };
 
@@ -148,7 +202,60 @@ function Inicio() {
         {/* Tarjeta inferior con el formulario o estados */}
         <div className="pb-4">
           <Card className="w-full p-5 sm:p-6 shadow-2xl border border-borde bg-superficie rounded-2xl">
-            {estado === 'cargando' && (
+            {destino.accion === 'redirigir' && (
+              <div className="py-8 text-center" role="status" aria-live="polite">
+                <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-primario border-t-transparent mb-3" />
+                <p className="font-etiqueta uppercase tracking-wide text-base text-texto">
+                  Entrando a la mesa...
+                </p>
+              </div>
+            )}
+
+            {destino.accion === 'confirmar_reutilizar' && sesion && (
+              <div className="space-y-4 text-center py-2">
+                <div
+                  aria-hidden="true"
+                  className="w-14 h-14 bg-texto text-fondo rounded-full flex items-center justify-center mx-auto text-2xl font-bold shadow-md"
+                >
+                  ✓
+                </div>
+                <div className="space-y-1">
+                  <h2 className="font-titulo text-3xl text-white uppercase tracking-wide">
+                    {`YA ESTÁS EN LA MESA ${sesion.numeroMesa || sesion.idMesa}`}
+                  </h2>
+                  <p className="text-sm font-semibold text-white">
+                    Conectado como {sesion.comensal}
+                  </p>
+                  <p className="text-xs text-texto-suave">
+                    ¿Deseas continuar con tu sesión o entrar con otro nombre?
+                  </p>
+                </div>
+                <div className="space-y-2 pt-2">
+                  <Button
+                    variante="primario"
+                    onClick={() =>
+                      navigate(tienePedidos ? '/seguimiento' : '/menu', {
+                        replace: true,
+                      })
+                    }
+                    className="w-full"
+                  >
+                    CONTINUAR
+                  </Button>
+                  <Button
+                    variante="secundario"
+                    onClick={() => {
+                      cerrarSesion();
+                    }}
+                    className="w-full"
+                  >
+                    ENTRAR CON OTRO NOMBRE
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {destino.accion !== 'redirigir' && destino.accion !== 'confirmar_reutilizar' && estado === 'cargando' && (
               <div className="py-8 text-center" role="status" aria-live="polite">
                 <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-primario border-t-transparent mb-3" />
                 <p className="font-etiqueta uppercase tracking-wide text-base text-texto">
@@ -157,7 +264,7 @@ function Inicio() {
               </div>
             )}
 
-            {estado === 'pide_nombre' && esErrorQr401 && (
+            {destino.accion !== 'redirigir' && destino.accion !== 'confirmar_reutilizar' && estado === 'pide_nombre' && esErrorQr401 && (
               <div role="alert" aria-live="polite" className="text-center space-y-4 py-2">
                 <div
                   aria-hidden="true"
@@ -179,7 +286,10 @@ function Inicio() {
               </div>
             )}
 
-            {estado === 'pide_nombre' && !esErrorQr401 && (
+            {destino.accion !== 'redirigir' &&
+              destino.accion !== 'confirmar_reutilizar' &&
+              (estado === 'pide_nombre' || destino.accion === 'unirse_nueva_mesa') &&
+              !esErrorQr401 && (
               <form onSubmit={manejarSubmit} className="space-y-4" noValidate>
                 <div className="space-y-1">
                   <h2 className="font-titulo text-3xl sm:text-4xl text-white tracking-wide uppercase leading-tight">
@@ -248,12 +358,20 @@ function Inicio() {
                       aria-live="polite"
                       className="mt-2 rounded-xl bg-primario/10 border border-primario/30 p-3 space-y-1"
                     >
-                      <p className="text-xs font-bold text-primario-texto">
-                        {error.mensaje}
-                      </p>
-                      <p className="text-xs text-texto-suave">
-                        Prueba con otro nombre o agrega una inicial
-                      </p>
+                      {aliasSesionCerrada ? (
+                        <p className="text-xs font-bold text-primario-texto">
+                          {`Tu sesión anterior se cerró. Ese nombre sigue reservado en la mesa; elige otro (por ejemplo, ${nombreSugerido(nombre || aliasSesionCerrada)}).`}
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-xs font-bold text-primario-texto">
+                            {error.mensaje}
+                          </p>
+                          <p className="text-xs text-texto-suave">
+                            Prueba con otro nombre o agrega una inicial
+                          </p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -319,7 +437,10 @@ function Inicio() {
               </form>
             )}
 
-            {estado === 'activa' && sesion && (
+            {destino.accion !== 'redirigir' &&
+              destino.accion !== 'confirmar_reutilizar' &&
+              estado === 'activa' &&
+              sesion && (
               <div className="space-y-4 text-center py-2">
                 <div
                   aria-hidden="true"
@@ -349,7 +470,9 @@ function Inicio() {
               </div>
             )}
 
-            {estado === 'sin_sesion' && (
+            {destino.accion !== 'redirigir' &&
+              destino.accion !== 'confirmar_reutilizar' &&
+              estado === 'sin_sesion' && (
               <div className="space-y-3 text-center py-2">
                 <div
                   aria-hidden="true"
