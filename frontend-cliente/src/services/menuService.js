@@ -133,7 +133,12 @@ export function aplicarDisponibilidadPlato(menu, idPlato, disponible) {
     if (!Array.isArray(cat.platos)) return cat;
     const nuevosPlatos = cat.platos.map((plato) => {
       if (Number(plato.id_plato) === idNum) {
-        return { ...plato, disponible: Boolean(disponible) };
+        const disp = Boolean(disponible);
+        return {
+          ...plato,
+          disponible: disp,
+          disponible_plato: disp,
+        };
       }
       return plato;
     });
@@ -217,7 +222,13 @@ export function aplicarDisponibilidadEnListaPlatos(platos = [], idPlato, disponi
   return platos.map((p) => {
     const pId = Number(p.id ?? p.id_plato);
     if (pId === idNum) {
-      return { ...p, disponible: Boolean(disponible) };
+      const dispPlato = Boolean(disponible);
+      const tieneStock = Array.isArray(p.pasos) ? armableTieneStock(p) : true;
+      return {
+        ...p,
+        disponible: dispPlato && tieneStock,
+        disponible_plato: dispPlato,
+      };
     }
     return p;
   });
@@ -226,6 +237,7 @@ export function aplicarDisponibilidadEnListaPlatos(platos = [], idPlato, disponi
 /**
  * Función pura que actualiza la disponibilidad de un ingrediente en una lista de platos armables.
  * Si el ingrediente agotado hace que un paso obligatorio no tenga opciones, el plato armable se agota.
+ * Respeta si el admin desactivó el plato por separado (disponible_plato).
  *
  * @param {Array<object>} armables
  * @param {number|string} idIngrediente
@@ -257,9 +269,15 @@ export function aplicarDisponibilidadIngredienteEnArmables(armables = [], idIngr
 
     const platoActualizado = { ...plato, pasos: nuevosPasos };
     const tieneStock = armableTieneStock(platoActualizado);
+    const dispPlato =
+      plato.disponible_plato !== undefined
+        ? plato.disponible_plato
+        : plato.disponible !== false;
+
     return {
       ...platoActualizado,
-      disponible: tieneStock,
+      disponible_plato: dispPlato,
+      disponible: dispPlato !== false && tieneStock,
     };
   });
 }
@@ -419,15 +437,20 @@ export function adaptarPlatosArmables(rawMenu) {
               : [],
           }))
         : [];
+      const dispPlato =
+        plato.disponible_plato !== undefined
+          ? plato.disponible_plato
+          : plato.disponible !== false;
       const objArmable = {
         ...plato,
         url_imagen: urlImagen(plato.url_imagen),
         pasos: pasosAdaptados,
+        disponible_plato: dispPlato,
       };
       const tieneStock = armableTieneStock(objArmable);
       return {
         ...objArmable,
-        disponible: plato.disponible !== false && tieneStock,
+        disponible: dispPlato !== false && tieneStock,
       };
     });
 }

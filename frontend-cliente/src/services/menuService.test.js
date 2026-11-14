@@ -637,6 +637,60 @@ describe('menuService', () => {
       });
     });
 
+    describe('respetar plato desactivado al reponer ingredientes', () => {
+      const armableEjemplo = [
+        {
+          id_plato: 301,
+          nombre: 'Burrito Bowl',
+          disponible: true,
+          disponible_plato: true,
+          pasos: [
+            {
+              id_paso: 1,
+              nombre: 'Base',
+              obligatorio: true,
+              ingredientes: [
+                { id_ingrediente: 11, nombre: 'Arroz', disponible: true },
+                { id_ingrediente: 12, nombre: 'Frijol', disponible: true },
+              ],
+            },
+          ],
+        },
+      ];
+
+      it('(a) plato desactivado por plato:disponibilidad false + reponer un ingrediente → sigue no disponible', () => {
+        // 1. Admin desactiva el plato: llega plato:disponibilidad false
+        const desactivado = aplicarDisponibilidadEnListaPlatos(armableEjemplo, 301, false);
+        expect(desactivado[0].disponible_plato).toBe(false);
+        expect(desactivado[0].disponible).toBe(false);
+
+        // 2. Se repone un ingrediente del plato (ej. arroz con disponible: true)
+        const trasReponer = aplicarDisponibilidadIngredienteEnArmables(desactivado, 11, true);
+        expect(trasReponer[0].disponible_plato).toBe(false);
+        expect(trasReponer[0].disponible).toBe(false);
+      });
+
+      it('(b) plato activado de nuevo (plato:disponibilidad true) con stock → disponible', () => {
+        // Partimos del plato desactivado
+        const desactivado = aplicarDisponibilidadEnListaPlatos(armableEjemplo, 301, false);
+        expect(desactivado[0].disponible).toBe(false);
+
+        // Admin lo reactiva: llega plato:disponibilidad true
+        const reactivado = aplicarDisponibilidadEnListaPlatos(desactivado, 301, true);
+        expect(reactivado[0].disponible_plato).toBe(true);
+        expect(reactivado[0].disponible).toBe(true);
+      });
+
+      it('(c) plato activo y un paso obligatorio sin opciones → no disponible', () => {
+        // Plato activo (disponible_plato: true) pero agotamos todos los ingredientes del paso obligatorio
+        let estado = aplicarDisponibilidadIngredienteEnArmables(armableEjemplo, 11, false);
+        estado = aplicarDisponibilidadIngredienteEnArmables(estado, 12, false);
+        expect(estado[0].disponible_plato).toBe(true);
+        expect(estado[0].disponible).toBe(false);
+        expect(armableTieneStock(estado[0])).toBe(false);
+      });
+    });
+
     it('limpiar marca local de agotado al reponerse un plato o ingrediente', () => {
       marcarFaltantesEnCache([
         { tipo: 'plato', id: 50, nombre: 'Sopa' },
