@@ -115,7 +115,7 @@ function cargarConfig(env = process.env) {
   }
   // Gracia de presencia de un comensal que se cae (sala.js). 0 = sin gracia
   // (sale al instante, como antes). Más de 10 min dejaría sentado a quien ya
-  // se fue: el panel y «igual» contarían a alguien que no está.
+  // se fue: el panel y la rotación del QR contarían a alguien que no está.
   const graciaTexto = (env.PRESENCIA_GRACIA_MS || '').trim();
   const presenciaGraciaMs = graciaTexto === '' ? 60000 : Number(graciaTexto);
   if (!Number.isInteger(presenciaGraciaMs) || presenciaGraciaMs < 0 || presenciaGraciaMs > 600000) {

@@ -82,7 +82,7 @@ test('se cae y vuelve ANTES de la gracia: el panel no recibe ni la salida ni la 
   cortarRed(ana);
   await hastaQue(() => s.presencia.enGracia(5).length === 1);
   assert.deepStrictEqual(s.presencia.enGracia(5), ['Ana']);
-  // Sigue contando para todos (rotación del QR, «igual», panel).
+  // Sigue contando para todos (rotación del QR, panel, PWA).
   const enGracia = await s.presencia.calcular(5);
   assert.deepStrictEqual(enGracia.comensales, ['Ana', 'Beto']);
   assert.strictEqual(enGracia.total, 2);

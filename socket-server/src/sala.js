@@ -39,7 +39,7 @@ const MOTIVOS_CON_GRACIA = new Set(['transport close', 'transport error', 'ping 
  * - total: personas en la mesa = alias distintos + sockets de comensal sin
  *   alias (dos pestañas de "Ana" cuentan como una persona).
  * - pagaron: alias que ya pagaron algo en esta sesión de mesa (estén o no
- *   sentados), ordenados. Con esto la PWA calcula "igual" como el servidor.
+ *   sentados), ordenados. Con esto la PWA sabe quién ya pagó.
  * - sin_celular: alias que agregó el personal (POST /internal/mesa-comensal),
  *   ordenados; también entran en comensales y en total.
  *
@@ -49,7 +49,7 @@ const MOTIVOS_CON_GRACIA = new Set(['transport close', 'transport error', 'ping 
  *
  * Gracia (EVENTS.md §5.2): cuando el socket de un comensal se cae por la red,
  * su alias sigue contando `graciaMs` (en comensales, en total, en la guarda de
- * rotación del QR y en «igual»). Si el mismo comensal (misma mesa y alias)
+ * rotación del QR). Si el mismo comensal (misma mesa y alias)
  * vuelve antes, no se avisa nada; si no, al vencer sale como siempre. Liberar
  * la mesa cancela todas sus gracias. `programarGracia`/`cancelarGracia` son el
  * reloj, inyectable en las pruebas.
@@ -76,7 +76,7 @@ function crearPresencia({
     // Quien está en su periodo de gracia sigue sentado.
     for (const a of (gracias.get(idMesa) || new Map()).keys()) alias.add(a);
     // Los sin celular (§6.4) cuentan como personas sentadas: van en
-    // comensales y en total, así «igual» y la rotación del QR los ven sin
+    // comensales y en total, así el panel y la rotación del QR los ven sin
     // lógica aparte.
     const sinCelular = Object.values(await estadoMesas.sinCelular(idMesa)).sort((a, b) => a.localeCompare(b));
     for (const a of sinCelular) alias.add(a);
@@ -88,7 +88,7 @@ function crearPresencia({
   }
 
   // A la mesa también: sus comensales necesitan quién está y quién pagó para
-  // mostrar cuánto es "igual". Solo llevan datos de esa misma mesa.
+  // mostrar quién falta por pagar. Solo llevan datos de esa misma mesa.
   async function emitir(idMesa) {
     const presencia = await calcular(idMesa);
     io.to(SALA_ADMIN).to(salaMesa(idMesa)).emit('mesa:presencia', presencia);

@@ -694,7 +694,7 @@ salga y entre del panel cada vez:
 
 - Si el socket de un comensal se cae por la red (`transport close`, `transport error` o
   `ping timeout`) y no le queda otra pestaña en la sala, **sigue contando** durante la gracia:
-  en `comensales`, en `total`, en la guarda de rotación del QR y en el reparto «igual». **No se
+  en `comensales`, en `total` y en la guarda de rotación del QR. **No se
   emite nada** al caerse.
 - Si el **mismo comensal** (misma mesa y mismo alias) vuelve y hace `join:table` antes de que
   termine, se cancela la salida y **no se emite nada**: para los demás nunca se fue.
