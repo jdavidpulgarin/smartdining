@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import QrScanner from 'qr-scanner';
-import { validarUrlQrMesa } from '../utils/qr';
+import { validarUrlQrMesa, clasificarErrorCamara } from '../utils/qr';
+import { esDispositivoIos } from '../services/push';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 
@@ -14,6 +15,15 @@ function EscanearQr() {
   const [errorCamara, setErrorCamara] = useState(null);
   const [mensajeInvalido, setMensajeInvalido] = useState(null);
 
+  const esIos =
+    typeof navigator !== 'undefined'
+      ? esDispositivoIos({
+          userAgent: navigator.userAgent,
+          platform: navigator.platform,
+          maxTouchPoints: navigator.maxTouchPoints,
+        })
+      : false;
+
   useEffect(() => {
     let activo = true;
 
@@ -22,7 +32,7 @@ function EscanearQr() {
         const tieneCamara = await QrScanner.hasCamera();
         if (!activo) return;
         if (!tieneCamara) {
-          setErrorCamara('sin_camara');
+          setErrorCamara(clasificarErrorCamara('sin_camara'));
           return;
         }
 
@@ -72,19 +82,7 @@ function EscanearQr() {
         await scanner.start();
       } catch (err) {
         if (!activo) return;
-        const nombre = err?.name || '';
-        const msg = String(err?.message || '').toLowerCase();
-        if (
-          nombre === 'NotAllowedError' ||
-          nombre === 'PermissionDeniedError' ||
-          msg.includes('permission') ||
-          msg.includes('denied') ||
-          msg.includes('notallowed')
-        ) {
-          setErrorCamara('permiso_denegado');
-        } else {
-          setErrorCamara('sin_camara');
-        }
+        setErrorCamara(clasificarErrorCamara(err));
       }
     };
 
@@ -153,14 +151,27 @@ function EscanearQr() {
             </div>
             <div className="space-y-2">
               <h1 className="font-titulo text-2xl text-white uppercase tracking-wide leading-tight">
-                Necesitamos la cámara para leer el QR de tu mesa
+                {errorCamara.mensaje}
               </h1>
-              <p className="text-xs sm:text-sm text-texto-suave leading-relaxed">
-                Para escanear el código, permite el acceso a la cámara en los Ajustes de tu dispositivo o navegador.
-              </p>
-              <p className="text-xs text-primario-texto font-semibold pt-1">
-                También puedes abrir el QR con la cámara de tu celular.
-              </p>
+              {errorCamara.tipo === 'permiso_denegado' ? (
+                <p className="text-xs sm:text-sm text-texto-suave leading-relaxed">
+                  Para escanear el código de tu mesa, activa el acceso a la cámara en los Ajustes de tu dispositivo o navegador.
+                </p>
+              ) : (
+                <p className="text-xs sm:text-sm text-texto-suave leading-relaxed">
+                  Asegúrate de que la cámara esté disponible y no esté siendo usada por otra aplicación.
+                </p>
+              )}
+              <div className="pt-1 space-y-1">
+                <p className="text-xs text-primario-texto font-semibold">
+                  También puedes abrir el QR con la cámara de tu celular.
+                </p>
+                {esIos && (
+                  <p className="text-xs text-texto-suave">
+                    Si lo abres con la cámara del iPhone se abrirá Safari, y ahí no te llegarán los avisos de tu pedido.
+                  </p>
+                )}
+              </div>
             </div>
             <Button
               type="button"

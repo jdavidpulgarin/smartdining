@@ -118,13 +118,73 @@ export function validarUrlQrMesa(
     return { ok: false };
   }
 
+  const tokenLimpio = token.trim();
   return {
     ok: true,
-    ruta: `${url.pathname}${url.search}`,
+    ruta: `/?token=${encodeURIComponent(tokenLimpio)}`,
+  };
+}
+
+/**
+ * Clasifica un error de acceso a la cámara en una categoría clara y amigable (T9 / Escaneo QR).
+ *
+ * @param {Error|object|string} [error]
+ * @returns {{ tipo: 'sin_camara' | 'permiso_denegado' | 'error_desconocido', mensaje: string }}
+ */
+export function clasificarErrorCamara(error) {
+  if (!error) {
+    return {
+      tipo: 'error_desconocido',
+      mensaje: 'No pudimos iniciar la cámara. Intenta de nuevo.',
+    };
+  }
+
+  const nombre =
+    typeof error === 'string'
+      ? error
+      : (error.name || error.codigo || '');
+  const mensajeError = String(error.message || '').toLowerCase();
+
+  // 1. Sin cámara disponible
+  if (
+    nombre === 'NotFoundError' ||
+    nombre === 'DevicesNotFoundError' ||
+    nombre === 'OverconstrainedError' ||
+    nombre === 'sin_camara' ||
+    mensajeError.includes('not found') ||
+    mensajeError.includes('no camera')
+  ) {
+    return {
+      tipo: 'sin_camara',
+      mensaje: 'No encontramos una cámara en este dispositivo.',
+    };
+  }
+
+  // 2. Permiso denegado por el usuario o seguridad
+  if (
+    nombre === 'NotAllowedError' ||
+    nombre === 'PermissionDeniedError' ||
+    nombre === 'SecurityError' ||
+    nombre === 'permiso_denegado' ||
+    mensajeError.includes('permission') ||
+    mensajeError.includes('denied') ||
+    mensajeError.includes('notallowed')
+  ) {
+    return {
+      tipo: 'permiso_denegado',
+      mensaje: 'Necesitamos permiso para usar la cámara. Actívalo en los ajustes del navegador o del teléfono.',
+    };
+  }
+
+  // 3. Otro error genérico
+  return {
+    tipo: 'error_desconocido',
+    mensaje: 'No pudimos iniciar la cámara. Intenta de nuevo.',
   };
 }
 
 export default {
   leerMesaDelQr,
   validarUrlQrMesa,
+  clasificarErrorCamara,
 };

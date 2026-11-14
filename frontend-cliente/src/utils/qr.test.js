@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leerMesaDelQr, validarUrlQrMesa } from './qr';
+import { leerMesaDelQr, validarUrlQrMesa, clasificarErrorCamara } from './qr';
 
 function crearTokenPrueba(payload, version = 'v1', firma = 'firma_mock') {
   const json = JSON.stringify(payload);
@@ -131,6 +131,85 @@ describe('validarUrlQrMesa', () => {
     expect(validarUrlQrMesa(urlLoopback, origenLoopback)).toEqual({
       ok: true,
       ruta: `/?token=${tokenValido}`,
+    });
+  });
+
+  it('QR válido con parámetros extra (?token=v1...&utm=x&jwt_dev=y) → ruta solo con el token', () => {
+    const origen = 'https://app.smartdining.co';
+    const urlConExtras = `${origen}/?token=${tokenValido}&utm_source=mesa5&jwt_dev=dev123&otro=param`;
+    const res = validarUrlQrMesa(urlConExtras, origen);
+
+    expect(res).toEqual({
+      ok: true,
+      ruta: `/?token=${tokenValido}`,
+    });
+  });
+
+  it('QR válido con #fragmento → sin fragmento', () => {
+    const origen = 'https://app.smartdining.co';
+    const urlConHash = `${origen}/?token=${tokenValido}#seccion-inicio`;
+    const res = validarUrlQrMesa(urlConHash, origen);
+
+    expect(res).toEqual({
+      ok: true,
+      ruta: `/?token=${tokenValido}`,
+    });
+  });
+});
+
+describe('clasificarErrorCamara', () => {
+  it('clasifica error sin camara (NotFoundError / OverconstrainedError / sin_camara)', () => {
+    const errNotFound = new Error('No camera found');
+    errNotFound.name = 'NotFoundError';
+    expect(clasificarErrorCamara(errNotFound)).toEqual({
+      tipo: 'sin_camara',
+      mensaje: 'No encontramos una cámara en este dispositivo.',
+    });
+
+    const errOverconstrained = new Error('Constraints not met');
+    errOverconstrained.name = 'OverconstrainedError';
+    expect(clasificarErrorCamara(errOverconstrained)).toEqual({
+      tipo: 'sin_camara',
+      mensaje: 'No encontramos una cámara en este dispositivo.',
+    });
+
+    expect(clasificarErrorCamara('sin_camara')).toEqual({
+      tipo: 'sin_camara',
+      mensaje: 'No encontramos una cámara en este dispositivo.',
+    });
+  });
+
+  it('clasifica error de permiso negado (NotAllowedError / SecurityError / permiso_denegado)', () => {
+    const errNotAllowed = new Error('Permission denied');
+    errNotAllowed.name = 'NotAllowedError';
+    expect(clasificarErrorCamara(errNotAllowed)).toEqual({
+      tipo: 'permiso_denegado',
+      mensaje: 'Necesitamos permiso para usar la cámara. Actívalo en los ajustes del navegador o del teléfono.',
+    });
+
+    const errSecurity = new Error('Security policy');
+    errSecurity.name = 'SecurityError';
+    expect(clasificarErrorCamara(errSecurity)).toEqual({
+      tipo: 'permiso_denegado',
+      mensaje: 'Necesitamos permiso para usar la cámara. Actívalo en los ajustes del navegador o del teléfono.',
+    });
+
+    expect(clasificarErrorCamara('permiso_denegado')).toEqual({
+      tipo: 'permiso_denegado',
+      mensaje: 'Necesitamos permiso para usar la cámara. Actívalo en los ajustes del navegador o del teléfono.',
+    });
+  });
+
+  it('clasifica otros errores como desconocidos con mensaje generico', () => {
+    const errGenerico = new Error('Something went wrong');
+    expect(clasificarErrorCamara(errGenerico)).toEqual({
+      tipo: 'error_desconocido',
+      mensaje: 'No pudimos iniciar la cámara. Intenta de nuevo.',
+    });
+
+    expect(clasificarErrorCamara(null)).toEqual({
+      tipo: 'error_desconocido',
+      mensaje: 'No pudimos iniciar la cámara. Intenta de nuevo.',
     });
   });
 });
