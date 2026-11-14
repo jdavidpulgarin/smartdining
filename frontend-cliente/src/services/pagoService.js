@@ -17,7 +17,7 @@ import { uuidV4 } from './clienteMesa';
  * - Si vale 'real', hace la petición real a socket-server (para probar 503 NO_CONFIGURADO).
  * - En caso normal, devuelve un mock de intención válido tras 600 ms.
  *
- * @param {('propio'|'igual'|'total')} modo - Modo de división del pago
+ * @param {('propio'|'total')} modo - Modo de pago ('propio' o 'total')
  * @param {string} [eventIdReintento] - Opcional, para reintentar el mismo intento
  * @returns {Promise<object>} Intención de pago generada
  */

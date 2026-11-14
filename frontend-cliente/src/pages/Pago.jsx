@@ -4,7 +4,7 @@ import { useMesaSocket } from '../context/MesaSocketContext';
 import {
   formatoPesos,
   montosPorModo,
-  personasDividir,
+  MODOS_PAGO,
   TITULOS_MODO,
   ESTADO_CUENTA_INICIAL,
   ESTADO_CUENTA_ENVIANDO,
@@ -30,7 +30,7 @@ import { uuidV4 } from '../services/clienteMesa';
  * Pantalla principal de La Cuenta y Pagos (J-08).
  *
  * Muestra el desglose de la cuenta de la mesa, el estado de cada comensal,
- * las opciones para pagar (LO MÍO, DIVIDIR, TODA LA MESA), y los flujos
+ * las opciones para pagar (Pagar lo mío, Pagar toda la cuenta), y los flujos
  * de confirmación y pago en caja.
  */
 function Pago() {
@@ -282,19 +282,40 @@ function Pago() {
     }
   }, [cuenta, pantalla, origenEspera, widgetAbierto, intencionActual]);
 
-  const saldoMesa = cuenta?.saldo ?? 0;
-  const miSaldoCuenta = cuenta?.mia?.saldo ?? 0;
-  const loMioHabilitado = miSaldoCuenta > 0;
+  const mesaNumero = cuenta?.numero || idMesa || null;
+  const ubicacion = cuenta?.ubicacion || null;
+  const total = cuenta?.total ?? 0;
+  const pagado = cuenta?.pagado ?? 0;
+  const saldo = cuenta?.saldo ?? 0;
+  const miSaldo = cuenta?.mia?.saldo ?? 0;
+  const miSubtotal = cuenta?.mia?.subtotal ?? 0;
+  const miPagado = cuenta?.mia?.pagado ?? 0;
 
-  // Si la cuenta se actualiza y mi saldo pasa a 0 estando en 'propio', cambia a 'igual' solo si la mesa aún debe
+  const selector = estadoSelectorPago({
+    saldoMesa: saldo,
+    miSaldo,
+    miPagado,
+    presencia,
+    cuenta,
+  });
+  const {
+    mostrarSelector,
+    yaPague,
+    modoInicial,
+    modosDisponibles,
+    textoBoton,
+  } = selector;
+
+  // Si el modo actual no está entre los permitidos (p. ej. 'propio' cuando mi saldo es 0 o mesa de 1 sola persona),
+  // cambia al modo recomendado ('total')
   useEffect(() => {
     if (!cuenta) return;
-    if (modo === 'propio' && !loMioHabilitado && saldoMesa > 0) {
+    if (modoInicial && (!modosDisponibles || !modosDisponibles.includes(modo))) {
       queueMicrotask(() => {
-        setModo('igual');
+        setModo(modoInicial);
       });
     }
-  }, [cuenta, modo, loMioHabilitado, saldoMesa]);
+  }, [cuenta, modoInicial, modosDisponibles, modo]);
 
   if (cargando && !cuenta) {
     return (
@@ -332,21 +353,6 @@ function Pago() {
     );
   }
 
-  const mesaNumero = cuenta?.numero || idMesa || null;
-  const ubicacion = cuenta?.ubicacion || null;
-  const total = cuenta?.total ?? 0;
-  const pagado = cuenta?.pagado ?? 0;
-  const saldo = cuenta?.saldo ?? 0;
-  const miSaldo = cuenta?.mia?.saldo ?? 0;
-  const miSubtotal = cuenta?.mia?.subtotal ?? 0;
-  const miPagado = cuenta?.mia?.pagado ?? 0;
-
-  const { mostrarSelector, yaPague } = estadoSelectorPago({
-    saldoMesa: saldo,
-    miSaldo,
-    miPagado,
-  });
-
   const tuParte = infoTuParte({
     miSaldo,
     miPagado,
@@ -357,19 +363,13 @@ function Pago() {
   const tuParteMonto = montoTuParte({ saldoMesa: saldo, miSaldo });
 
   const comensales = cuenta?.comensales || [];
-  const numPersonasDividir = personasDividir(cuenta, { presencia, yo: comensal });
 
-  const montos = montosPorModo(cuenta, { presencia, yo: comensal });
+  const montos = montosPorModo(cuenta);
   const montoModo = montos[modo] ?? miSaldo;
   const progreso = total > 0 ? Math.min(100, Math.round((pagado / total) * 100)) : 0;
 
-  const textoAyudaDividir = numPersonasDividir === 1
-    ? 'Eres el último: pagas lo que falta.'
-    : `El saldo que falta, dividido entre las ${numPersonasDividir} personas que aún no han pagado (contándote).`;
-
   const ayudas = {
     propio: 'Pagas solo lo que tú pediste.',
-    igual: textoAyudaDividir,
     total: 'Pagas todo lo que le falta a la mesa (invitas tú).',
   };
 
@@ -674,28 +674,22 @@ function Pago() {
               <div
                 role="radiogroup"
                 aria-label="Modo de pago"
-                className="grid grid-cols-3 gap-1.5 bg-[#0B0B0B] border border-borde rounded-xl p-1"
+                className="grid grid-cols-2 gap-1.5 bg-[#0B0B0B] border border-borde rounded-xl p-1"
               >
-                {['propio', 'igual', 'total'].map((k) => {
+                {MODOS_PAGO.map((k) => {
                   const activo = modo === k;
-                  const deshabilitado = k === 'propio' && !loMioHabilitado;
                   return (
                     <button
                       key={k}
                       type="button"
                       role="radio"
                       aria-checked={activo}
-                      aria-disabled={deshabilitado || undefined}
-                      disabled={deshabilitado}
                       onClick={() => {
-                        if (deshabilitado) return;
                         setModo(k);
                         setErrorPago(null);
                       }}
                       className={`min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
-                        deshabilitado
-                          ? 'opacity-40 cursor-not-allowed bg-transparent text-texto-tenue'
-                          : activo
+                        activo
                           ? 'bg-primario text-white shadow-sm cursor-pointer'
                           : 'bg-transparent text-texto-suave hover:text-white cursor-pointer'
                       }`}
@@ -753,22 +747,12 @@ function Pago() {
                     <button
                       type="button"
                       onClick={() => {
-                        setModo('igual');
-                        setErrorPago(null);
-                      }}
-                      className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#2A2A2A] hover:bg-[#333333] active:bg-[#3a3a3a] text-white font-etiqueta font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer border border-[#3A3A3A] flex items-center justify-center"
-                    >
-                      Dividir
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
                         setModo('total');
                         setErrorPago(null);
                       }}
                       className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#2A2A2A] hover:bg-[#333333] active:bg-[#3a3a3a] text-white font-etiqueta font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer border border-[#3A3A3A] flex items-center justify-center"
                     >
-                      Toda la mesa
+                      Pagar toda la cuenta
                     </button>
                   </div>
                 </div>
@@ -815,7 +799,11 @@ function Pago() {
                     <path d="M6 15h4" />
                   </svg>
                 )}
-                <span>PAGAR {formatoPesos(montoModo)}</span>
+                <span>
+                  {!mostrarSelector && textoBoton
+                    ? `${textoBoton.toUpperCase()} ${formatoPesos(montoModo)}`
+                    : `PAGAR ${formatoPesos(montoModo)}`}
+                </span>
               </button>
 
               {/* Botón Pagar en Caja */}

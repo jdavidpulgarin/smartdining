@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   formatoPesos,
+  MODOS_PAGO,
+  TITULOS_MODO,
+  contarPersonasMesa,
   normalizarCuenta,
   montosPorModo,
-  personasPorPagar,
-  montoIgualCentavos,
-  personasDividir,
   aplicarPagoConfirmado,
   textoPagoConfirmado,
   traducirErrorPago,
@@ -127,146 +127,32 @@ describe('utils/cuenta.js (J-08)', () => {
     });
   });
 
-  describe('personasPorPagar', () => {
-    it('yo no está en comensales → igual cuenta', () => {
-      const n = personasPorPagar({
-        comensales: ['Ana'],
-        pagaron: [],
-        yo: 'Beto',
-      });
-      expect(n).toBe(2);
-    });
-
-    it('yo ya está en pagaron → igual cuenta', () => {
-      const n = personasPorPagar({
-        comensales: ['Ana', 'Beto'],
-        pagaron: ['Ana', 'Beto'],
-        yo: 'Ana',
-      });
-      expect(n).toBe(1);
-    });
-
-    it('devuelve mínimo 1 aunque comensales y pagaron estén vacíos', () => {
-      expect(personasPorPagar()).toBe(1);
-    });
-  });
-
-  describe('personasDividir', () => {
-    it('con presencia usa personasPorPagar', () => {
-      const cuenta = { comensales: [] };
-      const presencia = { comensales: ['Ana', 'Beto'], pagaron: ['Ana'] };
-      expect(personasDividir(cuenta, { presencia, yo: 'Beto' })).toBe(1);
-      expect(personasDividir(cuenta, { presencia, yo: 'Carlos' })).toBe(2);
-    });
-
-    it('respaldo sin presencia: cuenta comensales con saldo > 0 y no General, sumando yo', () => {
-      const cuenta = {
-        saldo: 50000,
-        comensales: [
-          { nombre: 'Ana', saldo: 20000, esGeneral: false },
-          { nombre: 'Beto', saldo: 0, esGeneral: false },
-          { nombre: 'General', saldo: 10000, esGeneral: true },
-        ],
-      };
-      expect(personasDividir(cuenta, { yo: 'Carlos' })).toBe(2);
-      expect(personasDividir(cuenta, { yo: 'Ana' })).toBe(1);
-    });
-  });
-
-  describe('montoIgualCentavos y 5 filas de EVENTS.md §8.1 (en centavos)', () => {
-    it('2 personas, $85.000: Ana propio $20.000 → Beto igual $65.000', () => {
-      const montoBeto = montoIgualCentavos(6500000, 1);
-      expect(montoBeto).toBe(6500000); // $65.000
-    });
-
-    it('3 personas, $100.000: Ana propio $30.000 → Beto $35.000 → Carlos $35.000', () => {
-      const montoBeto = montoIgualCentavos(7000000, 2);
-      expect(montoBeto).toBe(3500000); // $35.000
-
-      const montoCarlos = montoIgualCentavos(3500000, 1);
-      expect(montoCarlos).toBe(3500000); // $35.000
-    });
-
-    it('4 personas, $120.000: Ana propio $45.000 → Beto, Carlos y Dani $25.000 c/u', () => {
-      const montoBeto = montoIgualCentavos(7500000, 3);
-      expect(montoBeto).toBe(2500000); // $25.000
-
-      const montoCarlos = montoIgualCentavos(5000000, 2);
-      expect(montoCarlos).toBe(2500000); // $25.000
-
-      const montoDani = montoIgualCentavos(2500000, 1);
-      expect(montoDani).toBe(2500000); // $25.000
-    });
-
-    it('4 personas, $120.000: Ana propio $10.000 → Beto $36.667 → Carlos $36.667 → Dani $36.666', () => {
-      const montoBeto = montoIgualCentavos(11000000, 3);
-      expect(montoBeto).toBe(3666700); // $36.667
-
-      const montoCarlos = montoIgualCentavos(7333300, 2);
-      expect(montoCarlos).toBe(3666700); // $36.667
-
-      const montoDani = montoIgualCentavos(3666600, 1);
-      expect(montoDani).toBe(3666600); // $36.666
-    });
-
-    it('3 personas, $100.000, todos igual: $33.333 → $33.334 → $33.333', () => {
-      const montoAna = montoIgualCentavos(10000000, 3);
-      expect(montoAna).toBe(3333300); // $33.333
-
-      const montoBeto = montoIgualCentavos(6666700, 2);
-      expect(montoBeto).toBe(3333400); // $33.334
-
-      const montoCarlos = montoIgualCentavos(3333300, 1);
-      expect(montoCarlos).toBe(3333300); // $33.333
-    });
-
-    it('saldo 0 → 0', () => {
-      expect(montoIgualCentavos(0, 3)).toBe(0);
-      expect(montoIgualCentavos(-500, 3)).toBe(0);
-    });
-
-    it('queda uno solo → paga el saldo exacto (con centavos)', () => {
-      expect(montoIgualCentavos(2066650, 1)).toBe(2066650);
-      expect(montoIgualCentavos(12345, 1)).toBe(12345);
-    });
-  });
-
   describe('montosPorModo', () => {
-    it('calcula propio, igual y total usando { presencia, yo }', () => {
+    it('calcula propio y total correctamente', () => {
       const cuenta = {
         total: 100000,
         pagado: 30000,
         saldo: 70000,
         mia: { saldo: 35000 },
-        comensales: [
-          { nombre: 'Ana', esGeneral: false },
-          { nombre: 'Beto', esGeneral: false },
-          { nombre: 'Carlos', esGeneral: false },
-        ],
-      };
-      const presencia = {
-        comensales: ['Ana', 'Beto', 'Carlos'],
-        pagaron: ['Ana'],
-        total: 3,
       };
 
-      const montos = montosPorModo(cuenta, { presencia, yo: 'Beto' });
+      const montos = montosPorModo(cuenta);
       expect(montos.propio).toBe(35000);
-      expect(montos.igual).toBe(35000); // 70000 / 2
       expect(montos.total).toBe(70000);
+      expect(montos.igual).toBeUndefined();
     });
 
-    it('calcula con número de personas directo (compatibilidad)', () => {
+    it('propio no supera el saldo de la mesa', () => {
       const cuenta = {
-        total: 62000,
-        pagado: 0,
-        saldo: 62000,
-        mia: { saldo: 20000 },
+        total: 50000,
+        pagado: 40000,
+        saldo: 10000,
+        mia: { saldo: 25000 },
       };
 
-      const montos = montosPorModo(cuenta, 3);
-      expect(montos.igual).toBe(20667);
-      expect(montos.total).toBe(62000);
+      const montos = montosPorModo(cuenta);
+      expect(montos.propio).toBe(10000);
+      expect(montos.total).toBe(10000);
     });
 
     it('si el saldo de la mesa es 0, todos los modos devuelven 0', () => {
@@ -277,10 +163,10 @@ describe('utils/cuenta.js (J-08)', () => {
         mia: { saldo: 0 },
       };
 
-      const montos = montosPorModo(cuenta, { yo: 'Ana' });
+      const montos = montosPorModo(cuenta);
       expect(montos.propio).toBe(0);
-      expect(montos.igual).toBe(0);
       expect(montos.total).toBe(0);
+      expect(montos.igual).toBeUndefined();
     });
   });
 
@@ -490,10 +376,10 @@ describe('utils/cuenta.js (J-08)', () => {
     it('modo distinto de propio → null', () => {
       const presencia = { comensales: ['Ana', 'Beto'], sin_celular: [] };
       expect(
-        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'igual' })
+        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'total' })
       ).toBeNull();
       expect(
-        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'total' })
+        avisoPedidoGrupal({ cuenta: cuentaBase, presencia, yo: 'Ana', modo: 'otro' })
       ).toBeNull();
     });
 
@@ -529,7 +415,7 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res.tipo).toBe('especifico');
       expect(res.nombres).toEqual(['Beto']);
       expect(res.mensaje).toBe(
-        'Beto no tiene nada a su nombre. Si tú pediste por él o ella, puedes dividir o pagar toda la mesa.'
+        'Beto no tiene nada a su nombre. Si tú pediste por él o ella, puedes pagar toda la cuenta.'
       );
     });
 
@@ -567,7 +453,7 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res2.tipo).toBe('especifico');
       expect(res2.nombres).toEqual(['Beto', 'Carla']);
       expect(res2.mensaje).toBe(
-        'Beto y Carla no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes dividir o pagar toda la mesa.'
+        'Beto y Carla no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes pagar toda la cuenta.'
       );
 
       // 4 sin pedidos: máximo 3 y "y 1 más"
@@ -584,7 +470,7 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res4.tipo).toBe('especifico');
       expect(res4.nombres).toEqual(['Beto', 'Carla', 'Dani', 'y 1 más']);
       expect(res4.mensaje).toBe(
-        'Beto, Carla, Dani y 1 más no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes dividir o pagar toda la mesa.'
+        'Beto, Carla, Dani y 1 más no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes pagar toda la cuenta.'
       );
 
       // 5 sin pedidos: "y 2 más"
@@ -621,7 +507,7 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res.tipo).toBe('general');
       expect(res.nombres).toEqual([]);
       expect(res.mensaje).toBe(
-        '¿Pediste para otros? Usa DIVIDIR o TODA LA MESA.'
+        '¿Pediste para otros? Puedes pagar toda la cuenta.'
       );
     });
 
@@ -670,7 +556,7 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res).not.toBeNull();
       expect(res.tipo).toBe('general');
       expect(res.mensaje).toBe(
-        '¿Pediste para otros? Usa DIVIDIR o TODA LA MESA.'
+        '¿Pediste para otros? Puedes pagar toda la cuenta.'
       );
     });
 
@@ -828,7 +714,7 @@ describe('utils/cuenta.js (J-08)', () => {
     it('cambia modo → nuevo', () => {
       const previo = { eventId: 'previo-uuid-123', modo: 'propio', saldo: 50000 };
       expect(
-        eventIdParaIntento(previo, { modo: 'igual', saldo: 50000 }, generar)
+        eventIdParaIntento(previo, { modo: 'total', saldo: 50000 }, generar)
       ).toBe('nuevo-uuid-456');
     });
 
@@ -856,55 +742,166 @@ describe('utils/cuenta.js (J-08)', () => {
     });
   });
 
-  describe('estadoSelectorPago (J-15)', () => {
-    it('sin fila en la cuenta (nunca pedí nada): selector visible, lo mío deshabilitado, arranca en igual y no yaPague', () => {
-      const res = estadoSelectorPago({ saldoMesa: 50000, miSaldo: 0, miPagado: 0 });
-      expect(res).toEqual({
-        mostrarSelector: true,
-        loMioHabilitado: false,
-        modoInicial: 'igual',
-        yaPague: false,
+  describe('estadoSelectorPago y modos de pago (T2)', () => {
+    it('MODOS_PAGO solo contiene propio y total, y TITULOS_MODO tiene los textos exactos', () => {
+      expect(MODOS_PAGO).toEqual(['propio', 'total']);
+      expect(TITULOS_MODO).toEqual({
+        propio: 'Pagar lo mío',
+        total: 'Pagar toda la cuenta',
       });
+      expect(TITULOS_MODO.igual).toBeUndefined();
     });
 
-    it('saldo propio > 0: selector visible, lo mío habilitado, arranca en propio y no yaPague', () => {
-      const res = estadoSelectorPago({ saldoMesa: 50000, miSaldo: 20000, miPagado: 0 });
-      expect(res).toEqual({
-        mostrarSelector: true,
-        loMioHabilitado: true,
-        modoInicial: 'propio',
-        yaPague: false,
+    it('mesa con 3 personas → 2 opciones con montos correctos', () => {
+      const cuenta = {
+        saldo: 60000,
+        mia: { saldo: 20000 },
+      };
+      const presencia = {
+        comensales: ['Ana', 'Beto', 'Carlos'],
+        sin_celular: [],
+      };
+      const res = estadoSelectorPago({
+        saldoMesa: cuenta.saldo,
+        miSaldo: cuenta.mia.saldo,
+        miPagado: 0,
+        presencia,
+        cuenta,
       });
+
+      expect(res.mostrarSelector).toBe(true);
+      expect(res.modosDisponibles).toEqual(['propio', 'total']);
+      expect(res.modoInicial).toBe('propio');
+      expect(res.modo).toBe('propio');
+
+      const montos = montosPorModo(cuenta);
+      expect(montos.propio).toBe(20000);
+      expect(montos.total).toBe(60000);
+      expect(montos.igual).toBeUndefined();
     });
 
-    it('ya pagué lo mío con la mesa debiendo: selector visible para ayudar, lo mío deshabilitado, arranca en igual y yaPague true', () => {
-      const res = estadoSelectorPago({ saldoMesa: 30000, miSaldo: 0, miPagado: 20000 });
-      expect(res).toEqual({
-        mostrarSelector: true,
-        loMioHabilitado: false,
-        modoInicial: 'igual',
-        yaPague: true,
+    it('1 persona → un botón y modo total con texto "Pagar la cuenta"', () => {
+      const cuenta = {
+        saldo: 30000,
+        mia: { saldo: 30000 },
+      };
+      const presencia = {
+        comensales: ['Ana'],
+        sin_celular: [],
+      };
+      const res = estadoSelectorPago({
+        saldoMesa: cuenta.saldo,
+        miSaldo: cuenta.mia.saldo,
+        miPagado: 0,
+        presencia,
+        cuenta,
       });
+
+      expect(res.mostrarSelector).toBe(false);
+      expect(res.modo).toBe('total');
+      expect(res.modosDisponibles).toEqual(['total']);
+      expect(res.textoBoton).toBe('Pagar la cuenta');
+      expect(res.texto).toBe('Pagar la cuenta');
     });
 
-    it('ya pagué lo mío con la mesa en 0: selector oculto, lo mío deshabilitado, yaPague true', () => {
-      const res = estadoSelectorPago({ saldoMesa: 0, miSaldo: 0, miPagado: 20000 });
-      expect(res).toEqual({
-        mostrarSelector: false,
-        loMioHabilitado: false,
-        modoInicial: 'igual',
-        yaPague: true,
+    it('mi saldo = saldo de la mesa en mesa de varias personas → mostrarSelector false y modo total "Pagar la cuenta"', () => {
+      const cuenta = {
+        saldo: 50000,
+        mia: { saldo: 50000 },
+      };
+      const presencia = {
+        comensales: ['Ana', 'Beto'],
+        sin_celular: [],
+      };
+      const res = estadoSelectorPago({
+        saldoMesa: 50000,
+        miSaldo: 50000,
+        presencia,
+        cuenta,
       });
+
+      expect(res.mostrarSelector).toBe(false);
+      expect(res.modo).toBe('total');
+      expect(res.modosDisponibles).toEqual(['total']);
+      expect(res.textoBoton).toBe('Pagar la cuenta');
     });
 
-    it('mesa en 0 sin consumos ni pagos: selector oculto, lo mío deshabilitado, yaPague false', () => {
-      const res = estadoSelectorPago({ saldoMesa: 0, miSaldo: 0, miPagado: 0 });
-      expect(res).toEqual({
-        mostrarSelector: false,
-        loMioHabilitado: false,
-        modoInicial: 'igual',
-        yaPague: false,
+    it('2 personas pero lo mío pagado (miSaldo <= 0) → solo total', () => {
+      const cuenta = {
+        saldo: 30000,
+        mia: { saldo: 0, pagado: 20000 },
+      };
+      const presencia = {
+        comensales: ['Ana', 'Beto'],
+        pagaron: ['Ana'],
+      };
+      const res = estadoSelectorPago({
+        saldoMesa: 30000,
+        miSaldo: 0,
+        miPagado: 20000,
+        presencia,
+        cuenta,
       });
+
+      expect(res.mostrarSelector).toBe(false);
+      expect(res.modosDisponibles).toEqual(['total']);
+      expect(res.modo).toBe('total');
+      expect(res.modosDisponibles).not.toContain('propio');
+      expect(res.yaPague).toBe(true);
+    });
+
+    it('cuenta sin_celular como persona en la mesa', () => {
+      const presenciaConSinCelular = {
+        comensales: ['Ana'],
+        sin_celular: ['Carlos'],
+      };
+      expect(contarPersonasMesa({ presencia: presenciaConSinCelular })).toBe(2);
+
+      const res = estadoSelectorPago({
+        saldoMesa: 50000,
+        miSaldo: 20000,
+        presencia: presenciaConSinCelular,
+      });
+      expect(res.mostrarSelector).toBe(true);
+      expect(res.modosDisponibles).toEqual(['propio', 'total']);
+    });
+
+    it('sin_celular repetido con comensales no se duplica', () => {
+      const presenciaDuplicada = {
+        comensales: ['Ana'],
+        sin_celular: ['Ana'],
+      };
+      expect(contarPersonasMesa({ presencia: presenciaDuplicada })).toBe(1);
+
+      const res = estadoSelectorPago({
+        saldoMesa: 50000,
+        miSaldo: 20000,
+        presencia: presenciaDuplicada,
+      });
+      expect(res.mostrarSelector).toBe(false);
+      expect(res.modo).toBe('total');
+    });
+
+    it('ningún camino devuelve modo igual', () => {
+      const casos = [
+        { saldoMesa: 50000, miSaldo: 20000, personas: 3 },
+        { saldoMesa: 50000, miSaldo: 50000, personas: 3 },
+        { saldoMesa: 50000, miSaldo: 0, personas: 3 },
+        { saldoMesa: 50000, miSaldo: 20000, personas: 1 },
+        { saldoMesa: 0, miSaldo: 0, personas: 2 },
+      ];
+
+      for (const caso of casos) {
+        const res = estadoSelectorPago(caso);
+        expect(res.modo).not.toBe('igual');
+        expect(res.modoInicial).not.toBe('igual');
+        expect(res.modosDisponibles).not.toContain('igual');
+      }
+
+      const montos = montosPorModo({ saldo: 10000, mia: { saldo: 5000 } });
+      expect(montos.igual).toBeUndefined();
+      expect(MODOS_PAGO).not.toContain('igual');
+      expect(TITULOS_MODO.igual).toBeUndefined();
     });
   });
 
@@ -933,7 +930,7 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res).toEqual({
         color: '#FFFFFF',
         esVerde: false,
-        mensaje: 'No tienes nada a tu nombre. Puedes aportar con DIVIDIR o TODA LA MESA.',
+        mensaje: 'No tienes nada a tu nombre. Puedes aportar pagando toda la cuenta.',
       });
     });
 
@@ -953,7 +950,7 @@ describe('utils/cuenta.js (J-08)', () => {
   });
 
   describe('montoTuParte (J-15)', () => {
-    it('otro pagó con DIVIDIR y la mesa debe menos que mi saldo → TU PARTE = saldo de la mesa', () => {
+    it('otro pagó y la mesa debe menos que mi saldo → TU PARTE = saldo de la mesa', () => {
       expect(montoTuParte({ saldoMesa: 20000, miSaldo: 46000 })).toBe(20000);
       expect(montoTuParte({ saldoMesa: 15000, miSaldo: 30000 })).toBe(15000);
     });
