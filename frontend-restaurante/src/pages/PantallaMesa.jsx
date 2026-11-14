@@ -31,7 +31,6 @@ import {
 import { errorDeRotacion } from '../utils/qrRotacion'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
-const ROTACION_INTERVALO = 180 // 3 minutos
 
 export function PantallaMesa() {
   const { id } = useParams()
@@ -59,9 +58,6 @@ export function PantallaMesa() {
 
   const [justRotated, setJustRotated] = useState(false)
 
-  // Temporizador de 3 minutos de rotación de seguridad
-  const [segundosRestantes, setSegundosRestantes] = useState(ROTACION_INTERVALO)
-  const [autoRotacionHabilitada, setAutoRotacionHabilitada] = useState(true)
 
   // Estado del socket exclusivo de la tablet (rol: 'pantalla')
   const [socketStatus, setSocketStatus] = useState('conectando') // 'conectado' | 'reconectando' | 'desconectado'
@@ -119,59 +115,31 @@ export function PantallaMesa() {
     return () => clearInterval(timer)
   }, [])
 
-  // Rotar el QR de la mesa usando el endpoint o fallback con notificación al socket
-  // T3: la rotación AUTOMÁTICA (cada 3 min) pide solo_si_vacia, igual que el
-  // QRModal: el backend se niega (409 mesa_con_comensales) si en la mesa ya
-  // hay alguien, también quien entró con su nombre y todavía no pidió, que
-  // tieneComensales no ve. Antes rotaba igual y la sesión de la tablet en modo
-  // compartido quedaba con un QR viejo y se cerraba. El botón manual sigue
-  // forzando la rotación (lo decide el personal).
-  const handleRotarQr = useCallback(async (opciones) => {
-    const automatica = opciones?.automatica === true
+  // T3: la tablet NO rota el QR por su cuenta. Lo rota el socket-server cada
+  // 3 min solo mientras la mesa está vacía (conoce la presencia real) y avisa
+  // con qr:actualizado. Antes la tablet tenía su propio temporizador: con la
+  // mesa vacía rotaba dos veces, y antes del #253 rotaba sin guarda y dejaba
+  // fuera a quien ya estaba dentro. El botón manual también pide solo_si_vacia:
+  // con gente en la mesa el backend responde 409 mesa_con_comensales y el QR
+  // se queda, con un aviso (un clic sin querer ya no saca a nadie).
+  const handleRotarQr = useCallback(async () => {
     if (loadingAction) return
     setLoadingAction(true)
+    setErrorPantalla('')
     try {
-      const res = await rotarTokenQrMesa(numMesa, undefined, { soloSiVacia: automatica })
+      const res = await rotarTokenQrMesa(numMesa, undefined, { soloSiVacia: true })
       if (res?.token) {
         setTokenQr(res.token)
         if (res?.url) setQrUrl(res.url)
       }
-      setSegundosRestantes(ROTACION_INTERVALO)
-      setErrorPantalla('')
       setJustRotated(true)
       setTimeout(() => setJustRotated(false), 2500)
     } catch (err) {
-      if (automatica && errorDeRotacion(err).conComensales) {
-        // La mesa tiene gente: el QR se queda como está y se vuelve a mirar
-        // en el próximo ciclo.
-        setSegundosRestantes(ROTACION_INTERVALO)
-      } else {
-        // Visible en la tablet: antes solo iba a la consola y nadie se enteraba.
-        setErrorPantalla(`No se pudo renovar el QR: ${err.message}. Sigue el código anterior; avisa al personal.`)
-      }
+      setErrorPantalla(errorDeRotacion(err).texto)
     } finally {
       setLoadingAction(false)
     }
   }, [loadingAction, numMesa])
-
-  // Temporizador de rotación automática cada 3 minutos (solo si no hay comensales)
-  useEffect(() => {
-    if (!tokenQr || tieneComensales || !autoRotacionHabilitada) {
-      return
-    }
-
-    const timer = setInterval(() => {
-      setSegundosRestantes((prev) => {
-        if (prev <= 1) {
-          handleRotarQr({ automatica: true })
-          return ROTACION_INTERVALO
-        }
-        return prev - 1
-      })
-    }, 1000)
-
-    return () => clearInterval(timer)
-  }, [tokenQr, tieneComensales, autoRotacionHabilitada, handleRotarQr])
 
   // Inicializar conexión Socket.io con rol 'pantalla' para esta mesa
   useEffect(() => {
@@ -223,7 +191,6 @@ export function PantallaMesa() {
         if (data?.token_qr) {
           setTokenQr(data.token_qr)
           if (data?.url) setQrUrl(data.url)
-          setSegundosRestantes(ROTACION_INTERVALO)
           setJustRotated(true)
           setTimeout(() => setJustRotated(false), 3000)
         }
@@ -256,11 +223,6 @@ export function PantallaMesa() {
     }
   }
 
-  // Formato mm:ss
-  const minutos = Math.floor(segundosRestantes / 60)
-  const segundos = segundosRestantes % 60
-  const tiempoFormateado = `${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`
-  const porcentajeTiempo = ((ROTACION_INTERVALO - segundosRestantes) / ROTACION_INTERVALO) * 100
 
   return (
     <div className="sd-pantalla-page">
@@ -481,26 +443,6 @@ export function PantallaMesa() {
               </div>
             )}
 
-            <div
-              style={{
-                width: '100%',
-                height: 4,
-                background: 'rgba(255,255,255,0.1)',
-                borderRadius: 2,
-                overflow: 'hidden',
-                marginTop: 4,
-              }}
-            >
-              <div
-                style={{
-                  height: '100%',
-                  background: 'var(--sd-red)',
-                  width: `${porcentajeTiempo}%`,
-                  transition: 'width 1s linear',
-                }}
-              />
-            </div>
-
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <button
                 type="button"
@@ -510,16 +452,7 @@ export function PantallaMesa() {
                 title="Rotar código QR"
               >
                 <RotateCw size={16} className={loadingAction ? 'spin' : ''} />
-                <span>ROTAR QR ({tiempoFormateado})</span>
-              </button>
-              <button
-                type="button"
-                className="sd-btn sd-btn-secondary"
-                style={{ padding: '8px 12px', fontSize: 13 }}
-                onClick={() => setAutoRotacionHabilitada((prev) => !prev)}
-                title={autoRotacionHabilitada ? 'Pausar rotación automática' : 'Reanudar rotación automática'}
-              >
-                <span>{autoRotacionHabilitada ? '⏸️ PAUSA' : '▶️ AUTO'}</span>
+                <span>ROTAR QR</span>
               </button>
             </div>
           </div>

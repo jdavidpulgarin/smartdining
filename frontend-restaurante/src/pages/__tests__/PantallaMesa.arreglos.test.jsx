@@ -90,7 +90,7 @@ describe('PantallaMesa: sin datos inventados ni botones de desarrollo', () => {
     await tick()
     fireEvent.click(screen.getByTitle('Rotar código QR'))
     await tick()
-    expect(screen.getByRole('alert')).toHaveTextContent('No se pudo renovar el QR: Sin conexión con el servidor')
+    expect(screen.getByRole('alert')).toHaveTextContent('No se pudo generar el QR nuevo: Sin conexión con el servidor')
   })
 
   it('una rotación buena después de un fallo quita el aviso', async () => {
