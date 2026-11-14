@@ -151,6 +151,15 @@ export function descartarIdCobro(err) {
   return err?.motivo === 'id_cobro_en_uso'
 }
 
+/**
+ * ¿Recargar las cuentas tras este error de cobro? Cuando el saldo que ve el
+ * cajero ya no es el real: `excede` (alguien pagó mientras tanto),
+ * `excede_saldo_comensal` (el saldo de esa persona cambió) o `sin_cuenta`.
+ */
+export function recargarCuentasTrasError(err) {
+  return ['excede', 'excede_saldo_comensal', 'sin_cuenta'].includes(err?.motivo)
+}
+
 /** El error del cobro en palabras del cajero, según el `motivo` del contrato. */
 export function mensajeDeErrorCobro(err, formatear = (n) => String(n)) {
   if (err?.sinConexion) {
@@ -159,6 +168,9 @@ export function mensajeDeErrorCobro(err, formatear = (n) => String(n)) {
   switch (err?.motivo) {
     case 'excede':
       return `El monto supera lo que debe la mesa${err.data?.saldo !== undefined ? ` (saldo actual ${formatear(err.data.saldo)})` : ''}. Actualiza las cuentas: alguien pudo pagar mientras tanto.`
+    case 'excede_saldo_comensal':
+      // T4 (#263): a una persona no se le cobra más que lo suyo.
+      return `No se cobró: el monto supera lo que debe esa persona${err.data?.saldo !== undefined ? ` (debe ${formatear(err.data.saldo)})` : ''}. Cóbrale hasta su saldo; lo de los demás, a cada uno o con TODA LA MESA.`
     case 'sin_cuenta':
       return 'Esta mesa ya no tiene nada por cobrar. Actualiza las cuentas.'
     case 'id_cobro_en_uso':

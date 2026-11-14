@@ -10,7 +10,8 @@ const navLinks = [
   // Solo admin y cajero (el backend da 403 al mesero y a cocina).
   { label: 'CAJA', path: '/caja', roles: ROLES_CAJA },
   { label: 'MENÚ', path: '/menu' },
-  { label: 'REPORTES', path: '/reportes' },
+  // Solo admin: GET /api/reportes da 403 al resto.
+  { label: 'REPORTES', path: '/reportes', soloAdmin: true },
   // P-21: solo para admin (el backend también lo exige).
   { label: 'INVENTARIO', path: '/inventario', soloAdmin: true },
   { label: 'CONFIGURACIÓN', path: '/configuracion', soloAdmin: true },

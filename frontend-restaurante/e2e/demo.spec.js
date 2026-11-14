@@ -162,13 +162,17 @@ const interruptorMenu = (page) =>
   page.locator('.sd-card', { has: page.getByText(PLATO, { exact: true }) }).getByTitle('Alternar disponibilidad para comensales')
 
 /** Sesión del comensal guardada por la PWA (el objeto con token e idMesa). */
+// T1 (#243): la sesión del comensal pasa de sessionStorage a localStorage
+// (sobrevive a cerrar la pestaña). Se busca en los dos.
 const tokenComensal = (page) =>
   page.evaluate(() => {
-    for (let i = 0; i < sessionStorage.length; i++) {
-      try {
-        const v = JSON.parse(sessionStorage.getItem(sessionStorage.key(i)))
-        if (v && v.token && v.idMesa) return v.token
-      } catch { /* no es JSON */ }
+    for (const almacen of [localStorage, sessionStorage]) {
+      for (let i = 0; i < almacen.length; i++) {
+        try {
+          const v = JSON.parse(almacen.getItem(almacen.key(i)))
+          if (v && v.token && v.idMesa) return v.token
+        } catch { /* no es JSON */ }
+      }
     }
     return null
   })
@@ -179,8 +183,14 @@ async function sentarComensal(browser, url, nombre) {
   await page.goto(url)
   await page.getByRole('textbox', { name: '¿Cómo te llamas?' }).fill(nombre)
   await page.getByRole('button', { name: 'ENTRAR A LA MESA' }).click()
-  await page.getByRole('button', { name: 'VER EL MENÚ' }).click()
-  await expect(page.getByRole('heading', { name: 'NUESTRO MENÚ' })).toBeVisible()
+  // T1 (#243): con la sesión persistente, la PWA puede ir directo al menú al
+  // unirse, sin la bienvenida. Se aceptan las dos entradas: si sale «VER EL
+  // MENÚ» se pulsa; si no, se espera el menú.
+  const verMenu = page.getByRole('button', { name: 'VER EL MENÚ' })
+  const menu = page.getByRole('heading', { name: 'NUESTRO MENÚ' })
+  await expect(verMenu.or(menu)).toBeVisible()
+  if (await verMenu.isVisible()) await verMenu.click()
+  await expect(menu).toBeVisible()
   return { ctx, page, token: await tokenComensal(page) }
 }
 
