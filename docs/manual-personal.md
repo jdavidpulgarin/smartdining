@@ -201,6 +201,13 @@ El cajero no ve este botón.
 
 ### 3.9 Lo que hace el cliente desde su celular
 
+- **Pagar**: elige **PAGAR LO MÍO** (solo sus platos) o **PAGAR TODA LA CUENTA**
+  (lo que falte de la mesa), en línea con Wompi o **en caja**. Ya no existe
+  «dividir en partes iguales». Si está solo en la mesa, ve un único botón
+  **PAGAR LA CUENTA**; si ya pagó lo suyo, solo le queda pagar el resto de la mesa.
+- Si su pago en línea anterior **todavía se está confirmando**, no puede volver
+  a pagar: la app le dice que espere o te pregunte. No le cobres de nuevo hasta
+  verlo en la Caja.
 - **Quitar** un plato suyo, mientras la cocina no lo haya empezado.
 - **Cancelar pedido**: su pedido completo, solo mientras está recibido, si todo
   es suyo y no tiene pagos.
@@ -227,7 +234,7 @@ A la izquierda están las mesas con saldo. Al tocar una ves su cuenta:
 
 ### 4.2 Cobrar
 
-1. Elige qué cobras: **TODA LA MESA** o una persona (división de cuenta). Las
+1. Elige qué cobras: **TODA LA MESA** o lo de una persona. Las
    personas que ya pagaron dicen **PAGADO ✔**.
 2. Si el cliente la acepta, marca **INCLUIR PROPINA VOLUNTARIA SUGERIDA (10%)**.
    La propina sale en el recibo, pero no se suma a la cuenta de los pedidos.
@@ -277,6 +284,28 @@ repartió entre varios pedidos sale en una sola fila. Abajo está el **TOTAL DEL
 DÍA**, que coincide con lo recaudado hoy.
 
 **IMPRIMIR CUADRE DE CAJA** lo imprime para el cierre.
+
+### 4.6 Devolver en efectivo (pago en línea de más)
+
+Un pago en línea que Wompi ya cobró **nunca se rechaza**. Si alguien pagó más
+de lo que debía (por ejemplo, pagó «lo mío» y mientras tanto también pagó una
+parte en la caja), lo que sobra queda **por devolver en efectivo**.
+
+Arriba de la Caja aparece **DEVOLVER EN EFECTIVO (N)**, del más viejo al más
+nuevo, con la hora, la mesa, quién y cuánto. Por ejemplo:
+
+> 13:14 · Mesa 2 · Ana: devuélvele $ 10.000 en efectivo (pagó en línea más de lo que debía).
+
+El motivo puede ser:
+
+- **pagó en línea más de lo que debía**: se devuelve lo que sobró;
+- **pagó la cuenta de la mesa por más del saldo**: se devuelve lo que sobró;
+- **la mesa ya estaba cerrada**: se devuelve todo;
+- **pagó después de que su grupo se fue**: se devuelve todo.
+
+Entrega el efectivo y toca **DEVUELTO EN EFECTIVO**: sale de la lista. Si otro
+cajero ya lo había marcado, el panel lo dice y también lo quita. Lo devuelto no
+cuenta en **RECAUDADO HOY**.
 
 ---
 
@@ -399,29 +428,7 @@ En **EDITAR RECETA** (o **AGREGAR RECETA**) eliges cada insumo y su cantidad.
 **AGREGAR INSUMO** suma una fila y la papelera la quita. La columna **HAY**
 muestra cuánto queda de ese insumo. Guarda con **GUARDAR RECETA**.
 
-### 5.8 Consumo
-
-![Consumo de inventario](capturas-personal/13_consumo_1280x800.png)
-
-**CONSUMO** dice cuánto se gastó de cada insumo en un rango de días:
-
-1. Elige **DESDE** y **HASTA**, o un atajo: **HOY**, **ÚLTIMOS 7 DÍAS** o
-   **ESTE MES**. El rango puede tener hasta 31 días y no puede ser futuro.
-2. Si quieres, elige un solo **INSUMO**.
-3. Toca **CONSULTAR**.
-
-Por cada insumo, en su unidad:
-
-| Columna | Qué es |
-|---|---|
-| **CONSUMO** | Lo usado en platos vendidos. Un plato quitado antes de que la cocina lo empezara no cuenta. |
-| **MERMA** | Las mermas registradas a mano, más lo de los platos cancelados cuando ya se cocinaban. |
-| **ENTRADAS** | Lo que llegó. |
-| **AJUSTES** | Los ajustes por conteo, con su signo (+ o −). |
-
-**VER DÍAS** abre el detalle de cada día. Los días son los de Bogotá.
-
-### 5.9 Configuración
+### 5.8 Configuración
 
 ![Configuración: mesas](capturas-personal/14a_config_mesas_1280x800.png)
 
@@ -441,7 +448,7 @@ acciones: sale marcado **(tú)**.
 moneda, redes (Instagram, Facebook, TikTok, WhatsApp) y el horario de cada día.
 Guarda con **GUARDAR CAMBIOS**.
 
-### 5.10 Reportes
+### 5.9 Reportes
 
 ![Reportes](capturas-personal/15_reportes_1280x800.png)
 
