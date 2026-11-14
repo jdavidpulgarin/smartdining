@@ -23,6 +23,7 @@ import {
   decidirVisibilidadPago,
 } from '../utils/cuenta';
 import { crearDeduplicador } from '../utils/deduplicador';
+import { claveAlias } from '../utils/apodo';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout, cerrarWidget } from '../services/wompiWidget';
 import { uuidV4 } from '../services/clienteMesa';
@@ -159,9 +160,8 @@ function Pago({ errorPagoInicial = null } = {}) {
         setUltimoPago(monto);
         setTipoConfirmado(tipo);
         const esMio = Boolean(
-          comensal &&
-          evento.comensal &&
-          String(evento.comensal).trim().toLowerCase() === String(comensal).trim().toLowerCase()
+          claveAlias(comensal) &&
+          claveAlias(evento.comensal) === claveAlias(comensal)
         );
         if (tipo === 'propio' || (tipo === 'mesa' && esMio)) {
           setAvisoExcedente(avisoExcedentePago(evento));

@@ -47,15 +47,15 @@ export function normalizarCuenta(api = {}, miAlias = '') {
   const sesion_iniciada_en = datos.sesion_iniciada_en || null;
   const pedidos = Array.isArray(datos.pedidos) ? datos.pedidos : [];
 
-  const aliasNormalizado = (miAlias || '').trim().toLowerCase();
+  const claveMiAlias = claveAlias(miAlias);
 
   const rawComensales = Array.isArray(datos.comensales) ? datos.comensales : [];
 
   // Mapear cada comensal
   const comensalesMapeados = rawComensales.map((raw) => {
     const nombre = (raw.comensal || raw.nombre || 'Comensal').trim();
-    const esGeneral = nombre.toLowerCase() === 'general';
-    const esMio = !esGeneral && Boolean(aliasNormalizado && nombre.toLowerCase() === aliasNormalizado);
+    const esGeneral = claveAlias(nombre) === 'general';
+    const esMio = !esGeneral && Boolean(claveMiAlias && claveAlias(nombre) === claveMiAlias);
     const subtotal = Math.max(0, Number(raw.subtotal ?? 0));
     const pagadoComensal = Math.max(0, Number(raw.pagado ?? 0));
     const saldoComensal = Math.max(0, Number(raw.saldo ?? Math.max(0, subtotal - pagadoComensal)));
@@ -171,15 +171,15 @@ export function aplicarPagoConfirmado(cuenta, evento = {}) {
     ? Math.max(0, Number(evento.monto))
     : (evento.monto_centavos != null ? Math.max(0, Number(evento.monto_centavos) / 100) : 0);
 
-  const comensalEvento = evento.comensal ? String(evento.comensal).trim().toLowerCase() : null;
+  const claveEvento = claveAlias(evento.comensal);
 
   let resto = monto;
   const comensalesClonados = (cuenta.comensales || []).map((c) => ({ ...c }));
 
   // Si el evento tiene comensal específico, abonar a ese comensal primero
-  if (comensalEvento) {
+  if (claveEvento) {
     const destino = comensalesClonados.find(
-      (c) => c.nombre.trim().toLowerCase() === comensalEvento
+      (c) => claveAlias(c.nombre) === claveEvento
     );
     if (destino) {
       const abono = Math.min(resto, destino.saldo);
@@ -299,13 +299,14 @@ export function textoPagoConfirmado(evento = {}, miAlias = '') {
 
   const montoTexto = formatoPesos(monto);
   const comensalEvento = evento.comensal ? String(evento.comensal).trim() : null;
-  const aliasNormalizado = (miAlias || '').trim().toLowerCase();
+  const claveMiAlias = claveAlias(miAlias);
+  const claveEvento = claveAlias(evento.comensal);
 
-  if (!comensalEvento) {
+  if (!comensalEvento || !claveEvento) {
     return 'Se pagó la cuenta completa';
   }
 
-  if (aliasNormalizado && comensalEvento.toLowerCase() === aliasNormalizado) {
+  if (claveMiAlias && claveEvento === claveMiAlias) {
     const aviso = avisoExcedentePago(evento);
     return aviso ? `Pago confirmado: ${montoTexto}. ${aviso}` : `Pago confirmado: ${montoTexto}`;
   }
@@ -465,7 +466,7 @@ export function avisoPedidoGrupal({ cuenta, presencia, yo, modo } = {}) {
   const miAlias = typeof yo === 'string' ? yo.trim() : '';
 
   function esGeneral(alias) {
-    return String(alias || '').trim().toLowerCase() === 'general';
+    return claveAlias(alias) === 'general';
   }
 
   function esYo(alias) {
@@ -690,14 +691,14 @@ export function decidirSalidaEspera({
  * @returns {'propio' | 'mesa' | 'otro'}
  */
 export function mensajePagoConfirmado({ comensal, yo, saldoRestante } = {}) {
-  const comensalNorm = comensal ? String(comensal).trim().toLowerCase() : null;
-  const yoNorm = yo ? String(yo).trim().toLowerCase() : null;
+  const cClave = claveAlias(comensal);
+  const yoClave = claveAlias(yo);
 
-  if (!comensalNorm) {
+  if (!cClave) {
     return 'mesa';
   }
 
-  if (yoNorm && comensalNorm === yoNorm) {
+  if (yoClave && cClave === yoClave) {
     return 'propio';
   }
 
@@ -720,9 +721,20 @@ export function mensajePagoConfirmado({ comensal, yo, saldoRestante } = {}) {
  * @param {function} [opciones.formato]
  * @returns {{ esPropio: boolean, mensaje: string, comprobante: string|null }}
  */
-export function textoDetalleConfirmacion({ tipo, monto = 0, formato = formatoPesos, evento = null, esMio = false } = {}) {
+export function textoDetalleConfirmacion({
+  tipo,
+  monto = 0,
+  formato = formatoPesos,
+  evento = null,
+  esMio = false,
+  comensal = null,
+} = {}) {
   const esPropio = tipo === 'propio';
-  const aviso = ((esPropio || esMio) && evento) ? avisoExcedentePago(evento, formato) : null;
+  const esComensalMio = Boolean(
+    esMio ||
+    (claveAlias(comensal) && claveAlias(evento?.comensal) === claveAlias(comensal))
+  );
+  const aviso = ((esPropio || esComensalMio) && evento) ? avisoExcedentePago(evento, formato) : null;
   if (esPropio) {
     return {
       esPropio: true,

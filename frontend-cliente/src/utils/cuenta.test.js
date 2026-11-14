@@ -265,6 +265,19 @@ describe('utils/cuenta.js (J-08)', () => {
       const evento = { comensal: null, monto: 90000 };
       expect(textoPagoConfirmado(evento, 'Beto')).toBe('Se pagó la cuenta completa');
     });
+
+    it('alias con tilde o mayúsculas distintas ("Ána" vs "ana") → se reconoce como propio y añade excedente', () => {
+      const evento = { comensal: 'Ána', monto: 28000, excedente: 3000, aplicado: 25000 };
+      expect(textoPagoConfirmado(evento, 'ana')).toBe(
+        'Pago confirmado: $ 28.000. Pagaste $ 3.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+      expect(textoPagoConfirmado(evento, 'ANA')).toBe(
+        'Pago confirmado: $ 28.000. Pagaste $ 3.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+      expect(textoPagoConfirmado({ comensal: 'ana', monto: 20000 }, 'Ána')).toBe(
+        'Pago confirmado: $ 20.000'
+      );
+    });
   });
 
   describe('avisoExcedentePago y excedente en payment:confirmed (EVENTS.md §8.7)', () => {
@@ -702,6 +715,9 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(mensajePagoConfirmado({ comensal: 'Ana', yo: 'Ana' })).toBe('propio');
       expect(mensajePagoConfirmado({ comensal: 'ana', yo: 'Ana' })).toBe('propio');
       expect(mensajePagoConfirmado({ comensal: '  Ana  ', yo: 'ana' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: 'Ána', yo: 'ana' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: 'ana', yo: 'Ána' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: 'ÁNA', yo: 'ana' })).toBe('propio');
     });
 
     it('comensal es null, undefined o vacío (cobro de caja de la mesa) → "mesa"', () => {
@@ -778,6 +794,18 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res.esPropio).toBe(false);
       expect(res.mensaje).toBe('La mesa quedó pagada.');
       expect(res.avisoExcedente).toBeUndefined();
+    });
+
+    it('tipo "mesa" con comensal con tilde ("Ána" vs "ana") → incluye avisoExcedente', () => {
+      const res = textoDetalleConfirmacion({
+        tipo: 'mesa',
+        monto: 90000,
+        evento: { comensal: 'Ána', excedente: 10000 },
+        comensal: 'ana',
+      });
+      expect(res.esPropio).toBe(false);
+      expect(res.mensaje).toBe('La mesa quedó pagada.');
+      expect(res.avisoExcedente).toBe('Pagaste $ 10.000 de más; la Caja te lo devuelve en efectivo.');
     });
 
     it('cualquier otro caso ("otro", null, undefined) → "La mesa quedó pagada."', () => {
