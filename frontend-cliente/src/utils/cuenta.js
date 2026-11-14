@@ -5,6 +5,8 @@
  * pruebas unitarias exhaustivas con Vitest sin necesidad de simular el DOM.
  */
 
+import { claveAlias } from './apodo';
+
 /**
  * Formatea un valor numérico a pesos colombianos redondeados sin decimales.
  * Formato esperado: "$ 28.000"
@@ -17,12 +19,11 @@ export function formatoPesos(n) {
   return `$ ${num.toLocaleString('es-CO')}`;
 }
 
-export const MODOS_PAGO = ['propio', 'igual', 'total'];
+export const MODOS_PAGO = ['propio', 'total'];
 
 export const TITULOS_MODO = {
-  propio: 'LO MÍO',
-  igual: 'DIVIDIR',
-  total: 'TODA LA MESA',
+  propio: 'Pagar lo mío',
+  total: 'Pagar toda la cuenta',
 };
 
 /**
@@ -113,112 +114,43 @@ export function normalizarCuenta(api = {}, miAlias = '') {
 }
 
 /**
- * Entre cuántas personas se reparte el saldo en modo "igual": las presentes
- * que todavía no han pagado en esta sesión de mesa, más quien paga.
- * Mínimo 1. Quien se va sin pagar deja de contar.
+ * Cuenta la cantidad de comensales distintos en la cuenta (excluyendo "General"
+ * si existiera), comparando con claveAlias. Mínimo 1.
  *
- * @param {object} [datos]
- * @param {string[]} [datos.comensales] - Alias presentes (mesa:presencia.comensales)
- * @param {string[]} [datos.pagaron] - Alias que ya pagaron (mesa:presencia.pagaron)
- * @param {string} [datos.yo] - Alias de quien paga
+ * @param {object} [cuenta] - Cuenta normalizada de la mesa
  * @returns {number}
  */
-export function personasPorPagar({ comensales = [], pagaron = [], yo } = {}) {
-  const listaComensales = Array.isArray(comensales) ? comensales : [];
-  const yaPagaron = new Set(Array.isArray(pagaron) ? pagaron : []);
-  const pendientes = new Set(listaComensales.filter((a) => !yaPagaron.has(a)));
-  if (yo && typeof yo === 'string' && yo.trim()) {
-    pendientes.add(yo.trim());
+export function contarComensalesCuenta(cuenta) {
+  const personas = new Set();
+  const comensales = Array.isArray(cuenta?.comensales) ? cuenta.comensales : [];
+  for (const c of comensales) {
+    if (!c) continue;
+    if (c.esGeneral) continue;
+    const nombre = typeof c === 'string' ? c : (c.nombre || c.comensal || '');
+    const clave = claveAlias(nombre);
+    if (clave && clave !== 'general') {
+      personas.add(clave);
+    }
   }
-  return Math.max(1, pendientes.size);
-}
-
-/**
- * Calcula la parte en centavos para modo "igual":
- * n = max(1, personas); parte = Math.round(saldo / n / 100) * 100;
- * si saldo <= 0 -> 0; si n === 1 || parte <= 0 || parte >= saldo -> saldo; si no -> parte.
- *
- * @param {number} saldoCentavos - Saldo restante en centavos
- * @param {number} personas - Cantidad de personas
- * @returns {number} Monto a pagar en centavos
- */
-export function montoIgualCentavos(saldoCentavos, personas) {
-  const saldo = Math.round(Number(saldoCentavos) || 0);
-  if (saldo <= 0) return 0;
-  const n = Math.max(1, Math.round(Number(personas) || 1));
-  const parte = Math.round(saldo / n / 100) * 100;
-  if (n === 1 || parte <= 0 || parte >= saldo) {
-    return saldo;
-  }
-  return parte;
-}
-
-/**
- * Determina el número de personas a usar para dividir en modo "igual".
- * Con presencia -> personasPorPagar(presencia.comensales, presencia.pagaron, yo).
- * Sin presencia (respaldo) -> comensales de la cuenta que no son "General" y tienen saldo > 0,
- * con pagaron = [] y sumando yo.
- *
- * @param {object} cuenta - Cuenta normalizada
- * @param {object} [opciones]
- * @param {object} [opciones.presencia] - Estado de mesa:presencia
- * @param {string} [opciones.yo] - Alias de quien paga
- * @returns {number}
- */
-export function personasDividir(cuenta, { presencia, yo } = {}) {
-  if (presencia && Array.isArray(presencia.comensales)) {
-    return personasPorPagar({
-      comensales: presencia.comensales,
-      pagaron: presencia.pagaron,
-      yo,
-    });
-  }
-
-  const rawComensales = Array.isArray(cuenta?.comensales) ? cuenta.comensales : [];
-  const comensalesConSaldo = rawComensales
-    .filter((c) => !c.esGeneral && Number(c.saldo) > 0)
-    .map((c) => c.nombre);
-
-  return personasPorPagar({
-    comensales: comensalesConSaldo,
-    pagaron: [],
-    yo,
-  });
+  return Math.max(1, personas.size);
 }
 
 /**
  * Calcula los montos a pagar según el modo seleccionado:
  * - propio: mi saldo (nunca más que el saldo de la mesa)
- * - igual: se reparte el saldo que falta entre quienes aún no han pagado
  * - total: todo lo que le falta a la mesa (saldo)
  *
- * Nota: El monto definitivo siempre es el monto_en_centavos que devuelve POST /pagos/intencion.
- *
  * @param {object} cuenta - Cuenta normalizada (cuenta.saldo es el saldo de la mesa)
- * @param {object|number} [opciones] - Opciones { presencia, yo } o cantidad de personas (respaldo)
- * @returns {{ propio: number, igual: number, total: number }}
+ * @returns {{ propio: number, total: number }}
  */
-export function montosPorModo(cuenta, opciones = {}) {
+export function montosPorModo(cuenta) {
   const saldo = Math.max(0, Number(cuenta?.saldo ?? 0));
   const miSaldo = Math.max(0, Number(cuenta?.mia?.saldo ?? 0));
   const propio = Math.min(saldo, miSaldo);
   const total = saldo;
 
-  let cantPersonas;
-  if (typeof opciones === 'number') {
-    cantPersonas = Math.max(1, Math.round(opciones));
-  } else {
-    cantPersonas = personasDividir(cuenta, opciones);
-  }
-
-  // El monto definitivo siempre es el monto_en_centavos de POST /pagos/intencion
-  const saldoCentavos = Math.round(saldo * 100);
-  const igualCentavos = montoIgualCentavos(saldoCentavos, cantPersonas);
-  const igual = igualCentavos / 100;
-
   return {
     propio,
-    igual,
     total,
   };
 }
@@ -456,7 +388,7 @@ export function textoCajaSegunEstado(avisoCuenta) {
  * @param {object} [opciones.cuenta] - Cuenta normalizada de la mesa
  * @param {object} [opciones.presencia] - Estado de mesa:presencia ({ comensales, sin_celular, pagaron })
  * @param {string} [opciones.yo] - Alias de quien paga
- * @param {string} [opciones.modo] - Modo de pago ('propio' | 'igual' | 'total')
+ * @param {('propio'|'total')} [opciones.modo] - Modo de pago ('propio' | 'total')
  * @returns {{ tipo: 'especifico' | 'general', nombres: string[], mensaje: string } | null}
  */
 export function avisoPedidoGrupal({ cuenta, presencia, yo, modo } = {}) {
@@ -565,8 +497,8 @@ export function avisoPedidoGrupal({ cuenta, presencia, yo, modo } = {}) {
     }
 
     const mensaje = esPlural
-      ? `${textoSujetos} no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes dividir o pagar toda la mesa.`
-      : `${textoSujetos} no tiene nada a su nombre. Si tú pediste por él o ella, puedes dividir o pagar toda la mesa.`;
+      ? `${textoSujetos} no tienen nada a su nombre. Si tú pediste por ellos o ellas, puedes pagar toda la cuenta.`
+      : `${textoSujetos} no tiene nada a su nombre. Si tú pediste por él o ella, puedes pagar toda la cuenta.`;
 
     return {
       tipo: 'especifico',
@@ -579,7 +511,7 @@ export function avisoPedidoGrupal({ cuenta, presencia, yo, modo } = {}) {
   return {
     tipo: 'general',
     nombres: [],
-    mensaje: '¿Pediste para otros? Usa DIVIDIR o TODA LA MESA.',
+    mensaje: '¿Pediste para otros? Puedes pagar toda la cuenta.',
   };
 }
 
@@ -763,34 +695,98 @@ export function eventIdParaIntento(previo, { modo, saldo } = {}, generar) {
 }
 
 /**
- * Determina el estado del selector de pago y de las opciones disponibles (J-15).
- * Permite dividir o pagar toda la mesa a quien no tiene consumos propios.
+ * Determina la configuración del selector de modos de pago y el botón de acción (T2).
+ *
+ * - Comensales en la mesa = comensales distintos de cuenta.comensales comparados con claveAlias.
+ *   NO usa mesa:presencia para no colapsar a total si otros bloquean el celular.
+ * - Si hay 1 persona (o mi saldo = saldo de la mesa) → mostrarSelector false y modo 'total' con el texto "Pagar la cuenta".
+ * - Si lo mío ya está pagado (miSaldo <= 0) → solo 'total' (no mostrar 'propio', ni siquiera deshabilitado).
+ * - Si no → las dos opciones, con modo inicial 'propio'.
  *
  * @param {object} [opciones]
  * @param {number} [opciones.saldoMesa=0] - Saldo restante de la mesa
  * @param {number} [opciones.miSaldo=0] - Saldo personal del comensal
  * @param {number} [opciones.miPagado=0] - Monto ya pagado por el comensal
+ * @param {object} [opciones.cuenta] - Cuenta normalizada de la mesa
+ * @param {number} [opciones.personas] - Número explícito de personas (para pruebas)
  * @returns {{
  *   mostrarSelector: boolean,
+ *   modo: 'propio' | 'total',
+ *   modoInicial: 'propio' | 'total',
+ *   modosDisponibles: Array<'propio' | 'total'>,
+ *   texto: string|null,
+ *   textoBoton: string|null,
  *   loMioHabilitado: boolean,
- *   modoInicial: 'propio' | 'igual',
  *   yaPague: boolean
  * }}
  */
-export function estadoSelectorPago({ saldoMesa = 0, miSaldo = 0, miPagado = 0 } = {}) {
+export function estadoSelectorPago({
+  saldoMesa = 0,
+  miSaldo = 0,
+  miPagado = 0,
+  cuenta = null,
+  personas = null,
+} = {}) {
   const saldoM = Math.max(0, Number(saldoMesa) || 0);
   const saldoP = Math.max(0, Number(miSaldo) || 0);
   const pagadoP = Math.max(0, Number(miPagado) || 0);
-
-  const mostrarSelector = saldoM > 0;
-  const loMioHabilitado = saldoP > 0;
-  const modoInicial = saldoP > 0 ? 'propio' : 'igual';
   const yaPague = pagadoP > 0 && saldoP <= 0;
 
+  const cantPersonas =
+    typeof personas === 'number'
+      ? Math.max(1, Math.round(personas))
+      : contarComensalesCuenta(cuenta);
+
+  if (saldoM <= 0) {
+    return {
+      mostrarSelector: false,
+      modosDisponibles: [],
+      modo: 'total',
+      modoInicial: 'total',
+      textoBoton: 'Pagar la cuenta',
+      texto: 'Pagar la cuenta',
+      loMioHabilitado: false,
+      yaPague,
+    };
+  }
+
+  // Si hay 1 persona (o mi saldo = saldo de la mesa) → mostrarSelector false y modo 'total' con el texto "Pagar la cuenta"
+  if (cantPersonas === 1 || saldoP >= saldoM) {
+    return {
+      mostrarSelector: false,
+      modosDisponibles: ['total'],
+      modo: 'total',
+      modoInicial: 'total',
+      textoBoton: 'Pagar la cuenta',
+      texto: 'Pagar la cuenta',
+      loMioHabilitado: false,
+      yaPague,
+    };
+  }
+
+  // Si lo mío ya está pagado (miSaldo <= 0) → solo 'total' (no mostrar 'propio', ni siquiera deshabilitado)
+  if (saldoP <= 0) {
+    return {
+      mostrarSelector: false,
+      modosDisponibles: ['total'],
+      modo: 'total',
+      modoInicial: 'total',
+      textoBoton: 'Pagar toda la cuenta',
+      texto: 'Pagar toda la cuenta',
+      loMioHabilitado: false,
+      yaPague,
+    };
+  }
+
+  // Si no → las dos opciones, con modo inicial 'propio'
   return {
-    mostrarSelector,
-    loMioHabilitado,
-    modoInicial,
+    mostrarSelector: true,
+    modosDisponibles: ['propio', 'total'],
+    modo: 'propio',
+    modoInicial: 'propio',
+    textoBoton: null,
+    texto: null,
+    loMioHabilitado: true,
     yaPague,
   };
 }
@@ -799,7 +795,7 @@ export function estadoSelectorPago({ saldoMesa = 0, miSaldo = 0, miPagado = 0 } 
  * Determina el color y texto de ayuda de la tarjeta "TU PARTE" (J-15).
  * - yaPague true: $0 en verde (#2FA35A) y "Ya pagaste lo tuyo. ¡Gracias!".
  * - Sin consumos propios (miSaldo 0 y miPagado 0): color normal (#FFFFFF) y
- *   "No tienes nada a tu nombre. Puedes aportar con DIVIDIR o TODA LA MESA.".
+ *   "No tienes nada a tu nombre. Puedes aportar pagando toda la cuenta.".
  * - Saldo propio pendiente (miSaldo > 0): color normal (#FFFFFF) y "Consumiste $X".
  *
  * @param {object} [opciones]
@@ -835,7 +831,7 @@ export function infoTuParte({
     return {
       color: '#FFFFFF',
       esVerde: false,
-      mensaje: 'No tienes nada a tu nombre. Puedes aportar con DIVIDIR o TODA LA MESA.',
+      mensaje: 'No tienes nada a tu nombre. Puedes aportar pagando toda la cuenta.',
     };
   }
 
@@ -974,10 +970,28 @@ export function transicionPantallaPago({
   }
 }
 
+export function decidirVisibilidadPago({ saldoMesa = 0, cuenta = null, personas = null, miSaldo = 0, miPagado = 0 } = {}) {
+  const saldoM = Math.max(0, Number(saldoMesa) || 0);
+  const selector = estadoSelectorPago({
+    saldoMesa: saldoM,
+    miSaldo,
+    miPagado,
+    cuenta,
+    personas,
+  });
+
+  return {
+    mostrarSeccionPago: saldoM > 0,
+    mostrarSelector: selector.mostrarSelector,
+    selector,
+  };
+}
+
 export default {
   formatoPesos,
   MODOS_PAGO,
   TITULOS_MODO,
+  contarComensalesCuenta,
   normalizarCuenta,
   montosPorModo,
   aplicarPagoConfirmado,
@@ -999,4 +1013,5 @@ export default {
   montoTuParte,
   transicionPantallaPago,
   decidirSalidaEspera,
+  decidirVisibilidadPago,
 };
