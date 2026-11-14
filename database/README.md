@@ -309,7 +309,7 @@ las líneas canceladas no cuentan, que las vistas conservan columnas y tipos y q
 
 Zona horaria (script 43, T6): `test_43_zona_horaria.sql` es de solo lectura y la corre también el
 CI después de `migrar.sh`. Comprueba que la base tiene `America/Bogota` por defecto, que una sesión
-nueva (`connect`) la toma y que `now()::date` es el día de Bogotá, y **falla si alguna columna de
+nueva (`\connect`) la toma y que `now()::date` es el día de Bogotá, y **falla si alguna columna de
 una tabla de `public` es `timestamp` sin zona, `date` o `time`**. Regla: las fechas van siempre como
 `TIMESTAMPTZ`, y el día se calcula con `(col AT TIME ZONE 'America/Bogota')::date`, sin depender
 de la zona de la sesión.
