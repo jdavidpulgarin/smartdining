@@ -38,3 +38,27 @@ export function detalleMesa(estado, sesionAbierta = false) {
       return 'Lista para asignar'
   }
 }
+
+/**
+ * Antes de ABRIR una mesa o tomarle pedido (revisión de Roberto en el #282):
+ * una mesa reservada o en mantenimiento no se abre sin confirmar. El backend
+ * (abrirSesion) abre cualquier mesa que no esté ocupada y la deja ocupada, así
+ * que la confirmación es del panel. null = no hace falta preguntar.
+ */
+export function avisoAbrirMesa({ estado, numero } = {}) {
+  const e = String(estado || '').toLowerCase()
+  const cual = numero !== undefined && numero !== null ? `La mesa ${numero}` : 'La mesa'
+  if (e === 'reservada') return `${cual} está reservada. ¿Abrirla igual?`
+  if (e === 'mantenimiento') return `${cual} está en mantenimiento. ¿Abrirla igual?`
+  return null
+}
+
+/**
+ * ¿Se puede seguir? Si la mesa necesita confirmación, se le pregunta al
+ * usuario con `confirmar(mensaje)` (window.confirm en el panel); si no, sí.
+ */
+export function puedeAbrirMesa(mesa, confirmar) {
+  const aviso = avisoAbrirMesa(mesa)
+  if (!aviso) return true
+  return Boolean(confirmar(aviso))
+}

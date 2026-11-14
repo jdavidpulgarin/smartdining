@@ -1,7 +1,7 @@
 import { QrCode, LogOut, Sparkles, Users, MapPin } from 'lucide-react'
 import { StatusBadge } from './ui/Badge'
 import { decodificarTokenQr } from '../services/qrService'
-import { estadoTarjetaMesa } from '../utils/estadoMesa'
+import { estadoTarjetaMesa, avisoAbrirMesa } from '../utils/estadoMesa'
 
 export function TableCard({
   table,
@@ -28,6 +28,8 @@ export function TableCard({
 
   const isDisponible = tableStatus === 'disponible' || tableStatus === 'libre'
   const isOcupada = tableStatus === 'ocupada'
+  // Reservada o en mantenimiento: se puede abrir, pero confirmando (TablesPanel).
+  const pideConfirmar = Boolean(avisoAbrirMesa({ estado: tableStatus }))
   // Reservada y mantenimiento tienen su etiqueta (utils/estadoMesa.js): con
   // T12 llegan en vivo y antes salían como «DISPONIBLE».
   const { visual: estadoVisual, etiqueta: estadoLabel } = estadoTarjetaMesa({
@@ -86,10 +88,10 @@ export function TableCard({
               e.stopPropagation()
               onOpenQR(table || { name, status, seats, detail, active })
             }}
-            title={isDisponible ? 'Abrir mesa y generar QR de sesión' : `Ver QR de ${tableName}`}
+            title={isDisponible ? 'Abrir mesa y generar QR de sesión' : pideConfirmar ? `${tableName} está ${tableStatus === 'reservada' ? 'reservada' : 'en mantenimiento'}: pide confirmación` : `Ver QR de ${tableName}`}
           >
-            {isDisponible ? <Sparkles size={14} /> : <QrCode size={14} />}
-            <span>{isDisponible ? 'Abrir / QR' : 'Ver QR'}</span>
+            {isDisponible || pideConfirmar ? <Sparkles size={14} /> : <QrCode size={14} />}
+            <span>{isDisponible ? 'Abrir / QR' : pideConfirmar ? 'Abrir igual' : 'Ver QR'}</span>
           </button>
         )}
 
