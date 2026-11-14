@@ -924,6 +924,28 @@ main {
   color: #120E0D;
 }
 
+/* 2b. RESERVADA: apartada, todavía sin gente */
+.sd-table-reservada {
+  background-color: transparent;
+  border: 1px dashed var(--sd-gold);
+  color: var(--sd-text);
+}
+.sd-table-reservada .sd-table-card-number {
+  color: var(--sd-gold);
+}
+
+/* 2c. EN MANTENIMIENTO: no se asigna */
+.sd-table-mantenimiento {
+  background-color: transparent;
+  border: 1px dashed var(--sd-border);
+  color: var(--sd-text-muted);
+  opacity: 0.75;
+}
+.sd-table-mantenimiento .sd-table-card-number,
+.sd-table-mantenimiento .sd-table-card-meta {
+  color: var(--sd-text-muted);
+}
+
 /* 3. PEDIDO LISTO */
 .sd-table-listo {
   background-color: #F5F1EC;

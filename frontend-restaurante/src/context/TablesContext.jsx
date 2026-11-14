@@ -6,6 +6,7 @@ import { useSocketListener } from '../hooks'
 import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { mesaDelAviso } from '../utils/avisos'
+import { detalleMesa } from '../utils/estadoMesa'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
 
@@ -16,7 +17,6 @@ function normalizarMesa(backendMesa, prev = {}) {
   const rawEstado = (backendMesa.estado || 'disponible').toLowerCase()
   const estadoCapitalizado = rawEstado.charAt(0).toUpperCase() + rawEstado.slice(1)
   const isOcupada = rawEstado === 'ocupada'
-  const isDisponible = rawEstado === 'disponible'
 
   return {
     id,
@@ -34,11 +34,7 @@ function normalizarMesa(backendMesa, prev = {}) {
     token_qr: prev.token_qr || null,
     qr_url: prev.qr_url || null,
     active: isOcupada,
-    detail: isDisponible
-      ? 'Lista para asignar'
-      : isOcupada
-        ? (backendMesa.sesion_abierta ? 'Sesión activa · QR generado' : 'Ocupada')
-        : 'Reservada',
+    detail: detalleMesa(rawEstado, backendMesa.sesion_abierta),
     openedAt: prev.openedAt || null,
     expiresAt: prev.expiresAt || null,
   }
