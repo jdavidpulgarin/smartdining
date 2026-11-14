@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../hooks'
 import { TabInsumos } from '../components/inventario/TabInsumos'
 import { TabRecetas } from '../components/inventario/TabRecetas'
+import { TabConsumo } from '../components/inventario/TabConsumo'
 
 /**
  * Inventario (P-22), solo admin: lo que hay en bodega, cómo entra y sale, y qué
@@ -14,9 +15,10 @@ import { TabRecetas } from '../components/inventario/TabRecetas'
 const PESTANAS = [
   { id: 'insumos', etiqueta: 'INSUMOS' },
   { id: 'recetas', etiqueta: 'RECETAS' },
+  { id: 'consumo', etiqueta: 'CONSUMO' },
 ]
 
-const CONTENIDO = { insumos: TabInsumos, recetas: TabRecetas }
+const CONTENIDO = { insumos: TabInsumos, recetas: TabRecetas, consumo: TabConsumo }
 
 export function Inventario() {
   const { user } = useAuth()
@@ -31,7 +33,7 @@ export function Inventario() {
       <div className="sd-page-header">
         <div>
           <h1 className="sd-page-title">INVENTARIO</h1>
-          <p className="sd-page-subtitle">Insumos, movimientos y recetas</p>
+          <p className="sd-page-subtitle">Insumos, movimientos, recetas y consumo</p>
         </div>
       </div>
       <div className="sd-page-container">
