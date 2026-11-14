@@ -6,6 +6,8 @@
  * Todo en centavos enteros (COP × 100), sin decimales en ningún paso.
  */
 
+const { claveAlias } = require('./alias');
+
 const MODOS = ['total', 'igual', 'propio'];
 const CENTAVOS_POR_PESO = 100;
 
@@ -45,9 +47,12 @@ function validarCuenta(c, idMesa) {
  * @param {string} datos.comensal      Alias de quien paga
  */
 function personasPorPagar({ comensales, pagaron, comensal }) {
-  const yaPagaron = new Set(pagaron);
-  const pendientes = new Set(comensales.filter((a) => !yaPagaron.has(a)));
-  pendientes.add(comensal);
+  // Por la clave del alias: «Ana» (pagó en línea) y «ana» (la Caja) son la
+  // misma persona y no cuentan dos veces.
+  const clave = (a) => claveAlias(a) ?? a;
+  const yaPagaron = new Set(pagaron.map(clave));
+  const pendientes = new Set(comensales.map(clave).filter((c) => !yaPagaron.has(c)));
+  pendientes.add(clave(comensal));
   return Math.max(1, pendientes.size);
 }
 
@@ -68,8 +73,15 @@ function calcularMonto({
   if (modo === 'total') return { montoCentavos: saldo };
 
   if (modo === 'propio') {
-    const propio = cuenta.por_comensal.find((p) => p.comensal === comensal);
-    const monto = Math.min(propio ? propio.saldo_centavos : 0, saldo);
+    // El comensal de la cuenta (el texto que guardó el backend en cada línea)
+    // se compara por la CLAVE del alias, no por el texto exacto: « ana » y
+    // «Ana» son la misma persona. Si el backend trae a la misma persona en
+    // dos filas (dos formas de escribirla), sus saldos se suman.
+    const mia = claveAlias(comensal);
+    const propio = mia === null ? 0 : cuenta.por_comensal
+      .filter((p) => claveAlias(p.comensal) === mia)
+      .reduce((s, p) => s + p.saldo_centavos, 0);
+    const monto = Math.min(propio, saldo);
     return monto > 0 ? { montoCentavos: monto } : { error: 'SIN_SALDO' };
   }
 
