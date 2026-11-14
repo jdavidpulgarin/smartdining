@@ -267,6 +267,16 @@ Al conectar **y en cada reconexión** el cliente debe:
    estado aunque se hayan perdido eventos.
 3. Reenviar los eventos sin ack con su mismo `eventId`.
 
+**Cada reconexión es un socket nuevo** (id nuevo, sin salas): el servidor **no** usa la
+recuperación de sesión de Socket.io (`connectionStateRecovery`), así que `socket.recovered`
+nunca es `true` y los eventos que se emitieron mientras no había conexión no se reenvían. El
+handshake vuelve a validar el JWT y la sesión de mesa: un comensal cuya mesa se liberó mientras
+no tenía red recibe `connect_error` → `TOKEN_INVALIDO` y no vuelve a la sala. Por eso el paso 1
+es obligatorio: sin `join:table` el socket no recibe nada de su mesa.
+
+Si un comensal pierde la red, el panel no lo ve salir enseguida: tiene un **periodo de gracia**
+(ver [§5.2](#52-mesapresencia)).
+
 ---
 
 ## 4. Eventos cliente → servidor
@@ -669,13 +679,32 @@ Quién está sentado en cada mesa y quién ya pagó. Se emite a `room:admin` (pa
 `room:mesa-{ID}`** (los comensales y la pantalla de **esa** mesa; ninguna otra mesa lo
 recibe) cada vez que:
 
-- un **comensal** hace `join:table`, `leave:table` o se desconecta;
+- un **comensal** hace `join:table`, `leave:table` o se desconecta (si fue un corte de red,
+  al terminar su periodo de gracia; ver abajo);
 - se confirma un pago con alias: un pago en línea (webhook, §8.3) o un cobro de caja con
   `comensal` (§8.6), siempre que quede saldo;
 - el personal agrega o quita a alguien sin celular (§6.4) y la lista cambia.
 
 Máximo **un aviso por mesa cada 500 ms**: el primero sale al instante y, si hubo más cambios
 dentro de esa ventana, se envía uno más al cerrarla (el último estado siempre llega).
+
+**Periodo de gracia (`PRESENCIA_GRACIA_MS`, 60 000 ms por defecto).** Un celular que pasa a
+segundo plano pierde el socket a los ~45 s y vuelve al desbloquearse. Para que el comensal no
+salga y entre del panel cada vez:
+
+- Si el socket de un comensal se cae por la red (`transport close`, `transport error` o
+  `ping timeout`) y no le queda otra pestaña en la sala, **sigue contando** durante la gracia:
+  en `comensales`, en `total`, en la guarda de rotación del QR y en el reparto «igual». **No se
+  emite nada** al caerse.
+- Si el **mismo comensal** (misma mesa y mismo alias) vuelve y hace `join:table` antes de que
+  termine, se cancela la salida y **no se emite nada**: para los demás nunca se fue.
+- Si no vuelve, al terminar la gracia se emite `mesa:presencia` sin él, como siempre.
+- **Sin gracia**, con aviso al instante: `leave:table`, una desconexión pedida por el cliente
+  (`socket.disconnect()`), la expulsión al liberar la mesa y el cierre del servidor.
+- **Liberar la mesa** cancela todas sus gracias pendientes: no pasan a la sesión siguiente.
+- `PRESENCIA_GRACIA_MS=0` desactiva la gracia (comportamiento anterior).
+- La gracia vive en la memoria del proceso: si el socket-server se reinicia, se pierde y quien
+  vuelva entra de nuevo con `join:table`.
 
 **Al conectar el panel.** El panel tiene dos formas de saber, al conectar o al recargar la
 página, quién está en cada mesa, sin esperar al siguiente cambio:
@@ -1569,6 +1598,7 @@ Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 | `REDIS_URL` | Estado persistente (obligatoria en producción) |
 | `ROTACION_QR_MINUTOS` | Rotación automática del QR con la mesa vacía (3) |
 | `MESA_CAPACIDAD_POR_DEFECTO` | Capacidad si el backend no la informa; comensales por mesa = capacidad + 4 (6) |
+| `PRESENCIA_GRACIA_MS` | Periodo de gracia de un comensal que pierde la red antes de salir de `mesa:presencia` (60000; entero de 0 a 600000, 0 = sin gracia) (§5.2) |
 | `TRUST_PROXY` | IPs o CIDR del proxy (nginx) del que se cree `X-Real-IP` para logs y límites. Vacía = la IP de la conexión. `/0` no se admite |
 | `LOG_NIVEL` | `debug`, `info` (por defecto), `warn`, `error` o `silencio`. Logs en JSON, sin secretos |
 
@@ -1613,4 +1643,6 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `pago:alerta` · cuánto y quién (pedido del panel) | Solo `eventId`, `id_mesa`, referencias, `motivo` y `emitidoEn`: el panel no podía mostrar cuánto ni quién | Agrega `comensal` (alias de la intención o `null`), `monto_centavos` (lo cobrado, según la API o el evento) y `monto_esperado_centavos` (de la intención o `null`). Sin datos de tarjeta ni del pagador; sigue yendo solo a `room:admin` (§8.5) | Panel: mostrarlos si quiere; los campos nuevos no rompen nada |
 | `mesa:presencia` · al conectar el panel | El panel recibía la presencia solo cuando cambiaba algo: al conectar o recargar no sabía quién estaba sentado | **500 ms** después de que un socket de personal entra a `room:admin`, recibe solo él un `mesa:presencia` por cada mesa con algo, incluidas las mesas sin ningún socket (índice `sd:mesas:con-estado`, 24 h). Si se desconecta antes, no se envía. Mismo evento y payload (§5.2) | Nadie: el panel ya lo guarda por `id_mesa`. Es el respaldo de `mesa:presencia:solicitar` |
 | `mesa:presencia:solicitar` (nuevo) | — | El personal pide la presencia de todas las mesas con algo y la recibe en el ack `{ ok, mesas }`, sin depender de listeners. Comensal, tablet y cocina → `NO_AUTORIZADO`; 1 por socket cada 2 s (`RATE_LIMIT`) (§4) | Panel (recomendado): pedirla en cada `connect`, después de registrar los listeners (ejemplo en §4) |
+| Reconexión · sin `connectionStateRecovery` (T1, seguridad) | Socket.io recuperaba la sesión tras un corte de hasta 2 min **sin pasar por los middlewares**: devolvía las salas y `socket.data`. Un comensal sin red mientras se liberaba su mesa volvía a `room:mesa-{ID}` y leía y escribía el carrito del grupo siguiente | Cada reconexión es un socket nuevo que se autentica de cero; un JWT de la sesión anterior → `connect_error` `TOKEN_INVALIDO`. `socket.recovered` nunca es `true` y no se reenvían eventos perdidos (§3.3) | Nadie: la PWA ya hace `join:table` y reemplaza el carrito en cada `connect`. Si algún cliente dependía de `recovered`, debe hacer `join:table` |
+| `mesa:presencia` · periodo de gracia (T1) | Un comensal salía de la presencia en cuanto se le caía el socket (celular en segundo plano) y entraba otra vez al volver | Con un corte de red sigue contando `PRESENCIA_GRACIA_MS` (60 s) en `comensales`, `total`, la rotación del QR y «igual». Si vuelve antes, no se emite nada; si no, sale al terminar. Salir a propósito, la expulsión y liberar la mesa no tienen gracia; liberar cancela las pendientes (§5.2) | Nadie: mismo evento y payload. Panel y PWA: un comensal puede seguir en `comensales` hasta 60 s después de cerrar la app |
 | `POST /pagos/intencion` · sin modo `igual` (T2) | Tres modos: `total`, `igual` (saldo ÷ personas que aún no pagaron) y `propio` | Dos modos: `propio` («pagar lo mío») y `total` («pagar toda la cuenta»). `modo: "igual"` → `400 PAYLOAD_INVALIDO` con un mensaje que lo explica, sin consultar la cuenta ni gastar el límite. `mesa:presencia.pagaron` sigue igual (§8.1) | PWA (Juan, en el mismo bloque de merges): quitar «Dividir» y no mandar `igual`. Una PWA vieja que lo mande recibe el `400` con el mensaje |

@@ -1,5 +1,5 @@
 import { ChefHat } from 'lucide-react'
-import ComandaCard from './ComandaCard'
+import BloqueMesa from './BloqueMesa'
 
 /**
  * Una columna del tablero, con su contador y su estado vacio.
@@ -8,6 +8,9 @@ import ComandaCard from './ComandaCard'
  * es neutro en las tres para que la cifra se lea igual de lejos sin que el
  * color le cambie el peso. Las tarjetas no se tinen de color de columna: lo
  * que las pinta es el semaforo de tiempos, y son dos cosas distintas.
+ *
+ * T10: la columna dibuja BLOQUES (una tarjeta por mesa, ver lib/bloques.js) y
+ * el contador cuenta tarjetas, que es lo que el cocinero ve debajo.
  */
 
 const COLOR = {
@@ -16,7 +19,18 @@ const COLOR = {
   listo: 'var(--color-listas)',
 }
 
-export default function Columna({ estado, titulo, comandas, ahora, vacio, conectado, onAvanzar }) {
+export default function Columna({
+  estado,
+  titulo,
+  bloques,
+  ahora,
+  vacio,
+  conectado,
+  onAvanzar,
+  todoListo = {},
+  onTodoListo,
+  onDescartarFallos,
+}) {
   const color = COLOR[estado] || 'var(--color-texto-suave)'
 
   return (
@@ -31,14 +45,14 @@ export default function Columna({ estado, titulo, comandas, ahora, vacio, conect
         <h2 className="display text-3xl font-bold">{titulo}</h2>
         <span
           className="display min-w-11 rounded-lg bg-[color:var(--color-contador)] px-3 py-1 text-center text-2xl font-bold tabular-nums text-[color:var(--color-contador-texto)]"
-          aria-label={`${comandas.length} comandas`}
+          aria-label={`${bloques.length} ${bloques.length === 1 ? 'tarjeta' : 'tarjetas'}`}
         >
-          {comandas.length}
+          {bloques.length}
         </span>
       </header>
 
       <div className="flex-1 space-y-3 overflow-y-auto pt-3">
-        {comandas.length === 0 ? (
+        {bloques.length === 0 ? (
           // Caja punteada, no un parrafo suelto: deja claro que el hueco es el
           // sitio donde van a aparecer las comandas, y no un fallo de carga.
           //
@@ -57,13 +71,16 @@ export default function Columna({ estado, titulo, comandas, ahora, vacio, conect
             )}
           </div>
         ) : (
-          comandas.map((comanda) => (
-            <ComandaCard
-              key={comanda.id_pedido}
-              comanda={comanda}
+          bloques.map((bloque) => (
+            <BloqueMesa
+              key={bloque.clave}
+              bloque={bloque}
               ahora={ahora}
               conectado={conectado}
               onAvanzar={onAvanzar}
+              todoListo={todoListo[bloque.clave]}
+              onTodoListo={onTodoListo}
+              onDescartarFallos={onDescartarFallos}
             />
           ))
         )}

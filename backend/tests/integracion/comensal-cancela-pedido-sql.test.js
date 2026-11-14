@@ -33,6 +33,7 @@ process.env.REDIS_URL = '';
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const { abrirSonda } = require('../helpers/base-prueba');
+const { SQL_BLOQUEADOS_POR_MI } = require('../helpers/bloqueos');
 const app = require('../../server');
 const pool = require('../../src/config/db');
 const pedidosService = require('../../src/services/pedidos.service');
@@ -321,10 +322,9 @@ async function carrera(primero) {
     await reten.query('SELECT 1 FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [p.idPedido]);
     const esperar = async (cuantos) => {
       for (let i = 0; i < 20000; i++) {
-        const { rows } = await reten.query(
-          `SELECT count(*)::int AS n FROM pg_stat_activity
-            WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'`
-        );
+        // Solo las que cuelgan del bloqueo de `reten` (tests/helpers/bloqueos.js):
+        // en paralelo, otras suites tienen sus propias esperas de bloqueo.
+        const { rows } = await reten.query(SQL_BLOQUEADOS_POR_MI);
         if (rows[0].n >= cuantos) return;
       }
       assert.fail(`no se vieron ${cuantos} esperando el bloqueo del pedido`);
