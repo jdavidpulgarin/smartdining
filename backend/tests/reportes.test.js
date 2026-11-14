@@ -606,6 +606,16 @@ test('t6: platos mas pedidos sin las lineas canceladas (estado_item)', async () 
   }
 });
 
+test('t6: ingredientes mas solicitados sin las lineas canceladas (estado_item)', async () => {
+  const db = instalarFakeDb(dbConDatos());
+  try {
+    await pedir('?rango=hoy');
+    assert.match(db.buscar('detalles_ingredientes di').sql, /dp\.estado_item <> 'cancelado'/);
+  } finally {
+    db.restaurar();
+  }
+});
+
 test('t6: ventasPorDia sale con numeros (fecha, total, pedidos) y en el orden de la base', async () => {
   const db = instalarFakeDb(dbConDatos());
   try {

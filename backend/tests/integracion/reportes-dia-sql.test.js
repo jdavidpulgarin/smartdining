@@ -246,3 +246,100 @@ test('T6: ventasPorDia del mes contra la base: 30 días con fecha AAAA-MM-DD, to
   }
   for (const k of reporte.tiemposKds) assert.match(k.fecha, /^\d{4}-\d{2}-\d{2}$/);
 });
+
+test('T6: ingredientes más solicitados sin las líneas canceladas: uno que solo está en líneas canceladas no aparece', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+
+  const cliente = await sonda.connect();
+  try {
+    // Misma técnica que arriba: todo en una transacción y ROLLBACK al final.
+    await cliente.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+
+    const c = await cliente.query(
+      'INSERT INTO categorias (nombre, descripcion) VALUES ($1::text, $2::text) RETURNING id_categoria',
+      [`${MARCA} ing`, 'T6']
+    );
+    const armable = await cliente.query(
+      `INSERT INTO platos (id_categoria, nombre, precio, disponible, personalizable)
+       VALUES ($1::int, $2::text, 5000, TRUE, TRUE) RETURNING id_plato`,
+      [c.rows[0].id_categoria, `${MARCA} armable`]
+    );
+    const idPlato = armable.rows[0].id_plato;
+    const paso = await cliente.query(
+      `INSERT INTO pasos_constructor (id_plato, nombre, orden, min_sel, max_sel, obligatorio)
+       VALUES ($1::int, 'base', 1, 1, 1, TRUE) RETURNING id_paso`,
+      [idPlato]
+    );
+    const ingrediente = async (nombre) => (await cliente.query(
+      `INSERT INTO ingredientes (id_paso, nombre, precio_extra) VALUES ($1::int, $2::text, 0)
+       RETURNING id_ingrediente`,
+      [paso.rows[0].id_paso, `${MARCA} ${nombre}`]
+    )).rows[0].id_ingrediente;
+    const vivo = await ingrediente('vivo');
+    const soloCancelado = await ingrediente('solo cancelado');
+
+    const m = await conNumeroDeMesa(async (numero) => {
+      await cliente.query('SAVEPOINT mesa');
+      try {
+        const r = await cliente.query(
+          `INSERT INTO mesas (numero, capacidad, ubicacion, estado, sesion_iniciada_en)
+           VALUES ($1::int, 4, $2::text, 'ocupada', now()) RETURNING id_mesa`,
+          [numero, MARCA]
+        );
+        await cliente.query('RELEASE SAVEPOINT mesa');
+        return r;
+      } catch (err) {
+        await cliente.query('ROLLBACK TO SAVEPOINT mesa');
+        throw err;
+      }
+    });
+
+    // Un pedido de hoy con 40 líneas de 1 (el tope es 50 ítems): 20 con el
+    // ingrediente vivo y 20 con el otro, que después se cancelan. Con 20
+    // pedidos, si se contaran las canceladas ese ingrediente entraría seguro
+    // en el top 6.
+    const p = await cliente.query(
+      `INSERT INTO pedidos (id_mesa, codigo_pedido, creado_en)
+       VALUES ($1::int, $2::text, ${instante(0, '12:00')}) RETURNING id_pedido`,
+      [m.rows[0].id_mesa, `T6-${crypto.randomBytes(5).toString('hex').toUpperCase()}`]
+    );
+    for (const [idIngrediente, cancelar] of [[vivo, false], [soloCancelado, true]]) {
+      for (let i = 0; i < 20; i += 1) {
+        const d = await cliente.query(
+          `INSERT INTO detalles_pedido (id_pedido, id_plato, cantidad, precio_unitario)
+           VALUES ($1::int, $2::int, 1, 5000) RETURNING id_detalle`,
+          [p.rows[0].id_pedido, idPlato]
+        );
+        await cliente.query(
+          `INSERT INTO detalles_ingredientes (id_detalle, id_ingrediente, porcion)
+           VALUES ($1::int, $2::int, 'normal')`,
+          [d.rows[0].id_detalle, idIngrediente]
+        );
+        if (cancelar) {
+          await cliente.query(
+            "UPDATE detalles_pedido SET estado_item = 'cancelado' WHERE id_detalle = $1::int",
+            [d.rows[0].id_detalle]
+          );
+        }
+      }
+    }
+
+    const { hoy, semana } = await reportes(cliente, ZONA);
+    const bogUtc = await reportes(cliente, 'UTC');
+    assert.deepStrictEqual(bogUtc, { hoy, semana }, 'el mismo resultado en sesión UTC');
+
+    for (const [rango, r] of [['hoy', hoy], ['semana', semana]]) {
+      const delVivo = r.topIngredientes.find((x) => x.id_ingrediente === vivo);
+      assert.ok(delVivo, `${rango}: el ingrediente vivo está: ${JSON.stringify(r.topIngredientes)}`);
+      assert.strictEqual(delVivo.veces_solicitado, 20, `${rango}: solo sus 20 líneas vivas`);
+      assert.strictEqual(
+        r.topIngredientes.find((x) => x.id_ingrediente === soloCancelado),
+        undefined,
+        `${rango}: lo elegido en una línea cancelada no se pidió`
+      );
+    }
+  } finally {
+    await cliente.query('ROLLBACK').catch(() => {});
+    cliente.release();
+  }
+});

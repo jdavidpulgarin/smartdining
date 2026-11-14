@@ -3130,8 +3130,10 @@ pago) y `pedidos` los pedidos no cancelados **creados** ese día. Por eso:
 
 > **suma de `ventasPorDia[].total` = `totalVentas` = suma de `metodosPago[].monto`.**
 
-**`topPlatos` sin líneas canceladas (T6).** Excluye los pedidos cancelados **y** las líneas con
-`estado_item = 'cancelado'` (D-13, J-14): un plato que se quitó del pedido no se vendió.
+**`topPlatos` y `topIngredientes` sin líneas canceladas (T6).** Excluyen los pedidos cancelados
+**y** las líneas con `estado_item = 'cancelado'` (D-13, J-14): un plato que se quitó del pedido
+no se vendió, y lo que se eligió en él no se pidió. Es el mismo criterio que `v_platos_top` y
+`v_ingredientes_top` desde el script 42.
 
 **Por qué `topPlatos` y `topIngredientes` no usan las vistas.** `v_platos_top` y
 `v_ingredientes_top` **no tienen columna de fecha**: agrupan todo el histórico. Con ellas,

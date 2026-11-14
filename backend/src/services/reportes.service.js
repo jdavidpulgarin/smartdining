@@ -195,6 +195,10 @@ const SQL_TOP_PLATOS = `
  * Va por id_ingrediente: en la carta hay nombres repetidos a propósito (la
  * misma "Panceta Crujiente" existe en dos platos y son ingredientes distintos),
  * así que agrupar por nombre fusionaría cosas que no son la misma.
+ *
+ * T6: sin las líneas canceladas (estado_item = 'cancelado'), igual que
+ * SQL_TOP_PLATOS y que v_ingredientes_top desde el script 42: lo elegido en un
+ * plato que se quitó del pedido no se pidió.
  */
 const SQL_TOP_INGREDIENTES = `
   ${CTE_LIMITES}
@@ -215,6 +219,7 @@ const SQL_TOP_INGREDIENTES = `
   JOIN pedidos p             ON p.id_pedido = dp.id_pedido
   CROSS JOIN limites l
   WHERE p.estado <> 'cancelado'
+    AND dp.estado_item <> 'cancelado'
     AND ${FECHA_LOCAL('p.creado_en')} BETWEEN l.desde AND l.hasta
   GROUP BY i.id_ingrediente, i.nombre, pc.nombre, pl.nombre
   ORDER BY veces_solicitado DESC, ingresos_extras DESC
