@@ -33,7 +33,7 @@ export function debeRecargarCuentaPorEstado(evento) {
  */
 export function useCuentaMesa() {
   const { sesion } = useSesion();
-  const { on: socketOn, estado: estadoSocket } = useMesaSocket();
+  const { on: socketOn, estado: estadoSocket, resync } = useMesaSocket();
 
   const idMesa = sesion?.idMesa ?? null;
   const comensal = sesion?.comensal || '';
@@ -104,6 +104,15 @@ export function useCuentaMesa() {
     }
     estadoAnteriorRef.current = estadoSocket;
   }, [estadoSocket, cargarCuenta]);
+
+  // Recargar al volver de segundo plano
+  const resyncAnteriorRef = useRef(resync);
+  useEffect(() => {
+    if (resyncAnteriorRef.current !== resync && idMesa) {
+      cargarCuenta();
+    }
+    resyncAnteriorRef.current = resync;
+  }, [resync, idMesa, cargarCuenta]);
 
   // Escuchar eventos en vivo del socket
   useEffect(() => {

@@ -45,7 +45,8 @@ export const ESTADO_INICIAL = {
 export function obtenerMesaInicial() {
   try {
     if (typeof window !== 'undefined') {
-      const sesionGuardada = sessionStorage.getItem(CLAVE_SESION);
+      const sesionGuardada =
+        localStorage.getItem(CLAVE_SESION) || sessionStorage.getItem(CLAVE_SESION);
       if (sesionGuardada) {
         const parsed = JSON.parse(sesionGuardada);
         if (parsed?.idMesa && !isNaN(Number(parsed.idMesa))) {
@@ -54,7 +55,7 @@ export function obtenerMesaInicial() {
       }
     }
   } catch {
-    // Si ocurre un error al acceder a sessionStorage o parsear, continuar con null
+    // Si ocurre un error al acceder a storage o parsear, continuar con null
   }
   return null;
 }
@@ -244,6 +245,23 @@ export function CarritoProvider({ children }) {
     }
     estadoAnteriorSocketRef.current = estadoSocket;
   }, [estadoSocket]);
+
+  // Recargar menú al volver a primer plano (visibilidad, BFCache, online)
+  const resync = mesaSocket?.resync;
+  const resyncAnteriorRef = useRef(resync);
+  useEffect(() => {
+    if (resyncAnteriorRef.current !== resync) {
+      resyncAnteriorRef.current = resync;
+      recargarMenu();
+      obtenerMenuRaw()
+        .then((menu) => {
+          if (menu) setMenuRaw(menu);
+        })
+        .catch((err) => {
+          console.error('Error al recargar menú tras volver a primer plano:', err);
+        });
+    }
+  }, [resync]);
 
   // Sincronizar estado cuando la mesa cambia (modo local)
   useEffect(() => {

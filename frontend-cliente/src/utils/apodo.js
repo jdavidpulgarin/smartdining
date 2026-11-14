@@ -36,7 +36,9 @@ export function resolverApodo(sesion) {
 
 export function obtenerApodo() {
   try {
-    const guardado = sessionStorage.getItem(CLAVE_SESION);
+    const guardado =
+      (typeof localStorage !== 'undefined' ? localStorage.getItem(CLAVE_SESION) : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(CLAVE_SESION) : null);
     if (!guardado) return '';
     const parsed = JSON.parse(guardado);
     return resolverApodo(parsed);
