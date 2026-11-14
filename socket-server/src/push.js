@@ -7,6 +7,35 @@ const CODIGOS_SUSCRIPCION_CADUCADA = [404, 410];
 const TTL_PUSH_SEG = 30 * 60;
 
 /**
+ * Solo el HOST del servicio push (fcm.googleapis.com, web.push.apple.com,
+ * updates.push.services.mozilla.com…), para saber a quién se le habló. Nunca
+ * la URL completa: el resto del endpoint identifica al dispositivo.
+ */
+function servicioDe(suscripcion) {
+  try {
+    return new URL(suscripcion.endpoint).host || 'desconocido';
+  } catch {
+    return 'desconocido';
+  }
+}
+
+/** Código HTTP con que respondió el servicio push, o null si no respondió (red, DNS…). */
+const codigoHttp = (r) => (r && Number.isInteger(r.statusCode) ? r.statusCode : null);
+
+// Apple responde { "reason": "BadJwtToken" } (y parecidos): se registra solo si
+// tiene esa forma, una palabra corta, para no copiar al log nada que venga en
+// el cuerpo de la respuesta.
+const RAZON_SEGURA = /^[A-Za-z]{1,40}$/;
+function razonDe(err) {
+  try {
+    const razon = JSON.parse(err.body).reason;
+    return typeof razon === 'string' && RAZON_SEGURA.test(razon) ? razon : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Servicio de Web Push. Se inyecta `webpush` para poder probarlo sin salir a
  * internet ni depender de un navegador real.
  *
@@ -28,22 +57,40 @@ function crearServicioPush(config, { webpush = require('web-push') } = {}) {
 
   /**
    * Envía una notificación a una suscripción.
-   * Devuelve { ok:true } o { ok:false, caducada } — `caducada` le indica al
-   * llamador que debe borrar esa suscripción porque nunca volverá a servir.
-   * Nunca lanza: un fallo de push no debe romper la difusión por socket.
+   * Devuelve { ok, caducada, servicio, status } (`motivo` si falló) —
+   * `caducada` le indica al llamador que debe borrar esa suscripción porque
+   * nunca volverá a servir. Nunca lanza: un fallo de push no debe romper la
+   * difusión por socket.
+   *
+   * Cada envío deja UNA línea en el log (T9): el host del servicio, el código
+   * HTTP y si la suscripción caducó. Sin el endpoint completo, sin las llaves
+   * de la suscripción (p256dh, auth) y sin el payload.
    */
   async function enviar(suscripcion, payload) {
     if (!habilitado) return { ok: false, caducada: false, motivo: 'deshabilitado' };
+    const servicio = servicioDe(suscripcion);
     try {
       // TTL 30 min: si el dispositivo está apagado más tiempo, "tu plato está
       // listo" ya no sirve (o ya lo recogieron). urgency high: que no lo
       // retrase el ahorro de batería.
-      await webpush.sendNotification(suscripcion, JSON.stringify(payload), { TTL: TTL_PUSH_SEG, urgency: 'high' });
-      return { ok: true };
+      const r = await webpush.sendNotification(suscripcion, JSON.stringify(payload), { TTL: TTL_PUSH_SEG, urgency: 'high' });
+      const status = codigoHttp(r);
+      log.info('push: enviado', { servicio_push: servicio, status, caducada: false });
+      return { ok: true, caducada: false, servicio, status };
     } catch (err) {
-      const caducada = CODIGOS_SUSCRIPCION_CADUCADA.includes(err.statusCode);
-      if (!caducada) log.error('push: error al enviar', { status: err.statusCode, codigo: err.code });
-      return { ok: false, caducada, motivo: err.statusCode || 'error' };
+      const status = codigoHttp(err);
+      const caducada = CODIGOS_SUSCRIPCION_CADUCADA.includes(status);
+      const campos = { servicio_push: servicio, status, caducada };
+      const razon = razonDe(err);
+      if (razon) campos.razon = razon;
+      // Sin respuesta HTTP: el código de red (ECONNRESET, ENOTFOUND…).
+      if (status === null && typeof err.code === 'string') campos.codigo = err.code;
+      // Caducada es lo normal (desinstaló la PWA o quitó el permiso): info.
+      if (caducada) log.info('push: suscripción caducada', campos);
+      else log.error('push: error al enviar', campos);
+      return {
+        ok: false, caducada, motivo: status || 'error', servicio, status,
+      };
     }
   }
 
@@ -60,5 +107,5 @@ const rutasPush = {
 };
 
 module.exports = {
-  crearServicioPush, rutasPush, CODIGOS_SUSCRIPCION_CADUCADA, TTL_PUSH_SEG,
+  crearServicioPush, rutasPush, servicioDe, CODIGOS_SUSCRIPCION_CADUCADA, TTL_PUSH_SEG,
 };

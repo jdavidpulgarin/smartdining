@@ -15,11 +15,14 @@ const cache = require('./cache');
  * con TZ=UTC correría "hoy" cinco horas y el corte de caja saldría mal sin que
  * nadie se diera cuenta.
  *
- * CAVEAT de las vistas: `v_ventas_diarias` y `v_tiempos_kds` agrupan por
- * `DATE(columna)`, que usa la zona de la SESIÓN, no una explícita. Aquí se
- * filtran sus filas con fechas ya calculadas en Bogotá, así que el rango es
- * correcto; lo que no se puede garantizar desde el backend es el corte interno
- * de la vista. Arreglarlo es de `database/` (24_vistas_reportes.sql).
+ * NADA DEPENDE DE LA ZONA DE LA SESIÓN (T6). Todas las columnas de fecha son
+ * TIMESTAMPTZ, así que `(columna AT TIME ZONE 'America/Bogota')::date` es el día
+ * de Bogotá sea cual sea el `timezone` de la conexión. Las vistas
+ * `v_ventas_diarias` y `v_tiempos_kds` ya agrupan así desde el script 42 (#241;
+ * antes usaban DATE(columna), que sí dependía de la sesión). Las fechas salen
+ * con to_char(..., 'YYYY-MM-DD'), no con ::text, que depende de DateStyle.
+ * tests/integracion/reportes-dia-sql.test.js corre el reporte en sesión UTC y
+ * en sesión Bogotá y exige el mismo resultado.
  */
 
 /** Zona del restaurante. Una sola constante para no repetirla en cada query. */
@@ -69,12 +72,12 @@ const ETIQUETA_METODO = `
  */
 const CTE_LIMITES = `
   WITH limites AS (
-    SELECT (now() AT TIME ZONE $2)::date - $1::int AS desde,
-           (now() AT TIME ZONE $2)::date            AS hasta
+    SELECT (now() AT TIME ZONE $2::text)::date - $1::int AS desde,
+           (now() AT TIME ZONE $2::text)::date            AS hasta
   )`;
 
 /** Fecha local de un pedido/transacción, para comparar con los límites. */
-const FECHA_LOCAL = (columna) => `(${columna} AT TIME ZONE $2)::date`;
+const FECHA_LOCAL = (columna) => `(${columna} AT TIME ZONE $2::text)::date`;
 
 /**
  * Totales de venta. Salen de v_ventas_diarias, que ya excluye cancelados y solo
@@ -92,6 +95,30 @@ const SQL_VENTAS = `
     COALESCE(SUM(v.pedidos_liquidados), 0)::int   AS pedidos_liquidados
   FROM limites l
   LEFT JOIN v_ventas_diarias v ON v.fecha BETWEEN l.desde AND l.hasta`;
+
+/**
+ * T6: ventas por día del rango, UN día por cada día de Bogotá entre `desde` y
+ * `hasta` (los días sin ventas en 0), en orden. La MISMA fuente que SQL_VENTAS
+ * (v_ventas_diarias): `total` es lo recaudado ese día por la fecha del pago
+ * (como los métodos de pago y «Recaudado hoy») y `pedidos` los pedidos no
+ * cancelados creados ese día. Así la suma de los días es totalVentas, que es la
+ * suma de los métodos.
+ *
+ * Los días salen de desde + 0..$1 (enteros), no de generate_series sobre
+ * fechas: ese convierte a timestamptz con la zona de la sesión.
+ */
+const SQL_VENTAS_POR_DIA = `
+  ${CTE_LIMITES}
+  , dias AS (
+    SELECT l.desde + g.n AS fecha
+    FROM limites l, generate_series(0, $1::int) AS g(n)
+  )
+  SELECT to_char(d.fecha, 'YYYY-MM-DD')               AS fecha,
+         COALESCE(v.total_recaudado, 0)::float8       AS total,
+         COALESCE(v.total_pedidos, 0)::int            AS pedidos
+  FROM dias d
+  LEFT JOIN v_ventas_diarias v ON v.fecha = d.fecha
+  ORDER BY d.fecha`;
 
 /**
  * Tiempo real promedio de cocina, PONDERADO por comandas.
@@ -115,7 +142,7 @@ const SQL_TIEMPO_COCINA = `
 const SQL_TIEMPOS_KDS = `
   ${CTE_LIMITES}
   SELECT
-    k.fecha::text                          AS fecha,
+    to_char(k.fecha, 'YYYY-MM-DD')          AS fecha,
     k.platos_preparados::int               AS platos_preparados,
     k.tiempo_estimado_promedio_min::float8  AS tiempo_estimado_promedio_min,
     k.tiempo_real_promedio_min::float8      AS tiempo_real_promedio_min,
@@ -132,6 +159,10 @@ const SQL_TIEMPOS_KDS = `
  *
  * `percentage` es relativo al primero (barra proporcional), no un porcentaje
  * del total: es lo que el panel pinta como ancho de barra.
+ *
+ * T6: sin las líneas canceladas (estado_item = 'cancelado', D-13 y J-14): un
+ * plato que se quitó del pedido no se vendió. Mismo criterio que v_platos_top
+ * desde el script 42.
  */
 const SQL_TOP_PLATOS = `
   ${CTE_LIMITES}
@@ -147,6 +178,7 @@ const SQL_TOP_PLATOS = `
     JOIN categorias c ON c.id_categoria = pl.id_categoria
     CROSS JOIN limites l
     WHERE p.estado <> 'cancelado'
+      AND dp.estado_item <> 'cancelado'
       AND ${FECHA_LOCAL('p.creado_en')} BETWEEN l.desde AND l.hasta
     GROUP BY pl.id_plato, pl.nombre, c.nombre
   )
@@ -163,6 +195,10 @@ const SQL_TOP_PLATOS = `
  * Va por id_ingrediente: en la carta hay nombres repetidos a propósito (la
  * misma "Panceta Crujiente" existe en dos platos y son ingredientes distintos),
  * así que agrupar por nombre fusionaría cosas que no son la misma.
+ *
+ * T6: sin las líneas canceladas (estado_item = 'cancelado'), igual que
+ * SQL_TOP_PLATOS y que v_ingredientes_top desde el script 42: lo elegido en un
+ * plato que se quitó del pedido no se pidió.
  */
 const SQL_TOP_INGREDIENTES = `
   ${CTE_LIMITES}
@@ -183,6 +219,7 @@ const SQL_TOP_INGREDIENTES = `
   JOIN pedidos p             ON p.id_pedido = dp.id_pedido
   CROSS JOIN limites l
   WHERE p.estado <> 'cancelado'
+    AND dp.estado_item <> 'cancelado'
     AND ${FECHA_LOCAL('p.creado_en')} BETWEEN l.desde AND l.hasta
   GROUP BY i.id_ingrediente, i.nombre, pc.nombre, pl.nombre
   ORDER BY veces_solicitado DESC, ingresos_extras DESC
@@ -226,7 +263,7 @@ const SQL_METODOS_PAGO = `
 const SQL_HORAS_PICO = `
   ${CTE_LIMITES}
   , por_hora AS (
-    SELECT EXTRACT(HOUR FROM (p.creado_en AT TIME ZONE $2))::int AS hora,
+    SELECT EXTRACT(HOUR FROM (p.creado_en AT TIME ZONE $2::text))::int AS hora,
            COUNT(*)::int AS pedidos
     FROM pedidos p
     CROSS JOIN limites l
@@ -287,23 +324,28 @@ const numONull = (valor) => {
 /**
  * Arma el reporte completo del rango leyendo de la base.
  *
- * Las ocho consultas van en paralelo: son independientes y ninguna escribe, así
+ * Las consultas van en paralelo: son independientes y ninguna escribe, así
  * que encadenarlas solo sumaría latencias.
+ *
+ * `db` es el pool por omisión. Una prueba puede pasar UN cliente (en una
+ * transacción): pg pone en fila las consultas de un mismo cliente, así que
+ * Promise.all sigue funcionando, en serie.
  */
-async function consultarBase(rango) {
+async function consultarBase(rango, db = pool) {
   const params = [DIAS_POR_RANGO[rango], ZONA];
 
-  const [ventas, tiempo, tiempos, platos, ingredientes, metodos, horas, ocupacion, alertas] =
+  const [ventas, tiempo, tiempos, platos, ingredientes, metodos, horas, ocupacion, alertas, porDia] =
     await Promise.all([
-      pool.query(SQL_VENTAS, params),
-      pool.query(SQL_TIEMPO_COCINA, params),
-      pool.query(SQL_TIEMPOS_KDS, params),
-      pool.query(SQL_TOP_PLATOS, params),
-      pool.query(SQL_TOP_INGREDIENTES, params),
-      pool.query(SQL_METODOS_PAGO, params),
-      pool.query(SQL_HORAS_PICO, params),
-      pool.query(SQL_OCUPACION, params),
-      pool.query(SQL_ALERTAS, params),
+      db.query(SQL_VENTAS, params),
+      db.query(SQL_TIEMPO_COCINA, params),
+      db.query(SQL_TIEMPOS_KDS, params),
+      db.query(SQL_TOP_PLATOS, params),
+      db.query(SQL_TOP_INGREDIENTES, params),
+      db.query(SQL_METODOS_PAGO, params),
+      db.query(SQL_HORAS_PICO, params),
+      db.query(SQL_OCUPACION, params),
+      db.query(SQL_ALERTAS, params),
+      db.query(SQL_VENTAS_POR_DIA, params),
     ]);
 
   const v = ventas.rows[0] || {};
@@ -361,6 +403,14 @@ async function consultarBase(rango) {
       tiempo_estimado_promedio_min: num(t.tiempo_estimado_promedio_min),
       tiempo_real_promedio_min: num(t.tiempo_real_promedio_min),
       variacion_promedio_porcentaje: num(t.variacion_promedio_porcentaje),
+    })),
+
+    // T6: un día por cada día del rango (Bogotá), en orden; misma fuente que
+    // totalVentas.
+    ventasPorDia: (porDia ? porDia.rows : []).map((d) => ({
+      fecha: d.fecha,
+      total: num(d.total),
+      pedidos: num(d.pedidos),
     })),
   };
 }

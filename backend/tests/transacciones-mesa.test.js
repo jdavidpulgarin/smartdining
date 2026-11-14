@@ -41,8 +41,12 @@ function fakeCobro(o = {}) {
     mesaExiste = true,
     error = null,
     fallaEn = 'INSERT INTO historial_estados',
+    // Consumo y pagos por comensal (SQL_CUENTA_POR_COMENSAL), en centavos.
+    // Por omisión Ana consumió todo el saldo de la mesa y no ha pagado nada.
+    cuentaPorComensal = null,
   } = o;
   const saldoInicial = pedidos.reduce((s, p) => s + p.saldo_centavos, 0);
+  const filasCuenta = cuentaPorComensal || [{ tipo: 'consumo', comensal: 'Ana', centavos: saldoInicial }];
   let cobrado = 0;
   let siguienteId = 500;
 
@@ -53,6 +57,9 @@ function fakeCobro(o = {}) {
     }
     if (sql.includes('SELECT 1 FROM transacciones WHERE referencia_externa')) {
       return yaRegistrada ? { rows: [{ '?column?': 1 }] } : { rows: [] };
+    }
+    if (sql.includes("'consumo'::text AS tipo")) {
+      return { rows: filasCuenta.map((f) => ({ ...f, centavos: String(f.centavos) })) };
     }
     if (sql.includes('SUM(ROUND(obtener_saldo_pendiente')) {
       return { rows: [{ saldo_centavos: String(saldoInicial - cobrado) }] };
@@ -390,5 +397,117 @@ test('cobro de mesa: un pago parcial avisa el pago y nada mas', async () => {
   } finally {
     db.restaurar();
     socket.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// «Pagar lo mío»: el monto no supera el saldo PROPIO de ese comensal
+// ---------------------------------------------------------------------------
+
+// Mesa con 52.000 por cobrar: Caro 28.000 y Beto 24.000 vivos. Ana tenía
+// 12.000, pero el mesero le canceló el plato (la consulta ya no lo trae).
+const MESA_JARRISON = [{ id_pedido: 87, estado: 'entregado', saldo_centavos: 5200000 }];
+const SIN_PLATOS_DE_ANA = [
+  { tipo: 'consumo', comensal: 'Caro', centavos: 2800000 },
+  { tipo: 'consumo', comensal: 'Beto', centavos: 2400000 },
+];
+const CON_ANA = [
+  { tipo: 'consumo', comensal: 'Ana', centavos: 1200000 },
+  ...SIN_PLATOS_DE_ANA,
+];
+
+for (const [caso, opciones, monto, saldo] of [
+  ['Ana sin platos vivos (saldo propio 0)', { cuentaPorComensal: SIN_PLATOS_DE_ANA }, 12000, 0],
+  ['Ana debe 12.000 y se cobran 15.000', { cuentaPorComensal: CON_ANA }, 15000, 12000],
+  ['Ana debe 12.000 pero ya pagó 5.000 y se cobran 12.000',
+    { cuentaPorComensal: [...CON_ANA, { tipo: 'pagado', comensal: 'Ana', centavos: 500000 }] }, 12000, 7000],
+]) {
+  test(`lo mio: ${caso} -> 409 excede_saldo_comensal con su saldo, sin escribir`, async () => {
+    const db = fakeCobro({ pedidos: MESA_JARRISON, ...opciones });
+    try {
+      const res = await cobrar({ ...CUERPO, monto, comensal: 'Ana' });
+      assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+      assert.deepStrictEqual(res.body, {
+        error: 'El pago excede lo que debe ese comensal',
+        motivo: 'excede_saldo_comensal',
+        saldo,
+      });
+      assert.strictEqual(db.todas('INSERT INTO transacciones').length, 0);
+      assert.ok(db.buscar('ROLLBACK'));
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+test('lo mio: Ana debe 12.000 y se cobran 12.000 -> 201', async () => {
+  const db = fakeCobro({ pedidos: MESA_JARRISON, cuentaPorComensal: CON_ANA });
+  try {
+    const res = await cobrar({ ...CUERPO, monto: 12000, comensal: 'Ana' });
+    assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+    assert.strictEqual(db.todas('INSERT INTO transacciones').length, 1);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('lo mio: el alias se compara por su clave (« aná » en la base, «Ana» en el cobro)', async () => {
+  const db = fakeCobro({
+    pedidos: MESA_JARRISON,
+    cuentaPorComensal: [{ tipo: 'consumo', comensal: ' aná ', centavos: 1200000 }, ...SIN_PLATOS_DE_ANA],
+  });
+  try {
+    assert.strictEqual((await cobrar({ ...CUERPO, monto: 12000, comensal: 'Ana' })).status, 201);
+  } finally {
+    db.restaurar();
+  }
+});
+
+for (const [caso, comensal] of [['sin comensal (mesa completa)', undefined], ['a «General»', 'General'], ['comensal null', null]]) {
+  test(`lo mio: un cobro ${caso} sigue igual: solo el saldo de la mesa, sin mirar la cuenta por comensal`, async () => {
+    const db = fakeCobro({ pedidos: MESA_JARRISON, cuentaPorComensal: SIN_PLATOS_DE_ANA });
+    try {
+      const cuerpo = { ...CUERPO, monto: 52000 };
+      if (comensal !== undefined) cuerpo.comensal = comensal;
+      const res = await cobrar(cuerpo);
+      assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+      assert.strictEqual(db.buscar("'consumo'::text AS tipo"), undefined);
+    } finally {
+      db.restaurar();
+    }
+  });
+}
+
+test('lo mio: la cuenta por comensal se lee DESPUES de bloquear la mesa y los pedidos, y sin lineas canceladas', async () => {
+  const db = fakeCobro({ pedidos: MESA_JARRISON, cuentaPorComensal: CON_ANA });
+  try {
+    assert.strictEqual((await cobrar({ ...CUERPO, monto: 12000, comensal: 'Ana' })).status, 201);
+    const sqls = db.ejecutadas.map((q) => q.sql);
+    const i = (txt) => sqls.findIndex((s) => s.includes(txt));
+    const iCuenta = i("'consumo'::text AS tipo");
+    assert.ok(i('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE') < i('ORDER BY id_pedido ASC'), 'mesa antes que pedidos');
+    assert.ok(i('ORDER BY id_pedido ASC') < iCuenta, 'pedidos bloqueados antes de leer la cuenta');
+    assert.ok(iCuenta < i('INSERT INTO transacciones'));
+    const q = db.ejecutadas[iCuenta];
+    assert.match(q.sql, /dp\.estado_item <> 'cancelado'/);
+    assert.match(q.sql, /t\.estado_transaccion = 'completada'/);
+    assert.match(q.sql, /p\.creado_en >= m\.sesion_iniciada_en/, 'la visita actual');
+    assert.deepStrictEqual(q.params, [ID_MESA]);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('lo mio: el pago en linea (registrarPagoInterno) no cambia: solo el saldo de la mesa', async () => {
+  const transacciones = require('../src/services/transacciones.service');
+  const db = fakeCobro({ pedidos: MESA_JARRISON, cuentaPorComensal: SIN_PLATOS_DE_ANA });
+  try {
+    const r = await transacciones.registrarPagoInterno({
+      referencia_externa: 'wompi-ref-1', id_mesa: ID_MESA, comensal: 'Ana', monto_centavos: 1200000,
+    });
+    assert.strictEqual(r.duplicado, false);
+    assert.strictEqual(db.buscar("'consumo'::text AS tipo"), undefined);
+  } finally {
+    db.restaurar();
   }
 });

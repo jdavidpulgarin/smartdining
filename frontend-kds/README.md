@@ -22,7 +22,7 @@ Necesita el **backend** (`:4000`) y el **socket-server** (`:4001`) levantados.
 | `npm run build` | Build de producción en `dist/` |
 | `npm run preview` | Sirve el build |
 | `npm run lint` | oxlint |
-| `npm test` | `node --test` sobre la lógica pura: tablero, umbrales, pase, resumen y conexión |
+| `npm test` | `node --test` sobre la lógica pura: tablero, agrupado por mesa, umbrales, pase, resumen y conexión |
 
 El puerto es 5175 a propósito: es el origen que el socket-server tiene en su
 `CORS_ORIGINS`. Si Vite arrancara en otro puerto, el tiempo real quedaría bloqueado por
@@ -72,8 +72,37 @@ limpia el storage y desconecta el socket.
 4. Los minutos de cada tarjeta parten de `minutos_transcurridos` de la API y avanzan con
    el reloj local, refrescándose cada 30 s **sin pedir nada al servidor**.
 
+### Una tarjeta por mesa (T10)
+
+El estado sigue guardando una comanda por pedido (cada pedido tiene su estado y avisa a su
+comensal), pero se **dibuja** agrupado ([`src/lib/bloques.js`](src/lib/bloques.js)):
+
+- Los pedidos de la **misma mesa** (`id_mesa`) van en un solo bloque: **"Mesa N"** en
+  grande y el tiempo de su pedido **más antiguo**, con el mismo semáforo (ámbar a 10 min,
+  rojo a 15; neutro si todo el bloque ya está en el pase). Dentro, cada pedido como antes:
+  su comensal, su código, su estado, sus líneas (las canceladas, tachadas) y su botón.
+- Los pedidos **sin mesa** no se agrupan: cada uno es su bloque, **"Para llevar #código"**
+  o **"Domicilio #código"** según el `canal` de la API. `order:created` no trae `canal`, así
+  que uno que llega por el socket sale como **"Sin mesa #código"** hasta la siguiente
+  recarga.
+- **Columna:** el bloque va en la columna de su pedido **más atrasado** (una mesa con un
+  pedido en el pase y otro recién llegado se ve en Nuevas, con los dos dentro). Una mesa
+  nunca se parte en dos columnas. El contador cuenta tarjetas.
+- **Orden:** en Nuevas y En preparación, por su pedido más antiguo (la mesa que más
+  espera, primero); dentro del bloque, por `creado_en`. El pase conserva su orden (lo
+  último que salió, arriba).
+- **"Todo listo"** (solo en bloques de mesa con algo pendiente): pide confirmación en la
+  propia tarjeta y lleva a `listo` cada pedido pendiente, **de uno en uno** y paso a paso
+  (`recibido → en_preparacion → listo`), con el mismo PATCH que los botones. Salta los que
+  ya están listos. Si uno falla, sigue con los demás y el bloque dice cuáles fallaron con
+  el mensaje del backend; cada pedido queda en el estado que devolvió el servidor.
+- **En vivo** no hay nada que recalcular a mano: el bloque se deriva en cada render de las
+  comandas, así que `order:created`, `order:status` e `item:cancelado` (con su
+  deduplicación por `eventId`) lo recolocan solos, y un bloque sin pedidos desaparece.
+
 Toda esa lógica está en funciones puras y se prueba con `npm test` sin montar React:
 [`src/lib/comandas.js`](src/lib/comandas.js) (columnas, eventos, deduplicación),
+[`src/lib/bloques.js`](src/lib/bloques.js) (agrupado por mesa y "Todo listo"),
 [`src/lib/espera.js`](src/lib/espera.js) (umbrales y formato del cronómetro) y
 [`src/lib/preferencias.js`](src/lib/preferencias.js) (tema y sonido). Los efectos (pedir,
 conectar, reconectar, PATCH) están aparte en

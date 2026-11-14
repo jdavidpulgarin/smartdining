@@ -204,11 +204,14 @@ export function useTablero({
     async (idPedido, nuevoEstado) => {
       try {
         const comanda = await cambiarEstadoComanda(token, idPedido, nuevoEstado)
+        const estadoReal = comanda?.estado || nuevoEstado
         despachar({
           tipo: 'local',
-          datos: { id_pedido: idPedido, nuevoEstado: comanda?.estado || nuevoEstado },
+          datos: { id_pedido: idPedido, nuevoEstado: estadoReal },
         })
-        return { ok: true }
+        // T10: "Todo listo" encadena pasos y necesita saber donde quedo de
+        // verdad el pedido, no donde se pidio que fuera.
+        return { ok: true, estado: estadoReal }
       } catch (error) {
         // 401 ya cerro la sesion en el servicio. Para el resto, el tablero se
         // vuelve a leer porque puede estar desincronizado.

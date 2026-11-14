@@ -18,12 +18,8 @@ import Logo from '../components/Logo'
 import PanelAgotados from '../components/PanelAgotados'
 import { MENSAJE_SESION_CAIDA, useAuth } from '../context/AuthContext'
 import { cerrarSonido, prepararSonido, sonarAvisoDeComanda } from '../lib/aviso-sonoro'
-import {
-  COLUMNAS,
-  avisoDelTablero,
-  comandasDeColumna,
-  contarComandasActivas,
-} from '../lib/comandas'
+import { bloquesDeColumna, marcarTodoListo } from '../lib/bloques'
+import { COLUMNAS, avisoDelTablero, contarComandasActivas } from '../lib/comandas'
 import {
   CLAVE_SONIDO,
   CLAVE_TEMA,
@@ -38,6 +34,9 @@ import { useTablero } from '../lib/useTablero'
 
 /**
  * Tablero de cocina: tres columnas por estado, con los botones de avance.
+ *
+ * T10: cada columna muestra una tarjeta por MESA (lib/bloques.js), que se
+ * dibuja en la columna del pedido más atrasado de la mesa.
  *
  * Desde D-09 la columna "Listas" también viene de la API, así que sobrevive a
  * una recarga o a una reconexión.
@@ -125,6 +124,28 @@ export default function Tablero() {
 
   // Un solo intervalo de 1 s para todas las tarjetas.
   const ahora = useCronometro()
+
+  // T10 · "Todo listo" por bloque: { [clave]: { corriendo, fallidos } }. Vive
+  // aqui y no en el bloque porque el bloque cambia de columna (se desmonta y
+  // se vuelve a montar) a mitad de camino, y se llevaria los fallos con el.
+  const [todoListo, setTodoListo] = useState({})
+
+  const correrTodoListo = useCallback(
+    async (bloque) => {
+      setTodoListo((previo) => ({ ...previo, [bloque.clave]: { corriendo: true, fallidos: [] } }))
+      const { fallidos } = await marcarTodoListo(bloque.comandas, avanzar)
+      setTodoListo((previo) => ({ ...previo, [bloque.clave]: { corriendo: false, fallidos } }))
+    },
+    [avanzar]
+  )
+
+  const descartarFallos = useCallback((clave) => {
+    setTodoListo((previo) => {
+      const siguiente = { ...previo }
+      delete siguiente[clave]
+      return siguiente
+    })
+  }, [])
 
   async function alternarSonido() {
     if (sonido) {
@@ -345,11 +366,14 @@ export default function Tablero() {
             key={columna.estado}
             estado={columna.estado}
             titulo={columna.titulo}
-            comandas={comandasDeColumna(estado, columna.estado)}
+            bloques={bloquesDeColumna(estado, columna.estado, ahora)}
             ahora={ahora}
             onAvanzar={avanzar}
             vacio={columna.vacio}
             conectado={conectado}
+            todoListo={todoListo}
+            onTodoListo={correrTodoListo}
+            onDescartarFallos={descartarFallos}
           />
         ))}
       </main>

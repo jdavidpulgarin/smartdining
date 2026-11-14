@@ -2644,7 +2644,8 @@ cada uno con su `estado_item`. `total` es un número:
 
 > **Contrato con los ajustes de la revisión de Jarrison** (motivo obligatorio, solo admin y
 > mesero) y su decisión sobre `pago_registrado`: para el personal **no** es estricto, se
-> permite mientras lo pagado no supere el total nuevo.
+> permite mientras lo pagado no supere el total nuevo **y** el dueño de la línea no haya
+> pagado en la visita actual (T4, review de #235).
 
 Admin y mesero cancelan **cualquier línea** de **cualquier mesa** (no hay regla de dueño),
 también cuando cocina ya la empezó.
@@ -2658,14 +2659,19 @@ también cuando cocina ya la empezó.
   historial**, no al aviso.
 
 En la **misma transacción y con los mismos bloqueos** que el comensal (pedido y después línea,
-`FOR UPDATE`), y con `app.id_usuario` fijado (`set_config(..., true)`) para que los
-movimientos de inventario que escriben los triggers lleven al usuario:
+`FOR UPDATE`), pero **antes la fila de la mesa** (`FOR UPDATE`; un domicilio no tiene mesa y
+ese paso no existe), en el orden de los cobros: `mesas → pedidos → pedidos_domicilio →
+detalles_pedido`. Así un pago en **otro** pedido de la mesa y la cancelación se ponen en fila,
+y el segundo decide con lo que el primero confirmó (nunca quedan los dos). Y con
+`app.id_usuario` fijado (`set_config(..., true)`) para que los movimientos de inventario que
+escriben los triggers lleven al usuario:
 
 | Paso | Si no se cumple |
 |---|---|
 | El pedido existe y `id_detalle` es de ese pedido | **404** `{ "motivo": "no_encontrado" }` |
 | La línea no estaba ya cancelada (va **primero**) | **409** `{ "motivo": "item_ya_cancelado" }` |
 | La línea no está `servido` y el pedido no está `entregado`, `pagado` ni `cancelado` | **409** `{ "motivo": "item_no_cancelable" }` |
+| **T4:** el comensal **dueño de la línea** no tiene un pago `completada` en la visita actual de la mesa (ver abajo) | **409** `{ "error": "Ese comensal ya pagó: reembolsa antes de cancelar su plato", "motivo": "pago_registrado" }`, sin tocar nada |
 | Después de cancelar la línea: lo **ya pagado** (transacciones `completada` del pedido) **no supera** el **total nuevo** (ver abajo) | **409** `{ "motivo": "pago_registrado" }` y `ROLLBACK` |
 | Si es la **última** línea viva: el pedido puede pasar a `cancelado` desde su estado según `transiciones_validas` | **409** `{ "motivo": "item_no_cancelable" }` (ver abajo) |
 | El usuario del JWT existe | **409** `{ "motivo": "autor_inexistente" }` (el helper de siempre) |
@@ -2701,7 +2707,23 @@ Si era la **última línea viva**, el pedido pasa a `cancelado` con su fila en
 `estado_pedido` puede ser `recibido`, `en_preparacion`, `listo` o `cancelado` (Roberto los
 acepta en su #181). Si el pedido quedó cancelado, también el `order:status` de siempre.
 
-**`pago_registrado` del personal: lo pagado contra el total nuevo.** En la misma
+**`pago_registrado` del personal (T4): el dueño de la línea ya pagó.** Antes de tocar la
+línea: si el comensal de la línea tiene una transacción `completada` en la **visita actual**
+de la mesa, **409** `pago_registrado` y nada cambia. Sin esta regla, su pago quedaba como
+crédito de toda la mesa y terminaba pagando lo de los demás. Las reglas:
+
+- Cuenta un pago del comensal en **cualquier pedido de la mesa** («pagar lo mío» reparte
+  entre pedidos) con `transacciones.creado_en >= mesas.sesion_iniciada_en`, y siempre los
+  del propio pedido (un domicilio no tiene mesa; una mesa sin sesión delimitada, solo este
+  pedido).
+- El comensal se compara por la **clave del alias** (D-18b): «Ana», « ana » y «Aná» son la
+  misma persona. Es el mismo agrupamiento que la cuenta (`obtener_cuenta_mesa`).
+- Una línea **«General»** (sin comensal) se bloquea con cualquier pago «General» o de la
+  **mesa completa** (`comensal` NULL). Un pago de la mesa completa **no** bloquea la línea de
+  un comensal con nombre: para eso sigue la regla de abajo.
+- Hay que reembolsar ese pago antes de cancelar el plato.
+
+**`pago_registrado` del personal: lo pagado contra el total nuevo (#206).** Se mantiene. En la misma
 transacción, con el pedido bloqueado (`FOR UPDATE`), se cancela la línea y se lee el total
 que deja `tr_actualizar_total_pedido` (sin las líneas canceladas). Se compara en **centavos
 enteros** calculados por la base, sin coma flotante:
@@ -3063,6 +3085,9 @@ busca máximos y compara periodos.
   "tiemposKds": [
     { "fecha": "2026-10-14", "platos_preparados": 56, "tiempo_estimado_promedio_min": 15,
       "tiempo_real_promedio_min": 13.1, "variacion_promedio_porcentaje": -12.7 }
+  ],
+  "ventasPorDia": [
+    { "fecha": "2026-10-14", "total": 1250000, "pedidos": 42 }
   ]
 }
 ```
@@ -3083,6 +3108,32 @@ busca máximos y compara periodos.
 | `metodosPago` | `transacciones` | ver la agrupación abajo |
 | `horasPico` | `pedidos` | ver `volumen` abajo. Máx. 24 |
 | `tiemposKds` | `v_tiempos_kds` | una fila por día. Máx. 30 |
+| `ventasPorDia` (T6) | `v_ventas_diarias` | **un día por cada día del rango**, en orden; ver abajo |
+
+**Días de Bogotá, sin depender de la sesión (T6).** Todos los campos cuentan por el **día de
+Bogotá**: el backend usa `(columna AT TIME ZONE 'America/Bogota')::date` y las vistas también
+desde el script 42 (#241). Todas las columnas de fecha son `TIMESTAMPTZ`, así que el resultado
+es el mismo con la conexión en UTC o en Bogotá (la prueba de integración lo exige). Las fechas
+salen con `to_char(..., 'YYYY-MM-DD')`, que tampoco depende del `DateStyle` de la sesión.
+Bordes:
+
+- Un pedido de **ayer 23:40** (en UTC ya es hoy) cuenta **ayer**.
+- Un pedido de ayer **pagado hoy 00:10**: el pedido cuenta en `totalPedidos` de **ayer** y la
+  plata en `totalVentas` de **hoy** (por la fecha del pago).
+- Un pago de **hoy 20:40** (en UTC ya es mañana) cuenta **hoy**.
+
+**`ventasPorDia`.** `[{ "fecha": "AAAA-MM-DD", "total": number, "pedidos": number }]`: un
+elemento por **cada** día del rango (1 para `hoy`, 7 para `semana`, 30 para `mes`), ordenado
+del más viejo a hoy; un día sin ventas sale con `total: 0` y `pedidos: 0`. Misma fuente que
+`totalVentas`: `total` es lo **recaudado** ese día (transacciones `completada` por la fecha del
+pago) y `pedidos` los pedidos no cancelados **creados** ese día. Por eso:
+
+> **suma de `ventasPorDia[].total` = `totalVentas` = suma de `metodosPago[].monto`.**
+
+**`topPlatos` y `topIngredientes` sin líneas canceladas (T6).** Excluyen los pedidos cancelados
+**y** las líneas con `estado_item = 'cancelado'` (D-13, J-14): un plato que se quitó del pedido
+no se vendió, y lo que se eligió en él no se pidió. Es el mismo criterio que `v_platos_top` y
+`v_ingredientes_top` desde el script 42.
 
 **Por qué `topPlatos` y `topIngredientes` no usan las vistas.** `v_platos_top` y
 `v_ingredientes_top` **no tienen columna de fecha**: agrupan todo el histórico. Con ellas,
@@ -3738,6 +3789,18 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
   invalidado) en la misma transacción.
 - **La propina no entra**: este cobro solo cubre el saldo de los pedidos. Un monto mayor que el
   saldo es `409 excede`, no una propina.
+- **«Pagar lo mío» no supera lo que debe esa persona.** Con `comensal` (que no sea «General»),
+  el monto tampoco puede superar el **saldo propio** de ese comensal en la visita: sus líneas
+  **vivas** menos sus pagos `completada`, en los pedidos de la mesa desde `sesion_iniciada_en`
+  (los mismos que la cuenta), comparando el alias por su clave («Ana», « ana » y «Aná» son la
+  misma persona). Si lo supera, **409 `excede_saldo_comensal`** con su saldo; con saldo propio
+  0 (por ejemplo, el mesero le canceló el plato), el mismo 409. Antes solo se miraba el saldo de
+  la mesa, y el pago de Ana terminaba cubriendo lo de los demás. Las líneas canceladas no
+  cuentan aunque `obtener_cuenta_mesa` todavía las sume (hasta el script 41). Se calcula con la
+  mesa y los pedidos ya bloqueados, el mismo orden que la cancelación del personal, así que
+  cancelar el plato de Ana y cobrarle «lo suyo» a la vez nunca dejan los dos. Un cobro **sin
+  comensal** o a **«General»** sigue igual. El pago en línea (`/transacciones/internal`) no
+  cambia.
 
 **Respuestas:**
 
@@ -3768,6 +3831,7 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
 | **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
 | **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
 | **409** | `{ "error", "motivo": "excede", "saldo": 68000 }` | El monto supera el saldo de la mesa (`saldo` en pesos). No se escribe nada |
+| **409** | `{ "error": "El pago excede lo que debe ese comensal", "motivo": "excede_saldo_comensal", "saldo": 12000 }` | Cobro con `comensal`: el monto supera el **saldo propio** de esa persona (`saldo` en pesos; 0 si no debe nada). No se escribe nada |
 | **409** | `{ "error", "motivo": "autor_inexistente" }` | El usuario del token ya no existe ([El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)). La transacción se deshace entera |
 
 `POST /transacciones/internal` (Wompi) responde los mismos casos **sin** `motivo` y en
@@ -4361,7 +4425,7 @@ cualquier ruta que acabe tocando el inventario.
 
 | SQLSTATE | Cuándo | Status | Cuerpo |
 |---|---|---|---|
-| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "error": "...", "motivo": "sin_stock", "faltantes": [{ "tipo", "id", "nombre" }] }` |
+| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "error": "...", "motivo": "sin_stock", "faltantes": [{ "tipo", "id", "nombre", "disponible" }] }` |
 | **SD002** "stock negativo" | `registrar_movimiento_inventario` (merma o ajuste) dejaría el stock bajo 0 | **400** | `{ "error": "...", "motivo": "movimiento_invalido", "stock_actual": 450 }` |
 | `El ingrediente "X" está agotado` (**P0001**) | Interruptor manual de una opción, anterior a P-19 | **409** | `{ "error": "...", "motivo": "ingrediente_agotado" }` |
 
@@ -4377,14 +4441,40 @@ cualquier ruta que acabe tocando el inventario.
   "error": "Sin stock suficiente para el pedido 87",
   "motivo": "sin_stock",
   "faltantes": [
-    { "tipo": "plato", "id": 12, "nombre": "Arepa de Huevo" },
-    { "tipo": "ingrediente", "id": 7, "nombre": "Panceta Crujiente" }
+    { "tipo": "plato", "id": 1004, "nombre": "Nachos Supremos", "disponible": 2 },
+    { "tipo": "ingrediente", "id": 1, "nombre": "Arroz Integral", "disponible": 0 }
   ]
 }
 ```
 
-- `tipo` es `"plato"` o `"ingrediente"`, e `id`/`nombre` dicen **qué quitar del carrito**.
-- **Al cliente solo van `tipo`, `id` y `nombre`, y sin repetir**: el pedido lo puede hacer un
+- `tipo` es `"plato"` o `"ingrediente"` (una opción de un plato armable), e `id`/`nombre`
+  dicen **qué ajustar o quitar del carrito**.
+- **`disponible` (T5)**: cuántas unidades de ESE plato, o de ESA opción, se pueden pedir con el
+  stock actual. Entero `>= 0`. Es la fórmula de la base para reservar
+  (`fn_consumo_detalle`, `database/scripts/27_inventario.sql` líneas 129 y 134), despejada, con
+  lo que "hay" como lo cuenta `fn_faltantes_pedido` (línea 392: un insumo inactivo cuenta 0):
+
+  | `tipo` | `disponible` |
+  |---|---|
+  | `plato` | mínimo, sobre los insumos de su receta, de `floor(hay / cantidad_por_unidad)` |
+  | `ingrediente` | mínimo, sobre los insumos de la receta de la opción, de `floor(hay / (cantidad × factor de la porción))` (`factores_porcion`: ligera 0,5 · normal 1 · extra 1,5; si se pidió en varias porciones, la de factor más alto) |
+
+  - **Puede no venir**: si el plato no tiene receta (por ejemplo, un armable cuyo faltante es
+    un paso obligatorio sin opciones) no hay de dónde sacarlo y no se inventa; y si la
+    consulta que lo calcula falla, el 409 sale igual **sin** `disponible` (nunca un 500; el
+    servidor anota solo el código del fallo).
+  - **Es aproximado**: se calcula por faltante, como si fuera lo único del pedido, con una
+    lectura aparte después del error (la transacción del pedido ya está deshecha), por la
+    misma conexión del pedido y nunca por una nueva del pool, para que muchos rechazos a la
+    vez no lo agoten. Si otra
+    línea del MISMO pedido gasta el mismo insumo (otro plato con el mismo ingrediente), o el
+    stock cambia entre la lectura y el reintento, **"Ajustar a N" puede volver a dar 409**;
+    la PWA vuelve a mostrar el diálogo con los números nuevos.
+  - **Cómo usarlo en la PWA**: `disponible` **0** → solo "Quitar"; **> 0** → "Ajustar a N"
+    (cambiar la cantidad de esa línea a `N`) o "Quitar"; **sin el campo** → solo "Quitar".
+  - Lo calcula `crearConDetalles`, el único camino que crea líneas hoy (`POST /pedidos`, del
+    comensal y del personal); vive en `src/services/disponible-sin-stock.js`.
+- **Al cliente solo van `tipo`, `id`, `nombre` y `disponible`, y sin repetir**: el pedido lo puede hacer un
   comensal anónimo desde su teléfono y las cantidades de bodega no son asunto suyo.
   `id_insumo`, `insumo`, `necesita` y `hay` quedan **solo en el log del servidor**, que es
   donde hacen falta para reponer.
@@ -4460,11 +4550,10 @@ El backend los escucha en `src/services/inventario-avisos.js` y los reenvía al 
   puesto— para otra cosa, o `idleTimeoutMillis` la cerraría y el canal quedaría muerto sin que
   nadie se enterara. Esa conexión tampoco lleva `statement_timeout`: el recálculo del arranque
   recorre toda la carta.
-- **Con `eventId` y reintentos.** Estos avisos van **siempre** con reintento
-  (`enviarConReintento`: 3 intentos, 150 ms, solo ante `500/502/503 ERROR_INTERNO`), porque
-  nadie está esperando la respuesta y el aviso no se guarda en ningún sitio: si se pierde, la
-  carta queda desfasada en las mesas hasta el próximo movimiento. Las rutas del personal
-  (`PATCH /platos/:id/disponible`) siguen con un solo intento, como antes.
+- **Con `eventId` y reintentos, por una cola donde el último gana.** Ver
+  [Reintentos y cola de los avisos de stock](#reintentos-y-cola-de-los-avisos-de-stock) más
+  abajo. Las rutas del personal (`PATCH /platos/:id/disponible`) siguen con un solo intento,
+  como antes.
 - **Los números tienen que ser números.** Los del `pg_notify` ya son números JSON, pero los
   `NUMERIC` de una **consulta** con `pg` llegan como texto (`'450.00'`), y el socket-server
   responde `400 PAYLOAD_INVALIDO` a un `stock_actual` de texto. Se convierten antes de
@@ -4486,11 +4575,74 @@ El backend los escucha en `src/services/inventario-avisos.js` y los reenvía al 
    disponibilidad de cada plato y de cada opción**. Las apps además recargan el menú al
    reconectar.
 
-Si el socket-server no responde, la emisión de la carta se **abandona tras 5 fallos seguidos**:
-los demás van a fallar igual y serían minutos de timeouts y decenas de líneas idénticas en el
-log. **Si se cae la conexión del canal**, se reconecta con espera creciente (1 s, 2 s, 4 s…
+La carta entera se **encola** en la cola de avisos (abajo). Si el socket-server no responde,
+**ya no se abandona**: se hace un solo intento por pasada (no un timeout por cada plato) y la
+cola **insiste hasta lograrlo**, con la misma espera creciente. Así, si el socket-server
+arranca después que el backend, o se reinicia, la carta de las mesas se pone al día en cuanto
+vuelve. **Si se cae la conexión del canal**, se reconecta con espera creciente (1 s, 2 s, 4 s…
 hasta 30 s), se vuelve a hacer `LISTEN` y se repiten los pasos 2 y 3. El apagado ordenado
-cierra esa conexión y **cancela la reconexión pendiente** antes de cerrar el pool.
+cierra esa conexión, **cancela la reconexión pendiente** y para la cola antes de cerrar el
+pool.
+
+#### Reintentos y cola de los avisos de stock
+
+Todos los avisos de este canal —`plato:disponibilidad`, `ingrediente:disponibilidad` e
+`inventario:alerta`— y la carta del arranque pasan por una cola
+(`src/services/avisos-stock-cola.js`).
+
+**Qué se reintenta.**
+
+| Resultado del envío | Qué hace la cola |
+|---|---|
+| Error de **red**: el socket-server no está (`ECONNREFUSED`), cortó (`ECONNRESET`), DNS (`EAI_AGAIN`), `ETIMEDOUT`, o no contestó a tiempo (`SOCKET_TIMEOUT_MS`, "socket colgado") | **reintenta** |
+| Cualquier **5xx** | **reintenta** |
+| Un **4xx** (aviso mal armado, clave que no coincide) | **no** reintenta: se registra y se descarta, repetirlo daría el mismo 4xx |
+| Sin `SOCKET_URL` o sin `INTERNAL_API_KEY` | nada: el tiempo real está apagado a propósito |
+
+**Espera.** 1 s, 2 s, 4 s, 8 s… hasta un tope de 30 s, con un margen al azar de ±20 % (sin
+pasar el tope) para que varios backends no reintenten en el mismo instante. Hay **un solo**
+temporizador para toda la cola y nunca dos envíos a la vez. Con el socket-server caído, cada
+pasada hace **un** intento (el aviso más viejo) y, si falla, vuelve a esperar. Un aviso nuevo no
+espera al temporizador: se intenta en el acto. En cuanto un envío sale bien tras fallos, el
+socket-server volvió y **se vacía la cola entera** en esa misma pasada.
+
+**El último gana.** Un aviso de disponibilidad es un **estado**, no un suceso. Si cada aviso se
+reintentara por su cuenta, un "agotado" que falló y se reintenta tarde podría llegar
+**después** de un "repuesto" más nuevo que sí salió, y dejar el plato agotado en todas las
+mesas por error. Por eso la cola guarda **una entrada por clave** con **solo su último estado**:
+
+- la clave es el tipo y el id: `plato:5`, `ingrediente:7`, `alerta:<id_insumo>`;
+- un aviso nuevo de la misma clave **reemplaza** al pendiente, y el viejo ya no se manda nunca
+  (eso cancela su reintento);
+- si llega mientras el viejo está en vuelo, al terminar ese envío sale el nuevo; como los envíos
+  van de uno en uno, el viejo nunca puede adelantarlo en la red.
+
+**Un `eventId` nuevo en cada envío, también en cada reintento.** El socket-server deduplica por
+`eventId`. Si un intento le llegó y lo procesó pero la respuesta se perdió (un timeout),
+reintentar con el **mismo** `eventId` haría que descartara el reintento como repetido, aunque
+ahora lleve un estado más nuevo de esa clave. Con uno nuevo, en el peor caso las mesas reciben
+dos veces el **mismo** estado, que es inofensivo.
+
+**Límite.** Como mucho `AVISOS_STOCK_COLA_MAX` claves (500 por defecto). Con el socket-server
+caído mucho tiempo, la cola no crece sin fin: si llega una clave nueva con la cola llena, se
+descarta **la más vieja** (la que lleva más tiempo sin actualizarse; una clave que se actualiza
+pasa al final) y se registra. Si la carta tiene más platos y opciones que ese tope, súbelo.
+
+**Logs sin datos sensibles.** Solo el código del fallo (`INALCANZABLE/ECONNREFUSED`,
+`TIMEOUT`, `HTTP_503`…) y cuántos avisos quedan pendientes; ni cuerpos ni mensajes de error.
+
+**Solo con el servidor en marcha.** La cola nace sin reintentos (un intento por aviso, como
+antes) y los enciende `inventario-avisos.iniciar()`, que solo llama `server.js`. Una prueba que
+importa `app` o llama a `manejarAviso` no deja temporizadores. El temporizador lleva `unref()`
+y `detener()` lo cancela en el apagado ordenado.
+
+**Configuración** (`.env`, todas opcionales): `AVISOS_STOCK_REINTENTO_INICIAL_MS` (1000),
+`AVISOS_STOCK_REINTENTO_MAX_MS` (30000) y `AVISOS_STOCK_COLA_MAX` (500).
+
+**Lo que la cola no puede saber.** El backend detecta que el socket-server volvió cuando un envío
+falla y el siguiente sale bien, y entonces re-emite lo pendiente. Si el socket-server se
+**reinicia entre dos avisos** (sin que ningún envío falle), el backend no se entera. No pierde
+ningún aviso pendiente, porque no hay ninguno, pero tampoco vuelve a emitir la carta.
 
 **Nada de esto puede tumbar el backend ni una petición**: el tiempo real es un extra. El
 backend arranca y sirve igual sin Redis, sin socket-server y con el canal cerrado.

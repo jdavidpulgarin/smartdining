@@ -4,6 +4,7 @@ const mesasService = require('./mesas.service');
 const aliasComensal = require('./alias-comensal');
 const { traducirAutorInexistente } = require('./autor-inexistente');
 const { errorConMotivo } = require('../utils/error-con-motivo');
+const { anotarDisponibles } = require('./disponible-sin-stock');
 
 /**
  * Dominio del CHECK de pedidos.estado. Se usa solo para validar que el body
@@ -181,11 +182,22 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     // COMMIT, PostgreSQL ya deshizo la transacción y este ROLLBACK solo avisa
     // "no hay transacción en curso"; si por lo que sea lanzara, el SD001 se
     // perdería y el cliente recibiría un 500 en vez de la lista de faltantes.
+    let rollbackHecho = false;
     try {
       await client.query('ROLLBACK');
+      rollbackHecho = true;
     } catch (errRollback) {
       console.error('[pedidos] el ROLLBACK fallo tras un error:', errRollback && errRollback.message);
     }
+    // T5: en un SD001 (sin stock) se anota cuánto se puede pedir de cada
+    // faltante. La lectura va por ESTA MISMA conexión, ya fuera de la
+    // transacción (el ROLLBACK la cerró) y antes del release del finally.
+    // NUNCA por el pool: con 50 pedidos a la vez por 10 porciones, los 40
+    // rechazados pedían cada uno una segunda conexión mientras retenían la
+    // suya, agotaban el pool (max 10) y salían 500 por connectionTimeout.
+    // Si el ROLLBACK falló, la conexión no está en un estado fiable y no se
+    // consulta. Nunca lanza; si falla, el 409 sale igual sin `disponible`.
+    if (rollbackHecho) await anotarDisponibles(err, items, client);
     // El AUTOR (review de #144): el INSERT de historial_estados de más arriba
     // guarda el id del JWT, y la columna tiene su `fk_historial_usuario` contra
     // `usuarios`. Si ese usuario ya se borró, el 23503 salía como el 409
@@ -563,10 +575,31 @@ function esDelComensal(aliasDeLaLinea, aliasDelJwt) {
 }
 
 /**
+ * T4 (review de #235): la clave con que se agrupa un comensal en la CUENTA.
+ *
+ * obtener_cuenta_mesa (script 20) junta líneas y pagos por
+ * COALESCE(NULLIF(btrim(comensal), ''), 'General'): NULL o vacío es «General»,
+ * y un pago con comensal NULL (cobro de la mesa completa) cae ahí. Aquí se
+ * hace lo mismo, pero comparando por la clave del alias (D-18b), como el resto
+ * del backend, para que «Ana», « ana » y «Aná» sean la misma persona. Un texto
+ * que la normalización no acepta (dato viejo, a mano) se compara por su texto
+ * recortado y en minúsculas, nunca se descarta.
+ */
+function claveDeCuenta(comensal) {
+  if (typeof comensal !== 'string' || comensal.trim() === '') return aliasComensal.CLAVE_RESERVADA;
+  const n = aliasComensal.normalizarAlias(comensal);
+  if (n.clave) return n.clave; // incluye «General» escrito a mano: clave reservada
+  return comensal.trim().toLowerCase();
+}
+
+const MENSAJE_COMENSAL_YA_PAGO = 'Ese comensal ya pagó: reembolsa antes de cancelar su plato';
+
+/**
  * El comensal quita UNA línea de su pedido, entera (aunque tenga cantidad > 1).
  *
  * TODO en una transacción, con el pedido y después la línea bloqueados (FOR
- * UPDATE, siempre en ese orden). El KDS cambia el estado con un UPDATE del
+ * UPDATE, siempre en ese orden; el personal bloquea antes la MESA, como los
+ * cobros: paso 0). El KDS cambia el estado con un UPDATE del
  * pedido, que toma el mismo bloqueo de fila: si cocina llega primero, aquí se
  * espera y al despertar se lee el estado YA confirmado ('en_preparacion' -> 409);
  * si llega primero el comensal, cocina espera a que la línea quede cancelada y
@@ -594,8 +627,9 @@ function esDelComensal(aliasDeLaLinea, aliasDelJwt) {
  *     (los movimientos lo llevan) y en historial_estados, con el motivo.
  *
  * pago_registrado: el comensal, ESTRICTO (cualquier pago completado); el
- * personal, solo si lo pagado supera el total que queda sin la línea. Ver el
- * paso 3 y el 4b.
+ * personal, si el comensal dueño de la línea ya pagó en la visita actual de la
+ * mesa (T4) o si lo pagado supera el total que queda sin la línea (#206). Ver
+ * los pasos 3, 3b y 4b.
  *
  * @param {number} idPedido
  * @param {number} idDetalle
@@ -620,6 +654,28 @@ async function cancelarItem(idPedido, idDetalle, actor) {
     // solo esta transacción, así no se filtra a la siguiente petición.
     if (esPersonal) {
       await client.query('SELECT set_config($1::text, $2::text, true)', ['app.id_usuario', String(actor.idUsuario)]);
+    }
+
+    // 0. PERSONAL (T4): la MESA antes que el pedido, el orden de los cobros
+    // (mesas -> pedidos -> pedidos_domicilio -> detalles_pedido; ver arriba).
+    // La regla del paso 3b mira pagos de TODOS los pedidos de la mesa, pero el
+    // FOR UPDATE del pedido solo frena los cobros de ESTE pedido: un pago de
+    // Ana en otro pedido de la mesa podía entrar entre la lectura y el COMMIT,
+    // y quedaban los dos (el pago y el plato cancelado). Todos los cobros
+    // (registrarPago, cobrarMesa en caja y el pago en línea) bloquean la mesa
+    // primero, así que ahora uno espera al otro y el segundo decide con lo que
+    // el primero confirmó.
+    //
+    // La mesa sale de una subconsulta en la misma sentencia (como en
+    // actualizarEstado): sin leer y después bloquear. Un domicilio no tiene
+    // mesa: la subconsulta da NULL, no hay fila y no se bloquea nada.
+    if (esPersonal) {
+      await client.query(
+        `SELECT m.id_mesa FROM mesas m
+          WHERE m.id_mesa = (SELECT p.id_mesa FROM pedidos p WHERE p.id_pedido = $1::int)
+          FOR UPDATE`,
+        [idPedido]
+      );
     }
 
     // 1. Pedido, y después la línea: siempre en este orden.
@@ -682,6 +738,36 @@ async function cancelarItem(idPedido, idDetalle, actor) {
         [idPedido]
       );
       if (pago.rows[0].bloquea) return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado });
+    }
+
+    // 3b. PERSONAL (T4, review de #235): el comensal DUEÑO de la línea ya pagó
+    // en la visita actual de la mesa -> 409 pago_registrado, y nada cambia.
+    // Sin esto, el mesero le cancelaba el plato y su pago quedaba como crédito
+    // de toda la mesa: lo de Ana pagaba lo de Beto y Caro (la mesa debía
+    // 40.000 y los demás sumaban 52.000), y devolverlo por Wompi no es viable.
+    //
+    // Cuenta un pago COMPLETADO de ese comensal en CUALQUIER pedido de la mesa
+    // («pagar lo mío» reparte entre pedidos) hecho desde que empezó la sesión
+    // vigente (t.creado_en >= mesas.sesion_iniciada_en, la visita de
+    // obtener_cuenta_mesa), y siempre los del propio pedido (un domicilio no
+    // tiene mesa; una mesa sin sesión delimitada, solo este pedido). Una línea
+    // «General» (sin comensal) se bloquea con cualquier pago «General» o de la
+    // mesa completa (comensal NULL). La regla del #206 (paso 4b) sigue igual.
+    if (esPersonal) {
+      const pagos = await client.query(
+        `SELECT DISTINCT t.comensal
+           FROM transacciones t
+           JOIN pedidos p ON p.id_pedido = t.id_pedido
+          WHERE t.estado_transaccion = 'completada'
+            AND (t.id_pedido = $1::int
+                 OR (p.id_mesa = $2::int
+                     AND t.creado_en >= (SELECT m.sesion_iniciada_en FROM mesas m WHERE m.id_mesa = $2::int)))`,
+        [idPedido, pedido.id_mesa]
+      );
+      const dueno = claveDeCuenta(linea.comensal);
+      if (pagos.rows.some((t) => claveDeCuenta(t.comensal) === dueno)) {
+        return await salir({ conflicto: MOTIVOS_QUITAR_ITEM.pagoRegistrado, mensaje: MENSAJE_COMENSAL_YA_PAGO });
+      }
     }
 
     // 4. La línea COMPLETA. La base decide el stock (devolución o merma, según
@@ -937,6 +1023,9 @@ module.exports = {
   cancelarPedidoComensal,
   MOTIVOS_QUITAR_ITEM,
   MOTIVOS_CANCELAR_PEDIDO,
+  // T4
+  claveDeCuenta,
+  MENSAJE_COMENSAL_YA_PAGO,
   // D-20a
   entregaEnCamino,
   cerrarSiEntregadoYPagado,
