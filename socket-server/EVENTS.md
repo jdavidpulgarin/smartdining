@@ -1201,8 +1201,10 @@ ni reemplazada) y su `expira_en` todavía no pasó.
 - **Sin `comensal`:** `enCurso: true` si hay cualquier vigente en la mesa; `pagos` las trae todas.
 - `pagos[]`: `comensal` (como lo firmó su JWT), `modo`, `monto` en **pesos** y `venceEn` (ISO). **Nunca**
   la referencia de Wompi, tokens ni datos de tarjeta.
-- Las marcas se listan con un índice por mesa (`sd:pago:mesa:{mesa}`, que se anota antes de fijar la
-  marca y vence con ella), no con `SCAN`. Una intención creada antes de desplegar esto no está en el
+- Las marcas se listan con un índice por mesa (`sd:pago:mesa:{mesa}`, hash comensal → `1`), no con `SCAN`.
+  Se anota **antes** de fijar la marca, así que toda marca que exista está en el índice. Su plazo **solo se
+  alarga**: con varios comensales queda al menos tan largo como el de la marca más larga de la mesa. Un
+  miembro cuya marca ya venció o se liberó se ignora al listar, sin error. Una intención creada antes de desplegar esto no está en el
   índice: deja de importar cuando vence (`PAGOS_TTL_MINUTOS`).
 
 **Qué hace el backend (T4, Daniel)**, en `cancelarItem` (comensal y personal) y al cancelar un pedido
@@ -1213,9 +1215,11 @@ entero, **antes** de cambiar nada:
 2. `enCurso: true` → `409 pago_en_curso` (no se cancela).
 3. **Si no responde a tiempo, falla la conexión o da 5xx → `409 pago_en_curso` con motivo
    `sin_verificar`**, por prudencia: es mejor que el mesero reintente en unos segundos que cancelar un plato
-   que se está cobrando. Un `4xx` es un error del backend (cuerpo mal armado o clave): se registra y
-   también se responde `409 … sin_verificar`.
-4. `enCurso: false` → sigue con las demás guardas de siempre (`pago_registrado`, etc.).
+   que se está cobrando.
+4. **Si recibe un `4xx`** (consulta mal armada o clave errada, un error del propio backend): responde
+   también `409 pago_en_curso` con motivo `sin_verificar` **y lo registra como error** en su log (solo el
+   status y el `codigo`; nunca la clave). Un 4xx no se arregla reintentando, pero tampoco se cancela a ciegas.
+5. `enCurso: false` → sigue con las demás guardas de siempre (`pago_registrado`, etc.).
 
 ---
 
@@ -1733,4 +1737,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `mesa:presencia:solicitar` (nuevo) | — | El personal pide la presencia de todas las mesas con algo y la recibe en el ack `{ ok, mesas }`, sin depender de listeners. Comensal, tablet y cocina → `NO_AUTORIZADO`; 1 por socket cada 2 s (`RATE_LIMIT`) (§4) | Panel (recomendado): pedirla en cada `connect`, después de registrar los listeners (ejemplo en §4) |
 | Reconexión · sin `connectionStateRecovery` (T1, seguridad) | Socket.io recuperaba la sesión tras un corte de hasta 2 min **sin pasar por los middlewares**: devolvía las salas y `socket.data`. Un comensal sin red mientras se liberaba su mesa volvía a `room:mesa-{ID}` y leía y escribía el carrito del grupo siguiente | Cada reconexión es un socket nuevo que se autentica de cero; un JWT de la sesión anterior → `connect_error` `TOKEN_INVALIDO`. `socket.recovered` nunca es `true` y no se reenvían eventos perdidos (§3.3) | Nadie: la PWA ya hace `join:table` y reemplaza el carrito en cada `connect`. Si algún cliente dependía de `recovered`, debe hacer `join:table` |
 | `mesa:presencia` · periodo de gracia (T1) | Un comensal salía de la presencia en cuanto se le caía el socket (celular en segundo plano) y entraba otra vez al volver | Con un corte de red sigue contando `PRESENCIA_GRACIA_MS` (60 s) en `comensales`, `total`, la rotación del QR y «igual». Si vuelve antes, no se emite nada; si no, sale al terminar. Salir a propósito, la expulsión y liberar la mesa no tienen gracia; liberar cancela las pendientes (§5.2) | Nadie: mismo evento y payload. Panel y PWA: un comensal puede seguir en `comensales` hasta 60 s después de cerrar la app |
-| `GET /internal/pagos-en-curso` (nueva, T4) | El backend podía cancelar un plato mientras alguien lo pagaba en línea (el widget de Wompi abierto) y el cobro salía por el monto viejo | Nueva ruta de solo lectura: `{ mesa, enCurso, pagos }` con las intenciones vigentes (propio de ese comensal, o total/igual de cualquiera); validación estricta, sin referencias de Wompi (§6.6) | Backend (Daniel): consultarla antes de cancelar (timeout 1500 ms); `enCurso` → `409 pago_en_curso`; sin respuesta, error o 5xx → `409 pago_en_curso` motivo `sin_verificar` |
+| `GET /internal/pagos-en-curso` (nueva, T4) | El backend podía cancelar un plato mientras alguien lo pagaba en línea (el widget de Wompi abierto) y el cobro salía por el monto viejo | Nueva ruta de solo lectura: `{ mesa, enCurso, pagos }` con las intenciones vigentes (propio de ese comensal, o total/igual de cualquiera); validación estricta, sin referencias de Wompi (§6.6) | Backend (Daniel): consultarla antes de cancelar (timeout 1500 ms); `enCurso` → `409 pago_en_curso`; sin respuesta, error o 5xx → `409 pago_en_curso` motivo `sin_verificar` (con un 4xx, además, error en el log) |

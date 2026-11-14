@@ -182,3 +182,31 @@ test('[Redis falso] al reservar se anota el índice sd:pago:mesa:{mesa} junto a 
   assert.ok(falso.llaves().includes('sd:pago:mesa:5'));
   assert.ok(falso.llaves().includes('sd:pago:pendiente:5:Ana'));
 });
+
+test('[Redis falso] varios comensales: el índice dura al menos lo que la marca más larga, nunca se acorta', async (t) => {
+  const { falso, deps } = ALMACENES['Redis falso']();
+  const s = await levantar({}, deps);
+  t.after(() => s.cerrar());
+  const ttlIndice = () => s.redis.cliente.ttl('sd:pago:mesa:5');
+  await intencion(s, { comensal: 'Ana', modo: 'propio', marcaSeg: 1800 });
+  assert.ok((await ttlIndice()) > 1790, 'toma el plazo de la primera marca');
+  await intencion(s, { comensal: 'Beto', modo: 'propio', marcaSeg: 60 });
+  assert.ok((await ttlIndice()) > 1790, 'una marca con plazo menor no lo acorta');
+  await intencion(s, { comensal: 'Caro', modo: 'propio', marcaSeg: 3600 });
+  assert.ok((await ttlIndice()) > 3590, 'una marca con plazo mayor lo alarga');
+  assert.ok(falso.llaves().includes('sd:pago:mesa:5'));
+});
+
+for (const [nombre, crear] of Object.entries(ALMACENES)) {
+  test(`[${nombre}] un miembro del índice cuya marca ya no existe se ignora, sin romper la consulta`, async (t) => {
+    const { deps } = crear();
+    const s = await levantar({}, deps);
+    t.after(() => s.cerrar());
+    const refBeto = await intencion(s, { comensal: 'Beto', modo: 'total' });
+    await intencion(s, { comensal: 'Ana', modo: 'propio' });
+    await s.almacenPagos.liberarPendiente(5, 'Beto', refBeto); // Beto sigue en el índice, sin marca
+    const r = await json(s, '?mesa=5');
+    assert.deepStrictEqual(r.pagos.map((p) => p.comensal), ['Ana']);
+    assert.strictEqual((await json(s, '?mesa=5&comensal=Caro')).enCurso, false, 'el total de Beto ya no cuenta');
+  });
+}

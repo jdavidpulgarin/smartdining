@@ -122,12 +122,14 @@ async function compararYCambiar(cliente, llaves, fn) {
 
 function crearAlmacenPagosRedis({ cliente }) {
   // Índice por mesa: se anota ANTES de fijar la marca (ver la versión en
-  // memoria). El hash dura lo que la marca más nueva: cada anotación le renueva
-  // el plazo, y las marcas viejas vencen antes o a la vez.
+  // memoria). Su plazo solo se ALARGA, nunca se acorta: queda al menos tan
+  // largo como el de la marca más larga de la mesa, aunque una marca nueva
+  // traiga un plazo menor. Un miembro cuya marca ya venció se ignora al listar.
   const anotarEnMesa = async (idMesa, comensal, ttlSeg) => {
     const k = llaveMesa(idMesa);
     await cliente.hSet(k, comensal, '1');
-    await cliente.expire(k, ttlSeg);
+    const queda = await cliente.ttl(k); // -1 recién creado (sin plazo)
+    if (queda < ttlSeg) await cliente.expire(k, ttlSeg);
   };
   return {
     async guardarIntencion(ref, intencion, ttlSeg) {
