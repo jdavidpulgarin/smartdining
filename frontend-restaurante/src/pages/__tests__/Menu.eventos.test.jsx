@@ -11,6 +11,10 @@ vi.mock('../../hooks', () => ({
 }))
 
 import { Menu } from '../Menu'
+import { AuthContext } from '../../context/authContextDef'
+
+// La gestión del Menú es de admin (el mesero y el cajero lo ven de solo consulta).
+const ADMIN = { user: { id_usuario: 1, nombre: 'Ana Admin', rol: 'admin' } }
 import { EditorPasos } from '../../components/admin/EditorPasos'
 
 const json = (body, status = 200) => ({
@@ -63,7 +67,7 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
   const ponerEnBase = (campos) => Object.assign(enBase, campos)
 
   it('Menú: plato:disponibilidad relee SOLO ese plato (no la carta) y aplica lo que dice la base', async () => {
-    render(<MemoryRouter><Menu /></MemoryRouter>)
+    render(<AuthContext.Provider value={ADMIN}><MemoryRouter><Menu /></MemoryRouter></AuthContext.Provider>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
     const llamadas = fetchSpy.mock.calls.length
 
@@ -81,7 +85,7 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
   })
 
   it('Menú: un aviso de apagado MANUAL se muestra como AGOTADO, no como sin stock', async () => {
-    render(<MemoryRouter><Menu /></MemoryRouter>)
+    render(<AuthContext.Provider value={ADMIN}><MemoryRouter><Menu /></MemoryRouter></AuthContext.Provider>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
 
     ponerEnBase({ disponible: false, stock_suficiente: true })
@@ -94,7 +98,7 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
   it('Menú: si la cocina enciende a mano un plato sin stock, el panel no se cree el "true" del aviso', async () => {
     // El PATCH manual avisa con el interruptor (true) aunque no haya stock: la
     // relectura dice la verdad.
-    render(<MemoryRouter><Menu /></MemoryRouter>)
+    render(<AuthContext.Provider value={ADMIN}><MemoryRouter><Menu /></MemoryRouter></AuthContext.Provider>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
 
     ponerEnBase({ disponible: true, stock_suficiente: false })
@@ -103,7 +107,7 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
   })
 
   it('Menú: de dos relecturas del mismo plato vale la última que se pidió, aunque llegue primero', async () => {
-    render(<MemoryRouter><Menu /></MemoryRouter>)
+    render(<AuthContext.Provider value={ADMIN}><MemoryRouter><Menu /></MemoryRouter></AuthContext.Provider>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
 
     let soltarPrimera
@@ -126,7 +130,7 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
   })
 
   it('Menú: sin poder releer, un false con el interruptor encendido se muestra como sin stock', async () => {
-    render(<MemoryRouter><Menu /></MemoryRouter>)
+    render(<AuthContext.Provider value={ADMIN}><MemoryRouter><Menu /></MemoryRouter></AuthContext.Provider>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
     fetchSpy.mockImplementation(async () => { throw new TypeError('Failed to fetch') })
 
@@ -138,7 +142,7 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
   })
 
   it('Menú: un aviso más viejo que el último aplicado se descarta (ni siquiera se relee)', async () => {
-    render(<MemoryRouter><Menu /></MemoryRouter>)
+    render(<AuthContext.Provider value={ADMIN}><MemoryRouter><Menu /></MemoryRouter></AuthContext.Provider>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
 
     ponerEnBase({ disponible: false, stock_suficiente: true })
@@ -151,7 +155,7 @@ describe('P-14: disponibilidad en vivo, sin recargar', () => {
   })
 
   it('Menú: ignora un aviso mal formado', async () => {
-    render(<MemoryRouter><Menu /></MemoryRouter>)
+    render(<AuthContext.Provider value={ADMIN}><MemoryRouter><Menu /></MemoryRouter></AuthContext.Provider>)
     await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
     const llamadas = fetchSpy.mock.calls.length
 

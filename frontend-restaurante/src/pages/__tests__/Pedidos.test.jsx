@@ -140,4 +140,15 @@ describe('Pedidos en tiempo real (order:created)', () => {
 
     expect(screen.queryByText(/PED-260922-K3F9AQ/)).toBeNull()
   })
+
+  it('sin dato de quién atiende no inventa "Mesero Asignado"; con el dato, lo muestra', async () => {
+    await montar()
+    act(() => oyentes['order:created'](eventoOrderCreated(pedidoNuevo)))
+    expect(await screen.findAllByText(/PED-260922-K3F9AQ/)).not.toHaveLength(0)
+    expect(screen.queryByText(/Mesero Asignado/)).toBeNull()
+    expect(screen.queryByText(/Atiende:/)).toBeNull()
+
+    act(() => oyentes['order:created']({ eventId: 'evt-con-mesero', pedido: { ...pedidoNuevo, mesero: 'Juan' }, emitidoEn: new Date().toISOString() }))
+    expect(screen.getByText('Atiende: Juan')).toBeInTheDocument()
+  })
 })
