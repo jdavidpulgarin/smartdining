@@ -23,7 +23,7 @@ código y este documento no coinciden, es un error y se corrige en el mismo PR.
 - [5. Eventos servidor → cliente](#5-eventos-servidor--cliente) · [5.5. `inventario:alerta`](#55-inventarioalerta) · [5.6. `item:cancelado`](#56-itemcancelado)
 - [6. Endpoints HTTP](#6-endpoints-http) · [6.4. Comensales sin celular](#64-comensales-sin-celular-post-internalmesa-comensal) · [6.6. Pagos en curso](#66-pagos-en-curso-get-internalpagos-en-curso)
 - [7. Web Push](#7-web-push)
-- [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox) · [8.6. Cobros de caja](#86-cobros-de-caja-post-internalpayment-confirmed)
+- [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox) · [8.6. Cobros de caja](#86-cobros-de-caja-post-internalpayment-confirmed) · [8.7. Excedente](#87-pago-en-línea-que-excede-el-saldo-contrato-del-excedente)
 - [9. Variables de entorno](#9-variables-de-entorno)
 - [10. Historial de cambios de contrato](#10-historial-de-cambios-de-contrato)
 
@@ -87,6 +87,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `inventario:alerta` | `room:admin` | Sí | Estable (el backend la llama desde D-17; el panel la escucha, P-22) | [§5.5](#55-inventarioalerta) |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Caja: Estable vía `/internal/payment-confirmed` (PR #58). Wompi: Conectado (falta prueba E2E con Wompi sandbox), vía webhook con cuenta ([§8.2](#82-contrato-que-necesita-del-backend)) y registro ([§8.4](#84-contrato-de-registro-que-necesita-del-backend)) en el backend (PR #33) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6), [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 | `pago:alerta` | `room:admin` | Sí | Conectado (falta prueba E2E con Wompi sandbox); el backend guarda el intento (PR #33) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
+| `pago:excedente` | `room:admin` | Sí | Espera backend (contrato del excedente) y la Caja | [§8.7](#87-pago-en-línea-que-excede-el-saldo-contrato-del-excedente) |
 
 ### HTTP
 
@@ -147,6 +148,7 @@ motivo exacto) va solo al log del servidor.
 | `403 NO_AUTORIZADO` | Credencial válida sin permiso (rol, alias que no está en la mesa) |
 | `404` | Ruta inexistente (y toda `/internal/*` desde Internet, en nginx) |
 | `409 SIN_SALDO` | Intención de pago sin nada que cobrar |
+| `409 PAGO_EN_REVISION` | Esa persona tiene un pago en línea aprobado que todavía se está registrando ([§8.7](#87-pago-en-línea-que-excede-el-saldo-contrato-del-excedente)) |
 | `409 MESA_LIBERADA` | La mesa figura liberada y no se ha generado un QR nuevo ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
 | `409 ALIAS_EN_USO` | La clave del alias ya está en uso en la mesa ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
 | `409 LIMITE_COMENSALES` | La mesa ya tiene 20 comensales sin celular ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
@@ -598,8 +600,9 @@ cambio el panel funciona igual, con el envío automático de 500 ms como respald
 | `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` (cada `pedido.items[]` trae `id_detalle`, `id_plato`, `estado_item`, `nombre`, `cantidad`, `comensal`, `notas_especiales` e `ingredientes`; ver [`order:created`](#ordercreated)) |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, origen?, emitidoEn }` (`origen` solo si el backend lo mandó por `/internal/order-status`; sin él, asume `personal`; ver §6.3) |
 | `item:cancelado` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, id_detalle, nombre, comensal, total, estado_pedido, origen, emitidoEn }` (§5.6) |
-| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, emitidoEn }` (mismo payload para Wompi, §8.3, y caja, §8.6) |
+| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` (con `otra_visita`, solo `room:admin`) | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, aplicado?, aplicado_centavos?, excedente?, excedente_centavos?, emitidoEn }` (mismo payload para Wompi, §8.3, y caja, §8.6; `aplicado`/`excedente` solo en línea y si el backend los da, §8.7) |
 | `pago:alerta` | `room:admin` | `{ eventId, id_mesa, comensal, monto_centavos, monto_esperado_centavos, referencia_externa, id_transaccion_pasarela, motivo, emitidoEn }` (§8.5) |
+| `pago:excedente` | `room:admin` | `{ eventId, id_mesa, comensal, monto_centavos, aplicado_centavos, excedente_centavos, motivo_excedente, id_transaccion, referencia_externa, emitidoEn }` (§8.7) |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
@@ -1336,6 +1339,7 @@ servidor con la cuenta del backend.
 | `401 TOKEN_INVALIDO` | JWT de comensal antiguo, sin alias: volver a escanear el QR |
 | `403 NO_AUTORIZADO` | No es comensal, o `comensal` distinto del alias del JWT. Cualquier valor que no sea ese alias, aunque esté mal formado (`""`, `123`, `null`), es `403` y nunca `400` |
 | `409 SIN_SALDO` | Saldo 0 (o `propio` sin consumos de ese alias) |
+| `409 PAGO_EN_REVISION` | Su intención anterior está `en_revision`: Wompi la cobró y el registro todavía no entra. Otra intención sería un segundo cobro. Se libera cuando el reintento la registra (`pagada`) o al vencer la marca (`PAGOS_TTL_MINUTOS`) (§8.7) |
 | `429 RATE_LIMIT` | Más de 5 intenciones por minuto del mismo comensal |
 | `502/503 ERROR_INTERNO` | El backend no respondió o respondió mal |
 | `503 NO_CONFIGURADO` | Pagos apagados (sin `WOMPI_*`) |
@@ -1463,7 +1467,7 @@ Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún fron
    comensal puede pedir otra. No se registra ni se anuncia nada.
 6. `APPROVED` → **reverificación** con `GET /v1/transactions/{id}` (llave privada, 5 s de
    timeout). Debe coincidir: `status APPROVED`, la misma referencia, una intención conocida y
-   **pendiente o reemplazada** (§8.1), `amount_in_cents` **exactamente** igual al esperado
+   **pendiente, reemplazada o en revisión** (§8.1, §8.7), `amount_in_cents` **exactamente** igual al esperado
    por **esa** intención y `currency COP`.
    Si algo no cuadra → intento fallido + `pago:alerta` (§8.5), `200`.
    - Un `APPROVED` con `expira_en` ya pasado **se acepta**: Wompi solo cobra antes de que
@@ -1471,15 +1475,21 @@ Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún fron
      ese plazo (26 h por defecto) la referencia ya no se reconoce: `referencia_desconocida`.
      Lo mismo vale para un `DECLINED` tardío, que marca la intención como `rechazada`.
    - Pago de una **reemplazada** (el comensal la pagó en otra pestaña): se registra como
-     cualquier otro. Si además pagó la nueva y la suma excede el saldo, el backend responde
-     `409` a la segunda → intento fallido + `pago:alerta` (`backend_rechazo_409`) para que
-     caja devuelva el dinero. Ningún pago real se pierde en silencio.
+     cualquier otro. Si además pagó la nueva y la suma excede el saldo, la segunda se registra
+     con su **excedente** y la Caja lo devuelve (§8.7). Ningún pago real se pierde en silencio.
+   - Con `monto_distinto` o `moneda_distinta` (la API confirma un cobro aprobado que no cuadra
+     con su intención), la intención pasa a `en_revision`: nunca se queda en `pendiente`.
    - Al resolverse una intención solo se libera la marca de pendiente del comensal **si
      apunta a esa referencia**: pagar o rechazar una reemplazada no toca la intención nueva.
 7. **Registro** en el backend (`POST /api/transacciones/internal`, §8.4). **Solo si el backend
-   confirma** se emite `payment:confirmed`.
-8. Si la pasarela o el backend no responden (o dan 5xx) → `503`, se libera la marca de
-   idempotencia y **no se emite nada**; Wompi reintenta.
+   confirma** se emite `payment:confirmed`, y `pago:excedente` si sobró algo (§8.7). La
+   intención pasa a `pagada`. Si el backend la rechaza (`4xx`): intento fallido + `pago:alerta`,
+   la intención pasa a `en_revision` y se responde `200`.
+8. Si la pasarela no responde → `503`, se libera la marca de idempotencia y **no se emite
+   nada**; Wompi reintenta. Si es **el backend** el que no responde (o da 5xx) al registrar un
+   pago ya aprobado, además la intención pasa a `en_revision` y sale `pago:alerta` con
+   `backend_no_disponible`, solo al panel (§8.5). Una `en_revision` sigue siendo cobrable, así
+   que el reintento la registra.
 
 `payment:confirmed` → `room:admin` y `room:mesa-{ID}`:
 
@@ -1517,13 +1527,21 @@ x-internal-key: <INTERNAL_API_KEY>
   "modo": "igual",
   "monto_centavos": 3333300,
   "moneda": "COP",
-  "metodo_pago": "online"
+  "metodo_pago": "online",
+  "intencion_creada_en": "2026-11-14T20:10:00.000Z"
 }
 
-→ 201 { "ok": true, "duplicado": false, "saldo_restante_centavos": 6666700, "mesa_liberada": false }
-→ 200 { "ok": true, "duplicado": true, … }   (misma referencia_externa: no registra dos veces)
-→ 409 { "error": "…" }                       (excede el saldo, mesa sin cuenta abierta…)
+→ 201 { "ok": true, "duplicado": false, "saldo_restante_centavos": 6666700, "mesa_liberada": false,
+        "aplicado_centavos": 3333300, "excedente_centavos": 0, "motivo_excedente": null, "id_transaccion": 812 }
+→ 200 { "ok": true, "duplicado": true, … }   (misma referencia_externa: el mismo resultado, sin registrar dos veces)
+→ 400 / 404                                  (cuerpo inválido, mesa inexistente)
 ```
+
+- **Un pago aprobado nunca se rechaza** (§8.7): ya no hay `409` por exceder el saldo ni por
+  mesa sin cuenta. Lo que sobra va como excedente. `intencion_creada_en` dice de qué visita es
+  la intención; `aplicado_centavos`, `excedente_centavos`, `motivo_excedente` e
+  `id_transaccion` son los campos nuevos de la respuesta. Un backend que todavía no los manda
+  sigue funcionando como antes (el socket-server los ignora si `aplicado + excedente ≠ monto`).
 
 - **Idempotente por `referencia_externa`** (índice único). Un reintento devuelve el mismo
   resultado.
@@ -1566,7 +1584,8 @@ pero no datos de tarjeta ni del pagador: la pasarela no nos los entrega y no se 
 | `transaccion_inexistente` | si hay intención | si hay intención | **evento** | si hay intención |
 | `referencia_desconocida` (o vencida) | `null` | `null` | API | `null` |
 | `intencion_no_pendiente` (por ejemplo, un aprobado después de un rechazo) | sí | sí | API | sí |
-| `backend_rechazo_<status>` (por ejemplo, `409` por una reemplazada pagada dos veces, §8.3) | sí | sí | API | sí |
+| `backend_rechazo_<status>` (`400` o `404`; con el contrato del excedente ya no hay `409`, §8.7) | sí | sí | API | sí |
+| `backend_no_disponible` (el backend no respondió o dio 5xx al registrar un pago aprobado; **no** se guarda como intento fallido, solo se avisa al panel, con el mismo `eventId` en cada reintento) | sí | sí | API | sí |
 
 Contrato (el backend lo expone desde PR #33):
 
@@ -1689,6 +1708,59 @@ Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 
 ---
 
+
+### 8.7. Pago en línea que excede el saldo (contrato del excedente)
+
+> **Espera backend y Caja (T4).** Socket-server listo (`src/pagos.js`, pruebas en
+> `tests/pagos-excedente.test.js`). Backend (Daniel): script 44 y el registro. Caja (Jarrinson):
+> la alerta.
+
+Si se cancela un plato entre la intención y el webhook (por ejemplo, porque la intención venció
+antes de que Wompi aprobara), el pago aprobado puede superar lo que se debía. Reglas:
+
+- **(a)** Un pago que Wompi aprobó **nunca se rechaza**: el backend lo registra entero y responde
+  cuánto aplicó y cuánto sobra (§8.4).
+- **(b)** La intención **siempre termina en `pagada` o `en_revision`**, nunca en `pendiente`.
+- **(c)** Se aplica **solo a la visita de la intención** (`intencion_creada_en`). Si es de un grupo
+  anterior, no cubre nada del grupo nuevo: `motivo_excedente: "otra_visita"`.
+- **(d)** Si no hay nada que cubrir, `excedente = monto` (`sin_cuenta` u `otra_visita`).
+- **(e)** El reparto es **por persona**: un `propio` cubre solo el saldo de esa persona
+  (`excede_saldo_comensal`); un `total`, el de la mesa (`excede_saldo_mesa`).
+
+**Estados de la intención en el socket-server:**
+
+| Qué pasó con un `APPROVED` | Intención | A Wompi | Al panel |
+|---|---|---|---|
+| Registrado (`201` o `200 duplicado`) | `pagada`, se libera la marca | `200` | `payment:confirmed` (+ `pago:excedente` si sobró) |
+| El backend lo rechazó (`400`/`404`) | `en_revision` | `200` | `pago:alerta` `backend_rechazo_<status>` + intento fallido |
+| El backend no respondió o dio 5xx | `en_revision` (sigue cobrable) | `503` (Wompi reintenta) | `pago:alerta` `backend_no_disponible` |
+| No cuadra con su intención (`monto_distinto`, `moneda_distinta`) | `en_revision` | `200` | `pago:alerta` + intento fallido |
+
+- Con su marca apuntando a una `en_revision`, esa persona recibe `409 PAGO_EN_REVISION` si pide
+  otra intención (sin doble cobro). Las demás personas de la mesa pagan normal.
+- Un `DECLINED`, `ERROR` o `VOIDED` de otro intento con la misma referencia **no** saca de
+  `en_revision` a una intención con un cobro aprobado.
+- `GET /internal/pagos-en-curso` (§6.6) **no** cuenta `en_revision`: con la regla (a), cancelar
+  un plato ya no hace perder dinero.
+
+`pago:excedente` → **solo** `room:admin`:
+
+```json
+{ "eventId": "1132-903100443-27458:excedente", "id_mesa": 5, "comensal": "Ana",
+  "monto_centavos": 3333300, "aplicado_centavos": 2000000, "excedente_centavos": 1333300,
+  "motivo_excedente": "excede_saldo_comensal", "id_transaccion": 812,
+  "referencia_externa": "SD-5-…", "emitidoEn": "…" }
+```
+
+- `eventId` fijo por transacción: un reintento de Wompi no crea otra alerta (el panel
+  deduplica). No se guarda: la Caja carga los pendientes por REST al conectar (backend).
+- `payment:confirmed` del mismo pago lleva además `aplicado`, `aplicado_centavos`, `excedente` y
+  `excedente_centavos`. Con `otra_visita` va **solo** a `room:admin`: el grupo nuevo de la mesa
+  no tiene por qué ver el pago de alguien que ya se fue.
+- Caja (Jarrinson): una alerta fija «Pago en línea de <alias> excede su saldo por $N: devolver
+  en efectivo» (con `otra_visita`, «…era de un grupo anterior: devolver $N completos») y el
+  botón «Devuelto en efectivo».
+
 ## 9. Variables de entorno
 
 | Variable | Uso |
@@ -1761,3 +1833,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | Reconexión · sin `connectionStateRecovery` (T1, seguridad) | Socket.io recuperaba la sesión tras un corte de hasta 2 min **sin pasar por los middlewares**: devolvía las salas y `socket.data`. Un comensal sin red mientras se liberaba su mesa volvía a `room:mesa-{ID}` y leía y escribía el carrito del grupo siguiente | Cada reconexión es un socket nuevo que se autentica de cero; un JWT de la sesión anterior → `connect_error` `TOKEN_INVALIDO`. `socket.recovered` nunca es `true` y no se reenvían eventos perdidos (§3.3) | Nadie: la PWA ya hace `join:table` y reemplaza el carrito en cada `connect`. Si algún cliente dependía de `recovered`, debe hacer `join:table` |
 | `mesa:presencia` · periodo de gracia (T1) | Un comensal salía de la presencia en cuanto se le caía el socket (celular en segundo plano) y entraba otra vez al volver | Con un corte de red sigue contando `PRESENCIA_GRACIA_MS` (60 s) en `comensales`, `total`, la rotación del QR y «igual». Si vuelve antes, no se emite nada; si no, sale al terminar. Salir a propósito, la expulsión y liberar la mesa no tienen gracia; liberar cancela las pendientes (§5.2) | Nadie: mismo evento y payload. Panel y PWA: un comensal puede seguir en `comensales` hasta 60 s después de cerrar la app |
 | `GET /internal/pagos-en-curso` (nueva, T4) | El backend podía cancelar un plato mientras alguien lo pagaba en línea (el widget de Wompi abierto) y el cobro salía por el monto viejo | Nueva ruta de solo lectura: `{ mesa, enCurso, pagos }` con las intenciones vigentes (propio de ese comensal, o total/igual de cualquiera); validación estricta, sin referencias de Wompi. Liberar la mesa borra sus pagos en curso (no los registros que usa el webhook) (§6.6) | Backend (Daniel): consultarla antes de cancelar (timeout 1500 ms); `enCurso` → `409 pago_en_curso`; sin respuesta, error o 5xx → `409 pago_en_curso` motivo `sin_verificar` (con un 4xx, además, error en el log) |
+| Pagos en línea · contrato del excedente (T4) | Un pago aprobado que superaba el saldo se rechazaba con `409` (intento fallido, la intención quedaba en `pendiente` y se podía pagar dos veces); un 5xx también la dejaba en `pendiente`, y un webhook de un grupo anterior se repartía en el grupo nuevo | El registro manda `intencion_creada_en`; el backend nunca rechaza un aprobado y responde `aplicado_centavos`/`excedente_centavos`/`motivo_excedente`. La intención termina en `pagada` o `en_revision` (cobrable en el reintento); `409 PAGO_EN_REVISION` para no pagar dos veces; nuevo `pago:excedente` (solo `room:admin`); `payment:confirmed` con `aplicado`/`excedente`, y solo al panel con `otra_visita`; `pago:alerta` `backend_no_disponible` (§8.7) | Backend (Daniel): script 44 y el registro (§8.4, §8.7). Caja (Jarrinson): escuchar `pago:excedente` y cargar los pendientes. PWA (Juan): mostrar el `409 PAGO_EN_REVISION` |
