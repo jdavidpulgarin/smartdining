@@ -50,12 +50,27 @@ export function extraerNombreIngredienteAgotado(error) {
 }
 
 /**
+ * Normaliza el valor de `disponible`: número entero >= 0, o `null` si no viene o es inválido.
+ *
+ * @param {any} raw
+ * @returns {number|null}
+ */
+export function normalizarDisponible(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const num = Number(raw);
+  if (Number.isInteger(num) && num >= 0) {
+    return num;
+  }
+  return null;
+}
+
+/**
  * Normaliza y filtra la lista de faltantes al formato real de D-17:
- * `[{ tipo: 'plato' | 'ingrediente', id: number | null, nombre: string | null }]`.
+ * `[{ tipo: 'plato' | 'ingrediente', id: number | null, nombre: string | null, disponible?: number | null }]`.
  * Ignora objetos con la forma vieja (`{ id_plato }` o `{ id_ingrediente }` sin `tipo`).
  *
  * @param {Array<object>} faltantes
- * @returns {Array<{ tipo: 'plato'|'ingrediente', id: number|null, nombre: string|null }>}
+ * @returns {Array<{ tipo: 'plato'|'ingrediente', id: number|null, nombre: string|null, disponible?: number|null }>}
  */
 export function normalizarFaltantes(faltantes) {
   if (!Array.isArray(faltantes)) return [];
@@ -84,11 +99,16 @@ export function normalizarFaltantes(faltantes) {
     if (vistos.has(clave)) continue;
     vistos.add(clave);
 
-    resultado.push({
+    const fObj = {
       tipo: f.tipo,
       id: idFinal,
       nombre,
-    });
+    };
+    if (f.disponible !== undefined) {
+      fObj.disponible = normalizarDisponible(f.disponible);
+    }
+
+    resultado.push(fObj);
   }
 
   return resultado;
@@ -291,7 +311,39 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
     const coincidencias = faltantesDelItem(linea, faltantesLimpios);
     if (coincidencias.length === 0) continue;
 
-    const idLinea = linea.id_linea != null ? String(linea.id_linea) : null;
+    // Calcular disponible para la línea (entero >= 0, o null si no viene o es inválido)
+    let disponibleLinea = null;
+    const valoresDisp = coincidencias.map((f) =>
+      f.disponible !== undefined ? normalizarDisponible(f.disponible) : null
+    );
+    if (valoresDisp.some((v) => v === 0)) {
+      disponibleLinea = 0;
+    } else if (valoresDisp.some((v) => v === null)) {
+      disponibleLinea = null;
+    } else {
+      disponibleLinea = Math.min(...valoresDisp);
+    }
+
+    const cantidadLinea = Math.max(1, Number(linea.cantidad) || 1);
+
+    // puedeAjustar: disponible > 0 && disponible < cantidad de la línea && el faltante afecta a UNA sola línea del carrito
+    const soloAfectaAUnaLinea = coincidencias.every((f) => {
+      const lineasAfectadasPorF = lineas.filter(
+        (l) => faltantesDelItem(l, [f]).length > 0
+      );
+      return lineasAfectadasPorF.length === 1;
+    });
+
+    // Si la cantidad de la línea ya es <= disponible (disponible > 0), y solo afecta a esta línea o la suma no supera, no bloquea el envío
+    // (a) Si afecta a una sola línea y su cantidad <= disponible → no se marca como afectada
+    if (disponibleLinea !== null && disponibleLinea > 0 && cantidadLinea <= disponibleLinea && soloAfectaAUnaLinea) {
+      continue;
+    }
+
+    const idLinea =
+      linea.id_linea != null
+        ? String(linea.id_linea)
+        : (linea.idLinea != null ? String(linea.idLinea) : null);
     if (idLinea) idsLineasAfectadas.push(idLinea);
 
     const platoAgotado = coincidencias.some((f) => f.tipo === 'plato');
@@ -308,18 +360,31 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
       .map((f) => f.nombre || `ingrediente #${f.id}`)
       .filter(Boolean);
 
+    const puedeAjustar = Boolean(
+      disponibleLinea !== null &&
+      disponibleLinea > 0 &&
+      disponibleLinea < cantidadLinea &&
+      soloAfectaAUnaLinea
+    );
+
     const etiqueta =
-      !platoAgotado && nombresIng.length > 0
-        ? `Se acabó: ${nombresIng.join(', ')}`
-        : 'Se acabó';
+      disponibleLinea != null && disponibleLinea > 0
+        ? `Solo quedan ${disponibleLinea}`
+        : (!platoAgotado && nombresIng.length > 0
+            ? `Se acabó: ${nombresIng.join(', ')}`
+            : 'Se acabó');
 
     itemsAfectados.push({
       id_linea: idLinea,
+      idLinea,
       id_plato: Number(linea.id_plato ?? linea.idPlato ?? linea.id) || 0,
       nombre: nombreLinea,
+      cantidad: cantidadLinea,
       platoAgotado,
       ingredientesAgotados,
       faltantes: coincidencias,
+      disponible: disponibleLinea,
+      puedeAjustar,
       etiqueta,
     });
   }
@@ -335,7 +400,14 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
   // Construir texto legible con f.nombre
   const frases = [];
 
-  const faltantesPlato = faltantesLimpios.filter((f) => f.tipo === 'plato');
+  const faltantesPlato = faltantesLimpios.filter((f) => {
+    if (f.tipo !== 'plato') return false;
+    const disp = normalizarDisponible(f.disponible);
+    if (disp !== null && disp > 0) {
+      return itemsAfectados.some((it) => it.id_plato === f.id);
+    }
+    return true;
+  });
   if (faltantesPlato.length > 0) {
     const nombresPlatos = faltantesPlato.map((f) => {
       if (f.nombre) return f.nombre;
@@ -365,6 +437,8 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
       frases.push(
         `Se acabó el ingrediente ${nombreIng} en tu ${itemConIng.nombre}. Quítalo para enviar el resto.`
       );
+    } else if (itemsAfectados.length === 0) {
+      // Si no afecta a ningun item de este carrito, no agregamos frase
     } else {
       frases.push(
         `Se acabó el ingrediente ${nombreIng}. Quítalo para enviar el resto.`
@@ -375,15 +449,28 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
   const texto = frases.join(' ');
   const mensaje = texto || MENSAJE_SIN_STOCK_GENERICO;
 
+  const hayFaltantes =
+    itemsAfectados.length > 0 ||
+    (lineas.length === 0 && faltantesLimpios.length > 0);
+
   return {
-    hayFaltantes: itemsAfectados.length > 0 || faltantesLimpios.length > 0,
+    hayFaltantes,
     faltantes: faltantesLimpios,
     itemsAfectados,
+    lineasAfectadas: itemsAfectados.map((it) => ({
+      idLinea: it.idLinea,
+      id_linea: it.id_linea,
+      disponible: it.disponible,
+      puedeAjustar: it.puedeAjustar,
+    })),
     idsLineasAfectadas,
     idsPlatosAgotados,
     idsIngredientesAgotados,
     texto,
     mensaje,
+    ayuda: hayFaltantes
+      ? 'Quita lo que se acabó para poder enviar el resto de tu pedido.'
+      : null,
   };
 }
 
@@ -426,6 +513,7 @@ export function accionErrorPedido(error, carrito = []) {
       puedeEnviar: resumen.idsLineasAfectadas.length === 0,
       faltantes: resumen.faltantes,
       itemsAfectados: resumen.itemsAfectados,
+      lineasAfectadas: resumen.lineasAfectadas,
       idsLineasAfectadas: resumen.idsLineasAfectadas,
       idsPlatosAgotados: resumen.idsPlatosAgotados,
       idsIngredientesAgotados: resumen.idsIngredientesAgotados,
@@ -458,6 +546,7 @@ export function accionErrorPedido(error, carrito = []) {
       puedeEnviar: resumen.idsLineasAfectadas.length === 0,
       faltantes: resumen.faltantes,
       itemsAfectados: resumen.itemsAfectados,
+      lineasAfectadas: resumen.lineasAfectadas,
       idsLineasAfectadas: resumen.idsLineasAfectadas,
       idsPlatosAgotados: resumen.idsPlatosAgotados,
       idsIngredientesAgotados: resumen.idsIngredientesAgotados,
@@ -829,11 +918,254 @@ export function estadoStockPlato(plato) {
   return 'normal';
 }
 
+export function aplicarAjusteFaltantes(
+  estadoFaltantes,
+  { idLinea, nuevaCantidad, lineas = [] } = {}
+) {
+  if (!estadoFaltantes || typeof estadoFaltantes !== 'object') {
+    return estadoFaltantes;
+  }
+
+  const idLineaStr = String(idLinea ?? '');
+  const cantNum = Math.max(1, Number(nuevaCantidad) || 1);
+
+  const faltantesPrev = Array.isArray(estadoFaltantes.faltantes)
+    ? estadoFaltantes.faltantes
+    : (Array.isArray(estadoFaltantes) ? estadoFaltantes : []);
+
+  // Si el estado pasado fue directamente el array faltantesStock
+  if (Array.isArray(estadoFaltantes)) {
+    const faltanteConId = estadoFaltantes.find(
+      (f) => String(f.idLinea ?? f.id_linea ?? '') === idLineaStr
+    );
+    if (faltanteConId) {
+      const disp = normalizarDisponible(faltanteConId.disponible);
+      if (disp !== null && disp > 0 && cantNum <= disp) {
+        return estadoFaltantes.filter((f) => f !== faltanteConId);
+      }
+      return estadoFaltantes;
+    }
+
+    const lineaObj = lineas.find(
+      (l) => String(l.id_linea ?? l.idLinea) === idLineaStr
+    );
+    if (!lineaObj) return estadoFaltantes;
+
+    const faltantesDeEstaLinea = faltantesDelItem(lineaObj, faltantesPrev);
+    // Verificar si la nueva cantidad es <= disponible de estos faltantes
+    const puedeLiberar = faltantesDeEstaLinea.every((f) => {
+      const disp = normalizarDisponible(f.disponible);
+      return disp !== null && disp > 0 && cantNum <= disp;
+    });
+
+    if (!puedeLiberar) return estadoFaltantes;
+
+    // Solo quitamos el faltante si ya no afecta a ninguna otra línea
+    return faltantesPrev.filter((f) => {
+      if (!faltantesDeEstaLinea.includes(f)) return true;
+      const otrasLineasAfectadas = lineas.filter(
+        (l) =>
+          String(l.id_linea ?? l.idLinea) !== idLineaStr &&
+          faltantesDelItem(l, [f]).length > 0
+      );
+      return otrasLineasAfectadas.length > 0;
+    });
+  }
+
+  // Si el estado pasado es el objeto completo de accionErrorPedido o similar
+  const itemsAfectadosPrev = Array.isArray(estadoFaltantes.itemsAfectados)
+    ? estadoFaltantes.itemsAfectados
+    : [];
+  const lineasAfectadasPrev = Array.isArray(estadoFaltantes.lineasAfectadas)
+    ? estadoFaltantes.lineasAfectadas
+    : [];
+
+  const itemAfectado = itemsAfectadosPrev.find(
+    (it) => String(it.id_linea ?? it.idLinea ?? it.id) === idLineaStr
+  );
+  const lineaAfectada = lineasAfectadasPrev.find(
+    (l) => String(l.id_linea ?? l.idLinea ?? l.id) === idLineaStr
+  );
+  const faltanteDirecto = faltantesPrev.find(
+    (f) => String(f.idLinea ?? f.id_linea) === idLineaStr
+  );
+
+  const dispItem = normalizarDisponible(
+    itemAfectado?.disponible ??
+    lineaAfectada?.disponible ??
+    faltanteDirecto?.disponible ??
+    (itemAfectado?.id_plato != null
+      ? faltantesPrev.find((f) => f.tipo === 'plato' && f.id === itemAfectado.id_plato)?.disponible
+      : (lineaAfectada?.id_plato != null
+        ? faltantesPrev.find((f) => f.tipo === 'plato' && f.id === lineaAfectada.id_plato)?.disponible
+        : (faltantesPrev.length === 1 ? faltantesPrev[0]?.disponible : null)))
+  );
+
+  const seLibera = dispItem !== null && dispItem > 0 && cantNum <= dispItem;
+
+  if (!seLibera && (itemAfectado || lineaAfectada || faltanteDirecto)) {
+    return estadoFaltantes;
+  }
+
+  const nuevosItemsAfectados = itemsAfectadosPrev.filter(
+    (it) => String(it.id_linea ?? it.idLinea ?? it.id) !== idLineaStr
+  );
+  const nuevasLineasAfectadas = lineasAfectadasPrev.filter(
+    (l) => String(l.id_linea ?? l.idLinea ?? l.id) !== idLineaStr
+  );
+  const nuevosIdsLineasAfectadas = (estadoFaltantes.idsLineasAfectadas || []).filter(
+    (id) => String(id) !== idLineaStr
+  );
+
+  const idPlatoLiberado =
+    itemAfectado?.id_plato ??
+    lineaAfectada?.id_plato ??
+    (faltanteDirecto?.tipo === 'plato' ? faltanteDirecto.id : null);
+
+  const faltantesDeEstaLinea = itemAfectado?.faltantes || (faltanteDirecto ? [faltanteDirecto] : []);
+
+  // Conservar solo los faltantes que aún afecten a algún ítem de nuevosItemsAfectados,
+  // nuevasLineasAfectadas o a otras líneas de `lineas`
+  const nuevosFaltantes = faltantesPrev.filter((f) => {
+    if (f.idLinea != null || f.id_linea != null) {
+      if (String(f.idLinea ?? f.id_linea) === idLineaStr) return false;
+      return true;
+    }
+
+    const coincidePlato =
+      idPlatoLiberado != null &&
+      f.tipo === 'plato' &&
+      Number(f.id) === Number(idPlatoLiberado);
+
+    const coincideFaltante =
+      faltantesDeEstaLinea.includes(f) ||
+      faltantesDeEstaLinea.some(
+        (fa) =>
+          fa.tipo === f.tipo &&
+          (f.id != null
+            ? fa.id === f.id
+            : fa.nombre?.toLowerCase() === f.nombre?.toLowerCase())
+      );
+
+    if (coincidePlato || coincideFaltante) {
+      const afectaAOtraEnItems = nuevosItemsAfectados.some((it) => {
+        if (f.tipo === 'plato' && Number(it.id_plato) === Number(f.id)) return true;
+        return (it.faltantes || []).some(
+          (itF) =>
+            itF.tipo === f.tipo &&
+            (f.id != null
+              ? itF.id === f.id
+              : itF.nombre?.toLowerCase() === f.nombre?.toLowerCase())
+        );
+      });
+      if (afectaAOtraEnItems) return true;
+
+      const afectaAOtraEnLineas = nuevasLineasAfectadas.some(
+        (l) => f.tipo === 'plato' && Number(l.id_plato) === Number(f.id)
+      );
+      if (afectaAOtraEnLineas) return true;
+
+      if (lineas.length > 0) {
+        const otrasLineasAfectadas = lineas.filter(
+          (l) =>
+            String(l.id_linea ?? l.idLinea) !== idLineaStr &&
+            faltantesDelItem(l, [f]).length > 0
+        );
+        return otrasLineasAfectadas.length > 0;
+      }
+
+      return false;
+    }
+
+    return true;
+  });
+
+  const idsPlatosAgotados = nuevosFaltantes
+    .filter((f) => f.tipo === 'plato' && f.id != null)
+    .map((f) => f.id);
+
+  const idsIngredientesAgotados = nuevosFaltantes
+    .filter((f) => f.tipo === 'ingrediente' && f.id != null)
+    .map((f) => f.id);
+
+  // Recalcular texto/mensaje
+  let nuevoTexto = '';
+  let nuevoMensaje = '';
+  if (nuevosItemsAfectados.length > 0) {
+    const frases = [];
+    const faltantesPlato = nuevosFaltantes.filter((f) => f.tipo === 'plato');
+    if (faltantesPlato.length > 0) {
+      const nombresPlatos = faltantesPlato.map(
+        (f) => f.nombre || `plato #${f.id}`
+      );
+      const verboQuitar =
+        nombresPlatos.length === 1
+          ? 'Quítalo para enviar el resto.'
+          : 'Quítalos para enviar el resto.';
+      frases.push(`Se acabó: ${nombresPlatos.join(', ')}. ${verboQuitar}`);
+    }
+    const faltantesIng = nuevosFaltantes.filter((f) => f.tipo === 'ingrediente');
+    for (const ing of faltantesIng) {
+      const nombreIng = ing.nombre || `ingrediente #${ing.id}`;
+      const itemConIng = nuevosItemsAfectados.find((it) =>
+        (it.ingredientesAgotados || []).some(
+          (x) =>
+            (ing.id != null && x.id === ing.id) ||
+            (ing.nombre &&
+              x.nombre &&
+              x.nombre.toLowerCase() === ing.nombre.toLowerCase())
+        )
+      );
+      if (itemConIng?.nombre) {
+        frases.push(
+          `Se acabó el ingrediente ${nombreIng} en tu ${itemConIng.nombre}. Quítalo para enviar el resto.`
+        );
+      } else {
+        frases.push(
+          `Se acabó el ingrediente ${nombreIng}. Quítalo para enviar el resto.`
+        );
+      }
+    }
+    nuevoTexto = frases.join(' ');
+    nuevoMensaje = nuevoTexto || MENSAJE_SIN_STOCK_GENERICO;
+  }
+
+  const hayFaltantes =
+    nuevosItemsAfectados.length > 0 ||
+    nuevosIdsLineasAfectadas.length > 0 ||
+    nuevasLineasAfectadas.length > 0;
+
+  return {
+    ...estadoFaltantes,
+    hayFaltantes,
+    puedeEnviar: nuevosIdsLineasAfectadas.length === 0,
+    faltantes: nuevosFaltantes,
+    itemsAfectados: nuevosItemsAfectados,
+    lineasAfectadas: nuevasLineasAfectadas.length > 0
+      ? nuevasLineasAfectadas
+      : nuevosItemsAfectados.map((it) => ({
+          idLinea: it.idLinea,
+          id_linea: it.id_linea,
+          disponible: it.disponible,
+          puedeAjustar: it.puedeAjustar,
+        })),
+    idsLineasAfectadas: nuevosIdsLineasAfectadas,
+    idsPlatosAgotados,
+    idsIngredientesAgotados,
+    texto: nuevoTexto,
+    mensaje: nuevoMensaje,
+    ayuda: hayFaltantes
+      ? 'Quita lo que se acabó para poder enviar el resto de tu pedido.'
+      : null,
+  };
+}
+
 export default {
   MENSAJE_CRUCE_PEDIDO,
   MENSAJE_ERROR_PEDIDO_GENERICO,
   MENSAJE_SIN_STOCK_GENERICO,
   extraerNombreIngredienteAgotado,
+  normalizarDisponible,
   normalizarFaltantes,
   faltantesDelItem,
   resumenFaltantes,
@@ -841,4 +1173,5 @@ export default {
   marcasAgotadoTrasRecarga,
   actualizarMarcasPorDisponibilidad,
   estadoStockPlato,
+  aplicarAjusteFaltantes,
 };

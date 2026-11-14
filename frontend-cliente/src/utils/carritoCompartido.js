@@ -1,5 +1,56 @@
 import { calcularPlato } from './calcularPlato';
 
+export function sonLineasIdenticas(a, b) {
+  if (!a || !b) return false;
+
+  const idPlatoA = Number(a.id_plato ?? a.idPlato);
+  const idPlatoB = Number(b.id_plato ?? b.idPlato);
+  if (!idPlatoA || idPlatoA !== idPlatoB) return false;
+
+  const comensalA = typeof a.comensal === 'string' ? a.comensal.trim().toLowerCase() : '';
+  const comensalB = typeof b.comensal === 'string' ? b.comensal.trim().toLowerCase() : '';
+  if (comensalA !== comensalB) return false;
+
+  const notasA = typeof (a.notas || a.notasCocina || a.notasCliente) === 'string'
+    ? (a.notas || a.notasCocina || a.notasCliente).trim()
+    : '';
+  const notasB = typeof (b.notas || b.notasCocina || b.notasCliente) === 'string'
+    ? (b.notas || b.notasCocina || b.notasCliente).trim()
+    : '';
+  if (notasA !== notasB) return false;
+
+  const ingsA = Array.isArray(a.ingredientes)
+    ? a.ingredientes
+    : (Array.isArray(a.selecciones) ? a.selecciones : []);
+  const ingsB = Array.isArray(b.ingredientes)
+    ? b.ingredientes
+    : (Array.isArray(b.selecciones) ? b.selecciones : []);
+
+  const normalizarIngs = (lista) => {
+    return lista
+      .map((ing) => {
+        const id = Number(ing.id_ingrediente ?? ing.idIngrediente ?? ing.id);
+        const porcion = String(ing.porcion || 'normal').toLowerCase();
+        return { id, porcion };
+      })
+      .filter((ing) => !isNaN(ing.id) && ing.id > 0)
+      .sort((x, y) => x.id - y.id || x.porcion.localeCompare(y.porcion));
+  };
+
+  const normA = normalizarIngs(ingsA);
+  const normB = normalizarIngs(ingsB);
+
+  if (normA.length !== normB.length) return false;
+
+  for (let i = 0; i < normA.length; i++) {
+    if (normA[i].id !== normB[i].id || normA[i].porcion !== normB[i].porcion) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 /**
  * Busca un plato en el menú (normalizado o crudo).
  */
