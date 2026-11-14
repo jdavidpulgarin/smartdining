@@ -13,9 +13,10 @@
 /infra/                  @rcarlosbuelvas
 /docker-compose*.yml     @rcarlosbuelvas
 
-# Base de datos y panel del restaurante
-/database/               @jdavidpulgarin
-/frontend-restaurante/   @jdavidpulgarin
+# Base de datos y panel del restaurante. Roberto va de segundo dueño: basta la
+# aprobación de UNO de los dos, así un PR de Jarrinson se desbloquea sin --admin.
+/database/               @jdavidpulgarin @rcarlosbuelvas
+/frontend-restaurante/   @jdavidpulgarin @rcarlosbuelvas
 
 # API REST y pantalla de cocina
 /backend/                @carlosdospino
