@@ -3085,6 +3085,9 @@ busca máximos y compara periodos.
   "tiemposKds": [
     { "fecha": "2026-10-14", "platos_preparados": 56, "tiempo_estimado_promedio_min": 15,
       "tiempo_real_promedio_min": 13.1, "variacion_promedio_porcentaje": -12.7 }
+  ],
+  "ventasPorDia": [
+    { "fecha": "2026-10-14", "total": 1250000, "pedidos": 42 }
   ]
 }
 ```
@@ -3105,6 +3108,32 @@ busca máximos y compara periodos.
 | `metodosPago` | `transacciones` | ver la agrupación abajo |
 | `horasPico` | `pedidos` | ver `volumen` abajo. Máx. 24 |
 | `tiemposKds` | `v_tiempos_kds` | una fila por día. Máx. 30 |
+| `ventasPorDia` (T6) | `v_ventas_diarias` | **un día por cada día del rango**, en orden; ver abajo |
+
+**Días de Bogotá, sin depender de la sesión (T6).** Todos los campos cuentan por el **día de
+Bogotá**: el backend usa `(columna AT TIME ZONE 'America/Bogota')::date` y las vistas también
+desde el script 42 (#241). Todas las columnas de fecha son `TIMESTAMPTZ`, así que el resultado
+es el mismo con la conexión en UTC o en Bogotá (la prueba de integración lo exige). Las fechas
+salen con `to_char(..., 'YYYY-MM-DD')`, que tampoco depende del `DateStyle` de la sesión.
+Bordes:
+
+- Un pedido de **ayer 23:40** (en UTC ya es hoy) cuenta **ayer**.
+- Un pedido de ayer **pagado hoy 00:10**: el pedido cuenta en `totalPedidos` de **ayer** y la
+  plata en `totalVentas` de **hoy** (por la fecha del pago).
+- Un pago de **hoy 20:40** (en UTC ya es mañana) cuenta **hoy**.
+
+**`ventasPorDia`.** `[{ "fecha": "AAAA-MM-DD", "total": number, "pedidos": number }]`: un
+elemento por **cada** día del rango (1 para `hoy`, 7 para `semana`, 30 para `mes`), ordenado
+del más viejo a hoy; un día sin ventas sale con `total: 0` y `pedidos: 0`. Misma fuente que
+`totalVentas`: `total` es lo **recaudado** ese día (transacciones `completada` por la fecha del
+pago) y `pedidos` los pedidos no cancelados **creados** ese día. Por eso:
+
+> **suma de `ventasPorDia[].total` = `totalVentas` = suma de `metodosPago[].monto`.**
+
+**`topPlatos` y `topIngredientes` sin líneas canceladas (T6).** Excluyen los pedidos cancelados
+**y** las líneas con `estado_item = 'cancelado'` (D-13, J-14): un plato que se quitó del pedido
+no se vendió, y lo que se eligió en él no se pidió. Es el mismo criterio que `v_platos_top` y
+`v_ingredientes_top` desde el script 42.
 
 **Por qué `topPlatos` y `topIngredientes` no usan las vistas.** `v_platos_top` y
 `v_ingredientes_top` **no tienen columna de fecha**: agrupan todo el histórico. Con ellas,

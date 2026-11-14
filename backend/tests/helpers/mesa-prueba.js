@@ -36,6 +36,8 @@ const RANGOS = Object.freeze({
   'sin-stock-disponible-sql': { desde: 9900, hasta: 9999 },
   // T5 (review de #236): la mesa de los 50 pedidos simultáneos por 10 porciones.
   'sin-stock-concurrencia-sql': { desde: 10000, hasta: 10099 },
+  // T6: la mesa de los pedidos del reporte por día.
+  'reportes-dia-sql': { desde: 10100, hasta: 10199 },
 });
 
 const PG_UNIQUE = '23505';
