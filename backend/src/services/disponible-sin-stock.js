@@ -28,12 +28,14 @@
  * ingrediente), "Ajustar a N" puede volver a dar 409. Y el stock puede cambiar
  * entre esta lectura y el siguiente intento.
  *
- * Es una consulta de SOLO LECTURA por el pool, DESPUÉS del error y fuera de la
- * transacción del pedido (que ya está abortada). Nunca lanza: si falla, se
- * registra el código y el 409 sale igual, sin `disponible`.
+ * Es una consulta de SOLO LECTURA, DESPUÉS del error y fuera de la transacción
+ * del pedido (ya deshecha con ROLLBACK), por la MISMA conexión que usó el
+ * pedido, antes de soltarla. NUNCA por el pool: cada rechazo pediría una
+ * segunda conexión mientras retiene la suya, y con muchos pedidos a la vez
+ * (50 por 10 porciones) el pool se agota y salen 500. Por eso `db` es
+ * obligatorio: sin él no se consulta y el 409 sale sin `disponible`.
+ * Nunca lanza: si falla, se registra el código y el 409 sale igual.
  */
-
-const pool = require('../config/db');
 
 const SQLSTATE_SIN_STOCK = 'SD001';
 
@@ -89,10 +91,12 @@ const SQL_DISPONIBLES = `
    GROUP BY r.tipo, r.id`;
 
 /**
- * Calcula `disponible` por faltante. Devuelve un Map "tipo:id" -> entero >= 0
- * (sin entrada para lo que no tiene receta), o null si la consulta falló.
+ * Calcula `disponible` por faltante con `db`, la conexión del pedido. Devuelve
+ * un Map "tipo:id" -> entero >= 0 (sin entrada para lo que no tiene receta), o
+ * null si no hay conexión o la consulta falló.
  */
-async function calcularDisponibles(err, items, db = pool) {
+async function calcularDisponibles(err, items, db) {
+  if (!db || typeof db.query !== 'function') return null;
   const faltantes = faltantesDelDetalle(err);
   if (faltantes.length === 0) return new Map();
   const porciones = porcionesPedidas(items);
@@ -113,9 +117,10 @@ async function calcularDisponibles(err, items, db = pool) {
 
 /**
  * Si `err` es el SD001 de sin stock, le anota `disponibles` (el Map de arriba)
- * para que inventario-errores.js los agregue a cada faltante. Nunca lanza.
+ * para que inventario-errores.js los agregue a cada faltante. `db` es la
+ * conexión del pedido (nunca el pool). Nunca lanza.
  */
-async function anotarDisponibles(err, items, db = pool) {
+async function anotarDisponibles(err, items, db) {
   if (!err || err.code !== SQLSTATE_SIN_STOCK) return;
   const disponibles = await calcularDisponibles(err, items, db);
   if (disponibles) err.disponibles = disponibles;

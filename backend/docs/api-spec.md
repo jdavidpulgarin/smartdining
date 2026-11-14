@@ -4400,7 +4400,9 @@ cualquier ruta que acabe tocando el inventario.
     consulta que lo calcula falla, el 409 sale igual **sin** `disponible` (nunca un 500; el
     servidor anota solo el código del fallo).
   - **Es aproximado**: se calcula por faltante, como si fuera lo único del pedido, con una
-    lectura aparte después del error (la transacción del pedido ya está deshecha). Si otra
+    lectura aparte después del error (la transacción del pedido ya está deshecha), por la
+    misma conexión del pedido y nunca por una nueva del pool, para que muchos rechazos a la
+    vez no lo agoten. Si otra
     línea del MISMO pedido gasta el mismo insumo (otro plato con el mismo ingrediente), o el
     stock cambia entre la lectura y el reintento, **"Ajustar a N" puede volver a dar 409**;
     la PWA vuelve a mostrar el diálogo con los números nuevos.

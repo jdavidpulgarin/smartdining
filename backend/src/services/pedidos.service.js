@@ -182,15 +182,22 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     // COMMIT, PostgreSQL ya deshizo la transacción y este ROLLBACK solo avisa
     // "no hay transacción en curso"; si por lo que sea lanzara, el SD001 se
     // perdería y el cliente recibiría un 500 en vez de la lista de faltantes.
+    let rollbackHecho = false;
     try {
       await client.query('ROLLBACK');
+      rollbackHecho = true;
     } catch (errRollback) {
       console.error('[pedidos] el ROLLBACK fallo tras un error:', errRollback && errRollback.message);
     }
     // T5: en un SD001 (sin stock) se anota cuánto se puede pedir de cada
-    // faltante, con una lectura aparte por el pool: esta transacción ya está
-    // abortada. Nunca lanza; si falla, el 409 sale igual sin `disponible`.
-    await anotarDisponibles(err, items);
+    // faltante. La lectura va por ESTA MISMA conexión, ya fuera de la
+    // transacción (el ROLLBACK la cerró) y antes del release del finally.
+    // NUNCA por el pool: con 50 pedidos a la vez por 10 porciones, los 40
+    // rechazados pedían cada uno una segunda conexión mientras retenían la
+    // suya, agotaban el pool (max 10) y salían 500 por connectionTimeout.
+    // Si el ROLLBACK falló, la conexión no está en un estado fiable y no se
+    // consulta. Nunca lanza; si falla, el 409 sale igual sin `disponible`.
+    if (rollbackHecho) await anotarDisponibles(err, items, client);
     // El AUTOR (review de #144): el INSERT de historial_estados de más arriba
     // guarda el id del JWT, y la columna tiene su `fk_historial_usuario` contra
     // `usuarios`. Si ese usuario ya se borró, el 23503 salía como el 409

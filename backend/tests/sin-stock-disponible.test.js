@@ -6,7 +6,12 @@ const { instalarFakeDb, tokenStaff, tokenComensal } = require('./helpers/fake-db
 const { instalarFakeSocket } = require('./helpers/fake-socket');
 const { instalarFakeRedis } = require('./helpers/fake-redis');
 const { traducirErrorInventario } = require('../src/middleware/inventario-errores');
-const { porcionesPedidas, faltantesDelDetalle } = require('../src/services/disponible-sin-stock');
+const {
+  porcionesPedidas,
+  faltantesDelDetalle,
+  calcularDisponibles,
+} = require('../src/services/disponible-sin-stock');
+const pool = require('../src/config/db');
 
 // T5: el 409 sin_stock dice cuánto se puede pedir de cada faltante
 // (`disponible`), para el "Ajustar a N" de la PWA. El cálculo de verdad (la
@@ -30,9 +35,10 @@ const FALTANTES = [
  * Doble de la base: el pedido falla en el COMMIT con el SD001, y la consulta
  * de disponibles (jsonb_to_recordset) contesta `disponibles` o lanza.
  */
-function fakeSinStock({ disponibles = [], fallaDisponibles = null } = {}) {
+function fakeSinStock({ disponibles = [], fallaDisponibles = null, fallaRollback = false } = {}) {
   return instalarFakeDb((sql) => {
     if (sql === 'COMMIT') throw errorSinStock(FALTANTES);
+    if (sql === 'ROLLBACK' && fallaRollback) throw new Error('conexión rota');
     if (sql.includes('jsonb_to_recordset')) {
       if (fallaDisponibles) throw fallaDisponibles;
       return { rows: disponibles };
@@ -171,3 +177,92 @@ test('t5: si la consulta de disponible falla, el 409 sale igual SIN `disponible`
     assert.match(log, /no se pudo calcular el disponible de los faltantes \(57014\)/);
     assert.ok(!log.includes('se cayó con Masa'), 'sin el mensaje del error');
   }));
+
+// ---------------------------------------------------------------------------
+// La conexión: la del pedido, nunca otra del pool (review de #236)
+// ---------------------------------------------------------------------------
+
+/**
+ * Envuelve el doble ya instalado para saber POR DÓNDE pasó cada query: por
+ * `pool.query` (otra conexión) o por el cliente de `pool.connect` (la del
+ * pedido), y cuándo se soltó ese cliente. Lo deshace el restaurar del doble.
+ */
+function rastrearConexiones() {
+  const eventos = [];
+  const queryDelDoble = pool.query;
+  const connectDelDoble = pool.connect;
+  let conexiones = 0;
+  pool.query = async (sql, params) => {
+    eventos.push({ via: 'pool', sql });
+    return queryDelDoble(sql, params);
+  };
+  pool.connect = async () => {
+    const n = ++conexiones;
+    const cliente = await connectDelDoble();
+    return {
+      query: async (sql, params) => {
+        eventos.push({ via: `cliente${n}`, sql });
+        return cliente.query(sql, params);
+      },
+      release: (...a) => {
+        eventos.push({ via: `cliente${n}`, sql: 'release' });
+        return cliente.release(...a);
+      },
+    };
+  };
+  return { eventos, conexiones: () => conexiones };
+}
+
+test('t5: el disponible se lee por la MISMA conexión del pedido, después del ROLLBACK y antes del release; nunca por el pool', () =>
+  conDobles({ disponibles: [{ tipo: 'plato', id: 12, disponible: 2 }] }, async () => {
+    const r = rastrearConexiones();
+    const res = await pedirMesero();
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.strictEqual(res.body.faltantes[0].disponible, 2);
+
+    assert.strictEqual(r.conexiones(), 1, 'una sola conexión del pool por pedido');
+    const delDisponible = r.eventos.filter((e) => e.sql.includes('jsonb_to_recordset'));
+    assert.deepStrictEqual(delDisponible.map((e) => e.via), ['cliente1'], 'por el cliente del pedido');
+    assert.ok(!r.eventos.some((e) => e.via === 'pool' && e.sql.includes('jsonb_to_recordset')), 'nunca por pool.query');
+
+    const delCliente = r.eventos.filter((e) => e.via === 'cliente1').map((e) => e.sql);
+    const iRollback = delCliente.indexOf('ROLLBACK');
+    const iDisponible = delCliente.findIndex((s) => s.includes('jsonb_to_recordset'));
+    const iRelease = delCliente.indexOf('release');
+    assert.ok(iRollback >= 0 && iRollback < iDisponible && iDisponible < iRelease, delCliente.join(' | '));
+    assert.strictEqual(iRelease, delCliente.length - 1, 'el release es lo último');
+  }));
+
+test('t5: si el ROLLBACK falla, no se consulta el disponible por esa conexión y el 409 sale sin él', () =>
+  conDobles({ fallaRollback: true, disponibles: [{ tipo: 'plato', id: 12, disponible: 2 }] }, async () => {
+    const r = rastrearConexiones();
+    const original = console.error;
+    console.error = () => {};
+    let res;
+    try {
+      res = await pedirMesero();
+    } finally {
+      console.error = original;
+    }
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.strictEqual(res.body.motivo, 'sin_stock');
+    assert.ok(res.body.faltantes.every((f) => !('disponible' in f)), JSON.stringify(res.body.faltantes));
+    assert.ok(!r.eventos.some((e) => e.sql.includes('jsonb_to_recordset')), 'ni por el cliente ni por el pool');
+    assert.strictEqual(r.conexiones(), 1);
+  }));
+
+test('t5: calcularDisponibles sin conexión devuelve null y no toca el pool', async () => {
+  const queryOriginal = pool.query;
+  const connectOriginal = pool.connect;
+  let tocado = false;
+  pool.query = async () => { tocado = true; return { rows: [] }; };
+  pool.connect = async () => { tocado = true; throw new Error('no debería pedir conexión'); };
+  try {
+    assert.strictEqual(await calcularDisponibles(errorSinStock(FALTANTES), ITEMS), null);
+    assert.strictEqual(await calcularDisponibles(errorSinStock(FALTANTES), ITEMS, null), null);
+    assert.strictEqual(tocado, false);
+  } finally {
+    pool.query = queryOriginal;
+    pool.connect = connectOriginal;
+  }
+});
