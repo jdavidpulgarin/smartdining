@@ -1723,7 +1723,10 @@ antes de que Wompi aprobara), el pago aprobado puede superar lo que se debía. R
 - **(b)** La intención **siempre termina en `pagada` o `en_revision`**, nunca en `pendiente`.
 - **(c)** Se aplica **solo a la visita de la intención** (`intencion_creada_en`). Si es de un grupo
   anterior, no cubre nada del grupo nuevo: `motivo_excedente: "otra_visita"`.
-- **(d)** Si no hay nada que cubrir, `excedente = monto` (`sin_cuenta` u `otra_visita`).
+- **(d)** Si no hay nada que cubrir, `excedente = monto` (`sin_cuenta` u `otra_visita`). Con la
+  mesa **sin sesión abierta** (se liberó y nadie la volvió a abrir) el backend responde
+  `sin_cuenta`, no `otra_visita`: `otra_visita` es solo cuando ya hay **otra** sesión, posterior a
+  la intención (#273).
 - **(e)** El reparto es **por persona**: un `propio` cubre solo el saldo de esa persona
   (`excede_saldo_comensal`); un `total`, el de la mesa (`excede_saldo_mesa`).
 
@@ -1753,13 +1756,22 @@ antes de que Wompi aprobara), el pago aprobado puede superar lo que se debía. R
 ```
 
 - `eventId` fijo por transacción: un reintento de Wompi no crea otra alerta (el panel
-  deduplica). No se guarda: la Caja carga los pendientes por REST al conectar (backend).
+  deduplica). No se guarda: la Caja carga los pendientes al conectar con
+  `GET /api/excedentes-pago-en-linea?estado=pendiente` y marca cada uno con
+  `PATCH /api/excedentes-pago-en-linea/:id/devuelto` (admin y cajero; tabla
+  `excedentes_pago_en_linea`, script 44, #273).
 - `payment:confirmed` del mismo pago lleva además `aplicado`, `aplicado_centavos`, `excedente` y
   `excedente_centavos`. Con `otra_visita` va **solo** a `room:admin`: el grupo nuevo de la mesa
   no tiene por qué ver el pago de alguien que ya se fue.
-- Caja (Jarrinson): una alerta fija «Pago en línea de <alias> excede su saldo por $N: devolver
-  en efectivo» (con `otra_visita`, «…era de un grupo anterior: devolver $N completos») y el
-  botón «Devuelto en efectivo».
+- Caja (Jarrinson): una alerta fija con el botón «Devuelto en efectivo». El texto depende de
+  `motivo_excedente`:
+
+  | `motivo_excedente` | Texto |
+  |---|---|
+  | `excede_saldo_comensal` | «Pago en línea de <alias> excede su saldo por $N: devolver en efectivo» |
+  | `excede_saldo_mesa` | «Pago en línea de <alias> excede el saldo de la mesa por $N: devolver en efectivo» |
+  | `sin_cuenta` | «Pago en línea de <alias>: la mesa ya estaba cerrada: devolver todo ($N)». Es todo el pago: `aplicado_centavos` es 0. También sale si la mesa seguía abierta pero ya no debía nada |
+  | `otra_visita` | «Pago en línea de <alias> era de un grupo anterior de la mesa: devolver todo ($N)» |
 
 ## 9. Variables de entorno
 
