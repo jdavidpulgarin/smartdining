@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { aplicarMesaActualizada } from '../mesaActualizada'
+import { aplicarMesaActualizada, fusionarCargaConAvisos } from '../mesaActualizada'
 
 // Un normalizador mínimo con la misma forma que el de TablesContext.
 const normalizar = (m, prev = {}) => ({
@@ -48,6 +48,30 @@ describe('utils/mesaActualizada (T12, §5.7)', () => {
   it('activa:false sin eliminada: la actualiza (GET /mesas lista las inactivas); id_mesero se guarda', () => {
     const [m] = aplicarMesaActualizada([mesa(2)], ev({ estado: 'disponible', activa: false, motivo: 'datos', id_mesero: 5 }), normalizar)
     expect(m).toMatchObject({ activa: false, id_mesero: 5 })
+  })
+
+  it('fusionarCargaConAvisos: un aviso llegado durante la recarga no lo pisa la respuesta vieja (revisión de Roberto)', () => {
+    // La mesa 2 se abrió por aviso mientras el GET (más viejo) la traía disponible.
+    const actual = [mesa(1), mesa(2, { estado: 'ocupada' })]
+    const delBackend = [
+      { id_mesa: 1, numero: 1, estado: 'reservada', capacidad: 4, ubicacion: 'Salón' },
+      { id_mesa: 2, numero: 2, estado: 'disponible', capacidad: 4, ubicacion: 'Salón' },
+    ]
+    const r = fusionarCargaConAvisos(actual, delBackend, new Map([[2, 'actualizada']]), normalizar)
+    expect(r.map((t) => t.estado)).toEqual(['reservada', 'ocupada'])
+  })
+
+  it('fusionarCargaConAvisos: borrada o creada por aviso durante la carga', () => {
+    const delBackend = [
+      { id_mesa: 1, numero: 1, estado: 'disponible', capacidad: 4, ubicacion: 'Salón' },
+      { id_mesa: 3, numero: 3, estado: 'disponible', capacidad: 4, ubicacion: 'Salón' },
+    ]
+    // La 3 se borró por aviso; la 9 se creó por aviso y el GET todavía no la trae.
+    const actual = [mesa(1), mesa(9)]
+    const r = fusionarCargaConAvisos(actual, delBackend, new Map([[3, 'eliminada'], [9, 'actualizada']]), normalizar)
+    expect(r.map((t) => t.id_mesa)).toEqual([1, 9])
+    // Sin avisos durante la carga: manda el GET
+    expect(fusionarCargaConAvisos([mesa(1, { estado: 'ocupada' })], delBackend, new Map(), normalizar).map((t) => t.id_mesa)).toEqual([1, 3])
   })
 
   it('un evento sin id_mesa válido no cambia la lista', () => {

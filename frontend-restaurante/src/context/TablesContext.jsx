@@ -6,7 +6,7 @@ import { useSocketListener } from '../hooks'
 import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { mesaDelAviso } from '../utils/avisos'
-import { aplicarMesaActualizada } from '../utils/mesaActualizada'
+import { aplicarMesaActualizada, fusionarCargaConAvisos } from '../utils/mesaActualizada'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
 
@@ -103,6 +103,11 @@ export function TablesProvider({ children }) {
     }
   }, [tables])
 
+  // Cargas de GET /api/mesas en curso: cada una anota las mesas que reciben un
+  // mesa:actualizada MIENTRAS se pide, para que la respuesta (más vieja) no las
+  // pise (revisión de Roberto en el #278).
+  const cargasEnCurso = useRef(new Set())
+
   /**
    * Carga las mesas desde el backend real: GET /api/mesas
    */
@@ -117,19 +122,17 @@ export function TablesProvider({ children }) {
     }
 
     setLoading(true)
+    const avisadas = new Map()
+    cargasEnCurso.current.add(avisadas)
     try {
       const data = await mesasApi.listar()
       if (data?.mesas && Array.isArray(data.mesas)) {
-        setTables((prevTables) => {
-          const prevMap = new Map(prevTables.map((t) => [t.id, t]))
-          return data.mesas.map((m) =>
-            normalizarMesa(m, prevMap.get(m.id_mesa) || prevMap.get(m.numero) || {})
-          )
-        })
+        setTables((prevTables) => fusionarCargaConAvisos(prevTables, data.mesas, avisadas, normalizarMesa))
       }
     } catch (err) {
       console.warn('Aviso: no se pudieron cargar las mesas desde el backend:', err.message)
     } finally {
+      cargasEnCurso.current.delete(avisadas)
       setLoading(false)
     }
   }, [])
@@ -358,6 +361,10 @@ export function TablesProvider({ children }) {
   // repetido se ignora (ventana de los últimos 200).
   useSocketListener('mesa:actualizada', (data) => {
     if (mesaVista(data?.eventId)) return
+    const id = Number(data?.id_mesa)
+    if (Number.isInteger(id) && id > 0) {
+      for (const avisadas of cargasEnCurso.current) avisadas.set(id, data.motivo === 'eliminada' ? 'eliminada' : 'actualizada')
+    }
     setTables((prev) => aplicarMesaActualizada(prev, data, normalizarMesa))
   })
 

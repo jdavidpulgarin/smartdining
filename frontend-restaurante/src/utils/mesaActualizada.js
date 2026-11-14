@@ -19,6 +19,41 @@ const entero = (v) => (Number.isInteger(v) && v > 0 ? v : null)
 const mismaMesa = (t, id) => Number(t?.id_mesa ?? t?.id) === id
 
 /**
+ * El resultado de GET /api/mesas cuando, MIENTRAS se pedía, llegaron avisos
+ * mesa:actualizada (pasa al recargar tras reconectar). La respuesta es más
+ * vieja que esos avisos: no los puede pisar (una mesa recién abierta volvería a
+ * «disponible»). Revisión de Roberto en el #278.
+ *
+ * @param {Array} previa      la lista actual (ya con los avisos aplicados)
+ * @param {Array} delBackend  las mesas de GET /api/mesas
+ * @param {Map<number, 'actualizada'|'eliminada'>} avisadas  lo que avisó el socket durante la carga
+ * @param {Function} normalizar  normalizarMesa de TablesContext
+ */
+export function fusionarCargaConAvisos(previa, delBackend, avisadas, normalizar) {
+  const actual = Array.isArray(previa) ? previa : []
+  const porId = new Map(actual.map((t) => [Number(t?.id_mesa ?? t?.id), t]))
+  const marcas = avisadas instanceof Map ? avisadas : new Map()
+  const vistas = new Set()
+  const salida = []
+  for (const m of Array.isArray(delBackend) ? delBackend : []) {
+    const id = Number(m?.id_mesa)
+    vistas.add(id)
+    const marca = marcas.get(id)
+    if (marca === 'eliminada') continue // se borró durante la carga
+    if (marca === 'actualizada' && porId.has(id)) {
+      salida.push(porId.get(id)) // el aviso es más nuevo que esta respuesta
+      continue
+    }
+    salida.push(normalizar(m, porId.get(id) || porId.get(Number(m?.numero)) || {}))
+  }
+  // Creadas por aviso durante la carga y que la respuesta todavía no trae.
+  for (const [id, marca] of marcas) {
+    if (marca === 'actualizada' && !vistas.has(id) && porId.has(id)) salida.push(porId.get(id))
+  }
+  return salida.sort((a, b) => (Number(a.numero) || 0) - (Number(b.numero) || 0))
+}
+
+/**
  * La lista de mesas del panel después de un `mesa:actualizada`.
  * `normalizar(mesaDelBackend, previa)` es la misma que usa la carga de
  * GET /api/mesas (TablesContext), así la fila queda igual que tras recargar.
