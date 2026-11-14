@@ -107,6 +107,7 @@ database/scripts/
 ├── 35_transacciones_voucher.sql      # transacciones.voucher VARCHAR(40), opcional, solo con tarjeta débito/crédito, ^[A-Z0-9-]{1,40}$
 ├── 36_multicanal.sql                 # P-23: canal (mesa/para_llevar/domicilio), por_pagar, clientes, direcciones, zonas, domicilios, repartidor, pago anticipado
 ├── 37_refresh_rotado_en.sql          # refresh_tokens_cliente.rotado_en (ventana de gracia del contrato de #199): va con reemplazado_por, no cambia una vez puesto, reemplazo de la misma familia y cliente
+├── 41_cuenta_sin_lineas_canceladas.sql # T4: obtener_cuenta_mesa() no suma las líneas canceladas (la Caja, la PWA y Wompi cobraban los platos quitados)
 ├── 42_reportes_hora_bogota.sql       # T6: vistas de reportes por el día de Bogotá (no el de la sesión), lo recaudado por la fecha del pago (= «Recaudado hoy») y sin líneas canceladas
 └── 43_zona_horaria_bogota.sql        # T6: ALTER DATABASE <base actual> SET timezone = 'America/Bogota' (las sesiones nuevas cuentan los días en hora de Bogotá); no toca datos
 ```
@@ -233,6 +234,7 @@ psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_34_contacto_espacios_
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_35_voucher.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_36_multicanal.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_37_refresh_rotado.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_41_cuenta_sin_lineas_canceladas.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_42_reportes_hora_bogota.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_zonas_demo.sql       # carga seed_zonas_demo.sql dentro de su ROLLBACK
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_43_zona_horaria.sql  # solo lectura; también la corre el CI
@@ -300,6 +302,12 @@ Rotación de los refresh tokens de la app (script 37): `test_37_refresh_rotado.s
 (`reemplazado_por` + `rotado_en`, sin tocar `revocado_en`), que los dos van juntos, que la
 ventana de gracia puede cambiar el reemplazo sin mover `rotado_en`, que el reemplazo es de la
 misma familia y del mismo cliente, el reuso (revocar la familia) y que el script es idempotente.
+
+Cuenta sin las líneas canceladas (script 41, T4): `test_41_cuenta_sin_lineas_canceladas.sql`
+corre en `BEGIN … ROLLBACK` (usa `\ir`). Quita líneas como el backend (`estado_item = 'cancelado'`)
+y comprueba que el total, el saldo y los ítems de la mesa y de cada comensal bajan, que la
+cuenta JSON (Caja, PWA, Wompi) coincide con la suma de `pedidos.total`, que un pago hecho no
+se pierde, que H-02 sigue igual y que el script es idempotente. Sin el script falla en el caso 2.
 
 Reportes en hora de Bogotá (script 42, T6): `test_42_reportes_hora_bogota.sql` corre en
 `BEGIN … ROLLBACK` con la sesión en UTC (como Docker) y días del 2031. Comprueba que una venta
