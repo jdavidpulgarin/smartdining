@@ -618,6 +618,22 @@ dc exec -T postgres psql -U smartdining -d smartdining -c "SELECT count(*) FROM 
 Un script ya aplicado **nunca** se edita: `migrar.sh` compara checksums y se
 detiene sin aplicar nada si alguno cambió.
 
+**Ajustes de la base (`ALTER DATABASE … SET`) y el backend.** Un ajuste así (p. ej.
+la zona horaria `America/Bogota`, script 43) solo lo toman las sesiones **nuevas**: el
+pool del backend y su conexión `LISTEN` del canal `inventario` siguen con el valor de
+antes hasta que el backend se reinicia. Por eso Deploy staging recrea el backend
+(`up -d --force-recreate --no-deps backend`) cuando `migrar.sh` aplicó algún script,
+aunque su imagen no haya cambiado. Si se migra a mano, recrea el backend después:
+
+```bash
+dc up -d --force-recreate --no-deps --wait backend
+dc exec -T postgres psql -U smartdining -d smartdining -Atc "SHOW timezone"   # America/Bogota
+```
+
+> **Producción:** el workflow `Deploy` todavía no hace esa recreación: el primer
+> despliegue a producción con el script 43 tiene que recrear el backend (ver el
+> paso a producción).
+
 `dc down -v` borra la base entera, los certificados y las imágenes. No lo uses
 nunca (tampoco en staging).
 
