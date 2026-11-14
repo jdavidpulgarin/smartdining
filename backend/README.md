@@ -197,6 +197,24 @@ coincidir con las del socket-server:
 | `INTERNAL_API_KEY` | — | La clave compartida que viaja en la cabecera `x-internal-key` hacia `/internal/*` del socket-server. **Debe ser la misma** que la de `socket-server/.env`, o él responde 401. Se genera como el `JWT_SECRET`: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Sin ella los avisos salen con `SIN_CONFIGURAR` y el backend sigue funcionando |
 | `SOCKET_TIMEOUT_MS` | `1500` | Milisegundos que el backend espera al socket-server **por intento** antes de rendirse. Es lo que evita que un socket-server colgado retenga la petición de un comensal; si falta o no es un número, 1500 |
 
+**Pagos en curso al cancelar (T4).** Antes de cancelar una línea (el personal o el comensal)
+o un pedido entero, el backend pregunta al socket-server si hay un pago en línea en curso en
+la mesa (`GET /internal/pagos-en-curso`, timeout fijo de 1500 ms; ver `docs/api-spec.md`). Si
+no puede verificarlo, responde `409 pago_en_curso` con `detalle: "sin_verificar"` en vez de
+cancelar. Un domicilio (sin mesa) no consulta. **Sin `SOCKET_URL`** la verificación se omite con
+una advertencia en el log, **salvo con `NODE_ENV=production`**, donde la falta de
+`SOCKET_URL` (o de `INTERNAL_API_KEY`) hace que ninguna cancelación de un pedido de mesa pase:
+en producción hay que configurar las dos.
+
+**Excedentes del pago en línea (T4).** Un pago en línea que Wompi ya aprobó **nunca se
+rechaza**: `POST /api/transacciones/internal` aplica lo que se debía (el saldo propio con
+«lo mío», el de la mesa con «total» o «igual»; nada si la intención era de otra visita o la
+mesa no debe nada) y guarda lo que sobra en `excedentes_pago_en_linea` (script 44,
+`database/scripts/44_excedentes_pago_en_linea.sql`, lo aplica `migrar.sh`), en la misma
+transacción. La Caja los ve con `GET /api/excedentes-pago-en-linea?estado=pendiente` y los marca
+con `PATCH /api/excedentes-pago-en-linea/:id/devuelto` (admin y cajero). Es aparte de
+`pagos_por_devolver` (script 36, domicilios). Detalle en `docs/api-spec.md`.
+
 **Ningún valor de estos va en un frontend ni con prefijo `VITE_`.**
 
 ## Ejecución

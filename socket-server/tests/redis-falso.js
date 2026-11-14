@@ -65,6 +65,8 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
       return n;
     },
     async expire(k, seg) { verificar(); const e = vigente(k); if (!e) return 0; e.expira = ahora() + seg * 1000; return 1; },
+    // Como Redis: -2 si no existe, -1 si no vence, si no los segundos que le quedan.
+    async ttl(k) { verificar(); const e = vigente(k); if (!e) return -2; if (e.expira === null) return -1; return Math.ceil((e.expira - ahora()) / 1000); },
     async hSet(k, campo, valor) {
       verificar();
       const e = vigente(k);

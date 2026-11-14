@@ -38,6 +38,8 @@ const RANGOS = Object.freeze({
   'sin-stock-concurrencia-sql': { desde: 10000, hasta: 10099 },
   // T6: la mesa de los pedidos del reporte por día.
   'reportes-dia-sql': { desde: 10100, hasta: 10199 },
+  // T4: las mesas de los pagos en línea con excedente.
+  'excedentes-pago-en-linea-sql': { desde: 10200, hasta: 10299 },
 });
 
 const PG_UNIQUE = '23505';
