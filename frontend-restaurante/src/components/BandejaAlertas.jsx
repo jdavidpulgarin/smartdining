@@ -156,7 +156,7 @@ export function BandejaAlertas({
                       <div className="sd-alerta-top">
                         <span className={`sd-alerta-dot ${getDotClass(alerta.tipo)}`} />
                         <strong className="sd-alerta-item-title">
-                          MESA {alerta.idMesa || alerta.mesa} · {alerta.hora || 'Ahora'}
+                          MESA {alerta.idMesa || alerta.mesa || 'DESCONOCIDA'} · {alerta.hora || 'Ahora'}
                         </strong>
                       </div>
                       <p className="sd-alerta-detail">{alerta.mensaje}</p>
@@ -266,7 +266,7 @@ export function BandejaAlertas({
         {alertasFiltradas.length > 0 ? (
           alertasFiltradas.map((alerta) => {
             const dotClass = getDotClass(alerta.tipo)
-            const idMesa = alerta.idMesa || alerta.mesa || '?'
+            const idMesa = alerta.idMesa || alerta.mesa || 'DESCONOCIDA'
             const hora = alerta.hora || 'Ahora'
             const defaultMsg =
               alerta.tipo === 'llamado'
