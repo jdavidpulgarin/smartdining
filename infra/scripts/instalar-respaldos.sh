@@ -188,8 +188,10 @@ paso "4. $ENV_PRIVADO"
 install -d -o root -g root -m 700 /etc/smartdining
 if [ ! -f "$ENV_PRIVADO" ]; then
   if [ "$ENTORNO" = staging ] && [ -f "$ENV_VIEJO" ]; then
-    # Compatibilidad: el check de staging sigue siendo el mismo.
-    cp -p "$ENV_VIEJO" "$ENV_PRIVADO"
+    # Compatibilidad: el check de staging sigue siendo el mismo. Con umask
+    # 077 y sin -p nace ya en 600 (no hereda los permisos del viejo); el
+    # chown/chmod de abajo lo deja en root:root 600 en cualquier caso.
+    ( umask 077; cp "$ENV_VIEJO" "$ENV_PRIVADO" )
     echo "    copiado de $ENV_VIEJO (el viejo se queda; se puede borrar a mano)"
   else
     ( umask 077
