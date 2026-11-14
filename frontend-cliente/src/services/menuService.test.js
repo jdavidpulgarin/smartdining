@@ -571,6 +571,72 @@ describe('menuService', () => {
       expect(res[0].disponible).toBe(true);
     });
 
+    describe('reglas de disponibilidad de armables por ingredientes (T5)', () => {
+      const armableBase = [
+        {
+          id_plato: 201,
+          nombre: 'Bowl Personalizado',
+          disponible: true,
+          pasos: [
+            {
+              id_paso: 1,
+              nombre: 'Base',
+              obligatorio: true,
+              ingredientes: [
+                { id_ingrediente: 1, nombre: 'Arroz', disponible: true },
+                { id_ingrediente: 2, nombre: 'Lechuga', disponible: true },
+                { id_ingrediente: 3, nombre: 'Quinoa', disponible: true },
+              ],
+            },
+            {
+              id_paso: 2,
+              nombre: 'Salsa',
+              obligatorio: false,
+              ingredientes: [
+                { id_ingrediente: 4, nombre: 'Vinagreta', disponible: true },
+              ],
+            },
+          ],
+        },
+      ];
+
+      it('(a) se agota quinoa pero quedan arroz y lechuga en la base → disponible', () => {
+        const res = aplicarDisponibilidadIngredienteEnArmables(armableBase, 3, false);
+        expect(res[0].pasos[0].ingredientes.find((i) => i.id_ingrediente === 3).disponible).toBe(false);
+        expect(res[0].disponible).toBe(true);
+        expect(armableTieneStock(res[0])).toBe(true);
+      });
+
+      it('(b) se agotan todas las opciones de un paso obligatorio → agotado', () => {
+        let estado = aplicarDisponibilidadIngredienteEnArmables(armableBase, 1, false);
+        estado = aplicarDisponibilidadIngredienteEnArmables(estado, 2, false);
+        estado = aplicarDisponibilidadIngredienteEnArmables(estado, 3, false);
+        expect(estado[0].pasos[0].ingredientes.every((i) => !i.disponible)).toBe(true);
+        expect(estado[0].disponible).toBe(false);
+        expect(armableTieneStock(estado[0])).toBe(false);
+      });
+
+      it('(c) se agota la única opción de un paso opcional → disponible', () => {
+        const res = aplicarDisponibilidadIngredienteEnArmables(armableBase, 4, false);
+        expect(res[0].pasos[1].ingredientes[0].disponible).toBe(false);
+        expect(res[0].disponible).toBe(true);
+        expect(armableTieneStock(res[0])).toBe(true);
+      });
+
+      it('(d) se repone una opción del paso vacío → vuelve a disponible', () => {
+        let vacio = aplicarDisponibilidadIngredienteEnArmables(armableBase, 1, false);
+        vacio = aplicarDisponibilidadIngredienteEnArmables(vacio, 2, false);
+        vacio = aplicarDisponibilidadIngredienteEnArmables(vacio, 3, false);
+        expect(vacio[0].disponible).toBe(false);
+
+        // Reponer arroz
+        const repuesto = aplicarDisponibilidadIngredienteEnArmables(vacio, 1, true);
+        expect(repuesto[0].pasos[0].ingredientes.find((i) => i.id_ingrediente === 1).disponible).toBe(true);
+        expect(repuesto[0].disponible).toBe(true);
+        expect(armableTieneStock(repuesto[0])).toBe(true);
+      });
+    });
+
     it('limpiar marca local de agotado al reponerse un plato o ingrediente', () => {
       marcarFaltantesEnCache([
         { tipo: 'plato', id: 50, nombre: 'Sopa' },

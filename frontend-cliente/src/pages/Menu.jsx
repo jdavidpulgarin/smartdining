@@ -5,6 +5,7 @@ import {
   obtenerPlatos,
   obtenerPlatosArmables,
   recargarMenu,
+  tieneMarcasAgotadoLocal,
   actualizarDisponibilidadPlatoEnCache,
   actualizarDisponibilidadEnCache,
   suscribirCambiosMenu,
@@ -126,9 +127,12 @@ function Menu() {
     }
   }, []);
 
-  // Carga inicial al montar: toma el estado actual del caché
+  // Carga inicial al montar el componente (si había marcas locales de 409, recarga GET /menu)
   useEffect(() => {
     let activo = true;
+    if (tieneMarcasAgotadoLocal()) {
+      recargarMenu();
+    }
     (async () => {
       try {
         const [cats, plats, armables] = await Promise.all([
@@ -137,6 +141,7 @@ function Menu() {
           obtenerPlatosArmables(),
         ]);
         if (!activo) return;
+        setErrorMenu(null);
         setCategorias(cats);
         setPlatos(plats);
         setPlatosArmables(Array.isArray(armables) ? armables : []);
@@ -342,16 +347,9 @@ function Menu() {
                     )}
                   </div>
                   <div>
-                    <div className="flex items-start justify-between gap-1">
-                      <h3 className="font-etiqueta text-base font-bold uppercase tracking-wide text-texto leading-snug">
-                        {plato.nombre}
-                      </h3>
-                      {plato.disponible === false && (
-                        <span className="shrink-0 text-[10px] font-etiqueta font-bold uppercase text-primario-texto bg-primario/15 border border-primario/30 px-1.5 py-0.5 rounded">
-                          AGOTADO
-                        </span>
-                      )}
-                    </div>
+                    <h3 className="font-etiqueta text-base font-bold uppercase tracking-wide text-texto leading-snug">
+                      {plato.nombre}
+                    </h3>
                     {plato.descripcion && (
                       <p className="text-xs text-texto-suave mt-1 line-clamp-2 leading-relaxed">
                         {plato.descripcion}
