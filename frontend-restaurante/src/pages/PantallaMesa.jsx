@@ -30,7 +30,7 @@ import {
   obtenerHostPorDefecto,
   resolverDiningUrl,
 } from '../utils/qrUrl'
-import { errorDeRotacion } from '../utils/qrRotacion'
+import { errorDeRotacion, tabletSinQr, tokenDeUrl } from '../utils/qrRotacion'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
 
@@ -54,6 +54,18 @@ export function PantallaMesa() {
   if (tableData?.qr_url !== prevTableQrUrl) {
     setPrevTableQrUrl(tableData?.qr_url)
     setQrUrl(tableData?.qr_url || '')
+  }
+
+  // Mesa liberada: el QR que tenía la tablet quedó revocado. Hasta que llegue
+  // uno nuevo se muestra «Mesa disponible» (utils/qrRotacion.js, tabletSinQr).
+  const [sinQr, setSinQr] = useState(() =>
+    tabletSinQr(false, { tipo: 'mesa', estado: tableData?.estado, token_qr: tableData?.token_qr })
+  )
+  const claveMesa = `${tableData?.estado}|${tableData?.token_qr}`
+  const [prevClaveMesa, setPrevClaveMesa] = useState(claveMesa)
+  if (claveMesa !== prevClaveMesa) {
+    setPrevClaveMesa(claveMesa)
+    setSinQr((actual) => tabletSinQr(actual, { tipo: 'mesa', estado: tableData?.estado, token_qr: tableData?.token_qr }))
   }
 
   const [justRotated, setJustRotated] = useState(false)
@@ -134,6 +146,7 @@ export function PantallaMesa() {
         setTokenQr(res.token)
         if (res?.url) setQrUrl(res.url)
       }
+      setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: res?.token || tokenDeUrl(res?.url) }))
       setJustRotated(true)
       setTimeout(() => setJustRotated(false), 2500)
     } catch (err) {
@@ -195,16 +208,17 @@ export function PantallaMesa() {
         if (data?.token_qr) {
           setTokenQr(data.token_qr)
           if (data?.url) setQrUrl(data.url)
+          setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: data.token_qr }))
           setJustRotated(true)
           setTimeout(() => setJustRotated(false), 3000)
         }
       })
 
       // También escuchar mesa liberada
+      // Al liberar, el QR queda revocado: «Mesa disponible» hasta el siguiente.
       socket.on('mesa:liberada', () => {
         if (isCancelled) return
-        setJustRotated(true)
-        setTimeout(() => setJustRotated(false), 2000)
+        setSinQr((actual) => tabletSinQr(actual, { tipo: 'mesa:liberada' }))
       })
     }
 
@@ -234,6 +248,7 @@ export function PantallaMesa() {
     setErrorPantalla('')
     try {
       const res = await notificarQrRotado(numMesa)
+      setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: res?.token || tokenDeUrl(res?.url) }))
       if (res?.token) {
         setTokenQr(res.token)
         if (res?.url) setQrUrl(res.url)
@@ -413,29 +428,45 @@ export function PantallaMesa() {
           )}
 
           <p className="sd-pantalla-subtitle">
-            Escanea el código QR con la cámara de tu teléfono para ver la carta, ordenar y compartir comanda
+            {sinQr
+              ? 'Mesa disponible · pide a tu mesero que la abra'
+              : 'Escanea el código QR con la cámara de tu teléfono para ver la carta, ordenar y compartir comanda'}
           </p>
         </div>
 
         {/* QR sobre blanco en el centro */}
         <div className="sd-pantalla-qr-card">
-          <div className="sd-pantalla-qr-white-frame">
-            <QRCodeSVG
-              value={diningUrl}
-              size={260}
-              level="M"
-              includeMargin={false}
-              fgColor="#0a0f1d"
-              bgColor="#ffffff"
-            />
-          </div>
+          {sinQr ? (
+            <div
+              role="status"
+              data-testid="tablet-mesa-disponible"
+              className="sd-pantalla-qr-white-frame"
+              style={{ width: 260, height: 260, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, textAlign: 'center', color: '#0a0f1d' }}
+            >
+              <strong style={{ fontSize: 26, lineHeight: 1.2 }}>Mesa disponible</strong>
+              <span style={{ fontSize: 16, lineHeight: 1.4 }}>Pide a tu mesero que la abra</span>
+            </div>
+          ) : (
+            <div className="sd-pantalla-qr-white-frame">
+              <QRCodeSVG
+                value={diningUrl}
+                size={260}
+                level="M"
+                includeMargin={false}
+                fgColor="#0a0f1d"
+                bgColor="#ffffff"
+              />
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: '100%' }}>
-            <div className="sd-pantalla-sid-meta">
-              <span>Sesión activa · sid: {sid}</span>
-            </div>
+            {!sinQr && (
+              <div className="sd-pantalla-sid-meta">
+                <span>Sesión activa · sid: {sid}</span>
+              </div>
+            )}
 
-            {qrApuntaALocalhost && (
+            {qrApuntaALocalhost && !sinQr && (
               <div
                 className="sd-localhost-warning"
                 style={{
