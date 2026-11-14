@@ -5,6 +5,7 @@ const aliasComensal = require('./alias-comensal');
 const { traducirAutorInexistente } = require('./autor-inexistente');
 const { errorConMotivo } = require('../utils/error-con-motivo');
 const { anotarDisponibles } = require('./disponible-sin-stock');
+const socketNotifier = require('./socket.notifier');
 
 /**
  * Dominio del CHECK de pedidos.estado. Se usa solo para validar que el body
@@ -545,6 +546,7 @@ const MOTIVOS_QUITAR_ITEM = Object.freeze({
   enPreparacion: 'item_en_preparacion',
   noCancelable: 'item_no_cancelable',
   pagoRegistrado: 'pago_registrado',
+  pagoEnCurso: 'pago_en_curso',
 });
 
 const OBSERVACION_CANCELADO_POR_COMENSAL = 'Cancelado por el comensal';
@@ -594,6 +596,59 @@ function claveDeCuenta(comensal) {
 
 const MENSAJE_COMENSAL_YA_PAGO = 'Ese comensal ya pagó: reembolsa antes de cancelar su plato';
 
+/* T4: pagos en línea en curso (GET /internal/pagos-en-curso, EVENTS.md §6.6). */
+const MENSAJE_PAGO_EN_CURSO = 'Hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.';
+const MENSAJE_PAGO_SIN_VERIFICAR =
+  'No se pudo comprobar si hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.';
+/**
+ * `detalle` del 409 pago_en_curso cuando el socket-server no pudo contestar
+ * (campo aparte: `motivo` ya es pago_en_curso). Sin `detalle` cuando el
+ * socket-server SÍ confirmó un pago en curso.
+ */
+const DETALLE_SIN_VERIFICAR = 'sin_verificar';
+
+/**
+ * El alias que se manda a /internal/pagos-en-curso: null si la línea es de
+ * «General» (sin comensal) o si su texto no es un alias válido (un dato viejo):
+ * el socket-server lo rechazaría con 400 y, sin comensal, la consulta es la
+ * más prudente (cualquier pago vigente de la mesa).
+ */
+function comensalParaPagosEnCurso(comensal) {
+  if (typeof comensal !== 'string' || comensal.trim() === '') return null;
+  const n = aliasComensal.normalizarAlias(comensal);
+  return n.error ? null : n.alias;
+}
+
+/**
+ * PERSONAL (T4, #260): ¿se puede cancelar esta línea sin pisar un pago en línea
+ * en curso? Va ANTES de abrir la transacción: la consulta es de red (hasta
+ * 1500 ms) y no se retiene la mesa bloqueada esperándola. Lee la línea sin
+ * bloquear (su pedido no cambia de mesa ni la línea de comensal).
+ *
+ * Devuelve null si se puede seguir, o el conflicto que responde la ruta. Sin
+ * mesa (domicilio), con la línea inexistente (el 404 lo da la transacción) o
+ * ya cancelada (el 409 item_ya_cancelado va primero) no consulta.
+ */
+async function conflictoPorPagoEnCurso(idPedido, idDetalle) {
+  const { rows } = await pool.query(
+    `SELECT p.id_mesa, dp.comensal, dp.estado_item
+       FROM detalles_pedido dp JOIN pedidos p ON p.id_pedido = dp.id_pedido
+      WHERE dp.id_detalle = $1::int AND dp.id_pedido = $2::int`,
+    [idDetalle, idPedido]
+  );
+  const linea = rows[0];
+  if (!linea || linea.id_mesa === null || linea.estado_item === 'cancelado') return null;
+
+  const { estado } = await socketNotifier.consultarPagosEnCurso(linea.id_mesa, comensalParaPagosEnCurso(linea.comensal));
+  if (estado === 'en_curso') {
+    return { conflicto: MOTIVOS_QUITAR_ITEM.pagoEnCurso, mensaje: MENSAJE_PAGO_EN_CURSO };
+  }
+  if (estado === 'sin_verificar') {
+    return { conflicto: MOTIVOS_QUITAR_ITEM.pagoEnCurso, mensaje: MENSAJE_PAGO_SIN_VERIFICAR, detalle: DETALLE_SIN_VERIFICAR };
+  }
+  return null; // 'libre' u 'omitido'
+}
+
 /**
  * El comensal quita UNA línea de su pedido, entera (aunque tenga cantidad > 1).
  *
@@ -641,6 +696,14 @@ const MENSAJE_COMENSAL_YA_PAGO = 'Ese comensal ya pagó: reembolsa antes de canc
  */
 async function cancelarItem(idPedido, idDetalle, actor) {
   const esPersonal = actor.tipo === 'personal';
+
+  // Paso -1, PERSONAL (T4): un pago en línea en curso (o que no se pudo
+  // verificar) -> 409 pago_en_curso, sin abrir la transacción.
+  if (esPersonal) {
+    const enCurso = await conflictoPorPagoEnCurso(idPedido, idDetalle);
+    if (enCurso) return enCurso;
+  }
+
   const client = await pool.connect();
   const salir = async (resultado) => {
     await client.query('ROLLBACK');
@@ -1026,6 +1089,9 @@ module.exports = {
   // T4
   claveDeCuenta,
   MENSAJE_COMENSAL_YA_PAGO,
+  MENSAJE_PAGO_EN_CURSO,
+  MENSAJE_PAGO_SIN_VERIFICAR,
+  DETALLE_SIN_VERIFICAR,
   // D-20a
   entregaEnCamino,
   cerrarSiEntregadoYPagado,

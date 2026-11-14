@@ -2664,7 +2664,33 @@ ese paso no existe), en el orden de los cobros: `mesas → pedidos → pedidos_d
 detalles_pedido`. Así un pago en **otro** pedido de la mesa y la cancelación se ponen en fila,
 y el segundo decide con lo que el primero confirmó (nunca quedan los dos). Y con
 `app.id_usuario` fijado (`set_config(..., true)`) para que los movimientos de inventario que
-escriben los triggers lleven al usuario:
+escriben los triggers lleven al usuario.
+
+**Antes de todo eso, un pago en línea en curso (T4, #260).** Antes de abrir la transacción y
+de tomar ningún bloqueo (para no retener la mesa esperando la red), el backend pregunta al
+socket-server `GET {SOCKET_URL}/internal/pagos-en-curso?mesa=<id_mesa>&comensal=<alias de la
+línea>` con `x-internal-key` y **timeout de 1500 ms** (`socket-server/EVENTS.md` §6.6). Una
+línea «General» (sin comensal) se consulta **sin** `comensal`; también un alias viejo que no
+pasa la validación de alias (el socket-server lo rechazaría con 400; sin `comensal` la consulta
+es la más prudente: cualquier pago vigente de la mesa). Un pago `total` de cualquiera cuenta
+para todas las líneas: lo decide el socket-server. No se consulta en un **domicilio** (sin
+mesa), ni si la línea no existe (el 404 de siempre) o ya estaba cancelada (el 409
+`item_ya_cancelado` va primero).
+
+| Respuesta del socket-server | Qué responde el backend |
+|---|---|
+| `200 { "enCurso": true }` | **409** `{ "error": "Hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.", "motivo": "pago_en_curso" }`, **sin** `detalle` |
+| `200 { "enCurso": false }` | sigue con las guardas de abajo |
+| Sin respuesta en 1500 ms, falla de red, **5xx** (incluido el **503 `NO_CONFIGURADO`**) o un 200 sin `enCurso` booleano | **409** `{ "error": "No se pudo comprobar si hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.", "motivo": "pago_en_curso", "detalle": "sin_verificar" }`, por prudencia |
+| **4xx** (consulta mal armada o clave errada: un bug del backend) | el mismo 409 con `detalle: "sin_verificar"`, y además **error en el log** (solo el status y el `codigo`; nunca la clave ni el cuerpo) |
+
+`motivo` es siempre `pago_en_curso`: el panel lo trata igual (esperar y reintentar); `detalle`
+dice si fue porque no se pudo verificar. **Sin `SOCKET_URL`** (desarrollo o pruebas sin
+socket-server) la consulta **se omite** con una advertencia en el log, **salvo con
+`NODE_ENV=production`**, donde sin `SOCKET_URL` es `sin_verificar` (409): en producción el
+tiempo real siempre está configurado y su falta es un error de despliegue. Con `SOCKET_URL` y
+sin `INTERNAL_API_KEY`, `sin_verificar` y error en el log. El camino del **comensal** no
+consulta (sigue estricto con cualquier pago completado).
 
 | Paso | Si no se cumple |
 |---|---|

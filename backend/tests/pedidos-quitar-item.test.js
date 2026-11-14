@@ -228,6 +228,17 @@ test('t4: el comensal sigue ESTRICTO: su mensaje de siempre y sin la regla del d
   }
 });
 
+test('t4: el comensal no consulta /internal/pagos-en-curso (solo el camino del personal)', async () => {
+  const e = escenario('Ana');
+  try {
+    assert.strictEqual((await quitar(e.jwtComensal)).status, 200);
+    assert.ok(!e.socket.avisos.some((a) => a.ruta.startsWith('/internal/pagos-en-curso')));
+    assert.strictEqual(e.db.buscar('SELECT p.id_mesa, dp.comensal, dp.estado_item'), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
 test('t4: el comensal no toma el bloqueo de la mesa (solo el camino del personal)', async () => {
   const e = escenario('Ana');
   try {
