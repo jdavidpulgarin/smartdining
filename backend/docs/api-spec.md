@@ -2504,6 +2504,13 @@ ve su pedido cerrado. Con cuenta pendiente o abono parcial, el pedido se queda e
 
 Una sola ruta y **decide el tipo de sesión del JWT**. Cocina no entra (403).
 
+**Pago en línea en curso (T4).** En los dos caminos (y en `PATCH /pedidos/:id/estado` a
+`cancelado`), **antes** de abrir la transacción se pregunta al socket-server si hay un pago en
+línea en curso en la mesa, **sin** `comensal`: con uno, **409** `{ "motivo": "pago_en_curso" }`;
+si no se pudo verificar, el mismo 409 con `"detalle": "sin_verificar"`. Sin mesa (domicilio)
+no se consulta. Las reglas completas, en *Pago en línea en curso* del [camino del
+personal](#camino-del-personal-d-13).
+
 **Personal (admin, cajero, mesero):** el de siempre, sin cambios. Es el atajo de `PATCH
 /pedidos/:id/estado` con `estado = cancelado`: historial con el usuario y las
 `observaciones` del cuerpo, y si la mesa se queda sin pedidos abiertos **se libera**
@@ -2559,6 +2566,10 @@ empezado.
   `{ "motivo": "parametro_invalido" }`.
 - **Sin cuerpo:** nada o `{}`. Un cuerpo con cualquier campo es **400**
   `{ "motivo": "cuerpo_invalido" }`.
+- **Pago en línea en curso (T4):** antes de abrir la transacción se pregunta al socket-server,
+  con **su** alias normalizado y solo si el pedido es de su mesa: **409**
+  `{ "motivo": "pago_en_curso" }`, o con `"detalle": "sin_verificar"` si no se pudo verificar.
+  Reglas en *Pago en línea en curso* del [camino del personal](#camino-del-personal-d-13).
 
 En **una transacción**, con el pedido y después la línea bloqueados (`FOR UPDATE`, siempre
 en ese orden), y en este orden de comprobación:
@@ -2668,14 +2679,22 @@ escriben los triggers lleven al usuario.
 
 **Antes de todo eso, un pago en línea en curso (T4, #260).** Antes de abrir la transacción y
 de tomar ningún bloqueo (para no retener la mesa esperando la red), el backend pregunta al
-socket-server `GET {SOCKET_URL}/internal/pagos-en-curso?mesa=<id_mesa>&comensal=<alias de la
-línea>` con `x-internal-key` y **timeout de 1500 ms** (`socket-server/EVENTS.md` §6.6). Una
-línea «General» (sin comensal) se consulta **sin** `comensal`; también un alias viejo que no
-pasa la validación de alias (el socket-server lo rechazaría con 400; sin `comensal` la consulta
-es la más prudente: cualquier pago vigente de la mesa). Un pago `total` de cualquiera cuenta
-para todas las líneas: lo decide el socket-server. No se consulta en un **domicilio** (sin
-mesa), ni si la línea no existe (el 404 de siempre) o ya estaba cancelada (el 409
-`item_ya_cancelado` va primero).
+socket-server `GET {SOCKET_URL}/internal/pagos-en-curso?mesa=<id_mesa>[&comensal=<alias>]` con
+`x-internal-key` y **timeout de 1500 ms** (`socket-server/EVENTS.md` §6.6). Es la misma regla
+en los **tres** caminos que cancelan, y cambia solo con qué comensal se pregunta:
+
+| Camino | `comensal` de la consulta |
+|---|---|
+| **Personal** quita una línea (aquí) | el alias **de la línea**; sin `comensal` si es «General» |
+| **Comensal** quita una línea suya ([camino del comensal](#camino-del-comensal)) | **su** alias (el del JWT), normalizado. Solo si el pedido es de **su mesa**: si no, el 403 de siempre, sin decirle nada de los pagos de otra mesa |
+| Cancelar el **pedido entero** ([POST /pedidos/:id/cancelar](#post-pedidosidcancelar--personal-y-comensal-d-12), comensal o personal, y `PATCH /pedidos/:id/estado` a `cancelado`) | **sin** `comensal`: cualquier pago vigente de la mesa |
+
+Un alias viejo que no pasa la validación de alias se consulta también **sin** `comensal` (el
+socket-server lo rechazaría con 400; sin `comensal` la consulta es la más prudente). Un pago
+`total` de cualquiera cuenta para todas las líneas: lo decide el socket-server. **No** se
+consulta en un **domicilio** (sin mesa), ni si la línea o el pedido no existen (el 404 de
+siempre) o ya estaban cancelados (el 409 `item_ya_cancelado` / `pedido_ya_cancelado` va
+primero), ni en un cambio de estado que no sea cancelar.
 
 | Respuesta del socket-server | Qué responde el backend |
 |---|---|
@@ -2689,8 +2708,9 @@ dice si fue porque no se pudo verificar. **Sin `SOCKET_URL`** (desarrollo o prue
 socket-server) la consulta **se omite** con una advertencia en el log, **salvo con
 `NODE_ENV=production`**, donde sin `SOCKET_URL` es `sin_verificar` (409): en producción el
 tiempo real siempre está configurado y su falta es un error de despliegue. Con `SOCKET_URL` y
-sin `INTERNAL_API_KEY`, `sin_verificar` y error en el log. El camino del **comensal** no
-consulta (sigue estricto con cualquier pago completado).
+sin `INTERNAL_API_KEY`, `sin_verificar` y error en el log. En el pedido entero del
+**personal** (que va por el manejador central), el 409 tiene la misma forma: `{ error,
+motivo: "pago_en_curso" }` y `detalle: "sin_verificar"` solo si no se pudo verificar.
 
 | Paso | Si no se cumple |
 |---|---|

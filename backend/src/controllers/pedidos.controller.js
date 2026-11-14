@@ -595,7 +595,11 @@ async function cancelarPedidoComensal(req, res, next) {
       });
     }
     if (r.conflicto) {
-      return res.status(409).json({ error: MENSAJES_CANCELAR_PEDIDO[r.conflicto], motivo: r.conflicto });
+      // T4: pago_en_curso trae su mensaje, y `detalle: 'sin_verificar'` si el
+      // socket-server no pudo contestar.
+      const cuerpo = { error: r.mensaje || MENSAJES_CANCELAR_PEDIDO[r.conflicto], motivo: r.conflicto };
+      if (r.detalle) cuerpo.detalle = r.detalle;
+      return res.status(409).json(cuerpo);
     }
 
     const { pedido, estadoAnterior } = r;

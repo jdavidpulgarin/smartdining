@@ -197,13 +197,14 @@ coincidir con las del socket-server:
 | `INTERNAL_API_KEY` | — | La clave compartida que viaja en la cabecera `x-internal-key` hacia `/internal/*` del socket-server. **Debe ser la misma** que la de `socket-server/.env`, o él responde 401. Se genera como el `JWT_SECRET`: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Sin ella los avisos salen con `SIN_CONFIGURAR` y el backend sigue funcionando |
 | `SOCKET_TIMEOUT_MS` | `1500` | Milisegundos que el backend espera al socket-server **por intento** antes de rendirse. Es lo que evita que un socket-server colgado retenga la petición de un comensal; si falta o no es un número, 1500 |
 
-**Pagos en curso al cancelar un plato (T4).** Antes de que el personal cancele una línea, el
-backend pregunta al socket-server si hay un pago en línea en curso
-(`GET /internal/pagos-en-curso`, timeout fijo de 1500 ms; ver `docs/api-spec.md`). Si no puede
-verificarlo, responde `409 pago_en_curso` con `detalle: "sin_verificar"` en vez de cancelar.
-**Sin `SOCKET_URL`** la verificación se omite con una advertencia en el log, **salvo con
-`NODE_ENV=production`**, donde la falta de `SOCKET_URL` (o de `INTERNAL_API_KEY`) hace que
-ninguna cancelación del personal pase: en producción hay que configurar las dos.
+**Pagos en curso al cancelar (T4).** Antes de cancelar una línea (el personal o el comensal)
+o un pedido entero, el backend pregunta al socket-server si hay un pago en línea en curso en
+la mesa (`GET /internal/pagos-en-curso`, timeout fijo de 1500 ms; ver `docs/api-spec.md`). Si
+no puede verificarlo, responde `409 pago_en_curso` con `detalle: "sin_verificar"` en vez de
+cancelar. Un domicilio (sin mesa) no consulta. **Sin `SOCKET_URL`** la verificación se omite con
+una advertencia en el log, **salvo con `NODE_ENV=production`**, donde la falta de
+`SOCKET_URL` (o de `INTERNAL_API_KEY`) hace que ninguna cancelación de un pedido de mesa pase:
+en producción hay que configurar las dos.
 
 **Ningún valor de estos va en un frontend ni con prefijo `VITE_`.**
 
