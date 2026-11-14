@@ -20,6 +20,7 @@ import {
 import { agotadosApi, platosApi, categoriasApi, mensajeNoGuardado } from '../services/api'
 import { EditorPasos } from '../components/admin/EditorPasos'
 import { HistorialPrecios } from '../components/admin/HistorialPrecios'
+import { SubirImagen } from '../components/admin/SubirImagen'
 import { AuthContext } from '../context/authContextDef'
 import { useSocketListener } from '../hooks'
 import { crearUltimoPorId } from '../utils/dedupeEventos'
@@ -156,6 +157,7 @@ export function Menu() {
   const [editingDish, setEditingDish] = useState(null)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
   const [submittingAction, setSubmittingAction] = useState(false)
+  const [subiendoImagen, setSubiendoImagen] = useState(false)
   // Error al guardar el plato: va DENTRO del modal, que tapa el aviso de la página.
   const [dishFormError, setDishFormError] = useState(null)
 
@@ -902,6 +904,14 @@ export function Menu() {
                   onChange={(e) => setDishForm({ ...dishForm, imageUrl: e.target.value })}
                   className="sd-input"
                 />
+                {/* La subida es asíncrona: se actualiza con la forma funcional para
+                    no pisar lo que se haya escrito mientras subía. */}
+                <SubirImagen
+                  etiqueta="imagen del plato"
+                  valor={dishForm.imageUrl}
+                  onCambio={(ruta) => setDishForm((f) => ({ ...f, imageUrl: ruta }))}
+                  onSubiendo={setSubiendoImagen}
+                />
               </div>
 
               <div>
@@ -1003,8 +1013,10 @@ export function Menu() {
                 >
                   CANCELAR
                 </button>
-                <button type="submit" className="sd-btn sd-btn-primary" disabled={submittingAction}>
-                  {submittingAction
+                <button type="submit" className="sd-btn sd-btn-primary" disabled={submittingAction || subiendoImagen}>
+                  {subiendoImagen
+                    ? 'SUBIENDO IMAGEN...'
+                    : submittingAction
                     ? 'GUARDANDO...'
                     : editingDish
                     ? 'GUARDAR CAMBIOS'
