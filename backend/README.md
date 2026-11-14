@@ -206,6 +206,15 @@ una advertencia en el log, **salvo con `NODE_ENV=production`**, donde la falta d
 `SOCKET_URL` (o de `INTERNAL_API_KEY`) hace que ninguna cancelación de un pedido de mesa pase:
 en producción hay que configurar las dos.
 
+**Excedentes del pago en línea (T4).** Un pago en línea que Wompi ya aprobó **nunca se
+rechaza**: `POST /api/transacciones/internal` aplica lo que se debía (el saldo propio con
+«lo mío», el de la mesa con «total» o «igual»; nada si la intención era de otra visita o la
+mesa no debe nada) y guarda lo que sobra en `excedentes_pago_en_linea` (script 44,
+`database/scripts/44_excedentes_pago_en_linea.sql`, lo aplica `migrar.sh`), en la misma
+transacción. La Caja los ve con `GET /api/excedentes-pago-en-linea?estado=pendiente` y los marca
+con `PATCH /api/excedentes-pago-en-linea/:id/devuelto` (admin y cajero). Es aparte de
+`pagos_por_devolver` (script 36, domicilios). Detalle en `docs/api-spec.md`.
+
 **Ningún valor de estos va en un frontend ni con prefijo `VITE_`.**
 
 ## Ejecución

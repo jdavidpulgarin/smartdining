@@ -53,6 +53,8 @@ const FK_AUTOR = [
   'fk_configuracion_actualizado_por',
   'movimientos_inventario_id_usuario_fkey',
   'fk_historial_usuario',
+  // T4 (script 44): quien marca un excedente del pago en línea como devuelto.
+  'fk_excedentes_devuelto_por',
 ];
 
 const MOTIVO_AUTOR_INEXISTENTE = 'autor_inexistente';
