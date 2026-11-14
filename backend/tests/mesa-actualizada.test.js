@@ -7,6 +7,7 @@ const socketNotifier = require('../src/services/socket.notifier');
 const mesasService = require('../src/services/mesas.service');
 const transaccionesService = require('../src/services/transacciones.service');
 const pedidosService = require('../src/services/pedidos.service');
+const kdsService = require('../src/services/kds.service');
 const app = require('../server');
 
 // T12: POST /internal/mesa-actualizada (socket-server/EVENTS.md §5.7) después
@@ -377,3 +378,109 @@ test('t12: si la relectura de la mesa falla, no se avisa y la respuesta sale igu
     e.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Pedido de Roberto en #276: el camino del KDS y el reintento
+// ---------------------------------------------------------------------------
+
+test('t12: el KDS que deja la mesa liberada -> mesa-liberada y además mesa-actualizada "liberada"', async () => {
+  // Hoy el KDS solo pasa a en_preparacion o listo y ninguno libera la mesa (ver
+  // kds.controller.js): el servicio se reemplaza para ejercitar esa rama, que
+  // existe para que, si algún día el KDS cierra un pedido, el panel lo vea.
+  const mesa = fila();
+  const e = escenario({
+    mesa,
+    stubs: [[kdsService, {
+      cambiarEstado: async () => ({
+        id_pedido: 87, id_mesa: ID_MESA, estado: 'listo', estado_anterior: 'en_preparacion', mesaLiberada: true,
+      }),
+    }]],
+  });
+  try {
+    const res = await request(app).patch('/api/kds/comandas/87/estado')
+      .set('Authorization', `Bearer ${tokenStaff(6, 'cocina')}`).send({ estado: 'listo' });
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    await socketNotifier.esperarAvisos();
+    assert.ok(e.socket.buscar('/internal/mesa-liberada'), 'el aviso de siempre');
+    assert.deepStrictEqual(unAviso(e), esperado(mesa, 'liberada'));
+    assert.deepStrictEqual(e.db.buscar(SQL_RELECTURA).params, [ID_MESA], 'relee la mesa del pedido');
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t12: el KDS que NO libera la mesa no avisa mesa-actualizada', async () => {
+  const e = escenario({
+    stubs: [[kdsService, {
+      cambiarEstado: async () => ({ id_pedido: 87, id_mesa: ID_MESA, estado: 'listo', estado_anterior: 'en_preparacion' }),
+    }]],
+  });
+  try {
+    const res = await request(app).patch('/api/kds/comandas/87/estado')
+      .set('Authorization', `Bearer ${tokenStaff(6, 'cocina')}`).send({ estado: 'listo' });
+    assert.strictEqual(res.status, 200);
+    await socketNotifier.esperarAvisos();
+    assert.strictEqual(e.avisos().length, 0);
+  } finally {
+    e.restaurar();
+  }
+});
+
+/** PATCH /mesas/:id/estado con el socket-server contestando `respuestas` en orden (la última se repite). */
+async function reintentosDeEstado(respuestas) {
+  const mesa = fila({ estado: 'mantenimiento' });
+  let i = 0;
+  const e = escenario({
+    mesa,
+    socket: (ruta) => {
+      if (ruta !== RUTA) return { ok: true };
+      const r = respuestas[Math.min(i, respuestas.length - 1)];
+      i += 1;
+      return r();
+    },
+    stubs: [[mesasService, { actualizarEstado: async () => ({ ...mesa, token_qr: null }) }]],
+  });
+  const original = console.error;
+  console.error = () => {};
+  try {
+    const res = await request(app).patch(`/api/mesas/${ID_MESA}/estado`).set('Authorization', cajero()).send({ estado: 'mantenimiento' });
+    assert.strictEqual(res.status, 200, 'la respuesta nunca depende del aviso');
+    await socketNotifier.esperarAvisos();
+    return e.avisos();
+  } finally {
+    console.error = original;
+    e.restaurar();
+  }
+}
+
+const error = (status, codigo) => () => ({ __status: status, error: 'x', codigo });
+
+for (const status of [500, 502, 503]) {
+  test(`t12 reintento: ${status} ERROR_INTERNO se reintenta con el MISMO eventId hasta lograrlo`, async () => {
+    const enviados = await reintentosDeEstado([error(status, 'ERROR_INTERNO'), () => ({ ok: true, duplicado: false })]);
+    assert.strictEqual(enviados.length, 2, 'un intento fallido y el reintento que sale bien');
+    assert.strictEqual(enviados[0].eventId, enviados[1].eventId, 'el mismo eventId: el socket-server deduplica');
+    assert.deepStrictEqual(enviados[1], enviados[0], 'el mismo cuerpo entero');
+  });
+}
+
+test(`t12 reintento: ERROR_INTERNO persistente se intenta como mucho ${socketNotifier.MAX_INTENTOS} veces, siempre con el mismo eventId`, async () => {
+  const enviados = await reintentosDeEstado([error(503, 'ERROR_INTERNO')]);
+  assert.strictEqual(enviados.length, socketNotifier.MAX_INTENTOS);
+  assert.strictEqual(new Set(enviados.map((c) => c.eventId)).size, 1);
+});
+
+for (const [caso, respuesta] of [
+  ['503 NO_CONFIGURADO', error(503, 'NO_CONFIGURADO')],
+  ['500 con otro código', error(500, 'OTRO_ERROR')],
+  ['500 sin código', () => ({ __status: 500, error: 'x' })],
+  ['400 PAYLOAD_INVALIDO', error(400, 'PAYLOAD_INVALIDO')],
+  ['401 NO_AUTORIZADO', error(401, 'NO_AUTORIZADO')],
+  ['404', error(404, 'NO_ENCONTRADO')],
+  ['la red caída', () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })],
+]) {
+  test(`t12 reintento: ${caso} NO se reintenta (un solo envío)`, async () => {
+    const enviados = await reintentosDeEstado([respuesta, () => ({ ok: true, duplicado: false })]);
+    assert.strictEqual(enviados.length, 1);
+  });
+}
