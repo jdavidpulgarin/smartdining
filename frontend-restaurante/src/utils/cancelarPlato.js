@@ -44,7 +44,19 @@ export function mensajeErrorCancelarPlato(err) {
     case 'item_no_cancelable':
       return 'Ese plato ya no se puede cancelar: ya se sirvió, el pedido está entregado, o es el último plato de un pedido que no puede cancelarse.'
     case 'pago_registrado':
+      // Dos casos con el mismo motivo (api-spec): el dueño de la línea ya pagó
+      // (T4, #259; el backend lo dice en `error`) o lo pagado supera el total nuevo.
+      if (/ya pag[oó]/i.test(err?.message || '')) {
+        return 'Esa persona ya pagó su parte: hay que reembolsarle antes de cancelar su plato.'
+      }
       return 'Lo ya pagado supera el total que quedaría sin ese plato: hay que reembolsar antes de cancelarlo.'
+    case 'pago_en_curso':
+      // T4 (#270): alguien de la mesa tiene el pago en línea abierto. Con
+      // `detalle: 'sin_verificar'` el backend no pudo comprobarlo (tiempo real caído).
+      if (err?.data?.detalle === 'sin_verificar') {
+        return 'No se pudo comprobar si alguien de la mesa está pagando en línea, así que no se canceló. Espera unos segundos e inténtalo otra vez.'
+      }
+      return 'Alguien de la mesa está pagando en línea en este momento: no se canceló. Espera a que termine el pago e inténtalo otra vez.'
     case 'motivo_requerido':
       return 'Escribe el motivo (hasta 200 caracteres).'
     case 'no_encontrado':
