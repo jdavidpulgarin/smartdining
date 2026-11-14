@@ -47,6 +47,45 @@ map $http_upgrade $connection_upgrade {
     ''      close;
 }
 
+# --- Access log SIN tokens (T13). Los tokens QR viajan en la ruta
+# (POST /api(/v1)/mesas/qr/<token>/sesion) y en el query (?token=… del enlace
+# del QR, que además llega como Referer de todo lo que pide la PWA). Con el
+# formato "main" de la imagen quedaban enteros en el log. Aquí se reemplazan
+# por *** antes de escribir:
+#   1. la ruta /mesas/qr/<token>/…
+#   2. y 3. hasta dos parámetros cuyo nombre termina en "token" (token=,
+#      access_token=, refresh_token=…): el 2 toma el último y el 3 el primero.
+# Mismo formato que "main"; solo cambian $request y $http_referer. Cada server
+# usa este formato (access_log … sd_sin_token): uno a nivel http se SUMARÍA al
+# "main" de nginx.conf en vez de reemplazarlo. Prueba: infra/scripts/nginx-log.test.cjs.
+map $request $sd_req_1 {
+    "~*^(?<sd_a>.*/mesas/qr/)[^/?#\s]+(?<sd_b>.*)$"  "${sd_a}***${sd_b}";
+    default $request;
+}
+map $sd_req_1 $sd_req_2 {
+    "~*^(?<sd_a>.*[?&][a-z_]*token=)[^&#\s]*(?<sd_b>.*)$"  "${sd_a}***${sd_b}";
+    default $sd_req_1;
+}
+map $sd_req_2 $sd_req_sin_token {
+    "~*^(?<sd_a>.*?[?&][a-z_]*token=)(?!\*\*\*(?:[&#\s]|$))[^&#\s]*(?<sd_b>.*)$"  "${sd_a}***${sd_b}";
+    default $sd_req_2;
+}
+map $http_referer $sd_ref_1 {
+    "~*^(?<sd_a>.*/mesas/qr/)[^/?#\s]+(?<sd_b>.*)$"  "${sd_a}***${sd_b}";
+    default $http_referer;
+}
+map $sd_ref_1 $sd_ref_2 {
+    "~*^(?<sd_a>.*[?&][a-z_]*token=)[^&#\s]*(?<sd_b>.*)$"  "${sd_a}***${sd_b}";
+    default $sd_ref_1;
+}
+map $sd_ref_2 $sd_ref_sin_token {
+    "~*^(?<sd_a>.*?[?&][a-z_]*token=)(?!\*\*\*(?:[&#\s]|$))[^&#\s]*(?<sd_b>.*)$"  "${sd_a}***${sd_b}";
+    default $sd_ref_2;
+}
+log_format sd_sin_token '$remote_addr - $remote_user [$time_local] "$sd_req_sin_token" '
+                        '$status $body_bytes_sent "$sd_ref_sin_token" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+
 upstream backend { server backend:4000; keepalive 16; }
 upstream tiempo_real { server socket-server:4001; }
 
@@ -55,6 +94,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name ${DOMINIO} app.${DOMINIO} staff.${DOMINIO} cocina.${DOMINIO} api.${DOMINIO} rt.${DOMINIO};
+    access_log /var/log/nginx/access.log sd_sin_token;
 
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -79,6 +119,7 @@ server {
     listen [::]:443 ssl;
     http2 on;
     server_name ${DOMINIO};
+    access_log /var/log/nginx/access.log sd_sin_token;
     include /etc/nginx/snippets/seguridad.conf;
     return 301 https://app.${DOMINIO}$request_uri;
 }
@@ -89,6 +130,7 @@ server {
     listen [::]:443 ssl;
     http2 on;
     server_name app.${DOMINIO};
+    access_log /var/log/nginx/access.log sd_sin_token;
     root /usr/share/nginx/html/app;
     client_max_body_size 64k;
 
@@ -118,6 +160,7 @@ server {
     listen [::]:443 ssl;
     http2 on;
     server_name staff.${DOMINIO};
+    access_log /var/log/nginx/access.log sd_sin_token;
     root /usr/share/nginx/html/staff;
     client_max_body_size 64k;
 
@@ -136,6 +179,7 @@ server {
     listen [::]:443 ssl;
     http2 on;
     server_name cocina.${DOMINIO};
+    access_log /var/log/nginx/access.log sd_sin_token;
     root /usr/share/nginx/html/cocina;
     client_max_body_size 64k;
 
@@ -157,6 +201,7 @@ server {
     listen [::]:443 ssl;
     http2 on;
     server_name api.${DOMINIO};
+    access_log /var/log/nginx/access.log sd_sin_token;
     client_max_body_size 1m;
 
     include /etc/nginx/snippets/seguridad.conf;
@@ -225,6 +270,7 @@ server {
     listen [::]:443 ssl;
     http2 on;
     server_name rt.${DOMINIO};
+    access_log /var/log/nginx/access.log sd_sin_token;
     # El socket-server ya corta en 100 KB (HTTP) y 16 KB (mensajes de socket).
     client_max_body_size 100k;
 

@@ -598,6 +598,39 @@ Para volver a los valores por defecto, borra esas líneas de `infra/.env` y repi
 pasos 2 y 3. Las capacidades de las mesas no se revierten solas: cámbialas desde el panel
 si hace falta.
 
+### Logs de nginx sin tokens (T13)
+
+El access log de nginx **no guarda tokens QR**. Cada `server` escribe con el formato
+`sd_sin_token`, que es el `main` de la imagen con dos cambios: en la petición y en el
+`Referer` se reemplaza por `***`:
+
+- el token de la ruta `/api(/v1)/mesas/qr/<token>/…`;
+- el valor de hasta dos parámetros cuyo nombre termina en `token` (`?token=`, `access_token=`…).
+  El enlace del QR (`app.<dominio>/?token=…`) llega como `Referer` en todo lo que pide la PWA.
+
+Dónde está: los `map` y el `log_format` al principio de
+`infra/nginx/templates/smartdining.conf.template`. Prueba: `infra/scripts/nginx-log.test.cjs`.
+
+- **Dónde se guarda:** el log va al stdout del contenedor (driver `json-file`, como mucho
+  5 archivos de 10 MB por contenedor) y **se pierde al recrear el contenedor** nginx, por
+  ejemplo en cada despliegue que lo reconstruye. El `error_log` no tiene formato propio.
+- **Validar una plantilla que aún no está en la imagen**, p. ej. la de una rama: copia la
+  carpeta al VPS y pásala con `PLANTILLAS`. Se valida con el mismo nginx en marcha, sin
+  tocar lo que sirve:
+
+  ```bash
+  PLANTILLAS=/tmp/rama/infra/nginx/templates ENV_FILE=infra/.env.staging sh infra/scripts/validar-nginx.sh
+  ```
+
+- **Comprobar tras desplegar:** una petición con un token inventado no debe dejar el token
+  en el log:
+
+  ```bash
+  curl -s -o /dev/null -X POST "https://api.<dominio>/api/mesas/qr/v1.PRUEBA-T13/sesion"
+  dc logs --since 2m nginx | grep -c 'PRUEBA-T13'     # 0
+  dc logs --since 2m nginx | grep -c '/mesas/qr/\*\*\*/sesion'   # 1 o más
+  ```
+
 ### Cambios de esquema
 
 Con el volumen vacío, `database/docker-init.sh` corre `database/migrar.sh`, que

@@ -21,7 +21,7 @@ código y este documento no coinciden, es un error y se corrige en el mismo PR.
 - [3. Convenciones](#3-convenciones): idempotencia, formato del ack, reconexión
 - [4. Eventos cliente → servidor](#4-eventos-cliente--servidor)
 - [5. Eventos servidor → cliente](#5-eventos-servidor--cliente) · [5.5. `inventario:alerta`](#55-inventarioalerta) · [5.6. `item:cancelado`](#56-itemcancelado)
-- [6. Endpoints HTTP](#6-endpoints-http) · [6.4. Comensales sin celular](#64-comensales-sin-celular-post-internalmesa-comensal)
+- [6. Endpoints HTTP](#6-endpoints-http) · [6.4. Comensales sin celular](#64-comensales-sin-celular-post-internalmesa-comensal) · [6.6. Pagos en curso](#66-pagos-en-curso-get-internalpagos-en-curso)
 - [7. Web Push](#7-web-push)
 - [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox) · [8.6. Cobros de caja](#86-cobros-de-caja-post-internalpayment-confirmed)
 - [9. Variables de entorno](#9-variables-de-entorno)
@@ -105,6 +105,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `POST /internal/mesa-comensal` | backend (tras el COMMIT de D-18) | Estable (el backend ya la llama, D-18/D-18b) | [§6.4](#64-comensales-sin-celular-post-internalmesa-comensal) |
 | `POST /internal/inventario-alerta` | backend (D-17, oyente del canal `inventario`) | Estable (el backend ya la llama, D-17) | [§5.5](#55-inventarioalerta) |
 | `POST /internal/item-cancelado` | backend (tras el COMMIT de J-14, el comensal quita un plato, o de D-13, el personal cancela uno) | Estable; el backend la llama desde #180 (J-14) y #186 (D-13) | [§5.6](#56-itemcancelado) |
+| `GET /internal/pagos-en-curso` | backend (antes de cancelar un plato, T4) | Espera backend (T4): el socket-server ya la da | [§6.6](#66-pagos-en-curso-get-internalpagos-en-curso) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
 responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
@@ -963,11 +964,12 @@ CORS con la misma política que el socket: la lista blanca `CORS_ORIGINS` y, sol
 | POST | `/internal/order-created` | Header `x-internal-key` | Solo backend. Mismo body que el evento `order:created` |
 | POST | `/internal/order-status` | Header `x-internal-key` | Solo backend. Mismo body que `order:status`, más `origen` opcional (`comensal` o `personal`; otro valor o `null` → `400`). Se reenvía solo si vino (§6.3) |
 | POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` (token de 1 a 255 caracteres) → reenvía `qr:actualizado` a la pantalla de esa mesa |
-| POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "motivo": "pagada" }` (`motivo` opcional: `pagada` o `liberada`, por defecto `liberada`) → revoca los QR, emite `mesa:liberada`, desconecta a los comensales y borra carrito y suscripciones. Responde `{ ok, duplicado }` |
+| POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "motivo": "pagada" }` (`motivo` opcional: `pagada` o `liberada`, por defecto `liberada`) → revoca los QR, emite `mesa:liberada`, desconecta a los comensales y borra carrito, suscripciones y pagos en curso (§6.6). Responde `{ ok, duplicado }` |
 | POST | `/internal/ingrediente-disponibilidad` | Header `x-internal-key` | Solo backend. `{ "id_ingrediente": 12, "disponible": false, "eventId": "<uuid opcional>" }` → emite `ingrediente:disponibilidad`. Con `eventId`, un reintento responde `duplicado: true` |
 | POST | `/internal/plato-disponibilidad` | Header `x-internal-key` | Solo backend, tras el COMMIT de `PATCH /api/platos/:id/disponible`. `{ "id_plato": 7, "disponible": false, "eventId": "<uuid opcional>" }` → emite `plato:disponibilidad` (§5.4). Con `eventId`, un reintento responde `duplicado: true` |
 | POST | `/internal/payment-confirmed` | Header `x-internal-key` | Solo backend. Cobro de caja (efectivo, datáfono o abono) ya registrado → emite `payment:confirmed` con el mismo payload que Wompi (§8.6) |
 | POST | `/internal/item-cancelado` | Header `x-internal-key` | Solo backend, tras el COMMIT de J-14 (el comensal quita un plato) o de D-13 (el personal cancela uno). `{ id_pedido, id_mesa, codigo_pedido, id_detalle, id_plato, nombre, comensal, total, estado_pedido, origen?, eventId }`, validación estricta (un campo de más → `400`) → emite `item:cancelado` a `room:kds`, `room:admin` y `room:mesa-{ID}` (§5.6) |
+| GET | `/internal/pagos-en-curso?mesa=<id>[&comensal=<alias>]` | Header `x-internal-key` | Solo backend, antes de cancelar un plato. `200 { mesa, enCurso, pagos: [{ comensal, modo, monto, venceEn }] }` con las intenciones de pago en línea vigentes; validación estricta (`400`). Sin referencias de Wompi ni tokens (§6.6) |
 | POST | `/pagos/intencion` | Bearer JWT `comensal` | Intención de pago (§8.1) |
 | POST | `/pagos/webhook` | Checksum de Wompi | Eventos de Wompi (§8.3) |
 
@@ -1162,6 +1164,70 @@ backend valida igual la sesión de la mesa). Llevarla a Redis toca `liberarMesa`
 si el borrado de la marca fallara al generar el QR, la siguiente liberación se tomaría como
 duplicada y no revocaría los QR ni limpiaría el estado de la sesión nueva.
 
+### 6.6. Pagos en curso: `GET /internal/pagos-en-curso`
+
+> **Espera backend · T4.** Implementado en `src/pagos-en-curso.js` y `src/almacen/pagos.js` (pruebas:
+> `tests/pagos-en-curso.test.js`). Falta que el backend la consulte antes de cancelar un plato.
+
+**Para qué:** que el backend **no cancele una línea mientras alguien la está pagando en línea**. Si se
+cancela con el widget de Wompi abierto, el cobro sale por el monto viejo y hay que devolver plata (y
+devolver por Wompi hoy no es viable).
+
+```http
+GET /internal/pagos-en-curso?mesa=5&comensal=Ana
+x-internal-key: <INTERNAL_API_KEY>
+```
+
+```json
+{ "mesa": 5, "enCurso": true, "pagos": [ { "comensal": "Beto", "modo": "total", "monto": 90000, "venceEn": "2026-11-14T04:30:00.000Z" } ] }
+```
+
+| Parámetro | Obligatorio | Regla |
+|---|---|---|
+| `mesa` | Sí | Entero de 1 a 2147483647, en decimal y sin ceros a la izquierda (`05`, `1.5`, `1e3` → `400`) |
+| `comensal` | No | Un alias válido con la regla del sistema (`alias.js`, la misma de `claveAlias` y del backend): de 2 a 40 caracteres, letras, números, espacios y `. _ ' -`, nunca «General». Se compara por su **clave** (sin tildes, minúsculas, sin espacios ni `. _ ' -`): «Ána María» y «ana maria» son la misma persona |
+
+Un parámetro de más o repetido → `400 PAYLOAD_INVALIDO`. Sin clave o con una errónea, `401 NO_AUTORIZADO`;
+sin `INTERNAL_API_KEY` configurada, `503 NO_CONFIGURADO`. Si Redis no responde, `500 ERROR_INTERNO`. Como
+toda `/internal/*`, la respuesta lleva `X-Instancia-Id` cuando está #254 (§6.5).
+
+**Qué cuenta como «en curso»:** una intención de `POST /pagos/intencion` **vigente**: su marca
+`sd:pago:pendiente:{mesa}:{comensal}` existe, su estado sigue en `pendiente` (ni pagada, ni rechazada,
+ni reemplazada), su `expira_en` todavía no pasó y se creó **después de la última liberación** de la mesa.
+
+**Liberar la mesa los borra.** `POST /internal/mesa-liberada` (y la liberación tras el cobro) termina la
+sesión de mesa: se borran el índice `sd:pago:mesa:{mesa}` y las marcas `sd:pago:pendiente:{mesa}:*` que
+lista, en un solo `DEL` y sin `SCAN`. El grupo siguiente empieza con `enCurso: false`, aunque alguien
+repita el alias. Los registros `sd:pago:ref:*` **no** se tocan: un webhook tardío del grupo anterior se
+sigue registrando. Por si una intención se escribe justo mientras se libera, la ruta además descarta
+toda intención con `creada_en` anterior a la liberación.
+
+- **Con `comensal`:** `enCurso: true` si **ese** comensal tiene una vigente, o si **cualquiera** de la mesa
+  tiene una que no es `propio`: `total` cubre todas las líneas. `igual` (Dividir, que T2 retira)
+  reparte el total, así que también cuenta. `pagos` trae solo las que deciden.
+- **Sin `comensal`:** `enCurso: true` si hay cualquier vigente en la mesa; `pagos` las trae todas.
+- `pagos[]`: `comensal` (como lo firmó su JWT), `modo`, `monto` en **pesos** y `venceEn` (ISO). **Nunca**
+  la referencia de Wompi, tokens ni datos de tarjeta.
+- Las marcas se listan con un índice por mesa (`sd:pago:mesa:{mesa}`, hash comensal → `1`), no con `SCAN`.
+  Se anota **antes** de fijar la marca, así que toda marca que exista está en el índice. Su plazo **solo se
+  alarga**: con varios comensales queda al menos tan largo como el de la marca más larga de la mesa. Un
+  miembro cuya marca ya venció o se liberó se ignora al listar, sin error. Una intención creada antes de desplegar esto no está en el
+  índice: deja de importar cuando vence (`PAGOS_TTL_MINUTOS`).
+
+**Qué hace el backend (T4, Daniel)**, en `cancelarItem` (comensal y personal) y al cancelar un pedido
+entero, **antes** de cambiar nada:
+
+1. Consulta `GET /internal/pagos-en-curso?mesa=<id_mesa>&comensal=<comensal de la línea>`, sin
+   `comensal` si la línea es de «General» o si se cancela el pedido entero, con **timeout de 1500 ms**.
+2. `enCurso: true` → `409 pago_en_curso` (no se cancela).
+3. **Si no responde a tiempo, falla la conexión o da 5xx → `409 pago_en_curso` con motivo
+   `sin_verificar`**, por prudencia: es mejor que el mesero reintente en unos segundos que cancelar un plato
+   que se está cobrando.
+4. **Si recibe un `4xx`** (consulta mal armada o clave errada, un error del propio backend): responde
+   también `409 pago_en_curso` con motivo `sin_verificar` **y lo registra como error** en su log (solo el
+   status y el `codigo`; nunca la clave). Un 4xx no se arregla reintentando, pero tampoco se cancela a ciegas.
+5. `enCurso: false` → sigue con las demás guardas de siempre (`pago_registrado`, etc.).
+
 ---
 
 ## 7. Web Push
@@ -1207,6 +1273,22 @@ Reglas:
 - Suscribirse dos veces con el mismo `endpoint` no duplica.
 - Las suscripciones caducadas (HTTP 404/410 del servicio push) se eliminan solas.
 - Son de la **sesión de mesa**: se borran al liberarla.
+
+**Registro de envíos (diagnóstico, T9).** No cambia el contrato; sirve para saber si un aviso
+salió y qué respondió el servicio push (p. ej., por qué no llega a un iPhone):
+
+- Una línea por envío: `push: enviado` (info), `push: suscripción caducada` (info) o
+  `push: error al enviar` (error), con `servicio_push` (**solo el host**: `fcm.googleapis.com`,
+  `web.push.apple.com`…), `status` (código HTTP, o `null` sin respuesta, con `codigo` de red)
+  y `caducada`. Si Apple manda `{ "reason": "BadJwtToken" }` o parecido, va en `razon`
+  (solo si es una palabra).
+- Una línea por cambio de estado: `push: resumen del envío` con `estado`, `destinatarios`,
+  `enviados`, `fallidos`, `caducados` y `servicios` (cuántos por host). `destinatarios: 0`
+  quiere decir que nadie de la mesa tenía avisos activados.
+- **Nunca** el endpoint completo (identifica al dispositivo), las llaves de la suscripción
+  (`p256dh`, `auth`), el payload, el alias ni las llaves VAPID (`tests/push-registro.test.js`).
+
+Para verlo en el VPS: `docker logs <socket-server> | grep '"msg":"push: '`.
 
 ---
 
@@ -1678,3 +1760,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `mesa:presencia:solicitar` (nuevo) | — | El personal pide la presencia de todas las mesas con algo y la recibe en el ack `{ ok, mesas }`, sin depender de listeners. Comensal, tablet y cocina → `NO_AUTORIZADO`; 1 por socket cada 2 s (`RATE_LIMIT`) (§4) | Panel (recomendado): pedirla en cada `connect`, después de registrar los listeners (ejemplo en §4) |
 | Reconexión · sin `connectionStateRecovery` (T1, seguridad) | Socket.io recuperaba la sesión tras un corte de hasta 2 min **sin pasar por los middlewares**: devolvía las salas y `socket.data`. Un comensal sin red mientras se liberaba su mesa volvía a `room:mesa-{ID}` y leía y escribía el carrito del grupo siguiente | Cada reconexión es un socket nuevo que se autentica de cero; un JWT de la sesión anterior → `connect_error` `TOKEN_INVALIDO`. `socket.recovered` nunca es `true` y no se reenvían eventos perdidos (§3.3) | Nadie: la PWA ya hace `join:table` y reemplaza el carrito en cada `connect`. Si algún cliente dependía de `recovered`, debe hacer `join:table` |
 | `mesa:presencia` · periodo de gracia (T1) | Un comensal salía de la presencia en cuanto se le caía el socket (celular en segundo plano) y entraba otra vez al volver | Con un corte de red sigue contando `PRESENCIA_GRACIA_MS` (60 s) en `comensales`, `total`, la rotación del QR y «igual». Si vuelve antes, no se emite nada; si no, sale al terminar. Salir a propósito, la expulsión y liberar la mesa no tienen gracia; liberar cancela las pendientes (§5.2) | Nadie: mismo evento y payload. Panel y PWA: un comensal puede seguir en `comensales` hasta 60 s después de cerrar la app |
+| `GET /internal/pagos-en-curso` (nueva, T4) | El backend podía cancelar un plato mientras alguien lo pagaba en línea (el widget de Wompi abierto) y el cobro salía por el monto viejo | Nueva ruta de solo lectura: `{ mesa, enCurso, pagos }` con las intenciones vigentes (propio de ese comensal, o total/igual de cualquiera); validación estricta, sin referencias de Wompi. Liberar la mesa borra sus pagos en curso (no los registros que usa el webhook) (§6.6) | Backend (Daniel): consultarla antes de cancelar (timeout 1500 ms); `enCurso` → `409 pago_en_curso`; sin respuesta, error o 5xx → `409 pago_en_curso` motivo `sin_verificar` (con un 4xx, además, error en el log) |

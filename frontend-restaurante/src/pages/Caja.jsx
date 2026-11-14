@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
 import { useAuth, useSocketListener, useTables } from '../hooks'
+import { crearUltimaPeticion } from '../utils/ultimaPeticion'
 import {
   puedeUsarCaja,
   comensalDelCobro,
@@ -131,30 +132,33 @@ function CajaRegistradora() {
 
   const cobrosDelDia = useMemo(() => agruparCobros(dia?.transacciones || []), [dia])
 
+  // Solo cuenta la última recarga de cuentas (T4): ver utils/ultimaPeticion.
+  const [ultimaCarga] = useState(() => crearUltimaPeticion())
+
   /**
-   * Carga las cuentas activas directamente desde la API para todas las mesas ocupadas
+   * Carga las cuentas de todas las mesas ocupadas desde la API.
+   *
+   * Varias recargas pueden salir seguidas (quitar dos platos, un cobro, el
+   * pedido que pasa a cancelado...) y responder en otro orden. Solo se aplica
+   * la respuesta de la ÚLTIMA: una vieja que llega tarde ya no pisa el saldo.
    */
   const cargarCuentas = useCallback(async () => {
     const token = getAuthToken()
     if (!token) return
 
+    const peticion = ultimaCarga.nueva()
     setLoading(true)
     setErrorMessage(null)
 
     try {
-      // 1. Obtener estado actual de las mesas
+      // 1. Estado actual de las mesas
       const mesasRes = await mesasApi.listar()
       const listaMesas = mesasRes?.mesas || []
 
-      // 2. Para cada mesa ocupada, consultar su cuenta desglosada
+      // 2. Para cada mesa ocupada, su cuenta desglosada
       const mesasOcupadas = listaMesas.filter(
         (m) => m.estado === 'ocupada' || Boolean(m.sesion_abierta)
       )
-
-      if (mesasOcupadas.length === 0) {
-        setCuentasMesas([])
-        return
-      }
 
       const promesas = mesasOcupadas.map(async (mesa) => {
         try {
@@ -176,6 +180,7 @@ function CajaRegistradora() {
         (c) => c && (Number(c.saldo_mesa) > 0 || Number(c.total_mesa) > 0)
       )
 
+      if (!peticion.vigente()) return
       setCuentasMesas(cuentas)
 
       // Seleccionar automáticamente la primera mesa si no hay una elegida
@@ -184,12 +189,13 @@ function CajaRegistradora() {
         return cuentas[0]?.id_mesa || null
       })
     } catch (err) {
+      if (!peticion.vigente()) return
       console.warn('Aviso al cargar cuentas de caja:', err.message)
       setErrorMessage('No se pudieron consultar las cuentas del salón.')
     } finally {
-      setLoading(false)
+      if (peticion.vigente()) setLoading(false)
     }
-  }, [])
+  }, [ultimaCarga])
 
   const handleSelectMesa = useCallback((mesaId) => {
     setSelectedMesaId(mesaId)
@@ -197,70 +203,26 @@ function CajaRegistradora() {
     setErrorCobro(null)
   }, [])
 
-  // Cargar cuentas al montar de forma asíncrona
+  // Cargar cuentas al montar, en la microtarea siguiente (fuera del cuerpo del
+  // efecto: el estado inicial ya es «cargando»). Al desmontar, lo que esté en
+  // vuelo se descarta.
   useEffect(() => {
-    let cancel = false
-    const token = getAuthToken()
-    if (!token) return
-
-    mesasApi
-      .listar()
-      .then(async (mesasRes) => {
-        if (cancel) return
-        const listaMesas = mesasRes?.mesas || []
-        const mesasOcupadas = listaMesas.filter(
-          (m) => m.estado === 'ocupada' || Boolean(m.sesion_abierta)
-        )
-
-        if (mesasOcupadas.length === 0) {
-          if (!cancel) {
-            setCuentasMesas([])
-            setLoading(false)
-          }
-          return
-        }
-
-        const promesas = mesasOcupadas.map(async (mesa) => {
-          try {
-            const cuenta = await mesasApi.obtenerCuenta(mesa.id_mesa)
-            if (cuenta) {
-              return {
-                ...cuenta,
-                numero_mesa: mesa.numero,
-                ubicacion_mesa: mesa.ubicacion,
-              }
-            }
-          } catch {
-            // Ignorar
-          }
-          return null
-        })
-
-        const cuentas = (await Promise.all(promesas)).filter(
-          (c) => c && (Number(c.saldo_mesa) > 0 || Number(c.total_mesa) > 0)
-        )
-
-        if (!cancel) {
-          setCuentasMesas(cuentas)
-          setSelectedMesaId((prev) => {
-            if (prev && cuentas.some((c) => c.id_mesa === prev)) return prev
-            return cuentas[0]?.id_mesa || null
-          })
-          setLoading(false)
-        }
-      })
-      .catch((err) => {
-        if (!cancel) {
-          console.warn('Aviso al cargar cuentas de caja:', err.message)
-          setErrorMessage('No se pudieron consultar las cuentas del salón.')
-          setLoading(false)
-        }
-      })
-
+    let montada = true
+    Promise.resolve().then(() => {
+      if (montada) cargarCuentas()
+    })
     return () => {
-      cancel = true
+      montada = false
+      ultimaCarga.invalidar()
     }
-  }, [])
+  }, [cargarCuentas, ultimaCarga])
+
+  // Al (re)conectar el socket se recargan las cuentas y lo cobrado hoy: los
+  // avisos que llegaron con el socket caído se perdieron (T4).
+  useSocketListener('connect', () => {
+    cargarCuentas()
+    cargarDia()
+  })
 
   // Escuchar eventos de WebSockets en tiempo real para mantener la caja sincronizada
   useSocketListener('order:created', () => cargarCuentas())
