@@ -34,7 +34,7 @@ test('enviar: éxito, suscripción caducada (410/404) y error transitorio', asyn
     },
   };
   const push = crearServicioPush(config, { webpush: falso });
-  assert.deepStrictEqual(await push.enviar({ endpoint: 'e' }, { titulo: 'Hola' }), { ok: true });
+  assert.strictEqual((await push.enviar({ endpoint: 'e' }, { titulo: 'Hola' })).ok, true);
   assert.deepStrictEqual(JSON.parse(falso.ultimo.cuerpo), { titulo: 'Hola' });
   assert.strictEqual(falso.ultimo.opts.TTL, 30 * 60);
   assert.strictEqual(falso.ultimo.opts.urgency, 'high');

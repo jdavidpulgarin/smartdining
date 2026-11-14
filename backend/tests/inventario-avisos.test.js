@@ -336,7 +336,7 @@ test('d-17: ponerLaCartaAlDia devuelve el resumen de lo que hizo', async () => {
   assert.strictEqual(resumen.recalculados, 3);
   assert.strictEqual(resumen.emitidos, 3);
   assert.strictEqual(resumen.fallidos, 0);
-  assert.strictEqual(resumen.abortado, false);
+  assert.strictEqual(resumen.pendientes, 0);
 });
 
 test('d-17: si el recalculo falla, la carta se emite igual', async () => {
@@ -373,9 +373,18 @@ test('d-17: si no se puede leer la carta, no se cae nada', async () => {
   assert.deepStrictEqual(notifier.enviados, []);
 });
 
-test('d-17: con el socket-server caido se deja de emitir la carta tras unos fallos', async () => {
-  // Cada envio gasta su timeout y los demas van a fallar igual: insistir con
-  // decenas de platos son minutos de trabajo inutil y el log lleno.
+test('d-17: con el socket-server caido y la cola con reintentos, la pasada para en el primer fallo y queda todo pendiente', async () => {
+  // Cada envio gasta su timeout y los demas van a fallar igual: con el
+  // servidor caido se hace UN intento por pasada y el resto espera en la cola
+  // (ya no se descarta: se reintenta solo, ver tests/avisos-stock-cola.test.js).
+  const { crearColaAvisos } = require('../src/services/avisos-stock-cola');
+  const programados = [];
+  const cola = crearColaAvisos({
+    reintentos: true,
+    programar: (fn, ms) => programados.push({ fn, ms }),
+    cancelar: () => {},
+    aleatorio: () => 0.5,
+  });
   const muchos = { rows: [] };
   for (let id = 1; id <= 30; id += 1) {
     muchos.rows.push({ tipo: 'plato', id, disponible_efectivo: true, motivo: null });
@@ -385,11 +394,13 @@ test('d-17: con el socket-server caido se deja de emitir la carta tras unos fall
   });
   const notifier = notifierFalso({ ok: false });
 
-  const resumen = await avisos.ponerLaCartaAlDia(cliente, { notifier });
+  const resumen = await avisos.ponerLaCartaAlDia(cliente, { notifier, cola });
 
-  assert.strictEqual(resumen.abortado, true);
-  assert.strictEqual(resumen.fallidos, avisos.MAX_FALLOS_SEGUIDOS);
-  assert.strictEqual(notifier.enviados.length, avisos.MAX_FALLOS_SEGUIDOS, 'no se intentaron los 30');
+  assert.strictEqual(notifier.enviados.length, 1, 'no se gasta un timeout por cada uno de los 30');
+  assert.strictEqual(resumen.fallidos, 1);
+  assert.strictEqual(resumen.pendientes, 30, 'nada se pierde: todo queda en la cola');
+  assert.strictEqual(programados.length, 1, 'un solo reintento programado');
+  cola.detener();
 });
 
 // ---------------------------------------------------------------------------

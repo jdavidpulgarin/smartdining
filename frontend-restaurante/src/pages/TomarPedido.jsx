@@ -533,7 +533,7 @@ export function TomarPedido() {
               </h3>
             </div>
             <p style={{ color: 'var(--sd-text-muted)', fontSize: '0.85rem', margin: '0 0 16px' }}>
-              Si un cliente no trae teléfono, asígnale un nombre o apodo para que su comanda quede separada y cuente en «dividir igual».
+              Si un cliente no trae teléfono, asígnale un nombre o apodo para que su comanda quede a su nombre y en la Caja se le pueda cobrar solo lo suyo.
             </p>
 
             <form onSubmit={handleRegistrarComensal} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

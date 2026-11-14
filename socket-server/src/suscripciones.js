@@ -6,6 +6,7 @@ const {
 } = require('./http');
 const { verificarJwt, esComensalSinAlias, ROL_COMENSAL } = require('./auth');
 const { estaEnMesa } = require('./salas');
+const { log } = require('./log');
 
 const MAX_SUSCRIPCIONES_POR_MESA = 20; // una mesa tiene pocos comensales; evita llenar memoria
 const MAX_ENDPOINT = 2048;
@@ -193,12 +194,33 @@ async function notificarCambioEstado(ctx, cambio) {
     const duenos = ctx.duenosPedidos ? await ctx.duenosPedidos.obtener(cambio.id_pedido) : [];
     destinatarios = destinatarios.filter((s) => s.comensal && duenos.includes(s.comensal));
   }
-  await Promise.all(destinatarios.map(async (s) => {
+  const resultados = await Promise.all(destinatarios.map(async (s) => {
     const r = await ctx.push.enviar(s, payload);
     if (r.caducada) await ctx.suscripciones.quitar(cambio.id_mesa, s.endpoint);
+    return r;
   }));
+  log.info('push: resumen del envío', resumirEnvio(cambio.estado, resultados));
+}
+
+/**
+ * Un resumen por cambio de estado (T9): a cuántas suscripciones se mandó y
+ * cómo les fue, y cuántas por servicio (solo el host). `destinatarios: 0` es
+ * también un dato: nadie de la mesa tenía avisos activados.
+ */
+function resumirEnvio(estado, resultados) {
+  const resumen = {
+    estado, destinatarios: resultados.length, enviados: 0, fallidos: 0, caducados: 0, servicios: {},
+  };
+  for (const r of resultados) {
+    if (r.ok) resumen.enviados += 1;
+    else if (r.caducada) resumen.caducados += 1;
+    else resumen.fallidos += 1;
+    const servicio = r.servicio || 'desconocido';
+    resumen.servicios[servicio] = (resumen.servicios[servicio] || 0) + 1;
+  }
+  return resumen;
 }
 
 module.exports = {
-  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, URL_SEGUIMIENTO, rutasSuscripciones, notificarCambioEstado, validarSuscripcion,
+  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, URL_SEGUIMIENTO, rutasSuscripciones, notificarCambioEstado, resumirEnvio, validarSuscripcion,
 };

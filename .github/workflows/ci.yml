@@ -214,6 +214,12 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -d postgres -c "CREATE DATABASE $PGDATABASE"
           sh "$GITHUB_WORKSPACE/database/migrar.sh"
           psql -X -q -v ON_ERROR_STOP=1 -f "$GITHUB_WORKSPACE/database/seed_inventario_demo.sql"
+      - name: Zona de la base y columnas de fecha (test_43, solo lectura)
+        # Falla si la base no quedó en America/Bogota (script 43) o si una
+        # columna de fecha nueva no es TIMESTAMPTZ. Las pruebas de integración
+        # de abajo corren ya con la base en hora de Bogotá, como en el VPS.
+        working-directory: database/tests
+        run: psql -X -v ON_ERROR_STOP=1 -f test_43_zona_horaria.sql
       - name: JWT_SECRET aleatorio para esta corrida
         # Se genera aquí y se enmascara en el log; nada viene de un .env ni de
         # los secretos del repo.

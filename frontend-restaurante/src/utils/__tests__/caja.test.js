@@ -7,6 +7,7 @@ import {
   idCobroParaEnviar,
   mensajeDeErrorCobro,
   descartarIdCobro,
+  recargarCuentasTrasError,
   agruparCobros,
   horaBogota,
   usaVoucher,
@@ -134,5 +135,27 @@ describe('utils/caja: voucher del datáfono (script 35)', () => {
     expect(g).toHaveLength(1)
     expect(g[0]).toMatchObject({ ids: [1, 2], voucher: 'AB-12', monto: 2000 })
     expect(agruparCobros([{ ...t(5, undefined), referencia_pago: null }])[0].voucher).toBeNull()
+  })
+})
+
+describe('T4: textos de los 409 del cobro', () => {
+  const cop = (n) => '$' + n
+
+  it('excede_saldo_comensal: dice cuánto debe esa persona y qué hacer (no el genérico)', () => {
+    const m = mensajeDeErrorCobro({ motivo: 'excede_saldo_comensal', data: { saldo: 12000 }, message: 'El pago excede lo que debe ese comensal' }, cop)
+    expect(m).toContain('debe $12000')
+    expect(m).toContain('TODA LA MESA')
+    expect(m).not.toMatch(/^No se pudo registrar el cobro/)
+  })
+
+  it('excede_saldo_comensal sin saldo en la respuesta: el texto sin cifra', () => {
+    const m = mensajeDeErrorCobro({ motivo: 'excede_saldo_comensal', data: {} }, cop)
+    expect(m).toMatch(/supera lo que debe esa persona\./)
+  })
+
+  it('recargarCuentasTrasError: excede, excede_saldo_comensal y sin_cuenta recargan; el resto no', () => {
+    for (const motivo of ['excede', 'excede_saldo_comensal', 'sin_cuenta']) expect(recargarCuentasTrasError({ motivo })).toBe(true)
+    for (const motivo of ['id_cobro_en_uso', 'voucher_invalido', undefined]) expect(recargarCuentasTrasError({ motivo })).toBe(false)
+    expect(recargarCuentasTrasError(null)).toBe(false)
   })
 })

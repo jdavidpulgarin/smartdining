@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { formatearNotificacionPush } from './notificacionPush';
 
-describe('formatearNotificacionPush (J-09)', () => {
-  it('formatea estado en_preparacion con titulo amigable y cuerpo descriptivo', () => {
+describe('formatearNotificacionPush (J-09 / T9)', () => {
+  it('formatea estado en_preparacion con titulo sobrio y cuerpo descriptivo', () => {
     const res = formatearNotificacionPush({
       titulo: 'Tu pedido está en preparación',
       cuerpo: 'SD-087',
@@ -12,24 +12,23 @@ describe('formatearNotificacionPush (J-09)', () => {
     });
 
     expect(res).toEqual({
-      titulo: 'Tu pedido está en preparación \u{1F468}\u200D\u{1F373}',
+      titulo: 'Tu pedido está en preparación',
       cuerpo: 'Pedido SD-087. Te avisamos cuando esté listo.',
     });
   });
 
-  it('incluye el separador ZWJ (\\u200D) en el emoji del chef de en_preparacion', () => {
-    const res = formatearNotificacionPush({
-      estado: 'en_preparacion',
-      cuerpo: 'SD-087',
-    });
-
-    expect(res.titulo).toContain('\u200D');
-    expect(res.titulo).toContain('\u{1F468}\u200D\u{1F373}');
+  it('los titulos de estados conocidos no contienen emojis ni signos de exclamacion', () => {
+    for (const estado of ['en_preparacion', 'listo', 'cancelado']) {
+      const { titulo } = formatearNotificacionPush({ estado });
+      expect(titulo).not.toMatch(/[!¡]/);
+      expect(titulo).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+      expect(titulo).not.toContain('\u200D');
+    }
   });
 
-  it('formatea estado listo con titulo destacado y cuerpo descriptivo', () => {
+  it('formatea estado listo con titulo sobrio y cuerpo descriptivo', () => {
     const res = formatearNotificacionPush({
-      titulo: '¡Tu plato está listo!',
+      titulo: 'Tu pedido está listo',
       cuerpo: 'SD-087',
       id_pedido: 87,
       estado: 'listo',
@@ -37,7 +36,7 @@ describe('formatearNotificacionPush (J-09)', () => {
     });
 
     expect(res).toEqual({
-      titulo: '¡Tu plato está listo! \u{1F37D}\uFE0F',
+      titulo: 'Tu pedido está listo',
       cuerpo: 'Pedido SD-087. Ya sale de cocina hacia tu mesa.',
     });
   });
@@ -85,7 +84,7 @@ describe('formatearNotificacionPush (J-09)', () => {
 
   it('no deja "Pedido ." colgado si el cuerpo llega vacio en estado conocido', () => {
     expect(formatearNotificacionPush({ estado: 'listo', cuerpo: '' })).toEqual({
-      titulo: '¡Tu plato está listo! \u{1F37D}\uFE0F',
+      titulo: 'Tu pedido está listo',
       cuerpo: 'Ya sale de cocina hacia tu mesa.',
     });
   });

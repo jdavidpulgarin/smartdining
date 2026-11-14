@@ -6,6 +6,7 @@ import {
   MenuSection,
 } from '../components'
 import { menuApi } from '../services/api'
+import { urlImagen } from '../utils/imagenes'
 import { useTables } from '../hooks'
 
 export function Home() {
@@ -27,7 +28,8 @@ export function Home() {
               name: p.nombre,
               price: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
               tag: cat.nombre || 'Menú',
-              imageUrl: isArepa ? '/img/arepa-rellena.png' : p.url_imagen,
+              // Misma lista blanca que la app (#212); null → MenuItem pinta el ícono.
+              imageUrl: isArepa ? '/img/arepa-rellena.png' : urlImagen(p.url_imagen),
             }
           })
         )

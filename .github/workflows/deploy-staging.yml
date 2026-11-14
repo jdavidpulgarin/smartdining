@@ -87,11 +87,21 @@ jobs:
             exit 1
           }
           # Migraciones (R-18.1) antes de que el backend nuevo use el esquema.
-          dc exec -T postgres sh /smartdining-db/migrar.sh || {
+          salida_migrar=$(dc exec -T postgres sh /smartdining-db/migrar.sh) || {
+            printf '%s\n' "$salida_migrar"
             echo "::error::Falló migrar.sh (el script que falló se deshizo completo). No se levantó el backend nuevo. Respaldo previo en /srv/respaldos/<proyecto>/predeploy/."
             exit 1
           }
+          printf '%s\n' "$salida_migrar"
           dc up -d --build --remove-orphans --wait --wait-timeout 180 backend socket-server
+          # Si migrar.sh aplicó algún script, el backend se recrea aunque su
+          # imagen no haya cambiado: un ALTER DATABASE … SET (p. ej. la zona
+          # horaria, script 43) solo lo toman las sesiones NUEVAS, y el pool y
+          # la conexión LISTEN del canal 'inventario' son de antes de migrar.
+          if printf '%s\n' "$salida_migrar" | grep -q '^migrar: aplica '; then
+            echo "migrar.sh aplicó scripts: se recrea el backend para que sus conexiones tomen la base nueva"
+            dc up -d --force-recreate --no-deps --wait --wait-timeout 180 backend
+          fi
           # nginx (lo único público) solo si ninguna cuenta del personal tiene
           # una contraseña conocida o publicada.
           if ! sh infra/scripts/passwords-demo.sh verificar < /dev/null; then

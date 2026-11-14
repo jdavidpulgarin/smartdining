@@ -81,12 +81,12 @@ El sistema admite tres métodos de pago certificados:
 3. Ingrese el número de comprobante o referencia digital.
 4. Presione **"Registrar Transferencia"**.
 
-### 3.3 Pagos Divididos / Parciales
-Si los comensales solicitan pagar por separado:
-1. Active la opción **"Pago Parcial"**.
-2. Ingrese el monto específico que abonará el comensal actual.
-3. Confirme el pago; el estado de pago del pedido cambiará a `parcial`.
-4. El saldo restante quedará pendiente hasta que se cubra el 100% de la comanda.
+### 3.3 Cobro por persona
+Si cada comensal quiere pagar lo suyo:
+1. Elija la mesa y, en el desglose por comensal, toque a la persona que paga. Para cobrar todo, deje seleccionada la mesa completa.
+2. La Caja muestra y cobra exactamente lo que debe esa persona.
+3. Confirme el pago; mientras falte saldo, el estado de pago del pedido queda en `parcial`.
+4. El saldo restante quedará pendiente hasta que se cubra el 100% de la cuenta.
 5. **Regla de liberación de mesa (H-03):** La mesa física se libera automáticamente cuando se cumplen simultáneamente ambas condiciones: el saldo total de la comanda queda cubierto a $0.00 (`pagado`) **Y** todos los platillos han sido servidos físicamente en la mesa (`entregado`). Si los comensales pagan por adelantado en caja mientras la cocina aún prepara sus pedidos, la mesa permanece `ocupada` y el código QR continúa activo para no interrumpir la sesión ni invalidar el seguimiento de quienes aún esperan su comida.
 
 ### 3.4 Emisión de Comprobantes

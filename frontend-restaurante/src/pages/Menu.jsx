@@ -23,6 +23,8 @@ import { HistorialPrecios } from '../components/admin/HistorialPrecios'
 import { AuthContext } from '../context/authContextDef'
 import { useSocketListener } from '../hooks'
 import { crearUltimoPorId } from '../utils/dedupeEventos'
+import { confirmacionAlCambiar, ETIQUETA_DISPONIBILIDAD, NO_DISPONIBLE } from '../utils/disponibilidadPlato'
+import { urlImagen as urlParaPintar, urlImagenGuardable, MENSAJE_URL_IMAGEN } from '../utils/imagenes'
 
 /**
  * Carta para ADMINISTRAR: todas las categorías y TODOS los platos, también los
@@ -68,6 +70,11 @@ export function Menu() {
   // no exigir un AuthProvider (sin sesión, no hay enlace).
   const sesion = useContext(AuthContext)
   const esAdmin = sesion?.user?.rol === 'admin'
+  // Crear, editar y borrar platos y categorías, configurar pasos y cambiar la
+  // disponibilidad son solo de admin en el backend (la disponibilidad también de
+  // cocina, que no usa el panel). Al mesero y al cajero el Menú les queda de solo
+  // consulta: ven el estado del plato como etiqueta, no como interruptor.
+  const Disponibilidad = esAdmin ? 'button' : 'span'
   const [platoHistorial, setPlatoHistorial] = useState(null)
 
   // tipo 'error': el cambio NO se guardó; se queda más tiempo a la vista.
@@ -102,7 +109,10 @@ export function Menu() {
           // imageUrl es SOLO para pintar la tarjeta (con la foto local de la
           // arepa o la de respaldo). Lo que se edita y se guarda es
           // urlImagenGuardada: el url_imagen real del plato, o '' si no tiene.
-          imageUrl: (isArepa ? FOTO_AREPA : null) || p.url_imagen || FOTO_RESPALDO,
+          // La url_imagen pasa por la lista blanca de la app (#212): una
+          // /imagenes/<uuid>.webp subida al backend se pinta con el origen de
+          // la API; http://, javascript:, data: y demás, con el respaldo.
+          imageUrl: (isArepa ? FOTO_AREPA : null) || urlParaPintar(p.url_imagen) || FOTO_RESPALDO,
           urlImagenGuardada: p.url_imagen || '',
           // available = interruptor MANUAL de la cocina (platos.disponible).
           // stockOk = lo que calcula la base desde el inventario (stock_suficiente,
@@ -193,6 +203,9 @@ export function Menu() {
     const dish = dishesList.find((d) => d.id === dishId)
     if (!dish) return
     const nuevoEstado = !dish.available
+    // T8: desactivar se confirma (los comensales dejan de poder pedirlo).
+    const pregunta = confirmacionAlCambiar(dish, nuevoEstado)
+    if (pregunta && !window.confirm(pregunta)) return
     const ponerEstado = (estado) =>
       setDishesList((prev) => prev.map((d) => (d.id === dishId ? { ...d, available: estado } : d)))
 
@@ -319,6 +332,12 @@ export function Menu() {
     // crear) o con la que ya tenía (al editar). Antes se mandaba la foto de
     // respaldo y quedaba guardada como si fuera la real.
     const urlImagen = dishForm.imageUrl.trim()
+    // Lo mismo que acepta el backend (#209): https:// o /imagenes/<uuid>.webp.
+    // Se avisa aquí en vez de mandar algo que el backend va a rechazar.
+    if (!urlImagenGuardable(urlImagen)) {
+      setDishFormError(MENSAJE_URL_IMAGEN)
+      return
+    }
     if (urlImagen) payload.url_imagen = urlImagen
 
     setSubmittingAction(true)
@@ -417,9 +436,12 @@ export function Menu() {
           <div>
             <h1 className="sd-page-title">MENÚ</h1>
             <p className="sd-page-subtitle">
-              Administración de categorías, platos y disponibilidad en tiempo real
+              {esAdmin
+                ? 'Administración de categorías, platos y disponibilidad en tiempo real'
+                : 'Carta del restaurante y disponibilidad en tiempo real (solo consulta)'}
             </p>
           </div>
+          {esAdmin && (
           <div style={{ display: 'flex', gap: 12 }}>
             <button
               type="button"
@@ -438,6 +460,7 @@ export function Menu() {
               <span>NUEVO PLATO</span>
             </button>
           </div>
+          )}
         </div>
       </div>
 
@@ -670,10 +693,17 @@ export function Menu() {
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--sd-border)', paddingTop: 12, marginTop: 'auto' }}>
                     {/* Disponibilidad (sin verde: disponible en BLANCO, agotado en ROJO) */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleAvailability(dish.id)}
-                      title="Alternar disponibilidad para comensales"
+                    <Disponibilidad
+                      {...(esAdmin
+                        ? {
+                            type: 'button',
+                            onClick: () => handleToggleAvailability(dish.id),
+                            title: 'Alternar disponibilidad para comensales',
+                            // Interruptor: encendido = el admin lo dejó disponible.
+                            'aria-pressed': dish.available,
+                            'aria-label': `Disponible: ${dish.name}`,
+                          }
+                        : { 'data-testid': `disponibilidad-${dish.id}` })}
                       style={{
                         padding: '6px 12px',
                         fontSize: 12,
@@ -681,7 +711,7 @@ export function Menu() {
                         fontFamily: 'var(--sd-font-heading)',
                         letterSpacing: '0.04em',
                         borderRadius: 4,
-                        cursor: 'pointer',
+                        cursor: esAdmin ? 'pointer' : 'default',
                         background: estaDisponible(dish) ? 'var(--sd-surface)' : 'var(--sd-red)',
                         color: 'var(--sd-white)',
                         border: estaDisponible(dish) ? '1px solid var(--sd-border-strong)' : 'none',
@@ -706,14 +736,17 @@ export function Menu() {
                           </span>
                         </>
                       ) : (
+                        // Apagado a mano (T8): no es falta de stock, así que no dice
+                        // «AGOTADO». Vuelve cuando el admin lo activa.
                         <>
                           <XCircle size={13} />
-                          <span>AGOTADO</span>
+                          <span>{ETIQUETA_DISPONIBILIDAD[NO_DISPONIBLE]}</span>
                         </>
                       )}
-                    </button>
+                    </Disponibilidad>
 
-                    {/* Acciones */}
+                    {/* Acciones (solo admin: el backend las niega al resto) */}
+                    {esAdmin && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <button
                         type="button"
@@ -752,6 +785,7 @@ export function Menu() {
                         <Trash2 size={15} />
                       </button>
                     </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -882,9 +916,12 @@ export function Menu() {
 
               <div>
                 <label className="sd-input-label">URL DE IMAGEN</label>
+                {/* type="text": una imagen subida se guarda como /imagenes/<uuid>.webp,
+                    que el type="url" del navegador no deja enviar. */}
                 <input
-                  type="url"
-                  placeholder="https://images.unsplash.com/..."
+                  type="text"
+                  inputMode="url"
+                  placeholder="https://… o /imagenes/<código>.webp"
                   value={dishForm.imageUrl}
                   onChange={(e) => setDishForm({ ...dishForm, imageUrl: e.target.value })}
                   className="sd-input"
