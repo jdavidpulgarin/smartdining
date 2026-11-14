@@ -148,11 +148,14 @@ test('el ultimo gana: un agotado que no llego no pisa el repuesto posterior', as
   if (saltar(t)) return;
   const antes = delPlato().length;
 
-  // El socket-server se cae y el plato se agota: el aviso falla y queda en cola.
+  // El socket-server se cae y el plato se agota: el aviso queda en cola. Puede
+  // que ni se intente: llegar a 0 dispara tambien la alerta de stock bajo del
+  // insumo, y con el servidor caido cada pasada intenta solo el aviso MAS VIEJO.
+  const clave = `plato:${catalogo.plato.id_plato}`;
   socketCaido = true;
   await fijarStock(0);
-  await hasta(() => delPlato().length > antes, 'el intento del agotado');
-  assert.deepStrictEqual(cola.estado().pendientes.filter((c) => c === `plato:${catalogo.plato.id_plato}`).length, 1);
+  await hasta(() => cola.estado().pendientes.includes(clave), 'el agotado en la cola');
+  assert.ok(!delPlato().slice(antes).some((a) => a.cuerpo.disponible === true));
 
   // Vuelve el socket-server y llega el repuesto: sale en el acto.
   socketCaido = false;
@@ -171,5 +174,5 @@ test('el ultimo gana: un agotado que no llego no pisa el repuesto posterior', as
   assert.ok(exitosos.length >= 1);
   assert.strictEqual(exitosos.at(-1).cuerpo.disponible, true, 'lo ultimo que llega es el repuesto');
   assert.ok(!exitosos.some((a) => a.cuerpo.disponible === false), 'el agotado viejo no se reenvio');
-  assert.ok(!cola.estado().pendientes.includes(`plato:${catalogo.plato.id_plato}`));
+  assert.ok(!cola.estado().pendientes.includes(clave));
 });
