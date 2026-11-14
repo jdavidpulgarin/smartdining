@@ -447,6 +447,10 @@ test('h: el pago en linea no manda payment-confirmed desde el backend', async ()
     if (sql.includes('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE')) {
       return { rows: [{ id_mesa: ID_MESA }] };
     }
+    // T4: el pago en línea bloquea la mesa diciendo si es otra visita.
+    if (sql.includes('FROM mesas WHERE id_mesa = $1::int FOR UPDATE')) {
+      return { rows: [{ id_mesa: ID_MESA, otra_visita: false }] };
+    }
     if (sql.includes('SELECT 1 FROM transacciones WHERE referencia_externa')) return { rows: [] };
     if (sql.includes('SUM(ROUND(obtener_saldo_pendiente'))  return { rows: [{ saldo_centavos: '0' }] };
     if (sql.includes('obtener_saldo_pendiente(p.id_pedido) * 100')) {

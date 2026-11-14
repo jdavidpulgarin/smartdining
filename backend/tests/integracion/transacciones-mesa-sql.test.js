@@ -64,6 +64,16 @@ async function limpiar() {
   }
   if (ids.length === 0) return;
 
+  // T4: los excedentes del pago en línea de estas mesas (script 44), con su auditoría.
+  const ex = await sonda.query('DELETE FROM excedentes_pago_en_linea WHERE id_mesa = ANY($1::int[]) RETURNING id', [ids]);
+  if (ex.rows.length) {
+    await sonda.query(
+      `DELETE FROM auditoria_cambios WHERE tabla_afectada = 'excedentes_pago_en_linea'
+         AND COALESCE(datos_nuevos->>'id', datos_anteriores->>'id')::int = ANY($1::int[])`,
+      [ex.rows.map((r) => r.id)]
+    );
+  }
+
   const t = await sonda.query(
     `DELETE FROM transacciones
       WHERE id_pedido IN (SELECT id_pedido FROM pedidos WHERE id_mesa = ANY($1::int[]))
@@ -281,15 +291,28 @@ test('f. caja y webhook de Wompi a la vez sobre la misma mesa: sin interbloqueo 
     }),
   ]);
 
-  const exitos = [caja, wompi].filter((r) => r.duplicado === false);
-  const excedidos = [caja, wompi].filter((r) => r.excede);
-  assert.strictEqual(exitos.length, 1, 'uno cobra');
-  assert.strictEqual(excedidos.length, 1, 'el otro ve el saldo ya reducido y no cobra de mas');
-  assert.strictEqual(excedidos[0].saldo_centavos, saldo - parte);
+  // T4: el pago en línea ya aprobado NUNCA se rechaza; la caja sí. Según quién
+  // llegue primero a la fila de la mesa:
+  //   - la caja: cobra 2/3; Wompi aplica el 1/3 que queda y el resto es excedente;
+  //   - Wompi: aplica sus 2/3; la caja ve el saldo reducido y responde excede.
+  // En los dos casos, sin interbloqueo y sin cobrar de más.
+  assert.strictEqual(wompi.duplicado, false, 'el pago en línea siempre se registra');
   const cobrado = await cobradoEnMesa(idMesa);
-  assert.strictEqual(cobrado.centavos, parte);
-  assert.ok(cobrado.centavos <= saldo);
-  assert.deepStrictEqual(await estados(pedidos), ['pagado', 'pagado', 'entregado']);
+  assert.ok(cobrado.centavos <= saldo, 'nunca más que el saldo');
+  if (caja.duplicado === false) {
+    assert.deepStrictEqual(
+      [wompi.aplicado_centavos, wompi.excedente_centavos, wompi.motivo_excedente],
+      [saldo - parte, parte - (saldo - parte), 'excede_saldo_mesa']
+    );
+    assert.strictEqual(cobrado.centavos, saldo);
+    assert.deepStrictEqual(await estados(pedidos), ['pagado', 'pagado', 'pagado']);
+  } else {
+    assert.ok(caja.excede, JSON.stringify(caja));
+    assert.strictEqual(caja.saldo_centavos, saldo - parte);
+    assert.deepStrictEqual([wompi.aplicado_centavos, wompi.excedente_centavos], [parte, 0]);
+    assert.strictEqual(cobrado.centavos, parte);
+    assert.deepStrictEqual(await estados(pedidos), ['pagado', 'pagado', 'entregado']);
+  }
 });
 
 test('g. autor inexistente: 409 autor_inexistente y la base queda igual', async (t) => {
@@ -338,7 +361,11 @@ test("el pago en linea sigue escribiendo su historial como siempre: sin autor y 
   const r = await transaccionesService.registrarPagoInterno({
     referencia_externa: `PRUEBA-${crypto.randomUUID()}`, id_mesa: idMesa, comensal: null, monto_centavos: P, metodo_pago: 'online',
   });
-  assert.deepStrictEqual(Object.keys(r).sort(), ['duplicado', 'mesa_liberada', 'pagados', 'saldo_restante_centavos'], 'las mismas claves de siempre');
+  // T4 (§8.4): además, cuánto se aplicó, cuánto sobró y la transacción.
+  assert.deepStrictEqual(Object.keys(r).sort(), [
+    'aplicado_centavos', 'duplicado', 'excedente_centavos', 'id_transaccion', 'mesa_liberada', 'motivo_excedente',
+    'pagados', 'saldo_restante_centavos',
+  ]);
 
   const { rows } = await sonda.query(
     `SELECT id_usuario, observaciones FROM historial_estados WHERE id_pedido = $1 AND estado_nuevo = 'pagado'`, [pedidos[0]]);
@@ -406,7 +433,10 @@ test('el pago en linea con una referencia de otra mesa sigue siendo duplicado (c
 
   assert.strictEqual((await pagar(a.idMesa)).duplicado, false);
   const enB = await pagar(b.idMesa);
-  assert.deepStrictEqual(Object.keys(enB).sort(), ['duplicado', 'saldo_restante_centavos'], 'las mismas claves de siempre');
+  // T4 (§8.4): el duplicado devuelve además lo que se registró la primera vez.
+  assert.deepStrictEqual(Object.keys(enB).sort(), [
+    'aplicado_centavos', 'duplicado', 'excedente_centavos', 'id_transaccion', 'motivo_excedente', 'saldo_restante_centavos',
+  ]);
   assert.strictEqual(enB.duplicado, true);
   assert.deepStrictEqual(await cobradoEnMesa(b.idMesa), { centavos: 0, filas: 0 });
 });

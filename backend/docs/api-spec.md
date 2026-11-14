@@ -3696,14 +3696,31 @@ Body:
   "modo": "igual",
   "monto_centavos": 3000000,
   "moneda": "COP",
-  "metodo_pago": "online"
+  "metodo_pago": "online",
+  "intencion_creada_en": "2026-11-14T20:10:00.000Z"
 }
 ```
 
 - `moneda` solo acepta `"COP"`; `monto_centavos` es un entero > 0; `comensal` puede
   ir `null` (pago de la mesa completa); `metodo_pago` por omisión es `online`.
-- `modo` e `id_transaccion_pasarela` se validan porque son del contrato, pero hoy **no
-  hay columna** donde guardarlos.
+- **`intencion_creada_en`** (T4, opcional por compatibilidad): cuándo se creó la intención
+  en el socket-server, en ISO 8601 (otra cosa → **400**). Dice de qué visita es el pago.
+- `modo` decide el tope (abajo). `id_transaccion_pasarela` se guarda en el excedente, si lo hay.
+
+**Un pago aprobado nunca se rechaza (T4, `socket-server/EVENTS.md` §8.4 y §8.7).** Wompi ya
+cobró: ya **no** hay 409 por exceder el saldo ni por mesa sin cuenta. Se aplica lo que se debía
+y lo que sobra queda en **`excedentes_pago_en_linea`** (script 44), en la **misma transacción
+SQL**, para que la Caja lo devuelva en efectivo (rutas más abajo). El tope de lo que se aplica:
+
+| Caso | Tope | `motivo_excedente` si sobra |
+|---|---|---|
+| La intención es de **otra visita**: la sesión vigente de la mesa empezó **después** de `intencion_creada_en` (lo compara la base, con la fila de la mesa bloqueada) | **0**: no cubre nada del grupo nuevo; todo es excedente | `otra_visita` |
+| La mesa no tiene saldo en la visita | **0**: todo es excedente | `sin_cuenta` |
+| `modo: "propio"` con `comensal` | el **saldo propio** de ese comensal (sus líneas vivas menos sus pagos, con el alias normalizado: «Ana», « ana » y «Aná» son la misma persona), nunca más que el de la mesa | `excede_saldo_comensal` |
+| `modo: "total"`, `"igual"` (o `propio` sin comensal) | el **saldo de la mesa** | `excede_saldo_mesa` |
+
+Sin `intencion_creada_en`, o con la mesa sin sesión abierta, la visita no se decide por ahí (un
+socket-server anterior sigue funcionando como antes, salvo que ya no recibe 409).
 - **El pago es de la mesa, no de un pedido.** Todo ocurre en una sola transacción SQL:
   se bloquea la fila de la mesa (`FOR UPDATE`), se reparte el monto entre sus pedidos
   no cancelados con saldo, **del más antiguo al más nuevo** (orden de la base, por
@@ -3732,30 +3749,56 @@ Body:
 201:
 
 ```json
-{ "ok": true, "duplicado": false, "saldo_restante_centavos": 6000000, "mesa_liberada": false }
+{ "ok": true, "duplicado": false, "saldo_restante_centavos": 6000000, "mesa_liberada": false,
+  "aplicado_centavos": 3000000, "excedente_centavos": 0, "motivo_excedente": null, "id_transaccion": 812 }
 ```
 
-- **200** con `"duplicado": true` si esa `referencia_externa` ya estaba registrada (un
-  reintento de la pasarela no vuelve a cobrar ni a avisar al socket-server). Si la
-  carrera la pierde el `INSERT` y choca con el índice único (`23505`), se revierte y se
-  responde igual como duplicado.
+- `aplicado_centavos + excedente_centavos = monto_centavos`. `motivo_excedente` es `null` si no
+  sobró nada. `id_transaccion` es la **primera** fila aplicada (la de la referencia tal cual), o
+  `null` si no se aplicó nada (todo fue excedente).
+- **200** con `"duplicado": true` si esa `referencia_externa` ya estaba registrada (en
+  `transacciones` **o** en `excedentes_pago_en_linea`): devuelve **el mismo resultado** del
+  primer registro, también cuando todo fue excedente, sin cobrar ni avisar otra vez. Dos
+  webhooks del mismo pago a la vez se ponen en fila en la mesa; si aun así chocara un índice
+  único (`23505`), se revierte y se responde como duplicado.
+- `mesa_liberada` y el aviso `/internal/mesa-liberada` (`motivo: "pagada"`), como siempre: solo
+  si lo aplicado cerró el último pedido abierto.
+- Los triggers siguen siendo la autoridad: cada fila aplica como mucho el saldo de su pedido y
+  `tr_validar_transaccion_financiera` lo vuelve a comprobar.
+
 Errores:
 
 | Status | Cuándo | Cuerpo |
 |---|---|---|
 | **404** | La mesa no existe (se comprueba con la fila bloqueada, antes de repartir nada) | `{ "error": "Mesa no encontrada" }` |
-| **409** | El pago **excede el saldo** de la mesa | `{ "error": "El pago excede el saldo de la mesa", "saldo_centavos": 2400000 }` |
-| **409** | La mesa **no tiene cuenta abierta** (ningún pedido no cancelado con saldo > 0) | `{ "error": "La mesa no tiene una cuenta abierta por pagar" }` |
-| **409** | Cualquier regla que rechace un trigger de la base | El mensaje del trigger, tal cual |
+| **409** | Una regla que rechace un trigger de la base (no debería pasar: el tope ya lo respeta) | El mensaje del trigger, tal cual |
 | **400** | El cuerpo no cumple el esquema | El primer problema que encontró zod |
 | **401** / **503** | Clave interna inválida / canal interno sin configurar | Ver el inicio de esta sección |
 
-A diferencia de la bitácora de intentos fallidos, **aquí sí se rechaza de verdad**:
-este endpoint mueve dinero, y registrar un pago a medias sería peor que devolver un
-error. El cuerpo exige `referencia_externa`, `id_transaccion_pasarela`, `pasarela`,
-`id_mesa`, `modo`, `monto_centavos` (entero > 0) y `moneda` **exactamente `"COP"`**;
-solo `comensal` admite `null` y solo `metodo_pago` tiene valor por omisión.
-Nada se degrada a NULL en silencio.
+El cuerpo exige `referencia_externa`, `id_transaccion_pasarela`, `pasarela`, `id_mesa`, `modo`,
+`monto_centavos` (entero > 0) y `moneda` **exactamente `"COP"`**; solo `comensal` e
+`intencion_creada_en` admiten faltar o `null`, y solo `metodo_pago` tiene valor por omisión.
+
+### Excedentes del pago en línea — la Caja (T4)
+
+**Roles:** `admin`, `cajero` (los mismos que las demás rutas de cobro). En `/api` y `/api/v1`.
+Es aparte de `pagos_por_devolver` (script 36, pagos anticipados de domicilio).
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/excedentes-pago-en-linea?estado=pendiente` | Los excedentes de ese estado (`pendiente` por omisión, o `devuelto`), del más viejo al más nuevo. Otro valor o un parámetro de más → **400** `consulta_invalida` |
+| PATCH | `/excedentes-pago-en-linea/:id/devuelto` | Lo marca devuelto en efectivo, con **quién** (el usuario del JWT, nunca del cuerpo) y **cuándo**. Ya marcado → **409** `ya_devuelto` (con cómo quedó); no existe → **404**; `:id` inválido → **400** `parametro_invalido`; el usuario del JWT ya no existe → **409** `autor_inexistente` |
+
+```json
+{ "estado": "pendiente", "excedentes": [ {
+  "id": 7, "id_mesa": 5, "comensal": "Ana", "referencia_externa": "SD-5-…", "id_transaccion": 812,
+  "monto_centavos": 3333300, "aplicado_centavos": 2000000, "excedente_centavos": 1333300,
+  "motivo": "excede_saldo_comensal", "estado": "pendiente", "devuelto_por": null,
+  "devuelto_en": null, "creado_en": "2026-11-14T20:15:00.000Z" } ] }
+```
+
+El PATCH es un `UPDATE` condicional (`... AND estado = 'pendiente'`): dos cajeros a la vez no lo
+marcan dos veces; el segundo recibe el 409.
 
 ### POST /transacciones/mesa — cobro de mesa en caja
 
@@ -3848,7 +3891,8 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
   mesa y los pedidos ya bloqueados, el mismo orden que la cancelación del personal, así que
   cancelar el plato de Ana y cobrarle «lo suyo» a la vez nunca dejan los dos. Un cobro **sin
   comensal** o a **«General»** sigue igual. El pago en línea (`/transacciones/internal`) no
-  cambia.
+  rechaza: con `modo: "propio"` aplica hasta el mismo saldo propio y el resto queda como
+  excedente (T4).
 
 **Respuestas:**
 
@@ -3882,8 +3926,8 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
 | **409** | `{ "error": "El pago excede lo que debe ese comensal", "motivo": "excede_saldo_comensal", "saldo": 12000 }` | Cobro con `comensal`: el monto supera el **saldo propio** de esa persona (`saldo` en pesos; 0 si no debe nada). No se escribe nada |
 | **409** | `{ "error", "motivo": "autor_inexistente" }` | El usuario del token ya no existe ([El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)). La transacción se deshace entera |
 
-`POST /transacciones/internal` (Wompi) responde los mismos casos **sin** `motivo` y en
-centavos; ese contrato no cambia.
+`POST /transacciones/internal` (Wompi) ya **no** responde estos 409: desde T4 un pago en
+línea aprobado nunca se rechaza y lo que sobra queda como excedente (ver su sección).
 
 **Avisos de tiempo real**, después del COMMIT y en este orden, los mismos que el cobro de caja
 por pedido (`POST /transacciones`):

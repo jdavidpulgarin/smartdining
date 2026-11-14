@@ -55,6 +55,14 @@ function fakeCobro(o = {}) {
     if (sql.includes('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE')) {
       return mesaExiste ? { rows: [{ id_mesa: ID_MESA }] } : { rows: [] };
     }
+    // T4: el pago en línea (registrarPagoInterno) bloquea la mesa con otra
+    // sentencia y busca lo registrado también en excedentes_pago_en_linea.
+    if (sql.includes('FROM mesas WHERE id_mesa = $1::int FOR UPDATE')) {
+      return mesaExiste ? { rows: [{ id_mesa: ID_MESA, otra_visita: false }] } : { rows: [] };
+    }
+    if (sql.includes('LEFT JOIN excedentes_pago_en_linea')) {
+      return { rows: [{ aplicado: '0', id_primera: null, excedente_centavos: null, motivo: null, id_del_excedente: null }] };
+    }
     if (sql.includes('SELECT 1 FROM transacciones WHERE referencia_externa')) {
       return yaRegistrada ? { rows: [{ '?column?': 1 }] } : { rows: [] };
     }
@@ -498,14 +506,15 @@ test('lo mio: la cuenta por comensal se lee DESPUES de bloquear la mesa y los pe
   }
 });
 
-test('lo mio: el pago en linea (registrarPagoInterno) no cambia: solo el saldo de la mesa', async () => {
+test("lo mio: el pago en linea SIN modo 'propio' sigue mirando solo el saldo de la mesa (el propio es de T4, con modo 'propio')", async () => {
   const transacciones = require('../src/services/transacciones.service');
   const db = fakeCobro({ pedidos: MESA_JARRISON, cuentaPorComensal: SIN_PLATOS_DE_ANA });
   try {
     const r = await transacciones.registrarPagoInterno({
-      referencia_externa: 'wompi-ref-1', id_mesa: ID_MESA, comensal: 'Ana', monto_centavos: 1200000,
+      referencia_externa: 'wompi-ref-1', id_mesa: ID_MESA, comensal: 'Ana', modo: 'total', monto_centavos: 1200000,
     });
     assert.strictEqual(r.duplicado, false);
+    assert.strictEqual(r.aplicado_centavos, 1200000);
     assert.strictEqual(db.buscar("'consumo'::text AS tipo"), undefined);
   } finally {
     db.restaurar();
