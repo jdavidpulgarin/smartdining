@@ -2,6 +2,10 @@ const { z } = require('zod');
 const transaccionesService = require('../services/transacciones.service');
 const { ESTADO_COBRADO } = transaccionesService;
 const socketNotifier = require('../services/socket.notifier');
+// T12: tras liberar la mesa por el cobro, mesa-actualizada 'liberada' al panel.
+const avisosMesa = require('../services/avisos-mesa');
+
+const MOTIVO_MESA_LIBERADA = socketNotifier.MOTIVOS_MESA_ACTUALIZADA.liberada;
 const { MOTIVO_PAGADA } = socketNotifier;
 const { esComensal } = require('../middleware/auth.middleware');
 const aliasComensal = require('../services/alias-comensal');
@@ -132,6 +136,7 @@ async function crear(req, res, next) {
     // línea; las pantallas distinguen las dos cosas.
     if (mesaLiberada) {
       avisos.push(() => socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA));
+      avisos.push(() => avisosMesa.avisarMesaActualizada(id_mesa, MOTIVO_MESA_LIBERADA));
     }
 
     socketNotifier.encadenarAvisos(avisos);
@@ -239,7 +244,10 @@ async function crearInterno(req, res, next) {
         estado: 'pagado',
       });
     }
-    if (r.mesa_liberada) socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA);
+    if (r.mesa_liberada) {
+      socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA);
+      avisosMesa.encolarMesaActualizada(id_mesa, MOTIVO_MESA_LIBERADA);
+    }
 
     return res.status(201).json({
       ok: true,
@@ -451,7 +459,10 @@ async function cobrarMesa(req, res, next) {
         estado: 'pagado',
       })),
     ];
-    if (r.mesa_liberada) avisos.push(() => socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA));
+    if (r.mesa_liberada) {
+      avisos.push(() => socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA));
+      avisos.push(() => avisosMesa.avisarMesaActualizada(id_mesa, MOTIVO_MESA_LIBERADA));
+    }
     socketNotifier.encadenarAvisos(avisos);
 
     if (r.mesa_liberada) aliasComensal.olvidarMesa(id_mesa);

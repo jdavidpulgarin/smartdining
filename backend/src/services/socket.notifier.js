@@ -548,6 +548,62 @@ async function notificarMesaLiberada(id_mesa, motivo) {
   return enviar('/internal/mesa-liberada', cuerpo);
 }
 
+/** Motivos de mesa-actualizada que manda el backend (EVENTS.md §5.7). */
+const MOTIVOS_MESA_ACTUALIZADA = Object.freeze({
+  abierta: 'abierta',
+  estado: 'estado',
+  creada: 'creada',
+  datos: 'datos',
+  liberada: 'liberada',
+  eliminada: 'eliminada',
+});
+
+/**
+ * Cuerpo de POST /internal/mesa-actualizada (T12, EVENTS.md §5.7) a partir de
+ * la fila de la mesa YA CONFIRMADA. Solo los campos del contrato, los mismos
+ * que GET /mesas: `token_qr` NUNCA viaja (de él solo sale `sesion_abierta`).
+ *
+ * Coherencia del contrato (si no, el socket-server responde 400 y no emite):
+ * 'liberada' con sesión abierta, o 'abierta' sin sesión, solo pueden pasar si
+ * alguien cambió la mesa entre el COMMIT y esta lectura. Entonces el aviso va
+ * SIN motivo: el panel recibe igual el estado actual, que es lo que importa.
+ *
+ * Con 'eliminada' la fila ya no existe: solo eventId, id_mesa y activa: false.
+ */
+function cuerpoMesaActualizada(mesa, motivo) {
+  if (motivo === MOTIVOS_MESA_ACTUALIZADA.eliminada) {
+    return { eventId: nuevoEventId(), id_mesa: mesa.id_mesa, activa: false, motivo };
+  }
+  const sesionAbierta = mesa.sesion_abierta !== undefined ? Boolean(mesa.sesion_abierta) : Boolean(mesa.token_qr);
+  const cuerpo = {
+    eventId: nuevoEventId(),
+    id_mesa: mesa.id_mesa,
+    numero: mesa.numero,
+    capacidad: mesa.capacidad,
+    estado: mesa.estado,
+    ubicacion: mesa.ubicacion,
+    activa: mesa.activa ?? true,
+    sesion_abierta: sesionAbierta,
+  };
+  const incoherente =
+    (motivo === MOTIVOS_MESA_ACTUALIZADA.liberada && sesionAbierta)
+    || (motivo === MOTIVOS_MESA_ACTUALIZADA.abierta && !sesionAbierta);
+  if (motivo && !incoherente) cuerpo.motivo = motivo;
+  return cuerpo;
+}
+
+/**
+ * POST /internal/mesa-actualizada — el panel ve en vivo que una mesa cambió.
+ * Con reintento ante 500/502/503 ERROR_INTERNO y el MISMO eventId (§5.7); nunca
+ * ante NO_CONFIGURADO ni un 4xx. Nunca lanza.
+ *
+ * @param {object} mesa  la fila confirmada (con token_qr o con sesion_abierta)
+ * @param {string} motivo  uno de MOTIVOS_MESA_ACTUALIZADA
+ */
+async function notificarMesaActualizada(mesa, motivo) {
+  return enviarConReintento('/internal/mesa-actualizada', cuerpoMesaActualizada(mesa, motivo));
+}
+
 /**
  * POST /internal/ingrediente-disponibilidad (D-05) — un ingrediente se agotó
  * (`false`) o volvió (`true`). El socket-server lo difunde a TODOS los sockets
@@ -931,6 +987,9 @@ module.exports = {
   notificarItemCancelado,
   notificarPagoConfirmado,
   notificarMesaLiberada,
+  notificarMesaActualizada,
+  cuerpoMesaActualizada,
+  MOTIVOS_MESA_ACTUALIZADA,
   notificarIngredienteDisponibilidad,
   notificarPlatoDisponibilidad,
   notificarMesaComensal,
