@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('node:crypto');
 const { claveAlias } = require('../src/alias');
-const { calcularMonto, personasPorPagar } = require('../src/cuenta');
+const { calcularMonto } = require('../src/cuenta');
 const { crearEstadoMesasMemoria } = require('../src/sala');
 const { crearEstadoMesasRedis } = require('../src/almacen/mesas-redis');
 const { crearRedisFalso } = require('./redis-falso');
@@ -51,12 +51,6 @@ test('«lo mío»: si la cuenta trae a la misma persona en dos filas, se suman; 
   // Nunca más que el saldo de la mesa.
   const poca = cuenta(5, 9_000_000, 2_000_000, { Ana: 1_500_000, ana: 1_500_000 });
   assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: poca, comensal: 'ANA', personas: 1 }), { montoCentavos: 2_000_000 });
-});
-
-test('personasPorPagar: «Ana» presente y «ana» en pagaron son la misma persona', () => {
-  assert.strictEqual(personasPorPagar({ comensales: ['Ana', 'Beto'], pagaron: ['ana'], comensal: 'Beto' }), 1);
-  assert.strictEqual(personasPorPagar({ comensales: ['Ána', 'Beto'], pagaron: ['ANA'], comensal: 'beto' }), 1);
-  assert.strictEqual(personasPorPagar({ comensales: ['Ana', 'Beto'], pagaron: [], comensal: ' ana ' }), 2, 'quien paga no cuenta dos veces');
 });
 
 for (const [nombre, crear] of [

@@ -32,7 +32,7 @@ async function escenario(t, { api = { [ID_TX]: txApi() }, apiCaida = false, ruta
   t.after(() => s.cerrar());
   // Intención pendiente de Ana en la mesa 5, como la deja POST /pagos/intencion.
   await s.almacenPagos.guardarIntencion(REF, {
-    id_mesa: 5, comensal: 'Ana', modo: 'igual', monto_centavos: MONTO, estado: 'pendiente', creada_en: new Date().toISOString(), expira_en: new Date(Date.now() + 1800e3).toISOString(),
+    id_mesa: 5, comensal: 'Ana', modo: 'total', monto_centavos: MONTO, estado: 'pendiente', creada_en: new Date().toISOString(), expira_en: new Date(Date.now() + 1800e3).toISOString(),
   }, 1800);
   await s.almacenPagos.reservarPendiente(5, 'Ana', REF, 1800);
 
@@ -76,7 +76,7 @@ test('pago aprobado y coherente: se registra en el backend y SOLO después se an
 
   const [registro] = llamadasA(backend, '/api/transacciones/internal');
   assert.deepStrictEqual(registro.cuerpo, {
-    referencia_externa: REF, id_transaccion_pasarela: ID_TX, pasarela: 'wompi', id_mesa: 5, comensal: 'Ana', modo: 'igual', monto_centavos: MONTO, moneda: 'COP', metodo_pago: 'online', intencion_creada_en: registro.cuerpo.intencion_creada_en,
+    referencia_externa: REF, id_transaccion_pasarela: ID_TX, pasarela: 'wompi', id_mesa: 5, comensal: 'Ana', modo: 'total', monto_centavos: MONTO, moneda: 'COP', metodo_pago: 'online', intencion_creada_en: registro.cuerpo.intencion_creada_en,
   });
   assert.ok(!Number.isNaN(Date.parse(registro.cuerpo.intencion_creada_en)), 'manda la creación de la intención');
   // Reverificación con la llave PRIVADA.
