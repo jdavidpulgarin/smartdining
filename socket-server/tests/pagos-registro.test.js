@@ -76,8 +76,9 @@ test('pago aprobado y coherente: se registra en el backend y SOLO después se an
 
   const [registro] = llamadasA(backend, '/api/transacciones/internal');
   assert.deepStrictEqual(registro.cuerpo, {
-    referencia_externa: REF, id_transaccion_pasarela: ID_TX, pasarela: 'wompi', id_mesa: 5, comensal: 'Ana', modo: 'igual', monto_centavos: MONTO, moneda: 'COP', metodo_pago: 'online',
+    referencia_externa: REF, id_transaccion_pasarela: ID_TX, pasarela: 'wompi', id_mesa: 5, comensal: 'Ana', modo: 'igual', monto_centavos: MONTO, moneda: 'COP', metodo_pago: 'online', intencion_creada_en: registro.cuerpo.intencion_creada_en,
   });
+  assert.ok(!Number.isNaN(Date.parse(registro.cuerpo.intencion_creada_en)), 'manda la creación de la intención');
   // Reverificación con la llave PRIVADA.
   assert.strictEqual(fetch.llamadas[0].opts.headers.Authorization, `Bearer ${WOMPI_ENV.WOMPI_PRIVATE_KEY}`);
   assert.strictEqual((await s.almacenPagos.obtener(REF)).estado, 'pagada');
@@ -113,7 +114,8 @@ test('monto distinto al esperado: no se registra; intento fallido y pago:alerta 
   const [fallido] = llamadasA(backend, '/api/pagos/intentos-fallidos/interno');
   assert.deepStrictEqual([fallido.cuerpo.motivo, fallido.cuerpo.monto_centavos, fallido.cuerpo.monto_esperado_centavos], ['monto_distinto', 100, MONTO]);
   assert.strictEqual(await nadaMesa, null);
-  assert.strictEqual((await s.almacenPagos.obtener(REF)).estado, 'pendiente');
+  // Wompi lo cobró (la API lo confirma): no se queda en pendiente, lo revisa el personal.
+  assert.strictEqual((await s.almacenPagos.obtener(REF)).estado, 'en_revision');
 });
 
 test('el evento dice APPROVED pero la API no: gana la API (alerta, sin registro)', async (t) => {
