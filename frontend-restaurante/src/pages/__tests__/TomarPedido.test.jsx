@@ -131,6 +131,21 @@ describe('Paso 1: Elegir o registrar comensal al tomar pedido (J-16)', () => {
     })
   })
 
+  it('T2: el registro sin celular ya no habla de «dividir igual» (no existe): dice que se le cobra lo suyo', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation(async () => ({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ id_mesa: 5, total_mesa: 0, comensales: [] }),
+    }))
+
+    renderTomarPedido('mesero', 5)
+
+    const titulo = await screen.findByText('Registrar a alguien sin celular')
+    const tarjeta = titulo.closest('div').parentElement
+    expect(tarjeta).toHaveTextContent('se le pueda cobrar solo lo suyo')
+    expect(tarjeta.textContent).not.toMatch(/dividir|partes iguales/i)
+  })
+
   it('registra a alguien sin celular y usa el alias normalizado devuelto por el servidor (201)', async () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url, opts) => {
       if (url.includes('/api/mesas/5/cuenta')) {

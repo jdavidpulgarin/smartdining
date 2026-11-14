@@ -46,6 +46,7 @@ const MARCA_MESA = 'PRUEBA cobro-de-mesa';
 let sonda = null;
 let hayBase = false;
 let catalogo = null; // el de plato-prueba.js, con su limpiar()
+let catalogoPropio = null; // plato a 12.000 para «pagar lo mío»
 let plato = null; // { id_plato, precio, precio_centavos }
 let usuarioReal = null;
 let siguienteMesa = MESA_BASE;
@@ -108,6 +109,8 @@ test.before(async () => {
   // `after` y, con otras suites a la vez, el CI caía por stock insuficiente.
   catalogo = await crearCatalogoPrueba(sonda, 'transacciones-mesa', { precio: 24000 });
   plato = catalogo.plato;
+  // «Pagar lo mío»: un plato propio a 12.000 (lo de Ana en el caso de Jarrison).
+  catalogoPropio = await crearCatalogoPrueba(sonda, 'transacciones-mesa-propio', { precio: 12000 });
   hayBase = true;
 });
 
@@ -115,14 +118,18 @@ test.after(async () => {
   try {
     if (hayBase) await limpiar();
     if (catalogo) await catalogo.limpiar();
+    if (catalogoPropio) await catalogoPropio.limpiar();
   } finally {
     if (sonda) await sonda.end();
     await pool.end();
   }
 });
 
-/** Una mesa propia con `n` pedidos de un plato, llevados al estado dado. */
-async function mesaConPedidos(n, estado = 'entregado') {
+/**
+ * Una mesa propia con `n` pedidos de un plato, llevados al estado dado.
+ * `comensales[i]` es el comensal de la línea del pedido i (por omisión, ninguno: «General»).
+ */
+async function mesaConPedidos(n, estado = 'entregado', comensales = []) {
   const numero = siguienteMesa++;
   const m = await sonda.query(
     `INSERT INTO mesas (numero, capacidad, ubicacion, estado) VALUES ($1, 4, $2, 'ocupada') RETURNING id_mesa`,
@@ -132,7 +139,9 @@ async function mesaConPedidos(n, estado = 'entregado') {
   const pedidos = [];
   for (let i = 0; i < n; i++) {
     const ped = await pedidosService.crearConDetalles({
-      id_mesa: idMesa, id_usuario: usuarioReal.id_usuario, items: [{ id_plato: plato.id_plato, cantidad: 1 }],
+      id_mesa: idMesa,
+      id_usuario: usuarioReal.id_usuario,
+      items: [{ id_plato: plato.id_plato, cantidad: 1, ...(comensales[i] ? { comensal: comensales[i] } : {}) }],
     });
     const camino = { recibido: [], en_preparacion: ['en_preparacion'], entregado: ['en_preparacion', 'listo', 'entregado'] }[estado];
     for (const e of camino) await pedidosService.actualizarEstado(ped.id_pedido, e, null, usuarioReal.id_usuario);
@@ -174,7 +183,8 @@ async function estadoMesa(idMesa) {
 test('a. 3 pedidos entregados: un comensal paga el primero y luego "toda la mesa" el resto', async (t) => {
   if (!hayBase) return t.skip('sin base de datos');
   const P = plato.precio_centavos;
-  const { idMesa, pedidos } = await mesaConPedidos(3);
+  // El primer pedido es de Ana: «lo mío» no puede superar lo que ella debe.
+  const { idMesa, pedidos } = await mesaConPedidos(3, 'entregado', ['Ana']);
 
   const r1 = await cobro(idMesa, P, { comensal: 'Ana' });
   assert.strictEqual(r1.duplicado, false);
@@ -399,4 +409,130 @@ test('el pago en linea con una referencia de otra mesa sigue siendo duplicado (c
   assert.deepStrictEqual(Object.keys(enB).sort(), ['duplicado', 'saldo_restante_centavos'], 'las mismas claves de siempre');
   assert.strictEqual(enB.duplicado, true);
   assert.deepStrictEqual(await cobradoEnMesa(b.idMesa), { centavos: 0, filas: 0 });
+});
+
+// ---------------------------------------------------------------------------
+// «Pagar lo mío»: el cobro a nombre de un comensal no supera SU saldo
+// ---------------------------------------------------------------------------
+
+/**
+ * Mesa con dos pedidos en 'recibido' (se pueden cancelar y cobrar): el de Ana
+ * (12.000) y el de Beto (12.000). Devuelve también la línea de Ana.
+ */
+async function mesaDeAnaYBeto() {
+  const numero = siguienteMesa++;
+  const m = await sonda.query(
+    `INSERT INTO mesas (numero, capacidad, ubicacion, estado, sesion_iniciada_en)
+     VALUES ($1::int, 4, $2::text, 'ocupada', now()) RETURNING id_mesa`,
+    [numero, MARCA_MESA]
+  );
+  const idMesa = m.rows[0].id_mesa;
+  const p = catalogoPropio.plato.id_plato;
+  const deAna = await pedidosService.crearConDetalles({
+    id_mesa: idMesa, id_usuario: usuarioReal.id_usuario, items: [{ id_plato: p, cantidad: 1, comensal: 'Ana' }],
+  });
+  const deBeto = await pedidosService.crearConDetalles({
+    id_mesa: idMesa, id_usuario: usuarioReal.id_usuario, items: [{ id_plato: p, cantidad: 1, comensal: 'Beto' }],
+  });
+  const { rows } = await sonda.query('SELECT id_detalle FROM detalles_pedido WHERE id_pedido = $1::int', [deAna.id_pedido]);
+  return { idMesa, pedidoAna: deAna.id_pedido, pedidoBeto: deBeto.id_pedido, lineaAna: rows[0].id_detalle };
+}
+
+/** Pagos a nombre de Ana en la mesa, y si su línea sigue viva. */
+async function estadoDeAna(idMesa, lineaAna) {
+  const t = await sonda.query(
+    `SELECT count(*)::int AS n FROM transacciones t JOIN pedidos p ON p.id_pedido = t.id_pedido
+      WHERE p.id_mesa = $1::int AND t.comensal = 'Ana'`,
+    [idMesa]
+  );
+  const l = await sonda.query('SELECT estado_item FROM detalles_pedido WHERE id_detalle = $1::int', [lineaAna]);
+  return { pagosDeAna: t.rows[0].n, lineaViva: l.rows[0].estado_item !== 'cancelado' };
+}
+
+test('lo mio: el mesero le cancela el plato a Ana y la caja le cobra "lo suyo" -> 409 excede_saldo_comensal (saldo 0); nada se escribe', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa, pedidoAna, lineaAna } = await mesaDeAnaYBeto();
+  const c = await pedidosService.cancelarItemPersonal(pedidoAna, lineaAna, { idUsuario: usuarioReal.id_usuario, motivo: 'prueba' });
+  assert.ok(c.pedido, JSON.stringify(c));
+
+  const antes = await cobradoEnMesa(idMesa);
+  const r = await cobro(idMesa, 1200000, { comensal: 'Ana' });
+  assert.deepStrictEqual(r, { excedeComensal: true, saldo_centavos: 0 });
+  assert.deepStrictEqual(await cobradoEnMesa(idMesa), antes, 'ni una transacción');
+  assert.strictEqual(await saldoMesa(idMesa), 1200000, 'la mesa sigue debiendo lo de Beto');
+});
+
+test('lo mio: Ana debe 12.000: 15.000 -> 409 con su saldo; 12.000 -> cobra; uno más -> 409 con saldo 0', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa } = await mesaDeAnaYBeto();
+
+  assert.deepStrictEqual(await cobro(idMesa, 1500000, { comensal: 'Ana' }), { excedeComensal: true, saldo_centavos: 1200000 });
+  assert.strictEqual((await cobradoEnMesa(idMesa)).filas, 0);
+
+  // Escrito distinto: es la misma persona (clave del alias, como en T4).
+  const ok = await cobro(idMesa, 1200000, { comensal: ' ana ' });
+  assert.strictEqual(ok.duplicado, false, JSON.stringify(ok));
+  assert.strictEqual(ok.saldo_restante_centavos, 1200000, 'queda lo de Beto');
+
+  assert.deepStrictEqual(await cobro(idMesa, 100, { comensal: 'Ana' }), { excedeComensal: true, saldo_centavos: 0 });
+});
+
+test('lo mio: un cobro sin comensal o a «General» sigue igual (solo el saldo de la mesa)', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa } = await mesaDeAnaYBeto();
+  // Más de lo que debe cualquiera de los dos, pero no más que la mesa.
+  const general = await cobro(idMesa, 1500000, { comensal: 'General' });
+  assert.strictEqual(general.duplicado, false, JSON.stringify(general));
+  const mesa = await cobro(idMesa, 900000);
+  assert.strictEqual(mesa.duplicado, false, JSON.stringify(mesa));
+  assert.strictEqual(mesa.saldo_restante_centavos, 0);
+  // Y sigue el tope de la mesa: nada más que cobrar.
+  assert.ok((await cobro(idMesa, 100)).sinCuenta);
+});
+
+test('lo mio, carrera: la cancelación del plato de Ana está en curso; el cobro de Ana espera a la mesa y después da 409 (nunca los dos)', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa, pedidoAna, lineaAna } = await mesaDeAnaYBeto();
+
+  // Lo que hace cancelarItem del personal, a medias: la MESA primero, el
+  // pedido y la línea ya cancelada, SIN confirmar.
+  const cancelacion = await sonda.connect();
+  let confirmada = false;
+  try {
+    await cancelacion.query('BEGIN');
+    await cancelacion.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1::int FOR UPDATE', [idMesa]);
+    await cancelacion.query('SELECT id_pedido FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [pedidoAna]);
+    await cancelacion.query("UPDATE detalles_pedido SET estado_item = 'cancelado' WHERE id_detalle = $1::int", [lineaAna]);
+
+    let respondio = false;
+    const pago = cobro(idMesa, 1200000, { comensal: 'Ana' }).then((r) => { respondio = true; return r; });
+    await new Promise((listo) => setTimeout(listo, 500));
+    assert.strictEqual(respondio, false, 'el cobro espera en la fila de la mesa');
+
+    await cancelacion.query('COMMIT');
+    confirmada = true;
+    assert.deepStrictEqual(await pago, { excedeComensal: true, saldo_centavos: 0 });
+  } finally {
+    if (!confirmada) await cancelacion.query('ROLLBACK').catch(() => {});
+    cancelacion.release();
+  }
+  assert.deepStrictEqual(await estadoDeAna(idMesa, lineaAna), { pagosDeAna: 0, lineaViva: false });
+});
+
+test('lo mio, carrera: cancelar el plato de Ana y cobrar "lo suyo" A LA VEZ -> gana uno, el otro 409, nunca los dos', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const { idMesa, pedidoAna, lineaAna } = await mesaDeAnaYBeto();
+
+  const [cancelar, cobrar] = await Promise.all([
+    pedidosService.cancelarItemPersonal(pedidoAna, lineaAna, { idUsuario: usuarioReal.id_usuario, motivo: 'carrera' }),
+    cobro(idMesa, 1200000, { comensal: 'Ana' }),
+  ]);
+  const cancelo = Boolean(cancelar.pedido);
+  const cobro_ = cobrar.duplicado === false;
+  assert.ok(cancelo !== cobro_, `exactamente uno gana: cancelar=${JSON.stringify(cancelar)} cobrar=${JSON.stringify(cobrar)}`);
+  if (cancelo) assert.deepStrictEqual(cobrar, { excedeComensal: true, saldo_centavos: 0 });
+  else assert.strictEqual(cancelar.conflicto, 'pago_registrado');
+
+  const ana = await estadoDeAna(idMesa, lineaAna);
+  assert.deepStrictEqual(ana, cancelo ? { pagosDeAna: 0, lineaViva: false } : { pagosDeAna: 1, lineaViva: true });
 });
