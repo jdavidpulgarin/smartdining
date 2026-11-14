@@ -2232,7 +2232,9 @@ Body:
 - `subtotal` y `total` los calculan los triggers; el backend relee el pedido antes de
   responder, así que el `total` de la respuesta es el que dejó la base.
 - `codigo_pedido` lo genera el backend (formato `PED-AAMMDD-XXXXX`, 16 caracteres, que
-  es el largo de la columna) y es único.
+  es el largo de la columna) y es único. `AAMMDD` es el **día de Bogotá** (`America/Bogota`),
+  sin depender de la zona del servidor: un pedido de las 23:30 del 14 sale `PED-261114-…`
+  aunque en UTC ya sea el 15.
 - Cada ítem nace con `estado_item = 'pendiente'` (DEFAULT de la columna).
 - `precio_aplicado` de cada ingrediente **lo fija el trigger**
   `tr_validar_detalle_ingrediente`: solo la porción `extra` cobra
