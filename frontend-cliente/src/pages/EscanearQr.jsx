@@ -49,7 +49,7 @@ function EscanearQr() {
                 }
                 scannerRef.current = null;
               }
-              navigate(validacion.ruta);
+              window.location.replace(validacion.ruta);
             } else {
               setMensajeInvalido('Este QR no es de SmartDining');
               if (errorTimeoutRef.current) {
