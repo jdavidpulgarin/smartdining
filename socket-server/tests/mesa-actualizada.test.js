@@ -54,6 +54,7 @@ for (const almacen of Object.keys(ALMACENES)) {
       { motivo: 'mesero', id_mesero: null },
       { activa: true, motivo: 'abierta' },
       { motivo: 'creada' },
+      { motivo: 'liberada', estado: 'disponible' },
       { motivo: 'datos', estado: 'mantenimiento' },
     ]) {
       const llega = esperar(e.admin, EVENTO, 1000);

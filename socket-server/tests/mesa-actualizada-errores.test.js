@@ -18,7 +18,7 @@ const INVALIDOS = [
   ['estado', [undefined, null, '', 'libre', 'OCUPADA', 1]],
   ['ubicacion', [undefined, null, '', '   ', 'x'.repeat(51), 7]],
   ['activa', [null, 'true', 1, 0]],
-  ['motivo', [null, '', 'otro', 'ABIERTA', 3]],
+  ['motivo', [null, '', 'otro', 'ABIERTA', 'LIBERADA', 'pagada', 3]],
   ['id_mesero', [0, -1, 1.5, '9', false]],
 ];
 

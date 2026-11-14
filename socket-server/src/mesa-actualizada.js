@@ -12,9 +12,10 @@ const MAX_UBICACION = 50;
 const ESTADOS_MESA = ['disponible', 'ocupada', 'reservada', 'mantenimiento'];
 
 // Qué cambió (opcional, solo informativo para el panel): la mesa se abrió con
-// su QR, cambió de estado, se creó, se editaron sus datos o se le asignó
-// mesero (esto último aún no existe en el backend).
-const MOTIVOS = ['abierta', 'estado', 'creada', 'datos', 'mesero'];
+// su QR, cambió de estado, se creó, se editaron sus datos, quedó libre (a mano
+// o tras el cobro) o se le asignó mesero (esto último aún no existe en el
+// backend).
+const MOTIVOS = ['abierta', 'estado', 'creada', 'datos', 'liberada', 'mesero'];
 
 const esId = (v) => Number.isSafeInteger(v) && v > 0 && v <= MAX_INT_PG;
 // Caracteres (puntos de código), como VARCHAR en PostgreSQL.
@@ -61,7 +62,7 @@ function armarEvento(c) {
 
 /**
  * POST /internal/mesa-actualizada (EVENTS.md §5.7) — cambió una mesa: se
- * abrió, cambió de estado, se creó o se editaron sus datos. Lo llama el
+ * abrió, cambió de estado, se creó, se editaron sus datos o quedó libre. Lo llama el
  * backend después del COMMIT, para que el panel vea las mesas en vivo.
  *
  * Emite mesa:actualizada SOLO a room:admin (admin, mesero, cajero). Nunca a
