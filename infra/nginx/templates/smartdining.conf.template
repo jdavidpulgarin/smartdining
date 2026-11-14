@@ -256,6 +256,23 @@ server {
     location = /imagenes {
         return 404;
     }
+    # Entrada del comensal por el QR: el TOKEN va en la ruta
+    # (/api/mesas/qr/<token>/sesion, también /api/v1/…). El access log ya lo
+    # enmascara (sd_sin_token, T13), pero si el backend falla (502/504) nginx
+    # escribe en el error_log, con nivel [error], la petición entera
+    # (`request: "POST /api/mesas/qr/<token>/sesion …"`) y el upstream con la
+    # misma ruta. error_log no admite log_format, así que solo en ESTA ruta se
+    # sube el nivel a crit: los [error] del upstream no se escriben. El fallo
+    # queda igual en el access log (status 502/504, con el token como ***) y en
+    # los logs del backend. Regex anclada: solo esa ruta exacta. Misma
+    # configuración de proxy que location /.
+    location ~ ^/api(/v1)?/mesas/qr/[^/]+/sesion$ {
+        error_log /var/log/nginx/error.log crit;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_set_header Connection "";
+        proxy_read_timeout 30s;
+        proxy_pass http://backend;
+    }
     location / {
         include /etc/nginx/snippets/proxy.conf;
         proxy_set_header Connection "";
