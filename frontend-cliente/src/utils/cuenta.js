@@ -230,6 +230,62 @@ export function aplicarPagoConfirmado(cuenta, evento = {}) {
 }
 
 /**
+ * Extrae y formatea el aviso de excedente de un pago confirmado si aplica (EVENTS.md §8.7).
+ * - Si excedente > 0 (usa excedente_centavos si viene, si no excedente):
+ *   "Pagaste $X de más; la Caja te lo devuelve en efectivo."
+ * - Si aplicado = 0 (la mesa ya estaba cerrada):
+ *   el mismo aviso con el monto completo pagado.
+ *
+ * @param {object} evento - Evento payment:confirmed
+ * @param {function} [formato=formatoPesos]
+ * @returns {string|null}
+ */
+export function avisoExcedentePago(evento = {}, formato = formatoPesos) {
+  if (!evento || typeof evento !== 'object') return null;
+
+  const monto = evento.monto != null
+    ? Number(evento.monto)
+    : (evento.monto_centavos != null ? Number(evento.monto_centavos) / 100 : 0);
+
+  let tieneAplicado = false;
+  let aplicado = null;
+  if (evento.aplicado_centavos !== undefined && evento.aplicado_centavos !== null) {
+    aplicado = Number(evento.aplicado_centavos) / 100;
+    tieneAplicado = true;
+  } else if (evento.aplicado !== undefined && evento.aplicado !== null) {
+    aplicado = Number(evento.aplicado);
+    tieneAplicado = true;
+  }
+
+  let tieneExcedente = false;
+  let excedente = null;
+  if (evento.excedente_centavos !== undefined && evento.excedente_centavos !== null) {
+    excedente = Number(evento.excedente_centavos) / 100;
+    tieneExcedente = true;
+  } else if (evento.excedente !== undefined && evento.excedente !== null) {
+    excedente = Number(evento.excedente);
+    tieneExcedente = true;
+  }
+
+  if (!tieneAplicado && !tieneExcedente) {
+    return null;
+  }
+
+  // Si aplicado = 0 (la mesa ya estaba cerrada): monto completo pagado
+  if (tieneAplicado && aplicado === 0) {
+    const montoExcedente = excedente !== null && excedente > 0 ? excedente : monto;
+    return `Pagaste ${formato(montoExcedente)} de más; la Caja te lo devuelve en efectivo.`;
+  }
+
+  // Si excedente > 0
+  if (tieneExcedente && excedente > 0) {
+    return `Pagaste ${formato(excedente)} de más; la Caja te lo devuelve en efectivo.`;
+  }
+
+  return null;
+}
+
+/**
  * Genera el texto para la notificación toast global ante un pago confirmado.
  *
  * @param {object} evento - Evento payment:confirmed
@@ -250,7 +306,8 @@ export function textoPagoConfirmado(evento = {}, miAlias = '') {
   }
 
   if (aliasNormalizado && comensalEvento.toLowerCase() === aliasNormalizado) {
-    return `Pago confirmado: ${montoTexto}`;
+    const aviso = avisoExcedentePago(evento);
+    return aviso ? `Pago confirmado: ${montoTexto}. ${aviso}` : `Pago confirmado: ${montoTexto}`;
   }
 
   return `${comensalEvento} pagó ${montoTexto}`;
@@ -261,11 +318,19 @@ export function textoPagoConfirmado(evento = {}, miAlias = '') {
  *
  * @param {number|string} [status] - Código de estado HTTP
  * @param {string} [codigo] - Código simbólico de error
- * @returns {string} Mensaje de error amigable
+ * @returns {string|{ tipo: string, mensaje: string }} Mensaje de error amigable o descriptor de error
  */
 export function traducirErrorPago(status, codigo) {
   const s = Number(status);
   const cod = String(codigo || '').toUpperCase();
+
+  // Revisar el código ANTES que el status (PAGO_EN_REVISION §8.7)
+  if (cod === 'PAGO_EN_REVISION') {
+    return {
+      tipo: 'en_revision',
+      mensaje: 'Tu pago anterior está en revisión. No vuelvas a pagar; pregúntale al mesero.',
+    };
+  }
 
   if (s === 409 || cod === 'SIN_SALDO') {
     return 'No hay saldo pendiente para pagar';
@@ -655,12 +720,14 @@ export function mensajePagoConfirmado({ comensal, yo, saldoRestante } = {}) {
  * @param {function} [opciones.formato]
  * @returns {{ esPropio: boolean, mensaje: string, comprobante: string|null }}
  */
-export function textoDetalleConfirmacion({ tipo, monto = 0, formato = formatoPesos } = {}) {
+export function textoDetalleConfirmacion({ tipo, monto = 0, formato = formatoPesos, evento = null } = {}) {
+  const aviso = (tipo === 'propio' && evento) ? avisoExcedentePago(evento, formato) : null;
   if (tipo === 'propio') {
     return {
       esPropio: true,
       mensaje: `Pagaste ${formato(monto)}.`,
       comprobante: 'Te llegará el comprobante de Wompi.',
+      ...(aviso ? { avisoExcedente: aviso } : {}),
     };
   }
 
@@ -996,6 +1063,7 @@ export default {
   montosPorModo,
   aplicarPagoConfirmado,
   textoPagoConfirmado,
+  avisoExcedentePago,
   traducirErrorPago,
   ESTADO_CUENTA_INICIAL,
   ESTADO_CUENTA_ENVIANDO,

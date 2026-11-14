@@ -40,6 +40,15 @@ export async function crearIntencion(
     if (simPago !== 'real') {
       await new Promise((resolve) => setTimeout(resolve, 600));
 
+      if (simPago === 'PAGO_EN_REVISION' || simPago === 'en_revision') {
+        const traduccion = traducirErrorPago(409, 'PAGO_EN_REVISION');
+        throw new ErrorApi({
+          status: 409,
+          codigo: 'PAGO_EN_REVISION',
+          tipo: traduccion.tipo,
+          mensaje: traduccion.mensaje,
+        });
+      }
       if (simPago === '409') {
         throw new ErrorApi({
           status: 409,
@@ -168,10 +177,16 @@ export async function crearIntencion(
   if (!res.ok) {
     const status = res.status;
     const codigo = data?.codigo || data?.error || 'ERROR_PAGO';
-    const mensaje = traducirErrorPago(status, codigo) || data?.mensaje || 'Error al iniciar el pago';
+    const traduccion = traducirErrorPago(status, codigo);
+    const mensaje =
+      (typeof traduccion === 'object' ? traduccion?.mensaje : traduccion) ||
+      data?.mensaje ||
+      'Error al iniciar el pago';
+    const tipo = typeof traduccion === 'object' ? traduccion?.tipo : undefined;
     throw new ErrorApi({
       status,
       codigo,
+      tipo,
       mensaje,
     });
   }
