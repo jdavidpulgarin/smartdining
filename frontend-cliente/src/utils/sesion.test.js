@@ -203,6 +203,35 @@ describe('decidirDestinoInicio', () => {
     expect(res).toEqual({ accion: 'redirigir', ruta: '/seguimiento' });
   });
 
+  it('sesión que ya existía al abrir + sin token → redirige', () => {
+    const res = decidirDestinoInicio({
+      tokenUrl: null,
+      sesion: sesionVigenteMesa5,
+      tienePedidosActivos: false,
+      recienUnido: false,
+    });
+    expect(res).toEqual({ accion: 'redirigir', ruta: '/menu' });
+  });
+
+  it('sesión recién creada (recienUnido) → NO redirige (muestra bienvenida)', () => {
+    const res = decidirDestinoInicio({
+      tokenUrl: null,
+      sesion: sesionVigenteMesa5,
+      tienePedidosActivos: false,
+      recienUnido: true,
+    });
+    expect(res).toEqual({ accion: 'bienvenida' });
+  });
+
+  it('sin sesión → pantalla normal', () => {
+    const res = decidirDestinoInicio({
+      tokenUrl: null,
+      sesion: null,
+      recienUnido: false,
+    });
+    expect(res).toEqual({ accion: 'sin_sesion' });
+  });
+
   it('(sin token + sesión vigente sin pedidos activos) -> redirige a /menu', () => {
     const res = decidirDestinoInicio({
       tokenUrl: '',

@@ -185,14 +185,21 @@ export function tienePedidosActivosGuardados(comensal, idMesa, token) {
  * @param {string|null} [params.tokenUrl] - Token QR de la URL
  * @param {object|null} [params.sesion] - Sesión vigente almacenada ({ token, idMesa, numeroMesa, comensal })
  * @param {boolean} [params.tienePedidosActivos=false] - Si el comensal tiene pedidos activos
+ * @param {boolean} [params.recienUnido=false] - Si la sesión acaba de ser creada en esta vista al unirse
  * @returns {{ accion: string, ruta?: string, mesaQr?: number|null }}
  */
 export function decidirDestinoInicio({
   tokenUrl = null,
   sesion = null,
   tienePedidosActivos = false,
+  recienUnido = false,
 } = {}) {
   const tieneSesionValida = Boolean(sesion && sesion.token && sesion.idMesa);
+
+  if (recienUnido) {
+    return { accion: 'bienvenida' };
+  }
+
   const tokenLimpio =
     typeof tokenUrl === 'string' && tokenUrl.trim() ? tokenUrl.trim() : null;
 

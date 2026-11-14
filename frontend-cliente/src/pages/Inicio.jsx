@@ -59,14 +59,17 @@ function Inicio() {
     );
   }, [sesion]);
 
+  const [sesionExistiaAlMontar] = useState(() => Boolean(sesion?.token && sesion?.idMesa));
+
   const destino = useMemo(
     () =>
       decidirDestinoInicio({
         tokenUrl,
         sesion,
         tienePedidosActivos: tienePedidos,
+        recienUnido: Boolean(recienUnido || !sesionExistiaAlMontar),
       }),
-    [tokenUrl, sesion, tienePedidos]
+    [tokenUrl, sesion, tienePedidos, recienUnido, sesionExistiaAlMontar]
   );
 
   useEffect(() => {
