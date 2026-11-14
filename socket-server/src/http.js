@@ -100,9 +100,20 @@ function buscarHandler(rutas, metodo, ruta) {
  * Cualquier ErrorHttp lanzado se traduce a su respuesta; lo demás es un 500
  * genérico (el detalle solo va al log, no al cliente).
  */
+/** Encabezado con la instancia del socket-server en toda respuesta de /internal/* (T5, EVENTS.md §6.5). */
+const ENCABEZADO_INSTANCIA = 'X-Instancia-Id';
+const PREFIJO_INTERNO = '/internal/';
+
 function crearRouter(rutas, ctx) {
   return async (req, res) => {
     const ruta = req.url.split('?')[0];
+    // ANTES de buscar el handler: va también en el 404 de una ruta interna que
+    // no existe, en el 503 de cierre y en los 4xx/5xx que lance el handler
+    // (writeHead conserva lo puesto con setHeader). Solo /internal/*: el resto
+    // (health, QR, push, pagos) no lo necesita y no conviene anunciarlo.
+    if (ctx.instancia && ruta.startsWith(PREFIJO_INTERNO)) {
+      res.setHeader(ENCABEZADO_INSTANCIA, ctx.instancia.instanciaId);
+    }
     const handler = buscarHandler(rutas, req.method, ruta);
     if (!handler) return enviarJson(res, 404, { error: 'Ruta no encontrada' });
     // Cerrando: lo nuevo se rechaza con 503 (Wompi y el backend reintentan) y
@@ -133,4 +144,5 @@ function enviarAck(res, ack) {
 
 module.exports = {
   ErrorHttp, enviarJson, enviarAck, leerCuerpoCrudo, parsearJson, igualesSeguro, exigirClaveInterna, crearRouter,
+  ENCABEZADO_INSTANCIA,
 };
