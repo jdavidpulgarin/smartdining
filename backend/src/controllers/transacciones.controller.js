@@ -168,6 +168,17 @@ const pagoInternoSchema = z.object({
   monto_centavos: z.number().int().positive(),
   moneda: z.literal(MONEDA),
   metodo_pago: z.enum(METODOS_PAGO).default('online'),
+  // T4 (§8.4): cuándo se creó la intención, para saber de qué visita es.
+  // Opcional por compatibilidad con un socket-server que todavía no lo manda.
+  intencion_creada_en: z.string().datetime({ offset: true, message: 'intencion_creada_en debe ser una fecha ISO 8601' }).nullish(),
+});
+
+/** Los campos del resultado del registro que viajan en la respuesta (§8.4). */
+const camposDelRegistro = (r) => ({
+  aplicado_centavos: r.aplicado_centavos,
+  excedente_centavos: r.excedente_centavos,
+  motivo_excedente: r.motivo_excedente,
+  id_transaccion: r.id_transaccion,
 });
 
 /**
@@ -177,41 +188,44 @@ const pagoInternoSchema = z.object({
  * mesa, asi que el reparto entre pedidos y la liberacion de la mesa ocurren en
  * una sola transaccion en el service; aqui solo se traduce el resultado a HTTP
  * y se avisa al tiempo real DESPUES del commit.
+ *
+ * T4 (§8.7): un pago aprobado NUNCA se rechaza. Ya no hay 409 por exceder el
+ * saldo ni por mesa sin cuenta: lo que sobra queda en excedentes_pago_en_linea
+ * y la respuesta dice cuánto se aplicó y cuánto sobró. Solo 400 (cuerpo) y 404
+ * (mesa inexistente).
  */
 async function crearInterno(req, res, next) {
   const parsed = pagoInternoSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
 
-  const { referencia_externa, id_mesa, comensal, monto_centavos, metodo_pago } = parsed.data;
+  const {
+    referencia_externa, id_transaccion_pasarela, id_mesa, comensal, modo, monto_centavos, metodo_pago,
+    intencion_creada_en,
+  } = parsed.data;
 
   try {
     const r = await transaccionesService.registrarPagoInterno({
       referencia_externa,
+      id_transaccion_pasarela,
       id_mesa,
       comensal: comensal ?? null,
+      modo,
       monto_centavos,
       metodo_pago,
+      intencion_creada_en: intencion_creada_en ?? null,
     });
 
     if (r.noExiste) return res.status(404).json({ error: 'Mesa no encontrada' });
-    if (r.sinCuenta) {
-      return res.status(409).json({ error: 'La mesa no tiene una cuenta abierta por pagar' });
-    }
-    if (r.excede) {
-      return res.status(409).json({
-        error: 'El pago excede el saldo de la mesa',
-        saldo_centavos: r.saldo_centavos,
-      });
-    }
 
-    // Un reintento de Wompi no vuelve a cobrar ni a avisar: el aviso de
-    // payment:confirmed ya salio con el primer registro.
+    // Un reintento de Wompi no vuelve a cobrar ni a avisar: responde el MISMO
+    // resultado del primer registro (también si todo fue excedente).
     if (r.duplicado) {
       return res.status(200).json({
         ok: true,
         duplicado: true,
         saldo_restante_centavos: r.saldo_restante_centavos,
         mesa_liberada: false,
+        ...camposDelRegistro(r),
       });
     }
 
@@ -232,6 +246,7 @@ async function crearInterno(req, res, next) {
       duplicado: false,
       saldo_restante_centavos: r.saldo_restante_centavos,
       mesa_liberada: r.mesa_liberada,
+      ...camposDelRegistro(r),
     });
   } catch (err) {
     return next(err);
@@ -253,6 +268,7 @@ const MOTIVO_CUERPO_INVALIDO = 'cuerpo_invalido';
 const MOTIVO_MESA_INEXISTENTE = 'mesa_inexistente';
 const MOTIVO_SIN_CUENTA = 'sin_cuenta';
 const MOTIVO_EXCEDE = 'excede';
+const MOTIVO_EXCEDE_SALDO_COMENSAL = 'excede_saldo_comensal';
 const MOTIVO_ID_COBRO_EN_USO = 'id_cobro_en_uso';
 const MOTIVO_VOUCHER_INVALIDO = 'voucher_invalido';
 const MOTIVO_VOUCHER_NO_APLICA = 'voucher_no_aplica';
@@ -349,6 +365,9 @@ const cobroMesaSchema = z
  * reparte entre sus pedidos con saldo, del más viejo al más nuevo (el mismo
  * núcleo que el pago en línea). `id_cobro` hace el reintento seguro: con el
  * mismo id_cobro no se cobra dos veces.
+ *
+ * Con `comensal` («pagar lo mío»), el monto tampoco puede superar el saldo
+ * PROPIO de esa persona en la visita: 409 excede_saldo_comensal con su saldo.
  */
 async function cobrarMesa(req, res, next) {
   const parsed = cobroMesaSchema.safeParse(req.body);
@@ -379,6 +398,13 @@ async function cobrarMesa(req, res, next) {
       return res.status(409).json({
         error: 'La mesa no tiene una cuenta abierta por pagar',
         motivo: MOTIVO_SIN_CUENTA,
+      });
+    }
+    if (r.excedeComensal) {
+      return res.status(409).json({
+        error: 'El pago excede lo que debe ese comensal',
+        motivo: MOTIVO_EXCEDE_SALDO_COMENSAL,
+        saldo: aPesos(r.saldo_centavos),
       });
     }
     if (r.excede) {
