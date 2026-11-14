@@ -116,6 +116,10 @@ export function agruparCobros(transacciones = []) {
         clave,
         ids: [t.id_transaccion],
         numero_mesa: t.numero_mesa,
+        // P-24: un cobro de domicilio no tiene mesa (numero_mesa null): se nombra
+        // por su canal y su pedido (ver ubicacionPedido en utils/domicilios).
+        canal: t.canal || 'mesa',
+        id_pedido: t.id_pedido ?? null,
         comensal: t.comensal ?? null,
         metodo_pago: t.metodo_pago,
         voucher: t.voucher ?? null,
