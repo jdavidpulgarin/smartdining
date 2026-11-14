@@ -231,6 +231,7 @@ psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_34_contacto_espacios_
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_35_voucher.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_36_multicanal.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_37_refresh_rotado.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_zonas_demo.sql       # carga seed_zonas_demo.sql dentro de su ROLLBACK
 ```
 
 Voucher de tarjeta (script 35): `test_35_voucher.sql` crea su propia mesa, plato y pedido y
@@ -362,3 +363,56 @@ lo avisa y no es un fallo del seed.
 gastó (por ejemplo desde la pantalla de Inventario cuando esté, o con
 `SELECT registrar_movimiento_inventario(id_insumo, 'entrada', cantidad, 'Reposición demo')`),
 sin borrar movimientos: el libro debe seguir cuadrando.
+
+### Zonas de entrega para la demo
+
+`database/seed_zonas_demo.sql` carga tres zonas activas con barrios de Cartagena, para que
+la app pueda cotizar un domicilio. Sin zonas, `GET /api/v1/zonas` viene vacío y cotizar
+siempre responde 422 `fuera_de_cobertura`.
+
+| Zona | Barrios | Envío | Tiempo |
+|---|---|---|---|
+| Centro | Centro Histórico, Getsemaní, San Diego, La Matuna | $4.000 | 25 min |
+| Bocagrande | Bocagrande, Castillogrande, El Laguito, Manga | $6.000 | 35 min |
+| Norte | Crespo, Marbella, El Cabrero, Torices | $7.000 | 40 min |
+
+**Es solo para local, staging y la demo:** como `seed_inventario_demo.sql`, no lo corren
+`docker-init.sh` ni `migrar.sh`. Se carga **a mano**, después de `migrar.sh` (necesita el
+script 36).
+
+Se puede correr varias veces. Solo inserta; nunca cambia ni borra una zona. Una zona se
+salta, con un `NOTICE`, si ya existe una con ese nombre o si alguno de sus barrios ya está en
+otra zona activa. Así no pisa lo que haga el administrador (D-20).
+
+`test_zonas_demo.sql` corre en `BEGIN … ROLLBACK` y carga el seed él mismo (usa `\ir`), así
+que sirve en una base con o sin él. Comprueba:
+- las tres zonas;
+- `cotizar_zona` con cualquier escritura del barrio;
+- que repetirlo no cambia nada;
+- que no pisa una zona editada o desactivada;
+- que salta sin error una zona cuyo barrio ya cubre otra.
+
+`test_36_multicanal.sql` desactiva dentro de su transacción las zonas que ya existan, porque
+usa barrios del Centro.
+
+**Local (Docker):**
+
+```bash
+docker compose exec -T postgres psql -U postgres -d smartdining -v ON_ERROR_STOP=1 \
+  -f /smartdining-db/seed_zonas_demo.sql
+docker compose exec -T postgres sh -c 'cd /smartdining-db/tests && psql -q -U postgres -d smartdining -v ON_ERROR_STOP=1 -f test_zonas_demo.sql'
+```
+
+#### Para Roberto: cargarlas en staging
+
+Solo en **staging**, nunca en producción. En el servidor, desde la carpeta del proyecto y con
+la rama ya desplegada:
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /smartdining-db/seed_zonas_demo.sql'
+```
+
+Debe decir `zona "…" creada` tres veces y terminar con la tabla de las zonas activas
+(`(3 rows)` si no había otras). Para comprobarlo desde fuera:
+`GET https://api.staging.smartdining.com.co/api/v1/zonas` debe traer las tres zonas.

@@ -134,6 +134,10 @@ export function comandaDesdePedido(pedido, llegadaEnMs = Date.now()) {
     codigo_pedido: pedido.codigo_pedido ?? null,
     id_mesa: pedido.id_mesa ?? null,
     mesa_numero: pedido.mesa_numero ?? null,
+    // T10: 'mesa' | 'para_llevar' | 'domicilio'. La API lo trae; el payload de
+    // order:created hoy no, y un pedido sin mesa sale como "Sin mesa" hasta
+    // la siguiente recarga (ver lib/bloques.js).
+    canal: pedido.canal ?? null,
     estado: pedido.estado || 'recibido',
     notas_generales: pedido.notas_generales ?? null,
     // Hora de paso a 'listo' (historial_estados), cuando la API la manda.

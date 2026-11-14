@@ -144,4 +144,6 @@ async function login(req, res, next) {
   }
 }
 
-module.exports = { register, login, COSTO_BCRYPT, MENSAJE_CREDENCIALES };
+// HASH_FICTICIO se exporta para el login de clientes (D-19): el mismo truco
+// contra la enumeración, con el mismo costo, y calculado una sola vez.
+module.exports = { register, login, COSTO_BCRYPT, MENSAJE_CREDENCIALES, HASH_FICTICIO };

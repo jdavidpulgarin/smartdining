@@ -4,6 +4,7 @@
  */
 
 const { traducirErrorInventario } = require('./inventario-errores');
+const { esRutaConMotivo, caminoDe } = require('../config/rutas-clientes');
 
 // SQLSTATE que PostgreSQL asigna a un RAISE EXCEPTION sin código propio, o sea
 // a las reglas de negocio que viven en los triggers de Jarrison.
@@ -144,14 +145,42 @@ function traduccionDeSqlstate(codigo) {
 function manejadorErrores(err, req, res, next) {
   if (res.headersSent) return next(err);
 
+  // D-19: en las rutas de clientes TODO error lleva `motivo` (el genérico de su
+  // status si no trae uno propio) y el log no lleva datos: ni el mensaje de
+  // PostgreSQL ni su `detail` (que puede repetir un email o una dirección), solo
+  // el código, el método y el camino.
+  // D-20a: también despacho, zonas del admin y repartidores (rutas-clientes.js).
+  const deClientes = esRutaConMotivo(req.originalUrl);
+  const enviar = (status, cuerpo) =>
+    res
+      .status(status)
+      .json(deClientes && !cuerpo.motivo ? { ...cuerpo, motivo: motivoPorStatus(status) } : cuerpo);
+  const registrar = (rotulo, ...detalle) => {
+    if (deClientes) {
+      console.error(`${rotulo} (${err && err.code}) en ${req.method} ${caminoDe(req.originalUrl)}`);
+    } else {
+      console.error(`${rotulo} (${err && err.code}) en ${req.method} ${req.originalUrl}:`, ...detalle);
+    }
+  };
+
   if (err && typeof err.status === 'number') {
     // `motivo` es el codigo estable que el cliente puede comparar, al lado del
     // `error` que es texto para leer: es la convencion de los 409 de mesas y de
     // pedidos ({ error, motivo }). Solo viaja si el service lo puso, asi que
     // ningun error de negocio anterior cambia de forma.
-    const cuerpo = { error: err.message };
+    //
+    // Los errores de express.json() (JSON mal formado, cuerpo demasiado grande)
+    // llegan por aqui con `type`. Su mensaje cita un trozo del cuerpo: en las
+    // rutas de clientes se cambia por uno generico.
+    const mensaje = deClientes && err.type ? MENSAJE_CUERPO_INVALIDO : err.message;
+    const cuerpo = { error: mensaje };
     if (typeof err.motivo === 'string' && err.motivo) cuerpo.motivo = err.motivo;
-    return res.status(err.status).json(cuerpo);
+    // D-20a: un error de negocio puede traer datos para quien llama (p. ej. el
+    // barrio con el que choca una zona) en `extra`. Nunca pisan error ni motivo.
+    if (err.extra && typeof err.extra === 'object' && !Array.isArray(err.extra)) {
+      for (const [k, v] of Object.entries(err.extra)) if (!(k in cuerpo)) cuerpo[k] = v;
+    }
+    return enviar(err.status, cuerpo);
   }
 
   // Inventario (D-17, P-19): SD001, SD002 y el "ingrediente agotado" del
@@ -170,32 +199,22 @@ function manejadorErrores(err, req, res, next) {
   }
 
   if (err && err.code === PG_RAISE_EXCEPTION) {
-    return res.status(409).json({ error: err.message });
+    return enviar(409, { error: err.message });
   }
 
   if (err && esErrorDeDatos(err.code)) {
     // El detalle completo (código, detail y where de PostgreSQL) se registra
     // para poder arreglar la causa; al cliente solo le llega el mensaje seguro.
-    console.error(
-      `Error de datos de PostgreSQL (${err.code}) en ${req.method} ${req.originalUrl}:`,
-      err.message,
-      err.detail || '',
-      err.where || ''
-    );
-    return res.status(422).json({ error: MENSAJE_DATOS_FUERA_DE_RANGO });
+    registrar('Error de datos de PostgreSQL', err.message, err.detail || '', err.where || '');
+    return enviar(422, { error: MENSAJE_DATOS_FUERA_DE_RANGO });
   }
 
   if (err && esErrorDeConcurrencia(err.code)) {
     // Mismo criterio que la clase 22: el detalle completo al log del servidor
     // (es lo que permite encontrar el par de transacciones que chocó) y al
     // cliente solo el mensaje seguro.
-    console.error(
-      `Choque de concurrencia en PostgreSQL (${err.code}) en ${req.method} ${req.originalUrl}:`,
-      err.message,
-      err.detail || '',
-      err.where || ''
-    );
-    return res.status(409).json({ error: MENSAJE_CONCURRENCIA });
+    registrar('Choque de concurrencia en PostgreSQL', err.message, err.detail || '', err.where || '');
+    return enviar(409, { error: MENSAJE_CONCURRENCIA });
   }
 
   const traduccion = traduccionDeSqlstate(err && err.code);
@@ -203,17 +222,42 @@ function manejadorErrores(err, req, res, next) {
     // Mismo criterio que las clases 22 y 40: el detalle completo al log del
     // servidor (el nombre del constraint es lo que permite arreglar la causa) y
     // al cliente solo el mensaje genérico.
-    console.error(
-      `${traduccion.rotulo} en PostgreSQL (${err.code}) en ${req.method} ${req.originalUrl}:`,
-      err.message,
-      err.detail || '',
-      err.where || ''
-    );
-    return res.status(traduccion.status).json({ error: traduccion.mensaje });
+    registrar(`${traduccion.rotulo} en PostgreSQL`, err.message, err.detail || '', err.where || '');
+    return enviar(traduccion.status, { error: traduccion.mensaje });
   }
 
-  console.error('Error no controlado:', err);
-  return res.status(500).json({ error: 'Error interno del servidor' });
+  if (deClientes) {
+    // Ni el mensaje ni la pila: un error de una ruta de clientes puede citar
+    // datos del cuerpo. El nombre y el código bastan para buscar la causa.
+    console.error(
+      `Error no controlado (${(err && err.name) || 'Error'}, ${(err && err.code) || 'sin código'}) en ${req.method} ${caminoDe(req.originalUrl)}`
+    );
+  } else {
+    console.error('Error no controlado:', err);
+  }
+  // `motivo` se agregó en la D-19: el `error` de siempre no cambia.
+  return res.status(500).json({ error: 'Error interno del servidor', motivo: MOTIVO_ERROR_INTERNO });
+}
+
+const MOTIVO_ERROR_INTERNO = 'error_interno';
+const MENSAJE_CUERPO_INVALIDO = 'El cuerpo de la petición no es válido';
+
+/**
+ * El motivo genérico de un status, para los errores de las rutas de clientes
+ * que no traen uno propio (D-19: "todo error responde { error, motivo }").
+ */
+function motivoPorStatus(status) {
+  if (status === 400) return 'cuerpo_invalido';
+  if (status === 401) return 'no_autenticado';
+  if (status === 403) return 'prohibido';
+  if (status === 404) return 'no_encontrado';
+  if (status === 409) return 'conflicto';
+  if (status === 413) return 'cuerpo_demasiado_grande';
+  if (status === 422) return 'dato_invalido';
+  if (status === 429) return 'demasiadas_peticiones';
+  if (status === 503) return 'servicio_no_disponible';
+  if (status >= 500) return MOTIVO_ERROR_INTERNO;
+  return 'error';
 }
 
 module.exports = {
@@ -230,6 +274,9 @@ module.exports = {
   MENSAJE_CONSULTA_CANCELADA,
   TRADUCCION_POR_SQLSTATE,
   traduccionDeSqlstate,
+  MOTIVO_ERROR_INTERNO,
+  MENSAJE_CUERPO_INVALIDO,
+  motivoPorStatus,
   // Reexportada para que quien prueba el manejador no tenga que importar los
   // dos módulos, y para que el PR 2 encuentre la traducción desde aquí.
   traducirErrorInventario,

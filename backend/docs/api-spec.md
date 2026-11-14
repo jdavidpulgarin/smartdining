@@ -202,7 +202,7 @@ Body: `{ "email": "ana@mail.com", "password": "123456" }`
 | 200 | `{ usuario, token }` | Credenciales correctas y cuenta activa |
 | 400 | `{ "error": "..." }` | El body no cumple el esquema (email inválido, contraseña de menos de 6) |
 | **401** | `{ "error": "Credenciales inválidas" }` | **El email no existe, la contraseña es incorrecta o la cuenta está inactiva: los tres responden lo mismo** |
-| 429 | `{ "error": "Demasiados intentos..." }` | Límite de intentos (H-04): 5 fallos por minuto y por IP+email |
+| 429 | `{ "error": "Demasiados intentos...", "motivo": "demasiadas_peticiones" }` | Límite de intentos (H-04): 5 fallos por minuto y por IP+email |
 
 #### Un solo código y un solo mensaje (H-12)
 
@@ -383,8 +383,13 @@ Los contadores son **independientes**: una petición al login gasta cupo del lí
 login **y** del global, pero agotar uno no agota el otro.
 
 ```json
-{ "error": "Demasiados intentos de inicio de sesión. Espera un momento y vuelve a intentarlo." }
+{
+  "error": "Demasiados intentos de inicio de sesión. Espera un momento y vuelve a intentarlo.",
+  "motivo": "demasiadas_peticiones"
+}
 ```
+
+(`motivo` se agregó en la D-19 parte B, en todos los 429; el `error` no cambió.)
 
 La clave del login combina IP y email a propósito: por IP sola, una botnet esquiva el
 límite; por email solo, cualquiera podría bloquear la cuenta de otro. Y solo cuentan los
@@ -396,7 +401,10 @@ pasar.
 #### El límite global (D-21)
 
 ```json
-{ "error": "Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo." }
+{
+  "error": "Demasiadas peticiones desde esta red. Espera un momento y vuelve a intentarlo.",
+  "motivo": "demasiadas_peticiones"
+}
 ```
 
 **No cuenta** dos cosas:
@@ -417,6 +425,10 @@ por segundo sostenidos no los hace ningún comensal.
 **Variables:** `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_VENTANA_MS`, `RATE_LIMIT_QR_MAX`,
 `RATE_LIMIT_QR_VENTANA_MS`, `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_GLOBAL_VENTANA_MS`. Los
 tres límites se desactivan solos dentro de las pruebas.
+
+Aparte, la subida de imágenes (D-23, `POST /imagenes`) tiene su propio límite **por usuario**
+(30 cada 10 min, `RATE_LIMIT_IMAGENES_MAX` y `RATE_LIMIT_IMAGENES_VENTANA_MS`), con el mismo
+429 más `motivo: "demasiadas_peticiones"`. Ver [Imágenes del menú](#imágenes-del-menú-d-23).
 
 > **Detrás de un proxy** (nginx, Docker), `req.ip` es la IP del proxy y el límite contaría
 > a todo el mundo como un solo visitante. Hay que poner **`TRUST_PROXY`** (`true`, un
@@ -794,7 +806,7 @@ Si no se envían, **el comportamiento no cambia**: el plato conserva lo que ten�
 | `nombre` | Sí | Texto, 1–120 |
 | `precio` | Sí | Número > 0. Cabe en `DECIMAL(10,2)`: más allá es **422** (desbordamiento), no 500 |
 | `id_categoria` | Sí | Entero. Si la categoría no existe, **409 `categoria_inexistente`** |
-| `descripcion`, `url_imagen` | No | Texto; `url_imagen` tiene que ser una URL. Son **nullable**: ponerlas en `null` las borra |
+| `descripcion`, `url_imagen` | No | Texto. `url_imagen`: una URL **https** absoluta o una ruta **`/imagenes/<uuid>.webp`** de [`POST /imagenes`](#imágenes-del-menú-d-23), hasta 255 caracteres (`http:` u otro esquema, `..`, otra carpeta u otra extensión: **400**; https solo por la CSP de producción, ver D-23). Son **nullable**: ponerlas en `null` las borra |
 | `disponible` | No (por omisión `true`) | Booleano |
 | `tiempo_preparacion_estimado` | **No** | Entero > 0. **Si no se envía, queda en 15**, el `DEFAULT` de la columna (`database/schema.sql:105`) |
 | `personalizable` | No (por omisión `false`) | Booleano. Decide si el plato se arma por pasos en el constructor |
@@ -936,6 +948,95 @@ que usa el panel. La caché sí se invalida en los dos casos.
 **La bitácora la escribe la base.** El trigger `tr_auditar_cambios` audita todo `UPDATE` de
 `platos` en `auditoria_cambios` (modelo-er.md §11); el backend no registra nada por su
 cuenta.
+
+---
+
+## Imágenes del menú (D-23)
+
+Diseño acordado con Roberto: el **backend** recibe, valida, re-codifica y guarda; el
+**volumen, nginx, la CSP y los respaldos** son de su PR de infra.
+
+### POST /imagenes
+
+También en **`/api/v1/imagenes`** en cuanto entre el prefijo v1 (D-19 parte A, #199): v1 monta
+el mismo router.
+
+- **Quién:** solo **admin**. Sin token **401**; `mesero`, `cajero`, `cocina` o un comensal,
+  **403** (los cuerpos de siempre de `requireAuth`/`requireRole`).
+- **Cuerpo:** `multipart/form-data` con **UN** archivo en el campo **`imagen`** y **nada
+  más**: ni otros campos de texto ni un segundo archivo.
+- **Límites** (multer en **memoria**, nunca a disco directo): archivo de hasta
+  **2 MB** (`IMAGENES_MAX_BYTES`, por defecto `2097152`), 1 archivo, 0 campos, como mucho 2
+  partes.
+- **Límite de peticiones:** **por usuario** del JWT, no por IP: **30 cada 10 minutos**
+  (`RATE_LIMIT_IMAGENES_MAX`, `RATE_LIMIT_IMAGENES_VENTANA_MS`). Mismo almacén que los demás
+  límites (memoria del proceso) y el mismo 429 con `Retry-After`, más `motivo`.
+- **Tipo por el contenido:** se decide por los **primeros bytes** (magic numbers), **no** por
+  el `Content-Type` ni por la extensión: **JPEG** (`FF D8 FF`), **PNG**
+  (`89 50 4E 47 0D 0A 1A 0A`) y **WebP** (`RIFF....WEBP`). Cualquier otra cosa → **415**. Un
+  PNG de verdad mandado como `text/plain` y `documento.txt` se acepta; un texto o un `.exe`
+  mandado como `image/png` y `foto.png`, no.
+- **Re-codificación SIEMPRE** (sharp): lo que se guarda nunca es el archivo original.
+  - `.rotate()`: aplica la orientación EXIF (una foto de móvil girada queda derecha);
+  - como mucho **1200 px** de lado (`fit: 'inside'`), **sin agrandar** las pequeñas;
+  - salida **WebP**, calidad 80, **sin metadatos**: ni EXIF (GPS incluido), ni ICC, ni XMP;
+  - tope de **40 millones de píxeles** de entrada contra las bombas de descompresión.
+- **Nombre:** lo genera el servidor, `crypto.randomUUID() + '.webp'`. El nombre del archivo
+  subido no se usa nunca, ni en la ruta ni en el disco.
+- **Disco:** `IMAGENES_DIR` (producción `/app/uploads/imagenes`, el volumen; desarrollo
+  `backend/uploads/imagenes`, ignorado por git). La carpeta se crea al primer uso. Escritura
+  **atómica**: un temporal en la misma carpeta y `rename`; permisos `0644`.
+- **No toca la base.** El cliente guarda la ruta devuelta en `url_imagen` con el
+  `POST`/`PUT` del plato o del ingrediente.
+
+**201:**
+
+```json
+{ "ruta": "/imagenes/0f8fad5b-d9cb-469f-a165-70867728950e.webp" }
+```
+
+**Errores**, siempre `{ "error": "...", "motivo": "..." }`:
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **400** | `sin_archivo` | Sin archivo, el archivo en otro campo, dos archivos, campos de texto de más o un multipart mal formado |
+| **413** | `archivo_muy_grande` | Más de `IMAGENES_MAX_BYTES`. Lo corta multer al leer; nunca llega como 500 |
+| **415** | `tipo_no_permitido` | Los primeros bytes no son de JPEG, PNG ni WebP |
+| **422** | `imagen_invalida` | La cabecera es válida pero sharp no la puede leer: corrupta, truncada o por encima del tope de píxeles |
+| **429** | `demasiadas_peticiones` | El límite por usuario, con `Retry-After` |
+| **500** | `error_interno` | No se pudo escribir en `IMAGENES_DIR` (p. ej. el volumen sin permisos). El log lleva solo el código del error |
+
+El contenido del archivo y su nombre original **nunca** van al log.
+
+### `url_imagen` relativa y cómo se muestra
+
+`url_imagen` (platos y ingredientes del constructor) acepta **dos formas**: una URL
+**https** absoluta o la ruta **relativa** que devuelve este endpoint, exactamente
+`^/imagenes/<uuid en minúsculas>\.webp$`. Sin `..`, sin otras carpetas, sin otra extensión ni
+nada detrás; hasta 255 caracteres.
+
+**Solo https, no http** (pedido de Roberto): en producción la CSP de `app.` y `staff.` solo
+permite `img-src https:`, así que una foto `http://` quedaría **bloqueada por el navegador sin
+aviso** (el plato se vería sin imagen). Por eso se rechaza al guardarla con **400**. El esquema
+no distingue mayúsculas: `HTTPS://ejemplo.com/a.png` vale y `HTTP://ejemplo.com/a.png` no.
+
+**El cliente (PWA y panel) antepone el origen de la API** cuando la ruta empieza por
+`/imagenes/`: `https://api.<dominio>/imagenes/<uuid>.webp` en producción,
+`http://localhost:4000/imagenes/<uuid>.webp` en desarrollo. Una URL absoluta se usa tal cual.
+
+**Quién sirve `/imagenes/`:**
+
+- **Producción:** **nginx**, directo desde el volumen (PR de Roberto). El backend **no** monta
+  la ruta.
+- **Desarrollo** (`NODE_ENV` distinto de `production`): el backend sirve
+  `GET /imagenes/<uuid>.webp` desde `IMAGENES_DIR`: solo ese patrón (cualquier otra cosa es
+  404), sin listar la carpeta, con `X-Content-Type-Options: nosniff` y
+  `Cross-Origin-Resource-Policy: cross-origin` (para que la PWA en otro puerto la pueda
+  mostrar).
+
+**Al reemplazar la imagen de un plato, la vieja NO se borra** (acuerdo con Roberto): queda
+huérfana en el volumen. La limpieza de huérfanas (archivos de `IMAGENES_DIR` que ninguna
+`url_imagen` usa) se hace después, aparte.
 
 ---
 
@@ -1223,7 +1324,7 @@ está en §[La frontera entre 400 y 422](#la-frontera-entre-400-y-422-h-11)):
 | `precio_extra` | número ≥ 0 |
 | `calorias` | entero ≥ 0 |
 | `alergenos` | arreglo de texto |
-| `url_imagen` | hasta 255 caracteres |
+| `url_imagen` | URL **https** absoluta (http no, por la CSP de producción) o ruta **`/imagenes/<uuid>.webp`** (D-23, la misma regla que los platos), hasta 255 caracteres |
 
 **Normalización de lo que manda el panel:**
 
@@ -4596,9 +4697,11 @@ vez**; ante un 503 conviene dejar pasar unos segundos, porque lo que sobra es ca
 
 ## API v1 · Clientes (D-19)
 
-> **Contrato. Implementación después de la P-23.** Nada de esta sección existe todavía en
-> el código: es el acuerdo para que la app móvil (Juan) y la base (Jarrison) puedan
-> avanzar en paralelo. **Todo va bajo `/api/v1`, nada en `/api`.**
+> **Implementado (D-19 parte B)** sobre los scripts 36 y 37 de la base. **Todo va bajo
+> `/api/v1`, nada en `/api`:** `/api/auth/clientes/...`, `/api/clientes/...` y `/api/zonas`
+> responden el 404 de siempre (`src/routes/solo-v1.js`, montado solo en v1 por
+> `src/routes/montaje.js`). Lo que el contrato no decía, y cómo se resolvió, está en
+> [Decisiones de la implementación](#decisiones-de-la-implementación-d-19-parte-b).
 
 ### El prefijo `/api/v1` (ya montado, D-19 parte A)
 
@@ -4615,7 +4718,7 @@ fija y `x-internal-key`; en `/api/v1` responde 404. Las rutas de clientes de aba
 
 | | Valor |
 |---|---|
-| JWT (`token`) | `rol: "cliente"`, `sub: id_cliente`. Vida corta: **15 min** (`JWT_CLIENTE_EXPIRES_IN`, configurable). **Mismo algoritmo y secreto** que hoy: HS256 (`ALGORITMO_JWT`) con `JWT_SECRET`. |
+| JWT (`token`) | `rol: "cliente"`, `sub: id_cliente` (como texto, el estándar de JWT). Vida corta: **15 min** (`JWT_CLIENTE_EXPIRES_IN`, configurable; también se acepta `CLIENTE_JWT_EXPIRES_IN`, y si están las dos gana la primera). **Mismo algoritmo y secreto** que hoy: HS256 (`ALGORITMO_JWT`) con `JWT_SECRET`. |
 | `refresh_token` | **Opaco y aleatorio** (32 bytes, `crypto.randomBytes`, en base64url: **43 caracteres** `[A-Za-z0-9_-]`). En la base se guarda **solo su hash SHA-256**, nunca el valor. Vida **30 días** desde que se emite (`REFRESH_CLIENTE_DIAS`, configurable). Pertenece a una **familia** (la de su primer login) para detectar reuso. |
 | Ventana de gracia | **30 s** (`REFRESH_CLIENTE_GRACIA_SEGUNDOS`, configurable; `0` la apaga). Ver [la ventana de gracia del refresh](#la-ventana-de-gracia-del-refresh). |
 | `expira_en` | Cuándo vence el `token`, en ISO 8601 UTC. |
@@ -4770,8 +4873,9 @@ El cliente sale del JWT (`sub`); no hay `:id` en la ruta.
 lista de textos.
 
 **Cotizar compara barrios normalizados contra normalizados**, con la regla de la **base**
-(`normalizar_barrio(text)`, ver [Lo que necesita la base](#lo-que-necesita-la-base-p-23)), no
-con una regla propia del backend ni de la app: `direcciones.barrio` normalizado contra cada
+(implementada en el script 36 como `fn_clave_barrio(text)` y usada por
+`cotizar_zona(barrio)`; el backend llama a `cotizar_zona` y no reimplementa nada), no con una
+regla propia del backend ni de la app: `direcciones.barrio` normalizado contra cada
 elemento normalizado de `zonas_envio.barrios`. Así `"  Los   Álamos "` y `"los alamos"` son el
 mismo barrio en la app, en la API y en la base. La app puede normalizar para mostrar o
 sugerir, pero quien decide la cobertura es la base.
@@ -4817,7 +4921,8 @@ Superar cualquiera de los dos da **429** `demasiadas_peticiones` con `Retry-Afte
 - Mismo almacén que los límites de hoy (`limites.middleware.js`) y se desactivan solos dentro
   de las pruebas.
 
-**Variables sugeridas** (no existen todavía; se implementan en la parte B):
+**Variables** (implementadas en `limites.middleware.js`, `crearLimitadoresClientes`; ver
+`.env.example`):
 
 | Variable | Por defecto |
 |---|---|
@@ -4852,12 +4957,28 @@ puede cambiar.
 | **429** | `demasiadas_peticiones` | Algún límite, con cabecera `Retry-After` en segundos |
 | **500** | `error_interno` | Cualquier fallo no previsto. El detalle va al log del servidor, nunca a la respuesta |
 
-**Hoy no es así en todo:** el **404** de ruta inexistente (`server.js`), el **429** de los
-límites (`limites.middleware.js`) y el **500** del manejador global responden solo
-`{ error }`, igual que el 401/403 de `requireAuth`/`requireRole`. En la **parte B** se les
-agrega `motivo` (y las rutas de clientes usan su propio middleware de sesión con
-`no_autenticado` y `prohibido`). Es **compatible hacia atrás**: solo se agrega un campo, y
-la PWA, el panel y el KDS siguen leyendo `error` como hasta ahora.
+**En TODA la API, desde la parte B:** el **404** de ruta inexistente (`server.js`,
+`no_encontrado`), el **429** de todos los límites (`demasiadas_peticiones`), el **500** del
+manejador global (`error_interno`) y el 401/403 de `requireAuth`/`requireRole`
+(`no_autenticado` y `prohibido`) llevan `motivo`. Es **compatible hacia atrás**: solo se
+agregó el campo, el `error` es el mismo de antes, y la PWA, el panel y el KDS siguen leyendo
+`error`. (Las rutas de clientes usan el mismo `requireAuth`, con un caso propio para el rol
+`cliente`.)
+
+**Solo en las rutas de clientes**, los demás errores genéricos del manejador global, que en
+el resto de la API siguen siendo `{ error }`, llevan también un `motivo`:
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| 400 | `cuerpo_invalido` | JSON mal formado (el mensaje del parser, que cita el cuerpo, se cambia por uno genérico) |
+| 409 | `conflicto` | Un 23505/23503 o un choque de concurrencia que no es `email_registrado` |
+| 409 | `principal_requerida` | Ver [Decisiones de la implementación](#decisiones-de-la-implementación-d-19-parte-b) |
+| 413 | `cuerpo_demasiado_grande` | El cuerpo pasa el tope de `express.json()` |
+| 422 | `dato_invalido` | Un CHECK de la base (23514) o un dato fuera de rango (clase 22) |
+| 503 | `servicio_no_disponible` | La consulta se canceló por `statement_timeout` (57014) |
+
+En esas rutas el **log** no lleva el mensaje ni el `detail` de PostgreSQL (pueden repetir un
+email o una dirección): solo el código, el método y el camino.
 
 ### Diferencias con `app-movil/src/services/authService.js`
 
@@ -4874,7 +4995,55 @@ contratos esperados y no llama a nada):
 | Errores sin motivo | **Todo** error de estas rutas trae `{ error, motivo }`, también 404, 429 y 500: decidir siempre por `motivo` ([la tabla](#errores-de-las-rutas-de-clientes)). Ante un 429 `demasiadas_peticiones`, esperar lo que diga `Retry-After` |
 | Sin manejo de vencimiento | El `token` vive **15 min**: renovar con `/refresh` ante un 401 `no_autenticado` o antes de `expira_en`. Con `sesion_revocada` o `refresh_invalido`, volver al login |
 
+### Decisiones de la implementación (D-19 parte B)
+
+Lo que el contrato no decía, o donde la implementación lo concreta:
+
+- **Cliente inactivo** (`clientes.activo = false`): en sus rutas, **401** `no_autenticado`
+  (`requireAuth` lo comprueba en cada petición, con la misma caché que el personal, H-09); en
+  el login, el **mismo 401** `credenciales_invalidas` que un email inexistente; en
+  `/refresh`, **401** `refresh_invalido` **sin revocar nada** (paso 3b, después del
+  vencimiento y antes de mirar si está revocado).
+- **Login:** no se valida la forma del email. Un email mal escrito sigue el camino de uno que
+  no existe (bcrypt contra el hash ficticio y 401), así que no dice nada que no diría uno bien
+  escrito. Solo es 400 `cuerpo_invalido` lo que no es un intento de login (tipos, vacíos,
+  campos de más). La clave del login no tiene el tope de 72 bytes (como en el personal), solo
+  un freno de 1024 caracteres.
+- **Registro:** el motivo de un campo que falta o no sirve es el de ese campo
+  (`nombre_invalido`, `email_invalido`, `telefono_invalido`); una clave que falta o no es
+  texto, y un campo de más, `cuerpo_invalido`. El nombre se guarda recortado y el email en
+  minúsculas y recortado. `telefono: null` equivale a no mandarlo. El mínimo de 8 cuenta
+  caracteres (puntos de código) y el tope, bytes.
+- **Perfil (`PATCH /clientes/yo`):** `telefono: null` borra el teléfono. El nombre se recorta.
+- **Direcciones:**
+  - la **primera** nace principal aunque llegue `principal: false`;
+  - las siguientes son principales solo con `principal: true`, y eso desmarca la anterior en
+    la misma transacción;
+  - **`principal: false` sobre la principal → 409 `principal_requerida`**: para cambiarla se
+    marca otra. Así, mientras el cliente tenga direcciones, siempre hay exactamente una
+    principal;
+  - **al borrar la principal**, pasa a ser principal la **más reciente** de las que quedan
+    (por `creado_en`, y por id si empatan); si no queda ninguna, no hay principal;
+  - cada escritura bloquea primero la fila del cliente (`FOR UPDATE`): dos cambios a la vez
+    del mismo cliente se ponen en fila, y nunca hay dos principales ni un 23505 por la carrera;
+  - `referencia` vacía se guarda como `null`; `lat` y `lng` en `null` los dos borran las
+    coordenadas; `PATCH` pide al menos un campo;
+  - un `:id` que no es un entero positivo es **404** (no puede ser una dirección de nadie);
+  - la respuesta no lleva `id_cliente`.
+- **Cotizar:** la query admite **solo** `id_direccion` (entero positivo); otra cosa, 400
+  `cuerpo_invalido`.
+- **Base:** la normalización se llama `fn_clave_barrio` (no `normalizar_barrio`) y la
+  cotización `cotizar_zona(barrio)`, del script 36; la columna `rotado_en`, sus CHECK y el
+  trigger `tr_refresh_rotacion` son del script 37. El backend nunca mueve `rotado_en` una vez
+  puesto ni apunta un reemplazo de otra familia.
+- **socket-server:** su `verificarJwt` (`socket-server/src/auth.js`) **rechaza** un JWT con
+  `rol: "cliente"` (solo acepta comensal, pantalla y los cuatro roles del personal). Si la app
+  necesita tiempo real, hay que agregar el rol allí.
+
 ### Lo que necesita la base (P-23)
+
+**Ya implementado en los scripts 36 y 37** (con los nombres de arriba). Se deja la propuesta
+original como referencia.
 
 **Propuesta para Jarrison, no un script.** Las tablas y columnas son las del **plan 5.5**
 (`clientes`, `direcciones`, `zonas_envio`). Lo marcado como **sugerido, además del plan** son
@@ -4972,6 +5141,212 @@ contraseña incluido**. Para los clientes, no repetir eso:
   mucho movimiento (cada refresh inserta y actualiza); lo razonable es no auditarla y dejar el
   rastro en sus propias columnas (`creado_en`, `rotado_en`, `revocado_en`).
 - `direcciones`: los mismos datos personales; si se audita, sin la dirección en claro.
+
+---
+
+## D-20a · Despacho y repartidor
+
+Lo que necesita la P-24 del panel: despachar los pedidos a domicilio y que el repartidor los
+lleve. Sobre el script 36 (`pedidos_domicilio`, `zonas_envio`, rol `repartidor`). **Crear**
+pedidos para llevar o a domicilio, el pago anticipado y su vencimiento son la **D-20b**: no
+están aquí.
+
+Todas las rutas de esta sección están en el router compartido (**`/api` y `/api/v1`**) y
+**todo error responde `{ error, motivo }`**, también los genéricos (404, 422, 500…). El log
+de estas rutas no lleva nombres, teléfonos ni direcciones: solo código, método y camino.
+
+### El rol `repartidor`
+
+Es personal: está en `ROLES_STAFF` (registro, cambio de rol con `PATCH /usuarios/:id` y login
+como cualquiera), y en el CHECK `usuarios_rol_check` del script 36. **No está en ningún
+`requireRole` del panel**: en todo lo que no es suyo recibe **403** `prohibido` (lo comprueba
+la matriz de roles sobre todas las rutas).
+
+### Zonas para el admin
+
+| Método y ruta | Rol | Cuerpo | Respuesta |
+|---|---|---|---|
+| `GET /zonas-envio` | admin | — | **200** `{ zonas }`, **todas** (también las inactivas) |
+| `POST /zonas-envio` | admin | `{ nombre, barrios, costo_envio, tiempo_estimado_min, activa? }` | **201** `{ zona }` |
+| `PATCH /zonas-envio/:id` | admin | los mismos campos, al menos uno | **200** `{ zona }` · 404 `no_encontrado` |
+
+`zona` es `{ id_zona, nombre, barrios, costo_envio, tiempo_estimado_min, activa, creado_en,
+actualizado_en }`. Es una ruta distinta de la pública `GET /api/v1/zonas` (D-19, solo las
+activas, para la app).
+
+- zod `.strict()`: `nombre` y cada barrio se recortan (1 a 80 caracteres); **al menos un
+  barrio**; `costo_envio` de 0 a 99.999.999,99 con dos decimales como mucho;
+  `tiempo_estimado_min` entero de 1 a 600; `activa` booleano (por defecto `true`). Si no,
+  **400** `cuerpo_invalido`.
+- **No se borran**: se desactivan con `PATCH { activa: false }` (`pedidos_domicilio` las
+  referencia con `ON DELETE RESTRICT`).
+- Los choques los decide el trigger `fn_tr_validar_zona_envio` y se traducen sin exponer el
+  detalle de PostgreSQL:
+
+| Status | `motivo` | Cuándo |
+|---|---|---|
+| **409** | `barrio_en_otra_zona` | Un barrio (comparado con `fn_clave_barrio`) ya está en **otra zona activa**. La respuesta trae `barrio` (la clave normalizada) y `zona` (la otra) |
+| **409** | `zona_duplicada` | Ya existe una zona con ese nombre |
+| **400** | `barrio_repetido` | El mismo barrio dos veces en la zona (trae `barrio`) |
+
+Una zona **inactiva** puede repetir barrios de una activa; activarla después da el mismo 409.
+
+### Despacho (admin y cajero)
+
+| Método y ruta | Cuerpo | Respuesta |
+|---|---|---|
+| `GET /domicilios?estado_entrega=a,b` | — | **200** `{ domicilios }` |
+| `PATCH /domicilios/:id_pedido/repartidor` | `{ id_repartidor }` | **200** `{ domicilio }` |
+| `GET /usuarios/repartidores` | — | **200** `{ repartidores: [{ id_usuario, nombre }] }`, solo los activos |
+
+- `estado_entrega`: uno o varios de `por_asignar`, `asignado`, `en_camino`, `entregado`,
+  `fallido`, separados por coma. **Sin el parámetro, los no terminados** (`por_asignar`,
+  `asignado`, `en_camino`). Un estado que no existe, o otro parámetro, es **400**
+  `cuerpo_invalido`. **Nunca** salen los pedidos en `por_pagar` (todavía no llegan a cocina)
+  ni los `cancelado`.
+- Cada `domicilio`:
+
+```json
+{
+  "pedido": { "id_pedido": 87, "codigo_pedido": "A1B2C3", "estado": "listo", "total": 35000 },
+  "cliente": { "nombre": "Ana", "telefono": "3001234567" },
+  "direccion": { "direccion": "Calle 1 # 2-3", "barrio": "Centro", "referencia": "Portón azul",
+                 "lat": null, "lng": null, "telefono_contacto": "3001234567" },
+  "zona": { "id_zona": 1, "nombre": "Norte" },
+  "costo_envio": 5000,
+  "repartidor": { "id_usuario": 40, "nombre": "Rafa" },
+  "estado_entrega": "asignado",
+  "motivo_fallo": null,
+  "tiempos": { "creado_en": "...", "asignado_en": "...", "en_camino_en": null,
+               "entregado_en": null, "fallido_en": null }
+}
+```
+
+  Del cliente salen **solo nombre y teléfono** ([Datos personales](#datos-personales)), y la
+  dirección es la **copiada** en `pedidos_domicilio` al crear el pedido, no la libreta del
+  cliente. `repartidor` es `null` mientras no hay uno.
+- **Asignar o reasignar** solo con el **pedido pagado y sin entregar** y la entrega en
+  `por_asignar` o `asignado`. Se decide con el pedido y la entrega ya bloqueados (pedido antes
+  que `pedidos_domicilio`), en este orden:
+
+  | Status | `motivo` | Cuándo |
+  |---|---|---|
+  | **409** | `pedido_sin_pagar` | El pedido está en `por_pagar`: el pago (siempre anticipado) no se ha confirmado |
+  | **409** | `pedido_no_asignable` | El pedido está en `cancelado`, `entregado` o `pagado` |
+  | **409** | `entrega_ya_salio` | La entrega ya está en `en_camino`, `entregado` o `fallido` |
+  | **409** | `repartidor_no_valido` | No es un usuario activo con rol `repartidor` (también si lo rechaza el trigger porque lo desactivaron en medio) |
+
+  O sea: solo con el pedido en `recibido`, `en_preparacion` o `listo`. Un pedido que no es
+  domicilio o no existe: **404** `no_encontrado`. `asignado_en` se pone en cada asignación.
+  (Antes de este arreglo un pedido en `por_pagar` se podía asignar y el cancelado respondía
+  `pedido_cancelado`; ese motivo ya no existe.)
+
+### Repartidor
+
+| Método y ruta | Cuerpo | Respuesta |
+|---|---|---|
+| `GET /domicilios/mios` | — | **200** `{ domicilios }`: las suyas sin terminar (sin las de pedidos cancelados ni en `por_pagar`, como el despacho) y las que terminó **hoy** (hora de Bogotá) |
+| `POST /domicilios/:id_pedido/salir` | ninguno | **200** `{ domicilio }` |
+| `POST /domicilios/:id_pedido/entregar` | ninguno | **200** `{ domicilio }` |
+| `POST /domicilios/:id_pedido/fallar` | `{ motivo }` (1 a 200 caracteres) | **200** `{ domicilio }` |
+
+Mismo objeto `domicilio` que el despacho. Errores: **403** `no_es_tu_entrega` (no es suya),
+**409** `transicion_invalida` (la transición no vale, o ya se hizo: sin efectos), **409**
+`pedido_no_listo`, **404** `no_encontrado`, **400** `parametro_invalido` (el id) o
+`cuerpo_invalido` (un cuerpo en salir/entregar, o el motivo de fallar).
+
+### Las transiciones de la entrega
+
+El trigger `fn_tr_validar_pedido_domicilio` (script 36) **no impone un orden**: solo exige un
+pedido de canal `domicilio`, que `id_repartidor` sea un usuario activo con rol `repartidor`, que
+una entrega `entregado` o `fallido` **no cambie más** de estado, y pone las marcas de tiempo la
+primera vez que se entra a cada estado. Además `ck_domicilio_repartidor` exige repartidor fuera de
+`por_asignar` y `ck_domicilio_fallo` un motivo en `fallido`. **El orden lo impone el backend**, y
+estas son las únicas transiciones:
+
+| De | A | Quién | Condición |
+|---|---|---|---|
+| `por_asignar` | `asignado` | admin, cajero | pedido en `recibido`, `en_preparacion` o `listo`; repartidor activo |
+| `asignado` | `asignado` | admin, cajero | reasignar, con la misma condición |
+| `asignado` | `en_camino` | el repartidor asignado | **el pedido está en `listo`** (si no, 409 `pedido_no_listo`) |
+| `en_camino` | `entregado` | el repartidor asignado | el pedido pasa a `entregado` en la misma transacción |
+| `en_camino` | `fallido` | el repartidor asignado | con `motivo`; **final** |
+
+### Las decisiones (acordadas con Jarrison)
+
+- **Salir solo en `listo`.** La entrega pasa a `en_camino` únicamente si el pedido está en
+  `listo`; si no, **409** `pedido_no_listo`.
+- **En camino nadie cancela.** Con la entrega `en_camino`, **ningún** camino cancela el pedido:
+  `PATCH /pedidos/:id/estado` a `cancelado`, `POST /pedidos/:id/cancelar` (personal y comensal)
+  y `POST /pedidos/:id/items/:id_detalle/cancelar` responden **409** `entrega_en_camino` sin
+  tocar nada. En el último se bloquea **cualquier** línea, no solo la última (la comida ya va
+  en la bolsa; quitar la última, además, cancelaría el pedido). Antes de decidir se bloquea la
+  fila de `pedidos_domicilio`.
+- **En un domicilio, la entrega la marca solo el repartidor.** El paso del pedido a
+  `entregado` lo hace únicamente `POST /domicilios/:id_pedido/entregar`.
+  `PATCH /pedidos/:id/estado` con `estado: "entregado"` sobre un pedido de canal `domicilio`
+  responde **409** `entrega_por_repartidor` ("En un domicilio la entrega la marca el
+  repartidor"), **en cualquier estado de la entrega** y para cualquier rol, sin tocar nada. Se
+  bloquea igual que el resto: el pedido y después su fila de `pedidos_domicilio`. Mesa y para
+  llevar no cambian. (El paso a `pagado` solo es legal desde `entregado`, así que tampoco hay
+  otro camino para cerrar un domicilio: ver abajo.)
+- **Entregado cierra.** `en_camino -> entregado` pasa el pedido `listo -> entregado` en la
+  **misma transacción**, firmado por el repartidor en `historial_estados` (la transición
+  requiere usuario), y aplica la **misma regla de cierre** que el mesero
+  (`cerrarSiEntregadoYPagado`: entregado + `estado_pago` `pagado` + saldo 0 -> `pagado`, también
+  firmado por el repartidor). Sin mesa no se bloquea ni se libera ninguna.
+- **Fallido es final.** No hay reintentos ni reasignación. El pedido se queda en `listo` y lo
+  único que puede hacer el admin es **cancelarlo** (`listo -> cancelado`): lo cocinado es
+  **merma** (scripts 27 y 31). El **reembolso es aparte**, con `reembolsar_pago()`: no se
+  automatiza.
+- **Pago siempre anticipado.** El repartidor no cobra.
+- **ORDEN DE BLOQUEOS**, en todo lo que toca las dos tablas (asignar, salir, entregar, fallar
+  y todas las cancelaciones):
+
+  ```
+  mesas -> pedidos -> pedidos_domicilio -> detalles_pedido
+  ```
+
+  La mesa sigue antes del pedido, como en los pagos (un domicilio no tiene mesa). Con un solo
+  orden, una cancelación y un `salir` del mismo pedido se ponen en fila en el bloqueo del
+  pedido: gana el primero y el segundo decide con lo que aquel confirmó (`pedido_no_listo` si
+  ganó la cancelación, `entrega_en_camino` si ganó la salida). Nunca los dos.
+
+### Quién puede llevar un domicilio a `entregado` o `pagado`
+
+Revisado camino por camino:
+
+| Camino | ¿Puede con un domicilio? |
+|---|---|
+| `POST /domicilios/:id_pedido/entregar` (repartidor) | **Sí: el único** a `entregado` (y, con el pago cubierto, a `pagado` en la misma transacción) |
+| `PATCH /pedidos/:id/estado` y `POST /pedidos/:id/cancelar` | No: `entregado` da 409 `entrega_por_repartidor`; `pagado` solo es legal desde `entregado` |
+| `PATCH /kds/comandas/:id/estado` | No: el KDS solo pide `en_preparacion` o `listo` |
+| Pagos (`POST /transacciones`, el interno del socket-server, el cobro de mesa en caja) | Solo `entregado -> pagado` (la base no deja otra transición a `pagado`), o sea después de que el repartidor entregó; el cobro de mesa ni siquiera ve pedidos sin mesa |
+| Función de la base `cambiar_estado_pedido()` (script 03) | **Podría** (`listo -> entregado` respetando `transiciones_validas`), pero **ni el backend ni el socket-server la llaman**; queda anotada |
+
+### Los pedidos sin mesa en los listados (LEFT JOIN)
+
+Desde el script 36 `pedidos.id_mesa` admite `NULL`. Los listados **generales** pasan a
+`LEFT JOIN mesas` (solo se agregan campos; nada de lo que ya salía cambia):
+
+| Listado | Cambio |
+|---|---|
+| `GET /kds/comandas` | sale con `mesa_numero: null` y el nuevo `canal` |
+| `GET /pedidos/activos` | `mesa_numero: null`; `p.*` ya trae `canal` e `id_cliente` |
+| `GET /transacciones` (caja, "Recaudado hoy") | `numero_mesa: null` y el nuevo `canal` en cada fila |
+
+**No cambian**, porque son de **una mesa** a propósito y un pedido sin mesa no tiene nada que
+hacer ahí: la cuenta y el cobro de una mesa (`transacciones.service`, `WHERE p.id_mesa = $1`)
+y el conteo de pedidos abiertos para liberar una mesa (`mesas.service`, dos consultas). Los
+reportes leen vistas que no unen con mesas.
+
+### Avisos por socket
+
+En la D-20a **no hay avisos nuevos** de domicilio, y los existentes (`order:status` e
+`item:cancelado`) **no se envían** para un pedido sin mesa: el socket-server de hoy exige
+`id_mesa` en esos contratos. No lanzan ni cambian la respuesta HTTP. Los avisos de domicilio
+llegan con la **R-23** de Roberto. (Su `socket-server/src/auth.js` tampoco acepta hoy un JWT con
+`rol: "repartidor"`: hay que agregarlo allí cuando el repartidor necesite tiempo real.)
 
 ---
 

@@ -14,7 +14,7 @@ function Despedida() {
     : 'La cuenta de la mesa quedó pagada.';
 
   return (
-    <div className="min-h-screen bg-fondo text-texto flex items-center justify-center p-4">
+    <main className="min-h-screen bg-fondo text-texto flex items-center justify-center p-4">
       {motivo === 'pagada' ? (
         <section
           className="entra max-w-md w-full"
@@ -116,7 +116,7 @@ function Despedida() {
           </button>
         </Card>
       )}
-    </div>
+    </main>
   );
 }
 

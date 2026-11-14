@@ -28,6 +28,11 @@
 
 BEGIN;
 
+-- Las zonas que ya tenga la base (las de seed_zonas_demo.sql o las del
+-- administrador) cubren barrios que esta prueba usa: se desactivan solo dentro
+-- de la prueba.
+UPDATE zonas_envio SET activa = FALSE WHERE activa;
+
 CREATE TEMP TABLE t36 (clave TEXT PRIMARY KEY, id INTEGER) ON COMMIT DROP;
 
 CREATE FUNCTION pg_temp.id(p TEXT) RETURNS INTEGER AS $$ SELECT id FROM t36 WHERE clave = p $$ LANGUAGE sql;

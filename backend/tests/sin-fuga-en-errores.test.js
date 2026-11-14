@@ -187,7 +187,7 @@ test('d-11: una ruta que no existe no delata el enrutador', async () => {
   const res = await pedir({ metodo: 'GET', url: '/api/no-existe/de/verdad' });
 
   assert.strictEqual(res.status, 404);
-  assert.deepStrictEqual(res.body, { error: 'Ruta no encontrada' });
+  assert.deepStrictEqual(res.body, { error: 'Ruta no encontrada', motivo: 'no_encontrado' });
   sinFuga(res, 'el 404 del enrutador');
 });
 

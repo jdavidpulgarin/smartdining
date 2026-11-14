@@ -23,6 +23,7 @@ import { HistorialPrecios } from '../components/admin/HistorialPrecios'
 import { AuthContext } from '../context/authContextDef'
 import { useSocketListener } from '../hooks'
 import { crearUltimoPorId } from '../utils/dedupeEventos'
+import { urlImagen as urlParaPintar, urlImagenGuardable, MENSAJE_URL_IMAGEN } from '../utils/imagenes'
 
 /**
  * Carta para ADMINISTRAR: todas las categorías y TODOS los platos, también los
@@ -32,6 +33,10 @@ import { crearUltimoPorId } from '../utils/dedupeEventos'
  */
 /** Lo que ve el comensal: encendido a mano Y con stock para una unidad. */
 const estaDisponible = (dish) => dish.available && dish.stockOk !== false
+
+// Fotos SOLO para pintar la tarjeta; nunca se mandan como url_imagen.
+const FOTO_RESPALDO = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
+const FOTO_AREPA = '/img/arepa-rellena.png'
 
 async function obtenerCartaAdmin() {
   const [respCategorias, respPlatos] = await Promise.all([categoriasApi.listar(), platosApi.listar()])
@@ -95,10 +100,14 @@ export function Menu() {
           prepTime: p.tiempo_estimado ?? p.tiempo_preparacion_estimado ?? 15,
           tag: catNombre,
           description: p.descripcion || '',
-          imageUrl:
-            (isArepa ? '/img/arepa-rellena.png' : null) ||
-            p.url_imagen ||
-            'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+          // imageUrl es SOLO para pintar la tarjeta (con la foto local de la
+          // arepa o la de respaldo). Lo que se edita y se guarda es
+          // urlImagenGuardada: el url_imagen real del plato, o '' si no tiene.
+          // La url_imagen pasa por la lista blanca de la app (#212): una
+          // /imagenes/<uuid>.webp subida al backend se pinta con el origen de
+          // la API; http://, javascript:, data: y demás, con el respaldo.
+          imageUrl: (isArepa ? FOTO_AREPA : null) || urlParaPintar(p.url_imagen) || FOTO_RESPALDO,
+          urlImagenGuardada: p.url_imagen || '',
           // available = interruptor MANUAL de la cocina (platos.disponible).
           // stockOk = lo que calcula la base desde el inventario (stock_suficiente,
           // script 27). El comensal ve los dos juntos: ver estaDisponible().
@@ -260,7 +269,9 @@ export function Menu() {
         prepTime: dish.prepTime.toString(),
         tag: dish.tag || 'General',
         description: dish.description,
-        imageUrl: dish.imageUrl,
+        // El valor real, no la foto que se pinta: si no, editar un plato sin
+        // foto (o la arepa) guardaba la foto de respaldo (o /img/...).
+        imageUrl: dish.urlImagenGuardada ?? '',
         available: dish.available,
         personalizable: Boolean(dish.personalizable),
         calorias: dish.calorias?.toString() || '',
@@ -304,13 +315,21 @@ export function Menu() {
       descripcion: dishForm.description.trim(),
       precio: numericPrice,
       tiempo_preparacion_estimado: numericTime,
-      url_imagen:
-        dishForm.imageUrl.trim() ||
-        'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
       disponible: Boolean(dishForm.available),
       personalizable: Boolean(dishForm.personalizable),
       calorias: dishForm.calorias ? parseInt(dishForm.calorias, 10) : null,
     }
+    // Con el campo vacío NO se manda url_imagen: el plato queda sin foto (al
+    // crear) o con la que ya tenía (al editar). Antes se mandaba la foto de
+    // respaldo y quedaba guardada como si fuera la real.
+    const urlImagen = dishForm.imageUrl.trim()
+    // Lo mismo que acepta el backend (#209): https:// o /imagenes/<uuid>.webp.
+    // Se avisa aquí en vez de mandar algo que el backend va a rechazar.
+    if (!urlImagenGuardable(urlImagen)) {
+      setDishFormError(MENSAJE_URL_IMAGEN)
+      return
+    }
+    if (urlImagen) payload.url_imagen = urlImagen
 
     setSubmittingAction(true)
     setDishFormError(null)
@@ -551,12 +570,7 @@ export function Menu() {
                     alt={dish.name}
                     loading="lazy"
                     onError={(e) => {
-                      if (dish.name?.toLowerCase().includes('arepa rellena')) {
-                        e.target.src = '/img/arepa-rellena.png'
-                      } else {
-                        e.target.src =
-                          'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
-                      }
+                      e.target.src = dish.name?.toLowerCase().includes('arepa rellena') ? FOTO_AREPA : FOTO_RESPALDO
                     }}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
@@ -878,9 +892,12 @@ export function Menu() {
 
               <div>
                 <label className="sd-input-label">URL DE IMAGEN</label>
+                {/* type="text": una imagen subida se guarda como /imagenes/<uuid>.webp,
+                    que el type="url" del navegador no deja enviar. */}
                 <input
-                  type="url"
-                  placeholder="https://images.unsplash.com/..."
+                  type="text"
+                  inputMode="url"
+                  placeholder="https://… o /imagenes/<código>.webp"
                   value={dishForm.imageUrl}
                   onChange={(e) => setDishForm({ ...dishForm, imageUrl: e.target.value })}
                   className="sd-input"

@@ -1,6 +1,7 @@
 import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
 import { colores, radios, espaciado } from '../../theme';
 import { formatearPrecio } from '../../utils/formato';
+import { urlImagen } from '../../utils/imagenes';
 import Badge from '../ui/Badge';
 import SelectorPorcion from './SelectorPorcion';
 
@@ -59,6 +60,7 @@ export default function PasoConstructor({
           const porcionElegida = seleccionesDelPaso[idIng] || 'normal';
           const agotado = ingrediente.disponible === false;
           const deshabilitado = agotado || (maxAlcanzado && !seleccionado);
+          const ingredienteFotoUrl = urlImagen(ingrediente.url_imagen);
 
           return (
             <View key={idIng} style={styles.itemGrupo}>
@@ -79,9 +81,9 @@ export default function PasoConstructor({
                   deshabilitado && styles.tarjetaDeshabilitada,
                 ]}
               >
-                {ingrediente.url_imagen ? (
+                {ingredienteFotoUrl ? (
                   <Image
-                    source={{ uri: ingrediente.url_imagen }}
+                    source={{ uri: ingredienteFotoUrl }}
                     style={styles.foto}
                     resizeMode="cover"
                   />

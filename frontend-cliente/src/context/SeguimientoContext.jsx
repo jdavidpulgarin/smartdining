@@ -438,21 +438,28 @@ export function SeguimientoProvider({ children }) {
 
   const cancelarPedido = useCallback(
     async (idPedido) => {
-      const respuesta = await cancelarPedidoService(idPedido);
-      const pedidoActualizado = respuesta?.pedido || respuesta;
-      if (pedidoActualizado) {
-        const conOrigen = {
-          ...pedidoActualizado,
-          cancelado_por: 'comensal',
-        };
-        actualizarListaPedidos((prev) =>
-          reemplazarPedido(prev, conOrigen, comensal)
-        );
-        if (pedidoActualizado.id_pedido != null) {
-          setIdSeleccionado(pedidoActualizado.id_pedido);
+      try {
+        const respuesta = await cancelarPedidoService(idPedido);
+        const pedidoActualizado = respuesta?.pedido || respuesta;
+        if (pedidoActualizado) {
+          const conOrigen = {
+            ...pedidoActualizado,
+            cancelado_por: 'comensal',
+          };
+          actualizarListaPedidos((prev) =>
+            reemplazarPedido(prev, conOrigen, comensal)
+          );
+          if (pedidoActualizado.id_pedido != null) {
+            setIdSeleccionado(pedidoActualizado.id_pedido);
+          }
         }
+        return pedidoActualizado;
+      } catch (err) {
+        if (err?.motivo === 'pedido_ya_cancelado' && idPedido != null) {
+          setIdSeleccionado(idPedido);
+        }
+        throw err;
       }
-      return pedidoActualizado;
     },
     [comensal, actualizarListaPedidos]
   );
