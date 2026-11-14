@@ -71,7 +71,11 @@ async function enviar(ruta, cuerpo) {
     // Incluye el timeout (AbortError) y que el socket-server no esté levantado.
     const motivo = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'TIMEOUT' : 'INALCANZABLE';
     console.error(`[socket] ${ruta} no se pudo notificar (${motivo}):`, err.message);
-    return { ok: false, motivo };
+    // El código del sistema (ECONNREFUSED, ECONNRESET, ETIMEDOUT, EAI_AGAIN…)
+    // viene en err.cause con el fetch de Node. Solo el código, para el log de
+    // quien reintenta (services/avisos-stock-cola.js).
+    const codigo = err && err.cause && typeof err.cause.code === 'string' ? err.cause.code : undefined;
+    return codigo ? { ok: false, motivo, codigo } : { ok: false, motivo };
   }
 }
 
