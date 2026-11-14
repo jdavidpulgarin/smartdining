@@ -586,7 +586,8 @@ const MENSAJE_COMENSAL_YA_PAGO = 'Ese comensal ya pagó: reembolsa antes de canc
  * El comensal quita UNA línea de su pedido, entera (aunque tenga cantidad > 1).
  *
  * TODO en una transacción, con el pedido y después la línea bloqueados (FOR
- * UPDATE, siempre en ese orden). El KDS cambia el estado con un UPDATE del
+ * UPDATE, siempre en ese orden; el personal bloquea antes la MESA, como los
+ * cobros: paso 0). El KDS cambia el estado con un UPDATE del
  * pedido, que toma el mismo bloqueo de fila: si cocina llega primero, aquí se
  * espera y al despertar se lee el estado YA confirmado ('en_preparacion' -> 409);
  * si llega primero el comensal, cocina espera a que la línea quede cancelada y
@@ -641,6 +642,28 @@ async function cancelarItem(idPedido, idDetalle, actor) {
     // solo esta transacción, así no se filtra a la siguiente petición.
     if (esPersonal) {
       await client.query('SELECT set_config($1::text, $2::text, true)', ['app.id_usuario', String(actor.idUsuario)]);
+    }
+
+    // 0. PERSONAL (T4): la MESA antes que el pedido, el orden de los cobros
+    // (mesas -> pedidos -> pedidos_domicilio -> detalles_pedido; ver arriba).
+    // La regla del paso 3b mira pagos de TODOS los pedidos de la mesa, pero el
+    // FOR UPDATE del pedido solo frena los cobros de ESTE pedido: un pago de
+    // Ana en otro pedido de la mesa podía entrar entre la lectura y el COMMIT,
+    // y quedaban los dos (el pago y el plato cancelado). Todos los cobros
+    // (registrarPago, cobrarMesa en caja y el pago en línea) bloquean la mesa
+    // primero, así que ahora uno espera al otro y el segundo decide con lo que
+    // el primero confirmó.
+    //
+    // La mesa sale de una subconsulta en la misma sentencia (como en
+    // actualizarEstado): sin leer y después bloquear. Un domicilio no tiene
+    // mesa: la subconsulta da NULL, no hay fila y no se bloquea nada.
+    if (esPersonal) {
+      await client.query(
+        `SELECT m.id_mesa FROM mesas m
+          WHERE m.id_mesa = (SELECT p.id_mesa FROM pedidos p WHERE p.id_pedido = $1::int)
+          FOR UPDATE`,
+        [idPedido]
+      );
     }
 
     // 1. Pedido, y después la línea: siempre en este orden.

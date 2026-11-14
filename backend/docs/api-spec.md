@@ -2659,8 +2659,12 @@ también cuando cocina ya la empezó.
   historial**, no al aviso.
 
 En la **misma transacción y con los mismos bloqueos** que el comensal (pedido y después línea,
-`FOR UPDATE`), y con `app.id_usuario` fijado (`set_config(..., true)`) para que los
-movimientos de inventario que escriben los triggers lleven al usuario:
+`FOR UPDATE`), pero **antes la fila de la mesa** (`FOR UPDATE`; un domicilio no tiene mesa y
+ese paso no existe), en el orden de los cobros: `mesas → pedidos → pedidos_domicilio →
+detalles_pedido`. Así un pago en **otro** pedido de la mesa y la cancelación se ponen en fila,
+y el segundo decide con lo que el primero confirmó (nunca quedan los dos). Y con
+`app.id_usuario` fijado (`set_config(..., true)`) para que los movimientos de inventario que
+escriben los triggers lleven al usuario:
 
 | Paso | Si no se cumple |
 |---|---|

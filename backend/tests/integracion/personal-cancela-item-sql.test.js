@@ -551,3 +551,89 @@ test('t4-e. línea «General» (sin comensal) con un pago de la mesa completa: 4
   assert.strictEqual(res.body.error, MENSAJE_YA_PAGO);
   assert.strictEqual((await estadoItem(general.id_detalle)).estado_item, 'pendiente');
 });
+
+// --- T4: sin carrera con los cobros (la mesa se bloquea antes que el pedido) ---
+
+test('t4-carrera. un cobro de Ana en OTRO pedido de la mesa y el cancelar del mesero a la vez: nunca quedan los dos', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const p = catalogoT4.plato.id_plato;
+  const deBeto = await pedidoCon(idMesa, [{ id_plato: p, cantidad: 2, comensal: 'Beto' }]);
+  const conAna = await pedidoCon(idMesa, [
+    { id_plato: p, cantidad: 3, comensal: 'Ana' },
+    { id_plato: p, cantidad: 1, comensal: 'Caro' },
+  ]);
+  const lineaDeAna = conAna.detalles[0].id_detalle;
+
+  // El cobro, a medias: lo que hace registrarPago (POST /transacciones de la
+  // Caja) con los mismos bloqueos y en el mismo orden (la mesa, después SOLO
+  // su pedido), y el pago de Ana ya insertado pero SIN confirmar.
+  const cobro = await sonda.connect();
+  let confirmado = false;
+  try {
+    await cobro.query('BEGIN');
+    await cobro.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1::int FOR UPDATE', [idMesa]);
+    await cobro.query('SELECT id_pedido FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [deBeto.idPedido]);
+    await cobro.query(
+      `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion, comensal)
+       VALUES ($1::int, 'efectivo', 1000, 'completada', 'Ana')`,
+      [deBeto.idPedido]
+    );
+
+    // El mesero cancela el plato de Ana mientras el cobro sigue abierto.
+    let respondio = false;
+    const cancelacion = cancelar(conAna.idPedido, lineaDeAna, { motivo: 'carrera' })
+      .then((r) => { respondio = true; return r; });
+    await new Promise((listo) => setTimeout(listo, 500));
+    assert.strictEqual(respondio, false, 'la cancelación espera al cobro en la fila de la mesa');
+
+    await cobro.query('COMMIT');
+    confirmado = true;
+    const res = await cancelacion;
+    // Despierta con el pago de Ana ya confirmado: lo ve y no cancela.
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.strictEqual(res.body.motivo, 'pago_registrado');
+  } finally {
+    if (!confirmado) await cobro.query('ROLLBACK').catch(() => {});
+    cobro.release();
+  }
+
+  const pago = await sonda.query(
+    "SELECT count(*)::int AS n FROM transacciones WHERE id_pedido = $1::int AND comensal = 'Ana'",
+    [deBeto.idPedido]
+  );
+  const linea = await estadoItem(lineaDeAna);
+  assert.strictEqual(pago.rows[0].n, 1, 'el pago de Ana quedó');
+  assert.strictEqual(linea.estado_item, 'pendiente', 'y el plato de Ana sigue vivo: nunca los dos');
+});
+
+test('t4-carrera. si el cobro de Ana no se confirma (ROLLBACK), la cancelación que esperaba sigue y da 200', async (t) => {
+  if (!hayBase) return t.skip('sin base de datos');
+  const idMesa = await mesaAbierta();
+  const p = catalogoT4.plato.id_plato;
+  const deBeto = await pedidoCon(idMesa, [{ id_plato: p, cantidad: 2, comensal: 'Beto' }]);
+  const conAna = await pedidoCon(idMesa, [
+    { id_plato: p, cantidad: 3, comensal: 'Ana' },
+    { id_plato: p, cantidad: 1, comensal: 'Caro' },
+  ]);
+
+  const cobro = await sonda.connect();
+  try {
+    await cobro.query('BEGIN');
+    await cobro.query('SELECT id_mesa FROM mesas WHERE id_mesa = $1::int FOR UPDATE', [idMesa]);
+    await cobro.query('SELECT id_pedido FROM pedidos WHERE id_pedido = $1::int FOR UPDATE', [deBeto.idPedido]);
+    await cobro.query(
+      `INSERT INTO transacciones (id_pedido, metodo_pago, monto, estado_transaccion, comensal)
+       VALUES ($1::int, 'efectivo', 1000, 'completada', 'Ana')`,
+      [deBeto.idPedido]
+    );
+    const cancelacion = cancelar(conAna.idPedido, conAna.detalles[0].id_detalle, { motivo: 'carrera' });
+    await new Promise((listo) => setTimeout(listo, 300));
+    await cobro.query('ROLLBACK');
+    const res = await cancelacion;
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+  } finally {
+    cobro.release();
+  }
+  assert.strictEqual((await estadoItem(conAna.detalles[0].id_detalle)).estado_item, 'cancelado');
+});

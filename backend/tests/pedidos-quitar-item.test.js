@@ -228,6 +228,16 @@ test('t4: el comensal sigue ESTRICTO: su mensaje de siempre y sin la regla del d
   }
 });
 
+test('t4: el comensal no toma el bloqueo de la mesa (solo el camino del personal)', async () => {
+  const e = escenario('Ana');
+  try {
+    assert.strictEqual((await quitar(e.jwtComensal)).status, 200);
+    assert.strictEqual(e.db.buscar('SELECT m.id_mesa FROM mesas m'), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
 for (const [caso, cuerpo] of [['un campo', { motivo: 'no lo quiero' }], ['un arreglo', [1]]]) {
   test(`quitar plato: cuerpo con ${caso} -> 400 cuerpo_invalido`, async () => {
     const e = escenario();

@@ -134,6 +134,25 @@ test('personal cancela plato: fija app.id_usuario con set_config DENTRO de la tr
   }
 });
 
+test('t4: el personal bloquea la MESA (FOR UPDATE, por subconsulta del pedido) ANTES que el pedido, como los cobros', async () => {
+  const e = escenario();
+  try {
+    assert.strictEqual((await cancelar('mesero')).status, 200);
+    const sqls = e.db.ejecutadas.map((q) => q.sql);
+    const iMesa = sqls.findIndex((s) => s.includes('SELECT m.id_mesa FROM mesas m'));
+    const iPedido = sqls.findIndex((s) => s.includes('total, creado_en') && s.includes('FOR UPDATE'));
+    assert.ok(iMesa >= 0, 'bloquea la mesa');
+    const mesa = e.db.ejecutadas[iMesa];
+    assert.ok(mesa.sql.includes('FOR UPDATE'));
+    assert.ok(mesa.sql.includes('SELECT p.id_mesa FROM pedidos p WHERE p.id_pedido = $1::int'), 'la mesa sale del pedido, en la misma sentencia');
+    assert.deepStrictEqual(mesa.params, [PEDIDO]);
+    assert.ok(sqls.findIndex((s) => s.includes('set_config')) < iMesa, 'dentro de la transacción');
+    assert.ok(iMesa < iPedido, 'mesa ANTES que el pedido');
+  } finally {
+    e.restaurar();
+  }
+});
+
 // --- Cuerpo -------------------------------------------------------------------
 
 for (const [caso, opciones, codigo] of [
