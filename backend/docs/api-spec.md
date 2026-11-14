@@ -3085,6 +3085,9 @@ busca máximos y compara periodos.
   "tiemposKds": [
     { "fecha": "2026-10-14", "platos_preparados": 56, "tiempo_estimado_promedio_min": 15,
       "tiempo_real_promedio_min": 13.1, "variacion_promedio_porcentaje": -12.7 }
+  ],
+  "ventasPorDia": [
+    { "fecha": "2026-10-14", "total": 1250000, "pedidos": 42 }
   ]
 }
 ```
@@ -3105,6 +3108,32 @@ busca máximos y compara periodos.
 | `metodosPago` | `transacciones` | ver la agrupación abajo |
 | `horasPico` | `pedidos` | ver `volumen` abajo. Máx. 24 |
 | `tiemposKds` | `v_tiempos_kds` | una fila por día. Máx. 30 |
+| `ventasPorDia` (T6) | `v_ventas_diarias` | **un día por cada día del rango**, en orden; ver abajo |
+
+**Días de Bogotá, sin depender de la sesión (T6).** Todos los campos cuentan por el **día de
+Bogotá**: el backend usa `(columna AT TIME ZONE 'America/Bogota')::date` y las vistas también
+desde el script 42 (#241). Todas las columnas de fecha son `TIMESTAMPTZ`, así que el resultado
+es el mismo con la conexión en UTC o en Bogotá (la prueba de integración lo exige). Las fechas
+salen con `to_char(..., 'YYYY-MM-DD')`, que tampoco depende del `DateStyle` de la sesión.
+Bordes:
+
+- Un pedido de **ayer 23:40** (en UTC ya es hoy) cuenta **ayer**.
+- Un pedido de ayer **pagado hoy 00:10**: el pedido cuenta en `totalPedidos` de **ayer** y la
+  plata en `totalVentas` de **hoy** (por la fecha del pago).
+- Un pago de **hoy 20:40** (en UTC ya es mañana) cuenta **hoy**.
+
+**`ventasPorDia`.** `[{ "fecha": "AAAA-MM-DD", "total": number, "pedidos": number }]`: un
+elemento por **cada** día del rango (1 para `hoy`, 7 para `semana`, 30 para `mes`), ordenado
+del más viejo a hoy; un día sin ventas sale con `total: 0` y `pedidos: 0`. Misma fuente que
+`totalVentas`: `total` es lo **recaudado** ese día (transacciones `completada` por la fecha del
+pago) y `pedidos` los pedidos no cancelados **creados** ese día. Por eso:
+
+> **suma de `ventasPorDia[].total` = `totalVentas` = suma de `metodosPago[].monto`.**
+
+**`topPlatos` y `topIngredientes` sin líneas canceladas (T6).** Excluyen los pedidos cancelados
+**y** las líneas con `estado_item = 'cancelado'` (D-13, J-14): un plato que se quitó del pedido
+no se vendió, y lo que se eligió en él no se pidió. Es el mismo criterio que `v_platos_top` y
+`v_ingredientes_top` desde el script 42.
 
 **Por qué `topPlatos` y `topIngredientes` no usan las vistas.** `v_platos_top` y
 `v_ingredientes_top` **no tienen columna de fecha**: agrupan todo el histórico. Con ellas,
@@ -3760,6 +3789,18 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
   invalidado) en la misma transacción.
 - **La propina no entra**: este cobro solo cubre el saldo de los pedidos. Un monto mayor que el
   saldo es `409 excede`, no una propina.
+- **«Pagar lo mío» no supera lo que debe esa persona.** Con `comensal` (que no sea «General»),
+  el monto tampoco puede superar el **saldo propio** de ese comensal en la visita: sus líneas
+  **vivas** menos sus pagos `completada`, en los pedidos de la mesa desde `sesion_iniciada_en`
+  (los mismos que la cuenta), comparando el alias por su clave («Ana», « ana » y «Aná» son la
+  misma persona). Si lo supera, **409 `excede_saldo_comensal`** con su saldo; con saldo propio
+  0 (por ejemplo, el mesero le canceló el plato), el mismo 409. Antes solo se miraba el saldo de
+  la mesa, y el pago de Ana terminaba cubriendo lo de los demás. Las líneas canceladas no
+  cuentan aunque `obtener_cuenta_mesa` todavía las sume (hasta el script 41). Se calcula con la
+  mesa y los pedidos ya bloqueados, el mismo orden que la cancelación del personal, así que
+  cancelar el plato de Ana y cobrarle «lo suyo» a la vez nunca dejan los dos. Un cobro **sin
+  comensal** o a **«General»** sigue igual. El pago en línea (`/transacciones/internal`) no
+  cambia.
 
 **Respuestas:**
 
@@ -3790,6 +3831,7 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
 | **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
 | **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
 | **409** | `{ "error", "motivo": "excede", "saldo": 68000 }` | El monto supera el saldo de la mesa (`saldo` en pesos). No se escribe nada |
+| **409** | `{ "error": "El pago excede lo que debe ese comensal", "motivo": "excede_saldo_comensal", "saldo": 12000 }` | Cobro con `comensal`: el monto supera el **saldo propio** de esa persona (`saldo` en pesos; 0 si no debe nada). No se escribe nada |
 | **409** | `{ "error", "motivo": "autor_inexistente" }` | El usuario del token ya no existe ([El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)). La transacción se deshace entera |
 
 `POST /transacciones/internal` (Wompi) responde los mismos casos **sin** `motivo` y en
@@ -4383,7 +4425,7 @@ cualquier ruta que acabe tocando el inventario.
 
 | SQLSTATE | Cuándo | Status | Cuerpo |
 |---|---|---|---|
-| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "error": "...", "motivo": "sin_stock", "faltantes": [{ "tipo", "id", "nombre" }] }` |
+| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "error": "...", "motivo": "sin_stock", "faltantes": [{ "tipo", "id", "nombre", "disponible" }] }` |
 | **SD002** "stock negativo" | `registrar_movimiento_inventario` (merma o ajuste) dejaría el stock bajo 0 | **400** | `{ "error": "...", "motivo": "movimiento_invalido", "stock_actual": 450 }` |
 | `El ingrediente "X" está agotado` (**P0001**) | Interruptor manual de una opción, anterior a P-19 | **409** | `{ "error": "...", "motivo": "ingrediente_agotado" }` |
 
@@ -4399,14 +4441,40 @@ cualquier ruta que acabe tocando el inventario.
   "error": "Sin stock suficiente para el pedido 87",
   "motivo": "sin_stock",
   "faltantes": [
-    { "tipo": "plato", "id": 12, "nombre": "Arepa de Huevo" },
-    { "tipo": "ingrediente", "id": 7, "nombre": "Panceta Crujiente" }
+    { "tipo": "plato", "id": 1004, "nombre": "Nachos Supremos", "disponible": 2 },
+    { "tipo": "ingrediente", "id": 1, "nombre": "Arroz Integral", "disponible": 0 }
   ]
 }
 ```
 
-- `tipo` es `"plato"` o `"ingrediente"`, e `id`/`nombre` dicen **qué quitar del carrito**.
-- **Al cliente solo van `tipo`, `id` y `nombre`, y sin repetir**: el pedido lo puede hacer un
+- `tipo` es `"plato"` o `"ingrediente"` (una opción de un plato armable), e `id`/`nombre`
+  dicen **qué ajustar o quitar del carrito**.
+- **`disponible` (T5)**: cuántas unidades de ESE plato, o de ESA opción, se pueden pedir con el
+  stock actual. Entero `>= 0`. Es la fórmula de la base para reservar
+  (`fn_consumo_detalle`, `database/scripts/27_inventario.sql` líneas 129 y 134), despejada, con
+  lo que "hay" como lo cuenta `fn_faltantes_pedido` (línea 392: un insumo inactivo cuenta 0):
+
+  | `tipo` | `disponible` |
+  |---|---|
+  | `plato` | mínimo, sobre los insumos de su receta, de `floor(hay / cantidad_por_unidad)` |
+  | `ingrediente` | mínimo, sobre los insumos de la receta de la opción, de `floor(hay / (cantidad × factor de la porción))` (`factores_porcion`: ligera 0,5 · normal 1 · extra 1,5; si se pidió en varias porciones, la de factor más alto) |
+
+  - **Puede no venir**: si el plato no tiene receta (por ejemplo, un armable cuyo faltante es
+    un paso obligatorio sin opciones) no hay de dónde sacarlo y no se inventa; y si la
+    consulta que lo calcula falla, el 409 sale igual **sin** `disponible` (nunca un 500; el
+    servidor anota solo el código del fallo).
+  - **Es aproximado**: se calcula por faltante, como si fuera lo único del pedido, con una
+    lectura aparte después del error (la transacción del pedido ya está deshecha), por la
+    misma conexión del pedido y nunca por una nueva del pool, para que muchos rechazos a la
+    vez no lo agoten. Si otra
+    línea del MISMO pedido gasta el mismo insumo (otro plato con el mismo ingrediente), o el
+    stock cambia entre la lectura y el reintento, **"Ajustar a N" puede volver a dar 409**;
+    la PWA vuelve a mostrar el diálogo con los números nuevos.
+  - **Cómo usarlo en la PWA**: `disponible` **0** → solo "Quitar"; **> 0** → "Ajustar a N"
+    (cambiar la cantidad de esa línea a `N`) o "Quitar"; **sin el campo** → solo "Quitar".
+  - Lo calcula `crearConDetalles`, el único camino que crea líneas hoy (`POST /pedidos`, del
+    comensal y del personal); vive en `src/services/disponible-sin-stock.js`.
+- **Al cliente solo van `tipo`, `id`, `nombre` y `disponible`, y sin repetir**: el pedido lo puede hacer un
   comensal anónimo desde su teléfono y las cantidades de bodega no son asunto suyo.
   `id_insumo`, `insumo`, `necesita` y `hay` quedan **solo en el log del servidor**, que es
   donde hacen falta para reponer.

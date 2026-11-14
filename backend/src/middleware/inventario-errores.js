@@ -91,8 +91,15 @@ function esId(valor) {
  * sirve para quitar nada del carrito y mandarla a medias es peor que no
  * mandarla. Si no queda ninguna, la lista va vacía y el `motivo` sigue diciendo
  * qué pasó.
+ *
+ * T5: con `disponibles` (el Map "tipo:id" -> entero que calcula
+ * services/disponible-sin-stock.js después del error), cada faltante lleva
+ * además `disponible`: cuántas unidades de ese plato u opción se pueden pedir.
+ * Sin el Map (la consulta falló o no se llamó), o sin entrada para ese faltante
+ * (no tiene receta), la fila sale como siempre, sin el campo. Nunca salen
+ * id_insumo, el nombre del insumo ni cantidades de bodega.
  */
-function faltantesParaElCliente(detalle) {
+function faltantesParaElCliente(detalle, disponibles = null) {
   const filas = detalle && Array.isArray(detalle.faltantes) ? detalle.faltantes : [];
   const vistos = new Set();
   const limpios = [];
@@ -106,11 +113,14 @@ function faltantesParaElCliente(detalle) {
     if (vistos.has(llave)) continue;
     vistos.add(llave);
 
-    limpios.push({
+    const limpio = {
       tipo: fila.tipo,
       id: fila.id,
       nombre: typeof fila.nombre === 'string' ? fila.nombre : null,
-    });
+    };
+    const disponible = disponibles instanceof Map ? disponibles.get(llave) : undefined;
+    if (Number.isInteger(disponible) && disponible >= 0) limpio.disponible = disponible;
+    limpios.push(limpio);
   }
 
   return limpios;
@@ -147,7 +157,9 @@ function traducirErrorInventario(err) {
 
   if (err.code === SQLSTATE_SIN_STOCK) {
     const detalle = detalleDeLaBase(err);
-    const faltantes = faltantesParaElCliente(detalle);
+    // T5: err.disponibles lo anota pedidos.service al fallar (ver
+    // services/disponible-sin-stock.js); si no está, los faltantes salen sin él.
+    const faltantes = faltantesParaElCliente(detalle, err.disponibles);
     return {
       status: 409,
       cuerpo: { error: err.message, motivo: MOTIVO_SIN_STOCK, faltantes },
