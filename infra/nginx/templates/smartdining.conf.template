@@ -47,6 +47,16 @@ map $http_upgrade $connection_upgrade {
     ''      close;
 }
 
+# Permissions-Policy por sitio (la manda snippets/seguridad.conf). Por defecto
+# nada pide cámara, micrófono ni ubicación. Solo la PWA del comensal (app.)
+# puede usar la cámara, y solo para sí misma: escanear el QR de la mesa desde
+# la app instalada (iPhone no comparte la sesión de Safari con la app).
+# staff., cocina., api. y rt. siguen sin cámara.
+map $host $sd_permisos {
+    default            "camera=(), microphone=(), geolocation=()";
+    app.${DOMINIO}     "camera=(self), microphone=(), geolocation=()";
+}
+
 upstream backend { server backend:4000; keepalive 16; }
 upstream tiempo_real { server socket-server:4001; }
 
@@ -97,7 +107,7 @@ server {
     # porque React y Tailwind los usan; revisar al endurecer. Las fuentes de
     # Google (index.css las importa) necesitan fonts.googleapis.com (la hoja)
     # y fonts.gstatic.com (los archivos).
-    set $csp "default-src 'self'; script-src 'self' https://checkout.wompi.co; frame-src https://checkout.wompi.co https://*.wompi.co; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO} https://*.wompi.co; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self' https://checkout.wompi.co; frame-ancestors 'none'";
+    set $csp "default-src 'self'; script-src 'self' https://checkout.wompi.co; frame-src https://checkout.wompi.co https://*.wompi.co; connect-src 'self' https://api.${DOMINIO} https://rt.${DOMINIO} wss://rt.${DOMINIO} https://*.wompi.co; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:; manifest-src 'self'; base-uri 'self'; form-action 'self' https://checkout.wompi.co; frame-ancestors 'none'";
     include /etc/nginx/snippets/cabeceras-sitio.conf;
     include /etc/nginx/snippets/bloqueo-interno.conf;
 
