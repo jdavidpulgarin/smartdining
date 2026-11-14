@@ -39,6 +39,7 @@ describe('utils/excedentes (T4, §8.7)', () => {
     const [y] = listaExcedentes([fila({ comensal: null, motivo: 'otra_visita', creado_en: '2026-11-15T01:30:00.000Z' })])
     expect(textoExcedente(y, (n) => '$' + n)).toBe('20:30 · Mesa 2: devuélvele $10000 en efectivo (pagó después de que su grupo se fue: se devuelve todo).')
     expect(textoExcedente({ ...x, creadoEn: null }, (n) => '$' + n)).toBe('Mesa 2 · Ana: devuélvele $10000 en efectivo (pagó en línea más de lo que debía).')
+    expect(textoExcedente({ ...x, motivo: 'sin_cuenta' })).toMatch(/la mesa ya estaba cerrada: se devuelve todo/)
     for (const motivo of ['excede_saldo_mesa', 'sin_cuenta', 'raro']) {
       expect(textoExcedente({ ...x, motivo })).toMatch(/devuélvele 10000 en efectivo/)
     }

@@ -15,7 +15,7 @@ import { horaBogota } from './caja'
 const POR_QUE = {
   excede_saldo_comensal: 'pagó en línea más de lo que debía',
   excede_saldo_mesa: 'pagó la cuenta de la mesa por más del saldo',
-  sin_cuenta: 'la mesa ya estaba pagada: se devuelve todo',
+  sin_cuenta: 'la mesa ya estaba cerrada: se devuelve todo',
   otra_visita: 'pagó después de que su grupo se fue: se devuelve todo',
 }
 
