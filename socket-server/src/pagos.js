@@ -11,7 +11,7 @@ const {
 const { esEventIdValido } = require('./idempotencia');
 const { normalizarAlias } = require('./alias');
 const {
-  calcularMonto, personasPorPagar, validarCuenta, MODOS,
+  calcularMonto, validarCuenta, MODOS, MODO_RETIRADO,
 } = require('./cuenta');
 const { ttlIntencionRegistroSeg } = require('./pasarelas/wompi');
 
@@ -62,6 +62,11 @@ async function crearIntencionPago(req, res, ctx) {
   const idMesa = identidad.id_mesa;
   const cuerpo = parsearJson(await leerCuerpoCrudo(req));
 
+  // «igual» (Dividir) se retiró (T2): un mensaje propio, para que una PWA vieja
+  // sepa qué pasó y no solo que el modo no vale.
+  if (cuerpo.modo === MODO_RETIRADO) {
+    throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'El modo «igual» (dividir la cuenta) ya no existe: usa «propio» (pagar lo tuyo) o «total» (pagar toda la cuenta)');
+  }
   if (!MODOS.includes(cuerpo.modo)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', `modo debe ser uno de: ${MODOS.join(', ')}`);
   if (!esEventIdValido(cuerpo.eventId)) throw new ErrorHttp(400, 'PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
   // Quien paga es el alias FIRMADO en el JWT. `comensal` en el cuerpo es
@@ -71,10 +76,6 @@ async function crearIntencionPago(req, res, ctx) {
   if (cuerpo.comensal !== undefined && cuerpo.comensal !== comensal) {
     throw new ErrorHttp(403, 'NO_AUTORIZADO', 'Solo puedes pagar con tu propio nombre');
   }
-  // El modo "igual" reparte el saldo entre las personas sentadas que aún no
-  // han pagado (más quien paga).
-  const presencia = await ctx.presencia.calcular(idMesa);
-
   // Reintento del mismo eventId: misma respuesta, sin otra intención. Si ya
   // venció, se trata como una petición nueva.
   const claveEvento = `comensal:pago:intencion:${idMesa}:${cuerpo.eventId}`;
@@ -122,13 +123,12 @@ async function crearIntencionPago(req, res, ctx) {
     modo: cuerpo.modo,
     cuenta: cuenta.cuerpo,
     comensal,
-    personas: personasPorPagar({ comensales: presencia.comensales, pagaron: presencia.pagaron, comensal }),
   });
   if (monto.error) throw new ErrorHttp(409, 'SIN_SALDO', 'No hay saldo por pagar en ese modo');
 
   // Una sola intención pendiente por comensal. Se reutiliza solo si es del
   // mismo modo y por el mismo monto recalculado, y si no está por vencer; si
-  // no (cambió de modo, llegó un pedido o cambió la presencia), se reemplaza
+  // no (cambió de modo o el monto, p. ej. llegó un pedido u otro pagó), se reemplaza
   // por una nueva.
   const pendiente = await ctx.almacenPagos.obtenerPendiente(idMesa, comensal);
   if (pendiente) {
@@ -177,7 +177,7 @@ const TTL_INTENCION_RESUELTA_SEG = 7 * 24 * 60 * 60;
 // Una reemplazada sigue valiendo: el comensal pudo pagarla en otra pestaña
 // antes de pedir la nueva, y ese dinero ya salió de su cuenta.
 /**
- * Anota a quien pagó en `pagaron` (deja de contar en «igual» y la mesa lo ve),
+ * Anota a quien pagó en `pagaron` (la mesa y el panel ven quién ya pagó),
  * también si el pago dejó el saldo en 0: la mesa sigue ocupada mientras quede
  * un pedido sin entregar (EVENTS.md §5.1). Pero solo si la sesión de mesa en la
  * que pagó sigue abierta, para no ensuciar la del grupo siguiente.
@@ -405,7 +405,7 @@ async function recibirEventoPasarela(req, res, ctx) {
       return enviarJson(res, 200, { ok: true, duplicado: false, registrado: false });
     }
 
-    // Quien pagó deja de contar en "igual" (en cualquier modo). Va ANTES de
+    // Quien pagó entra en `pagaron` (en cualquier modo). Va ANTES de
     // marcar la intención como pagada: si esto falla, el 503 hace que Wompi
     // reintente y el reintento la encuentra todavía cobrable (el backend es
     // idempotente por referencia_externa y marcarPago también). También con
@@ -429,7 +429,7 @@ async function recibirEventoPasarela(req, res, ctx) {
       saldoCentavos: registro.saldo,
       referencia: evento.referencia,
     });
-    // La mesa ve al instante quién ya pagó (la PWA recalcula "igual").
+    // La mesa y el panel ven al instante quién ya pagó.
     ctx.presencia.programar(intencion.id_mesa);
     return enviarJson(res, 200, { ok: true, duplicado: false, registrado: true });
   } catch (err) {
@@ -470,8 +470,8 @@ function validarPagoCaja(p) {
 /**
  * El alias con el que se anota un cobro de caja en `pagaron` (§8.6). Se
  * normaliza con la regla del alias para que «Abuela » (texto viejo de la
- * cuenta) coincida con «Abuela» de comensales/sin_celular y deje de contar en
- * «igual». Si no es un alias válido, se anota tal cual, como antes: el cobro
+ * cuenta) coincida con «Abuela» de comensales/sin_celular. Si no es un alias
+ * válido, se anota tal cual, como antes: el cobro
  * nunca se rompe por esto.
  */
 function aliasParaPagaron(comensal) {
@@ -490,8 +490,8 @@ async function difundirPagoConfirmado(ctx, p) {
   const errorPayload = validarPagoCaja(p);
   if (errorPayload) return fallo('PAYLOAD_INVALIDO', errorPayload, { eventId: p.eventId });
 
-  // Un cobro de caja con alias también saca a ese comensal del reparto
-  // "igual". Antes de las marcas de idempotencia: si falla, el reintento del
+  // Un cobro de caja con alias también anota a ese comensal en `pagaron`.
+  // Antes de las marcas de idempotencia: si falla, el reintento del
   // backend lo vuelve a intentar (marcarPago es idempotente). También con
   // saldo 0 mientras la mesa no se haya liberado (anotarPagoEnSesion).
   const anotado = typeof p.comensal === 'string'
