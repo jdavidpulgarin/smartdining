@@ -5,8 +5,14 @@ import {
   obtenerPlatos,
   obtenerPlatosArmables,
   recargarMenu,
-  tieneMarcasAgotadoLocal,
   actualizarDisponibilidadPlatoEnCache,
+  actualizarDisponibilidadEnCache,
+  suscribirCambiosMenu,
+  adaptarCategorias,
+  adaptarPlatos,
+  adaptarPlatosArmables,
+  aplicarDisponibilidadEnListaPlatos,
+  aplicarDisponibilidadIngredienteEnArmables,
 } from '../services/menuService';
 import CategoriaFiltro from '../components/menu/CategoriaFiltro';
 import PlatoCard from '../components/menu/PlatoCard';
@@ -44,9 +50,11 @@ function Menu() {
     [idPlatoSeleccionado, platos]
   );
 
+  // Escuchar eventos de disponibilidad en vivo (platos e ingredientes)
   useEffect(() => {
     if (!socketOn) return undefined;
-    const baja = socketOn('plato:disponibilidad', (data) => {
+
+    const bajaPlato = socketOn('plato:disponibilidad', (data) => {
       const idPlato = Number(data?.id_plato ?? data?.idPlato);
       const disponible = Boolean(data?.disponible);
       if (!idPlato) return;
@@ -54,16 +62,41 @@ function Menu() {
       actualizarDisponibilidadPlatoEnCache(idPlato, disponible);
 
       setPlatos((prev) =>
-        prev.map((p) => (p.id === idPlato ? { ...p, disponible } : p))
+        aplicarDisponibilidadEnListaPlatos(prev, idPlato, disponible)
       );
       setPlatosArmables((prev) =>
-        prev.map((p) =>
-          Number(p.id_plato) === idPlato ? { ...p, disponible } : p
-        )
+        aplicarDisponibilidadEnListaPlatos(prev, idPlato, disponible)
       );
     });
-    return baja;
+
+    const bajaIng = socketOn('ingrediente:disponibilidad', (data) => {
+      const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
+      const disponible = Boolean(data?.disponible);
+      if (!idIng) return;
+
+      actualizarDisponibilidadEnCache(idIng, disponible);
+
+      setPlatosArmables((prev) =>
+        aplicarDisponibilidadIngredienteEnArmables(prev, idIng, disponible)
+      );
+    });
+
+    return () => {
+      bajaPlato?.();
+      bajaIng?.();
+    };
   }, [socketOn]);
+
+  // Suscribirse a cambios del menú (para pintar cambios que llegaron mientras no estaba montada)
+  useEffect(() => {
+    const bajaSuscripcion = suscribirCambiosMenu((nuevoMenu) => {
+      if (!nuevoMenu) return;
+      setCategorias(adaptarCategorias(nuevoMenu));
+      setPlatos(adaptarPlatos(nuevoMenu));
+      setPlatosArmables(adaptarPlatosArmables(nuevoMenu));
+    });
+    return bajaSuscripcion;
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -93,12 +126,9 @@ function Menu() {
     }
   }, []);
 
-  // Carga inicial al montar el componente (si había marcas locales de 409, recarga GET /menu)
+  // Carga inicial al montar: toma el estado actual del caché
   useEffect(() => {
     let activo = true;
-    if (tieneMarcasAgotadoLocal()) {
-      recargarMenu();
-    }
     (async () => {
       try {
         const [cats, plats, armables] = await Promise.all([
@@ -107,7 +137,6 @@ function Menu() {
           obtenerPlatosArmables(),
         ]);
         if (!activo) return;
-        setErrorMenu(null);
         setCategorias(cats);
         setPlatos(plats);
         setPlatosArmables(Array.isArray(armables) ? armables : []);
@@ -120,7 +149,6 @@ function Menu() {
         if (activo) setCargando(false);
       }
     })();
-
     return () => {
       activo = false;
     };
@@ -295,19 +323,35 @@ function Menu() {
             {platosArmables.map((plato) => (
               <Card
                 key={plato.id_plato}
-                className="w-64 shrink-0 snap-start flex flex-col justify-between gap-3 bg-superficie border border-borde rounded-2xl p-3"
+                className={`w-64 shrink-0 snap-start flex flex-col justify-between gap-3 bg-superficie border border-borde rounded-2xl p-3 transition-all ${
+                  plato.disponible === false ? 'opacity-40 grayscale-[25%]' : ''
+                }`}
               >
                 <div className="space-y-2">
-                  <Imagen
-                    src={urlImagen(plato.url_imagen)}
-                    alt={plato.nombre}
-                    aspecto="4/3"
-                    className="w-full rounded-xl"
-                  />
+                  <div className="relative">
+                    <Imagen
+                      src={urlImagen(plato.url_imagen)}
+                      alt={plato.nombre}
+                      aspecto="4/3"
+                      className="w-full rounded-xl"
+                    />
+                    {plato.disponible === false && (
+                      <span className="absolute inset-0 bg-black/70 backdrop-blur-[1px] flex items-center justify-center text-primario-texto text-xs font-etiqueta font-bold uppercase tracking-wider text-center px-1 rounded-xl">
+                        AGOTADO
+                      </span>
+                    )}
+                  </div>
                   <div>
-                    <h3 className="font-etiqueta text-base font-bold uppercase tracking-wide text-texto leading-snug">
-                      {plato.nombre}
-                    </h3>
+                    <div className="flex items-start justify-between gap-1">
+                      <h3 className="font-etiqueta text-base font-bold uppercase tracking-wide text-texto leading-snug">
+                        {plato.nombre}
+                      </h3>
+                      {plato.disponible === false && (
+                        <span className="shrink-0 text-[10px] font-etiqueta font-bold uppercase text-primario-texto bg-primario/15 border border-primario/30 px-1.5 py-0.5 rounded">
+                          AGOTADO
+                        </span>
+                      )}
+                    </div>
                     {plato.descripcion && (
                       <p className="text-xs text-texto-suave mt-1 line-clamp-2 leading-relaxed">
                         {plato.descripcion}
@@ -330,9 +374,14 @@ function Menu() {
                   <Button
                     variante="primario"
                     className="w-full"
-                    onClick={() => navigate(`/armar/${plato.id_plato}`)}
+                    disabled={plato.disponible === false}
+                    onClick={() => {
+                      if (plato.disponible !== false) {
+                        navigate(`/armar/${plato.id_plato}`);
+                      }
+                    }}
                   >
-                    Armar mi plato
+                    {plato.disponible === false ? 'Agotado' : 'Armar mi plato'}
                   </Button>
                 </div>
               </Card>

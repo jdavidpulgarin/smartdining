@@ -10,7 +10,12 @@ import LineaCarrito from '../components/carrito/LineaCarrito';
 import Button from '../components/ui/Button';
 import Modal from '../components/ui/Modal';
 import { crearPedido } from '../services/pedidoService';
-import { recargarMenu, marcarFaltantesEnCache } from '../services/menuService';
+import {
+  recargarMenu,
+  marcarFaltantesEnCache,
+  actualizarDisponibilidadPlatoEnCache,
+  actualizarDisponibilidadEnCache,
+} from '../services/menuService';
 import {
   faltantesDelItem,
   resumenFaltantes,
@@ -66,6 +71,7 @@ function Carrito() {
       const idPlato = Number(data?.id_plato ?? data?.idPlato);
       const disponible = Boolean(data?.disponible);
       if (!idPlato || !disponible) return;
+      actualizarDisponibilidadPlatoEnCache(idPlato, true);
       setFaltantesStock((prev) =>
         actualizarMarcasPorDisponibilidad(prev, {
           tipo: 'plato',
@@ -78,6 +84,7 @@ function Carrito() {
       const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
       const disponible = Boolean(data?.disponible);
       if (!idIng || !disponible) return;
+      actualizarDisponibilidadEnCache(idIng, true);
       setFaltantesStock((prev) =>
         actualizarMarcasPorDisponibilidad(prev, {
           tipo: 'ingrediente',
