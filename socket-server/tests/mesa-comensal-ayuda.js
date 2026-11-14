@@ -75,7 +75,7 @@ function pruebasDeLaRuta(almacen) {
     assert.deepStrictEqual(await enMesa, esperado);
     assert.deepStrictEqual(await s.estadoMesas.sinCelular(5), { abuela: 'Abuela' }, 'se guarda la forma normalizada');
     if (falso) assert.ok(falso.llaves().includes('sd:mesa:5:sin_celular'));
-    // La rotación del QR y «igual» leen total/comensales de aquí.
+    // La rotación del QR lee total/comensales de aquí.
     assert.strictEqual((await s.presencia.calcular(5)).total, 2);
   });
 
