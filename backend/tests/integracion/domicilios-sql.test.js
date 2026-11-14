@@ -32,6 +32,7 @@ process.env.REDIS_URL = '';
 const crypto = require('node:crypto');
 const request = require('supertest');
 const { abrirSonda } = require('../helpers/base-prueba');
+const { SQL_BLOQUEADOS_POR_MI } = require('../helpers/bloqueos');
 const { tokenStaff } = require('../helpers/fake-db');
 const { crearCatalogoPrueba } = require('../helpers/plato-prueba');
 const app = require('../../server');
@@ -557,13 +558,12 @@ test('repartidor: /domicilios/mios trae SOLO las suyas', async (t) => {
   assert.ok(!ids.includes(deLucho));
 });
 
-/** Espera a ver `cuantas` conexiones esperando un bloqueo en esta base. */
+/** Espera a ver `cuantas` conexiones esperando el bloqueo que retiene `conexion`. */
 async function esperarBloqueados(conexion, cuantas) {
   for (let i = 0; i < 20000; i++) {
-    const { rows } = await conexion.query(
-      `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'`
-    );
+    // Solo las que cuelgan de ESTE bloqueo (tests/helpers/bloqueos.js): en
+    // paralelo, otras suites tienen sus propias esperas de bloqueo.
+    const { rows } = await conexion.query(SQL_BLOQUEADOS_POR_MI);
     if (rows[0].n >= cuantas) return;
   }
   assert.fail(`no se vieron ${cuantas} peticiones esperando el bloqueo`);

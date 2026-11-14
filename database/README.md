@@ -107,7 +107,8 @@ database/scripts/
 ├── 35_transacciones_voucher.sql      # transacciones.voucher VARCHAR(40), opcional, solo con tarjeta débito/crédito, ^[A-Z0-9-]{1,40}$
 ├── 36_multicanal.sql                 # P-23: canal (mesa/para_llevar/domicilio), por_pagar, clientes, direcciones, zonas, domicilios, repartidor, pago anticipado
 ├── 37_refresh_rotado_en.sql          # refresh_tokens_cliente.rotado_en (ventana de gracia del contrato de #199): va con reemplazado_por, no cambia una vez puesto, reemplazo de la misma familia y cliente
-└── 42_reportes_hora_bogota.sql       # T6: vistas de reportes por el día de Bogotá (no el de la sesión), lo recaudado por la fecha del pago (= «Recaudado hoy») y sin líneas canceladas
+├── 42_reportes_hora_bogota.sql       # T6: vistas de reportes por el día de Bogotá (no el de la sesión), lo recaudado por la fecha del pago (= «Recaudado hoy») y sin líneas canceladas
+└── 43_zona_horaria_bogota.sql        # T6: ALTER DATABASE <base actual> SET timezone = 'America/Bogota' (las sesiones nuevas cuentan los días en hora de Bogotá); no toca datos
 ```
 
 > El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (38).
@@ -234,6 +235,7 @@ psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_36_multicanal.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_37_refresh_rotado.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_42_reportes_hora_bogota.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_zonas_demo.sql       # carga seed_zonas_demo.sql dentro de su ROLLBACK
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_43_zona_horaria.sql  # solo lectura; también la corre el CI
 ```
 
 Voucher de tarjeta (script 35): `test_35_voucher.sql` crea su propia mesa, plato y pedido y
@@ -304,6 +306,13 @@ Reportes en hora de Bogotá (script 42, T6): `test_42_reportes_hora_bogota.sql` 
 de la noche cuenta en su día de Bogotá (sin el script falla aquí), que la zona de la sesión no
 importa, que lo recaudado va por la fecha del pago y cuadra con las transacciones del día, que
 las líneas canceladas no cuentan, que las vistas conservan columnas y tipos y que es idempotente.
+
+Zona horaria (script 43, T6): `test_43_zona_horaria.sql` es de solo lectura y la corre también el
+CI después de `migrar.sh`. Comprueba que la base tiene `America/Bogota` por defecto, que una sesión
+nueva (`\connect`) la toma y que `now()::date` es el día de Bogotá, y **falla si alguna columna de
+una tabla de `public` es `timestamp` sin zona, `date` o `time`**. Regla: las fechas van siempre como
+`TIMESTAMPTZ`, y el día se calcula con `(col AT TIME ZONE 'America/Bogota')::date`, sin depender
+de la zona de la sesión.
 
 Aviso de insumo agotado (script 28, G-06): también necesita `COMMIT` (escucha `LISTEN
 inventario`), crea y borra sus propios datos (prefijo `G06A`):

@@ -30,6 +30,7 @@ import {
   obtenerHostPorDefecto,
   resolverDiningUrl,
 } from '../utils/qrUrl'
+import { errorDeRotacion } from '../utils/qrRotacion'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
 const ROTACION_INTERVALO = 180 // 3 minutos
@@ -121,11 +122,18 @@ export function PantallaMesa() {
   }, [])
 
   // Rotar el QR de la mesa usando el endpoint o fallback con notificación al socket
-  const handleRotarQr = useCallback(async () => {
+  // T3: la rotación AUTOMÁTICA (cada 3 min) pide solo_si_vacia, igual que el
+  // QRModal: el backend se niega (409 mesa_con_comensales) si en la mesa ya
+  // hay alguien, también quien entró con su nombre y todavía no pidió, que
+  // tieneComensales no ve. Antes rotaba igual y la sesión de la tablet en modo
+  // compartido quedaba con un QR viejo y se cerraba. El botón manual sigue
+  // forzando la rotación (lo decide el personal).
+  const handleRotarQr = useCallback(async (opciones) => {
+    const automatica = opciones?.automatica === true
     if (loadingAction) return
     setLoadingAction(true)
     try {
-      const res = await rotarTokenQrMesa(numMesa)
+      const res = await rotarTokenQrMesa(numMesa, undefined, { soloSiVacia: automatica })
       if (res?.token) {
         setTokenQr(res.token)
         if (res?.url) setQrUrl(res.url)
@@ -134,7 +142,13 @@ export function PantallaMesa() {
       setJustRotated(true)
       setTimeout(() => setJustRotated(false), 2500)
     } catch (err) {
-      console.warn('Error al rotar QR:', err.message)
+      if (automatica && errorDeRotacion(err).conComensales) {
+        // La mesa tiene gente: el QR se queda como está y se vuelve a mirar
+        // en el próximo ciclo.
+        setSegundosRestantes(ROTACION_INTERVALO)
+      } else {
+        console.warn('Error al rotar QR:', err.message)
+      }
     } finally {
       setLoadingAction(false)
     }
@@ -149,7 +163,7 @@ export function PantallaMesa() {
     const timer = setInterval(() => {
       setSegundosRestantes((prev) => {
         if (prev <= 1) {
-          handleRotarQr()
+          handleRotarQr({ automatica: true })
           return ROTACION_INTERVALO
         }
         return prev - 1

@@ -253,6 +253,7 @@ const MOTIVO_CUERPO_INVALIDO = 'cuerpo_invalido';
 const MOTIVO_MESA_INEXISTENTE = 'mesa_inexistente';
 const MOTIVO_SIN_CUENTA = 'sin_cuenta';
 const MOTIVO_EXCEDE = 'excede';
+const MOTIVO_EXCEDE_SALDO_COMENSAL = 'excede_saldo_comensal';
 const MOTIVO_ID_COBRO_EN_USO = 'id_cobro_en_uso';
 const MOTIVO_VOUCHER_INVALIDO = 'voucher_invalido';
 const MOTIVO_VOUCHER_NO_APLICA = 'voucher_no_aplica';
@@ -349,6 +350,9 @@ const cobroMesaSchema = z
  * reparte entre sus pedidos con saldo, del más viejo al más nuevo (el mismo
  * núcleo que el pago en línea). `id_cobro` hace el reintento seguro: con el
  * mismo id_cobro no se cobra dos veces.
+ *
+ * Con `comensal` («pagar lo mío»), el monto tampoco puede superar el saldo
+ * PROPIO de esa persona en la visita: 409 excede_saldo_comensal con su saldo.
  */
 async function cobrarMesa(req, res, next) {
   const parsed = cobroMesaSchema.safeParse(req.body);
@@ -379,6 +383,13 @@ async function cobrarMesa(req, res, next) {
       return res.status(409).json({
         error: 'La mesa no tiene una cuenta abierta por pagar',
         motivo: MOTIVO_SIN_CUENTA,
+      });
+    }
+    if (r.excedeComensal) {
+      return res.status(409).json({
+        error: 'El pago excede lo que debe ese comensal',
+        motivo: MOTIVO_EXCEDE_SALDO_COMENSAL,
+        saldo: aPesos(r.saldo_centavos),
       });
     }
     if (r.excede) {

@@ -549,6 +549,22 @@ Al arrancar, y en cada reconexión del canal, hace tres cosas **en este orden**:
 Nada de esto puede tumbar el backend ni una petición: si el canal no se abre, se reintenta
 con espera creciente y el resto sigue funcionando.
 
+**Avisos de stock robustos.** Los avisos y la carta del arranque pasan por una cola
+(`src/services/avisos-stock-cola.js`):
+
+- **reintenta** ante errores de red, timeouts y 5xx, con espera de 1 s, 2 s, 4 s… hasta 30 s,
+  con un margen al azar; un **4xx no** se reintenta (se registra);
+- **el último gana**: una entrada por plato, opción o insumo con **solo su último estado**, y
+  un `eventId` nuevo en cada envío, así un "agotado" viejo reintentado tarde nunca pisa un
+  "repuesto" más nuevo;
+- está **acotada** (500 claves; si se llena se descarta la más vieja) y se vacía entera en
+  cuanto el socket-server vuelve;
+- la emisión de la carta **ya no se rinde** tras 5 fallos: insiste hasta lograrlo.
+
+Se configura con `AVISOS_STOCK_REINTENTO_INICIAL_MS`, `AVISOS_STOCK_REINTENTO_MAX_MS` y
+`AVISOS_STOCK_COLA_MAX` (todas opcionales, ver `.env.example`). El detalle y el porqué están en
+[docs/api-spec.md](docs/api-spec.md#reintentos-y-cola-de-los-avisos-de-stock).
+
 El contrato completo —cuerpos, filtros, los 409 y los 400— está en
 [docs/api-spec.md](docs/api-spec.md).
 
