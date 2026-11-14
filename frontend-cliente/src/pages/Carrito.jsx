@@ -160,6 +160,30 @@ function Carrito() {
     }
   };
 
+  const manejarAjustarCantidad = async (idLinea, cantidadDisponible) => {
+    await actualizarCantidad(idLinea, cantidadDisponible);
+    // Limpiar la marca de esa línea y dejar enviar el pedido
+    setFaltantesStock((prev) => {
+      const lineaObj = misLineas.find(
+        (l) => String(l.id_linea) === String(idLinea)
+      );
+      if (!lineaObj) return prev;
+      const faltantesDeEstaLinea = faltantesDelItem(lineaObj, prev);
+      return prev.filter((f) => !faltantesDeEstaLinea.includes(f));
+    });
+    setErrorPedido((prev) => {
+      if (!prev || prev.tipo !== 'sin_stock') return prev;
+      const idsRestantes = (prev.idsLineasAfectadas || []).filter(
+        (id) => String(id) !== String(idLinea)
+      );
+      if (idsRestantes.length === 0) return null;
+      return {
+        ...prev,
+        idsLineasAfectadas: idsRestantes,
+      };
+    });
+  };
+
   const estaVacioTotal = misLineas.length === 0 && otros.length === 0;
 
   if (estaVacioTotal) {
@@ -333,15 +357,27 @@ function Carrito() {
           </div>
         ) : (
           <div className="space-y-3">
-            {misLineas.map((linea) => (
-              <LineaCarrito
-                key={linea.id_linea}
-                linea={linea}
-                faltantes={faltantesDelItem(linea, faltantesStock)}
-                onActualizarCantidad={actualizarCantidad}
-                onEliminar={eliminarLinea}
-              />
-            ))}
+            {misLineas.map((linea) => {
+              const itemAfectado = resumenStock.itemsAfectados.find(
+                (it) => it.id_linea === linea.id_linea || it.idLinea === linea.id_linea
+              );
+              return (
+                <LineaCarrito
+                  key={linea.id_linea}
+                  linea={linea}
+                  faltantes={
+                    itemAfectado
+                      ? itemAfectado.faltantes
+                      : faltantesDelItem(linea, faltantesStock)
+                  }
+                  disponible={itemAfectado?.disponible}
+                  puedeAjustar={itemAfectado?.puedeAjustar}
+                  onAjustarCantidad={manejarAjustarCantidad}
+                  onActualizarCantidad={actualizarCantidad}
+                  onEliminar={eliminarLinea}
+                />
+              );
+            })}
           </div>
         )}
       </section>
