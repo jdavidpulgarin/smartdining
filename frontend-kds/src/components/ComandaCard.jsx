@@ -87,7 +87,27 @@ function Ingredientes({ item }) {
   )
 }
 
-export default function ComandaCard({ comanda, ahora, conectado = true, onAvanzar }) {
+/**
+ * T10: dentro de un bloque la tarjeta se dibuja en una columna que puede no
+ * ser la de su estado (el bloque va en la del pedido más atrasado), así que el
+ * estado se dice con texto y con el color de su columna.
+ */
+const ETIQUETA_ESTADO = {
+  recibido: { texto: 'Nuevo', color: 'var(--color-nuevas)' },
+  en_preparacion: { texto: 'En preparación', color: 'var(--color-preparacion)' },
+  listo: { texto: 'Listo', color: 'var(--color-listas)' },
+}
+
+export default function ComandaCard({
+  comanda,
+  ahora,
+  conectado = true,
+  onAvanzar,
+  // T10: la tarjeta va dentro del bloque de su mesa (el "Mesa N" lo pone el
+  // bloque) y `bloqueado` la congela mientras corre "Todo listo".
+  enBloque = false,
+  bloqueado = false,
+}) {
   const [enVuelo, setEnVuelo] = useState(false)
   const [error, setError] = useState(null)
   const [ultimoFallo, setUltimoFallo] = useState(null)
@@ -118,8 +138,10 @@ export default function ComandaCard({ comanda, ahora, conectado = true, onAvanza
     ? `${espera.etiqueta}: ${textoDeEspera(minutos)}`
     : tituloDelPase(enPase, minutos)
 
+  const etiquetaEstado = ETIQUETA_ESTADO[comanda.estado]
+
   async function alTocar() {
-    if (enVuelo || !paso) return
+    if (enVuelo || bloqueado || !paso) return
     setEnVuelo(true)
     setError(null)
     setUltimoFallo(null)
@@ -130,6 +152,11 @@ export default function ComandaCard({ comanda, ahora, conectado = true, onAvanza
       setError(resultado?.mensaje || 'No se pudo cambiar el estado')
       setUltimoFallo(resultado)
       setEnVuelo(false)
+    } else if (enBloque) {
+      // T10: dentro de un bloque la tarjeta NO se desmonta al avanzar (el
+      // bloque sigue en su columna mientras le quede un pedido atrasado), así
+      // que el botón tiene que volver por sí solo con su siguiente paso.
+      setEnVuelo(false)
     }
   }
 
@@ -137,23 +164,44 @@ export default function ComandaCard({ comanda, ahora, conectado = true, onAvanza
     <article
       // Atenuada, no escondida: una comanda olvidada tiene que seguir viendose,
       // solo deja de competir por la atencion con las que acaban de salir.
-      className={`rounded-xl border-2 bg-[color:var(--color-panel-alto)] p-4 shadow-lg${
-        olvidada ? ' opacity-60' : ''
-      }`}
+      className={`rounded-xl border-2 ${
+        enBloque ? 'bg-[color:var(--color-panel)] p-3' : 'bg-[color:var(--color-panel-alto)] p-4 shadow-lg'
+      }${olvidada ? ' opacity-60' : ''}`}
       style={{
         borderColor:
           conSemaforo && espera.nivel !== 'normal' ? colorEspera : 'var(--color-borde)',
       }}
     >
       <header className="flex items-start justify-between gap-3">
-        <div>
-          <p className="display text-4xl font-bold leading-none">Mesa {mesa}</p>
-          {(comanda.codigo_pedido || comensales.length > 0) && (
-            <p className="mt-1.5 text-base leading-none text-[color:var(--color-texto-suave)]">
-              {[comanda.codigo_pedido, comensales.join(', ')].filter(Boolean).join(' · ')}
+        {enBloque ? (
+          // Dentro del bloque: quién pidió (el alias, que es con lo que se canta
+          // el pase), el código y en qué estado va ESTE pedido.
+          <div>
+            <p className="display text-2xl font-bold leading-tight">
+              {comensales.length > 0 ? comensales.join(', ') : 'Pedido'}
             </p>
-          )}
-        </div>
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-base leading-none text-[color:var(--color-texto-suave)]">
+              {comanda.codigo_pedido && <span>{comanda.codigo_pedido}</span>}
+              {etiquetaEstado && (
+                <span
+                  className="display rounded px-1.5 py-0.5 text-sm font-bold uppercase tracking-wide"
+                  style={{ border: `2px solid ${etiquetaEstado.color}`, color: etiquetaEstado.color }}
+                >
+                  {etiquetaEstado.texto}
+                </span>
+              )}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <p className="display text-4xl font-bold leading-none">Mesa {mesa}</p>
+            {(comanda.codigo_pedido || comensales.length > 0) && (
+              <p className="mt-1.5 text-base leading-none text-[color:var(--color-texto-suave)]">
+                {[comanda.codigo_pedido, comensales.join(', ')].filter(Boolean).join(' · ')}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* El diseño señala el nivel solo con el color del chip; el texto sigue
             estando, en el title y para los lectores de pantalla, porque un
@@ -278,7 +326,7 @@ export default function ComandaCard({ comanda, ahora, conectado = true, onAvanza
         <button
           type="button"
           onClick={alTocar}
-          disabled={enVuelo}
+          disabled={enVuelo || bloqueado}
           // 64 px de alto: objetivo tactil holgado para una pantalla de cocina.
           className="display mt-4 flex h-16 w-full items-center justify-center gap-2 rounded-xl text-2xl font-bold disabled:opacity-60"
           style={

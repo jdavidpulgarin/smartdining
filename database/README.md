@@ -107,7 +107,8 @@ database/scripts/
 ├── 35_transacciones_voucher.sql      # transacciones.voucher VARCHAR(40), opcional, solo con tarjeta débito/crédito, ^[A-Z0-9-]{1,40}$
 ├── 36_multicanal.sql                 # P-23: canal (mesa/para_llevar/domicilio), por_pagar, clientes, direcciones, zonas, domicilios, repartidor, pago anticipado
 ├── 37_refresh_rotado_en.sql          # refresh_tokens_cliente.rotado_en (ventana de gracia del contrato de #199): va con reemplazado_por, no cambia una vez puesto, reemplazo de la misma familia y cliente
-└── 41_cuenta_sin_lineas_canceladas.sql # T4: obtener_cuenta_mesa() no suma las líneas canceladas (la Caja, la PWA y Wompi cobraban los platos quitados)
+├── 41_cuenta_sin_lineas_canceladas.sql # T4: obtener_cuenta_mesa() no suma las líneas canceladas (la Caja, la PWA y Wompi cobraban los platos quitados)
+└── 42_reportes_hora_bogota.sql       # T6: vistas de reportes por el día de Bogotá (no el de la sesión), lo recaudado por la fecha del pago (= «Recaudado hoy») y sin líneas canceladas
 ```
 
 > El script de "menú con agotados" que se decida en la G-06 toma el número siguiente libre (38).
@@ -233,6 +234,7 @@ psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_35_voucher.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_36_multicanal.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_37_refresh_rotado.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_41_cuenta_sin_lineas_canceladas.sql
+psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_42_reportes_hora_bogota.sql
 psql -v ON_ERROR_STOP=1 -U postgres -d smartdining -f test_zonas_demo.sql       # carga seed_zonas_demo.sql dentro de su ROLLBACK
 ```
 
@@ -304,6 +306,12 @@ corre en `BEGIN … ROLLBACK` (usa `\ir`). Quita líneas como el backend (`estad
 y comprueba que el total, el saldo y los ítems de la mesa y de cada comensal bajan, que la
 cuenta JSON (Caja, PWA, Wompi) coincide con la suma de `pedidos.total`, que un pago hecho no
 se pierde, que H-02 sigue igual y que el script es idempotente. Sin el script falla en el caso 2.
+
+Reportes en hora de Bogotá (script 42, T6): `test_42_reportes_hora_bogota.sql` corre en
+`BEGIN … ROLLBACK` con la sesión en UTC (como Docker) y días del 2031. Comprueba que una venta
+de la noche cuenta en su día de Bogotá (sin el script falla aquí), que la zona de la sesión no
+importa, que lo recaudado va por la fecha del pago y cuadra con las transacciones del día, que
+las líneas canceladas no cuentan, que las vistas conservan columnas y tipos y que es idempotente.
 
 Aviso de insumo agotado (script 28, G-06): también necesita `COMMIT` (escucha `LISTEN
 inventario`), crea y borra sus propios datos (prefijo `G06A`):
