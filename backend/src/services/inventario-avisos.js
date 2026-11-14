@@ -1,6 +1,7 @@
 const { Client } = require('pg');
 const socketNotifier = require('./socket.notifier');
 const menuService = require('./menu.service');
+const { crearColaAvisos } = require('./avisos-stock-cola');
 
 /**
  * Avisos de inventario en vivo (D-17, P-19).
@@ -51,16 +52,22 @@ const ESPERA_INICIAL_MS = 1000;
 const ESPERA_MAXIMA_MS = 30000;
 
 /**
- * Cuántos avisos seguidos pueden fallar durante la emisión de la carta antes de
- * dejarlo.
+ * La cola de avisos de stock hacia el socket-server (services/avisos-stock-cola.js):
+ * una entrada por plato, opción o insumo con SOLO su último estado, reintentos
+ * con espera creciente ante errores de red y 5xx, y un tope de claves.
  *
- * Al arrancar se emite la disponibilidad de TODA la carta (decenas de platos y
- * opciones). Si el socket-server no está levantado, cada envío gasta su timeout
- * y los demás van a fallar igual: insistir con los 60 restantes son minutos de
- * trabajo inútil y 60 líneas idénticas en el log. Con el socket-server vivo,
- * esto no se alcanza nunca.
+ * Por ella pasan los avisos del canal y la emisión de la carta al arrancar.
+ * Antes la carta se rendía tras 5 fallos seguidos (MAX_FALLOS_SEGUIDOS) y, si
+ * el socket-server arrancaba después que el backend, las mesas se quedaban con
+ * una carta vieja hasta el próximo movimiento de stock. Ahora se encola entera
+ * y la cola insiste hasta lograrlo, con un solo envío por pasada mientras el
+ * socket-server no responda (no se gasta un timeout por cada plato).
+ *
+ * Nace con los reintentos apagados; `iniciar()` los enciende y `detener()` los
+ * apaga y cancela el temporizador.
  */
-const MAX_FALLOS_SEGUIDOS = 5;
+const colaPorDefecto = crearColaAvisos();
+let colaActiva = colaPorDefecto;
 
 /**
  * Estado del oyente. Es un módulo con estado a propósito: hay UN canal por
@@ -127,6 +134,19 @@ function esId(valor) {
 }
 
 /**
+ * El envío de un aviso de disponibilidad, listo para la cola.
+ *
+ * Es una función y no un cuerpo ya armado porque cada llamada al notificador
+ * genera un eventId NUEVO, y eso es lo que tiene que pasar en cada reintento:
+ * el socket-server deduplica por eventId (ver services/avisos-stock-cola.js).
+ */
+function avisoDeDisponibilidad(notifier, entidad, id, disponible) {
+  return entidad === 'plato'
+    ? () => notifier.notificarPlatoDisponibilidad(id, disponible, { conReintento: true })
+    : () => notifier.notificarIngredienteDisponibilidad(id, disponible, { conReintento: true });
+}
+
+/**
  * Reenvía UN aviso del canal al socket-server.
  *
  * Nunca lanza y devuelve qué hizo, que es lo que las pruebas comprueban sin
@@ -138,7 +158,7 @@ function esId(valor) {
  * base, así que un aviso raro es un cambio de contrato o un script más nuevo,
  * nunca algo que deba cortar el oyente.
  */
-async function manejarAviso(payload, { notifier = socketNotifier } = {}) {
+async function manejarAviso(payload, { notifier = socketNotifier, cola = colaActiva } = {}) {
   let aviso;
   try {
     aviso = JSON.parse(payload);
@@ -174,11 +194,9 @@ async function manejarAviso(payload, { notifier = socketNotifier } = {}) {
     // peticion del comensal tiene que ver la carta real.
     await invalidarCacheDelMenu();
 
-    if (aviso.entidad === 'plato') {
-      await notifier.notificarPlatoDisponibilidad(id, aviso.disponible, { conReintento: true });
-    } else {
-      await notifier.notificarIngredienteDisponibilidad(id, aviso.disponible, { conReintento: true });
-    }
+    // Por la cola: si este envío falla y llega otro aviso de la misma clave,
+    // sale SOLO el más nuevo (ver services/avisos-stock-cola.js).
+    await cola.encolar(`${aviso.entidad}:${id}`, avisoDeDisponibilidad(notifier, aviso.entidad, id, aviso.disponible));
     return { reenviado: TIPO_DISPONIBILIDAD };
   }
 
@@ -191,13 +209,17 @@ async function manejarAviso(payload, { notifier = socketNotifier } = {}) {
       return { ignorado: 'datos' };
     }
 
-    await notifier.notificarInventarioAlerta({
+    const alerta = {
       id_insumo: aNumero(aviso.id_insumo),
       nombre: aviso.nombre,
       unidad: typeof aviso.unidad === 'string' ? aviso.unidad : 'porcion',
       stock_actual: stockActual,
       stock_minimo: stockMinimo,
-    });
+    };
+    // También por la cola, con su propia clave: si el socket-server estaba
+    // caído, al volver llega la alerta con el stock MÁS RECIENTE de ese insumo,
+    // no una por cada movimiento que hubo mientras tanto.
+    await cola.encolar(`alerta:${alerta.id_insumo}`, () => notifier.notificarInventarioAlerta(alerta));
     return { reenviado: TIPO_STOCK_BAJO };
   }
 
@@ -220,8 +242,8 @@ async function manejarAviso(payload, { notifier = socketNotifier } = {}) {
  * Nunca lanza. Devuelve un resumen, que es lo que se registra y lo que las
  * pruebas revisan.
  */
-async function ponerLaCartaAlDia(conexion, { notifier = socketNotifier } = {}) {
-  const resumen = { recalculados: null, emitidos: 0, fallidos: 0, abortado: false, cacheInvalidada: false };
+async function ponerLaCartaAlDia(conexion, { notifier = socketNotifier, cola = colaActiva } = {}) {
+  const resumen = { recalculados: null, emitidos: 0, fallidos: 0, pendientes: 0, cacheInvalidada: false };
 
   try {
     const recalculo = await conexion.query('SELECT fn_recalcular_toda_la_carta() AS cambios');
@@ -248,43 +270,29 @@ async function ponerLaCartaAlDia(conexion, { notifier = socketNotifier } = {}) {
     return resumen;
   }
 
-  let fallosSeguidos = 0;
+  // Toda la carta a la cola, y luego una pasada. Si el socket-server no
+  // responde, la pasada se para en el primer fallo (no se gasta un timeout por
+  // cada plato) y la cola sigue intentándolo sola, con espera creciente, hasta
+  // lograrlo: ya no se rinde tras unos fallos. Lo que llegue por el canal
+  // mientras tanto se junta con lo de la carta en la misma clave (el último
+  // gana), así que al volver sale un aviso por plato u opción, el más reciente.
+  const antes = cola.estado();
   for (const fila of filas) {
     const id = aNumero(fila.id);
-    const disponible = fila.disponible_efectivo === true;
     if (id === null) continue;
-
-    try {
-      const resultado = fila.tipo === 'plato'
-        ? await notifier.notificarPlatoDisponibilidad(id, disponible, { conReintento: true })
-        : await notifier.notificarIngredienteDisponibilidad(id, disponible, { conReintento: true });
-
-      if (resultado && resultado.ok) {
-        resumen.emitidos += 1;
-        fallosSeguidos = 0;
-      } else {
-        resumen.fallidos += 1;
-        fallosSeguidos += 1;
-      }
-    } catch (err) {
-      // El notificador no lanza, así que esto es una red de seguridad.
-      console.error('[inventario] fallo inesperado al emitir la carta:', err && err.message);
-      resumen.fallidos += 1;
-      fallosSeguidos += 1;
-    }
-
-    if (fallosSeguidos >= MAX_FALLOS_SEGUIDOS) {
-      resumen.abortado = true;
-      console.error(
-        `[inventario] ${fallosSeguidos} avisos seguidos fallaron: no se emite el resto de la carta`
-      );
-      break;
-    }
+    const entidad = fila.tipo === 'plato' ? 'plato' : 'ingrediente';
+    cola.encolar(`${entidad}:${id}`, avisoDeDisponibilidad(notifier, entidad, id, fila.disponible_efectivo === true));
   }
+  await cola.drenar();
+
+  const despues = cola.estado();
+  resumen.emitidos = despues.emitidos - antes.emitidos;
+  resumen.fallidos = (despues.fallidos - antes.fallidos) + (despues.rechazados - antes.rechazados);
+  resumen.pendientes = despues.pendientes.length;
 
   console.log(
     `[inventario] carta emitida: ${resumen.emitidos} avisos, ${resumen.fallidos} fallidos`
-      + (resumen.abortado ? ' (se abortó: el socket-server no responde)' : '')
+      + (resumen.pendientes > 0 ? `, ${resumen.pendientes} pendientes (se reintentan solos)` : '')
   );
   return resumen;
 }
@@ -383,6 +391,11 @@ function iniciar(opciones = {}) {
   if (activo) return ultimoCiclo;
   activo = true;
   espera = ESPERA_INICIAL_MS;
+  // Los reintentos de la cola solo existen con el oyente en marcha: así una
+  // prueba que llama a manejarAviso no deja temporizadores de fondo. Una
+  // prueba puede pasar su propia cola (con reloj falso) en `opciones.cola`.
+  colaActiva = opciones.cola || colaPorDefecto;
+  colaActiva.activar();
   ultimoCiclo = conectar(opciones);
   return ultimoCiclo;
 }
@@ -397,6 +410,9 @@ async function detener() {
     clearTimeout(temporizador);
     temporizador = null;
   }
+  // Y la cola de avisos: sin reintentos, sin temporizador y sin pendientes.
+  colaActiva.detener();
+  colaActiva = colaPorDefecto;
   const conexion = cliente;
   cliente = null;
   if (!conexion) return;
@@ -412,6 +428,11 @@ function esperarCiclo() {
   return ultimoCiclo;
 }
 
+/** Para las pruebas: cómo está la cola de avisos que usa el oyente. */
+function estadoDeLaCola() {
+  return colaActiva.estado();
+}
+
 /** Para las pruebas: dejar el módulo como recién cargado. */
 function reiniciarEstado() {
   activo = false;
@@ -422,6 +443,9 @@ function reiniciarEstado() {
   cliente = null;
   espera = ESPERA_INICIAL_MS;
   ultimoCiclo = Promise.resolve();
+  colaActiva.detener();
+  colaPorDefecto.detener();
+  colaActiva = colaPorDefecto;
 }
 
 module.exports = {
@@ -431,11 +455,11 @@ module.exports = {
   ponerLaCartaAlDia,
   aNumero,
   esperarCiclo,
+  estadoDeLaCola,
   reiniciarEstado,
   CANAL,
   TIPO_DISPONIBILIDAD,
   TIPO_STOCK_BAJO,
   ESPERA_INICIAL_MS,
   ESPERA_MAXIMA_MS,
-  MAX_FALLOS_SEGUIDOS,
 };
