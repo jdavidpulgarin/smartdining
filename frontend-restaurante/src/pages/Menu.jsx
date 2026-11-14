@@ -69,6 +69,11 @@ export function Menu() {
   // no exigir un AuthProvider (sin sesión, no hay enlace).
   const sesion = useContext(AuthContext)
   const esAdmin = sesion?.user?.rol === 'admin'
+  // Crear, editar y borrar platos y categorías, configurar pasos y cambiar la
+  // disponibilidad son solo de admin en el backend (la disponibilidad también de
+  // cocina, que no usa el panel). Al mesero y al cajero el Menú les queda de solo
+  // consulta: ven el estado del plato como etiqueta, no como interruptor.
+  const Disponibilidad = esAdmin ? 'button' : 'span'
   const [platoHistorial, setPlatoHistorial] = useState(null)
 
   // tipo 'error': el cambio NO se guardó; se queda más tiempo a la vista.
@@ -427,9 +432,12 @@ export function Menu() {
           <div>
             <h1 className="sd-page-title">MENÚ</h1>
             <p className="sd-page-subtitle">
-              Administración de categorías, platos y disponibilidad en tiempo real
+              {esAdmin
+                ? 'Administración de categorías, platos y disponibilidad en tiempo real'
+                : 'Carta del restaurante y disponibilidad en tiempo real (solo consulta)'}
             </p>
           </div>
+          {esAdmin && (
           <div style={{ display: 'flex', gap: 12 }}>
             <button
               type="button"
@@ -448,6 +456,7 @@ export function Menu() {
               <span>NUEVO PLATO</span>
             </button>
           </div>
+          )}
         </div>
       </div>
 
@@ -680,10 +689,10 @@ export function Menu() {
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--sd-border)', paddingTop: 12, marginTop: 'auto' }}>
                     {/* Disponibilidad (sin verde: disponible en BLANCO, agotado en ROJO) */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleAvailability(dish.id)}
-                      title="Alternar disponibilidad para comensales"
+                    <Disponibilidad
+                      {...(esAdmin
+                        ? { type: 'button', onClick: () => handleToggleAvailability(dish.id), title: 'Alternar disponibilidad para comensales' }
+                        : { 'data-testid': `disponibilidad-${dish.id}` })}
                       style={{
                         padding: '6px 12px',
                         fontSize: 12,
@@ -691,7 +700,7 @@ export function Menu() {
                         fontFamily: 'var(--sd-font-heading)',
                         letterSpacing: '0.04em',
                         borderRadius: 4,
-                        cursor: 'pointer',
+                        cursor: esAdmin ? 'pointer' : 'default',
                         background: estaDisponible(dish) ? 'var(--sd-surface)' : 'var(--sd-red)',
                         color: 'var(--sd-white)',
                         border: estaDisponible(dish) ? '1px solid var(--sd-border-strong)' : 'none',
@@ -721,9 +730,10 @@ export function Menu() {
                           <span>AGOTADO</span>
                         </>
                       )}
-                    </button>
+                    </Disponibilidad>
 
-                    {/* Acciones */}
+                    {/* Acciones (solo admin: el backend las niega al resto) */}
+                    {esAdmin && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <button
                         type="button"
@@ -762,6 +772,7 @@ export function Menu() {
                         <Trash2 size={15} />
                       </button>
                     </div>
+                    )}
                   </div>
                 </div>
               </div>

@@ -5,8 +5,11 @@ import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
 import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
+import { mesaDelAviso } from '../utils/avisos'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
+
+const textoMesa = (idMesa) => (idMesa ? `Mesa ${idMesa}` : 'Una mesa sin número')
 
 function normalizarMesa(backendMesa, prev = {}) {
   const id = backendMesa.id_mesa || backendMesa.numero
@@ -278,48 +281,52 @@ export function TablesProvider({ children }) {
 
   // Escuchar llamado al mesero (mesa:llamar_mesero / waiter:call)
   useSocketListener('mesa:llamar_mesero', (data) => {
-    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    const idMesa = mesaDelAviso(data)
+    if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'llamado',
       idMesa,
       mensaje: data?.motivo || `Comensal solicita asistencia urgente en mesa`,
     })
     emitirSonidoAlerta()
-    showNotification(`🔔 Mesa ${idMesa} llama al mesero`, 'info')
+    showNotification(`🔔 ${textoMesa(idMesa)} llama al mesero`, 'info')
   })
 
   useSocketListener('waiter:call', (data) => {
-    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    const idMesa = mesaDelAviso(data)
+    if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'llamado',
       idMesa,
       mensaje: data?.motivo || `Comensal solicita asistencia en mesa`,
     })
     emitirSonidoAlerta()
-    showNotification(`🔔 Mesa ${idMesa} llama al mesero`, 'info')
+    showNotification(`🔔 ${textoMesa(idMesa)} llama al mesero`, 'info')
   })
 
   // Escuchar solicitud de cuenta (cuenta:solicitada / bill:requested)
   useSocketListener('cuenta:solicitada', (data) => {
-    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    const idMesa = mesaDelAviso(data)
+    if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'cuenta',
       idMesa,
       mensaje: `Comensales solicitan la cuenta y factura`,
     })
     emitirSonidoAlerta()
-    showNotification(`🧾 Mesa ${idMesa} solicita la cuenta`, 'info')
+    showNotification(`🧾 ${textoMesa(idMesa)} solicita la cuenta`, 'info')
   })
 
   useSocketListener('bill:requested', (data) => {
-    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    const idMesa = mesaDelAviso(data)
+    if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'cuenta',
       idMesa,
       mensaje: `Comensales solicitan la cuenta y factura`,
     })
     emitirSonidoAlerta()
-    showNotification(`🧾 Mesa ${idMesa} solicita la cuenta`, 'info')
+    showNotification(`🧾 ${textoMesa(idMesa)} solicita la cuenta`, 'info')
   })
 
 

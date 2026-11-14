@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Menu } from '../Menu'
+import { AuthContext } from '../../context/authContextDef'
 
 const json = (body, status = 200) => ({
   ok: status >= 200 && status < 300,
@@ -56,11 +57,14 @@ const platosBase = [
   },
 ]
 
-function montar() {
+// Por defecto, admin: la gestión del Menú es suya. Con otro rol, solo consulta.
+function montar(rol = 'admin') {
   render(
-    <MemoryRouter>
-      <Menu />
-    </MemoryRouter>
+    <AuthContext.Provider value={{ user: { id_usuario: 1, nombre: 'Prueba', rol } }}>
+      <MemoryRouter>
+        <Menu />
+      </MemoryRouter>
+    </AuthContext.Provider>
   )
 }
 
@@ -255,6 +259,36 @@ describe('agotado por stock al cargar (stock_suficiente de GET /platos)', () => 
       expect(patch[0]).toMatch(/\/platos\/301\/disponible$/)
       expect(JSON.parse(patch[1].body)).toEqual({ disponible: false })
     })
+  })
+})
+
+describe('Menú de solo consulta para mesero y cajero (el backend les niega la gestión)', () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it.each(['mesero', 'cajero'])('%s: sin NUEVO PLATO, CATEGORÍAS, pasos, editar ni eliminar; la disponibilidad es solo una etiqueta', async (rol) => {
+    simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => { throw new Error('no debería escribir') } })
+    montar(rol)
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+    expect(screen.queryByText('NUEVO PLATO')).toBeNull()
+    expect(screen.queryByText(/^CATEGORÍAS/)).toBeNull()
+    expect(screen.queryByTitle('Editar plato')).toBeNull()
+    expect(screen.queryByTitle('Eliminar plato')).toBeNull()
+    expect(screen.queryByTitle('Configurar Pasos e Ingredientes del Constructor')).toBeNull()
+    expect(screen.queryByTitle('Alternar disponibilidad para comensales')).toBeNull()
+    const estado = screen.getByTestId('disponibilidad-101')
+    expect(estado.tagName).toBe('SPAN')
+    expect(estado).toHaveTextContent('DISPONIBLE')
+    expect(screen.getByTestId('disponibilidad-201')).toHaveTextContent('AGOTADO')
+    expect(screen.getByText(/solo consulta/)).toBeInTheDocument()
+  })
+
+  it('admin sí ve la gestión completa y el interruptor', async () => {
+    simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => json({}) })
+    montar('admin')
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+    expect(screen.getByText('NUEVO PLATO')).toBeInTheDocument()
+    expect(screen.getAllByTitle('Editar plato')).toHaveLength(2)
+    expect(screen.getAllByTitle('Alternar disponibilidad para comensales')[0].tagName).toBe('BUTTON')
   })
 })
 
