@@ -2,48 +2,90 @@
 # ==============================================================================
 # SmartDining · infra/scripts/instalar-respaldos.sh (R-18)
 #
-# Prepara los respaldos del VPS. Se corre como root desde la raíz de un clon
-# (producción o staging) y se puede repetir: no duplica nada. Vuelve a correrlo
-# cuando cambie infra/scripts/respaldo.sh o infra/systemd/.
+# Prepara los respaldos de UN entorno del VPS. Se corre como root desde la
+# raíz del clon de ese entorno y se puede repetir: no duplica nada. Vuelve a
+# correrlo cuando cambie infra/scripts/respaldo.sh o infra/systemd/.
 #
-#   sudo sh infra/scripts/instalar-respaldos.sh
-#   sudo sh infra/scripts/instalar-respaldos.sh --llave-lectura 'ssh-ed25519 AAAA... comentario'
+#   cd /srv/smartdining-staging && sudo ENTORNO=staging sh infra/scripts/instalar-respaldos.sh
+#   cd /srv/smartdining && sudo ENTORNO=produccion sh infra/scripts/instalar-respaldos.sh
+#   sudo sh infra/scripts/instalar-respaldos.sh --entorno staging --llave-lectura 'ssh-ed25519 AAAA... comentario'
+#
+# ENTORNO (variable o --entorno, OBLIGATORIO y sin valor por defecto):
+#   staging    clon /srv/smartdining-staging, carpeta /srv/respaldos/smartdining-staging,
+#              timer smartdining-respaldo@staging, /etc/smartdining/respaldo-staging.env
+#   produccion clon /srv/smartdining, carpeta /srv/respaldos/smartdining,
+#              timer smartdining-respaldo@produccion, /etc/smartdining/respaldo-produccion.env
+# Cualquier otro valor, o ninguno: sale con 2 sin tocar nada.
 #
 # Qué hace:
 #   1. Grupo sd-respaldos y usuario de sistema respaldos (sin contraseña ni
 #      terminal). Es el único miembro del grupo.
-#   2. /srv/respaldos (root, 755) y una carpeta por proyecto, deploy:sd-respaldos
-#      2750: deploy escribe, el grupo solo lee, nadie más entra.
+#   2. /srv/respaldos (root, 755) y la carpeta del proyecto del entorno,
+#      deploy:sd-respaldos 2750: deploy escribe, el grupo solo lee, nadie más
+#      entra. El nombre es el del proyecto de compose (smartdining-staging o
+#      smartdining): bajar-respaldos.ps1 los lista así.
 #   3. SFTP de SOLO LECTURA para respaldos (sshd_config.d/10-respaldos.conf):
 #      encerrado en /srv/respaldos, internal-sftp -R, sin terminal ni reenvíos.
 #      Agrega respaldos a la línea AllowUsers de 00-smartdining.conf.
 #      Su llave (con restrict) va en /etc/ssh/llaves-respaldos/respaldos y
 #      reemplaza a la anterior. Valida con sshd -t y sshd -T (roberto y deploy
 #      siguen entrando) antes de recargar; si algo no cuadra, deshace el cambio.
-#   4. respaldo.sh en /usr/local/lib/smartdining/ y el timer
-#      smartdining-respaldo (03:30 de Bogotá, Persistent).
-#   5. /etc/smartdining/respaldo.env (600 root) para HEALTHCHECKS_URL, que
-#      NUNCA va en el repo (es público). Si ya existe, no se toca.
+#   4. /etc/smartdining/respaldo-<entorno>.env (600 root) para HEALTHCHECKS_URL,
+#      que NUNCA va en el repo (es público). Si ya existe, no se toca. Con
+#      ENTORNO=staging y sin él, si existe el viejo respaldo.env se copia (el
+#      check de staging sigue igual); el viejo no se borra.
+#   5. respaldo.sh en /usr/local/lib/smartdining/ y el timer
+#      smartdining-respaldo@<entorno> (03:30 de Bogotá, Persistent). Si está
+#      el timer viejo sin entorno (smartdining-respaldo.timer, de antes de
+#      esto, que era el de staging), con ENTORNO=staging se reemplaza; con
+#      ENTORNO=produccion se detiene y pide instalar staging primero.
 # ==============================================================================
 set -eu
 
-[ "$(id -u)" -eq 0 ] || { echo "instalar-respaldos: córrelo con sudo" >&2; exit 1; }
 cd "$(dirname "$0")/../.."
 
+uso() {
+  echo "uso: sudo ENTORNO=staging|produccion sh $0 [--llave-lectura 'ssh-ed25519 AAAA... comentario']" >&2
+  echo "     (o --entorno staging|produccion en vez de la variable)" >&2
+  exit 2
+}
 LLAVE=
-case "${1:-}" in
-  --llave-lectura) LLAVE=${2:-}; [ -n "$LLAVE" ] || { echo "falta la llave pública después de --llave-lectura" >&2; exit 2; } ;;
-  "") ;;
-  *) echo "uso: sudo sh $0 [--llave-lectura 'ssh-ed25519 AAAA... comentario']" >&2; exit 2 ;;
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --llave-lectura) LLAVE=${2:-}; [ -n "$LLAVE" ] || { echo "falta la llave pública después de --llave-lectura" >&2; exit 2; }; shift 2 ;;
+    --entorno) ENTORNO=${2:-}; if [ "$#" -ge 2 ]; then shift 2; else shift; fi ;;
+    *) uso ;;
+  esac
+done
+
+case "${ENTORNO:-}" in
+  staging) PROYECTO=smartdining-staging RUTA=/srv/smartdining-staging ;;
+  produccion) PROYECTO=smartdining RUTA=/srv/smartdining ;;
+  *) echo "instalar-respaldos: ERROR: ENTORNO debe ser 'staging' o 'produccion' (recibido: '${ENTORNO:-}'). No se instaló nada." >&2; uso ;;
 esac
+UNIDAD=smartdining-respaldo@$ENTORNO
+ENV_PRIVADO=/etc/smartdining/respaldo-$ENTORNO.env
+ENV_VIEJO=/etc/smartdining/respaldo.env
+TIMER_VIEJO=/etc/systemd/system/smartdining-respaldo.timer
+SERVICIO_VIEJO=/etc/systemd/system/smartdining-respaldo.service
 
 paso() { echo "==> $*"; }
 fallar() { echo "instalar-respaldos: ERROR: $*" >&2; exit 1; }
 
+[ "$(id -u)" -eq 0 ] || { echo "instalar-respaldos: córrelo con sudo" >&2; exit 1; }
+
+# El respaldo.sh y las unidades salen del clon de ESE entorno.
+[ "$(pwd -P)" = "$RUTA" ] || fallar "ENTORNO=$ENTORNO se instala desde su clon, $RUTA (estás en $(pwd -P))"
 id deploy >/dev/null 2>&1 || fallar "no existe el usuario deploy (corre antes preparar-servidor.sh)"
-for f in infra/scripts/respaldo.sh infra/systemd/smartdining-respaldo.service infra/systemd/smartdining-respaldo.timer; do
+for f in infra/scripts/respaldo.sh 'infra/systemd/smartdining-respaldo@.service' 'infra/systemd/smartdining-respaldo@.timer'; do
   [ -f "$f" ] || fallar "falta $f: córrelo desde la raíz de un clon del repositorio"
 done
+# El timer viejo (sin entorno) corre /usr/local/lib/smartdining/respaldo.sh sin
+# ENTORNO: en cuanto se instale el respaldo.sh nuevo, fallaría cada noche. Era
+# el de staging, así que lo reemplaza ENTORNO=staging.
+if [ -f "$TIMER_VIEJO" ] && [ "$ENTORNO" != staging ]; then
+  fallar "está el timer viejo smartdining-respaldo.timer (el de staging): instala primero staging (cd /srv/smartdining-staging && sudo ENTORNO=staging sh infra/scripts/instalar-respaldos.sh)"
+fi
 
 # --- 1. Grupo y usuario --------------------------------------------------------
 paso "1. grupo sd-respaldos y usuario respaldos"
@@ -56,11 +98,9 @@ fi
 # --- 2. Carpetas ---------------------------------------------------------------
 # ChrootDirectory exige que /srv/respaldos y todo lo de arriba sean de root y
 # que nadie más pueda escribir en ellos.
-paso "2. carpetas en /srv/respaldos"
+paso "2. carpeta /srv/respaldos/$PROYECTO"
 install -d -o root -g root -m 755 /srv/respaldos
-for p in smartdining smartdining-staging; do
-  install -d -o deploy -g sd-respaldos -m 2750 "/srv/respaldos/$p"
-done
+install -d -o deploy -g sd-respaldos -m 2750 "/srv/respaldos/$PROYECTO"
 
 # --- 3. SFTP de solo lectura ---------------------------------------------------
 paso "3. SFTP de solo lectura para respaldos"
@@ -142,31 +182,47 @@ rm -f "$ANTERIOR_BASE"
 # En Ubuntu 24.04 sshd puede estar activado por ssh.socket; reload sirve en ambos casos.
 systemctl reload ssh 2>/dev/null || systemctl restart ssh
 
-# --- 4. Script y timer ---------------------------------------------------------
-paso "4. respaldo.sh y timer smartdining-respaldo"
+# --- 4. Variables privadas ----------------------------------------------------
+# Va ANTES del timer: así el primer respaldo ya tiene su HEALTHCHECKS_URL.
+paso "4. $ENV_PRIVADO"
+install -d -o root -g root -m 700 /etc/smartdining
+if [ ! -f "$ENV_PRIVADO" ]; then
+  if [ "$ENTORNO" = staging ] && [ -f "$ENV_VIEJO" ]; then
+    # Compatibilidad: el check de staging sigue siendo el mismo.
+    cp -p "$ENV_VIEJO" "$ENV_PRIVADO"
+    echo "    copiado de $ENV_VIEJO (el viejo se queda; se puede borrar a mano)"
+  else
+    ( umask 077
+      printf '%s\n' \
+        "# SmartDining · variables del respaldo diario de $ENTORNO (R-18). 600 root. NUNCA en el repo." \
+        '# URL de ping de healthchecks.io, un check por entorno (docs/despliegue.md §4):' \
+        '# HEALTHCHECKS_URL=https://hc-ping.com/<uuid>' > "$ENV_PRIVADO" )
+  fi
+fi
+chown root:root "$ENV_PRIVADO"
+chmod 600 "$ENV_PRIVADO"
+if grep -q '^HEALTHCHECKS_URL=' "$ENV_PRIVADO"; then
+  echo "    HEALTHCHECKS_URL: definida"
+else
+  echo "    HEALTHCHECKS_URL: sin definir (el timer respalda igual, pero nadie avisa si falla)"
+fi
+
+# --- 5. Script y timer ---------------------------------------------------------
+paso "5. respaldo.sh y timer $UNIDAD"
+if [ -f "$TIMER_VIEJO" ]; then
+  # Solo llega aquí con ENTORNO=staging (comprobado arriba).
+  systemctl disable --now smartdining-respaldo.timer >/dev/null 2>&1 || true
+  rm -f "$TIMER_VIEJO" "$SERVICIO_VIEJO"
+  echo "    timer viejo smartdining-respaldo.timer: desactivado y reemplazado por $UNIDAD.timer (los respaldos no se tocan)"
+fi
 install -d -o root -g root -m 755 /usr/local/lib/smartdining
 install -o root -g root -m 755 infra/scripts/respaldo.sh /usr/local/lib/smartdining/respaldo.sh
-install -o root -g root -m 644 infra/systemd/smartdining-respaldo.service /etc/systemd/system/smartdining-respaldo.service
-install -o root -g root -m 644 infra/systemd/smartdining-respaldo.timer /etc/systemd/system/smartdining-respaldo.timer
+install -o root -g root -m 644 'infra/systemd/smartdining-respaldo@.service' '/etc/systemd/system/smartdining-respaldo@.service'
+install -o root -g root -m 644 'infra/systemd/smartdining-respaldo@.timer' '/etc/systemd/system/smartdining-respaldo@.timer'
 systemctl daemon-reload
-systemctl enable --now smartdining-respaldo.timer >/dev/null 2>&1
-
-# --- 5. Variables privadas ------------------------------------------------------
-paso "5. /etc/smartdining/respaldo.env"
-install -d -o root -g root -m 700 /etc/smartdining
-if [ ! -f /etc/smartdining/respaldo.env ]; then
-  ( umask 077
-    printf '%s\n' \
-      '# SmartDining · variables del respaldo diario (R-18). 600 root. NUNCA en el repo.' \
-      '# URL de ping de healthchecks.io (docs/despliegue.md §4):' \
-      '# HEALTHCHECKS_URL=https://hc-ping.com/<uuid>' > /etc/smartdining/respaldo.env )
-fi
-chown root:root /etc/smartdining/respaldo.env
-chmod 600 /etc/smartdining/respaldo.env
-grep -q '^HEALTHCHECKS_URL=' /etc/smartdining/respaldo.env \
-  && echo "    HEALTHCHECKS_URL: definida" \
-  || echo "    HEALTHCHECKS_URL: sin definir (el timer respalda igual, pero nadie avisa si falla)"
+systemctl enable --now "$UNIDAD.timer" >/dev/null 2>&1
 
 echo
-systemctl list-timers smartdining-respaldo.timer --no-pager | head -2
-echo "Listo. Prueba: sudo systemctl start smartdining-respaldo.service && journalctl -u smartdining-respaldo -n 20 --no-pager"
+systemctl list-timers 'smartdining-respaldo@*' --no-pager | head -3
+echo "Listo. Prueba: sudo systemctl start $UNIDAD.service && journalctl -u $UNIDAD -n 20 --no-pager"
+echo "Solo el entorno que está corriendo debe tener su timer activo; el otro: sudo systemctl disable --now smartdining-respaldo@<otro>.timer"
