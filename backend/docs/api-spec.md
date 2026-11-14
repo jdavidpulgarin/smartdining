@@ -2644,7 +2644,8 @@ cada uno con su `estado_item`. `total` es un número:
 
 > **Contrato con los ajustes de la revisión de Jarrison** (motivo obligatorio, solo admin y
 > mesero) y su decisión sobre `pago_registrado`: para el personal **no** es estricto, se
-> permite mientras lo pagado no supere el total nuevo.
+> permite mientras lo pagado no supere el total nuevo **y** el dueño de la línea no haya
+> pagado en la visita actual (T4, review de #235).
 
 Admin y mesero cancelan **cualquier línea** de **cualquier mesa** (no hay regla de dueño),
 también cuando cocina ya la empezó.
@@ -2658,14 +2659,19 @@ también cuando cocina ya la empezó.
   historial**, no al aviso.
 
 En la **misma transacción y con los mismos bloqueos** que el comensal (pedido y después línea,
-`FOR UPDATE`), y con `app.id_usuario` fijado (`set_config(..., true)`) para que los
-movimientos de inventario que escriben los triggers lleven al usuario:
+`FOR UPDATE`), pero **antes la fila de la mesa** (`FOR UPDATE`; un domicilio no tiene mesa y
+ese paso no existe), en el orden de los cobros: `mesas → pedidos → pedidos_domicilio →
+detalles_pedido`. Así un pago en **otro** pedido de la mesa y la cancelación se ponen en fila,
+y el segundo decide con lo que el primero confirmó (nunca quedan los dos). Y con
+`app.id_usuario` fijado (`set_config(..., true)`) para que los movimientos de inventario que
+escriben los triggers lleven al usuario:
 
 | Paso | Si no se cumple |
 |---|---|
 | El pedido existe y `id_detalle` es de ese pedido | **404** `{ "motivo": "no_encontrado" }` |
 | La línea no estaba ya cancelada (va **primero**) | **409** `{ "motivo": "item_ya_cancelado" }` |
 | La línea no está `servido` y el pedido no está `entregado`, `pagado` ni `cancelado` | **409** `{ "motivo": "item_no_cancelable" }` |
+| **T4:** el comensal **dueño de la línea** no tiene un pago `completada` en la visita actual de la mesa (ver abajo) | **409** `{ "error": "Ese comensal ya pagó: reembolsa antes de cancelar su plato", "motivo": "pago_registrado" }`, sin tocar nada |
 | Después de cancelar la línea: lo **ya pagado** (transacciones `completada` del pedido) **no supera** el **total nuevo** (ver abajo) | **409** `{ "motivo": "pago_registrado" }` y `ROLLBACK` |
 | Si es la **última** línea viva: el pedido puede pasar a `cancelado` desde su estado según `transiciones_validas` | **409** `{ "motivo": "item_no_cancelable" }` (ver abajo) |
 | El usuario del JWT existe | **409** `{ "motivo": "autor_inexistente" }` (el helper de siempre) |
@@ -2701,7 +2707,23 @@ Si era la **última línea viva**, el pedido pasa a `cancelado` con su fila en
 `estado_pedido` puede ser `recibido`, `en_preparacion`, `listo` o `cancelado` (Roberto los
 acepta en su #181). Si el pedido quedó cancelado, también el `order:status` de siempre.
 
-**`pago_registrado` del personal: lo pagado contra el total nuevo.** En la misma
+**`pago_registrado` del personal (T4): el dueño de la línea ya pagó.** Antes de tocar la
+línea: si el comensal de la línea tiene una transacción `completada` en la **visita actual**
+de la mesa, **409** `pago_registrado` y nada cambia. Sin esta regla, su pago quedaba como
+crédito de toda la mesa y terminaba pagando lo de los demás. Las reglas:
+
+- Cuenta un pago del comensal en **cualquier pedido de la mesa** («pagar lo mío» reparte
+  entre pedidos) con `transacciones.creado_en >= mesas.sesion_iniciada_en`, y siempre los
+  del propio pedido (un domicilio no tiene mesa; una mesa sin sesión delimitada, solo este
+  pedido).
+- El comensal se compara por la **clave del alias** (D-18b): «Ana», « ana » y «Aná» son la
+  misma persona. Es el mismo agrupamiento que la cuenta (`obtener_cuenta_mesa`).
+- Una línea **«General»** (sin comensal) se bloquea con cualquier pago «General» o de la
+  **mesa completa** (`comensal` NULL). Un pago de la mesa completa **no** bloquea la línea de
+  un comensal con nombre: para eso sigue la regla de abajo.
+- Hay que reembolsar ese pago antes de cancelar el plato.
+
+**`pago_registrado` del personal: lo pagado contra el total nuevo (#206).** Se mantiene. En la misma
 transacción, con el pedido bloqueado (`FOR UPDATE`), se cancela la línea y se lee el total
 que deja `tr_actualizar_total_pedido` (sin las líneas canceladas). Se compara en **centavos
 enteros** calculados por la base, sin coma flotante:
@@ -4460,11 +4482,10 @@ El backend los escucha en `src/services/inventario-avisos.js` y los reenvía al 
   puesto— para otra cosa, o `idleTimeoutMillis` la cerraría y el canal quedaría muerto sin que
   nadie se enterara. Esa conexión tampoco lleva `statement_timeout`: el recálculo del arranque
   recorre toda la carta.
-- **Con `eventId` y reintentos.** Estos avisos van **siempre** con reintento
-  (`enviarConReintento`: 3 intentos, 150 ms, solo ante `500/502/503 ERROR_INTERNO`), porque
-  nadie está esperando la respuesta y el aviso no se guarda en ningún sitio: si se pierde, la
-  carta queda desfasada en las mesas hasta el próximo movimiento. Las rutas del personal
-  (`PATCH /platos/:id/disponible`) siguen con un solo intento, como antes.
+- **Con `eventId` y reintentos, por una cola donde el último gana.** Ver
+  [Reintentos y cola de los avisos de stock](#reintentos-y-cola-de-los-avisos-de-stock) más
+  abajo. Las rutas del personal (`PATCH /platos/:id/disponible`) siguen con un solo intento,
+  como antes.
 - **Los números tienen que ser números.** Los del `pg_notify` ya son números JSON, pero los
   `NUMERIC` de una **consulta** con `pg` llegan como texto (`'450.00'`), y el socket-server
   responde `400 PAYLOAD_INVALIDO` a un `stock_actual` de texto. Se convierten antes de
@@ -4486,11 +4507,74 @@ El backend los escucha en `src/services/inventario-avisos.js` y los reenvía al 
    disponibilidad de cada plato y de cada opción**. Las apps además recargan el menú al
    reconectar.
 
-Si el socket-server no responde, la emisión de la carta se **abandona tras 5 fallos seguidos**:
-los demás van a fallar igual y serían minutos de timeouts y decenas de líneas idénticas en el
-log. **Si se cae la conexión del canal**, se reconecta con espera creciente (1 s, 2 s, 4 s…
+La carta entera se **encola** en la cola de avisos (abajo). Si el socket-server no responde,
+**ya no se abandona**: se hace un solo intento por pasada (no un timeout por cada plato) y la
+cola **insiste hasta lograrlo**, con la misma espera creciente. Así, si el socket-server
+arranca después que el backend, o se reinicia, la carta de las mesas se pone al día en cuanto
+vuelve. **Si se cae la conexión del canal**, se reconecta con espera creciente (1 s, 2 s, 4 s…
 hasta 30 s), se vuelve a hacer `LISTEN` y se repiten los pasos 2 y 3. El apagado ordenado
-cierra esa conexión y **cancela la reconexión pendiente** antes de cerrar el pool.
+cierra esa conexión, **cancela la reconexión pendiente** y para la cola antes de cerrar el
+pool.
+
+#### Reintentos y cola de los avisos de stock
+
+Todos los avisos de este canal —`plato:disponibilidad`, `ingrediente:disponibilidad` e
+`inventario:alerta`— y la carta del arranque pasan por una cola
+(`src/services/avisos-stock-cola.js`).
+
+**Qué se reintenta.**
+
+| Resultado del envío | Qué hace la cola |
+|---|---|
+| Error de **red**: el socket-server no está (`ECONNREFUSED`), cortó (`ECONNRESET`), DNS (`EAI_AGAIN`), `ETIMEDOUT`, o no contestó a tiempo (`SOCKET_TIMEOUT_MS`, "socket colgado") | **reintenta** |
+| Cualquier **5xx** | **reintenta** |
+| Un **4xx** (aviso mal armado, clave que no coincide) | **no** reintenta: se registra y se descarta, repetirlo daría el mismo 4xx |
+| Sin `SOCKET_URL` o sin `INTERNAL_API_KEY` | nada: el tiempo real está apagado a propósito |
+
+**Espera.** 1 s, 2 s, 4 s, 8 s… hasta un tope de 30 s, con un margen al azar de ±20 % (sin
+pasar el tope) para que varios backends no reintenten en el mismo instante. Hay **un solo**
+temporizador para toda la cola y nunca dos envíos a la vez. Con el socket-server caído, cada
+pasada hace **un** intento (el aviso más viejo) y, si falla, vuelve a esperar. Un aviso nuevo no
+espera al temporizador: se intenta en el acto. En cuanto un envío sale bien tras fallos, el
+socket-server volvió y **se vacía la cola entera** en esa misma pasada.
+
+**El último gana.** Un aviso de disponibilidad es un **estado**, no un suceso. Si cada aviso se
+reintentara por su cuenta, un "agotado" que falló y se reintenta tarde podría llegar
+**después** de un "repuesto" más nuevo que sí salió, y dejar el plato agotado en todas las
+mesas por error. Por eso la cola guarda **una entrada por clave** con **solo su último estado**:
+
+- la clave es el tipo y el id: `plato:5`, `ingrediente:7`, `alerta:<id_insumo>`;
+- un aviso nuevo de la misma clave **reemplaza** al pendiente, y el viejo ya no se manda nunca
+  (eso cancela su reintento);
+- si llega mientras el viejo está en vuelo, al terminar ese envío sale el nuevo; como los envíos
+  van de uno en uno, el viejo nunca puede adelantarlo en la red.
+
+**Un `eventId` nuevo en cada envío, también en cada reintento.** El socket-server deduplica por
+`eventId`. Si un intento le llegó y lo procesó pero la respuesta se perdió (un timeout),
+reintentar con el **mismo** `eventId` haría que descartara el reintento como repetido, aunque
+ahora lleve un estado más nuevo de esa clave. Con uno nuevo, en el peor caso las mesas reciben
+dos veces el **mismo** estado, que es inofensivo.
+
+**Límite.** Como mucho `AVISOS_STOCK_COLA_MAX` claves (500 por defecto). Con el socket-server
+caído mucho tiempo, la cola no crece sin fin: si llega una clave nueva con la cola llena, se
+descarta **la más vieja** (la que lleva más tiempo sin actualizarse; una clave que se actualiza
+pasa al final) y se registra. Si la carta tiene más platos y opciones que ese tope, súbelo.
+
+**Logs sin datos sensibles.** Solo el código del fallo (`INALCANZABLE/ECONNREFUSED`,
+`TIMEOUT`, `HTTP_503`…) y cuántos avisos quedan pendientes; ni cuerpos ni mensajes de error.
+
+**Solo con el servidor en marcha.** La cola nace sin reintentos (un intento por aviso, como
+antes) y los enciende `inventario-avisos.iniciar()`, que solo llama `server.js`. Una prueba que
+importa `app` o llama a `manejarAviso` no deja temporizadores. El temporizador lleva `unref()`
+y `detener()` lo cancela en el apagado ordenado.
+
+**Configuración** (`.env`, todas opcionales): `AVISOS_STOCK_REINTENTO_INICIAL_MS` (1000),
+`AVISOS_STOCK_REINTENTO_MAX_MS` (30000) y `AVISOS_STOCK_COLA_MAX` (500).
+
+**Lo que la cola no puede saber.** El backend detecta que el socket-server volvió cuando un envío
+falla y el siguiente sale bien, y entonces re-emite lo pendiente. Si el socket-server se
+**reinicia entre dos avisos** (sin que ningún envío falle), el backend no se entera. No pierde
+ningún aviso pendiente, porque no hay ninguno, pero tampoco vuelve a emitir la carta.
 
 **Nada de esto puede tumbar el backend ni una petición**: el tiempo real es un extra. El
 backend arranca y sirve igual sin Redis, sin socket-server y con el canal cerrado.
