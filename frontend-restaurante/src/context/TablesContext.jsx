@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useContext } from 'react'
+import { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
@@ -362,18 +362,18 @@ export function TablesProvider({ children }) {
   })
 
   // Al RECONECTAR se vuelven a pedir las mesas: desde #239 los avisos que se
-  // perdieron sin conexión no se reenvían. La primera conexión no la necesita
-  // (las mesas se cargan al montar).
-  useEffect(() => {
-    const socket = getSocket()
-    let yaConecto = socket.connected
-    const alConectar = () => {
-      if (yaConecto) cargarMesas()
-      yaConecto = true
-    }
-    socket.on('connect', alConectar)
-    return () => socket.off('connect', alConectar)
-  }, [cargarMesas])
+  // perdieron sin conexión no se reenvían. Se marca el corte (disconnect) y se
+  // recarga en el connect que le sigue; la primera conexión no la necesita (las
+  // mesas se cargan al montar).
+  const huboCorte = useRef(false)
+  useSocketListener('disconnect', () => {
+    huboCorte.current = true
+  })
+  useSocketListener('connect', () => {
+    if (!huboCorte.current) return
+    huboCorte.current = false
+    cargarMesas()
+  })
 
   // Escuchar presencia de comensales en vivo (room:admin recibe cambios de todas las mesas).
   // Guardarla en el contexto evita perderla al cerrar y volver a abrir "Tomar pedido".
