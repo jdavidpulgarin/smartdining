@@ -266,6 +266,18 @@ describe('sinStock - logica pura de faltantes de inventario (J-17)', () => {
         expect(resTxt.itemsAfectados[0].disponible).toBeNull();
         expect(resTxt.itemsAfectados[0].puedeAjustar).toBe(false);
       });
+
+      it('línea con cantidad <= disponible no bloquea y no aparece en itemsAfectados', () => {
+        const carrito = [
+          { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 2 },
+        ];
+        const faltantes = [
+          { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 2 },
+        ];
+        const res = resumenFaltantes(carrito, faltantes);
+        expect(res.idsLineasAfectadas).toEqual([]);
+        expect(res.itemsAfectados).toEqual([]);
+      });
     });
   });
 

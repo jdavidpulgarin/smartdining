@@ -19,6 +19,7 @@ import {
   totalesMesa,
   traducirErrorSocket,
   buscarPlatoEnMenu,
+  sonLineasIdenticas,
 } from '../utils/carritoCompartido';
 import {
   obtenerMenuRaw,
@@ -100,9 +101,32 @@ export function guardarCarritoEnStorage(clave, lineas) {
 export function carritoReducer(state, action) {
   switch (action.type) {
     case 'AGREGAR_LINEA': {
+      const nueva = action.payload;
+      const indiceExistente = state.lineas.findIndex((l) =>
+        sonLineasIdenticas(l, nueva)
+      );
+
+      if (indiceExistente >= 0) {
+        const lineaExistente = state.lineas[indiceExistente];
+        const cantActual = Number(lineaExistente.cantidad) || 1;
+        const cantASumar = Number(nueva.cantidad) || 1;
+        const cantFinal = Math.min(20, Math.max(1, cantActual + cantASumar));
+
+        const nuevasLineas = [...state.lineas];
+        nuevasLineas[indiceExistente] = {
+          ...lineaExistente,
+          cantidad: cantFinal,
+        };
+
+        return {
+          ...state,
+          lineas: nuevasLineas,
+        };
+      }
+
       return {
         ...state,
-        lineas: [...state.lineas, action.payload],
+        lineas: [...state.lineas, nueva],
       };
     }
 
@@ -321,6 +345,22 @@ export function CarritoProvider({ children }) {
       setEnviando(true);
       setError(null);
       try {
+        const lineaExistente = misLineasCompartidas.find((l) =>
+          sonLineasIdenticas(l, linea)
+        );
+
+        if (lineaExistente) {
+          const cantActual = Number(lineaExistente.cantidad) || 1;
+          const cantASumar = Number(linea.cantidad) || 1;
+          const cantFinal = Math.min(20, Math.max(1, cantActual + cantASumar));
+          const payload = construirSet({
+            ...lineaExistente,
+            cantidad: cantFinal,
+          });
+          await mesaSocket.enviar('cart:update', payload);
+          return true;
+        }
+
         const payload = construirSet(linea);
         await mesaSocket.enviar('cart:update', payload);
         return true;
@@ -332,7 +372,7 @@ export function CarritoProvider({ children }) {
         setEnviando(false);
       }
     },
-    [modo, mesaSocket]
+    [modo, mesaSocket, misLineasCompartidas]
   );
 
   const actualizarCantidad = useCallback(

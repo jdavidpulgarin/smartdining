@@ -311,26 +311,6 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
     const coincidencias = faltantesDelItem(linea, faltantesLimpios);
     if (coincidencias.length === 0) continue;
 
-    const idLinea =
-      linea.id_linea != null
-        ? String(linea.id_linea)
-        : (linea.idLinea != null ? String(linea.idLinea) : null);
-    if (idLinea) idsLineasAfectadas.push(idLinea);
-
-    const platoAgotado = coincidencias.some((f) => f.tipo === 'plato');
-    const ingredientesAgotados = coincidencias.filter(
-      (f) => f.tipo === 'ingrediente'
-    );
-    const nombreLinea =
-      linea.nombre ||
-      linea.plato_nombre ||
-      coincidencias.find((f) => f.tipo === 'plato')?.nombre ||
-      'Plato';
-
-    const nombresIng = ingredientesAgotados
-      .map((f) => f.nombre || `ingrediente #${f.id}`)
-      .filter(Boolean);
-
     // Calcular disponible para la línea (entero >= 0, o null si no viene o es inválido)
     let disponibleLinea = null;
     const valoresDisp = coincidencias.map((f) =>
@@ -353,6 +333,32 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
       );
       return lineasAfectadasPorF.length === 1;
     });
+
+    // Si la cantidad de la línea ya es <= disponible (disponible > 0), y solo afecta a esta línea o la suma no supera, no bloquea el envío
+    // (a) Si afecta a una sola línea y su cantidad <= disponible → no se marca como afectada
+    if (disponibleLinea !== null && disponibleLinea > 0 && cantidadLinea <= disponibleLinea && soloAfectaAUnaLinea) {
+      continue;
+    }
+
+    const idLinea =
+      linea.id_linea != null
+        ? String(linea.id_linea)
+        : (linea.idLinea != null ? String(linea.idLinea) : null);
+    if (idLinea) idsLineasAfectadas.push(idLinea);
+
+    const platoAgotado = coincidencias.some((f) => f.tipo === 'plato');
+    const ingredientesAgotados = coincidencias.filter(
+      (f) => f.tipo === 'ingrediente'
+    );
+    const nombreLinea =
+      linea.nombre ||
+      linea.plato_nombre ||
+      coincidencias.find((f) => f.tipo === 'plato')?.nombre ||
+      'Plato';
+
+    const nombresIng = ingredientesAgotados
+      .map((f) => f.nombre || `ingrediente #${f.id}`)
+      .filter(Boolean);
 
     const puedeAjustar = Boolean(
       disponibleLinea !== null &&
