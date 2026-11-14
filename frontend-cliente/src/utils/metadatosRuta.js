@@ -5,6 +5,7 @@ const METADATOS_POR_RUTA = [
   { prefijo: '/seguimiento', titulo: 'Seguimiento del pedido · SmartDining', indexable: false },
   { prefijo: '/pago', titulo: 'La cuenta · SmartDining', indexable: false },
   { prefijo: '/despedida', titulo: '¡Gracias por venir! · SmartDining', indexable: false },
+  { prefijo: '/escanear', titulo: 'Escanear QR · SmartDining', indexable: false },
   { prefijo: '/dev/ui', titulo: 'UI Showcase · SmartDining', indexable: false },
 ];
 

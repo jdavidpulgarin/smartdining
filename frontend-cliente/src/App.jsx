@@ -17,6 +17,7 @@ const Carrito = lazy(() => import('./pages/Carrito'))
 const Seguimiento = lazy(() => import('./pages/Seguimiento'))
 const Pago = lazy(() => import('./pages/Pago'))
 const Despedida = lazy(() => import('./pages/Despedida'))
+const EscanearQr = lazy(() => import('./pages/EscanearQr'))
 const UiShowcase = lazy(() => import('./pages/dev/UiShowcase'))
 
 function CargandoRuta() {
@@ -109,6 +110,7 @@ function App() {
                       }
                     />
                     <Route path="/despedida" element={<Despedida />} />
+                    <Route path="/escanear" element={<EscanearQr />} />
                     {import.meta.env.DEV && (
                       <Route path="/dev/ui" element={<UiShowcase />} />
                     )}

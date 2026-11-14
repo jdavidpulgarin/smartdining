@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leerMesaDelQr } from './qr';
+import { leerMesaDelQr, validarUrlQrMesa } from './qr';
 
 function crearTokenPrueba(payload, version = 'v1', firma = 'firma_mock') {
   const json = JSON.stringify(payload);
@@ -45,5 +45,92 @@ describe('leerMesaDelQr', () => {
     expect(leerMesaDelQr(crearTokenPrueba({ m: 3.5 }))).toBeNull();
     expect(leerMesaDelQr(crearTokenPrueba({ m: '5' }))).toBeNull();
     expect(leerMesaDelQr(crearTokenPrueba({ m: null }))).toBeNull();
+  });
+});
+
+describe('validarUrlQrMesa', () => {
+  const tokenValido = crearTokenPrueba({ m: 5, sid: 'sesion-123', exp: 999999 });
+
+  it('QR real válido → ok con ruta', () => {
+    const origen = 'https://app.smartdining.co';
+    const url = `${origen}/?token=${tokenValido}`;
+    const res = validarUrlQrMesa(url, origen);
+
+    expect(res).toEqual({
+      ok: true,
+      ruta: `/?token=${tokenValido}`,
+    });
+  });
+
+  it('otro dominio → no', () => {
+    const origen = 'https://app.smartdining.co';
+    const urlMaliciosa = `https://sitio-falso.com/?token=${tokenValido}`;
+    expect(validarUrlQrMesa(urlMaliciosa, origen)).toEqual({ ok: false });
+
+    const urlSubdominio = `https://otro.smartdining.co/?token=${tokenValido}`;
+    expect(validarUrlQrMesa(urlSubdominio, origen)).toEqual({ ok: false });
+  });
+
+  it('mismo dominio con otra ruta → no', () => {
+    const origen = 'https://app.smartdining.co';
+    expect(validarUrlQrMesa(`${origen}/menu?token=${tokenValido}`, origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa(`${origen}/mesa/5?token=${tokenValido}`, origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa(`${origen}/api/mesas?token=${tokenValido}`, origen)).toEqual({ ok: false });
+  });
+
+  it('javascript:, data:, //host, texto plano, URL con token mal formado → no', () => {
+    const origen = 'https://app.smartdining.co';
+
+    // Protocolos no permitidos y formatos anómalos
+    expect(validarUrlQrMesa('javascript:alert(1)', origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa('data:text/html,<b>hola</b>', origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa('//app.smartdining.co/?token=' + tokenValido, origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa('texto plano no url', origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa('', origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa(null, origen)).toEqual({ ok: false });
+
+    // Sin token o token vacío
+    expect(validarUrlQrMesa(`${origen}/`, origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa(`${origen}/?token=`, origen)).toEqual({ ok: false });
+
+    // Token mal formado
+    expect(validarUrlQrMesa(`${origen}/?token=token_invalido`, origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa(`${origen}/?token=v1.no_es_base64.firma`, origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa(`${origen}/?token=v2.payload.firma`, origen)).toEqual({ ok: false });
+    expect(validarUrlQrMesa(`${origen}/?token=v1.solo-dos-partes`, origen)).toEqual({ ok: false });
+  });
+
+  it('http en producción → no', () => {
+    const origenHttp = 'http://app.smartdining.co';
+    const url = `${origenHttp}/?token=${tokenValido}`;
+    expect(validarUrlQrMesa(url, origenHttp)).toEqual({ ok: false });
+
+    // Aunque el origen actual sea https, si la URL escaneada viene con http
+    const origenHttps = 'https://app.smartdining.co';
+    expect(validarUrlQrMesa(`http://app.smartdining.co/?token=${tokenValido}`, origenHttps)).toEqual({ ok: false });
+  });
+
+  it('http://localhost en desarrollo → sí', () => {
+    const origenDev = 'http://localhost:5174';
+    const url = `${origenDev}/?token=${tokenValido}`;
+    expect(validarUrlQrMesa(url, origenDev)).toEqual({
+      ok: true,
+      ruta: `/?token=${tokenValido}`,
+    });
+
+    // Con token simulado en localhost
+    const urlSim = `${origenDev}/?token=simulado`;
+    expect(validarUrlQrMesa(urlSim, origenDev)).toEqual({
+      ok: true,
+      ruta: '/?token=simulado',
+    });
+
+    // En 127.0.0.1 también es desarrollo local
+    const origenLoopback = 'http://127.0.0.1:5174';
+    const urlLoopback = `${origenLoopback}/?token=${tokenValido}`;
+    expect(validarUrlQrMesa(urlLoopback, origenLoopback)).toEqual({
+      ok: true,
+      ruta: `/?token=${tokenValido}`,
+    });
   });
 });

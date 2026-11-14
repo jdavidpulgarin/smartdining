@@ -17,6 +17,7 @@ describe('obtenerMetadatosRuta', () => {
       '/seguimiento',
       '/pago',
       '/despedida',
+      '/escanear',
     ];
     for (const ruta of rutasPrivadas) {
       const res = obtenerMetadatosRuta(ruta);
