@@ -32,6 +32,81 @@ describe('CarritoContext helpers y reducer', () => {
       expect(siguiente.lineas).toEqual([linea]);
     });
 
+    it('agregar dos veces el mismo plato igual → una línea con cantidad 2', () => {
+      const linea1 = { id_linea: 'l-1', id_plato: 10, cantidad: 1, comensal: 'Ana', notas: '' };
+      const linea2 = { id_linea: 'l-2', id_plato: 10, cantidad: 1, comensal: 'Ana', notas: '' };
+
+      const estado1 = carritoReducer(estadoInicial, {
+        type: 'AGREGAR_LINEA',
+        payload: linea1,
+      });
+      const estado2 = carritoReducer(estado1, {
+        type: 'AGREGAR_LINEA',
+        payload: linea2,
+      });
+
+      expect(estado2.lineas).toHaveLength(1);
+      expect(estado2.lineas[0].id_linea).toBe('l-1');
+      expect(estado2.lineas[0].cantidad).toBe(2);
+    });
+
+    it('distinto en opciones o notas → dos líneas', () => {
+      const lineaConNotas1 = { id_linea: 'l-1', id_plato: 10, cantidad: 1, comensal: 'Ana', notas: 'Sin sal' };
+      const lineaConNotas2 = { id_linea: 'l-2', id_plato: 10, cantidad: 1, comensal: 'Ana', notas: 'Con sal' };
+
+      const estado1 = carritoReducer(estadoInicial, {
+        type: 'AGREGAR_LINEA',
+        payload: lineaConNotas1,
+      });
+      const estado2 = carritoReducer(estado1, {
+        type: 'AGREGAR_LINEA',
+        payload: lineaConNotas2,
+      });
+
+      expect(estado2.lineas).toHaveLength(2);
+      expect(estado2.lineas[0].cantidad).toBe(1);
+      expect(estado2.lineas[1].cantidad).toBe(1);
+
+      const lineaArmable1 = {
+        id_linea: 'l-3',
+        id_plato: 20,
+        cantidad: 1,
+        comensal: 'Ana',
+        ingredientes: [{ id_ingrediente: 1, porcion: 'normal' }],
+      };
+      const lineaArmable2 = {
+        id_linea: 'l-4',
+        id_plato: 20,
+        cantidad: 1,
+        comensal: 'Ana',
+        ingredientes: [{ id_ingrediente: 2, porcion: 'normal' }],
+      };
+
+      const estadoArmable = carritoReducer(
+        carritoReducer(estadoInicial, { type: 'AGREGAR_LINEA', payload: lineaArmable1 }),
+        { type: 'AGREGAR_LINEA', payload: lineaArmable2 }
+      );
+      expect(estadoArmable.lineas).toHaveLength(2);
+    });
+
+    it('de otro comensal → no se juntan', () => {
+      const lineaAna = { id_linea: 'l-1', id_plato: 10, cantidad: 1, comensal: 'Ana', notas: '' };
+      const lineaBeto = { id_linea: 'l-2', id_plato: 10, cantidad: 1, comensal: 'Beto', notas: '' };
+
+      const estado1 = carritoReducer(estadoInicial, {
+        type: 'AGREGAR_LINEA',
+        payload: lineaAna,
+      });
+      const estado2 = carritoReducer(estado1, {
+        type: 'AGREGAR_LINEA',
+        payload: lineaBeto,
+      });
+
+      expect(estado2.lineas).toHaveLength(2);
+      expect(estado2.lineas[0].comensal).toBe('Ana');
+      expect(estado2.lineas[1].comensal).toBe('Beto');
+    });
+
     it('actualiza la cantidad clampada entre 1 y 20', () => {
       const estadoConLinea = {
         lineas: [{ id_linea: 'l-1', id_plato: 10, cantidad: 2 }],

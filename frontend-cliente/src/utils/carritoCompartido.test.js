@@ -8,6 +8,7 @@ import {
   puedoEnviar,
   totalesMesa,
   traducirErrorSocket,
+  sonLineasIdenticas,
 } from './carritoCompartido';
 
 describe('carritoCompartido utils', () => {
@@ -464,6 +465,60 @@ describe('carritoCompartido utils', () => {
       expect(traducirErrorSocket('DESCONOCIDO')).toBe(
         'No se pudo actualizar el carrito'
       );
+    });
+  });
+
+  describe('sonLineasIdenticas', () => {
+    it('mismo plato, comensal y notas sin ingredientes → true', () => {
+      const a = { id_plato: 501, comensal: 'Ana', notas: 'Bien caliente' };
+      const b = { id_plato: 501, comensal: 'ana', notas: 'Bien caliente ' };
+      expect(sonLineasIdenticas(a, b)).toBe(true);
+    });
+
+    it('mismo plato con mismos ingredientes en distinto orden → true', () => {
+      const a = {
+        id_plato: 1001,
+        comensal: 'Beto',
+        ingredientes: [
+          { id_ingrediente: 2, porcion: 'normal' },
+          { id_ingrediente: 1, porcion: 'extra' },
+        ],
+      };
+      const b = {
+        id_plato: 1001,
+        comensal: 'Beto',
+        ingredientes: [
+          { id_ingrediente: 1, porcion: 'extra' },
+          { id_ingrediente: 2, porcion: 'normal' },
+        ],
+      };
+      expect(sonLineasIdenticas(a, b)).toBe(true);
+    });
+
+    it('distinto comensal → false', () => {
+      const a = { id_plato: 501, comensal: 'Ana' };
+      const b = { id_plato: 501, comensal: 'Carlos' };
+      expect(sonLineasIdenticas(a, b)).toBe(false);
+    });
+
+    it('distintas notas → false', () => {
+      const a = { id_plato: 501, comensal: 'Ana', notas: 'Sin cebolla' };
+      const b = { id_plato: 501, comensal: 'Ana', notas: 'Con cebolla' };
+      expect(sonLineasIdenticas(a, b)).toBe(false);
+    });
+
+    it('distintos ingredientes o porciones → false', () => {
+      const a = {
+        id_plato: 1001,
+        comensal: 'Ana',
+        ingredientes: [{ id_ingrediente: 1, porcion: 'normal' }],
+      };
+      const b = {
+        id_plato: 1001,
+        comensal: 'Ana',
+        ingredientes: [{ id_ingrediente: 1, porcion: 'extra' }],
+      };
+      expect(sonLineasIdenticas(a, b)).toBe(false);
     });
   });
 });
