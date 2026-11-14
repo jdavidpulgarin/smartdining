@@ -39,6 +39,7 @@ const {
 } = require('./sala');
 const { rutasMesaComensal } = require('./mesa-comensal');
 const { rutasItemCancelado } = require('./item-cancelado');
+const { crearInstancia, rutasInstancia } = require('./instancia');
 
 const rutasBase = {
   /**
@@ -69,8 +70,11 @@ function crearServidor(config, deps = {}) {
 
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
-  const ctx = { config, ipCliente: crearIpCliente(config.proxiesConfiables) };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala, ...rutasMesaComensal, ...rutasItemCancelado }, ctx);
+  // instanciaId: nuevo en cada arranque (T5). El backend lo compara para saber
+  // si el socket-server se reinició y volver a emitir la carta. deps.instancia
+  // solo para pruebas.
+  const ctx = { config, ipCliente: crearIpCliente(config.proxiesConfiables), instancia: deps.instancia || crearInstancia() };
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala, ...rutasMesaComensal, ...rutasItemCancelado, ...rutasInstancia }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));
