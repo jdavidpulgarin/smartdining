@@ -82,7 +82,7 @@ jobs:
           dc up -d --build --remove-orphans --wait --wait-timeout 180 postgres redis
           # Respaldo (R-18) ANTES de migrar. Si el respaldo o migrar.sh fallan,
           # se aborta aquí: no se levanta el backend ni el socket-server nuevos.
-          RESPALDO_CONTENEDOR=$(dc ps -q postgres) sh infra/scripts/respaldo.sh predeploy "$2" < /dev/null || {
+          ENTORNO=staging RESPALDO_CONTENEDOR=$(dc ps -q postgres) sh infra/scripts/respaldo.sh predeploy "$2" < /dev/null || {
             echo "::error::Falló el respaldo previo de la base. No se migró ni se levantó el backend nuevo."
             exit 1
           }
