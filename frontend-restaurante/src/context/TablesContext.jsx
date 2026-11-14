@@ -6,6 +6,7 @@ import { useSocketListener } from '../hooks'
 import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { mesaDelAviso } from '../utils/avisos'
+import { aplicarMesaActualizada } from '../utils/mesaActualizada'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
 
@@ -198,6 +199,7 @@ export function TablesProvider({ children }) {
   // la notificación ni el sonido. Una ventana por tipo, de los últimos 200.
   const [createdVisto] = useState(() => crearVentanaEventos())
   const [statusVisto] = useState(() => crearVentanaEventos())
+  const [mesaVista] = useState(() => crearVentanaEventos())
 
   // Escuchar cuando entra un pedido nuevo (order:created)
   useSocketListener('order:created', (data) => {
@@ -349,6 +351,29 @@ export function TablesProvider({ children }) {
     socket.on('connect', pedirPresencia)
     return () => socket.off('connect', pedirPresencia)
   }, [])
+
+  // T12 (EVENTS.md §5.7): el backend avisa cada cambio de mesa (abrir, estado,
+  // crear, editar, liberar, borrar) con mesa:actualizada, solo a room:admin.
+  // La lista de mesas, el admin y la Caja la ven sin recargar. Un eventId
+  // repetido se ignora (ventana de los últimos 200).
+  useSocketListener('mesa:actualizada', (data) => {
+    if (mesaVista(data?.eventId)) return
+    setTables((prev) => aplicarMesaActualizada(prev, data, normalizarMesa))
+  })
+
+  // Al RECONECTAR se vuelven a pedir las mesas: desde #239 los avisos que se
+  // perdieron sin conexión no se reenvían. La primera conexión no la necesita
+  // (las mesas se cargan al montar).
+  useEffect(() => {
+    const socket = getSocket()
+    let yaConecto = socket.connected
+    const alConectar = () => {
+      if (yaConecto) cargarMesas()
+      yaConecto = true
+    }
+    socket.on('connect', alConectar)
+    return () => socket.off('connect', alConectar)
+  }, [cargarMesas])
 
   // Escuchar presencia de comensales en vivo (room:admin recibe cambios de todas las mesas).
   // Guardarla en el contexto evita perderla al cerrar y volver a abrir "Tomar pedido".
