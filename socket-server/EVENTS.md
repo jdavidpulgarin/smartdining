@@ -1208,6 +1208,22 @@ Reglas:
 - Las suscripciones caducadas (HTTP 404/410 del servicio push) se eliminan solas.
 - Son de la **sesión de mesa**: se borran al liberarla.
 
+**Registro de envíos (diagnóstico, T9).** No cambia el contrato; sirve para saber si un aviso
+salió y qué respondió el servicio push (p. ej., por qué no llega a un iPhone):
+
+- Una línea por envío: `push: enviado` (info), `push: suscripción caducada` (info) o
+  `push: error al enviar` (error), con `servicio_push` (**solo el host**: `fcm.googleapis.com`,
+  `web.push.apple.com`…), `status` (código HTTP, o `null` sin respuesta, con `codigo` de red)
+  y `caducada`. Si Apple manda `{ "reason": "BadJwtToken" }` o parecido, va en `razon`
+  (solo si es una palabra).
+- Una línea por cambio de estado: `push: resumen del envío` con `estado`, `destinatarios`,
+  `enviados`, `fallidos`, `caducados` y `servicios` (cuántos por host). `destinatarios: 0`
+  quiere decir que nadie de la mesa tenía avisos activados.
+- **Nunca** el endpoint completo (identifica al dispositivo), las llaves de la suscripción
+  (`p256dh`, `auth`), el payload, el alias ni las llaves VAPID (`tests/push-registro.test.js`).
+
+Para verlo en el VPS: `docker logs <socket-server> | grep '"msg":"push: '`.
+
 ---
 
 ## 8. Pagos (Wompi, sandbox)
