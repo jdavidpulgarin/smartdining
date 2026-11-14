@@ -2,14 +2,20 @@
 # Emite el PRIMER certificado de Let's Encrypt en el VPS. Se corre una sola vez;
 # después el servicio certbot del compose lo renueva solo.
 #
-#   sh infra/scripts/primer-certificado.sh            # certificado real
-#   STAGING=1 sh infra/scripts/primer-certificado.sh  # prueba (sin límite de Let's Encrypt)
-#   SEED_DEMO=1 sh infra/scripts/primer-certificado.sh # además carga los datos de la demo
-#   ENV_FILE=infra/.env.staging sh infra/scripts/primer-certificado.sh  # staging
+#   cd /srv/smartdining && ENTORNO=produccion sh infra/scripts/primer-certificado.sh
+#   cd /srv/smartdining-staging && ENTORNO=staging sh infra/scripts/primer-certificado.sh
+#   sh infra/scripts/primer-certificado.sh --entorno staging
+#   STAGING=1 ...   certificado de PRUEBA de Let's Encrypt (sin su límite); no tiene
+#                   nada que ver con el entorno staging
+#   SEED_DEMO=1 ... además carga los datos de la demo
 #
-# ENV_FILE (por defecto infra/.env) elige el entorno. El nombre del proyecto
-# de compose sale de COMPOSE_PROJECT_NAME dentro de ese archivo (staging:
-# smartdining-staging); si no está, es "smartdining" (docker-compose.prod.yml).
+# ENTORNO (variable o --entorno, OBLIGATORIO y sin valor por defecto):
+#   staging    clon /srv/smartdining-staging, infra/.env.staging, proyecto smartdining-staging
+#   produccion clon /srv/smartdining, infra/.env, proyecto smartdining
+# Se corre desde el clon de ese entorno, y COMPOSE_PROJECT_NAME del .env tiene
+# que ser el del proyecto (en producción puede no estar: docker-compose.prod.yml
+# ya se llama "smartdining"). Si ENV_FILE viene, tiene que ser el del entorno.
+# Cualquier otro valor de ENTORNO, o ninguno: sale con 2 sin tocar nada.
 #
 # Si ya hay un certificado de PRUEBA (de una corrida con STAGING=1), la corrida
 # sin STAGING lo reemplaza por el real. Un certificado real no se toca.
@@ -26,11 +32,31 @@
 # ya apuntan a la IP del VPS y los puertos 80 y 443 están abiertos.
 set -eu
 
+if [ "${1:-}" = "--entorno" ]; then
+  ENTORNO=${2:-}
+  if [ "$#" -ge 2 ]; then shift 2; else shift; fi
+fi
+case "${ENTORNO:-}" in
+  staging) RUTA=/srv/smartdining-staging ENV_ENTORNO=infra/.env.staging PROYECTO=smartdining-staging EJEMPLO=infra/.env.staging.example ;;
+  produccion) RUTA=/srv/smartdining ENV_ENTORNO=infra/.env PROYECTO=smartdining EJEMPLO=infra/.env.example ;;
+  *)
+    echo "primer-certificado: ERROR: ENTORNO debe ser 'staging' o 'produccion' (recibido: '${ENTORNO:-}'). No se hizo nada." >&2
+    echo "uso: ENTORNO=staging|produccion sh $0   (o: sh $0 --entorno <entorno>)" >&2
+    exit 2
+    ;;
+esac
+
 cd "$(dirname "$0")/../.."
-ENV_FILE=${ENV_FILE:-infra/.env}
+[ "$(pwd -P)" = "$RUTA" ] || { echo "ENTORNO=$ENTORNO se corre desde su clon, $RUTA (estás en $(pwd -P))"; exit 1; }
+[ -z "${ENV_FILE:-}" ] || [ "$ENV_FILE" = "$ENV_ENTORNO" ] \
+  || { echo "ENV_FILE=$ENV_FILE no es el de ENTORNO=$ENTORNO ($ENV_ENTORNO)"; exit 1; }
+ENV_FILE=$ENV_ENTORNO
 # passwords-demo.sh (pasos 1 y 2) debe usar el mismo entorno.
 export ENV_FILE
-[ -f "$ENV_FILE" ] || { echo "Falta $ENV_FILE (cp infra/.env.example infra/.env)"; exit 1; }
+[ -f "$ENV_FILE" ] || { echo "Falta $ENV_FILE (cp $EJEMPLO $ENV_FILE)"; exit 1; }
+nombre=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$ENV_FILE" | tr -d '\r')
+[ "${nombre:-smartdining}" = "$PROYECTO" ] \
+  || { echo "$ENV_FILE tiene COMPOSE_PROJECT_NAME=${nombre:-<vacío>} y ENTORNO=$ENTORNO necesita $PROYECTO"; exit 1; }
 
 DOMINIO=$(sed -n 's/^DOMINIO=//p' "$ENV_FILE" | tr -d '\r')
 CERTBOT_EMAIL=$(sed -n 's/^CERTBOT_EMAIL=//p' "$ENV_FILE" | tr -d '\r')

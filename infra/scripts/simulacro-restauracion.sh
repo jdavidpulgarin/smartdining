@@ -4,8 +4,14 @@
 #
 # Comprueba que un respaldo se puede restaurar, SIN tocar la base real:
 #
-#   sh infra/scripts/simulacro-restauracion.sh                  # el diario más reciente
-#   sh infra/scripts/simulacro-restauracion.sh ARCHIVO.dump     # uno en concreto
+#   ENTORNO=staging sh infra/scripts/simulacro-restauracion.sh               # el diario más reciente
+#   ENTORNO=produccion sh infra/scripts/simulacro-restauracion.sh ARCHIVO.dump # uno en concreto
+#   sh infra/scripts/simulacro-restauracion.sh --entorno staging [ARCHIVO.dump]
+#
+# ENTORNO (variable o --entorno, OBLIGATORIO y sin valor por defecto) elige el
+# proyecto: staging = smartdining-staging, produccion = smartdining. La base en
+# vivo con la que se compara y la carpeta de respaldos son las de ese proyecto.
+# Cualquier otro valor, o ninguno: sale con 2 sin tocar nada.
 #
 # Como deploy (o con sudo -u deploy), en el VPS:
 #   1. Levanta un postgres TEMPORAL sin red (--network none) y sin ningún
@@ -35,20 +41,27 @@ fallar() {
   exit 1
 }
 
-# --- Base en vivo (si hay) ------------------------------------------------------
-vivo=
-proyecto=
-for p in smartdining smartdining-staging; do
-  c=$("$DOCKER" ps -q --filter "label=com.docker.compose.project=$p" --filter "label=com.docker.compose.service=postgres")
-  [ -n "$c" ] || continue
-  [ -z "$vivo" ] || fallar "están corriendo los postgres de smartdining y de smartdining-staging"
-  vivo=$c
-  proyecto=$p
-done
+if [ "${1:-}" = "--entorno" ]; then
+  ENTORNO=${2:-}
+  if [ "$#" -ge 2 ]; then shift 2; else shift; fi
+fi
+case "${ENTORNO:-}" in
+  staging) proyecto=smartdining-staging ;;
+  produccion) proyecto=smartdining ;;
+  *)
+    echo "simulacro: ERROR: ENTORNO debe ser 'staging' o 'produccion' (recibido: '${ENTORNO:-}'). No se hizo nada." >&2
+    echo "uso: ENTORNO=staging|produccion sh $0 [ARCHIVO.dump]   (o: sh $0 --entorno <entorno> [ARCHIVO.dump])" >&2
+    exit 2
+    ;;
+esac
+
+# --- Base en vivo de ese entorno (si hay) --------------------------------------
+vivo=$("$DOCKER" ps -q --filter "label=com.docker.compose.project=$proyecto" --filter "label=com.docker.compose.service=postgres")
+[ "$(printf '%s\n' "$vivo" | grep -c .)" -le 1 ] || fallar "hay más de un postgres de $proyecto corriendo"
 
 archivo=${1:-}
 if [ -z "$archivo" ]; then
-  [ -n "$vivo" ] || fallar "no hay postgres en marcha: indica el archivo .dump"
+  [ -n "$vivo" ] || fallar "no hay postgres de $proyecto en marcha: indica el archivo .dump"
   archivo=$(ls -1 "$RESPALDOS_DIR/$proyecto/diario"/diario-*.dump 2>/dev/null | sort | tail -n 1 || true)
   [ -n "$archivo" ] || fallar "no hay respaldos diarios en $RESPALDOS_DIR/$proyecto/diario"
 fi
@@ -116,7 +129,7 @@ if [ "$r_img" != "-" ]; then
     || fallar "el tar.gz de imágenes no se pudo extraer: NO se puede restaurar"
   x_img=$(printf '%s' "$x_img" | tr -d ' \r\n')
   [ "$x_img" = "$r_img" ] || fallar "el tar.gz lista $r_img imágenes .webp y al extraerlo salen $x_img"
-  if [ -n "$proyecto" ]; then
+  if [ -n "$vivo" ]; then
     vol=$("$DOCKER" volume ls -q --filter "label=com.docker.compose.project=$proyecto" --filter "label=com.docker.compose.volume=imagenes")
     if [ -n "$vol" ]; then
       v_img=$("$DOCKER" run --rm --pull never --network none -v "$vol:/imagenes:ro" --entrypoint sh "$imagen" \
@@ -148,7 +161,7 @@ if [ -n "$vivo" ]; then
   v_tablas=$1 v_migr=$2 v_ultima=$3 v_usuarios=$4 v_pedidos=$5
 fi
 
-printf '\n%-22s %-34s %s\n' "" "restaurada" "en vivo${proyecto:+ ($proyecto)}"
+printf '\n%-22s %-34s %s\n' "" "restaurada" "en vivo${vivo:+ ($proyecto)}"
 printf '%-22s %-34s %s\n' "tablas (public)" "$r_tablas" "$v_tablas"
 printf '%-22s %-34s %s\n' "schema_migraciones" "$r_migr" "$v_migr"
 # printf cuenta bytes: "ú" y "ó" ocupan dos cada una, de ahí el 24.
