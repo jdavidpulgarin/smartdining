@@ -154,6 +154,131 @@ describe('sinStock - logica pura de faltantes de inventario (J-17)', () => {
         expect(res.mensaje).toBe(MENSAJE_SIN_STOCK_GENERICO);
       }
     });
+
+    describe('ajuste de cantidad por stock disponible (T5)', () => {
+      it('disponible 2 con cantidad 3 → Ajustar a 2', () => {
+        const carrito = [
+          { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 3 },
+        ];
+        const faltantes = [
+          { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 2 },
+        ];
+
+        const res = resumenFaltantes(carrito, faltantes);
+        expect(res.hayFaltantes).toBe(true);
+        expect(res.itemsAfectados).toHaveLength(1);
+        expect(res.itemsAfectados[0].disponible).toBe(2);
+        expect(res.itemsAfectados[0].puedeAjustar).toBe(true);
+        expect(res.itemsAfectados[0].idLinea).toBe('l-1');
+        expect(res.itemsAfectados[0].etiqueta).toBe('Solo quedan 2');
+        expect(res.lineasAfectadas).toEqual([
+          { idLinea: 'l-1', id_linea: 'l-1', disponible: 2, puedeAjustar: true },
+        ]);
+      });
+
+      it('0 → solo Quitar', () => {
+        const carrito = [
+          { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 3 },
+        ];
+        const faltantes = [
+          { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 0 },
+        ];
+
+        const res = resumenFaltantes(carrito, faltantes);
+        expect(res.itemsAfectados[0].disponible).toBe(0);
+        expect(res.itemsAfectados[0].puedeAjustar).toBe(false);
+      });
+
+      it('sin campo disponible → solo Quitar', () => {
+        const carrito = [
+          { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 3 },
+        ];
+        const faltantes = [
+          { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
+        ];
+
+        const res = resumenFaltantes(carrito, faltantes);
+        expect(res.itemsAfectados[0].disponible).toBeNull();
+        expect(res.itemsAfectados[0].puedeAjustar).toBe(false);
+      });
+
+      it('ingrediente que afecta a 1 línea armable → ajusta la cantidad del plato', () => {
+        const carrito = [
+          {
+            id_linea: 'l-bowl',
+            id_plato: 1001,
+            nombre: 'Bowl Personalizado',
+            cantidad: 3,
+            ingredientes: [{ id_ingrediente: 10, nombre: 'Aguacate' }],
+          },
+        ];
+        const faltantes = [
+          { tipo: 'ingrediente', id: 10, nombre: 'Aguacate', disponible: 1 },
+        ];
+
+        const res = resumenFaltantes(carrito, faltantes);
+        expect(res.itemsAfectados[0].disponible).toBe(1);
+        expect(res.itemsAfectados[0].puedeAjustar).toBe(true);
+        expect(res.itemsAfectados[0].cantidad).toBe(3);
+        expect(res.itemsAfectados[0].idLinea).toBe('l-bowl');
+      });
+
+      it('ingrediente que afecta a 2 líneas → solo Quitar', () => {
+        const carrito = [
+          {
+            id_linea: 'l-bowl-1',
+            id_plato: 1001,
+            nombre: 'Bowl 1',
+            cantidad: 2,
+            ingredientes: [{ id_ingrediente: 10, nombre: 'Aguacate' }],
+          },
+          {
+            id_linea: 'l-bowl-2',
+            id_plato: 1001,
+            nombre: 'Bowl 2',
+            cantidad: 2,
+            ingredientes: [{ id_ingrediente: 10, nombre: 'Aguacate' }],
+          },
+        ];
+        const faltantes = [
+          { tipo: 'ingrediente', id: 10, nombre: 'Aguacate', disponible: 2 },
+        ];
+
+        const res = resumenFaltantes(carrito, faltantes);
+        expect(res.itemsAfectados[0].puedeAjustar).toBe(false);
+        expect(res.itemsAfectados[1].puedeAjustar).toBe(false);
+      });
+
+      it('disponible inválido (negativo, texto) → solo Quitar', () => {
+        const carrito = [
+          { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 3 },
+        ];
+
+        const resNeg = resumenFaltantes(carrito, [
+          { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: -1 },
+        ]);
+        expect(resNeg.itemsAfectados[0].disponible).toBeNull();
+        expect(resNeg.itemsAfectados[0].puedeAjustar).toBe(false);
+
+        const resTxt = resumenFaltantes(carrito, [
+          { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 'no-disponible' },
+        ]);
+        expect(resTxt.itemsAfectados[0].disponible).toBeNull();
+        expect(resTxt.itemsAfectados[0].puedeAjustar).toBe(false);
+      });
+
+      it('línea con cantidad <= disponible no bloquea y no aparece en itemsAfectados', () => {
+        const carrito = [
+          { id_linea: 'l-1', id_plato: 1008, nombre: 'Limonada de Coco', cantidad: 2 },
+        ];
+        const faltantes = [
+          { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 2 },
+        ];
+        const res = resumenFaltantes(carrito, faltantes);
+        expect(res.idsLineasAfectadas).toEqual([]);
+        expect(res.itemsAfectados).toEqual([]);
+      });
+    });
   });
 
   describe('accionErrorPedido', () => {

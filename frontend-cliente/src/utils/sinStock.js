@@ -50,12 +50,27 @@ export function extraerNombreIngredienteAgotado(error) {
 }
 
 /**
+ * Normaliza el valor de `disponible`: número entero >= 0, o `null` si no viene o es inválido.
+ *
+ * @param {any} raw
+ * @returns {number|null}
+ */
+export function normalizarDisponible(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const num = Number(raw);
+  if (Number.isInteger(num) && num >= 0) {
+    return num;
+  }
+  return null;
+}
+
+/**
  * Normaliza y filtra la lista de faltantes al formato real de D-17:
- * `[{ tipo: 'plato' | 'ingrediente', id: number | null, nombre: string | null }]`.
+ * `[{ tipo: 'plato' | 'ingrediente', id: number | null, nombre: string | null, disponible?: number | null }]`.
  * Ignora objetos con la forma vieja (`{ id_plato }` o `{ id_ingrediente }` sin `tipo`).
  *
  * @param {Array<object>} faltantes
- * @returns {Array<{ tipo: 'plato'|'ingrediente', id: number|null, nombre: string|null }>}
+ * @returns {Array<{ tipo: 'plato'|'ingrediente', id: number|null, nombre: string|null, disponible?: number|null }>}
  */
 export function normalizarFaltantes(faltantes) {
   if (!Array.isArray(faltantes)) return [];
@@ -84,11 +99,16 @@ export function normalizarFaltantes(faltantes) {
     if (vistos.has(clave)) continue;
     vistos.add(clave);
 
-    resultado.push({
+    const fObj = {
       tipo: f.tipo,
       id: idFinal,
       nombre,
-    });
+    };
+    if (f.disponible !== undefined) {
+      fObj.disponible = normalizarDisponible(f.disponible);
+    }
+
+    resultado.push(fObj);
   }
 
   return resultado;
@@ -291,7 +311,39 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
     const coincidencias = faltantesDelItem(linea, faltantesLimpios);
     if (coincidencias.length === 0) continue;
 
-    const idLinea = linea.id_linea != null ? String(linea.id_linea) : null;
+    // Calcular disponible para la línea (entero >= 0, o null si no viene o es inválido)
+    let disponibleLinea = null;
+    const valoresDisp = coincidencias.map((f) =>
+      f.disponible !== undefined ? normalizarDisponible(f.disponible) : null
+    );
+    if (valoresDisp.some((v) => v === 0)) {
+      disponibleLinea = 0;
+    } else if (valoresDisp.some((v) => v === null)) {
+      disponibleLinea = null;
+    } else {
+      disponibleLinea = Math.min(...valoresDisp);
+    }
+
+    const cantidadLinea = Math.max(1, Number(linea.cantidad) || 1);
+
+    // puedeAjustar: disponible > 0 && disponible < cantidad de la línea && el faltante afecta a UNA sola línea del carrito
+    const soloAfectaAUnaLinea = coincidencias.every((f) => {
+      const lineasAfectadasPorF = lineas.filter(
+        (l) => faltantesDelItem(l, [f]).length > 0
+      );
+      return lineasAfectadasPorF.length === 1;
+    });
+
+    // Si la cantidad de la línea ya es <= disponible (disponible > 0), y solo afecta a esta línea o la suma no supera, no bloquea el envío
+    // (a) Si afecta a una sola línea y su cantidad <= disponible → no se marca como afectada
+    if (disponibleLinea !== null && disponibleLinea > 0 && cantidadLinea <= disponibleLinea && soloAfectaAUnaLinea) {
+      continue;
+    }
+
+    const idLinea =
+      linea.id_linea != null
+        ? String(linea.id_linea)
+        : (linea.idLinea != null ? String(linea.idLinea) : null);
     if (idLinea) idsLineasAfectadas.push(idLinea);
 
     const platoAgotado = coincidencias.some((f) => f.tipo === 'plato');
@@ -308,18 +360,31 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
       .map((f) => f.nombre || `ingrediente #${f.id}`)
       .filter(Boolean);
 
+    const puedeAjustar = Boolean(
+      disponibleLinea !== null &&
+      disponibleLinea > 0 &&
+      disponibleLinea < cantidadLinea &&
+      soloAfectaAUnaLinea
+    );
+
     const etiqueta =
-      !platoAgotado && nombresIng.length > 0
-        ? `Se acabó: ${nombresIng.join(', ')}`
-        : 'Se acabó';
+      disponibleLinea != null && disponibleLinea > 0
+        ? `Solo quedan ${disponibleLinea}`
+        : (!platoAgotado && nombresIng.length > 0
+            ? `Se acabó: ${nombresIng.join(', ')}`
+            : 'Se acabó');
 
     itemsAfectados.push({
       id_linea: idLinea,
+      idLinea,
       id_plato: Number(linea.id_plato ?? linea.idPlato ?? linea.id) || 0,
       nombre: nombreLinea,
+      cantidad: cantidadLinea,
       platoAgotado,
       ingredientesAgotados,
       faltantes: coincidencias,
+      disponible: disponibleLinea,
+      puedeAjustar,
       etiqueta,
     });
   }
@@ -379,6 +444,12 @@ export function resumenFaltantes(carrito = [], faltantes = []) {
     hayFaltantes: itemsAfectados.length > 0 || faltantesLimpios.length > 0,
     faltantes: faltantesLimpios,
     itemsAfectados,
+    lineasAfectadas: itemsAfectados.map((it) => ({
+      idLinea: it.idLinea,
+      id_linea: it.id_linea,
+      disponible: it.disponible,
+      puedeAjustar: it.puedeAjustar,
+    })),
     idsLineasAfectadas,
     idsPlatosAgotados,
     idsIngredientesAgotados,
@@ -426,6 +497,7 @@ export function accionErrorPedido(error, carrito = []) {
       puedeEnviar: resumen.idsLineasAfectadas.length === 0,
       faltantes: resumen.faltantes,
       itemsAfectados: resumen.itemsAfectados,
+      lineasAfectadas: resumen.lineasAfectadas,
       idsLineasAfectadas: resumen.idsLineasAfectadas,
       idsPlatosAgotados: resumen.idsPlatosAgotados,
       idsIngredientesAgotados: resumen.idsIngredientesAgotados,
@@ -458,6 +530,7 @@ export function accionErrorPedido(error, carrito = []) {
       puedeEnviar: resumen.idsLineasAfectadas.length === 0,
       faltantes: resumen.faltantes,
       itemsAfectados: resumen.itemsAfectados,
+      lineasAfectadas: resumen.lineasAfectadas,
       idsLineasAfectadas: resumen.idsLineasAfectadas,
       idsPlatosAgotados: resumen.idsPlatosAgotados,
       idsIngredientesAgotados: resumen.idsIngredientesAgotados,
@@ -834,6 +907,7 @@ export default {
   MENSAJE_ERROR_PEDIDO_GENERICO,
   MENSAJE_SIN_STOCK_GENERICO,
   extraerNombreIngredienteAgotado,
+  normalizarDisponible,
   normalizarFaltantes,
   faltantesDelItem,
   resumenFaltantes,
