@@ -1,5 +1,6 @@
 const { exito, fallo, manejar } = require('./ack');
 const { log } = require('./log');
+const { claveAlias } = require('./alias');
 const { ROL_COMENSAL } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
 const {
@@ -244,7 +245,7 @@ const TTL_SIN_CELULAR_MS = 24 * 60 * 60 * 1000;
 function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
   const llamadas = new Map(); // idMesa -> ms en que vence el bloqueo
   const cuentas = new Set(); // mesas que pidieron la cuenta
-  const pagos = new Map(); // idMesa -> Set de alias que ya pagaron
+  const pagos = new Map(); // idMesa -> Map(clave del alias -> alias) de quienes ya pagaron
   const sinCelular = new Map(); // idMesa -> { ms en que vence, Map(clave -> alias) }
   // Como sd:mesas:con-estado en Redis: idMesa -> ms en que vence (24 h desde la
   // última vez que se anotó un pago o un sin celular).
@@ -289,19 +290,23 @@ function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
       if (e.alias.size === 0) sinCelular.delete(idMesa);
       return true;
     },
+    // Por la clave del alias (como sin_celular): «Ana» y «ana» son una persona
+    // en pagaron; se muestra el primer alias con el que se anotó.
     marcarPago(idMesa, alias) {
-      if (!pagos.has(idMesa)) pagos.set(idMesa, new Set());
-      pagos.get(idMesa).add(alias);
+      if (!pagos.has(idMesa)) pagos.set(idMesa, new Map());
+      const p = pagos.get(idMesa);
+      const clave = claveAlias(alias) ?? alias;
+      if (!p.has(clave)) p.set(clave, alias);
       anotarEnIndice(idMesa);
     },
     /** Deshace un marcarPago que llegó tarde a una mesa ya liberada (ver anotarPagoEnSesion en pagos.js). */
     desmarcarPago(idMesa, alias) {
       const p = pagos.get(idMesa);
-      if (p) p.delete(alias);
+      if (p) p.delete(claveAlias(alias) ?? alias);
       if (p && p.size === 0) pagos.delete(idMesa);
       if (!pagos.has(idMesa) && !listaSinCelular(idMesa)) conEstado.delete(idMesa);
     },
-    pagaron(idMesa) { return [...(pagos.get(idMesa) || [])].sort((a, b) => a.localeCompare(b)); },
+    pagaron(idMesa) { return [...(pagos.get(idMesa) || new Map()).values()].sort((a, b) => a.localeCompare(b)); },
     reservarLlamada(idMesa, segundos) {
       if ((llamadas.get(idMesa) || 0) > ahora()) return false;
       llamadas.set(idMesa, ahora() + segundos * 1000);
