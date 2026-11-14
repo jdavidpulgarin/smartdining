@@ -32,6 +32,10 @@ const RANGOS = Object.freeze({
   // D-20a: el pedido de mesa con el que domicilios-sql comprueba que la mesa
   // sigue marcando 'entregado' como siempre.
   'domicilios-sql': { desde: 9800, hasta: 9899 },
+  // T5: la mesa de los pedidos con los que se prueba el `disponible` del 409.
+  'sin-stock-disponible-sql': { desde: 9900, hasta: 9999 },
+  // T5 (review de #236): la mesa de los 50 pedidos simultáneos por 10 porciones.
+  'sin-stock-concurrencia-sql': { desde: 10000, hasta: 10099 },
 });
 
 const PG_UNIQUE = '23505';

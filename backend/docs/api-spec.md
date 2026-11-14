@@ -4383,7 +4383,7 @@ cualquier ruta que acabe tocando el inventario.
 
 | SQLSTATE | Cuándo | Status | Cuerpo |
 |---|---|---|---|
-| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "error": "...", "motivo": "sin_stock", "faltantes": [{ "tipo", "id", "nombre" }] }` |
+| **SD001** "sin stock" | Al pedir: la reserva no alcanza para el pedido completo | **409** | `{ "error": "...", "motivo": "sin_stock", "faltantes": [{ "tipo", "id", "nombre", "disponible" }] }` |
 | **SD002** "stock negativo" | `registrar_movimiento_inventario` (merma o ajuste) dejaría el stock bajo 0 | **400** | `{ "error": "...", "motivo": "movimiento_invalido", "stock_actual": 450 }` |
 | `El ingrediente "X" está agotado` (**P0001**) | Interruptor manual de una opción, anterior a P-19 | **409** | `{ "error": "...", "motivo": "ingrediente_agotado" }` |
 
@@ -4399,14 +4399,40 @@ cualquier ruta que acabe tocando el inventario.
   "error": "Sin stock suficiente para el pedido 87",
   "motivo": "sin_stock",
   "faltantes": [
-    { "tipo": "plato", "id": 12, "nombre": "Arepa de Huevo" },
-    { "tipo": "ingrediente", "id": 7, "nombre": "Panceta Crujiente" }
+    { "tipo": "plato", "id": 1004, "nombre": "Nachos Supremos", "disponible": 2 },
+    { "tipo": "ingrediente", "id": 1, "nombre": "Arroz Integral", "disponible": 0 }
   ]
 }
 ```
 
-- `tipo` es `"plato"` o `"ingrediente"`, e `id`/`nombre` dicen **qué quitar del carrito**.
-- **Al cliente solo van `tipo`, `id` y `nombre`, y sin repetir**: el pedido lo puede hacer un
+- `tipo` es `"plato"` o `"ingrediente"` (una opción de un plato armable), e `id`/`nombre`
+  dicen **qué ajustar o quitar del carrito**.
+- **`disponible` (T5)**: cuántas unidades de ESE plato, o de ESA opción, se pueden pedir con el
+  stock actual. Entero `>= 0`. Es la fórmula de la base para reservar
+  (`fn_consumo_detalle`, `database/scripts/27_inventario.sql` líneas 129 y 134), despejada, con
+  lo que "hay" como lo cuenta `fn_faltantes_pedido` (línea 392: un insumo inactivo cuenta 0):
+
+  | `tipo` | `disponible` |
+  |---|---|
+  | `plato` | mínimo, sobre los insumos de su receta, de `floor(hay / cantidad_por_unidad)` |
+  | `ingrediente` | mínimo, sobre los insumos de la receta de la opción, de `floor(hay / (cantidad × factor de la porción))` (`factores_porcion`: ligera 0,5 · normal 1 · extra 1,5; si se pidió en varias porciones, la de factor más alto) |
+
+  - **Puede no venir**: si el plato no tiene receta (por ejemplo, un armable cuyo faltante es
+    un paso obligatorio sin opciones) no hay de dónde sacarlo y no se inventa; y si la
+    consulta que lo calcula falla, el 409 sale igual **sin** `disponible` (nunca un 500; el
+    servidor anota solo el código del fallo).
+  - **Es aproximado**: se calcula por faltante, como si fuera lo único del pedido, con una
+    lectura aparte después del error (la transacción del pedido ya está deshecha), por la
+    misma conexión del pedido y nunca por una nueva del pool, para que muchos rechazos a la
+    vez no lo agoten. Si otra
+    línea del MISMO pedido gasta el mismo insumo (otro plato con el mismo ingrediente), o el
+    stock cambia entre la lectura y el reintento, **"Ajustar a N" puede volver a dar 409**;
+    la PWA vuelve a mostrar el diálogo con los números nuevos.
+  - **Cómo usarlo en la PWA**: `disponible` **0** → solo "Quitar"; **> 0** → "Ajustar a N"
+    (cambiar la cantidad de esa línea a `N`) o "Quitar"; **sin el campo** → solo "Quitar".
+  - Lo calcula `crearConDetalles`, el único camino que crea líneas hoy (`POST /pedidos`, del
+    comensal y del personal); vive en `src/services/disponible-sin-stock.js`.
+- **Al cliente solo van `tipo`, `id`, `nombre` y `disponible`, y sin repetir**: el pedido lo puede hacer un
   comensal anónimo desde su teléfono y las cantidades de bodega no son asunto suyo.
   `id_insumo`, `insumo`, `necesita` y `hay` quedan **solo en el log del servidor**, que es
   donde hacen falta para reponer.
