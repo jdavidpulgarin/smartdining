@@ -9,6 +9,8 @@
  * GET /api/excedentes-pago-en-linea?estado=pendiente.
  */
 
+import { horaBogota } from './caja'
+
 /** Por qué sobró, en palabras del cajero. */
 const POR_QUE = {
   excede_saldo_comensal: 'pagó en línea más de lo que debía',
@@ -50,7 +52,9 @@ export function listaExcedentes(respuesta) {
 export function textoExcedente(x, formatear = (n) => String(n), numeroMesa = (id) => id) {
   const quien = x.comensal ? `Mesa ${numeroMesa(x.idMesa)} · ${x.comensal}` : `Mesa ${numeroMesa(x.idMesa)}`
   const porQue = POR_QUE[x.motivo] || 'el pago en línea superó lo que se debía'
-  return `${quien}: devuélvele ${formatear(x.excedente)} en efectivo (${porQue}).`
+  // Sin fecha no hay hora (horaBogota(null) daría la época, 19:00).
+  const hora = x.creadoEn ? horaBogota(x.creadoEn) : ''
+  return `${hora ? `${hora} · ` : ''}${quien}: devuélvele ${formatear(x.excedente)} en efectivo (${porQue}).`
 }
 
 /** ¿Este error de PATCH …/devuelto quiere decir que ya no está pendiente? */

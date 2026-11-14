@@ -32,11 +32,13 @@ describe('utils/excedentes (T4, §8.7)', () => {
     expect(listaExcedentes([fila()])).toHaveLength(1)
   })
 
-  it('textoExcedente: a quién, cuánto y por qué, con el número de mesa del panel', () => {
+  it('textoExcedente: la hora de Bogotá, a quién, cuánto y por qué, con el número de mesa del panel', () => {
     const [x] = listaExcedentes([fila()])
-    expect(textoExcedente(x, (n) => '$' + n, (id) => id * 10)).toBe('Mesa 20 · Ana: devuélvele $10000 en efectivo (pagó en línea más de lo que debía).')
-    const [y] = listaExcedentes([fila({ comensal: null, motivo: 'otra_visita' })])
-    expect(textoExcedente(y, (n) => '$' + n)).toBe('Mesa 2: devuélvele $10000 en efectivo (pagó después de que su grupo se fue: se devuelve todo).')
+    // 16:00Z = 11:00 en Bogotá (UTC-5)
+    expect(textoExcedente(x, (n) => '$' + n, (id) => id * 10)).toBe('11:00 · Mesa 20 · Ana: devuélvele $10000 en efectivo (pagó en línea más de lo que debía).')
+    const [y] = listaExcedentes([fila({ comensal: null, motivo: 'otra_visita', creado_en: '2026-11-15T01:30:00.000Z' })])
+    expect(textoExcedente(y, (n) => '$' + n)).toBe('20:30 · Mesa 2: devuélvele $10000 en efectivo (pagó después de que su grupo se fue: se devuelve todo).')
+    expect(textoExcedente({ ...x, creadoEn: null }, (n) => '$' + n)).toBe('Mesa 2 · Ana: devuélvele $10000 en efectivo (pagó en línea más de lo que debía).')
     for (const motivo of ['excede_saldo_mesa', 'sin_cuenta', 'raro']) {
       expect(textoExcedente({ ...x, motivo })).toMatch(/devuélvele 10000 en efectivo/)
     }
