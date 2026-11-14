@@ -21,7 +21,7 @@ código y este documento no coinciden, es un error y se corrige en el mismo PR.
 - [3. Convenciones](#3-convenciones): idempotencia, formato del ack, reconexión
 - [4. Eventos cliente → servidor](#4-eventos-cliente--servidor)
 - [5. Eventos servidor → cliente](#5-eventos-servidor--cliente) · [5.5. `inventario:alerta`](#55-inventarioalerta) · [5.6. `item:cancelado`](#56-itemcancelado)
-- [6. Endpoints HTTP](#6-endpoints-http) · [6.4. Comensales sin celular](#64-comensales-sin-celular-post-internalmesa-comensal)
+- [6. Endpoints HTTP](#6-endpoints-http) · [6.4. Comensales sin celular](#64-comensales-sin-celular-post-internalmesa-comensal) · [6.5. Instancia del socket-server](#65-instancia-del-socket-server-x-instancia-id-y-get-internalsalud)
 - [7. Web Push](#7-web-push)
 - [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox) · [8.6. Cobros de caja](#86-cobros-de-caja-post-internalpayment-confirmed)
 - [9. Variables de entorno](#9-variables-de-entorno)
@@ -105,6 +105,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `POST /internal/mesa-comensal` | backend (tras el COMMIT de D-18) | Estable (el backend ya la llama, D-18/D-18b) | [§6.4](#64-comensales-sin-celular-post-internalmesa-comensal) |
 | `POST /internal/inventario-alerta` | backend (D-17, oyente del canal `inventario`) | Estable (el backend ya la llama, D-17) | [§5.5](#55-inventarioalerta) |
 | `POST /internal/item-cancelado` | backend (tras el COMMIT de J-14, el comensal quita un plato, o de D-13, el personal cancela uno) | Estable; el backend la llama desde #180 (J-14) y #186 (D-13) | [§5.6](#56-itemcancelado) |
+| `GET /internal/salud` · encabezado `X-Instancia-Id` en toda `/internal/*` | backend (re-emitir la carta si el socket-server se reinició, T5) | Espera backend (T5): el socket-server ya lo da | [§6.5](#65-instancia-del-socket-server-x-instancia-id-y-get-internalsalud) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
 responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
@@ -939,6 +940,7 @@ CORS con la misma política que el socket: la lista blanca `CORS_ORIGINS` y, sol
 | POST | `/internal/plato-disponibilidad` | Header `x-internal-key` | Solo backend, tras el COMMIT de `PATCH /api/platos/:id/disponible`. `{ "id_plato": 7, "disponible": false, "eventId": "<uuid opcional>" }` → emite `plato:disponibilidad` (§5.4). Con `eventId`, un reintento responde `duplicado: true` |
 | POST | `/internal/payment-confirmed` | Header `x-internal-key` | Solo backend. Cobro de caja (efectivo, datáfono o abono) ya registrado → emite `payment:confirmed` con el mismo payload que Wompi (§8.6) |
 | POST | `/internal/item-cancelado` | Header `x-internal-key` | Solo backend, tras el COMMIT de J-14 (el comensal quita un plato) o de D-13 (el personal cancela uno). `{ id_pedido, id_mesa, codigo_pedido, id_detalle, id_plato, nombre, comensal, total, estado_pedido, origen?, eventId }`, validación estricta (un campo de más → `400`) → emite `item:cancelado` a `room:kds`, `room:admin` y `room:mesa-{ID}` (§5.6) |
+| GET | `/internal/salud` | Header `x-internal-key` | Solo backend. `200 { instanciaId, arrancadoEn, redis: "ok" | "caido" }`. Sin límite de peticiones, como `/health`. Toda respuesta de `/internal/*` (también 4xx y 5xx) lleva `X-Instancia-Id` (§6.5) |
 | POST | `/pagos/intencion` | Bearer JWT `comensal` | Intención de pago (§8.1) |
 | POST | `/pagos/webhook` | Checksum de Wompi | Eventos de Wompi (§8.3) |
 
@@ -1132,6 +1134,58 @@ sigue en memoria: tras un reinicio del socket-server no hay marca y esta guardia
 backend valida igual la sesión de la mesa). Llevarla a Redis toca `liberarMesa` y `/qr/generar`:
 si el borrado de la marca fallara al generar el QR, la siguiente liberación se tomaría como
 duplicada y no revocaría los QR ni limpiaría el estado de la sesión nueva.
+
+### 6.5. Instancia del socket-server: `X-Instancia-Id` y `GET /internal/salud`
+
+> **Espera backend · T5.** Implementado en `src/instancia.js` y `src/http.js` (pruebas:
+> `tests/instancia.test.js`). Falta que el backend lo use para re-emitir la carta.
+
+**Para qué:** la carta (`plato:disponibilidad` / `ingrediente:disponibilidad`) no se guarda en el
+socket-server, que solo la difunde a los sockets conectados. Si el socket-server se reinicia con el
+backend en marcha, nadie vuelve a emitirla. Si se reinicia mientras el backend arranca, se pierde la
+emisión del arranque. Con esto el backend **sabe** que el socket-server es otro proceso y vuelve a
+emitirla.
+
+**Identidad:** al arrancar, el socket-server genera `instanciaId` (un UUID v4,
+`crypto.randomUUID()`) y `arrancadoEn` (ISO 8601). **No se guardan**: cambian en cada reinicio.
+Con varias réplicas, cada una tiene la suya.
+
+**Encabezado `X-Instancia-Id`:** va en **toda** respuesta de `/internal/*`, con el mismo valor
+mientras viva el proceso. Eso incluye los `200`, `400`, `401`, `404` de una ruta interna que
+no existe, el `500` y el `503` de cierre. Las demás rutas (`/health`, QR, push, pagos) no lo
+llevan.
+
+```http
+GET /internal/salud
+x-internal-key: <INTERNAL_API_KEY>
+```
+
+```json
+{ "instanciaId": "3f0c2e6a-9b1d-4c7e-8a55-2d1f6e9b0c41", "arrancadoEn": "2026-11-14T03:10:00.000Z", "redis": "ok" }
+```
+
+- **Clave obligatoria**, como en el resto de `/internal/*`: sin ella o errada, `401 NO_AUTORIZADO`,
+  sin el cuerpo de salud. Sin `INTERNAL_API_KEY` configurada, `503 NO_CONFIGURADO`.
+- `redis`: `"ok"` o `"caido"`. A diferencia de `/health`, Redis caído **no** es un `503`: el
+  proceso responde y su `instanciaId` vale. Sin `REDIS_URL` (solo desarrollo), `"ok"`.
+- **Sin datos sensibles** y **sin límite de peticiones**, igual que `/health`. Desde Internet no existe:
+  nginx responde `404` a toda `/internal/*` sin pasarla al servicio (`bloqueo-interno.conf`, en
+  los cinco sitios).
+
+**Qué hace el backend (T5, Daniel):**
+
+1. Guarda el **último** `instanciaId` que vio, en memoria. Lo lee del encabezado de cualquier
+   respuesta de `/internal/*` (no hace falta una petición aparte) o de `GET /internal/salud`.
+2. **El primero que ve al arrancar solo se guarda.** El arranque ya emite la carta entera
+   (`ponerLaCartaAlDia`).
+3. **Si cambia** respecto al guardado, el socket-server se reinició: guarda el nuevo y **vuelve a
+   emitir la carta** (`v_carta_disponible`, con `eventId` nuevos). Una sola vez por cambio, aunque
+   varias respuestas lleguen a la vez con el id nuevo.
+4. **Compara el `instanciaId`, no `arrancadoEn`.** Los relojes del backend y del socket-server
+   pueden diferir, y dos arranques pueden caer en el mismo instante. `arrancadoEn` es solo para logs.
+5. Para no depender de que haya tráfico, puede consultar `GET /internal/salud` cada cierto tiempo
+   (p. ej. 30 s). Una respuesta sin el encabezado (socket-server viejo o caído) **no** cuenta como
+   cambio.
 
 ---
 
@@ -1646,3 +1700,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `pago:alerta` · cuánto y quién (pedido del panel) | Solo `eventId`, `id_mesa`, referencias, `motivo` y `emitidoEn`: el panel no podía mostrar cuánto ni quién | Agrega `comensal` (alias de la intención o `null`), `monto_centavos` (lo cobrado, según la API o el evento) y `monto_esperado_centavos` (de la intención o `null`). Sin datos de tarjeta ni del pagador; sigue yendo solo a `room:admin` (§8.5) | Panel: mostrarlos si quiere; los campos nuevos no rompen nada |
 | `mesa:presencia` · al conectar el panel | El panel recibía la presencia solo cuando cambiaba algo: al conectar o recargar no sabía quién estaba sentado | **500 ms** después de que un socket de personal entra a `room:admin`, recibe solo él un `mesa:presencia` por cada mesa con algo, incluidas las mesas sin ningún socket (índice `sd:mesas:con-estado`, 24 h). Si se desconecta antes, no se envía. Mismo evento y payload (§5.2) | Nadie: el panel ya lo guarda por `id_mesa`. Es el respaldo de `mesa:presencia:solicitar` |
 | `mesa:presencia:solicitar` (nuevo) | — | El personal pide la presencia de todas las mesas con algo y la recibe en el ack `{ ok, mesas }`, sin depender de listeners. Comensal, tablet y cocina → `NO_AUTORIZADO`; 1 por socket cada 2 s (`RATE_LIMIT`) (§4) | Panel (recomendado): pedirla en cada `connect`, después de registrar los listeners (ejemplo en §4) |
+| `GET /internal/salud` · `X-Instancia-Id` (nuevos, T5) | Si el socket-server se reiniciaba con el backend en marcha, nadie volvía a emitir la carta y las mesas se quedaban con la disponibilidad vieja | Cada arranque tiene un `instanciaId` (UUID, no se guarda) que va en el encabezado `X-Instancia-Id` de toda respuesta de `/internal/*` (también 4xx y 5xx), y `GET /internal/salud` (con `x-internal-key`) da `{ instanciaId, arrancadoEn, redis }` (§6.5) | Backend (Daniel): guardar el último `instanciaId` y, si cambia, volver a emitir la carta; el primero al arrancar solo se guarda. Comparar el id, no la hora |
