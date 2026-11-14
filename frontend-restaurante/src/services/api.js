@@ -639,6 +639,19 @@ export const transaccionesApi = {
   },
 }
 
+// Excedentes del pago en línea (T4, §8.7; backend #273). Solo admin y cajero.
+export const excedentesApi = {
+  /** Los pendientes de devolver, del más viejo al más nuevo: GET /api/excedentes-pago-en-linea?estado=pendiente */
+  async pendientes() {
+    return apiFetch('/excedentes-pago-en-linea?estado=pendiente')
+  },
+
+  /** «Devuelto en efectivo»: PATCH /api/excedentes-pago-en-linea/:id/devuelto (409 ya_devuelto si otro cajero ya lo marcó). */
+  async marcarDevuelto(id) {
+    return apiFetch(`/excedentes-pago-en-linea/${Number(id)}/devuelto`, { method: 'PATCH' })
+  },
+}
+
 // Submódulo de Menú y Catálogo
 export const menuApi = {
   /**

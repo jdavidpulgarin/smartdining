@@ -34,6 +34,17 @@ function normalizarAlias(valor) {
   return { alias, clave };
 }
 
+/**
+ * Clave para CRUZAR un alias con otro (la cuenta del backend, `pagaron`, la
+ * presencia): la misma de `normalizarAlias`, así « ana », «Ana» y «Ána» son la
+ * misma persona. Un texto que no es un alias válido («General», vacío, de
+ * más de 40 caracteres…) devuelve null y no coincide con nadie.
+ */
+function claveAlias(valor) {
+  const n = normalizarAlias(valor);
+  return n.error ? null : n.clave;
+}
+
 module.exports = {
-  normalizarAlias, MIN_ALIAS, MAX_ALIAS, CLAVE_RESERVADA,
+  normalizarAlias, claveAlias, MIN_ALIAS, MAX_ALIAS, CLAVE_RESERVADA,
 };

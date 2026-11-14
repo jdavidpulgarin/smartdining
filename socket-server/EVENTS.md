@@ -750,7 +750,8 @@ En los dos casos:
 - `comensales`: alias distintos, ordenados. Dos pestañas de "Ana" cuentan como una persona.
 - `total`: personas en la mesa = alias distintos (cada JWT de comensal trae el suyo).
 - `pagaron`: alias que ya pagaron algo **en esta sesión de mesa**, en cualquier modo, estén
-  sentados o no; ordenados. Se borra al liberarse la mesa. Un cobro de caja sin `comensal`
+  sentados o no; ordenados. **Uno por persona**, por la clave del alias (`claveAlias`): si la
+  Caja anota «ana» y el pago en línea «Ana», sale una sola vez, con el primero que se anotó. Se borra al liberarse la mesa. Un cobro de caja sin `comensal`
   no aparece (no se sabe de quién es). Un pago que deja el saldo en 0 **sí** aparece: la mesa
   sigue ocupada mientras quede un pedido sin entregar ([§5.1](#51-mesaliberada)), y el grupo
   ve quién pagó el último saldo.
@@ -1346,9 +1347,12 @@ servidor con la cuenta del backend.
 Reglas de los modos:
 
 - **total**: el saldo completo de la mesa.
-- **propio**: el saldo de ese alias según el backend (nunca más que el saldo de la mesa).
-  Cuando el último paga su parte, la cuenta queda en 0; si alguien prefiere invitar o
-  completar lo que falta, usa `total`.
+- **propio**: el saldo de ese alias según el backend (nunca más que el saldo de la mesa). El
+  `comensal` de `por_comensal` se cruza con el alias del JWT por la **clave** del alias
+  (`claveAlias`, la misma regla que el backend: sin tildes, minúsculas, sin espacios ni `. _ ' -`),
+  no por el texto exacto: « ana » y «Ana» son la misma persona. Si la cuenta trae a la misma
+  persona en dos filas, sus saldos se suman. Cuando el último paga su parte, la cuenta queda
+  en 0; si alguien prefiere invitar o completar lo que falta, usa `total`.
 - **Una sola intención pendiente por comensal**, reutilizada **solo si sigue valiendo**. En
   cada petición el servidor consulta la cuenta y recalcula el monto:
   - mismo `modo` **y** mismo monto recalculado, y `expira_en` a más de 5 min → `200` con la
@@ -1408,7 +1412,9 @@ x-internal-key: <INTERNAL_API_KEY>
 - Montos en **centavos enteros** (`total` del pedido × 100), calculados en SQL.
 - `total_centavos`: suma de los pedidos no cancelados de la sesión actual de la mesa.
 - `saldo_centavos`: `total_centavos` menos las transacciones `completada`.
-- `por_comensal`: por alias (el `apodo`/`comensal` de cada ítem), menos lo que ya pagó.
+- `por_comensal`: por alias (el `apodo`/`comensal` de cada ítem), menos lo que ya pagó. El
+  socket-server lo compara por la clave del alias, así que el texto puede venir como lo guardó
+  el backend (con otros espacios, mayúsculas o tildes).
 - `404` si la mesa no existe. El socket-server trata cualquier otra forma como error (`502`).
 
 ### 8.3. Webhook: `POST /pagos/webhook` (capas 4, 5 y 6)
@@ -1801,4 +1807,5 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `mesa:presencia` · periodo de gracia (T1) | Un comensal salía de la presencia en cuanto se le caía el socket (celular en segundo plano) y entraba otra vez al volver | Con un corte de red sigue contando `PRESENCIA_GRACIA_MS` (60 s) en `comensales`, `total`, la rotación del QR y «igual». Si vuelve antes, no se emite nada; si no, sale al terminar. Salir a propósito, la expulsión y liberar la mesa no tienen gracia; liberar cancela las pendientes (§5.2) | Nadie: mismo evento y payload. Panel y PWA: un comensal puede seguir en `comensales` hasta 60 s después de cerrar la app |
 | `GET /internal/pagos-en-curso` (nueva, T4) | El backend podía cancelar un plato mientras alguien lo pagaba en línea (el widget de Wompi abierto) y el cobro salía por el monto viejo | Nueva ruta de solo lectura: `{ mesa, enCurso, pagos }` con las intenciones vigentes (propio de ese comensal, o total/igual de cualquiera); validación estricta, sin referencias de Wompi. Liberar la mesa borra sus pagos en curso (no los registros que usa el webhook) (§6.6) | Backend (Daniel): consultarla antes de cancelar (timeout 1500 ms); `enCurso` → `409 pago_en_curso`; sin respuesta, error o 5xx → `409 pago_en_curso` motivo `sin_verificar` (con un 4xx, además, error en el log) |
 | Pagos en línea · contrato del excedente (T4) | Un pago aprobado que superaba el saldo se rechazaba con `409` (intento fallido, la intención quedaba en `pendiente` y se podía pagar dos veces); un 5xx también la dejaba en `pendiente`, y un webhook de un grupo anterior se repartía en el grupo nuevo | El registro manda `intencion_creada_en`; el backend nunca rechaza un aprobado y responde `aplicado_centavos`/`excedente_centavos`/`motivo_excedente`. La intención termina en `pagada` o `en_revision` (cobrable en el reintento); `409 PAGO_EN_REVISION` para no pagar dos veces; nuevo `pago:excedente` (solo `room:admin`); `payment:confirmed` con `aplicado`/`excedente`, y solo al panel con `otra_visita`; `pago:alerta` `backend_no_disponible` (§8.7) | Backend (Daniel): script 44 y el registro (§8.4, §8.7). Caja (Jarrinson): escuchar `pago:excedente` y cargar los pendientes. PWA (Juan): mostrar el `409 PAGO_EN_REVISION` |
+| Alias contra la cuenta · por clave | El socket-server buscaba al comensal en `por_comensal` por el texto exacto: «Ana» ≠ « ana », y «lo mío» daba `409 SIN_SALDO`. `pagaron` podía tener a la misma persona dos veces («Ana» y «ana») | Todo cruce de alias con la cuenta o con `pagaron` usa la clave de `normalizarAlias` (`claveAlias`). En «lo mío», las filas de la misma persona se suman. `pagaron` se guarda por clave (Redis: campo = clave, `HSETNX`; lo anotado antes por texto se deduplica al leer) (§5.2, §8.1, §8.2) | Nadie: mismo contrato. El backend puede seguir mandando el alias como lo guardó |
 | `POST /pagos/intencion` · sin modo `igual` (T2) | Tres modos: `total`, `igual` (saldo ÷ personas que aún no pagaron) y `propio` | Dos modos: `propio` («pagar lo mío») y `total` («pagar toda la cuenta»). `modo: "igual"` → `400 PAYLOAD_INVALIDO` con un mensaje que lo explica, sin consultar la cuenta ni gastar el límite. `mesa:presencia.pagaron` sigue igual (§8.1) | PWA (Juan, en el mismo bloque de merges): quitar «Dividir» y no mandar `igual`. Una PWA vieja que lo mande recibe el `400` con el mensaje |

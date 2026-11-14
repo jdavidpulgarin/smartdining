@@ -20,6 +20,7 @@ import { useTables } from '../hooks'
 import {
   solicitarTokenPantalla,
   rotarTokenQrMesa,
+  notificarQrRotado,
   decodificarTokenQr,
 } from '../services/qrService'
 import {
@@ -28,14 +29,15 @@ import {
   obtenerHostPorDefecto,
   resolverDiningUrl,
 } from '../utils/qrUrl'
-import { errorDeRotacion } from '../utils/qrRotacion'
+import { errorDeRotacion, tabletSinQr, tokenDeUrl, accionTabletAlReconectar } from '../utils/qrRotacion'
+import { mesasApi } from '../services/api'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
 
 export function PantallaMesa() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { tables, pedidosActivos } = useTables()
+  const { tables, pedidosActivos, cargarMesas } = useTables()
 
   const numMesa = Number(id) || 1
   const tableData = tables?.find((t) => t.id === numMesa || t.number === numMesa)
@@ -54,6 +56,18 @@ export function PantallaMesa() {
   if (tableData?.qr_url !== prevTableQrUrl) {
     setPrevTableQrUrl(tableData?.qr_url)
     setQrUrl(tableData?.qr_url || '')
+  }
+
+  // Mesa liberada: el QR que tenía la tablet quedó revocado. Hasta que llegue
+  // uno nuevo se muestra «Mesa disponible» (utils/qrRotacion.js, tabletSinQr).
+  const [sinQr, setSinQr] = useState(() =>
+    tabletSinQr(false, { tipo: 'mesa', estado: tableData?.estado, token_qr: tableData?.token_qr })
+  )
+  const claveMesa = `${tableData?.estado}|${tableData?.token_qr}`
+  const [prevClaveMesa, setPrevClaveMesa] = useState(claveMesa)
+  if (claveMesa !== prevClaveMesa) {
+    setPrevClaveMesa(claveMesa)
+    setSinQr((actual) => tabletSinQr(actual, { tipo: 'mesa', estado: tableData?.estado, token_qr: tableData?.token_qr }))
   }
 
   const [justRotated, setJustRotated] = useState(false)
@@ -132,6 +146,7 @@ export function PantallaMesa() {
         setTokenQr(res.token)
         if (res?.url) setQrUrl(res.url)
       }
+      setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: res?.token || tokenDeUrl(res?.url) }))
       setJustRotated(true)
       setTimeout(() => setJustRotated(false), 2500)
     } catch (err) {
@@ -169,10 +184,46 @@ export function PantallaMesa() {
         reconnectionAttempts: 20,
       })
 
+      let yaConecto = false
       socket.on('connect', () => {
         if (isCancelled) return
         setSocketStatus('conectado')
+        // Reconexión: lo que pasó sin red no se reenvía (#239). Se mira el
+        // estado real de la mesa (utils/qrRotacion.js, accionTabletAlReconectar).
+        if (yaConecto) revisarAlReconectar()
+        yaConecto = true
       })
+
+      async function revisarAlReconectar() {
+        let mesa
+        try {
+          const data = await mesasApi.listar()
+          mesa = (data?.mesas || []).find((m) => Number(m.id_mesa) === numMesa || Number(m.numero) === numMesa)
+        } catch {
+          return // sin respuesta: se queda lo que hay; el próximo evento lo corrige
+        }
+        if (isCancelled) return
+        cargarMesas?.()
+        const accion = accionTabletAlReconectar(mesa?.estado)
+        if (accion === 'sin_qr') {
+          setSinQr((actual) => tabletSinQr(actual, { tipo: 'mesa:liberada' }))
+        } else if (accion === 'pedir_qr') {
+          try {
+            const res = await notificarQrRotado(numMesa)
+            if (isCancelled) return
+            const token = res?.token || tokenDeUrl(res?.url)
+            if (token) {
+              setTokenQr(token)
+              if (res?.url) setQrUrl(res.url)
+            }
+            setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: token }))
+          } catch (err) {
+            if (isCancelled) return
+            // Con gente en la mesa (409) el QR no pudo rotar: se queda el que hay.
+            if (!errorDeRotacion(err).conComensales) setErrorPantalla(errorDeRotacion(err).texto)
+          }
+        }
+      }
 
       socket.on('disconnect', () => {
         if (isCancelled) return
@@ -191,16 +242,17 @@ export function PantallaMesa() {
         if (data?.token_qr) {
           setTokenQr(data.token_qr)
           if (data?.url) setQrUrl(data.url)
+          setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: data.token_qr }))
           setJustRotated(true)
           setTimeout(() => setJustRotated(false), 3000)
         }
       })
 
       // También escuchar mesa liberada
+      // Al liberar, el QR queda revocado: «Mesa disponible» hasta el siguiente.
       socket.on('mesa:liberada', () => {
         if (isCancelled) return
-        setJustRotated(true)
-        setTimeout(() => setJustRotated(false), 2000)
+        setSinQr((actual) => tabletSinQr(actual, { tipo: 'mesa:liberada' }))
       })
     }
 
@@ -212,7 +264,7 @@ export function PantallaMesa() {
         socket.disconnect()
       }
     }
-  }, [numMesa])
+  }, [numMesa, cargarMesas])
 
   // Manejo de pantalla completa
   const toggleFullscreen = () => {
@@ -390,13 +442,25 @@ export function PantallaMesa() {
           )}
 
           <p className="sd-pantalla-subtitle">
-            Escanea el código QR con la cámara de tu teléfono para ver la carta, ordenar y compartir comanda
+            {sinQr
+              ? 'Mesa disponible · pide a tu mesero que la abra'
+              : 'Escanea el código QR con la cámara de tu teléfono para ver la carta, ordenar y compartir comanda'}
           </p>
         </div>
 
         {/* QR sobre blanco en el centro */}
         <div className="sd-pantalla-qr-card">
-          {tokenQr ? (
+          {sinQr ? (
+            <div
+              role="status"
+              data-testid="tablet-mesa-disponible"
+              className="sd-pantalla-qr-white-frame"
+              style={{ width: 260, height: 260, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, textAlign: 'center', color: '#0a0f1d' }}
+            >
+              <strong style={{ fontSize: 26, lineHeight: 1.2 }}>Mesa disponible</strong>
+              <span style={{ fontSize: 16, lineHeight: 1.4 }}>Pide a tu mesero que la abra</span>
+            </div>
+          ) : tokenQr ? (
             <div className="sd-pantalla-qr-white-frame">
               <QRCodeSVG
                 value={diningUrl}
@@ -414,13 +478,13 @@ export function PantallaMesa() {
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: '100%' }}>
-            {tokenQr && (
+            {!sinQr && tokenQr && (
               <div className="sd-pantalla-sid-meta">
                 <span>Sesión activa · sid: {sid}</span>
               </div>
             )}
 
-            {qrApuntaALocalhost && (
+            {qrApuntaALocalhost && !sinQr && tokenQr && (
               <div
                 className="sd-localhost-warning"
                 style={{

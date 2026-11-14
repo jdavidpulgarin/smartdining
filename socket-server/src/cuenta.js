@@ -6,6 +6,8 @@
  * Todo en centavos enteros (COP × 100), sin decimales en ningún paso.
  */
 
+const { claveAlias } = require('./alias');
+
 // «igual» (Dividir) se quitó en T2: quedan «pagar lo mío» (propio) y «pagar
 // toda la cuenta» (total). pagos.js responde 400 si llega (EVENTS.md §8.1).
 // `calcularMonto` solo recibe modos ya validados.
@@ -50,8 +52,15 @@ function calcularMonto({ modo, cuenta, comensal }) {
   if (modo === 'total') return { montoCentavos: saldo };
 
   // propio: lo que el backend atribuye a este comensal, sin pasar del saldo.
-  const propio = cuenta.por_comensal.find((p) => p.comensal === comensal);
-  const monto = Math.min(propio ? propio.saldo_centavos : 0, saldo);
+  // El comensal de la cuenta (el texto que guardó el backend en cada línea) se
+  // compara por la CLAVE del alias, no por el texto exacto: « ana » y «Ana» son
+  // la misma persona. Si el backend trae a la misma persona en dos filas (dos
+  // formas de escribirla), sus saldos se suman.
+  const mia = claveAlias(comensal);
+  const propio = mia === null ? 0 : cuenta.por_comensal
+    .filter((p) => claveAlias(p.comensal) === mia)
+    .reduce((s, p) => s + p.saldo_centavos, 0);
+  const monto = Math.min(propio, saldo);
   return monto > 0 ? { montoCentavos: monto } : { error: 'SIN_SALDO' };
 }
 
