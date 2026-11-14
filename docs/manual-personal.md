@@ -192,6 +192,8 @@ pedido, el pedido entero se cancela; la mesa sigue ocupada.
 No se puede cancelar:
 
 - un plato ya servido, ni nada de un pedido entregado o pagado;
+- el plato de un comensal que **ya pagó** en esta visita. El panel dice «Ese
+  comensal ya pagó: reembolsa antes de cancelar su plato»;
 - si lo ya pagado queda por encima del total nuevo. En ese caso hay que
   devolver el dinero antes.
 
@@ -241,6 +243,9 @@ cobro no se cobra dos veces.
 
 Si el monto ya no coincide (alguien pagó mientras tanto), el panel te avisa con
 el saldo real y recarga las cuentas.
+
+A una persona no se le puede cobrar más que lo suyo: la Caja no deja cobrar de
+más. Lo de los demás se cobra a cada uno o con **TODA LA MESA**.
 
 ### 4.3 Cobro con tarjeta y voucher
 
@@ -303,6 +308,10 @@ inventario. Vuelve solo cuando registras una entrada de ese insumo (ver 5.6).
 Llena nombre, categoría, precio, tiempo estimado, descripción y, si quieres,
 calorías y la **URL DE IMAGEN**.
 
+- La URL de imagen debe empezar por **https://**, o ser la ruta
+  `/imagenes/<código>.webp` de una imagen ya subida. Una dirección **http://**
+  no se acepta: el panel dice «La imagen debe ser una dirección https:// o una
+  imagen subida».
 - Si no pones imagen, el plato queda **sin foto**. En la tarjeta se ve una foto
   genérica, pero no se guarda como suya.
 - **HABILITAR COMO PERSONALIZABLE ("ARMA TU PLATO")** hace que el cliente arme
@@ -441,7 +450,17 @@ Guarda con **GUARDAR CAMBIOS**.
 
 - **Ventas**, **pedidos**, **ticket promedio** y **tiempo de preparación**.
 - **Platos** e **ingredientes más pedidos**.
-- **Métodos de pago**, **horas pico** y la **eficiencia de la cocina**.
+- **Ventas por día**: una barra por cada día del periodo, en hora de Colombia;
+  los días sin ventas quedan en cero. Al pasar el puntero sobre una barra se ven
+  el total y los pedidos de ese día.
+- **Métodos de pago** (cada método con su color), **horas pico** y la
+  **eficiencia de la cocina**.
+
+Las cuentas cuadran entre sí: las **ventas** son la suma de los **métodos de
+pago**. En **HOY**, debajo de los métodos, el panel dice si esa suma **cuadra
+con «Recaudado hoy»** de la Caja. Si no cuadra, muestra la diferencia; puede
+ser un cobro de hace menos de un minuto, porque el reporte se guarda 60
+segundos.
 
 **IMPRIMIR INFORME** lo imprime.
 
