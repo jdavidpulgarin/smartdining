@@ -287,6 +287,18 @@ export function aplicarFaltantesMenu(menu, faltantes = []) {
   let actual = menu;
   for (const f of faltantes) {
     if (!f || typeof f !== 'object') continue;
+    // Con disponible > 0 NO debe marcarlo agotado (solo con 0 o sin dato / null)
+    const dispNum = Number(f.disponible);
+    const tieneDisponiblePositivo =
+      f.disponible !== undefined &&
+      f.disponible !== null &&
+      f.disponible !== '' &&
+      Number.isInteger(dispNum) &&
+      dispNum > 0;
+    if (tieneDisponiblePositivo) {
+      continue;
+    }
+
     if (f.tipo === 'plato' && f.id != null) {
       actual = aplicarDisponibilidadPlato(actual, f.id, false);
     } else if (f.tipo === 'ingrediente') {
@@ -335,6 +347,19 @@ export function marcarFaltantesEnCache(faltantes = []) {
   for (const f of faltantes) {
     if (!f || typeof f !== 'object') continue;
     if (f.tipo !== 'plato' && f.tipo !== 'ingrediente') continue;
+
+    // Con disponible > 0 NO debe marcarlo agotado (solo con 0 o sin dato / null)
+    const dispNum = Number(f.disponible);
+    const tieneDisponiblePositivo =
+      f.disponible !== undefined &&
+      f.disponible !== null &&
+      f.disponible !== '' &&
+      Number.isInteger(dispNum) &&
+      dispNum > 0;
+    if (tieneDisponiblePositivo) {
+      continue;
+    }
+
     const idRaw = f.id;
     const idNum =
       idRaw !== null && idRaw !== undefined && idRaw !== ''

@@ -451,6 +451,39 @@ describe('menuService', () => {
       expect(tieneMarcasAgotadoLocal()).toBe(false);
     });
 
+    it('con disponible 1 no marca agotado el plato; con 0 sí', async () => {
+      const menuServidor = {
+        categorias: [
+          {
+            id_categoria: 1,
+            categoria: 'Bebidas',
+            platos: [
+              { id_plato: 1008, nombre: 'Limonada de Coco', precio: 12000, disponible: true },
+              { id_plato: 1009, nombre: 'Jugo de Fresa', precio: 10000, disponible: true },
+            ],
+          },
+        ],
+      };
+
+      vi.spyOn(apiModule, 'pedirJson').mockResolvedValue(menuServidor);
+      recargarMenu();
+      await obtenerPlatos();
+
+      marcarFaltantesEnCache([
+        { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 1 },
+        { tipo: 'plato', id: 1009, nombre: 'Jugo de Fresa', disponible: 0 },
+      ]);
+
+      const platos = await obtenerPlatos();
+      const limonada = platos.find((p) => (p.id ?? p.id_plato) === 1008);
+      const fresa = platos.find((p) => (p.id ?? p.id_plato) === 1009);
+
+      // Con disponible 1 NO debe marcarse agotado
+      expect(limonada.disponible).toBe(true);
+      // Con disponible 0 SÍ debe marcarse agotado
+      expect(fresa.disponible).toBe(false);
+    });
+
     it('limpia la marca local de 409 cuando llega plato:disponibilidad con disponible: true', async () => {
       const menuServidor = {
         categorias: [

@@ -7,6 +7,7 @@ import {
   marcasAgotadoTrasRecarga,
   actualizarMarcasPorDisponibilidad,
   estadoStockPlato,
+  aplicarAjusteFaltantes,
   MENSAJE_CRUCE_PEDIDO,
   MENSAJE_ERROR_PEDIDO_GENERICO,
   MENSAJE_SIN_STOCK_GENERICO,
@@ -659,6 +660,124 @@ describe('sinStock - logica pura de faltantes de inventario (J-17)', () => {
       expect(estadoStockPlato({ id_plato: 1, pocas_unidades: true })).toBe('pocas');
       expect(estadoStockPlato({ id_plato: 1 })).toBe('normal');
       expect(estadoStockPlato(null)).toBe('agotado');
+    });
+  });
+
+  describe('aplicarAjusteFaltantes', () => {
+    it('con disponible 1, ajustar a 1 quita la línea afectada y el faltante', () => {
+      const estado = {
+        tipo: 'sin_stock',
+        hayFaltantes: true,
+        puedeEnviar: false,
+        faltantes: [
+          { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 1 },
+        ],
+        itemsAfectados: [
+          {
+            idLinea: 'l-1',
+            id_linea: 'l-1',
+            id_plato: 1008,
+            nombre: 'Limonada de Coco',
+            disponible: 1,
+            puedeAjustar: true,
+            faltantes: [
+              { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 1 },
+            ],
+          },
+        ],
+        lineasAfectadas: [
+          { idLinea: 'l-1', id_linea: 'l-1', disponible: 1, puedeAjustar: true },
+        ],
+        idsLineasAfectadas: ['l-1'],
+        texto: 'Se acabó: Limonada de Coco. Quítalo para enviar el resto.',
+        mensaje: 'Se acabó: Limonada de Coco. Quítalo para enviar el resto.',
+      };
+
+      const resultado = aplicarAjusteFaltantes(estado, {
+        idLinea: 'l-1',
+        nuevaCantidad: 1,
+      });
+
+      expect(resultado.idsLineasAfectadas).toEqual([]);
+      expect(resultado.itemsAfectados).toEqual([]);
+      expect(resultado.lineasAfectadas).toEqual([]);
+      expect(resultado.faltantes).toEqual([]);
+      expect(resultado.hayFaltantes).toBe(false);
+      expect(resultado.puedeEnviar).toBe(true);
+      expect(resultado.texto).toBe('');
+      expect(resultado.mensaje).toBe('');
+    });
+
+    it('con 2 faltantes, ajustar uno mantiene el otro', () => {
+      const estado = {
+        tipo: 'sin_stock',
+        hayFaltantes: true,
+        puedeEnviar: false,
+        faltantes: [
+          { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 1 },
+          { tipo: 'plato', id: 1009, nombre: 'Empanada', disponible: 0 },
+        ],
+        itemsAfectados: [
+          {
+            idLinea: 'l-1',
+            id_linea: 'l-1',
+            id_plato: 1008,
+            nombre: 'Limonada de Coco',
+            disponible: 1,
+            puedeAjustar: true,
+            faltantes: [
+              { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco', disponible: 1 },
+            ],
+          },
+          {
+            idLinea: 'l-2',
+            id_linea: 'l-2',
+            id_plato: 1009,
+            nombre: 'Empanada',
+            disponible: 0,
+            puedeAjustar: false,
+            faltantes: [
+              { tipo: 'plato', id: 1009, nombre: 'Empanada', disponible: 0 },
+            ],
+          },
+        ],
+        lineasAfectadas: [
+          { idLinea: 'l-1', id_linea: 'l-1', disponible: 1, puedeAjustar: true },
+          { idLinea: 'l-2', id_linea: 'l-2', disponible: 0, puedeAjustar: false },
+        ],
+        idsLineasAfectadas: ['l-1', 'l-2'],
+        texto: 'Se acabó: Limonada de Coco, Empanada. Quítalos para enviar el resto.',
+        mensaje: 'Se acabó: Limonada de Coco, Empanada. Quítalos para enviar el resto.',
+      };
+
+      const resultado = aplicarAjusteFaltantes(estado, {
+        idLinea: 'l-1',
+        nuevaCantidad: 1,
+      });
+
+      expect(resultado.idsLineasAfectadas).toEqual(['l-2']);
+      expect(resultado.itemsAfectados).toHaveLength(1);
+      expect(resultado.itemsAfectados[0].idLinea).toBe('l-2');
+      expect(resultado.faltantes).toEqual([
+        { tipo: 'plato', id: 1009, nombre: 'Empanada', disponible: 0 },
+      ]);
+      expect(resultado.hayFaltantes).toBe(true);
+      expect(resultado.puedeEnviar).toBe(false);
+      expect(resultado.texto).toContain('Empanada');
+      expect(resultado.texto).not.toContain('Limonada');
+    });
+
+    it('si la nueva cantidad supera el stock disponible no libera la linea', () => {
+      const estado = {
+        idsLineasAfectadas: ['l-1'],
+        itemsAfectados: [{ idLinea: 'l-1', disponible: 1 }],
+        lineasAfectadas: [{ idLinea: 'l-1', disponible: 1 }],
+        faltantes: [{ tipo: 'plato', id: 1008, disponible: 1 }],
+      };
+
+      const res = aplicarAjusteFaltantes(estado, { idLinea: 'l-1', nuevaCantidad: 2 });
+      expect(res.idsLineasAfectadas).toEqual(['l-1']);
+      expect(res.itemsAfectados).toHaveLength(1);
     });
   });
 });

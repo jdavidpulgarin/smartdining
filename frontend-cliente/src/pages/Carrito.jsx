@@ -21,9 +21,10 @@ import {
   resumenFaltantes,
   accionErrorPedido,
   actualizarMarcasPorDisponibilidad,
+  aplicarAjusteFaltantes,
 } from '../utils/sinStock';
 
-function Carrito() {
+function Carrito({ faltantesIniciales = [], errorPedidoInicial = null } = {}) {
   const navigate = useNavigate();
   const {
     modo,
@@ -44,8 +45,12 @@ function Carrito() {
   const [modalConfirmarAbierto, setModalConfirmarAbierto] = useState(false);
   const [notasGenerales, setNotasGenerales] = useState('');
   const [enviando, setEnviando] = useState(false);
-  const [errorPedido, setErrorPedido] = useState(null);
-  const [faltantesStock, setFaltantesStock] = useState([]);
+  const [errorPedido, setErrorPedido] = useState(errorPedidoInicial);
+  const [faltantesStock, setFaltantesStock] = useState(
+    faltantesIniciales.length > 0
+      ? faltantesIniciales
+      : (errorPedidoInicial?.faltantes || [])
+  );
   const [bloqueoSegundos, setBloqueoSegundos] = useState(0);
 
   const miNombre = obtenerApodo();
@@ -54,7 +59,9 @@ function Carrito() {
     () => resumenFaltantes(misLineas, faltantesStock),
     [misLineas, faltantesStock]
   );
-  const tieneFaltantesPendientes = resumenStock.idsLineasAfectadas.length > 0;
+  const tieneFaltantesPendientes =
+    (errorPedido?.tipo === 'sin_stock' && (errorPedido?.idsLineasAfectadas?.length ?? 0) > 0) ||
+    resumenStock.idsLineasAfectadas.length > 0;
   const errorMarcabaLineas =
     (errorPedido?.idsLineasAfectadas?.length ?? 0) > 0;
   const errorPedidoVisible =
@@ -170,24 +177,23 @@ function Carrito() {
   const manejarAjustarCantidad = async (idLinea, cantidadDisponible) => {
     await actualizarCantidad(idLinea, cantidadDisponible);
     // Limpiar la marca de esa línea y dejar enviar el pedido
-    setFaltantesStock((prev) => {
-      const lineaObj = misLineas.find(
-        (l) => String(l.id_linea) === String(idLinea)
-      );
-      if (!lineaObj) return prev;
-      const faltantesDeEstaLinea = faltantesDelItem(lineaObj, prev);
-      return prev.filter((f) => !faltantesDeEstaLinea.includes(f));
-    });
     setErrorPedido((prev) => {
-      if (!prev || prev.tipo !== 'sin_stock') return prev;
-      const idsRestantes = (prev.idsLineasAfectadas || []).filter(
-        (id) => String(id) !== String(idLinea)
-      );
-      if (idsRestantes.length === 0) return null;
-      return {
-        ...prev,
-        idsLineasAfectadas: idsRestantes,
-      };
+      const base = prev || (resumenStock?.hayFaltantes ? resumenStock : null);
+      if (!base) return null;
+      const nuevo = aplicarAjusteFaltantes(base, {
+        idLinea,
+        nuevaCantidad: cantidadDisponible,
+        lineas: misLineas,
+      });
+      return nuevo?.hayFaltantes ? nuevo : null;
+    });
+    setFaltantesStock((prev) => {
+      const nuevo = aplicarAjusteFaltantes(prev, {
+        idLinea,
+        nuevaCantidad: cantidadDisponible,
+        lineas: misLineas,
+      });
+      return Array.isArray(nuevo) ? nuevo : (nuevo?.faltantes ?? []);
     });
   };
 
@@ -508,7 +514,11 @@ function Carrito() {
         {(!validacionEnvio.ok || tieneFaltantesPendientes) &&
           misLineas.length > 0 && (
             <p className="text-xs text-primario-texto text-center font-medium">
-              {resumenStock.texto || validacionEnvio.motivo}
+              {(errorPedido?.tipo === 'sin_stock'
+                ? errorPedido.texto || errorPedido.mensaje
+                : null) ||
+                resumenStock.texto ||
+                validacionEnvio.motivo}
             </p>
           )}
 
