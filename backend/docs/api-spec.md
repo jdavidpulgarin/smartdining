@@ -3760,6 +3760,18 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
   invalidado) en la misma transacción.
 - **La propina no entra**: este cobro solo cubre el saldo de los pedidos. Un monto mayor que el
   saldo es `409 excede`, no una propina.
+- **«Pagar lo mío» no supera lo que debe esa persona.** Con `comensal` (que no sea «General»),
+  el monto tampoco puede superar el **saldo propio** de ese comensal en la visita: sus líneas
+  **vivas** menos sus pagos `completada`, en los pedidos de la mesa desde `sesion_iniciada_en`
+  (los mismos que la cuenta), comparando el alias por su clave («Ana», « ana » y «Aná» son la
+  misma persona). Si lo supera, **409 `excede_saldo_comensal`** con su saldo; con saldo propio
+  0 (por ejemplo, el mesero le canceló el plato), el mismo 409. Antes solo se miraba el saldo de
+  la mesa, y el pago de Ana terminaba cubriendo lo de los demás. Las líneas canceladas no
+  cuentan aunque `obtener_cuenta_mesa` todavía las sume (hasta el script 41). Se calcula con la
+  mesa y los pedidos ya bloqueados, el mismo orden que la cancelación del personal, así que
+  cancelar el plato de Ana y cobrarle «lo suyo» a la vez nunca dejan los dos. Un cobro **sin
+  comensal** o a **«General»** sigue igual. El pago en línea (`/transacciones/internal`) no
+  cambia.
 
 **Respuestas:**
 
@@ -3790,6 +3802,7 @@ una referencia de Wompi ya registrada sigue siendo duplicado.)
 | **404** | `{ "error": "Mesa no encontrada", "motivo": "mesa_inexistente" }` | La mesa no existe |
 | **409** | `{ "error", "motivo": "sin_cuenta" }` | La mesa no tiene ningún pedido con saldo |
 | **409** | `{ "error", "motivo": "excede", "saldo": 68000 }` | El monto supera el saldo de la mesa (`saldo` en pesos). No se escribe nada |
+| **409** | `{ "error": "El pago excede lo que debe ese comensal", "motivo": "excede_saldo_comensal", "saldo": 12000 }` | Cobro con `comensal`: el monto supera el **saldo propio** de esa persona (`saldo` en pesos; 0 si no debe nada). No se escribe nada |
 | **409** | `{ "error", "motivo": "autor_inexistente" }` | El usuario del token ya no existe ([El autor que ya no existe](#el-autor-que-ya-no-existe-409-autor_inexistente)). La transacción se deshace entera |
 
 `POST /transacciones/internal` (Wompi) responde los mismos casos **sin** `motivo` y en
