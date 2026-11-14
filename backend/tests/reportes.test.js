@@ -22,8 +22,10 @@ const RUTA = '/api/reportes';
 
 const jwtAdmin = () => `Bearer ${tokenStaff(1, 'admin')}`;
 
-/** Fragmentos que identifican cada una de las nueve consultas del service. */
+/** Fragmentos que identifican cada una de las diez consultas del service. */
 const SQL = {
+  // T6: va ANTES que `ventas` al buscar, porque también lee v_ventas_diarias.
+  ventasPorDia: 'dias AS',
   ventas: 'v_ventas_diarias',
   tiempoCocina: 'tiempo_cocina_promedio',
   tiemposKds: 'ORDER BY k.fecha DESC',
@@ -66,6 +68,12 @@ function dbConDatos(parche = {}) {
     ],
     ocupacion: [{ ocupacion_mesas: 60 }],
     alertas: [{ kds_alerts_count: 3 }],
+    // pg entrega float8 como number, pero int8/numeric como string: se prueba
+    // que el servicio los pasa a number igual.
+    ventasPorDia: [
+      { fecha: '2026-11-12', total: '0', pedidos: 0 },
+      { fecha: '2026-11-13', total: 1250000, pedidos: '42' },
+    ],
     ...parche,
   };
 
@@ -74,6 +82,7 @@ function dbConDatos(parche = {}) {
     // se busca primero el fragmento mas especifico.
     if (sql.includes(SQL.tiempoCocina)) return { rows: filas.tiempoCocina };
     if (sql.includes(SQL.tiemposKds)) return { rows: filas.tiemposKds };
+    if (sql.includes(SQL.ventasPorDia)) return { rows: filas.ventasPorDia };
     if (sql.includes(SQL.ventas)) return { rows: filas.ventas };
     if (sql.includes(SQL.topPlatos)) return { rows: filas.topPlatos };
     if (sql.includes(SQL.topIngredientes)) return { rows: filas.topIngredientes };
@@ -97,6 +106,7 @@ function dbVacia() {
     horas: [],
     ocupacion: [{ ocupacion_mesas: 0 }],
     alertas: [{ kds_alerts_count: 0 }],
+    ventasPorDia: [{ fecha: '2026-11-13', total: 0, pedidos: 0 }],
   });
 }
 
@@ -241,6 +251,7 @@ const CLAVES = [
   'horasPico',
   'topIngredientes',
   'tiemposKds',
+  'ventasPorDia', // T6
 ];
 
 test('la respuesta trae exactamente las claves del contrato', async () => {
@@ -541,9 +552,9 @@ test('todas las consultas usan la zona de Bogota explicita', async () => {
     await pedir('?rango=hoy');
 
     const consultas = db.todas('limites AS');
-    assert.strictEqual(consultas.length, 9, 'las nueve consultas del reporte');
+    assert.strictEqual(consultas.length, 10, 'las diez consultas del reporte');
     for (const c of consultas) {
-      assert.match(c.sql, /AT TIME ZONE \$2/);
+      assert.match(c.sql, /AT TIME ZONE \$2::text/);
       assert.strictEqual(c.params[1], 'America/Bogota');
     }
   } finally {
@@ -578,6 +589,57 @@ test('las consultas de ranking excluyen los pedidos cancelados', async () => {
     for (const fragmento of ['vendidos AS', 'detalles_ingredientes di', 'por_hora AS']) {
       assert.match(db.buscar(fragmento).sql, /p\.estado <> 'cancelado'/, fragmento);
     }
+  } finally {
+    db.restaurar();
+  }
+});
+
+// --- T6 ----------------------------------------------------------------------
+
+test('t6: platos mas pedidos sin las lineas canceladas (estado_item)', async () => {
+  const db = instalarFakeDb(dbConDatos());
+  try {
+    await pedir('?rango=hoy');
+    assert.match(db.buscar('vendidos AS').sql, /dp\.estado_item <> 'cancelado'/);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('t6: ventasPorDia sale con numeros (fecha, total, pedidos) y en el orden de la base', async () => {
+  const db = instalarFakeDb(dbConDatos());
+  try {
+    const { body } = await pedir('?rango=semana');
+    assert.deepStrictEqual(body.ventasPorDia, [
+      { fecha: '2026-11-12', total: 0, pedidos: 0 },
+      { fecha: '2026-11-13', total: 1250000, pedidos: 42 },
+    ]);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('t6: ventasPorDia es un dia por cada dia del rango, de la MISMA vista que totalVentas, sin depender de la sesion', async () => {
+  const db = instalarFakeDb(dbConDatos());
+  try {
+    await pedir('?rango=mes');
+    const q = db.buscar('dias AS');
+    assert.ok(q, 'la consulta de ventas por dia');
+    assert.match(q.sql, /generate_series\(0, \$1::int\)/, 'desde + 0..N, enteros (no fechas por la sesion)');
+    assert.match(q.sql, /LEFT JOIN v_ventas_diarias v ON v\.fecha = d\.fecha/, 'misma fuente que totalVentas; dias sin ventas en 0');
+    assert.match(q.sql, /to_char\(d\.fecha, 'YYYY-MM-DD'\)/, 'fecha sin depender de DateStyle');
+    assert.match(q.sql, /ORDER BY d\.fecha/);
+    assert.deepStrictEqual(q.params, [reportesService.DIAS_POR_RANGO.mes, 'America/Bogota']);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('t6: ninguna fecha sale con ::text (depende de DateStyle de la sesion)', async () => {
+  const db = instalarFakeDb(dbConDatos());
+  try {
+    await pedir('?rango=mes');
+    for (const c of db.todas('limites AS')) assert.doesNotMatch(c.sql, /fecha::text/);
   } finally {
     db.restaurar();
   }

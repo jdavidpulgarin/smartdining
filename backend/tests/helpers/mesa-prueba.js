@@ -32,6 +32,9 @@ const RANGOS = Object.freeze({
   // D-20a: el pedido de mesa con el que domicilios-sql comprueba que la mesa
   // sigue marcando 'entregado' como siempre.
   'domicilios-sql': { desde: 9800, hasta: 9899 },
+  // T6: la mesa de los pedidos del reporte por día. 9900-10099 quedan para las
+  // suites de T5 (#236), que todavía no están en develop.
+  'reportes-dia-sql': { desde: 10100, hasta: 10199 },
 });
 
 const PG_UNIQUE = '23505';
