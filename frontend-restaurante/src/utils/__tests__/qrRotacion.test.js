@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { tokenDeUrl, puedeRotarSolo, errorDeRotacion, tabletSinQr, RENOVAR_CADA_SEGUNDOS, ROTACION_SOCKET_SEGUNDOS } from '../qrRotacion'
+import { tokenDeUrl, puedeRotarSolo, errorDeRotacion, tabletSinQr, accionTabletAlReconectar, RENOVAR_CADA_SEGUNDOS, ROTACION_SOCKET_SEGUNDOS } from '../qrRotacion'
 
 describe('utils/qrRotacion', () => {
   it('tokenDeUrl: saca el token del url del comensal', () => {
@@ -100,5 +100,19 @@ describe('tabletSinQr: la tablet no muestra un QR revocado', () => {
   it('un evento desconocido no cambia nada', () => {
     expect(tabletSinQr(true, { tipo: 'otro' })).toBe(true)
     expect(tabletSinQr(false, null)).toBe(false)
+  })
+})
+
+describe('accionTabletAlReconectar: lo que se perdió sin red (#239 no reenvía eventos)', () => {
+  it('mesa disponible → «Mesa disponible» (se perdió mesa:liberada)', () => {
+    expect(accionTabletAlReconectar('disponible')).toBe('sin_qr')
+  })
+
+  it('mesa ocupada → pedir el QR vigente (con solo_si_vacia)', () => {
+    expect(accionTabletAlReconectar('ocupada')).toBe('pedir_qr')
+  })
+
+  it('otro estado o sin dato → no hace nada', () => {
+    for (const e of ['reservada', 'mantenimiento', undefined, null, '']) expect(accionTabletAlReconectar(e)).toBe('nada')
   })
 })

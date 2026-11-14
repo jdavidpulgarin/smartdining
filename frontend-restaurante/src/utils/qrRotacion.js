@@ -94,6 +94,29 @@ export function tabletSinQr(disponible, evento) {
 }
 
 /**
+ * Qué hace la tablet al RECONECTAR su socket (no en la primera conexión).
+ *
+ * Desde #239 el socket-server no reenvía los eventos perdidos: si la tablet
+ * estaba sin red cuando se liberó (o se liberó y se volvió a abrir) la mesa,
+ * no recibió mesa:liberada ni qr:actualizado y seguiría mostrando un QR
+ * revocado. Al volver, mira el estado real de la mesa (GET /api/mesas, que no
+ * trae token_qr):
+ *   - 'disponible' → 'sin_qr': «Mesa disponible»;
+ *   - 'ocupada'    → 'pedir_qr': pedir el QR vigente con solo_si_vacia. Con la
+ *     mesa vacía lo rota y trae el nuevo; con gente responde 409
+ *     mesa_con_comensales y el QR se queda (con gente no pudo rotar);
+ *   - otro estado o sin dato → 'nada'.
+ *
+ * @param {string|undefined} estado estado de la mesa en el backend
+ * @returns {'sin_qr'|'pedir_qr'|'nada'}
+ */
+export function accionTabletAlReconectar(estado) {
+  if (estado === 'disponible') return 'sin_qr'
+  if (estado === 'ocupada') return 'pedir_qr'
+  return 'nada'
+}
+
+/**
  * Error de rotar-qr → { texto, reintentar }. Nunca se inventa un QR: si falla,
  * se dice por qué y, si es pasajero, se reintenta.
  */
