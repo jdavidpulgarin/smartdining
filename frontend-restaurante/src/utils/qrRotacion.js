@@ -63,6 +63,60 @@ export function puedeRotarSolo({ ocupada, tieneComensales, token }) {
 }
 
 /**
+ * ¿La tablet de la mesa (PantallaMesa) muestra «Mesa disponible» en vez del QR?
+ *
+ * Al liberar la mesa el backend deja token_qr en NULL y el socket-server
+ * revoca el QR: quien escanee el que sigue en la tablet ve un error. Desde
+ * mesa:liberada (o si la mesa ya está disponible) la tablet no muestra el QR,
+ * hasta que llegue uno nuevo (qr:actualizado, la rotación manual o la mesa
+ * ocupada con token desde el panel).
+ *
+ * @param {boolean} disponible lo que muestra ahora
+ * @param {{ tipo: 'mesa'|'mesa:liberada'|'qr', estado?: string, token_qr?: string }} evento
+ *   - 'mesa': los datos de la mesa en el panel (estado y token_qr);
+ *   - 'mesa:liberada': el evento del socket;
+ *   - 'qr': un QR nuevo (qr:actualizado o la rotación manual), con su token_qr.
+ * @returns {boolean} si muestra «Mesa disponible»
+ */
+export function tabletSinQr(disponible, evento) {
+  switch (evento?.tipo) {
+    case 'mesa:liberada':
+      return true
+    case 'qr':
+      return evento.token_qr ? false : disponible
+    case 'mesa':
+      if (evento.estado === 'disponible') return true
+      if (evento.estado === 'ocupada' && evento.token_qr) return false
+      return disponible
+    default:
+      return disponible
+  }
+}
+
+/**
+ * Qué hace la tablet al RECONECTAR su socket (no en la primera conexión).
+ *
+ * Desde #239 el socket-server no reenvía los eventos perdidos: si la tablet
+ * estaba sin red cuando se liberó (o se liberó y se volvió a abrir) la mesa,
+ * no recibió mesa:liberada ni qr:actualizado y seguiría mostrando un QR
+ * revocado. Al volver, mira el estado real de la mesa (GET /api/mesas, que no
+ * trae token_qr):
+ *   - 'disponible' → 'sin_qr': «Mesa disponible»;
+ *   - 'ocupada'    → 'pedir_qr': pedir el QR vigente con solo_si_vacia. Con la
+ *     mesa vacía lo rota y trae el nuevo; con gente responde 409
+ *     mesa_con_comensales y el QR se queda (con gente no pudo rotar);
+ *   - otro estado o sin dato → 'nada'.
+ *
+ * @param {string|undefined} estado estado de la mesa en el backend
+ * @returns {'sin_qr'|'pedir_qr'|'nada'}
+ */
+export function accionTabletAlReconectar(estado) {
+  if (estado === 'disponible') return 'sin_qr'
+  if (estado === 'ocupada') return 'pedir_qr'
+  return 'nada'
+}
+
+/**
  * Error de rotar-qr → { texto, reintentar }. Nunca se inventa un QR: si falla,
  * se dice por qué y, si es pasajero, se reintenta.
  */
