@@ -132,6 +132,8 @@ services:
       WOMPI_EVENTS_SECRET: ${WOMPI_EVENTS_SECRET:-}
       WOMPI_API_URL: ${WOMPI_API_URL:-}
       LOG_NIVEL: ${LOG_NIVEL:-info}
+      # Gracia de presencia de un comensal que pierde la red (EVENTS.md §5.2).
+      PRESENCIA_GRACIA_MS: ${PRESENCIA_GRACIA_MS:-60000}
       # Solo de nginx (IP fija abajo) se cree X-Real-IP; de cualquier otro
       # contenedor de la red web, no (socket-server/src/ip-cliente.js).
       TRUST_PROXY: 172.31.250.10

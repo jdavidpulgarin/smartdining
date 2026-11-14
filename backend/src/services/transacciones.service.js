@@ -4,6 +4,10 @@ const mesasService = require('./mesas.service');
 // sola constante para que el corte de caja y los reportes digan el mismo "hoy".
 const { ZONA } = require('./reportes.service');
 const { traducirAutorInexistente } = require('./autor-inexistente');
+// La clave con que la cuenta agrupa a un comensal (T4): la misma normalización
+// del alias que usa cancelarItem para saber si el dueño de una línea ya pagó.
+const { claveDeCuenta } = require('./pedidos.service');
+const { CLAVE_RESERVADA } = require('./alias-comensal');
 
 // Tabla transacciones (docs/modelo-er.md): id_transaccion, id_pedido,
 // metodo_pago, monto, estado_transaccion, referencia_externa, creado_en.
@@ -242,6 +246,60 @@ async function saldoDeLaMesaEnCentavos(ejecutor, idMesa) {
 }
 
 /**
+ * Consumo y pagos de cada comensal en la VISITA actual, en centavos, tal como
+ * los guarda la base (el texto del alias, sin normalizar: eso va en JS).
+ *
+ * Los mismos pedidos que la cuenta (obtener_cuenta_mesa y SQL_PEDIDOS_CON_SALDO:
+ * de la mesa, no cancelados, desde sesion_iniciada_en) y los mismos pagos (los
+ * 'completada' de esos pedidos), pero SIN las líneas canceladas: hasta que
+ * entre el script 41 (#235), obtener_cuenta_mesa todavía las suma, y con ellas
+ * a Ana le seguiría "debiendo" el plato que el mesero le canceló.
+ */
+const SQL_CUENTA_POR_COMENSAL = `
+  WITH visita AS (
+    SELECT p.id_pedido
+      FROM pedidos p
+      JOIN mesas m ON m.id_mesa = p.id_mesa
+     WHERE p.id_mesa = $1::int
+       AND p.estado <> 'cancelado'
+       AND (m.sesion_iniciada_en IS NULL OR p.creado_en >= m.sesion_iniciada_en)
+  )
+  SELECT 'consumo'::text AS tipo, dp.comensal, ROUND(SUM(dp.subtotal) * 100)::bigint AS centavos
+    FROM detalles_pedido dp
+    JOIN visita v ON v.id_pedido = dp.id_pedido
+   WHERE dp.estado_item <> 'cancelado'
+   GROUP BY dp.comensal
+  UNION ALL
+  SELECT 'pagado'::text, t.comensal, ROUND(SUM(t.monto) * 100)::bigint
+    FROM transacciones t
+    JOIN visita v ON v.id_pedido = t.id_pedido
+   WHERE t.estado_transaccion = 'completada'
+   GROUP BY t.comensal`;
+
+/**
+ * Saldo PROPIO de un comensal en la visita, en centavos: sus líneas vivas menos
+ * sus pagos completados, nunca negativo. El alias se compara por la clave de
+ * la cuenta (claveDeCuenta, T4): «Ana», « ana » y «Aná» son la misma persona.
+ */
+async function saldoPropioEnCentavos(ejecutor, idMesa, comensal) {
+  const clave = claveDeCuenta(comensal);
+  const { rows } = await ejecutor.query(SQL_CUENTA_POR_COMENSAL, [idMesa]);
+  let consumo = 0;
+  let pagado = 0;
+  for (const f of rows) {
+    if (claveDeCuenta(f.comensal) !== clave) continue;
+    if (f.tipo === 'consumo') consumo += Number(f.centavos);
+    else pagado += Number(f.centavos);
+  }
+  return Math.max(0, consumo - pagado);
+}
+
+/** ¿Es un cobro A NOMBRE de un comensal? Sin alias o «General» es de la mesa. */
+function esCobroDeComensal(comensal) {
+  return typeof comensal === 'string' && comensal.trim() !== '' && claveDeCuenta(comensal) !== CLAVE_RESERVADA;
+}
+
+/**
  * Referencia de cada fila del reparto.
  *
  * `transacciones.referencia_externa` tiene un índice único
@@ -379,6 +437,9 @@ async function repartirPagoDeMesa(client, {
   // null). El MISMO en todas las filas del cobro. Un reintento con la misma
   // referencia sale antes (duplicado) y no lo toca: se queda el del primero.
   voucher = null,
+  // Solo la CAJA lo enciende (cobrarMesaEnCaja): un cobro a nombre de un
+  // comensal no puede superar su saldo propio. Ver el paso de abajo.
+  limitarAlSaldoDelComensal = false,
 }) {
   // La fila de la mesa se bloquea de entrada: dos webhooks de Wompi para la
   // misma mesa (o un webhook y un cobro en caja) se serializan, así no se
@@ -424,6 +485,20 @@ async function repartirPagoDeMesa(client, {
     .filter((p) => p.saldo_centavos > 0);
 
   if (pedidos.length === 0) return { sinCuenta: true };
+
+  // «Pagar lo mío» en la caja: el monto no supera el saldo PROPIO de ese
+  // comensal (sus líneas vivas menos sus pagos). Sin esto, si el mesero le
+  // cancelaba el plato a Ana y después la caja le cobraba "lo suyo", solo se
+  // miraba el saldo de la MESA y la plata de Ana cubría lo de los demás. Con
+  // saldo propio 0, cualquier monto lo supera. Va con la mesa y los pedidos ya
+  // bloqueados (el mismo orden que cancelarItem del personal: mesa primero),
+  // así que una cancelación y este cobro se ponen en fila y el segundo decide
+  // con lo que el primero confirmó. Un cobro sin comensal o a «General» sigue
+  // como siempre (solo el saldo de la mesa).
+  if (limitarAlSaldoDelComensal && esCobroDeComensal(comensal)) {
+    const saldoPropio = await saldoPropioEnCentavos(client, id_mesa, comensal);
+    if (monto_centavos > saldoPropio) return { excedeComensal: true, saldo_centavos: saldoPropio };
+  }
 
   const saldoMesa = pedidos.reduce((s, p) => s + p.saldo_centavos, 0);
   if (monto_centavos > saldoMesa) return { excede: true, saldo_centavos: saldoMesa };
@@ -595,6 +670,7 @@ async function cobrarMesaEnCaja({
     id_usuario,
     observacion: OBSERVACION_PAGO_EN_CAJA,
     voucher,
+    limitarAlSaldoDelComensal: true,
   });
   // Un id_cobro ya usado en OTRA mesa no es un reintento de este cobro: si se
   // contestara "duplicado", la caja creería que cobró sin haber cobrado nada.
@@ -773,4 +849,5 @@ module.exports = {
   referenciaDelPago,
   ESTADO_COBRADO,
   ESTADO_ENTREGADO,
+  saldoPropioEnCentavos,
 };
