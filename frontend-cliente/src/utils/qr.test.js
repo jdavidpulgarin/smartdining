@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { leerMesaDelQr, validarUrlQrMesa, clasificarErrorCamara } from './qr';
+import {
+  leerMesaDelQr,
+  validarUrlQrMesa,
+  clasificarErrorCamara,
+  diagnosticarCamara,
+} from './qr';
 
 function crearTokenPrueba(payload, version = 'v1', firma = 'firma_mock') {
   const json = JSON.stringify(payload);
@@ -211,5 +216,104 @@ describe('clasificarErrorCamara', () => {
       tipo: 'error_desconocido',
       mensaje: 'No pudimos iniciar la cámara. Intenta de nuevo.',
     });
+  });
+});
+
+describe('diagnosticarCamara', () => {
+  it('permissions "denied" → permiso_denegado (y no llama a getUserMedia)', async () => {
+    let llamadoGetUserMedia = false;
+    const permissions = {
+      query: async ({ name }) => {
+        expect(name).toBe('camera');
+        return { state: 'denied' };
+      },
+    };
+    const mediaDevices = {
+      getUserMedia: async () => {
+        llamadoGetUserMedia = true;
+        return null;
+      },
+    };
+
+    const resultado = await diagnosticarCamara({ permissions, mediaDevices });
+    expect(resultado).toBe('permiso_denegado');
+    expect(llamadoGetUserMedia).toBe(false);
+  });
+
+  it('permissions que lanza + getUserMedia con NotAllowedError → permiso_denegado', async () => {
+    const permissions = {
+      query: async () => {
+        throw new Error('Not supported');
+      },
+    };
+    const mediaDevices = {
+      getUserMedia: async () => {
+        const err = new Error('Permission denied');
+        err.name = 'NotAllowedError';
+        throw err;
+      },
+    };
+
+    const resultado = await diagnosticarCamara({ permissions, mediaDevices });
+    expect(resultado).toBe('permiso_denegado');
+  });
+
+  it('sin Permissions API + NotFoundError → sin_camara', async () => {
+    const mediaDevices = {
+      getUserMedia: async () => {
+        const err = new Error('No device');
+        err.name = 'NotFoundError';
+        throw err;
+      },
+    };
+
+    const resultado = await diagnosticarCamara({ permissions: null, mediaDevices });
+    expect(resultado).toBe('sin_camara');
+  });
+
+  it('getUserMedia ok → "ok" y se detuvieron las pistas', async () => {
+    let pistaDetenida = false;
+    const mockTrack = {
+      stop: () => {
+        pistaDetenida = true;
+      },
+    };
+    const mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [mockTrack],
+      }),
+    };
+
+    const resultado = await diagnosticarCamara({ permissions: null, mediaDevices });
+    expect(resultado).toBe('ok');
+    expect(pistaDetenida).toBe(true);
+  });
+
+  it('sin mediaDevices → sin_camara', async () => {
+    const resultado = await diagnosticarCamara({ permissions: null, mediaDevices: null });
+    expect(resultado).toBe('sin_camara');
+  });
+
+  it('caso Roberto: la librería lanza "Camera not found." pero el permiso está negado → se muestra el mensaje de Ajustes (permiso_denegado), no el genérico', async () => {
+    // Cuando el permiso está denegado, diagnosticarCamara detecta 'permiso_denegado'
+    const permissions = {
+      query: async () => ({ state: 'denied' }),
+    };
+    const mediaDevices = {
+      getUserMedia: async () => {
+        const err = new Error('Camera not found.');
+        err.name = 'NotAllowedError';
+        throw err;
+      },
+    };
+
+    const diag = await diagnosticarCamara({ permissions, mediaDevices });
+    expect(diag).toBe('permiso_denegado');
+
+    // Al clasificar el resultado del diagnóstico, se obtiene el mensaje de ajustes y no el genérico
+    const errObj = clasificarErrorCamara(diag);
+    expect(errObj.tipo).toBe('permiso_denegado');
+    expect(errObj.mensaje.toLowerCase()).toContain('ajustes');
+    expect(errObj.mensaje).not.toBe('No pudimos iniciar la cámara. Intenta de nuevo.');
   });
 });

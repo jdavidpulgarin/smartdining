@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import QrScanner from 'qr-scanner';
-import { validarUrlQrMesa, clasificarErrorCamara } from '../utils/qr';
+import { validarUrlQrMesa, clasificarErrorCamara, diagnosticarCamara } from '../utils/qr';
 import { esDispositivoIos } from '../services/push';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
@@ -29,6 +29,13 @@ function EscanearQr() {
 
     const iniciarEscaner = async () => {
       try {
+        const diagnostico = await diagnosticarCamara();
+        if (!activo) return;
+        if (diagnostico !== 'ok') {
+          setErrorCamara(clasificarErrorCamara(diagnostico));
+          return;
+        }
+
         const tieneCamara = await QrScanner.hasCamera();
         if (!activo) return;
         if (!tieneCamara) {
@@ -82,7 +89,12 @@ function EscanearQr() {
         await scanner.start();
       } catch (err) {
         if (!activo) return;
-        setErrorCamara(clasificarErrorCamara(err));
+        const mensajeStr = String(err?.message || err || '');
+        if (mensajeStr.includes('Camera not found')) {
+          setErrorCamara(clasificarErrorCamara('error_desconocido'));
+        } else {
+          setErrorCamara(clasificarErrorCamara(err));
+        }
       }
     };
 

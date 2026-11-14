@@ -183,8 +183,68 @@ export function clasificarErrorCamara(error) {
   };
 }
 
+/**
+ * Diagnostica el estado de acceso a la cámara antes de inicializar librerías de escaneo.
+ * Resuelve el problema donde librerías como qr-scanner capturan y ocultan errores reales
+ * (como NotAllowedError de getUserMedia) transformándolos en "Camera not found.".
+ *
+ * @param {object} [opciones]
+ * @param {Permissions} [opciones.permissions] - API navigator.permissions (inyectable para tests)
+ * @param {MediaDevices} [opciones.mediaDevices] - API navigator.mediaDevices (inyectable para tests)
+ * @returns {Promise<'ok' | 'permiso_denegado' | 'sin_camara' | 'error_desconocido'>}
+ */
+export async function diagnosticarCamara({
+  permissions = typeof navigator !== 'undefined' ? navigator.permissions : undefined,
+  mediaDevices = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined,
+} = {}) {
+  // a) Si existe navigator.permissions.query, consulta { name: 'camera' }
+  if (permissions && typeof permissions.query === 'function') {
+    try {
+      const status = await permissions.query({ name: 'camera' });
+      if (status && status.state === 'denied') {
+        return 'permiso_denegado';
+      }
+    } catch {
+      // Safari viejo o navegadores que no soportan name: 'camera' lanzan excepción; continuar con getUserMedia
+    }
+  }
+
+  // c) Si no existe mediaDevices.getUserMedia → 'sin_camara'
+  if (!mediaDevices || typeof mediaDevices.getUserMedia !== 'function') {
+    return 'sin_camara';
+  }
+
+  // b) Si no hay Permissions API o no fue concluyente: prueba getUserMedia
+  try {
+    const stream = await mediaDevices.getUserMedia({ video: true });
+    if (stream) {
+      try {
+        const tracks = typeof stream.getTracks === 'function' ? stream.getTracks() : [];
+        for (const t of tracks) {
+          if (typeof t.stop === 'function') {
+            t.stop();
+          }
+        }
+      } catch {
+        // Ignorar errores al detener pistas
+      }
+    }
+    return 'ok';
+  } catch (error) {
+    const nombre = error?.name || error?.codigo || '';
+    if (nombre === 'NotAllowedError' || nombre === 'SecurityError' || nombre === 'PermissionDeniedError') {
+      return 'permiso_denegado';
+    }
+    if (nombre === 'NotFoundError' || nombre === 'OverconstrainedError' || nombre === 'DevicesNotFoundError') {
+      return 'sin_camara';
+    }
+    return 'error_desconocido';
+  }
+}
+
 export default {
   leerMesaDelQr,
   validarUrlQrMesa,
   clasificarErrorCamara,
+  diagnosticarCamara,
 };
