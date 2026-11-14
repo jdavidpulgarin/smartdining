@@ -6,7 +6,7 @@ import {
   FileCode,
 } from 'lucide-react'
 import { reportesApi, transaccionesApi } from '../services/api'
-import { resumirMetodos, cuadreConCaja } from '../utils/reportes'
+import { resumirMetodos, cuadreConCaja, barrasVentasPorDia } from '../utils/reportes'
 
 const copFormatter = new Intl.NumberFormat('es-CO', {
   style: 'currency',
@@ -123,6 +123,7 @@ export function Reportes() {
   }, [timeRange])
 
   const metodos = useMemo(() => resumirMetodos(reportData?.metodosPago), [reportData])
+  const ventasDia = useMemo(() => barrasVentasPorDia(reportData?.ventasPorDia), [reportData])
   const cuadre = cuadreConCaja(metodos.total, recaudadoHoy)
 
   const currentData = reportData
@@ -311,8 +312,36 @@ export function Reportes() {
               {/* Panel 1: VENTAS POR DÍA (Ancho grande) */}
               <div className="sd-reportes-panel">
                 <h3 className="sd-reportes-panel-title">VENTAS POR DÍA</h3>
-                {/* GET /reportes no trae ventas por día: no se dibujan barras inventadas. */}
-                <SinDatos>El reporte todavía no incluye las ventas por día.</SinDatos>
+                {/* ventasPorDia de GET /reportes (T6): un día por cada día del rango,
+                    en hora de Bogotá, con los días sin ventas en 0. Sin el campo
+                    (backend viejo) no se dibujan barras inventadas. */}
+                {ventasDia === null ? (
+                  <SinDatos>El reporte todavía no incluye las ventas por día.</SinDatos>
+                ) : ventasDia.every((d) => d.total === 0) ? (
+                  <SinDatos>Sin ventas en este periodo.</SinDatos>
+                ) : (
+                  <div
+                    role="img"
+                    aria-label="Ventas por día"
+                    data-testid="ventas-por-dia"
+                    style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 180, padding: '8px 0' }}
+                  >
+                    {ventasDia.map((d) => (
+                      <div
+                        key={d.fecha}
+                        data-testid={`dia-${d.fecha}`}
+                        title={`${d.titulo}: ${formatoCOP(d.total)} · ${d.pedidos} pedidos`}
+                        style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', gap: 4 }}
+                      >
+                        <span style={{ fontSize: 10, color: 'var(--sd-text-muted)', whiteSpace: 'nowrap' }}>
+                          {d.total > 0 ? formatoCOP(d.total) : ''}
+                        </span>
+                        <div style={{ width: '100%', maxWidth: 48, height: `${d.altura}%`, background: 'var(--sd-red)', borderRadius: '4px 4px 0 0' }} />
+                        <span style={{ fontSize: 11, color: 'var(--sd-text-muted)', whiteSpace: 'nowrap' }}>{d.etiqueta}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Panel 2: INGREDIENTES MÁS PEDIDOS */}

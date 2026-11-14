@@ -198,3 +198,47 @@ describe('T6: métodos de pago con su monto, su color y el cuadre con la Caja', 
     await waitFor(() => expect(screen.queryByTestId('cuadre-caja')).toBeNull())
   })
 })
+
+describe('T6: «Ventas por día» con ventasPorDia de GET /reportes', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.setItem('smartdining_token', 'test-token')
+  })
+
+  const conDias = (ventasPorDia) => vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+    if (/\/transacciones\?desde=hoy$/.test(url)) return json({ total: 0, cantidad: 0, transacciones: [] })
+    return json({ ...reporte(342000), ventasPorDia })
+  })
+
+  it('pinta una barra por día, cada una con su fecha, su monto y la altura relativa', async () => {
+    conDias([
+      { fecha: '2026-11-11', total: 0, pedidos: 0 },
+      { fecha: '2026-11-12', total: 114000, pedidos: 4 },
+      { fecha: '2026-11-13', total: 228000, pedidos: 9 },
+    ])
+    montar()
+    const grafica = await screen.findByTestId('ventas-por-dia')
+    expect(grafica.children).toHaveLength(3)
+    const dia13 = screen.getByTestId('dia-2026-11-13')
+    expect(dia13).toHaveTextContent('$228.000')
+    expect(dia13).toHaveTextContent('13')
+    expect(dia13.getAttribute('title')).toMatch(/13 de noviembre: \$228\.000 · 9 pedidos/)
+    expect(screen.getByTestId('dia-2026-11-12').children[1].style.height).toBe('50%')
+    expect(screen.getByTestId('dia-2026-11-11').children[1].style.height).toBe('0%')
+    expect(screen.queryByText(/todavía no incluye las ventas por día/)).toBeNull()
+  })
+
+  it('sin el campo (backend anterior) sigue diciendo que el reporte no lo incluye', async () => {
+    conDias(undefined)
+    montar()
+    expect(await screen.findByText(/todavía no incluye las ventas por día/)).toBeInTheDocument()
+    expect(screen.queryByTestId('ventas-por-dia')).toBeNull()
+  })
+
+  it('con todos los días en 0 dice que no hubo ventas (no dibuja barras vacías)', async () => {
+    conDias([{ fecha: '2026-11-13', total: 0, pedidos: 0 }])
+    montar()
+    expect(await screen.findByText('Sin ventas en este periodo.')).toBeInTheDocument()
+    expect(screen.queryByTestId('ventas-por-dia')).toBeNull()
+  })
+})

@@ -47,3 +47,35 @@ export function cuadreConCaja(totalMetodos, recaudadoHoy) {
   const diferencia = (aCentavos(totalMetodos) - aCentavos(recaudadoHoy)) / 100
   return { estado: diferencia === 0 ? 'cuadra' : 'no_cuadra', diferencia }
 }
+
+/**
+ * Barras de «Ventas por día» (T6) desde `ventasPorDia` de GET /reportes:
+ * `[{ fecha: 'AAAA-MM-DD', total, pedidos }]`, un día por cada día del rango en
+ * hora de Bogotá y los días sin ventas en 0 (contrato confirmado por Daniel).
+ *
+ * La fecha se lee por sus partes y NO con `new Date('AAAA-MM-DD')`, que la toma
+ * como medianoche UTC y en Colombia la pinta como el día anterior.
+ *
+ * @returns {null | Array<{ fecha, total, pedidos, altura, etiqueta, titulo }>}
+ *          null si el backend todavía no manda el campo (no se inventan barras).
+ */
+export function barrasVentasPorDia(ventasPorDia) {
+  if (!Array.isArray(ventasPorDia)) return null
+  const filas = ventasPorDia
+    .filter((d) => typeof d?.fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.fecha))
+    .map((d) => ({ fecha: d.fecha, total: Number(d.total) || 0, pedidos: Number(d.pedidos) || 0 }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha))
+  const max = Math.max(0, ...filas.map((f) => f.total))
+  return filas.map((f) => {
+    const [y, m, d] = f.fecha.split('-').map(Number)
+    const dia = new Date(y, m - 1, d)
+    const etiqueta = dia.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric' })
+    return {
+      ...f,
+      // Porcentaje de la barra más alta; un día con ventas nunca baja de 2 % (que se vea).
+      altura: max > 0 ? (f.total > 0 ? Math.max(2, Math.round((f.total / max) * 100)) : 0) : 0,
+      etiqueta,
+      titulo: dia.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' }),
+    }
+  })
+}
