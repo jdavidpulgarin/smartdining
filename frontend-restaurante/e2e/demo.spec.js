@@ -373,7 +373,13 @@ test.describe('Guion de la demo (G-08): agotar la Hamburguesa y reponerla', () =
       const r = await api(beto.token, '/pedidos', { method: 'POST', body: { items: [{ id_plato: ids.plato, cantidad: 1 }] } })
       expect(r.status).toBe(409)
       expect(r.data?.motivo).toBe('sin_stock')
-      expect(r.data?.faltantes).toEqual([{ tipo: 'plato', id: ids.plato, nombre: PLATO }])
+      // T5 (#236): cada faltante puede traer además `disponible` (cuántas se
+      // pueden pedir). Con la carne en 0 es 0; un backend anterior no lo manda.
+      expect(r.data?.faltantes).toHaveLength(1)
+      expect(r.data.faltantes[0]).toMatchObject({ tipo: 'plato', id: ids.plato, nombre: PLATO })
+      expect([undefined, 0]).toContain(r.data.faltantes[0].disponible)
+      // Nada de cantidades de bodega: solo esos cuatro campos.
+      expect(Object.keys(r.data.faltantes[0]).every((k) => ['tipo', 'id', 'nombre', 'disponible'].includes(k))).toBe(true)
     })
 
     await test.step('9. En Inventario el admin ve la carne en 0 y registra una entrada de 10', async () => {      // Por el menú del panel, como en la demo (Menú sigue abierto en su pestaña).
