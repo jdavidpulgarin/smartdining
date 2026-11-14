@@ -3,6 +3,7 @@ const pedidosService = require('../services/pedidos.service');
 const mesasService = require('../services/mesas.service');
 const { esComensal } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
+const avisosMesa = require('../services/avisos-mesa');
 const aliasComensal = require('../services/alias-comensal');
 const aliasEnCuenta = require('../services/alias-en-cuenta');
 const { esErrorDeConcurrencia } = require('../middleware/errores.middleware');
@@ -532,6 +533,8 @@ async function actualizarEstado(req, res, next) {
         socketNotifier.motivoPorEstadoFinal(pedido.estado)
       );
       aliasComensal.olvidarMesa(pedido.id_mesa);
+      // T12: el panel ve la mesa libre (estado y sesión), no solo el fin de la sesión.
+      avisosMesa.encolarMesaActualizada(pedido.id_mesa, socketNotifier.MOTIVOS_MESA_ACTUALIZADA.liberada);
     }
 
     return res.json(pedido);

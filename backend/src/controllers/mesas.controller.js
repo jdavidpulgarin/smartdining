@@ -3,6 +3,9 @@ const { z } = require('zod');
 const mesasService = require('../services/mesas.service');
 const { ALGORITMO_JWT, ROL_COMENSAL } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
+// T12: mesa-actualizada al panel, después del COMMIT y sin esperarlo.
+const avisosMesa = require('../services/avisos-mesa');
+const { MOTIVOS_MESA_ACTUALIZADA: MOTIVO_MESA } = socketNotifier;
 const { extraerSid } = require('../services/qr.token');
 const aliasComensal = require('../services/alias-comensal');
 const aliasEnCuenta = require('../services/alias-en-cuenta');
@@ -153,6 +156,9 @@ async function abrir(req, res, next) {
       socketNotifier.notificarQrRotado(idMesa, r.token);
       // Sesión nueva: los alias del grupo anterior quedan libres.
       aliasComensal.olvidarMesa(idMesa);
+      // T12: el panel ve la mesa abierta. Una apertura reutilizada (la sesión
+      // ya estaba abierta) no cambia nada de la mesa: no se avisa.
+      avisosMesa.encolarMesaActualizada(idMesa, MOTIVO_MESA.abierta);
     }
 
     return res.status(201).json({
@@ -426,6 +432,8 @@ async function liberar(req, res, next) {
     // liberada en la base y no se revierte (el notifier no lanza).
     socketNotifier.notificarMesaLiberada(idMesa);
     aliasComensal.olvidarMesa(idMesa);
+    // T12: mesa-liberada dice que terminó la sesión; esto, el estado nuevo.
+    avisosMesa.encolarMesaActualizada(idMesa, MOTIVO_MESA.liberada);
 
     return res.json({
       id_mesa: r.mesa.id_mesa,
@@ -538,6 +546,7 @@ async function crear(req, res, next) {
 
   try {
     const mesa = await mesasService.crear(parsed.data);
+    avisosMesa.encolarMesaActualizada(mesa.id_mesa, MOTIVO_MESA.creada);
     return res.status(201).json(vistaMesaPersonal(mesa));
   } catch (err) {
     return next(err);
@@ -551,6 +560,7 @@ async function actualizarEstado(req, res, next) {
   try {
     const mesa = await mesasService.actualizarEstado(req.params.id, parsed.data.estado);
     if (!mesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+    avisosMesa.encolarMesaActualizada(mesa.id_mesa, MOTIVO_MESA.estado);
     return res.json(vistaMesaPersonal(mesa));
   } catch (err) {
     return next(err);
@@ -571,6 +581,8 @@ async function actualizarDatos(req, res, next) {
   try {
     const mesa = await mesasService.actualizarDatos(req.params.id, parsed.data);
     if (!mesa) return res.status(404).json({ error: 'Mesa no encontrada' });
+    // Incluye desactivar (activa: false): también son datos de la mesa.
+    avisosMesa.encolarMesaActualizada(mesa.id_mesa, MOTIVO_MESA.datos);
     return res.json(vistaMesaPersonal(mesa));
   } catch (err) {
     return next(err);
@@ -581,6 +593,8 @@ async function eliminar(req, res, next) {
   try {
     const eliminada = await mesasService.eliminar(req.params.id);
     if (!eliminada) return res.status(404).json({ error: 'Mesa no encontrada' });
+    // T12: la fila ya no existe; el aviso va solo con id_mesa (y activa: false).
+    socketNotifier.encadenarAvisos([() => avisosMesa.avisarMesaEliminada(eliminada.id_mesa)]);
     return res.status(204).send();
   } catch (err) {
     return next(err);

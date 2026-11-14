@@ -3444,7 +3444,37 @@ Contrato completo en [socket-server/EVENTS.md](../../socket-server/EVENTS.md).
 | **El comensal cancela su pedido** (D-12) | Solo `POST /internal/order-status` (→ `cancelado`, `origen: "comensal"`); ni `item-cancelado` por línea ni `mesa-liberada` |
 | Se abre una mesa con un token **nuevo** | `POST /internal/qr-rotado` → `qr:actualizado` a la tablet |
 | **La caja cobra** (efectivo, datáfono o abono parcial) | `POST /internal/payment-confirmed` → `payment:confirmed` |
-| Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada`, con `motivo` si la cerró un pago |
+| Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada`, con `motivo` si la cerró un pago; **y además** `mesa-actualizada` (`liberada`, ver abajo) |
+| **Cambia una mesa** (T12): se abre, cambia de estado, se crea, se editan sus datos, se libera o se borra | `POST /internal/mesa-actualizada` → `mesa:actualizada` a `room:admin` (ver abajo) |
+
+### `mesa-actualizada` al panel (T12)
+
+`POST /internal/mesa-actualizada` (`socket-server/EVENTS.md` §5.7) para que el panel vea la mesa
+en vivo, sin recargar. Va **después del COMMIT**, por la cadena de avisos: la respuesta HTTP no
+lo espera y un fallo del socket-server (caído, `NO_CONFIGURADO`, un 4xx) **no la rompe**. Se
+reintenta con el **mismo `eventId`** solo ante `500/502/503 ERROR_INTERNO`; un `eventId` nuevo
+por cada cambio.
+
+| Camino | `motivo` |
+|---|---|
+| `POST /mesas/:id/abrir` con una sesión **nueva** (una reapertura que reutiliza la sesión no cambia nada y no avisa) | `abierta` |
+| `PATCH /mesas/:id/estado` | `estado` |
+| `POST /mesas` | `creada` |
+| `PATCH /mesas/:id` (datos, **incluido desactivar**: `activa: false`) | `datos` |
+| `POST /mesas/:id/liberar` (a mano) y **toda liberación automática**: el cobro en caja (`POST /transacciones` y `POST /transacciones/mesa`), el pago en línea (`POST /transacciones/internal`) y un cambio de estado del pedido que deja la mesa sin pedidos abiertos (`PATCH /pedidos/:id/estado`, KDS) | `liberada` |
+| `DELETE /mesas/:id` | `eliminada` |
+
+**Campos**, los mismos que `GET /mesas` y con el **estado ya confirmado**: después del COMMIT el
+backend **vuelve a leer** la mesa por `id_mesa` y manda `{ eventId, id_mesa, numero, capacidad,
+estado, ubicacion, activa, sesion_abierta, motivo }`. Con `eliminada` la fila ya no existe:
+`{ eventId, id_mesa, activa: false, motivo: "eliminada" }`. **`token_qr` nunca viaja**: la
+relectura ni siquiera lo selecciona (solo `token_qr IS NOT NULL AS sesion_abierta`).
+
+**Coherencia.** El socket-server responde 400 a `liberada` con `sesion_abierta: true` y a
+`abierta` con `sesion_abierta: false`. Como el aviso lleva el estado releído, eso solo pasa si
+alguien cambió la mesa entre el COMMIT y la relectura (por ejemplo, la reabrieron): entonces el
+aviso va **sin `motivo`**, y el panel recibe igual el estado real. Si la relectura falla, no se
+avisa (log con el código). **La rotación del QR no se avisa** (la mesa no cambia).
 
 ### `origen` en `order-status` (pedido de Juan)
 

@@ -1,5 +1,6 @@
 const kdsService = require('../services/kds.service');
 const socketNotifier = require('../services/socket.notifier');
+const avisosMesa = require('../services/avisos-mesa');
 
 // Desde el KDS, el cocinero solo puede mover una comanda entre estos dos
 // estados (marcar "en preparación" o "listo"). Cancelar o cobrar se hace
@@ -52,6 +53,8 @@ async function cambiarEstado(req, res, next) {
         pedido.id_mesa,
         socketNotifier.motivoPorEstadoFinal(pedido.estado)
       );
+      // T12: igual que los demás caminos que liberan la mesa.
+      avisosMesa.encolarMesaActualizada(pedido.id_mesa, socketNotifier.MOTIVOS_MESA_ACTUALIZADA.liberada);
     }
 
     return res.json(pedido);
