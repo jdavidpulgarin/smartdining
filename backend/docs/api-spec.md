@@ -5652,6 +5652,7 @@ recibe **403** `prohibido`. **Todo** error responde `{ error, motivo }`
 |---|---|---|
 | `POST /api/v1/pedidos-domicilio` | ver abajo | **201** `{ pedido }` |
 | `GET /api/v1/pedidos-domicilio/mios` | — | **200** `{ pedidos }` |
+| `GET /api/v1/pedidos-domicilio/:id` | — | **200** `{ pedido }` (ajuste de Juan) |
 | `POST /api/v1/pedidos-domicilio/:id/cancelar` | ninguno | **200** `{ pedido }` |
 
 #### `POST /api/v1/pedidos-domicilio`
@@ -5660,6 +5661,7 @@ recibe **403** `prohibido`. **Todo** error responde `{ error, motivo }`
 {
   "canal": "domicilio",
   "id_direccion": 12,
+  "telefono_contacto": "3001234567",
   "notas_generales": "Sin cebolla",
   "items": [
     { "id_plato": 4, "cantidad": 2, "notas": "bien asado" },
@@ -5675,13 +5677,29 @@ recibe **403** `prohibido`. **Todo** error responde `{ error, motivo }`
 - **Domicilio:** la dirección tiene que ser **del cliente** (si no, **404** `no_encontrado`, sin
   distinguir de una que no existe). Su barrio se cotiza con **`cotizar_zona`** (la base decide la
   cobertura): sin zona activa, **422** `fuera_de_cobertura`.
-- **En una transacción**, con el orden de bloqueos de siempre
-  (`pedidos → pedidos_domicilio → detalles_pedido`):
-  1. el pedido: `canal`, `id_cliente`, **sin mesa** y en **`por_pagar`**;
-  2. con domicilio, su fila de `pedidos_domicilio`: la **copia** de la dirección (dirección,
-     barrio, referencia, coordenadas), el teléfono del cliente como contacto, la zona y el
-     `costo_envio` cotizado. El envío **entra en el total** (script 36);
-  3. las líneas, con la **misma validación** que `POST /pedidos`: el constructor, la
+- **`telefono_contacto`** (opcional, ajuste de Juan): las **mismas reglas** que el teléfono del
+  cliente (`^\+?[0-9]{7,15}$`; si no, **400** `telefono_invalido`). **Con domicilio** se usa ese
+  o, si no viene, el del perfil del cliente; **si no hay ninguno, 422 `telefono_requerido`** (el
+  repartidor tiene que poder llamar). **Para llevar** no se exige: se valida si llega, pero no
+  se guarda (un pedido para llevar no tiene ficha de entrega).
+- **Un solo pedido en `por_pagar` por cliente** (ajuste de Juan). Antes de crear, con la fila
+  del cliente bloqueada (`FOR UPDATE`): si ya tiene uno en `por_pagar` **sin vencer**, **409**
+  `{ error, motivo: "pedido_pendiente", pedido }` con **ese** pedido (la misma forma que
+  `/mios`), sin crear otro. Así también se cubre el **reintento de la app** cuando se pierde la
+  respuesta del primer `POST`: recibe el pedido que ya se creó, sin `eventId` ni cambios de base.
+  Uno **vencido** que el temporizador todavía no canceló **no cuenta**: se cancela en la misma
+  transacción (`cancelar_pedido_por_pagar`, que lo bloquea y devuelve el stock) y se crea el
+  nuevo. Dos `POST` a la vez del mismo cliente se ponen en fila en ese bloqueo: uno **201** y el
+  otro **409** `pedido_pendiente`.
+- **En una transacción**, con este **orden de bloqueos**
+  (`clientes → pedidos → pedidos_domicilio → detalles_pedido`; el cliente va primero porque es lo
+  que pone en fila dos pedidos del mismo cliente):
+  1. la fila del cliente (`FOR UPDATE`) y la guarda de arriba;
+  2. el pedido: `canal`, `id_cliente`, **sin mesa** y en **`por_pagar`**;
+  3. con domicilio, su fila de `pedidos_domicilio`: la **copia** de la dirección (dirección,
+     barrio, referencia, coordenadas), el teléfono de contacto, la zona y el `costo_envio`
+     cotizado. El envío **entra en el total** (script 36);
+  4. las líneas, con la **misma validación** que `POST /pedidos`: el constructor, la
      disponibilidad y el **stock**. Sin stock: **409** `sin_stock` con `faltantes` (y su
      `disponible`), igual que en la mesa. Nada queda a medias.
 - **15 minutos para pagar**: `configuracion_restaurante.minutos_pago_anticipado` (15 por
@@ -5704,8 +5722,11 @@ recibe **403** `prohibido`. **Todo** error responde `{ error, motivo }`
 | Status | `motivo` | Cuándo |
 |---|---|---|
 | **400** | `cuerpo_invalido` | Cuerpo inválido (también `id_direccion` con `para_llevar`, o sin él con `domicilio`) |
+| **400** | `telefono_invalido` | `telefono_contacto` no cumple la regla del teléfono |
 | **404** | `no_encontrado` | La dirección no existe o no es del cliente |
+| **409** | `pedido_pendiente` | Ya tiene un pedido en `por_pagar` sin vencer; trae `pedido` (ese) |
 | **422** | `fuera_de_cobertura` | El barrio de la dirección no está en ninguna zona activa |
+| **422** | `telefono_requerido` | A domicilio, sin `telefono_contacto` y sin teléfono en el perfil |
 | **409** | `sin_stock` | Falta stock (con `faltantes`), como en `POST /pedidos` |
 | **409** / **422** | los de `POST /pedidos` | Plato o ingrediente no disponible, constructor incompleto, etc. (mismos motivos) |
 
@@ -5714,6 +5735,13 @@ recibe **403** `prohibido`. **Todo** error responde `{ error, motivo }`
 Los pedidos para llevar y a domicilio **del cliente**, del más nuevo al más viejo (**50** como
 mucho). Cada uno con la forma de arriba: `vence_en` solo mientras está en `por_pagar` (si no,
 `null`) y `entrega` con el `estado_entrega` actual (sin el repartidor ni datos de otros).
+
+#### `GET /api/v1/pedidos-domicilio/:id` (ajuste de Juan)
+
+**Un** pedido del cliente, con la **misma forma** que cada elemento de `/mios`: para que la app
+consulte solo ese después de pagar (ver si ya pasó a `recibido`). **404** `no_encontrado` si no
+existe, **no es del cliente** o es de mesa (no se distingue), y también con un `:id` que no es
+un entero positivo.
 
 #### `POST /api/v1/pedidos-domicilio/:id/cancelar`
 
