@@ -129,3 +129,44 @@ test('ninguna línea de ejemplo conserva el token', () => {
   for (const c of casos) assert.ok(!peticion(c).includes(TOKEN.slice(3, 20)), c);
   assert.ok(!referer(`https://app.ejemplo.co/?token=${TOKEN}`).includes(TOKEN.slice(3, 20)));
 });
+
+// --- error_log: la ruta con el token del QR (seguimiento de #242) ---------------
+// Con un 502/504 nginx escribe en el error_log, con nivel [error], la petición y
+// el upstream completos, y error_log no admite log_format. Por eso, en la única
+// ruta que lleva el token del QR en la URL, el nivel sube a crit.
+
+/** El bloque `location ~ <regex> { … }` del server api. */
+function locationTokenQr() {
+  const api = PLANTILLA.slice(PLANTILLA.indexOf('server_name api.${DOMINIO};'));
+  const finServer = api.indexOf('\n}\n');
+  const bloqueApi = api.slice(0, finServer);
+  const m = /location ~ (\S+) \{\n([\s\S]*?)\n {4}\}/.exec(bloqueApi.slice(bloqueApi.indexOf('/mesas/qr/') - 40));
+  return { bloqueApi, regex: m && m[1], cuerpo: m && m[2] };
+}
+
+test('api.: la ruta del QR tiene su location con error_log crit y la misma configuración de proxy', () => {
+  const { bloqueApi, regex, cuerpo } = locationTokenQr();
+  assert.ok(regex, 'falta la location de /api/mesas/qr/<token>/sesion');
+  assert.match(cuerpo, /^\s*error_log \/var\/log\/nginx\/error\.log crit;$/m);
+  // Lo mismo que location / (sin eso cambiaría el comportamiento de la ruta).
+  const raiz = /location \/ \{\n([\s\S]*?)\n {4}\}/.exec(bloqueApi)[1];
+  const proxy = (t) => t.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('error_log'));
+  assert.deepStrictEqual(proxy(cuerpo), proxy(raiz));
+});
+
+test('api.: la regex toma solo /api[/v1]/mesas/qr/<token>/sesion', () => {
+  const re = new RegExp(locationTokenQr().regex);
+  const token = 'v1.eyJtIjo1fQ.abc_DEF-123';
+  for (const ruta of [`/api/mesas/qr/${token}/sesion`, `/api/v1/mesas/qr/${token}/sesion`]) {
+    assert.ok(re.test(ruta), ruta);
+  }
+  for (const ruta of ['/api/mesas/qr//sesion', `/api/mesas/qr/${token}/sesion/x`, `/api/mesas/qr/${token}`, '/api/mesas/5/rotar-qr',
+    `/x/api/mesas/qr/${token}/sesion`, '/api/mesas', '/api/v2/mesas/qr/t/sesion']) {
+    assert.ok(!re.test(ruta), ruta);
+  }
+});
+
+test('el nivel crit solo está en esa ruta: el resto de los sitios sigue con el error_log de siempre', () => {
+  const niveles = [...PLANTILLA.matchAll(/^\s*error_log\s+(.+);$/gm)].map((m) => m[1]);
+  assert.deepStrictEqual(niveles, ['/var/log/nginx/error.log crit']);
+});

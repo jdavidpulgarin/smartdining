@@ -651,7 +651,14 @@ Dónde está: los `map` y el `log_format` al principio de
 
 - **Dónde se guarda:** el log va al stdout del contenedor (driver `json-file`, como mucho
   5 archivos de 10 MB por contenedor) y **se pierde al recrear el contenedor** nginx, por
-  ejemplo en cada despliegue que lo reconstruye. El `error_log` no tiene formato propio.
+  ejemplo en cada despliegue que lo reconstruye.
+- **El `error_log` no tiene formato propio**, así que no se puede enmascarar. Si el backend falla
+  (502/504), nginx escribe ahí, con nivel `[error]`, la petición y el upstream completos. En la
+  única ruta que lleva el token del QR en la URL (`/api[/v1]/mesas/qr/<token>/sesion`, en `api.`)
+  el `error_log` está en `crit`: esos `[error]` no se escriben. El fallo queda igual en el access
+  log (status 502/504, con el token como `***`) y en los logs del backend. En `app.` el
+  `?token=` no llega a ningún upstream, y el `referrer` que va de `app.` a `api.` lleva solo el
+  origen (`Referrer-Policy: strict-origin-when-cross-origin`).
 - **Validar una plantilla que aún no está en la imagen**, p. ej. la de una rama: copia la
   carpeta al VPS y pásala con `PLANTILLAS`. Se valida con el mismo nginx en marcha, sin
   tocar lo que sirve:
