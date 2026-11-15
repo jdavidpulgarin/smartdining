@@ -11,6 +11,7 @@ const mesasRoutes = require('./mesas.routes');
 const pedidosRoutes = require('./pedidos.routes');
 const kdsRoutes = require('./kds.routes');
 const transaccionesRoutes = require('./transacciones.routes');
+const excedentesRoutes = require('./excedentes.routes');
 const pagosRoutes = require('./pagos.routes');
 const reportesRoutes = require('./reportes.routes');
 const configuracionRoutes = require('./configuracion.routes');
@@ -37,6 +38,9 @@ router.use('/mesas', mesasRoutes);
 router.use('/pedidos', pedidosRoutes);
 router.use('/kds', kdsRoutes);
 router.use('/transacciones', transaccionesRoutes);
+// T4: excedentes de pagos en línea de mesa, para la Caja (en /api y /api/v1,
+// como las demás rutas de cobro).
+router.use('/excedentes-pago-en-linea', excedentesRoutes);
 router.use('/pagos', pagosRoutes);
 // D-07: metricas del panel de administracion.
 router.use('/reportes', reportesRoutes);

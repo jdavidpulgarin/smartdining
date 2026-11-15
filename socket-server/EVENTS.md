@@ -20,10 +20,10 @@ código y este documento no coinciden, es un error y se corrige en el mismo PR.
 - [2. Salas](#2-salas-rooms)
 - [3. Convenciones](#3-convenciones): idempotencia, formato del ack, reconexión
 - [4. Eventos cliente → servidor](#4-eventos-cliente--servidor)
-- [5. Eventos servidor → cliente](#5-eventos-servidor--cliente) · [5.5. `inventario:alerta`](#55-inventarioalerta) · [5.6. `item:cancelado`](#56-itemcancelado)
-- [6. Endpoints HTTP](#6-endpoints-http) · [6.4. Comensales sin celular](#64-comensales-sin-celular-post-internalmesa-comensal)
+- [5. Eventos servidor → cliente](#5-eventos-servidor--cliente) · [5.5. `inventario:alerta`](#55-inventarioalerta) · [5.6. `item:cancelado`](#56-itemcancelado) · [5.7. `mesa:actualizada`](#57-mesaactualizada)
+- [6. Endpoints HTTP](#6-endpoints-http) · [6.4. Comensales sin celular](#64-comensales-sin-celular-post-internalmesa-comensal) · [6.6. Pagos en curso](#66-pagos-en-curso-get-internalpagos-en-curso)
 - [7. Web Push](#7-web-push)
-- [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox) · [8.6. Cobros de caja](#86-cobros-de-caja-post-internalpayment-confirmed)
+- [8. Pagos (Wompi, sandbox)](#8-pagos-wompi-sandbox) · [8.6. Cobros de caja](#86-cobros-de-caja-post-internalpayment-confirmed) · [8.7. Excedente](#87-pago-en-línea-que-excede-el-saldo-contrato-del-excedente)
 - [9. Variables de entorno](#9-variables-de-entorno)
 - [10. Historial de cambios de contrato](#10-historial-de-cambios-de-contrato)
 
@@ -85,8 +85,10 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `ingrediente:disponibilidad` | todos los sockets | Opcional | Estable (el backend lo llama desde PR #70) | [§5.3](#53-ingredientedisponibilidad) |
 | `plato:disponibilidad` | todos los sockets | Opcional | Lista, espera que el backend la llame | [§5.4](#54-platodisponibilidad) |
 | `inventario:alerta` | `room:admin` | Sí | Estable (el backend la llama desde D-17; el panel la escucha, P-22) | [§5.5](#55-inventarioalerta) |
+| `mesa:actualizada` | `room:admin` | Sí | Espera backend (T12): el socket-server la emite; falta que el backend llame a `/internal/mesa-actualizada` y que el panel la escuche | [§5.7](#57-mesaactualizada) |
 | `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | Sí | Caja: Estable vía `/internal/payment-confirmed` (PR #58). Wompi: Conectado (falta prueba E2E con Wompi sandbox), vía webhook con cuenta ([§8.2](#82-contrato-que-necesita-del-backend)) y registro ([§8.4](#84-contrato-de-registro-que-necesita-del-backend)) en el backend (PR #33) | [§8.3](#83-webhook-post-pagoswebhook-capas-4-5-y-6), [§8.6](#86-cobros-de-caja-post-internalpayment-confirmed) |
 | `pago:alerta` | `room:admin` | Sí | Conectado (falta prueba E2E con Wompi sandbox); el backend guarda el intento (PR #33) | [§8.5](#85-pagoalerta-e-intentos-fallidos) |
+| `pago:excedente` | `room:admin` | Sí | Espera backend (contrato del excedente) y la Caja | [§8.7](#87-pago-en-línea-que-excede-el-saldo-contrato-del-excedente) |
 
 ### HTTP
 
@@ -105,6 +107,8 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `POST /internal/mesa-comensal` | backend (tras el COMMIT de D-18) | Estable (el backend ya la llama, D-18/D-18b) | [§6.4](#64-comensales-sin-celular-post-internalmesa-comensal) |
 | `POST /internal/inventario-alerta` | backend (D-17, oyente del canal `inventario`) | Estable (el backend ya la llama, D-17) | [§5.5](#55-inventarioalerta) |
 | `POST /internal/item-cancelado` | backend (tras el COMMIT de J-14, el comensal quita un plato, o de D-13, el personal cancela uno) | Estable; el backend la llama desde #180 (J-14) y #186 (D-13) | [§5.6](#56-itemcancelado) |
+| `GET /internal/pagos-en-curso` | backend (antes de cancelar un plato, T4) | Espera backend (T4): el socket-server ya la da | [§6.6](#66-pagos-en-curso-get-internalpagos-en-curso) |
+| `POST /internal/mesa-actualizada` | backend (tras el COMMIT de abrir mesa, cambio de estado, crear, editar y borrar mesa, y de liberarla a mano o tras el cobro) | Espera backend (T12) | [§5.7](#57-mesaactualizada) |
 
 `/internal/*` es solo servidor a servidor (`x-internal-key`). En producción nginx
 responde 404 a esas rutas desde Internet; ningún frontend debe llamarlas.
@@ -146,6 +150,7 @@ motivo exacto) va solo al log del servidor.
 | `403 NO_AUTORIZADO` | Credencial válida sin permiso (rol, alias que no está en la mesa) |
 | `404` | Ruta inexistente (y toda `/internal/*` desde Internet, en nginx) |
 | `409 SIN_SALDO` | Intención de pago sin nada que cobrar |
+| `409 PAGO_EN_REVISION` | Esa persona tiene un pago en línea aprobado que todavía se está registrando ([§8.7](#87-pago-en-línea-que-excede-el-saldo-contrato-del-excedente)) |
 | `409 MESA_LIBERADA` | La mesa figura liberada y no se ha generado un QR nuevo ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
 | `409 ALIAS_EN_USO` | La clave del alias ya está en uso en la mesa ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
 | `409 LIMITE_COMENSALES` | La mesa ya tiene 20 comensales sin celular ([§6.4](#64-comensales-sin-celular-post-internalmesa-comensal)) |
@@ -266,6 +271,16 @@ Al conectar **y en cada reconexión** el cliente debe:
 2. **Reemplazar** su carrito local por ese snapshot (no mezclarlo): así no se duplica
    estado aunque se hayan perdido eventos.
 3. Reenviar los eventos sin ack con su mismo `eventId`.
+
+**Cada reconexión es un socket nuevo** (id nuevo, sin salas): el servidor **no** usa la
+recuperación de sesión de Socket.io (`connectionStateRecovery`), así que `socket.recovered`
+nunca es `true` y los eventos que se emitieron mientras no había conexión no se reenvían. El
+handshake vuelve a validar el JWT y la sesión de mesa: un comensal cuya mesa se liberó mientras
+no tenía red recibe `connect_error` → `TOKEN_INVALIDO` y no vuelve a la sala. Por eso el paso 1
+es obligatorio: sin `join:table` el socket no recibe nada de su mesa.
+
+Si un comensal pierde la red, el panel no lo ve salir enseguida: tiene un **periodo de gracia**
+(ver [§5.2](#52-mesapresencia)).
 
 ---
 
@@ -587,8 +602,9 @@ cambio el panel funciona igual, con el envío automático de 500 ms como respald
 | `order:created` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, pedido, emitidoEn }` (cada `pedido.items[]` trae `id_detalle`, `id_plato`, `estado_item`, `nombre`, `cantidad`, `comensal`, `notas_especiales` e `ingredientes`; ver [`order:created`](#ordercreated)) |
 | `order:status` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, estado_anterior, estado, origen?, emitidoEn }` (`origen` solo si el backend lo mandó por `/internal/order-status`; sin él, asume `personal`; ver §6.3) |
 | `item:cancelado` | `room:kds`, `room:admin`, `room:mesa-{ID}` | `{ eventId, id_pedido, id_mesa, codigo_pedido, id_detalle, nombre, comensal, total, estado_pedido, origen, emitidoEn }` (§5.6) |
-| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, emitidoEn }` (mismo payload para Wompi, §8.3, y caja, §8.6) |
+| `payment:confirmed` | `room:admin`, `room:mesa-{ID}` (con `otra_visita`, solo `room:admin`) | `{ eventId, id_mesa, comensal, monto, saldo_restante, monto_centavos, saldo_restante_centavos, referencia_externa, aplicado?, aplicado_centavos?, excedente?, excedente_centavos?, emitidoEn }` (mismo payload para Wompi, §8.3, y caja, §8.6; `aplicado`/`excedente` solo en línea y si el backend los da, §8.7) |
 | `pago:alerta` | `room:admin` | `{ eventId, id_mesa, comensal, monto_centavos, monto_esperado_centavos, referencia_externa, id_transaccion_pasarela, motivo, emitidoEn }` (§8.5) |
+| `pago:excedente` | `room:admin` | `{ eventId, id_mesa, comensal, monto_centavos, aplicado_centavos, excedente_centavos, motivo_excedente, id_transaccion, referencia_externa, emitidoEn }` (§8.7) |
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
@@ -596,6 +612,7 @@ cambio el panel funciona igual, con el envío automático de 500 ms como respald
 | `ingrediente:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_ingrediente, disponible, emitidoEn }` |
 | `plato:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_plato, disponible, emitidoEn }` |
 | `inventario:alerta` | `room:admin` | `{ eventId, id_insumo, nombre, unidad, stock_actual, stock_minimo, agotado, emitidoEn }` (§5.5) |
+| `mesa:actualizada` | `room:admin` | `{ eventId, id_mesa, numero, estado, capacidad, ubicacion, activa?, sesion_abierta?, motivo?, id_mesero?, emitidoEn }` (§5.7; con `motivo: "eliminada"`, solo `eventId`, `id_mesa`, `activa: false`, `motivo` y lo que venga; nunca `token_qr`) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | `{ id_mesa, motivo, emitidoEn }` (`motivo`: `pagada` o `liberada`) |
 
 Notas para el frontend:
@@ -669,13 +686,32 @@ Quién está sentado en cada mesa y quién ya pagó. Se emite a `room:admin` (pa
 `room:mesa-{ID}`** (los comensales y la pantalla de **esa** mesa; ninguna otra mesa lo
 recibe) cada vez que:
 
-- un **comensal** hace `join:table`, `leave:table` o se desconecta;
+- un **comensal** hace `join:table`, `leave:table` o se desconecta (si fue un corte de red,
+  al terminar su periodo de gracia; ver abajo);
 - se confirma un pago con alias: un pago en línea (webhook, §8.3) o un cobro de caja con
   `comensal` (§8.6), siempre que quede saldo;
 - el personal agrega o quita a alguien sin celular (§6.4) y la lista cambia.
 
 Máximo **un aviso por mesa cada 500 ms**: el primero sale al instante y, si hubo más cambios
 dentro de esa ventana, se envía uno más al cerrarla (el último estado siempre llega).
+
+**Periodo de gracia (`PRESENCIA_GRACIA_MS`, 60 000 ms por defecto).** Un celular que pasa a
+segundo plano pierde el socket a los ~45 s y vuelve al desbloquearse. Para que el comensal no
+salga y entre del panel cada vez:
+
+- Si el socket de un comensal se cae por la red (`transport close`, `transport error` o
+  `ping timeout`) y no le queda otra pestaña en la sala, **sigue contando** durante la gracia:
+  en `comensales`, en `total` y en la guarda de rotación del QR. **No se
+  emite nada** al caerse.
+- Si el **mismo comensal** (misma mesa y mismo alias) vuelve y hace `join:table` antes de que
+  termine, se cancela la salida y **no se emite nada**: para los demás nunca se fue.
+- Si no vuelve, al terminar la gracia se emite `mesa:presencia` sin él, como siempre.
+- **Sin gracia**, con aviso al instante: `leave:table`, una desconexión pedida por el cliente
+  (`socket.disconnect()`), la expulsión al liberar la mesa y el cierre del servidor.
+- **Liberar la mesa** cancela todas sus gracias pendientes: no pasan a la sesión siguiente.
+- `PRESENCIA_GRACIA_MS=0` desactiva la gracia (comportamiento anterior).
+- La gracia vive en la memoria del proceso: si el socket-server se reinicia, se pierde y quien
+  vuelva entra de nuevo con `join:table`.
 
 **Al conectar el panel.** El panel tiene dos formas de saber, al conectar o al recargar la
 página, quién está en cada mesa, sin esperar al siguiente cambio:
@@ -717,7 +753,8 @@ En los dos casos:
 - `comensales`: alias distintos, ordenados. Dos pestañas de "Ana" cuentan como una persona.
 - `total`: personas en la mesa = alias distintos (cada JWT de comensal trae el suyo).
 - `pagaron`: alias que ya pagaron algo **en esta sesión de mesa**, en cualquier modo, estén
-  sentados o no; ordenados. Se borra al liberarse la mesa. Un cobro de caja sin `comensal`
+  sentados o no; ordenados. **Uno por persona**, por la clave del alias (`claveAlias`): si la
+  Caja anota «ana» y el pago en línea «Ana», sale una sola vez, con el primero que se anotó. Se borra al liberarse la mesa. Un cobro de caja sin `comensal`
   no aparece (no se sabe de quién es). Un pago que deja el saldo en 0 **sí** aparece: la mesa
   sigue ocupada mientras quede un pedido sin entregar ([§5.1](#51-mesaliberada)), y el grupo
   ve quién pagó el último saldo.
@@ -728,8 +765,8 @@ En los dos casos:
   pago se anota y después comprueba la revocación, deshaciendo la anotación si la ve.
 - El personal y la pantalla no cuentan.
 - No lleva `eventId`: es un estado completo; quédate siempre con el último.
-- La PWA lo usa para mostrar cuánto es «igual» antes de pedir la intención
-  ([§8.1](#81-post-pagosintencion)).
+- La PWA y el panel lo usan para mostrar quién ya pagó. (Antes la PWA calculaba con él el
+  modo «igual», que se retiró en T2: [§8.1](#81-post-pagosintencion).)
 
 **Campo `sin_celular`** (Estable desde R-19.2; compatible hacia atrás). Las
 personas sin celular las agrega el personal con
@@ -916,6 +953,101 @@ está en `room:kds` y en `room:admin`, lo recibe una sola vez. Nunca a otras mes
 - **No se guarda:** quien estaba desconectado lo ve al recargar por REST (`GET /api/pedidos/...`
   o las comandas del KDS, que ya excluyen las líneas canceladas). Deduplica por `eventId`.
 
+### 5.7. `mesa:actualizada`
+
+> **Espera backend · T12.** Implementado en `src/mesa-actualizada.js` (pruebas:
+> `tests/mesa-actualizada.test.js`, `tests/mesa-actualizada-errores.test.js` y `tests/mesa-actualizada-sesion.test.js`). Falta que el backend la
+> llame y que el panel la escuche. Los campos son los de la tabla `mesas` (`database/schema.sql`).
+
+Cambió una mesa y el panel debe verlo en vivo, sin recargar. El backend avisa **después del
+COMMIT** de:
+
+- abrir la mesa con su QR (`motivo: "abierta"`);
+- `PATCH /api/mesas/:id/estado` (`motivo: "estado"`);
+- `POST /api/mesas` (`motivo: "creada"`) y `PATCH /api/mesas/:id` (`motivo: "datos"`);
+- la **liberación** de la mesa (`motivo: "liberada"`), en los dos caminos: la manual y la automática
+  tras el cobro (caja o Wompi). Sin este aviso el panel no ve que la mesa quedó libre: `mesa:liberada`
+  dice que terminó la sesión, no el estado nuevo de la mesa;
+- el **borrado** de la mesa, `DELETE /api/mesas/:id` (`motivo: "eliminada"`, con `activa: false`). El
+  backend solo deja borrar una mesa que no está ocupada y no tiene pedidos, así que no hay sesión
+  que cerrar;
+- más adelante, la asignación de mesero (`motivo: "mesero"`; hoy `mesas` no tiene esa columna).
+
+```http
+POST /internal/mesa-actualizada
+x-internal-key: <INTERNAL_API_KEY>
+Content-Type: application/json
+
+{ "eventId": "<uuid>", "id_mesa": 5, "numero": 5, "estado": "ocupada", "capacidad": 4, "ubicacion": "Terraza",
+  "activa": true, "sesion_abierta": true, "motivo": "abierta" }
+```
+
+Al borrar una mesa basta con esto (la fila ya no existe: `DELETE … RETURNING id_mesa`):
+
+```json
+{ "eventId": "<uuid>", "id_mesa": 5, "activa": false, "motivo": "eliminada" }
+```
+
+**Quién la llama:** solo el backend. Ningún frontend la llama; nginx responde 404 desde Internet
+(igual que toda `/internal/*`).
+
+| Campo | Obligatorio | Regla |
+|---|---|---|
+| `eventId` | Sí | UUID |
+| `id_mesa` | Sí | Entero de 1 a 2147483647 (`INTEGER`, `CHECK > 0`) |
+| `numero`, `capacidad` | Sí (no con `eliminada`) | Entero de 1 a 2147483647 (`INTEGER`, `CHECK > 0`) |
+| `estado` | Sí (no con `eliminada`) | `disponible`, `ocupada`, `reservada` o `mantenimiento` (el `CHECK` de la tabla) |
+| `ubicacion` | Sí (no con `eliminada`) | Texto de 1 a 50 caracteres (`VARCHAR(50)`, se cuentan caracteres; solo espacios → `400`) |
+| `activa` | No (sí con `eliminada`: `false`) | `true` o `false` |
+| `sesion_abierta` | No (el backend debería mandarlo siempre) | `true` si la mesa tiene una sesión de QR vigente (`token_qr` no nulo), `false` si no. Es lo que el panel necesita para saber si la mesa está abierta sin ver el token |
+| `motivo` | No | `abierta`, `estado`, `creada`, `datos`, `liberada`, `eliminada` o `mesero` |
+| `id_mesero` | No | `null` (sin mesero) o entero de 1 a 2147483647 |
+
+Opcional quiere decir que puede **no venir**; si viene, tiene que cumplir la regla (`activa: null`,
+`sesion_abierta: "true"` o `motivo: "otro"` → `400`).
+
+**Con `motivo: "eliminada"`** son obligatorios solo `eventId`, `id_mesa` y `activa: false`. `numero`,
+`estado`, `capacidad` y `ubicacion` pueden no venir; si vienen, se validan igual.
+
+**Coherencia** (`400 PAYLOAD_INVALIDO`, sin emitir): `eliminada` sin `activa: false`; `eliminada` o
+`liberada` con `sesion_abierta: true`; `abierta` con `sesion_abierta: false`.
+
+**Campos de más: se descartan, no se rechazan.** El backend puede mandar la fila entera; el evento
+se arma solo con los campos de la tabla de arriba. **`token_qr`, `sesion_iniciada_en`, datos de
+comensales o cualquier otro campo nunca salen del socket-server** (hay prueba de que el token no
+viaja). Aun así, lo correcto es que el backend no los mande.
+
+Errores, sin emitir nada en ningún caso: `400 PAYLOAD_INVALIDO` (el mensaje nombra el campo),
+`400 JSON_INVALIDO`, `401 NO_AUTORIZADO` (sin clave o clave errada, comparada en tiempo
+constante; se comprueba antes del cuerpo) y `503 NO_CONFIGURADO`.
+
+- Respuesta normal: `200 { "ok": true, "duplicado": false }`.
+- **Idempotencia:** clave propia `backend:mesa-actualizada:{eventId}`, TTL de 10 min. Repetido →
+  `200 { "ok": true, "duplicado": true }` sin reemitir. Todo se valida antes de reservar: un `4xx`
+  no consume el `eventId`. Se reserva, se emite y, si la emisión falla, se libera la clave y se
+  responde `500 ERROR_INTERNO` (también si Redis no responde).
+- **Reintentos:** el backend reintenta, con el mismo `eventId`, solo ante `500/502/503
+  ERROR_INTERNO`; nunca ante `503 NO_CONFIGURADO` ni ante un `4xx`. Un `eventId` nuevo por cada
+  cambio (no por mesa).
+
+Emite `mesa:actualizada` **solo a `room:admin`** (`admin`, `mesero` y `cajero`). Nunca a las
+mesas, a las pantallas de mesa, a `room:kds` ni a los clientes:
+
+```json
+{ "eventId": "7d3f0c52-8a41-4e6b-b1f7-3c9a2e5d6f10", "id_mesa": 5, "numero": 5, "estado": "ocupada", "capacidad": 4,
+  "ubicacion": "Terraza", "activa": true, "motivo": "abierta", "emitidoEn": "2026-11-13T20:15:00.000Z" }
+```
+
+- `eventId` es el del cuerpo (para deduplicar). `activa`, `sesion_abierta`, `motivo` e `id_mesero` van
+  **solo si el backend los mandó** (`id_mesero: null` también viaja). Con `eliminada`, lo mismo vale para
+  `numero`, `estado`, `capacidad` y `ubicacion`. `emitidoEn` lo pone el socket-server.
+- **`motivo: "eliminada"`:** el panel **quita** la fila de esa `id_mesa`, no la reemplaza.
+- Salvo con `eliminada`, el evento trae el **estado completo** de la mesa: el panel reemplaza su fila
+  por `id_mesa`, no suma cambios. Deduplica por `eventId`.
+- **No se guarda:** quien estaba desconectado lo ve al recargar por REST (`GET /api/mesas`).
+- No sustituye a `mesa:presencia` (quién está sentado) ni a `mesa:liberada` (fin de la sesión).
+- Ningún cliente puede emitirlo por socket.
+
 ---
 
 ## 6. Endpoints HTTP
@@ -934,11 +1066,13 @@ CORS con la misma política que el socket: la lista blanca `CORS_ORIGINS` y, sol
 | POST | `/internal/order-created` | Header `x-internal-key` | Solo backend. Mismo body que el evento `order:created` |
 | POST | `/internal/order-status` | Header `x-internal-key` | Solo backend. Mismo body que `order:status`, más `origen` opcional (`comensal` o `personal`; otro valor o `null` → `400`). Se reenvía solo si vino (§6.3) |
 | POST | `/internal/qr-rotado` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "token_qr": "..." }` (token de 1 a 255 caracteres) → reenvía `qr:actualizado` a la pantalla de esa mesa |
-| POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "motivo": "pagada" }` (`motivo` opcional: `pagada` o `liberada`, por defecto `liberada`) → revoca los QR, emite `mesa:liberada`, desconecta a los comensales y borra carrito y suscripciones. Responde `{ ok, duplicado }` |
+| POST | `/internal/mesa-liberada` | Header `x-internal-key` | Solo backend. `{ "id_mesa": 5, "motivo": "pagada" }` (`motivo` opcional: `pagada` o `liberada`, por defecto `liberada`) → revoca los QR, emite `mesa:liberada`, desconecta a los comensales y borra carrito, suscripciones y pagos en curso (§6.6). Responde `{ ok, duplicado }` |
 | POST | `/internal/ingrediente-disponibilidad` | Header `x-internal-key` | Solo backend. `{ "id_ingrediente": 12, "disponible": false, "eventId": "<uuid opcional>" }` → emite `ingrediente:disponibilidad`. Con `eventId`, un reintento responde `duplicado: true` |
 | POST | `/internal/plato-disponibilidad` | Header `x-internal-key` | Solo backend, tras el COMMIT de `PATCH /api/platos/:id/disponible`. `{ "id_plato": 7, "disponible": false, "eventId": "<uuid opcional>" }` → emite `plato:disponibilidad` (§5.4). Con `eventId`, un reintento responde `duplicado: true` |
 | POST | `/internal/payment-confirmed` | Header `x-internal-key` | Solo backend. Cobro de caja (efectivo, datáfono o abono) ya registrado → emite `payment:confirmed` con el mismo payload que Wompi (§8.6) |
 | POST | `/internal/item-cancelado` | Header `x-internal-key` | Solo backend, tras el COMMIT de J-14 (el comensal quita un plato) o de D-13 (el personal cancela uno). `{ id_pedido, id_mesa, codigo_pedido, id_detalle, id_plato, nombre, comensal, total, estado_pedido, origen?, eventId }`, validación estricta (un campo de más → `400`) → emite `item:cancelado` a `room:kds`, `room:admin` y `room:mesa-{ID}` (§5.6) |
+| GET | `/internal/pagos-en-curso?mesa=<id>[&comensal=<alias>]` | Header `x-internal-key` | Solo backend, antes de cancelar un plato. `200 { mesa, enCurso, pagos: [{ comensal, modo, monto, venceEn }] }` con las intenciones de pago en línea vigentes; validación estricta (`400`). Sin referencias de Wompi ni tokens (§6.6) |
+| POST | `/internal/mesa-actualizada` | Header `x-internal-key` | Solo backend, tras el COMMIT de abrir, cambiar estado, crear, editar, borrar o liberar una mesa (a mano o tras el cobro). `{ eventId, id_mesa, numero, estado, capacidad, ubicacion, activa?, sesion_abierta?, motivo?, id_mesero? }` (`motivo`: `abierta`, `estado`, `creada`, `datos`, `liberada`, `eliminada` o `mesero`; con `eliminada` bastan `eventId`, `id_mesa` y `activa: false`); los campos de más (`token_qr` incluido) se descartan → emite `mesa:actualizada` solo a `room:admin` (§5.7) |
 | POST | `/pagos/intencion` | Bearer JWT `comensal` | Intención de pago (§8.1) |
 | POST | `/pagos/webhook` | Checksum de Wompi | Eventos de Wompi (§8.3) |
 
@@ -1025,7 +1159,7 @@ reintento termina de quitar las líneas del carrito sin volver a emitir la coman
 
 Alguien en la mesa no tiene celular y el mesero (o el admin) pide por esa persona desde el panel
 (D-18: `POST /api/mesas/:id/comensales` en el backend). Debe contar como persona en
-[`mesa:presencia`](#52-mesapresencia) y en «igual» ([§8.1](#81-post-pagosintencion)), y puede
+[`mesa:presencia`](#52-mesapresencia) y en la rotación del QR, y puede
 pagar en caja con su alias ([§8.6](#86-cobros-de-caja-post-internalpayment-confirmed)).
 
 **Quién la llama:** el backend, **después del COMMIT** de D-18, tanto al agregar como al quitar.
@@ -1118,10 +1252,9 @@ Defensa doble: además, el backend envía el alias guardado en la reserva (D-18b
   ([§5.2](#52-mesapresencia)).
 - La lista vive en `sd:mesa:{ID}:sin_celular` con TTL de 24 h, igual que `pagaron`, y se borra al
   liberarse la mesa, en el mismo momento que `pagaron`.
-- **«Igual»:** cuenta a los sin celular porque van en `comensales`.
 - **Cobro en caja:** el `comensal` se normaliza con la regla del alias antes de anotarlo en
   `pagaron` (§8.6), así «Abuela » de la cuenta marca a «Abuela». Si después de normalizar no
-  coincide con el alias de `sin_celular`, esa persona sigue contando en «igual».
+  coincide con el alias de `sin_celular`, esa persona no aparece como que ya pagó.
 - **Rotación del QR:** con un sin celular `total` es mayor que 0 y el QR deja de rotar, igual que
   con el primer comensal conectado: hay alguien sentado.
 - **Mesa solo con sin celular:** al liberarla no sale `mesa:presencia`, porque no hay comensales
@@ -1132,6 +1265,70 @@ sigue en memoria: tras un reinicio del socket-server no hay marca y esta guardia
 backend valida igual la sesión de la mesa). Llevarla a Redis toca `liberarMesa` y `/qr/generar`:
 si el borrado de la marca fallara al generar el QR, la siguiente liberación se tomaría como
 duplicada y no revocaría los QR ni limpiaría el estado de la sesión nueva.
+
+### 6.6. Pagos en curso: `GET /internal/pagos-en-curso`
+
+> **Espera backend · T4.** Implementado en `src/pagos-en-curso.js` y `src/almacen/pagos.js` (pruebas:
+> `tests/pagos-en-curso.test.js`). Falta que el backend la consulte antes de cancelar un plato.
+
+**Para qué:** que el backend **no cancele una línea mientras alguien la está pagando en línea**. Si se
+cancela con el widget de Wompi abierto, el cobro sale por el monto viejo y hay que devolver plata (y
+devolver por Wompi hoy no es viable).
+
+```http
+GET /internal/pagos-en-curso?mesa=5&comensal=Ana
+x-internal-key: <INTERNAL_API_KEY>
+```
+
+```json
+{ "mesa": 5, "enCurso": true, "pagos": [ { "comensal": "Beto", "modo": "total", "monto": 90000, "venceEn": "2026-11-14T04:30:00.000Z" } ] }
+```
+
+| Parámetro | Obligatorio | Regla |
+|---|---|---|
+| `mesa` | Sí | Entero de 1 a 2147483647, en decimal y sin ceros a la izquierda (`05`, `1.5`, `1e3` → `400`) |
+| `comensal` | No | Un alias válido con la regla del sistema (`alias.js`, la misma de `claveAlias` y del backend): de 2 a 40 caracteres, letras, números, espacios y `. _ ' -`, nunca «General». Se compara por su **clave** (sin tildes, minúsculas, sin espacios ni `. _ ' -`): «Ána María» y «ana maria» son la misma persona |
+
+Un parámetro de más o repetido → `400 PAYLOAD_INVALIDO`. Sin clave o con una errónea, `401 NO_AUTORIZADO`;
+sin `INTERNAL_API_KEY` configurada, `503 NO_CONFIGURADO`. Si Redis no responde, `500 ERROR_INTERNO`. Como
+toda `/internal/*`, la respuesta lleva `X-Instancia-Id` cuando está #254 (§6.5).
+
+**Qué cuenta como «en curso»:** una intención de `POST /pagos/intencion` **vigente**: su marca
+`sd:pago:pendiente:{mesa}:{comensal}` existe, su estado sigue en `pendiente` (ni pagada, ni rechazada,
+ni reemplazada), su `expira_en` todavía no pasó y se creó **después de la última liberación** de la mesa.
+
+**Liberar la mesa los borra.** `POST /internal/mesa-liberada` (y la liberación tras el cobro) termina la
+sesión de mesa: se borran el índice `sd:pago:mesa:{mesa}` y las marcas `sd:pago:pendiente:{mesa}:*` que
+lista, en un solo `DEL` y sin `SCAN`. El grupo siguiente empieza con `enCurso: false`, aunque alguien
+repita el alias. Los registros `sd:pago:ref:*` **no** se tocan: un webhook tardío del grupo anterior se
+sigue registrando. Por si una intención se escribe justo mientras se libera, la ruta además descarta
+toda intención con `creada_en` anterior a la liberación.
+
+- **Con `comensal`:** `enCurso: true` si **ese** comensal tiene una vigente, o si **cualquiera** de la mesa
+  tiene una que no es `propio`: `total` cubre todas las líneas. `igual` (Dividir, que T2 retira)
+  reparte el total, así que también cuenta. `pagos` trae solo las que deciden.
+- **Sin `comensal`:** `enCurso: true` si hay cualquier vigente en la mesa; `pagos` las trae todas.
+- `pagos[]`: `comensal` (como lo firmó su JWT), `modo`, `monto` en **pesos** y `venceEn` (ISO). **Nunca**
+  la referencia de Wompi, tokens ni datos de tarjeta.
+- Las marcas se listan con un índice por mesa (`sd:pago:mesa:{mesa}`, hash comensal → `1`), no con `SCAN`.
+  Se anota **antes** de fijar la marca, así que toda marca que exista está en el índice. Su plazo **solo se
+  alarga**: con varios comensales queda al menos tan largo como el de la marca más larga de la mesa. Un
+  miembro cuya marca ya venció o se liberó se ignora al listar, sin error. Una intención creada antes de desplegar esto no está en el
+  índice: deja de importar cuando vence (`PAGOS_TTL_MINUTOS`).
+
+**Qué hace el backend (T4, Daniel)**, en `cancelarItem` (comensal y personal) y al cancelar un pedido
+entero, **antes** de cambiar nada:
+
+1. Consulta `GET /internal/pagos-en-curso?mesa=<id_mesa>&comensal=<comensal de la línea>`, sin
+   `comensal` si la línea es de «General» o si se cancela el pedido entero, con **timeout de 1500 ms**.
+2. `enCurso: true` → `409 pago_en_curso` (no se cancela).
+3. **Si no responde a tiempo, falla la conexión o da 5xx → `409 pago_en_curso` con motivo
+   `sin_verificar`**, por prudencia: es mejor que el mesero reintente en unos segundos que cancelar un plato
+   que se está cobrando.
+4. **Si recibe un `4xx`** (consulta mal armada o clave errada, un error del propio backend): responde
+   también `409 pago_en_curso` con motivo `sin_verificar` **y lo registra como error** en su log (solo el
+   status y el `codigo`; nunca la clave). Un 4xx no se arregla reintentando, pero tampoco se cancela a ciegas.
+5. `enCurso: false` → sigue con las demás guardas de siempre (`pago_registrado`, etc.).
 
 ---
 
@@ -1179,6 +1376,22 @@ Reglas:
 - Las suscripciones caducadas (HTTP 404/410 del servicio push) se eliminan solas.
 - Son de la **sesión de mesa**: se borran al liberarla.
 
+**Registro de envíos (diagnóstico, T9).** No cambia el contrato; sirve para saber si un aviso
+salió y qué respondió el servicio push (p. ej., por qué no llega a un iPhone):
+
+- Una línea por envío: `push: enviado` (info), `push: suscripción caducada` (info) o
+  `push: error al enviar` (error), con `servicio_push` (**solo el host**: `fcm.googleapis.com`,
+  `web.push.apple.com`…), `status` (código HTTP, o `null` sin respuesta, con `codigo` de red)
+  y `caducada`. Si Apple manda `{ "reason": "BadJwtToken" }` o parecido, va en `razon`
+  (solo si es una palabra).
+- Una línea por cambio de estado: `push: resumen del envío` con `estado`, `destinatarios`,
+  `enviados`, `fallidos`, `caducados` y `servicios` (cuántos por host). `destinatarios: 0`
+  quiere decir que nadie de la mesa tenía avisos activados.
+- **Nunca** el endpoint completo (identifica al dispositivo), las llaves de la suscripción
+  (`p256dh`, `auth`), el payload, el alias ni las llaves VAPID (`tests/push-registro.test.js`).
+
+Para verlo en el VPS: `docker logs <socket-server> | grep '"msg":"push: '`.
+
 ---
 
 ## 8. Pagos (Wompi, sandbox)
@@ -1193,12 +1406,12 @@ intención y verifica el resultado. Todo va detrás de la interfaz `PasarelaPago
 Auth: `Authorization: Bearer <JWT del comensal>` (sesión de mesa vigente). La mesa sale del JWT.
 
 ```json
-{ "modo": "igual", "eventId": "4b0d…" }
+{ "modo": "propio", "eventId": "4b0d…" }
 ```
 
 | Campo | Reglas |
 |---|---|
-| `modo` | `total` (saldo de la mesa), `igual` (saldo ÷ personas que aún no pagaron, fórmula abajo), `propio` (lo de ese comensal) |
+| `modo` | `propio` («pagar lo mío»: lo de ese comensal) o `total` («pagar toda la cuenta»: el saldo de la mesa). **`igual` ya no existe** (T2): responde `400 PAYLOAD_INVALIDO` con un mensaje que lo explica |
 | `eventId` | UUID. Repetirlo devuelve la **misma** respuesta, salvo que esa intención ya no siga vigente (ver abajo): entonces se trata como una petición nueva |
 | `comensal` | Opcional. Quien paga es el alias **del JWT**; si viene uno distinto → `403 NO_AUTORIZADO` (nadie paga ni consulta "lo propio" de otro) |
 
@@ -1210,7 +1423,7 @@ servidor con la cuenta del backend.
 ```json
 {
   "referencia": "SD-5-1760212345678-Qm9vX2FfdGVzdF9f",
-  "monto_en_centavos": 3333300,
+  "monto_en_centavos": 2000000,
   "moneda": "COP",
   "llave_publica": "pub_test_…",
   "firma_integridad": "37c8407747e5…",
@@ -1220,58 +1433,30 @@ servidor con la cuenta del backend.
 
 | Error | Cuándo |
 |---|---|
-| `400 PAYLOAD_INVALIDO` | `modo` o `eventId` inválidos |
+| `400 PAYLOAD_INVALIDO` | `modo` o `eventId` inválidos. `modo: "igual"` da el mensaje «El modo «igual» (dividir la cuenta) ya no existe: usa «propio» (pagar lo tuyo) o «total» (pagar toda la cuenta)». Se valida antes de todo: no consulta la cuenta ni gasta el límite de 5 por minuto |
 | `401 NO_AUTORIZADO` | Sin JWT, JWT inválido o la mesa ya se liberó |
 | `401 TOKEN_INVALIDO` | JWT de comensal antiguo, sin alias: volver a escanear el QR |
 | `403 NO_AUTORIZADO` | No es comensal, o `comensal` distinto del alias del JWT. Cualquier valor que no sea ese alias, aunque esté mal formado (`""`, `123`, `null`), es `403` y nunca `400` |
 | `409 SIN_SALDO` | Saldo 0 (o `propio` sin consumos de ese alias) |
+| `409 PAGO_EN_REVISION` | Su intención anterior está `en_revision`: Wompi la cobró y el registro todavía no entra. Otra intención sería un segundo cobro. Se libera cuando el reintento la registra (`pagada`) o al vencer la marca (`PAGOS_TTL_MINUTOS`) (§8.7) |
 | `429 RATE_LIMIT` | Más de 5 intenciones por minuto del mismo comensal |
 | `502/503 ERROR_INTERNO` | El backend no respondió o respondió mal |
 | `503 NO_CONFIGURADO` | Pagos apagados (sin `WOMPI_*`) |
 
-Reglas de la cuenta dividida:
+Reglas de los modos:
 
 - **total**: el saldo completo de la mesa.
-- **igual**: el **saldo** que queda, entre las personas presentes que **aún no han pagado**
-  más quien paga. Así ningún pago `propio` o de caja deja saldo sin dueño, ni a uno le toca
-  la parte de otro. Quien se va sin pagar deja de contar. Fórmula exacta, en centavos
-  enteros (la PWA debe replicarla tal cual con los datos de `mesa:presencia` y la cuenta):
-
-  ```js
-  // saldo:      saldo_centavos de la cuenta de la mesa
-  // comensales: mesa:presencia.comensales · pagaron: mesa:presencia.pagaron
-  // yo:         alias de quien paga (el del JWT)
-  const pendientes = new Set(comensales.filter((a) => !pagaron.includes(a)));
-  pendientes.add(yo);                 // quien paga siempre cuenta
-  const n = Math.max(1, pendientes.size);
-  const parte = Math.round(saldo / n / 100) * 100;   // a pesos; .5 redondea hacia arriba
-  const monto = (n === 1 || parte <= 0 || parte >= saldo) ? saldo : parte;
-  ```
-
-  Con `saldo` = 0 → `409 SIN_SALDO`. El último (n = 1) paga el saldo exacto, centavos
-  incluidos; nunca se cobra más que el saldo. Ejemplos:
-
-  | Mesa | Pagos (en orden) |
-  |---|---|
-  | 2 personas, $85.000 | Ana propio $20.000 → Beto igual **$65.000** |
-  | 3 personas, $100.000 | Ana propio $30.000 → Beto igual **$35.000** → Carlos igual **$35.000** |
-  | 4 personas, $120.000 | Ana propio $45.000 → Beto, Carlos y Dani igual **$25.000** c/u |
-  | 4 personas, $120.000 | Ana propio $10.000 → Beto **$36.667** → Carlos **$36.667** → Dani **$36.666** |
-  | 3 personas, $100.000 | Ana **$33.333** → Beto **$33.334** → Carlos **$33.333** (todos igual) |
-
-  Las «personas presentes» incluyen los alias de `sin_celular`
-  ([§5.2](#52-mesapresencia)), que ya van en `comensales`; la PWA debe usar `comensales` y
-  `pagaron` de `mesa:presencia`, tal como dice la fórmula, y no calcular con `total`. Ejemplo:
-  3 personas (1 sin celular), $90.000, nadie ha pagado → igual **$30.000** cada uno.
-
-  Si la presencia o `pagaron` cambian entre lo que mostró la PWA y la petición, manda el
-  cálculo del servidor (y una pendiente anterior se reemplaza, ver abajo).
-- **propio**: el saldo de ese alias según el backend (nunca más que el saldo de la mesa).
+- **propio**: el saldo de ese alias según el backend (nunca más que el saldo de la mesa). El
+  `comensal` de `por_comensal` se cruza con el alias del JWT por la **clave** del alias
+  (`claveAlias`, la misma regla que el backend: sin tildes, minúsculas, sin espacios ni `. _ ' -`),
+  no por el texto exacto: « ana » y «Ana» son la misma persona. Si la cuenta trae a la misma
+  persona en dos filas, sus saldos se suman. Cuando el último paga su parte, la cuenta queda
+  en 0; si alguien prefiere invitar o completar lo que falta, usa `total`.
 - **Una sola intención pendiente por comensal**, reutilizada **solo si sigue valiendo**. En
   cada petición el servidor consulta la cuenta y recalcula el monto:
   - mismo `modo` **y** mismo monto recalculado, y `expira_en` a más de 5 min → `200` con la
     misma intención (misma referencia y firma);
-  - otro `modo`, el monto cambió (pedido nuevo, otro pago, cambio de presencia en `igual`) o
+  - otro `modo`, el monto cambió (pedido nuevo, otro pago) o
     está por vencer → `201` con una intención **nueva**. La vieja no se borra: queda `reemplazada` 7 días y
     su webhook se sigue aceptando por **su** monto exacto (§8.3), por si ya se pagó en otra
     pestaña;
@@ -1326,7 +1511,9 @@ x-internal-key: <INTERNAL_API_KEY>
 - Montos en **centavos enteros** (`total` del pedido × 100), calculados en SQL.
 - `total_centavos`: suma de los pedidos no cancelados de la sesión actual de la mesa.
 - `saldo_centavos`: `total_centavos` menos las transacciones `completada`.
-- `por_comensal`: por alias (el `apodo`/`comensal` de cada ítem), menos lo que ya pagó.
+- `por_comensal`: por alias (el `apodo`/`comensal` de cada ítem), menos lo que ya pagó. El
+  socket-server lo compara por la clave del alias, así que el texto puede venir como lo guardó
+  el backend (con otros espacios, mayúsculas o tildes).
 - `404` si la mesa no existe. El socket-server trata cualquier otra forma como error (`502`).
 
 ### 8.3. Webhook: `POST /pagos/webhook` (capas 4, 5 y 6)
@@ -1352,7 +1539,7 @@ Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún fron
    comensal puede pedir otra. No se registra ni se anuncia nada.
 6. `APPROVED` → **reverificación** con `GET /v1/transactions/{id}` (llave privada, 5 s de
    timeout). Debe coincidir: `status APPROVED`, la misma referencia, una intención conocida y
-   **pendiente o reemplazada** (§8.1), `amount_in_cents` **exactamente** igual al esperado
+   **pendiente, reemplazada o en revisión** (§8.1, §8.7), `amount_in_cents` **exactamente** igual al esperado
    por **esa** intención y `currency COP`.
    Si algo no cuadra → intento fallido + `pago:alerta` (§8.5), `200`.
    - Un `APPROVED` con `expira_en` ya pasado **se acepta**: Wompi solo cobra antes de que
@@ -1360,15 +1547,21 @@ Lo llama **Wompi** (URL de eventos del panel de Wompi). No lo llama ningún fron
      ese plazo (26 h por defecto) la referencia ya no se reconoce: `referencia_desconocida`.
      Lo mismo vale para un `DECLINED` tardío, que marca la intención como `rechazada`.
    - Pago de una **reemplazada** (el comensal la pagó en otra pestaña): se registra como
-     cualquier otro. Si además pagó la nueva y la suma excede el saldo, el backend responde
-     `409` a la segunda → intento fallido + `pago:alerta` (`backend_rechazo_409`) para que
-     caja devuelva el dinero. Ningún pago real se pierde en silencio.
+     cualquier otro. Si además pagó la nueva y la suma excede el saldo, la segunda se registra
+     con su **excedente** y la Caja lo devuelve (§8.7). Ningún pago real se pierde en silencio.
+   - Con `monto_distinto` o `moneda_distinta` (la API confirma un cobro aprobado que no cuadra
+     con su intención), la intención pasa a `en_revision`: nunca se queda en `pendiente`.
    - Al resolverse una intención solo se libera la marca de pendiente del comensal **si
      apunta a esa referencia**: pagar o rechazar una reemplazada no toca la intención nueva.
 7. **Registro** en el backend (`POST /api/transacciones/internal`, §8.4). **Solo si el backend
-   confirma** se emite `payment:confirmed`.
-8. Si la pasarela o el backend no responden (o dan 5xx) → `503`, se libera la marca de
-   idempotencia y **no se emite nada**; Wompi reintenta.
+   confirma** se emite `payment:confirmed`, y `pago:excedente` si sobró algo (§8.7). La
+   intención pasa a `pagada`. Si el backend la rechaza (`4xx`): intento fallido + `pago:alerta`,
+   la intención pasa a `en_revision` y se responde `200`.
+8. Si la pasarela no responde → `503`, se libera la marca de idempotencia y **no se emite
+   nada**; Wompi reintenta. Si es **el backend** el que no responde (o da 5xx) al registrar un
+   pago ya aprobado, además la intención pasa a `en_revision` y sale `pago:alerta` con
+   `backend_no_disponible`, solo al panel (§8.5). Una `en_revision` sigue siendo cobrable, así
+   que el reintento la registra.
 
 `payment:confirmed` → `room:admin` y `room:mesa-{ID}`:
 
@@ -1403,16 +1596,24 @@ x-internal-key: <INTERNAL_API_KEY>
   "pasarela": "wompi",
   "id_mesa": 5,
   "comensal": "Ana",
-  "modo": "igual",
-  "monto_centavos": 3333300,
+  "modo": "propio",
+  "monto_centavos": 2000000,
   "moneda": "COP",
-  "metodo_pago": "online"
+  "metodo_pago": "online",
+  "intencion_creada_en": "2026-11-14T20:10:00.000Z"
 }
 
-→ 201 { "ok": true, "duplicado": false, "saldo_restante_centavos": 6666700, "mesa_liberada": false }
-→ 200 { "ok": true, "duplicado": true, … }   (misma referencia_externa: no registra dos veces)
-→ 409 { "error": "…" }                       (excede el saldo, mesa sin cuenta abierta…)
+→ 201 { "ok": true, "duplicado": false, "saldo_restante_centavos": 6666700, "mesa_liberada": false,
+        "aplicado_centavos": 3333300, "excedente_centavos": 0, "motivo_excedente": null, "id_transaccion": 812 }
+→ 200 { "ok": true, "duplicado": true, … }   (misma referencia_externa: el mismo resultado, sin registrar dos veces)
+→ 400 / 404                                  (cuerpo inválido, mesa inexistente)
 ```
+
+- **Un pago aprobado nunca se rechaza** (§8.7): ya no hay `409` por exceder el saldo ni por
+  mesa sin cuenta. Lo que sobra va como excedente. `intencion_creada_en` dice de qué visita es
+  la intención; `aplicado_centavos`, `excedente_centavos`, `motivo_excedente` e
+  `id_transaccion` son los campos nuevos de la respuesta. Un backend que todavía no los manda
+  sigue funcionando como antes (el socket-server los ignora si `aplicado + excedente ≠ monto`).
 
 - **Idempotente por `referencia_externa`** (índice único). Un reintento devuelve el mismo
   resultado.
@@ -1455,7 +1656,8 @@ pero no datos de tarjeta ni del pagador: la pasarela no nos los entrega y no se 
 | `transaccion_inexistente` | si hay intención | si hay intención | **evento** | si hay intención |
 | `referencia_desconocida` (o vencida) | `null` | `null` | API | `null` |
 | `intencion_no_pendiente` (por ejemplo, un aprobado después de un rechazo) | sí | sí | API | sí |
-| `backend_rechazo_<status>` (por ejemplo, `409` por una reemplazada pagada dos veces, §8.3) | sí | sí | API | sí |
+| `backend_rechazo_<status>` (`400` o `404`; con el contrato del excedente ya no hay `409`, §8.7) | sí | sí | API | sí |
+| `backend_no_disponible` (el backend no respondió o dio 5xx al registrar un pago aprobado; **no** se guarda como intento fallido, solo se avisa al panel, con el mismo `eventId` en cada reintento) | sí | sí | API | sí |
 
 Contrato (el backend lo expone desde PR #33):
 
@@ -1560,7 +1762,7 @@ Respuestas:
 
 **`comensal` y `pagaron` (R-19.2):** si queda saldo, el `comensal` se anota en `pagaron`
 ([§5.2](#52-mesapresencia)) **normalizado** con la regla del alias (§6.4): «Abuela » se anota
-como «Abuela» y deja de contar en «igual». Si no es un alias válido (p. ej. «Mesa #5»), se anota
+como «Abuela». Si no es un alias válido (p. ej. «Mesa #5»), se anota
 tal cual, como antes: el cobro nunca falla por esto. `payment:confirmed` lleva el `comensal`
 tal como llegó.
 
@@ -1577,6 +1779,71 @@ pago final.
 Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 
 ---
+
+
+### 8.7. Pago en línea que excede el saldo (contrato del excedente)
+
+> **Espera backend y Caja (T4).** Socket-server listo (`src/pagos.js`, pruebas en
+> `tests/pagos-excedente.test.js`). Backend (Daniel): script 44 y el registro. Caja (Jarrinson):
+> la alerta.
+
+Si se cancela un plato entre la intención y el webhook (por ejemplo, porque la intención venció
+antes de que Wompi aprobara), el pago aprobado puede superar lo que se debía. Reglas:
+
+- **(a)** Un pago que Wompi aprobó **nunca se rechaza**: el backend lo registra entero y responde
+  cuánto aplicó y cuánto sobra (§8.4).
+- **(b)** La intención **siempre termina en `pagada` o `en_revision`**, nunca en `pendiente`.
+- **(c)** Se aplica **solo a la visita de la intención** (`intencion_creada_en`). Si es de un grupo
+  anterior, no cubre nada del grupo nuevo: `motivo_excedente: "otra_visita"`.
+- **(d)** Si no hay nada que cubrir, `excedente = monto` (`sin_cuenta` u `otra_visita`). Con la
+  mesa **sin sesión abierta** (se liberó y nadie la volvió a abrir) el backend responde
+  `sin_cuenta`, no `otra_visita`: `otra_visita` es solo cuando ya hay **otra** sesión, posterior a
+  la intención (#273).
+- **(e)** El reparto es **por persona**: un `propio` cubre solo el saldo de esa persona
+  (`excede_saldo_comensal`); un `total`, el de la mesa (`excede_saldo_mesa`).
+
+**Estados de la intención en el socket-server:**
+
+| Qué pasó con un `APPROVED` | Intención | A Wompi | Al panel |
+|---|---|---|---|
+| Registrado (`201` o `200 duplicado`) | `pagada`, se libera la marca | `200` | `payment:confirmed` (+ `pago:excedente` si sobró) |
+| El backend lo rechazó (`400`/`404`) | `en_revision` | `200` | `pago:alerta` `backend_rechazo_<status>` + intento fallido |
+| El backend no respondió o dio 5xx | `en_revision` (sigue cobrable) | `503` (Wompi reintenta) | `pago:alerta` `backend_no_disponible` |
+| No cuadra con su intención (`monto_distinto`, `moneda_distinta`) | `en_revision` | `200` | `pago:alerta` + intento fallido |
+
+- Con su marca apuntando a una `en_revision`, esa persona recibe `409 PAGO_EN_REVISION` si pide
+  otra intención (sin doble cobro). Las demás personas de la mesa pagan normal.
+- Un `DECLINED`, `ERROR` o `VOIDED` de otro intento con la misma referencia **no** saca de
+  `en_revision` a una intención con un cobro aprobado.
+- `GET /internal/pagos-en-curso` (§6.6) **no** cuenta `en_revision`: con la regla (a), cancelar
+  un plato ya no hace perder dinero.
+
+`pago:excedente` → **solo** `room:admin`:
+
+```json
+{ "eventId": "1132-903100443-27458:excedente", "id_mesa": 5, "comensal": "Ana",
+  "monto_centavos": 3333300, "aplicado_centavos": 2000000, "excedente_centavos": 1333300,
+  "motivo_excedente": "excede_saldo_comensal", "id_transaccion": 812,
+  "referencia_externa": "SD-5-…", "emitidoEn": "…" }
+```
+
+- `eventId` fijo por transacción: un reintento de Wompi no crea otra alerta (el panel
+  deduplica). No se guarda: la Caja carga los pendientes al conectar con
+  `GET /api/excedentes-pago-en-linea?estado=pendiente` y marca cada uno con
+  `PATCH /api/excedentes-pago-en-linea/:id/devuelto` (admin y cajero; tabla
+  `excedentes_pago_en_linea`, script 44, #273).
+- `payment:confirmed` del mismo pago lleva además `aplicado`, `aplicado_centavos`, `excedente` y
+  `excedente_centavos`. Con `otra_visita` va **solo** a `room:admin`: el grupo nuevo de la mesa
+  no tiene por qué ver el pago de alguien que ya se fue.
+- Caja (Jarrinson): una alerta fija con el botón «Devuelto en efectivo». El texto depende de
+  `motivo_excedente`:
+
+  | `motivo_excedente` | Texto |
+  |---|---|
+  | `excede_saldo_comensal` | «Pago en línea de <alias> excede su saldo por $N: devolver en efectivo» |
+  | `excede_saldo_mesa` | «Pago en línea de <alias> excede el saldo de la mesa por $N: devolver en efectivo» |
+  | `sin_cuenta` | «Pago en línea de <alias>: la mesa ya estaba cerrada: devolver todo ($N)». Es todo el pago: `aplicado_centavos` es 0. También sale si la mesa seguía abierta pero ya no debía nada |
+  | `otra_visita` | «Pago en línea de <alias> era de un grupo anterior de la mesa: devolver todo ($N)» |
 
 ## 9. Variables de entorno
 
@@ -1602,6 +1869,7 @@ Guía práctica: [docs/pagos-sandbox.md](docs/pagos-sandbox.md).
 | `REDIS_URL` | Estado persistente (obligatoria en producción) |
 | `ROTACION_QR_MINUTOS` | Rotación automática del QR con la mesa vacía (3) |
 | `MESA_CAPACIDAD_POR_DEFECTO` | Capacidad si el backend no la informa; comensales por mesa = capacidad + 4 (6) |
+| `PRESENCIA_GRACIA_MS` | Periodo de gracia de un comensal que pierde la red antes de salir de `mesa:presencia` (60000; entero de 0 a 600000, 0 = sin gracia) (§5.2) |
 | `TRUST_PROXY` | IPs o CIDR del proxy (nginx) del que se cree `X-Real-IP` para logs y límites. Vacía = la IP de la conexión. `/0` no se admite |
 | `LOG_NIVEL` | `debug`, `info` (por defecto), `warn`, `error` o `silencio`. Logs en JSON, sin secretos |
 
@@ -1646,3 +1914,10 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `pago:alerta` · cuánto y quién (pedido del panel) | Solo `eventId`, `id_mesa`, referencias, `motivo` y `emitidoEn`: el panel no podía mostrar cuánto ni quién | Agrega `comensal` (alias de la intención o `null`), `monto_centavos` (lo cobrado, según la API o el evento) y `monto_esperado_centavos` (de la intención o `null`). Sin datos de tarjeta ni del pagador; sigue yendo solo a `room:admin` (§8.5) | Panel: mostrarlos si quiere; los campos nuevos no rompen nada |
 | `mesa:presencia` · al conectar el panel | El panel recibía la presencia solo cuando cambiaba algo: al conectar o recargar no sabía quién estaba sentado | **500 ms** después de que un socket de personal entra a `room:admin`, recibe solo él un `mesa:presencia` por cada mesa con algo, incluidas las mesas sin ningún socket (índice `sd:mesas:con-estado`, 24 h). Si se desconecta antes, no se envía. Mismo evento y payload (§5.2) | Nadie: el panel ya lo guarda por `id_mesa`. Es el respaldo de `mesa:presencia:solicitar` |
 | `mesa:presencia:solicitar` (nuevo) | — | El personal pide la presencia de todas las mesas con algo y la recibe en el ack `{ ok, mesas }`, sin depender de listeners. Comensal, tablet y cocina → `NO_AUTORIZADO`; 1 por socket cada 2 s (`RATE_LIMIT`) (§4) | Panel (recomendado): pedirla en cada `connect`, después de registrar los listeners (ejemplo en §4) |
+| Reconexión · sin `connectionStateRecovery` (T1, seguridad) | Socket.io recuperaba la sesión tras un corte de hasta 2 min **sin pasar por los middlewares**: devolvía las salas y `socket.data`. Un comensal sin red mientras se liberaba su mesa volvía a `room:mesa-{ID}` y leía y escribía el carrito del grupo siguiente | Cada reconexión es un socket nuevo que se autentica de cero; un JWT de la sesión anterior → `connect_error` `TOKEN_INVALIDO`. `socket.recovered` nunca es `true` y no se reenvían eventos perdidos (§3.3) | Nadie: la PWA ya hace `join:table` y reemplaza el carrito en cada `connect`. Si algún cliente dependía de `recovered`, debe hacer `join:table` |
+| `mesa:presencia` · periodo de gracia (T1) | Un comensal salía de la presencia en cuanto se le caía el socket (celular en segundo plano) y entraba otra vez al volver | Con un corte de red sigue contando `PRESENCIA_GRACIA_MS` (60 s) en `comensales`, `total`, la rotación del QR y «igual». Si vuelve antes, no se emite nada; si no, sale al terminar. Salir a propósito, la expulsión y liberar la mesa no tienen gracia; liberar cancela las pendientes (§5.2) | Nadie: mismo evento y payload. Panel y PWA: un comensal puede seguir en `comensales` hasta 60 s después de cerrar la app |
+| `GET /internal/pagos-en-curso` (nueva, T4) | El backend podía cancelar un plato mientras alguien lo pagaba en línea (el widget de Wompi abierto) y el cobro salía por el monto viejo | Nueva ruta de solo lectura: `{ mesa, enCurso, pagos }` con las intenciones vigentes (propio de ese comensal, o total/igual de cualquiera); validación estricta, sin referencias de Wompi. Liberar la mesa borra sus pagos en curso (no los registros que usa el webhook) (§6.6) | Backend (Daniel): consultarla antes de cancelar (timeout 1500 ms); `enCurso` → `409 pago_en_curso`; sin respuesta, error o 5xx → `409 pago_en_curso` motivo `sin_verificar` (con un 4xx, además, error en el log) |
+| Pagos en línea · contrato del excedente (T4) | Un pago aprobado que superaba el saldo se rechazaba con `409` (intento fallido, la intención quedaba en `pendiente` y se podía pagar dos veces); un 5xx también la dejaba en `pendiente`, y un webhook de un grupo anterior se repartía en el grupo nuevo | El registro manda `intencion_creada_en`; el backend nunca rechaza un aprobado y responde `aplicado_centavos`/`excedente_centavos`/`motivo_excedente`. La intención termina en `pagada` o `en_revision` (cobrable en el reintento); `409 PAGO_EN_REVISION` para no pagar dos veces; nuevo `pago:excedente` (solo `room:admin`); `payment:confirmed` con `aplicado`/`excedente`, y solo al panel con `otra_visita`; `pago:alerta` `backend_no_disponible` (§8.7) | Backend (Daniel): script 44 y el registro (§8.4, §8.7). Caja (Jarrinson): escuchar `pago:excedente` y cargar los pendientes. PWA (Juan): mostrar el `409 PAGO_EN_REVISION` |
+| Alias contra la cuenta · por clave | El socket-server buscaba al comensal en `por_comensal` por el texto exacto: «Ana» ≠ « ana », y «lo mío» daba `409 SIN_SALDO`. `pagaron` podía tener a la misma persona dos veces («Ana» y «ana») | Todo cruce de alias con la cuenta o con `pagaron` usa la clave de `normalizarAlias` (`claveAlias`). En «lo mío», las filas de la misma persona se suman. `pagaron` se guarda por clave (Redis: campo = clave, `HSETNX`; lo anotado antes por texto se deduplica al leer) (§5.2, §8.1, §8.2) | Nadie: mismo contrato. El backend puede seguir mandando el alias como lo guardó |
+| `POST /internal/mesa-actualizada` · `mesa:actualizada` (nuevos, T12) | El panel no se enteraba en vivo de que una mesa se abría, cambiaba de estado, se creaba o se editaba: tenía que recargar | Nueva ruta: validación por campo, idempotencia `backend:mesa-actualizada:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`), campos de más descartados (nunca `token_qr`). `sesion_abierta` (boolean) y `motivo: "eliminada"` (con `activa: false` y solo `id_mesa` obligatorio), con chequeos de coherencia. Emite solo a `room:admin` (§5.7) | Backend (Daniel): llamarla tras el COMMIT de abrir, `PATCH /:id/estado`, `POST /`, `PATCH /:id`, `DELETE /:id` (`motivo: "eliminada"`) y de las dos liberaciones (manual y tras el cobro, `motivo: "liberada"`), siempre con `sesion_abierta`. Panel (Jarrinson): escuchar `mesa:actualizada` en `room:admin`, reemplazar la fila por `id_mesa` y quitarla con `eliminada` |
+| `POST /pagos/intencion` · sin modo `igual` (T2) | Tres modos: `total`, `igual` (saldo ÷ personas que aún no pagaron) y `propio` | Dos modos: `propio` («pagar lo mío») y `total` («pagar toda la cuenta»). `modo: "igual"` → `400 PAYLOAD_INVALIDO` con un mensaje que lo explica, sin consultar la cuenta ni gastar el límite. `mesa:presencia.pagaron` sigue igual (§8.1) | PWA (Juan, en el mismo bloque de merges): quitar «Dividir» y no mandar `igual`. Una PWA vieja que lo mande recibe el `400` con el mensaje |

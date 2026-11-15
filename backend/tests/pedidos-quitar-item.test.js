@@ -44,6 +44,10 @@ function fakeQuitar({
   vivas = 1,
 } = {}) {
   return instalarFakeDb((sql) => {
+    // T4: la lectura previa (sin bloquear) para consultar pagos en curso.
+    if (sql.includes('SELECT p.id_mesa, dp.comensal, dp.estado_item')) {
+      return { rows: pedido && linea ? [{ id_mesa: pedido.id_mesa, comensal: linea.comensal, estado_item: linea.estado_item }] : [] };
+    }
     if (sql.includes('total, creado_en') && sql.includes('FOR UPDATE')) return { rows: pedido ? [pedido] : [] };
     if (sql.includes('FOR UPDATE OF dp')) return { rows: linea ? [linea] : [] };
     if (sql.includes('SELECT sesion_iniciada_en FROM mesas')) return { rows: [{ sesion_iniciada_en: null }] };
@@ -64,9 +68,18 @@ const quitar = (jwtToken, { pedido = PEDIDO, detalle = DETALLE, cuerpo } = {}) =
 };
 
 /** Instala base y socket con lo indicado; `restaurar` deshace todo. */
+const RUTA_PAGOS_EN_CURSO = '/internal/pagos-en-curso';
+
 function escenario(alias = 'Ana', opcionesDb = {}, responderSocket = () => ({ ok: true })) {
   const s = sesionComensal(alias);
-  const socket = instalarFakeSocket(responderSocket);
+  // T4: por omisión, GET /internal/pagos-en-curso dice que no hay nada en curso.
+  const socket = instalarFakeSocket((ruta, cuerpo, peticion) => {
+    const propio = responderSocket(ruta, cuerpo, peticion);
+    if (ruta.startsWith(RUTA_PAGOS_EN_CURSO) && propio && propio.ok === true && propio.enCurso === undefined) {
+      return { mesa: MESA, enCurso: false, pagos: [] };
+    }
+    return propio;
+  });
   const db = fakeQuitar({ tokenQr: s.tokenQr, ...opcionesDb });
   return { ...s, db, socket, restaurar() { db.restaurar(); socket.restaurar(); } };
 }
@@ -213,6 +226,103 @@ test('quitar plato: pago_registrado es ESTRICTO, cualquier transacción completa
   }
 });
 
+test('t4: el comensal sigue ESTRICTO: su mensaje de siempre y sin la regla del dueño que pagó (es del personal)', async () => {
+  const e = escenario('Ana', { pagoBloquea: true });
+  try {
+    const res = await quitar(e.jwtComensal);
+    assert.strictEqual(res.status, 409);
+    assert.deepStrictEqual(res.body, {
+      error: 'El pedido ya tiene un pago registrado: pídeselo al mesero',
+      motivo: 'pago_registrado',
+    });
+    assert.strictEqual(e.db.buscar('SELECT DISTINCT t.comensal'), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
+// --- T4 (§6.6): el comensal también consulta pagos en curso -----------------
+
+/** La consulta a pagos-en-curso (o undefined), con su query ya separado. */
+function consultaPagos(e) {
+  const a = e.socket.avisos.find((x) => x.ruta.startsWith(RUTA_PAGOS_EN_CURSO));
+  if (!a) return undefined;
+  return { ...a, query: Object.fromEntries(new URLSearchParams(a.ruta.split('?')[1] || '')) };
+}
+const conConsulta = (respuesta) => (ruta) => (ruta.startsWith(RUTA_PAGOS_EN_CURSO) ? respuesta() : { ok: true });
+
+test('t4 comensal: enCurso true -> 409 pago_en_curso SIN detalle, con SU alias normalizado y sin abrir la transacción', async () => {
+  const e = escenario('  Ána   María ', {
+    linea: { id_detalle: DETALLE, id_plato: 12, comensal: 'Ana Maria', estado_item: 'pendiente', subtotal: 30000, nombre: 'Bandeja' },
+  }, conConsulta(() => ({ mesa: MESA, enCurso: true, pagos: [] })));
+  try {
+    const res = await quitar(e.jwtComensal);
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.deepStrictEqual(res.body, {
+      error: 'Hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.',
+      motivo: 'pago_en_curso',
+    });
+    const c = consultaPagos(e);
+    assert.deepStrictEqual(c.query, { mesa: String(MESA), comensal: 'Ána María' }, 'el alias del JWT, normalizado');
+    assert.strictEqual(c.cabeceras['x-internal-key'], e.socket.clave);
+    assert.strictEqual(e.db.buscar('BEGIN'), undefined, 'antes de abrir la transacción');
+    assert.strictEqual(e.db.buscar('FOR UPDATE'), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4 comensal: el socket-server no contesta (503 NO_CONFIGURADO) -> 409 pago_en_curso con detalle sin_verificar', async () => {
+  const e = escenario('Ana', {}, conConsulta(() => ({ __status: 503, error: 'x', codigo: 'NO_CONFIGURADO' })));
+  const original = console.error;
+  console.error = () => {};
+  try {
+    const res = await quitar(e.jwtComensal);
+    assert.strictEqual(res.status, 409);
+    assert.deepStrictEqual(res.body, {
+      error: 'No se pudo comprobar si hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.',
+      motivo: 'pago_en_curso',
+      detalle: 'sin_verificar',
+    });
+    assert.strictEqual(e.db.buscar('BEGIN'), undefined);
+  } finally {
+    console.error = original;
+    e.restaurar();
+  }
+});
+
+test('t4 comensal: enCurso false -> sigue con sus reglas de siempre (200)', async () => {
+  const e = escenario('Ana', {}, conConsulta(() => ({ mesa: MESA, enCurso: false, pagos: [] })));
+  try {
+    assert.strictEqual((await quitar(e.jwtComensal)).status, 200);
+    assert.ok(consultaPagos(e));
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4 comensal: un pedido de OTRA mesa no consulta (el 403 de siempre, sin decir nada de los pagos de esa mesa)', async () => {
+  const e = escenario('Ana', {
+    pedido: { id_pedido: PEDIDO, id_mesa: 9, codigo_pedido: 'PED-261111-ABCDE', estado: 'recibido', total: 50000, creado_en: new Date() },
+  }, conConsulta(() => ({ mesa: 9, enCurso: true, pagos: [] })));
+  try {
+    assert.strictEqual((await quitar(e.jwtComensal)).status, 403);
+    assert.strictEqual(consultaPagos(e), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4: el comensal no toma el bloqueo de la mesa (solo el camino del personal)', async () => {
+  const e = escenario('Ana');
+  try {
+    assert.strictEqual((await quitar(e.jwtComensal)).status, 200);
+    assert.strictEqual(e.db.buscar('SELECT m.id_mesa FROM mesas m'), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
 for (const [caso, cuerpo] of [['un campo', { motivo: 'no lo quiero' }], ['un arreglo', [1]]]) {
   test(`quitar plato: cuerpo con ${caso} -> 400 cuerpo_invalido`, async () => {
     const e = escenario();
@@ -301,7 +411,8 @@ test('quitar el último plato vivo: el pedido pasa a cancelado con historial, av
     assert.strictEqual(e.db.buscar('UPDATE mesas'), undefined, 'la mesa no se libera');
 
     await socketNotifier.esperarAvisos();
-    const rutas = e.socket.avisos.map((a) => a.ruta);
+    // Los avisos (POST), sin la consulta GET de pagos en curso (T4), que va antes.
+    const rutas = e.socket.avisos.map((a) => a.ruta).filter((r) => !r.startsWith(RUTA_PAGOS_EN_CURSO));
     assert.deepStrictEqual(rutas.filter((r) => r.startsWith('/internal/')), ['/internal/item-cancelado', '/internal/order-status']);
     const estado = e.socket.buscar('/internal/order-status').cuerpo;
     assert.strictEqual(estado.estado, 'cancelado');

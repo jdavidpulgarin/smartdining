@@ -2,19 +2,18 @@
 
 const URL_POR_DEFECTO = '/seguimiento';
 const ICONO_PUSH = '/icons/pwa-192x192.png';
-// No hay ícono monocromo dedicado en public/icons/; se reutiliza ICONO_PUSH.
-const BADGE_PUSH = ICONO_PUSH;
+const BADGE_PUSH = '/apple-touch-icon.png';
 
 // Copia sincronizada con src/utils/notificacionPush.js (formatearNotificacionPush):
 // public/sw-push.js se carga vía importScripts() en un service worker clásico y
 // no puede importar módulos ES de src/.
 const TEXTOS_POR_ESTADO = {
   en_preparacion: {
-    titulo: 'Tu pedido está en preparación \u{1F468}\u200D\u{1F373}',
+    titulo: 'Tu pedido está en preparación',
     cuerpo: (ref) => `${ref}Te avisamos cuando esté listo.`,
   },
   listo: {
-    titulo: '¡Tu plato está listo! \u{1F37D}\uFE0F',
+    titulo: 'Tu pedido está listo',
     cuerpo: (ref) => `${ref}Ya sale de cocina hacia tu mesa.`,
   },
   cancelado: {
@@ -70,13 +69,17 @@ self.addEventListener('push', (event) => {
   const url = rutaSegura(datos.url);
   const idPedido = datos.id_pedido ?? null;
   const estado = typeof datos.estado === 'string' ? datos.estado : null;
+  const tag =
+    idPedido !== null
+      ? (estado ? `pedido-${idPedido}-${estado}` : `pedido-${idPedido}`)
+      : (estado ? `smartdining-${estado}` : 'smartdining');
 
   const opciones = {
     body: cuerpo,
     icon: ICONO_PUSH,
     badge: BADGE_PUSH,
-    tag: idPedido !== null ? `pedido-${idPedido}` : 'smartdining',
-    renotify: true,
+    tag,
+    renotify: false,
     requireInteraction: estado === 'listo',
     vibrate: [200, 100, 200],
     actions: [{ action: 'ver', title: 'Ver mi pedido' }],

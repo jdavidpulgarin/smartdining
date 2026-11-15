@@ -26,6 +26,14 @@ function fakeReferencia({ mesaDeLaReferencia = null, choque = false } = {}) {
   let insertado = false;
   return instalarFakeDb((sql) => {
     if (sql.includes('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE')) return { rows: [{ id_mesa: ID_MESA }] };
+    // T4: el pago en línea bloquea la mesa con otra sentencia (dice si es otra
+    // visita) y busca lo ya registrado en transacciones y excedentes.
+    if (sql.includes('FROM mesas WHERE id_mesa = $1::int FOR UPDATE')) return { rows: [{ id_mesa: ID_MESA, otra_visita: false }] };
+    if (sql.includes('LEFT JOIN excedentes_pago_en_linea')) {
+      return mesaDeLaReferencia !== null && !choque
+        ? { rows: [{ aplicado: '3000000', id_primera: 900, excedente_centavos: null, motivo: null, id_del_excedente: null }] }
+        : { rows: [{ aplicado: '0', id_primera: null, excedente_centavos: null, motivo: null, id_del_excedente: null }] };
+    }
     if (sql.includes('SELECT 1 FROM transacciones WHERE referencia_externa')) {
       return mesaDeLaReferencia !== null && !choque ? { rows: [{ '?column?': 1 }] } : { rows: [] };
     }
@@ -114,9 +122,12 @@ test('el pago en linea (/internal) NO cambia: una referencia de otra mesa sigue 
         monto_centavos: 3000000, moneda: 'COP', metodo_pago: 'online',
       });
     assert.strictEqual(res.status, 200);
+    // Sigue siendo duplicado sea de la mesa que sea. Desde T4 (§8.4) la
+    // respuesta trae además lo que se registró la primera vez.
     assert.deepStrictEqual(res.body, {
       ok: true, duplicado: true, saldo_restante_centavos: 3000000, mesa_liberada: false,
-    }, 'la misma respuesta de siempre, sin campos nuevos');
+      aplicado_centavos: 3000000, excedente_centavos: 0, motivo_excedente: null, id_transaccion: 900,
+    });
   } finally {
     db.restaurar();
     socket.restaurar();

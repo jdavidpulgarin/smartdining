@@ -100,7 +100,9 @@ test('issue-135: se invalida ANTES de reenviar, y aunque el reenvio falle', asyn
   const notifier = notifierFalso({ lanza: true });
   const invalidaciones = contadorDeInvalidaciones();
   try {
-    await assert.rejects(() => avisos.manejarAviso(avisoDisponibilidad(), { notifier }));
+    // Desde la cola de avisos (avisos-stock-cola.js) una excepcion del
+    // notificador es un fallo reintentable mas: manejarAviso ya no lanza.
+    await assert.doesNotReject(() => avisos.manejarAviso(avisoDisponibilidad(), { notifier }));
 
     assert.strictEqual(invalidaciones(), 1, 'la cache se invalido igual');
     assert.strictEqual(redis.tiene('cache:menu'), false);

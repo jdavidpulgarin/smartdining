@@ -64,6 +64,18 @@ case "$1" in
 esac
 `;
 
+// ENTORNO es obligatorio en respaldo.sh. Si la prueba no lo da, se deduce del
+// contenedor (pg-prod → produccion, pg-stg → staging) o del postgres en marcha;
+// ENTORNO: null lo quita del todo.
+function entornoPorDefecto(extra) {
+  if ('ENTORNO' in extra) return extra.ENTORNO;
+  const c = extra.RESPALDO_CONTENEDOR || '';
+  if (c.startsWith('pg-prod')) return 'produccion';
+  if (c.startsWith('pg-stg')) return 'staging';
+  if (extra.FALSO_PG_smartdining && !extra.FALSO_PG_smartdining_staging) return 'produccion';
+  return 'staging';
+}
+
 function entorno(extra = {}) {
   const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-respaldo-'));
   const bin = path.join(raiz, 'bin');
@@ -75,6 +87,8 @@ function entorno(extra = {}) {
   const env = {
     ...process.env, DOCKER: path.join(bin, 'docker'), RESPALDOS_DIR: respaldos, ...extra,
   };
+  const valorEntorno = entornoPorDefecto(extra);
+  if (valorEntorno === null) delete env.ENTORNO; else env.ENTORNO = valorEntorno;
   const correr = (...args) => spawnSync('sh', [SCRIPT, ...args], { env, encoding: 'utf8' });
   const archivos = (proyecto, tipo) => {
     const d = path.join(respaldos, proyecto, tipo);
@@ -121,13 +135,59 @@ test('uso: un tipo desconocido sale con 2', () => {
   assert.match(r.stderr, /uso:/);
 });
 
-test('falla si no hay postgres, o si corren producción y staging a la vez', () => {
-  let r = entorno().correr('diario');
+test('falla si no hay postgres del proyecto de ENTORNO', () => {
+  let r = entorno({ ENTORNO: 'staging' }).correr('diario');
   assert.strictEqual(r.status, 1);
-  assert.match(r.stderr, /no hay ningún postgres/);
-  r = entorno({ FALSO_PG_smartdining: 'pg-prod-1', FALSO_PG_smartdining_staging: 'pg-stg-1' }).correr('diario');
+  assert.match(r.stderr, /no hay ningún postgres de smartdining-staging \(ENTORNO=staging\)/);
+  // El de producción en marcha no sirve para ENTORNO=staging.
+  r = entorno({ ENTORNO: 'staging', FALSO_PG_smartdining: 'pg-prod-1' }).correr('diario');
   assert.strictEqual(r.status, 1);
-  assert.match(r.stderr, /están corriendo los postgres de smartdining y de smartdining-staging/);
+  assert.match(r.stderr, /no hay ningún postgres de smartdining-staging/);
+});
+
+test('con producción y staging a la vez, cada ENTORNO respalda solo el suyo', () => {
+  const ambos = { FALSO_PG_smartdining: 'pg-prod-1', FALSO_PG_smartdining_staging: 'pg-stg-1' };
+  for (const [valor, propio, ajeno] of [['staging', 'smartdining-staging', 'smartdining'], ['produccion', 'smartdining', 'smartdining-staging']]) {
+    const e = entorno({ ...ambos, ENTORNO: valor });
+    const r = e.correr('diario');
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.strictEqual(e.archivos(propio, 'diario').length, 1, valor);
+    assert.deepStrictEqual(e.archivos(ajeno, 'diario'), [], `${valor} no escribe en ${ajeno}`);
+  }
+});
+
+test('ENTORNO falta o no es staging ni produccion: sale con 2 y no toca nada', () => {
+  for (const valor of [null, '', 'prod', 'Staging', 'PRODUCCION', 'produccion ', 'smartdining', 'staging;rm']) {
+    const e = entorno({ ENTORNO: valor, FALSO_PG_smartdining: 'pg-prod-1', FALSO_PG_smartdining_staging: 'pg-stg-1' });
+    const r = e.correr('diario');
+    assert.strictEqual(r.status, 2, JSON.stringify(valor));
+    assert.match(r.stderr, /ENTORNO debe ser 'staging' o 'produccion'/);
+    assert.match(r.stderr, /No se respaldó nada/);
+    assert.deepStrictEqual(e.archivos('smartdining', 'diario'), []);
+    assert.deepStrictEqual(e.archivos('smartdining-staging', 'diario'), []);
+  }
+});
+
+test('--entorno como argumento vale igual que la variable (y la variable no hace falta)', () => {
+  const e = entorno({ ENTORNO: null, RESPALDO_CONTENEDOR: 'pg-prod-1' });
+  let r = e.correr('--entorno', 'produccion', 'predeploy', '95ca756');
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(e.archivos('smartdining', 'predeploy').length, 1);
+  r = e.correr('--entorno', 'otro', 'diario');
+  assert.strictEqual(r.status, 2);
+  r = e.correr('--entorno');
+  assert.strictEqual(r.status, 2);
+});
+
+test('un contenedor del otro entorno se rechaza: nunca se escribe en la carpeta ajena', () => {
+  for (const [valor, contenedor, proyecto] of [['staging', 'pg-prod-1', 'smartdining'], ['produccion', 'pg-stg-1', 'smartdining-staging']]) {
+    const e = entorno({ ENTORNO: valor, RESPALDO_CONTENEDOR: contenedor });
+    const r = e.correr('predeploy', '95ca756');
+    assert.strictEqual(r.status, 1, valor);
+    assert.match(r.stderr, new RegExp(`proyecto '${proyecto}', no de .*\\(ENTORNO=${valor}\\)`));
+    assert.deepStrictEqual(e.archivos('smartdining', 'predeploy'), []);
+    assert.deepStrictEqual(e.archivos('smartdining-staging', 'predeploy'), []);
+  }
 });
 
 test('falla si el contenedor no es de smartdining ni de staging', () => {
@@ -143,14 +203,14 @@ test('proyecto sin carpeta preparada: falla con el comando exacto (desde el clon
   assert.strictEqual(r.status, 1);
   const raiz = path.resolve(__dirname, '..', '..');
   assert.match(r.stderr, /no existe .*smartdining: no se respaldó nada/);
-  assert.ok(r.stderr.includes('sudo sh infra/scripts/instalar-respaldos.sh'), r.stderr);
+  assert.ok(r.stderr.includes('sudo ENTORNO=produccion sh infra/scripts/instalar-respaldos.sh'), r.stderr);
   // La ruta real del clon desde el que corre (en Git Bash llega como /c/...).
   const rutaSh = raiz.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, l) => `/${l.toLowerCase()}`);
   assert.ok(r.stderr.includes(`cd ${rutaSh} &&`) || r.stderr.includes(`cd ${raiz} &&`), r.stderr);
   assert.ok(!fs.existsSync(path.join(e.respaldos, 'smartdining')), 'no crea la carpeta del proyecto');
 });
 
-test('proyecto sin carpeta, corriendo desde la copia instalada (timer): da los dos clones del VPS', () => {
+test('proyecto sin carpeta, corriendo desde la copia instalada (timer): da el clon de su entorno', () => {
   const e = entorno({ RESPALDO_CONTENEDOR: 'pg-stg-1' });
   fs.rmSync(path.join(e.respaldos, 'smartdining-staging'), { recursive: true });
   // Como /usr/local/lib/smartdining/respaldo.sh: fuera de cualquier clon.
@@ -159,8 +219,13 @@ test('proyecto sin carpeta, corriendo desde la copia instalada (timer): da los d
   fs.copyFileSync(SCRIPT, copia);
   const r = spawnSync('sh', [copia, 'diario'], { env: e.env, encoding: 'utf8' });
   assert.strictEqual(r.status, 1);
-  assert.ok(r.stderr.includes('cd /home/deploy/smartdining && sudo sh infra/scripts/instalar-respaldos.sh'), r.stderr);
-  assert.ok(r.stderr.includes('/srv/smartdining-staging'), r.stderr);
+  assert.ok(r.stderr.includes('cd /srv/smartdining-staging && sudo ENTORNO=staging sh infra/scripts/instalar-respaldos.sh'), r.stderr);
+  // Y en producción, el suyo.
+  const p = entorno({ RESPALDO_CONTENEDOR: 'pg-prod-1' });
+  fs.rmSync(path.join(p.respaldos, 'smartdining'), { recursive: true });
+  const rp = spawnSync('sh', [copia, 'diario'], { env: p.env, encoding: 'utf8' });
+  assert.strictEqual(rp.status, 1);
+  assert.ok(rp.stderr.includes('cd /srv/smartdining && sudo ENTORNO=produccion sh infra/scripts/instalar-respaldos.sh'), rp.stderr);
 });
 
 test('predeploy/ y diario/ se crean solos y heredan setgid y grupo de la carpeta del proyecto', { skip: !POSIX && 'sin permisos POSIX en Windows' }, () => {

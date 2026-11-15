@@ -403,6 +403,26 @@ describe('accionErrorQuitar (J-14)', () => {
       refrescar: false,
     });
 
+    expect(accionErrorQuitar({ status: 409, motivo: 'pago_en_curso' })).toEqual({
+      tipo: 'pago_en_curso',
+      mensaje:
+        'Alguien de la mesa está pagando en línea; espera a que termine e inténtalo otra vez.',
+      refrescar: false,
+    });
+
+    expect(
+      accionErrorQuitar({
+        status: 409,
+        motivo: 'pago_en_curso',
+        detalle: 'sin_verificar',
+      })
+    ).toEqual({
+      tipo: 'pago_en_curso',
+      mensaje:
+        'No se pudo comprobar el pago; espera unos segundos e inténtalo otra vez.',
+      refrescar: false,
+    });
+
     expect(accionErrorQuitar({ status: 403, motivo: 'no_es_tuyo' })).toEqual({
       tipo: 'no_disponible',
       mensaje: 'No pudimos quitar este plato.',
@@ -980,6 +1000,30 @@ describe('incorporarPedido y conteo en vivo de Mis pedidos (J-14)', () => {
       expect(r).toEqual({
         tipo: 'pago_registrado',
         mensaje: 'Ya hay un pago registrado; pídele ayuda al mesero.',
+        recargar: false,
+      });
+    });
+
+    it('pago_en_curso -> mensaje de pago en linea y recargar: false', () => {
+      const r = accionErrorCancelarPedido({ status: 409, motivo: 'pago_en_curso' });
+      expect(r).toEqual({
+        tipo: 'pago_en_curso',
+        mensaje:
+          'Alguien de la mesa está pagando en línea; espera a que termine e inténtalo otra vez.',
+        recargar: false,
+      });
+    });
+
+    it('pago_en_curso con detalle sin_verificar -> mensaje de comprobar pago y recargar: false', () => {
+      const r = accionErrorCancelarPedido({
+        status: 409,
+        motivo: 'pago_en_curso',
+        detalle: 'sin_verificar',
+      });
+      expect(r).toEqual({
+        tipo: 'pago_en_curso',
+        mensaje:
+          'No se pudo comprobar el pago; espera unos segundos e inténtalo otra vez.',
         recargar: false,
       });
     });

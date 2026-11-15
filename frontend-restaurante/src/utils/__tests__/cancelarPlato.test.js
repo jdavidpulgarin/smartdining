@@ -39,3 +39,26 @@ describe('utils/cancelarPlato (D-13)', () => {
     expect(mensajeErrorCancelarPlato({ message: 'boom' })).toMatch(/boom/)
   })
 })
+
+describe('T4: textos de los 409 al cancelar un plato', () => {
+  it('pago_en_curso: alguien está pagando en línea (no el genérico)', () => {
+    const m = mensajeErrorCancelarPlato({ status: 409, motivo: 'pago_en_curso', data: { motivo: 'pago_en_curso' }, message: 'Hay un pago en curso en esta mesa.' })
+    expect(m).toMatch(/pagando en línea/)
+    expect(m).not.toMatch(/^No se pudo cancelar el plato/)
+  })
+
+  it('pago_en_curso con detalle sin_verificar: no se pudo comprobar', () => {
+    const m = mensajeErrorCancelarPlato({ status: 409, motivo: 'pago_en_curso', data: { motivo: 'pago_en_curso', detalle: 'sin_verificar' } })
+    expect(m).toMatch(/No se pudo comprobar/)
+  })
+
+  it('pago_registrado porque el dueño de la línea ya pagó (#259): lo dice así', () => {
+    const m = mensajeErrorCancelarPlato({ status: 409, motivo: 'pago_registrado', message: 'Ese comensal ya pagó: reembolsa antes de cancelar su plato' })
+    expect(m).toMatch(/ya pagó su parte/)
+  })
+
+  it('pago_registrado porque lo pagado supera el total nuevo: el texto de siempre', () => {
+    const m = mensajeErrorCancelarPlato({ status: 409, motivo: 'pago_registrado', message: 'Error 409' })
+    expect(m).toMatch(/supera el total/)
+  })
+})

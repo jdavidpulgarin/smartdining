@@ -40,6 +40,9 @@ function fakePersonal({
   // centavos, como los devuelve pg (bigint -> texto). Por omisión, sin pagos.
   pagadoCentavos = 0,
   totalNuevoCentavos = null,
+  // T4: los comensales con un pago completado en la visita actual de la mesa,
+  // tal como los devuelve la consulta (texto o null = «General»/mesa completa).
+  pagosDeComensales = [],
   vivas = 1,
   transicionValida = true,
   falloEn = null,
@@ -47,11 +50,16 @@ function fakePersonal({
   const totalNuevo = totalNuevoCentavos ?? (pedido && linea ? (pedido.total - linea.subtotal) * 100 : 0);
   return instalarFakeDb((sql) => {
     if (falloEn && sql.includes(falloEn.sql)) throw falloEn.error;
+    // T4: la lectura previa (sin bloquear) para consultar pagos en curso.
+    if (sql.includes('SELECT p.id_mesa, dp.comensal, dp.estado_item')) {
+      return { rows: pedido && linea ? [{ id_mesa: pedido.id_mesa, comensal: linea.comensal, estado_item: linea.estado_item }] : [] };
+    }
     if (sql.includes('total, creado_en') && sql.includes('FOR UPDATE')) return { rows: pedido ? [pedido] : [] };
     if (sql.includes('FOR UPDATE OF dp')) return { rows: linea ? [linea] : [] };
     if (sql.includes('pagado_centavos')) {
       return { rows: [{ total_centavos: String(totalNuevo), pagado_centavos: String(pagadoCentavos) }] };
     }
+    if (sql.includes('SELECT DISTINCT t.comensal')) return { rows: pagosDeComensales.map((comensal) => ({ comensal })) };
     if (sql.includes('FROM transacciones t')) return { rows: [{ bloquea: pagoBloquea }] };
     if (sql.includes('count(*)::int AS n FROM detalles_pedido')) return { rows: [{ n: vivas }] };
     if (sql.includes('FROM transiciones_validas')) return { rows: [{ ok: transicionValida }] };
@@ -72,8 +80,24 @@ const cancelar = (rol, { cuerpo = { motivo: 'Se acabó' }, id = USUARIO, sinCuer
   return sinCuerpo ? r : r.send(cuerpo);
 };
 
+const RUTA_PAGOS_EN_CURSO = '/internal/pagos-en-curso';
+
+/** Los avisos (POST) al socket-server, sin la consulta GET de pagos en curso. */
+const avisosSinConsulta = (e) => e.socket.avisos.filter((a) => !a.ruta.startsWith(RUTA_PAGOS_EN_CURSO));
+
+/**
+ * El socket-server doble. Por omisión, GET /internal/pagos-en-curso dice que no
+ * hay nada en curso (T4) y los avisos responden { ok: true }; `responderSocket`
+ * decide el resto (y puede sobrescribir la consulta).
+ */
 function escenario(opcionesDb = {}, responderSocket = () => ({ ok: true })) {
-  const socket = instalarFakeSocket(responderSocket);
+  const socket = instalarFakeSocket((ruta, cuerpo, peticion) => {
+    const propio = responderSocket(ruta, cuerpo, peticion);
+    if (ruta.startsWith(RUTA_PAGOS_EN_CURSO) && propio && propio.ok === true && propio.enCurso === undefined) {
+      return { mesa: 9, enCurso: false, pagos: [] };
+    }
+    return propio;
+  });
   const db = fakePersonal(opcionesDb);
   return { db, socket, restaurar() { db.restaurar(); socket.restaurar(); } };
 }
@@ -125,6 +149,25 @@ test('personal cancela plato: fija app.id_usuario con set_config DENTRO de la tr
     assert.ok(i('BEGIN') < i('set_config'));
     assert.ok(i('set_config') < i('total, creado_en'));
     assert.ok(i('total, creado_en') < i('FOR UPDATE OF dp'), 'pedido ANTES que la línea');
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4: el personal bloquea la MESA (FOR UPDATE, por subconsulta del pedido) ANTES que el pedido, como los cobros', async () => {
+  const e = escenario();
+  try {
+    assert.strictEqual((await cancelar('mesero')).status, 200);
+    const sqls = e.db.ejecutadas.map((q) => q.sql);
+    const iMesa = sqls.findIndex((s) => s.includes('SELECT m.id_mesa FROM mesas m'));
+    const iPedido = sqls.findIndex((s) => s.includes('total, creado_en') && s.includes('FOR UPDATE'));
+    assert.ok(iMesa >= 0, 'bloquea la mesa');
+    const mesa = e.db.ejecutadas[iMesa];
+    assert.ok(mesa.sql.includes('FOR UPDATE'));
+    assert.ok(mesa.sql.includes('SELECT p.id_mesa FROM pedidos p WHERE p.id_pedido = $1::int'), 'la mesa sale del pedido, en la misma sentencia');
+    assert.deepStrictEqual(mesa.params, [PEDIDO]);
+    assert.ok(sqls.findIndex((s) => s.includes('set_config')) < iMesa, 'dentro de la transacción');
+    assert.ok(iMesa < iPedido, 'mesa ANTES que el pedido');
   } finally {
     e.restaurar();
   }
@@ -248,6 +291,89 @@ test('personal cancela plato: el pago se compara DESPUÉS de cancelar la línea,
   }
 });
 
+// --- T4 (review de #235): el dueño de la línea ya pagó ------------------------
+
+const MENSAJE_YA_PAGO = 'Ese comensal ya pagó: reembolsa antes de cancelar su plato';
+
+test('t4: el plato de Ana con Ana pagada -> 409 pago_registrado con el mensaje claro, ANTES de tocar la línea, y sin avisos', async () => {
+  const e = escenario({ linea: lineaEn('cocinando', { comensal: 'Ana' }), pagosDeComensales: ['Ana'] });
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.deepStrictEqual(res.body, { error: MENSAJE_YA_PAGO, motivo: 'pago_registrado' });
+    assert.strictEqual(e.db.buscar("UPDATE detalles_pedido SET estado_item = 'cancelado'"), undefined, 'la línea no se toca');
+    assert.strictEqual(e.db.buscar('pagado_centavos'), undefined, 'no llega a la regla del #206');
+    sinCancelar(e);
+    await socketNotifier.esperarAvisos();
+    assert.strictEqual(avisosSinConsulta(e).length, 0);
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4: la consulta busca pagos completados de la MESA en la visita actual (sesion_iniciada_en), y los del propio pedido', async () => {
+  const e = escenario({ linea: lineaEn('cocinando', { comensal: 'Beto' }), pagosDeComensales: ['Ana'] });
+  try {
+    assert.strictEqual((await cancelar('admin')).status, 200);
+    const q = e.db.buscar('SELECT DISTINCT t.comensal');
+    assert.ok(q, 'mira de quién son los pagos');
+    assert.ok(q.sql.includes("t.estado_transaccion = 'completada'"));
+    assert.ok(q.sql.includes('t.creado_en >= (SELECT m.sesion_iniciada_en FROM mesas m'), 'la visita actual');
+    assert.ok(q.sql.includes('t.id_pedido = $1::int'), 'siempre los del propio pedido');
+    assert.ok(q.sql.includes('p.id_mesa = $2::int'), 'y cualquier pedido de la mesa');
+    assert.deepStrictEqual(q.params, [PEDIDO, 9]);
+    const sqls = e.db.ejecutadas.map((x) => x.sql);
+    const iPagos = sqls.findIndex((s) => s.includes('SELECT DISTINCT t.comensal'));
+    const iLinea = sqls.findIndex((s) => s.includes("UPDATE detalles_pedido SET estado_item = 'cancelado'"));
+    assert.ok(iPagos >= 0 && iPagos < iLinea, 'antes de cancelar la línea');
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4: el plato de Beto sin pagar -> 200 aunque Ana y la mesa completa hayan pagado', async () => {
+  const e = escenario({ linea: lineaEn('cocinando', { comensal: 'Beto' }), pagosDeComensales: ['Ana', null] });
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.ok(e.db.buscar("UPDATE detalles_pedido SET estado_item = 'cancelado'"));
+    assert.ok(e.db.buscar('pagado_centavos'), 'la regla del #206 se sigue comprobando');
+  } finally {
+    e.restaurar();
+  }
+});
+
+for (const [caso, comensalLinea, pagos, esperado] of [
+  ['el alias se compara por su clave (« aná » pagó, la línea es de «Ana»)', 'Ana', [' aná '], 409],
+  ['línea «General» con un pago de la mesa completa (comensal null)', null, [null], 409],
+  ['línea «General» con un pago a nombre de «General»', null, ['General'], 409],
+  ['línea «General» con solo pagos de comensales con nombre', null, ['Ana'], 200],
+  ['línea de Ana con solo un pago de la mesa completa (lo cubre el #206)', 'Ana', [null], 200],
+  ['sin ningún pago en la visita', 'Ana', [], 200],
+]) {
+  test(`t4: ${caso} -> ${esperado}`, async () => {
+    const e = escenario({ linea: lineaEn('cocinando', { comensal: comensalLinea }), pagosDeComensales: pagos });
+    try {
+      const res = await cancelar('mesero');
+      assert.strictEqual(res.status, esperado, JSON.stringify(res.body));
+      if (esperado === 409) assert.strictEqual(res.body.error, MENSAJE_YA_PAGO);
+    } finally {
+      e.restaurar();
+    }
+  });
+}
+
+test('t4: el mensaje del #206 (pagado > total nuevo) no cambia', async () => {
+  const e = escenario({ pagadoCentavos: 2000001 });
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.status, 409);
+    assert.match(res.body.error, /supera el total que quedaría/);
+  } finally {
+    e.restaurar();
+  }
+});
+
 test('personal cancela plato: pagado > total nuevo -> 409 pago_registrado, ROLLBACK y sin avisos', async () => {
   const e = escenario({ pagadoCentavos: 2000001 });
   try {
@@ -259,7 +385,7 @@ test('personal cancela plato: pagado > total nuevo -> 409 pago_registrado, ROLLB
     sinCancelar(e); // ... y el ROLLBACK la deshace, con su movimiento de stock
     assert.strictEqual(e.db.buscar('count(*)::int AS n FROM detalles_pedido'), undefined, 'no sigue al paso del pedido');
     await socketNotifier.esperarAvisos();
-    assert.strictEqual(e.socket.avisos.length, 0, 'nada que avisar');
+    assert.strictEqual(avisosSinConsulta(e).length, 0, 'nada que avisar');
   } finally {
     e.restaurar();
   }
@@ -423,5 +549,212 @@ test('personal cancela plato: estado_pedido del aviso con el pedido vivo (en_pre
     assert.strictEqual(e.socket.buscar('/internal/order-status'), undefined);
   } finally {
     e.restaurar();
+  }
+});
+
+// --- T4 (#260): pago en línea en curso (GET /internal/pagos-en-curso, §6.6) ----
+
+const MENSAJE_EN_CURSO = 'Hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.';
+const MENSAJE_SIN_VERIFICAR =
+  'No se pudo comprobar si hay un pago en curso en esta mesa. Espera un momento e inténtalo de nuevo.';
+
+/** El socket-server doble contesta la consulta con `respuesta()` (un cuerpo, un Error o { __status }). */
+const conConsulta = (respuesta) => (ruta) => (ruta.startsWith(RUTA_PAGOS_EN_CURSO) ? respuesta() : { ok: true });
+
+/** La consulta hecha (o undefined), con su query string ya separado. */
+function consulta(e) {
+  const a = e.socket.avisos.find((x) => x.ruta.startsWith(RUTA_PAGOS_EN_CURSO));
+  if (!a) return undefined;
+  const qs = a.ruta.split('?')[1] || '';
+  return { ...a, query: Object.fromEntries(new URLSearchParams(qs)) };
+}
+
+/** Sin transacción: ni BEGIN ni bloqueos (la consulta va antes). */
+const sinTransaccion = (e) => {
+  assert.strictEqual(e.db.buscar('BEGIN'), undefined, 'no abre la transacción');
+  assert.strictEqual(e.db.buscar('FOR UPDATE'), undefined, 'ni bloquea nada');
+  assert.strictEqual(e.db.buscar("UPDATE detalles_pedido SET estado_item = 'cancelado'"), undefined);
+};
+
+/** Captura console.error y console.warn durante fn. */
+async function conLogs(fn) {
+  const errores = [];
+  const advertencias = [];
+  const original = { error: console.error, warn: console.warn };
+  console.error = (...a) => errores.push(a.map(String).join(' '));
+  console.warn = (...a) => advertencias.push(a.map(String).join(' '));
+  try {
+    return { resultado: await fn(), errores, advertencias };
+  } finally {
+    console.error = original.error;
+    console.warn = original.warn;
+  }
+}
+
+test('t4 pago en curso: enCurso true -> 409 pago_en_curso SIN detalle, sin abrir la transacción', async () => {
+  const e = escenario(
+    { linea: lineaEn('cocinando', { comensal: 'Ana' }) },
+    conConsulta(() => ({
+      mesa: 9, enCurso: true, pagos: [{ comensal: 'Beto', modo: 'total', monto: 90000, venceEn: '2026-11-14T04:30:00.000Z' }],
+    }))
+  );
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+    assert.deepStrictEqual(res.body, { error: MENSAJE_EN_CURSO, motivo: 'pago_en_curso' });
+    sinTransaccion(e);
+    const c = consulta(e);
+    assert.ok(c, 'consultó al socket-server');
+    assert.deepStrictEqual(c.query, { mesa: '9', comensal: 'Ana' });
+    assert.strictEqual(c.opciones.method, 'GET');
+    assert.strictEqual(c.cabeceras['x-internal-key'], e.socket.clave);
+    assert.ok(c.opciones.signal, 'con timeout');
+    assert.strictEqual(avisosSinConsulta(e).length, 0, 'nada que avisar');
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4 pago en curso: enCurso false -> sigue con las demás guardas y cancela (200)', async () => {
+  const e = escenario(
+    { linea: lineaEn('cocinando', { comensal: 'Ana' }) },
+    conConsulta(() => ({ mesa: 9, enCurso: false, pagos: [] }))
+  );
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.ok(e.db.buscar("UPDATE detalles_pedido SET estado_item = 'cancelado'"));
+    assert.ok(e.db.buscar('SELECT DISTINCT t.comensal'), 'y la guarda de pagos completados (#259) sigue');
+  } finally {
+    e.restaurar();
+  }
+});
+
+for (const [caso, respuesta, logEsperado] of [
+  ['un 500 ERROR_INTERNO', () => ({ __status: 500, error: 'x', codigo: 'ERROR_INTERNO' }), /respondio 500 ERROR_INTERNO/],
+  ['un 503 NO_CONFIGURADO', () => ({ __status: 503, error: 'x', codigo: 'NO_CONFIGURADO' }), /respondio 503 NO_CONFIGURADO/],
+  [
+    'la red caida (ECONNREFUSED)',
+    () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }),
+    /INALCANZABLE\/ECONNREFUSED/,
+  ],
+  ['un 200 sin enCurso', () => ({ mesa: 9, pagos: [] }), /respuesta sin enCurso/],
+]) {
+  test(`t4 pago en curso: ${caso} -> 409 pago_en_curso con detalle sin_verificar, sin abrir la transacción`, async () => {
+    const e = escenario({ linea: lineaEn('cocinando', { comensal: 'Ana' }) }, conConsulta(respuesta));
+    try {
+      const { resultado: res, errores } = await conLogs(() => cancelar('mesero'));
+      assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+      assert.deepStrictEqual(res.body, { error: MENSAJE_SIN_VERIFICAR, motivo: 'pago_en_curso', detalle: 'sin_verificar' });
+      sinTransaccion(e);
+      assert.match(errores.join('\n'), logEsperado);
+    } finally {
+      e.restaurar();
+    }
+  });
+}
+
+test('t4 pago en curso: un 4xx -> sin_verificar y ERROR en el log con solo el status y el codigo (nunca la clave)', async () => {
+  const e = escenario(
+    { linea: lineaEn('cocinando', { comensal: 'Ana' }) },
+    conConsulta(() => ({ __status: 400, error: 'Parametro de mas', codigo: 'PAYLOAD_INVALIDO' }))
+  );
+  try {
+    const { resultado: res, errores } = await conLogs(() => cancelar('mesero'));
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.detalle, 'sin_verificar');
+    const log = errores.join('\n');
+    assert.match(log, /pagos-en-curso respondio 400 PAYLOAD_INVALIDO: consulta mal armada o clave errada/);
+    assert.ok(!log.includes(e.socket.clave), 'la clave no va al log');
+    assert.ok(!log.includes('Parametro de mas'), 'ni el cuerpo');
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4 pago en curso: sin respuesta en 1500 ms -> sin_verificar (TIMEOUT)', async () => {
+  const e = escenario({ linea: lineaEn('cocinando', { comensal: 'Ana' }) }, conConsulta(() => new Promise(() => {})));
+  try {
+    const inicio = Date.now();
+    const { resultado: res, errores } = await conLogs(() => cancelar('mesero'));
+    const ms = Date.now() - inicio;
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.detalle, 'sin_verificar');
+    assert.match(errores.join('\n'), /no respondio \(TIMEOUT\)/);
+    assert.ok(ms >= 1400 && ms < 4000, `cortó a los ~1500 ms (${ms} ms)`);
+    sinTransaccion(e);
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4 pago en curso: la línea «General» (sin comensal) consulta SIN comensal; un alias viejo inválido, también', async () => {
+  for (const comensal of [null, 'A']) {
+    const e = escenario({ linea: lineaEn('cocinando', { comensal }) }, conConsulta(() => ({ mesa: 9, enCurso: false, pagos: [] })));
+    try {
+      assert.strictEqual((await cancelar('mesero')).status, 200);
+      assert.deepStrictEqual(consulta(e).query, { mesa: '9' }, `comensal=${comensal}`);
+    } finally {
+      e.restaurar();
+    }
+  }
+});
+
+test('t4 pago en curso: el alias va normalizado como lo valida el socket-server', async () => {
+  const e = escenario(
+    { linea: lineaEn('cocinando', { comensal: '  Ána   María ' }) },
+    conConsulta(() => ({ mesa: 9, enCurso: false, pagos: [] }))
+  );
+  try {
+    assert.strictEqual((await cancelar('mesero')).status, 200);
+    assert.deepStrictEqual(consulta(e).query, { mesa: '9', comensal: 'Ána María' });
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4 pago en curso: un domicilio (sin mesa) no consulta', async () => {
+  const e = escenario(
+    { pedido: pedidoEn('en_preparacion', { id_mesa: null }), linea: lineaEn('cocinando', { comensal: 'Ana' }) },
+    conConsulta(() => ({ mesa: 9, enCurso: true, pagos: [] }))
+  );
+  try {
+    assert.strictEqual((await cancelar('mesero')).status, 200);
+    assert.strictEqual(consulta(e), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4 pago en curso: una línea ya cancelada no consulta (el 409 item_ya_cancelado va primero)', async () => {
+  const e = escenario({ linea: lineaEn('cancelado', { comensal: 'Ana' }) }, conConsulta(() => ({ mesa: 9, enCurso: true, pagos: [] })));
+  try {
+    const res = await cancelar('mesero');
+    assert.strictEqual(res.body.motivo, 'item_ya_cancelado');
+    assert.strictEqual(consulta(e), undefined);
+  } finally {
+    e.restaurar();
+  }
+});
+
+test('t4 pago en curso: sin SOCKET_URL fuera de producción se omite con advertencia; en producción es sin_verificar', async () => {
+  const nodeEnv = process.env.NODE_ENV;
+  for (const [entorno, esperado] of [['test', 200], ['production', 409]]) {
+    const e = escenario({ linea: lineaEn('cocinando', { comensal: 'Ana' }) });
+    delete process.env.SOCKET_URL; // e.restaurar() lo deja como estaba
+    process.env.NODE_ENV = entorno;
+    try {
+      const { resultado: res, errores, advertencias } = await conLogs(() => cancelar('mesero'));
+      assert.strictEqual(res.status, esperado, `${entorno}: ${JSON.stringify(res.body)}`);
+      if (entorno === 'production') {
+        assert.strictEqual(res.body.detalle, 'sin_verificar');
+        assert.match(errores.join('\n'), /sin SOCKET_URL en produccion/);
+      } else {
+        assert.match(advertencias.join('\n'), /sin SOCKET_URL, se omite la verificacion/);
+      }
+    } finally {
+      process.env.NODE_ENV = nodeEnv;
+      e.restaurar();
+    }
   }
 });
