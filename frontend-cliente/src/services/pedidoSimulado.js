@@ -191,6 +191,17 @@ const ERRORES_SIM_QUITAR = {
     motivo: 'pago_registrado',
     mensaje: 'El pedido ya tiene un pago que quedaría por encima del total: pídeselo al mesero',
   },
+  pago_en_curso: {
+    status: 409,
+    motivo: 'pago_en_curso',
+    mensaje: 'Alguien de la mesa está pagando en línea; espera a que termine e inténtalo otra vez.',
+  },
+  pago_en_curso_sin_verificar: {
+    status: 409,
+    motivo: 'pago_en_curso',
+    detalle: 'sin_verificar',
+    mensaje: 'No se pudo comprobar el pago; espera unos segundos e inténtalo otra vez.',
+  },
   no_es_tuyo: {
     status: 403,
     motivo: 'no_es_tuyo',
@@ -354,6 +365,17 @@ const ERRORES_SIM_CANCELAR = {
     status: 409,
     motivo: 'pago_registrado',
     mensaje: 'Ya hay un pago registrado; pídele ayuda al mesero.',
+  },
+  pago_en_curso: {
+    status: 409,
+    motivo: 'pago_en_curso',
+    mensaje: 'Alguien de la mesa está pagando en línea; espera a que termine e inténtalo otra vez.',
+  },
+  pago_en_curso_sin_verificar: {
+    status: 409,
+    motivo: 'pago_en_curso',
+    detalle: 'sin_verificar',
+    mensaje: 'No se pudo comprobar el pago; espera unos segundos e inténtalo otra vez.',
   },
   pedido_ya_cancelado: {
     status: 409,

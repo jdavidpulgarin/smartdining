@@ -14,6 +14,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { enviarPedido, registrarComensal } from '../../services/api'
+import { puedeAbrirMesa } from '../../utils/estadoMesa'
 import {
   armarPedido,
   accionErrorEnvio,
@@ -24,6 +25,8 @@ import {
 
 export function ResumenPedido({
   idMesa,
+  estadoMesa,
+  numeroMesa,
   carrito = [],
   onModificarCantidad,
   onEliminarItem,
@@ -47,6 +50,8 @@ export function ResumenPedido({
   // Enviar el pedido a la API
   const handleEnviarPedido = async (itemsParaEnviar = carrito) => {
     if (!itemsParaEnviar || itemsParaEnviar.length === 0 || enviando) return
+    // Reservada o en mantenimiento: el pedido abre la mesa, así que se confirma.
+    if (!puedeAbrirMesa({ estado: estadoMesa, numero: numeroMesa ?? idMesa }, (m) => window.confirm(m))) return
 
     setEnviando(true)
     setErrorEnvio(null)

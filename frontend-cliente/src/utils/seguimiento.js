@@ -607,6 +607,20 @@ export function accionErrorCancelarPedido(error) {
       recargar: false,
     };
   }
+  if (motivo === 'pago_en_curso') {
+    const detalle = String(
+      error?.detalle ?? error?.data?.detalle ?? ''
+    ).trim().toLowerCase();
+    const mensaje =
+      detalle === 'sin_verificar'
+        ? 'No se pudo comprobar el pago; espera unos segundos e inténtalo otra vez.'
+        : 'Alguien de la mesa está pagando en línea; espera a que termine e inténtalo otra vez.';
+    return {
+      tipo: 'pago_en_curso',
+      mensaje,
+      recargar: false,
+    };
+  }
   if (
     motivo === 'no_es_tuyo' ||
     motivo === 'no_encontrado' ||
@@ -653,6 +667,20 @@ export function accionErrorQuitar(error) {
     return {
       tipo: 'pago_registrado',
       mensaje: 'Ya hay un pago registrado; pídele ayuda al mesero.',
+      refrescar: false,
+    };
+  }
+  if (motivo === 'pago_en_curso') {
+    const detalle = String(
+      error?.detalle ?? error?.data?.detalle ?? ''
+    ).trim().toLowerCase();
+    const mensaje =
+      detalle === 'sin_verificar'
+        ? 'No se pudo comprobar el pago; espera unos segundos e inténtalo otra vez.'
+        : 'Alguien de la mesa está pagando en línea; espera a que termine e inténtalo otra vez.';
+    return {
+      tipo: 'pago_en_curso',
+      mensaje,
       refrescar: false,
     };
   }

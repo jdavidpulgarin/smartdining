@@ -16,6 +16,9 @@ export class ErrorApi extends Error {
     campo = null,
     retryAfter = null,
     faltantes = null,
+    detalle = null,
+    codigo = null,
+    tipo = null,
   } = {}) {
     super(mensaje);
     this.name = 'ErrorApi';
@@ -25,6 +28,9 @@ export class ErrorApi extends Error {
     this.campo = campo;
     this.retryAfter = retryAfter;
     this.faltantes = Array.isArray(faltantes) ? faltantes : null;
+    this.detalle = detalle ?? null;
+    this.codigo = codigo ?? null;
+    this.tipo = tipo ?? null;
   }
 }
 
@@ -77,6 +83,9 @@ export async function pedirJson(ruta, { method = 'GET', body, token } = {}) {
     }
     const campo = data?.campo || null;
     const faltantes = Array.isArray(data?.faltantes) ? data.faltantes : null;
+    const detalle = typeof data?.detalle === 'string' ? data.detalle : null;
+    const codigo = typeof data?.codigo === 'string' ? data.codigo : null;
+    const tipo = typeof data?.tipo === 'string' ? data.tipo : null;
 
     if (token && respuesta.status === 401 && manejadorSesionInvalida) {
       manejadorSesionInvalida(motivo || 'sesion_invalida', mensaje);
@@ -89,6 +98,9 @@ export async function pedirJson(ruta, { method = 'GET', body, token } = {}) {
       campo,
       retryAfter,
       faltantes,
+      detalle,
+      codigo,
+      tipo,
     });
   }
 

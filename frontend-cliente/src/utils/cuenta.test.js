@@ -8,6 +8,7 @@ import {
   montosPorModo,
   aplicarPagoConfirmado,
   textoPagoConfirmado,
+  avisoExcedentePago,
   traducirErrorPago,
   ESTADO_CUENTA_INICIAL,
   ESTADO_CUENTA_ENVIANDO,
@@ -264,12 +265,87 @@ describe('utils/cuenta.js (J-08)', () => {
       const evento = { comensal: null, monto: 90000 };
       expect(textoPagoConfirmado(evento, 'Beto')).toBe('Se pagó la cuenta completa');
     });
+
+    it('alias con tilde o mayúsculas distintas ("Ána" vs "ana") → se reconoce como propio y añade excedente', () => {
+      const evento = { comensal: 'Ána', monto: 28000, excedente: 3000, aplicado: 25000 };
+      expect(textoPagoConfirmado(evento, 'ana')).toBe(
+        'Pago confirmado: $ 28.000. Pagaste $ 3.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+      expect(textoPagoConfirmado(evento, 'ANA')).toBe(
+        'Pago confirmado: $ 28.000. Pagaste $ 3.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+      expect(textoPagoConfirmado({ comensal: 'ana', monto: 20000 }, 'Ána')).toBe(
+        'Pago confirmado: $ 20.000'
+      );
+    });
+  });
+
+  describe('avisoExcedentePago y excedente en payment:confirmed (EVENTS.md §8.7)', () => {
+    it('sin campos opcionales → avisoExcedentePago devuelve null y textoPagoConfirmado da mensaje habitual', () => {
+      const evento = { comensal: 'Beto', monto: 35000 };
+      expect(avisoExcedentePago(evento)).toBeNull();
+      expect(textoPagoConfirmado(evento, 'Beto')).toBe('Pago confirmado: $ 35.000');
+    });
+
+    it('excedente: 5000 → aviso con $ 5.000 y se añade al texto para el usuario que pagó', () => {
+      const evento = { comensal: 'Beto', monto: 40000, excedente: 5000, aplicado: 35000 };
+      expect(avisoExcedentePago(evento)).toBe(
+        'Pagaste $ 5.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+      expect(textoPagoConfirmado(evento, 'Beto')).toBe(
+        'Pago confirmado: $ 40.000. Pagaste $ 5.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+    });
+
+    it('excedente_centavos: 500000 → aviso con $ 5.000', () => {
+      const evento = { comensal: 'Beto', monto_centavos: 4000000, excedente_centavos: 500000 };
+      expect(avisoExcedentePago(evento)).toBe(
+        'Pagaste $ 5.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+    });
+
+    it('aplicado: 0 (la mesa ya estaba cerrada) → aviso con el monto completo pagado', () => {
+      const evento = { comensal: 'Beto', monto: 30000, aplicado: 0 };
+      expect(avisoExcedentePago(evento)).toBe(
+        'Pagaste $ 30.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+      expect(textoPagoConfirmado(evento, 'Beto')).toBe(
+        'Pago confirmado: $ 30.000. Pagaste $ 30.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+    });
+
+    it('aplicado_centavos: 0 con monto_centavos → aviso con monto completo pagado', () => {
+      const evento = { comensal: 'Beto', monto_centavos: 3000000, aplicado_centavos: 0 };
+      expect(avisoExcedentePago(evento)).toBe(
+        'Pagaste $ 30.000 de más; la Caja te lo devuelve en efectivo.'
+      );
+    });
+
+    it('excedente: 0 → sin aviso', () => {
+      const evento = { comensal: 'Beto', monto: 35000, aplicado: 35000, excedente: 0 };
+      expect(avisoExcedentePago(evento)).toBeNull();
+      expect(textoPagoConfirmado(evento, 'Beto')).toBe('Pago confirmado: $ 35.000');
+    });
+
+    it('otro comensal pagó con excedente → solo ve "X pagó $Y" sin el aviso de excedente', () => {
+      const evento = { comensal: 'Carla', monto: 40000, excedente: 5000, aplicado: 35000 };
+      expect(textoPagoConfirmado(evento, 'Beto')).toBe('Carla pagó $ 40.000');
+    });
   });
 
   describe('traducirErrorPago', () => {
-    it('traduce 409 o SIN_SALDO', () => {
+    it('traduce 409 con PAGO_EN_REVISION a descriptor { tipo: "en_revision", mensaje: "..." }', () => {
+      const res = traducirErrorPago(409, 'PAGO_EN_REVISION');
+      expect(res).toEqual({
+        tipo: 'en_revision',
+        mensaje: 'Tu pago anterior está en revisión. No vuelvas a pagar; pregúntale al mesero.',
+      });
+    });
+
+    it('traduce 409 sin PAGO_EN_REVISION a mensaje habitual', () => {
       expect(traducirErrorPago(409)).toBe('No hay saldo pendiente para pagar');
-      expect(traducirErrorPago(null, 'SIN_SALDO')).toBe('No hay saldo pendiente para pagar');
+      expect(traducirErrorPago(409, 'SIN_SALDO')).toBe('No hay saldo pendiente para pagar');
+      expect(traducirErrorPago(409, 'OTRO_ERROR')).toBe('No hay saldo pendiente para pagar');
     });
 
     it('traduce 429 o RATE_LIMIT', () => {
@@ -639,6 +715,9 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(mensajePagoConfirmado({ comensal: 'Ana', yo: 'Ana' })).toBe('propio');
       expect(mensajePagoConfirmado({ comensal: 'ana', yo: 'Ana' })).toBe('propio');
       expect(mensajePagoConfirmado({ comensal: '  Ana  ', yo: 'ana' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: 'Ána', yo: 'ana' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: 'ana', yo: 'Ána' })).toBe('propio');
+      expect(mensajePagoConfirmado({ comensal: 'ÁNA', yo: 'ana' })).toBe('propio');
     });
 
     it('comensal es null, undefined o vacío (cobro de caja de la mesa) → "mesa"', () => {
@@ -681,6 +760,52 @@ describe('utils/cuenta.js (J-08)', () => {
       expect(res.esPropio).toBe(false);
       expect(res.mensaje).toBe('La mesa quedó pagada.');
       expect(res.comprobante).toBeNull();
+    });
+
+    it('tipo "propio" con excedente → incluye avisoExcedente', () => {
+      const res = textoDetalleConfirmacion({
+        tipo: 'propio',
+        monto: 50000,
+        evento: { excedente: 5000 },
+      });
+      expect(res.esPropio).toBe(true);
+      expect(res.avisoExcedente).toBe('Pagaste $ 5.000 de más; la Caja te lo devuelve en efectivo.');
+    });
+
+    it('tipo "mesa" con excedente y esMio true → incluye avisoExcedente', () => {
+      const res = textoDetalleConfirmacion({
+        tipo: 'mesa',
+        monto: 90000,
+        evento: { excedente: 10000 },
+        esMio: true,
+      });
+      expect(res.esPropio).toBe(false);
+      expect(res.mensaje).toBe('La mesa quedó pagada.');
+      expect(res.avisoExcedente).toBe('Pagaste $ 10.000 de más; la Caja te lo devuelve en efectivo.');
+    });
+
+    it('tipo "mesa" con excedente pero esMio false → no incluye avisoExcedente', () => {
+      const res = textoDetalleConfirmacion({
+        tipo: 'mesa',
+        monto: 90000,
+        evento: { excedente: 10000 },
+        esMio: false,
+      });
+      expect(res.esPropio).toBe(false);
+      expect(res.mensaje).toBe('La mesa quedó pagada.');
+      expect(res.avisoExcedente).toBeUndefined();
+    });
+
+    it('tipo "mesa" con comensal con tilde ("Ána" vs "ana") → incluye avisoExcedente', () => {
+      const res = textoDetalleConfirmacion({
+        tipo: 'mesa',
+        monto: 90000,
+        evento: { comensal: 'Ána', excedente: 10000 },
+        comensal: 'ana',
+      });
+      expect(res.esPropio).toBe(false);
+      expect(res.mensaje).toBe('La mesa quedó pagada.');
+      expect(res.avisoExcedente).toBe('Pagaste $ 10.000 de más; la Caja te lo devuelve en efectivo.');
     });
 
     it('cualquier otro caso ("otro", null, undefined) → "La mesa quedó pagada."', () => {

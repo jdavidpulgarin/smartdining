@@ -685,6 +685,8 @@ export function TomarPedido() {
         <section className="paso-resumen-container" style={{ padding: '8px 0' }}>
           <ResumenPedido
             idMesa={idMesa}
+            estadoMesa={mesaActual?.estado || mesaActual?.status}
+            numeroMesa={mesaActual?.numero ?? mesaActual?.number}
             carrito={carrito}
             onModificarCantidad={handleModificarCantidad}
             onEliminarItem={handleEliminarItem}

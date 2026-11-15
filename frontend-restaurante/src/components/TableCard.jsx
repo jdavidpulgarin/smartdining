@@ -1,6 +1,7 @@
 import { QrCode, LogOut, Sparkles, Users, MapPin } from 'lucide-react'
 import { StatusBadge } from './ui/Badge'
 import { decodificarTokenQr } from '../services/qrService'
+import { estadoTarjetaMesa, avisoAbrirMesa } from '../utils/estadoMesa'
 
 export function TableCard({
   table,
@@ -27,26 +28,15 @@ export function TableCard({
 
   const isDisponible = tableStatus === 'disponible' || tableStatus === 'libre'
   const isOcupada = tableStatus === 'ocupada'
-  const isCuenta = tableStatus === 'cuenta' || tableStatus === 'cuenta_pedida'
-  const isListo = tableStatus === 'listo' || tableStatus === 'pedido_listo'
-  const isLlamado = tableStatus === 'llamado' || table?.alerta?.tipo === 'llamado'
-
-  let estadoVisual = 'disponible'
-  let estadoLabel = 'DISPONIBLE'
-
-  if (isLlamado) {
-    estadoVisual = 'llamado'
-    estadoLabel = 'LLAMA AL MESERO'
-  } else if (isCuenta) {
-    estadoVisual = 'cuenta'
-    estadoLabel = 'PIDE LA CUENTA'
-  } else if (isListo) {
-    estadoVisual = 'listo'
-    estadoLabel = 'PEDIDO LISTO'
-  } else if (isOcupada || isActive) {
-    estadoVisual = 'ocupada'
-    estadoLabel = 'OCUPADA'
-  }
+  // Reservada o en mantenimiento: se puede abrir, pero confirmando (TablesPanel).
+  const pideConfirmar = Boolean(avisoAbrirMesa({ estado: tableStatus }))
+  // Reservada y mantenimiento tienen su etiqueta (utils/estadoMesa.js): con
+  // T12 llegan en vivo y antes salían como «DISPONIBLE».
+  const { visual: estadoVisual, etiqueta: estadoLabel } = estadoTarjetaMesa({
+    estado: tableStatus === 'libre' ? 'disponible' : tableStatus,
+    alerta: table?.alerta?.tipo === 'llamado' ? 'llamado' : null,
+    activa: isActive,
+  })
 
   return (
     <div
@@ -98,10 +88,10 @@ export function TableCard({
               e.stopPropagation()
               onOpenQR(table || { name, status, seats, detail, active })
             }}
-            title={isDisponible ? 'Abrir mesa y generar QR de sesión' : `Ver QR de ${tableName}`}
+            title={isDisponible ? 'Abrir mesa y generar QR de sesión' : pideConfirmar ? `${tableName} está ${tableStatus === 'reservada' ? 'reservada' : 'en mantenimiento'}: pide confirmación` : `Ver QR de ${tableName}`}
           >
-            {isDisponible ? <Sparkles size={14} /> : <QrCode size={14} />}
-            <span>{isDisponible ? 'Abrir / QR' : 'Ver QR'}</span>
+            {isDisponible || pideConfirmar ? <Sparkles size={14} /> : <QrCode size={14} />}
+            <span>{isDisponible ? 'Abrir / QR' : pideConfirmar ? 'Abrir igual' : 'Ver QR'}</span>
           </button>
         )}
 
