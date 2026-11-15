@@ -1,5 +1,6 @@
 const { exito, fallo, manejar } = require('./ack');
 const { log } = require('./log');
+const { claveAlias } = require('./alias');
 const { ROL_COMENSAL } = require('./auth');
 const { esEventIdValido } = require('./idempotencia');
 const {
@@ -39,7 +40,7 @@ const MOTIVOS_CON_GRACIA = new Set(['transport close', 'transport error', 'ping 
  * - total: personas en la mesa = alias distintos + sockets de comensal sin
  *   alias (dos pestañas de "Ana" cuentan como una persona).
  * - pagaron: alias que ya pagaron algo en esta sesión de mesa (estén o no
- *   sentados), ordenados. Con esto la PWA calcula "igual" como el servidor.
+ *   sentados), ordenados. Con esto la PWA sabe quién ya pagó.
  * - sin_celular: alias que agregó el personal (POST /internal/mesa-comensal),
  *   ordenados; también entran en comensales y en total.
  *
@@ -49,7 +50,7 @@ const MOTIVOS_CON_GRACIA = new Set(['transport close', 'transport error', 'ping 
  *
  * Gracia (EVENTS.md §5.2): cuando el socket de un comensal se cae por la red,
  * su alias sigue contando `graciaMs` (en comensales, en total, en la guarda de
- * rotación del QR y en «igual»). Si el mismo comensal (misma mesa y alias)
+ * rotación del QR). Si el mismo comensal (misma mesa y alias)
  * vuelve antes, no se avisa nada; si no, al vencer sale como siempre. Liberar
  * la mesa cancela todas sus gracias. `programarGracia`/`cancelarGracia` son el
  * reloj, inyectable en las pruebas.
@@ -76,7 +77,7 @@ function crearPresencia({
     // Quien está en su periodo de gracia sigue sentado.
     for (const a of (gracias.get(idMesa) || new Map()).keys()) alias.add(a);
     // Los sin celular (§6.4) cuentan como personas sentadas: van en
-    // comensales y en total, así «igual» y la rotación del QR los ven sin
+    // comensales y en total, así el panel y la rotación del QR los ven sin
     // lógica aparte.
     const sinCelular = Object.values(await estadoMesas.sinCelular(idMesa)).sort((a, b) => a.localeCompare(b));
     for (const a of sinCelular) alias.add(a);
@@ -88,7 +89,7 @@ function crearPresencia({
   }
 
   // A la mesa también: sus comensales necesitan quién está y quién pagó para
-  // mostrar cuánto es "igual". Solo llevan datos de esa misma mesa.
+  // mostrar quién falta por pagar. Solo llevan datos de esa misma mesa.
   async function emitir(idMesa) {
     const presencia = await calcular(idMesa);
     io.to(SALA_ADMIN).to(salaMesa(idMesa)).emit('mesa:presencia', presencia);
@@ -244,7 +245,7 @@ const TTL_SIN_CELULAR_MS = 24 * 60 * 60 * 1000;
 function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
   const llamadas = new Map(); // idMesa -> ms en que vence el bloqueo
   const cuentas = new Set(); // mesas que pidieron la cuenta
-  const pagos = new Map(); // idMesa -> Set de alias que ya pagaron
+  const pagos = new Map(); // idMesa -> Map(clave del alias -> alias) de quienes ya pagaron
   const sinCelular = new Map(); // idMesa -> { ms en que vence, Map(clave -> alias) }
   // Como sd:mesas:con-estado en Redis: idMesa -> ms en que vence (24 h desde la
   // última vez que se anotó un pago o un sin celular).
@@ -289,19 +290,23 @@ function crearEstadoMesasMemoria({ ahora = Date.now } = {}) {
       if (e.alias.size === 0) sinCelular.delete(idMesa);
       return true;
     },
+    // Por la clave del alias (como sin_celular): «Ana» y «ana» son una persona
+    // en pagaron; se muestra el primer alias con el que se anotó.
     marcarPago(idMesa, alias) {
-      if (!pagos.has(idMesa)) pagos.set(idMesa, new Set());
-      pagos.get(idMesa).add(alias);
+      if (!pagos.has(idMesa)) pagos.set(idMesa, new Map());
+      const p = pagos.get(idMesa);
+      const clave = claveAlias(alias) ?? alias;
+      if (!p.has(clave)) p.set(clave, alias);
       anotarEnIndice(idMesa);
     },
     /** Deshace un marcarPago que llegó tarde a una mesa ya liberada (ver anotarPagoEnSesion en pagos.js). */
     desmarcarPago(idMesa, alias) {
       const p = pagos.get(idMesa);
-      if (p) p.delete(alias);
+      if (p) p.delete(claveAlias(alias) ?? alias);
       if (p && p.size === 0) pagos.delete(idMesa);
       if (!pagos.has(idMesa) && !listaSinCelular(idMesa)) conEstado.delete(idMesa);
     },
-    pagaron(idMesa) { return [...(pagos.get(idMesa) || [])].sort((a, b) => a.localeCompare(b)); },
+    pagaron(idMesa) { return [...(pagos.get(idMesa) || new Map()).values()].sort((a, b) => a.localeCompare(b)); },
     reservarLlamada(idMesa, segundos) {
       if ((llamadas.get(idMesa) || 0) > ahora()) return false;
       llamadas.set(idMesa, ahora() + segundos * 1000);

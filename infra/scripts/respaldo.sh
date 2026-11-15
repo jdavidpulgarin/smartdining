@@ -3,18 +3,25 @@
 # SmartDining · infra/scripts/respaldo.sh (R-18)
 #
 # Respaldo de la base (pg_dump -Fc, ya comprimido) y del volumen de imágenes
-# de los platos (tar.gz, D-23) del proyecto que esté corriendo en el VPS:
-# smartdining (producción) o smartdining-staging.
+# de los platos (tar.gz, D-23) de UN entorno del VPS.
 #
-#   sh infra/scripts/respaldo.sh predeploy <sha>   # deploy.yml y deploy-staging.yml, ANTES de migrar.sh
-#   sh infra/scripts/respaldo.sh diario            # timer smartdining-respaldo (systemd)
+#   ENTORNO=staging sh infra/scripts/respaldo.sh predeploy <sha>    # deploy-staging.yml, ANTES de migrar.sh
+#   ENTORNO=produccion sh infra/scripts/respaldo.sh predeploy <sha> # deploy.yml, ANTES de migrar.sh
+#   sh infra/scripts/respaldo.sh --entorno staging diario            # timer smartdining-respaldo@staging
+#
+# ENTORNO (variable o --entorno, OBLIGATORIO y sin valor por defecto):
+#   staging    proyecto smartdining-staging, clon /srv/smartdining-staging
+#   produccion proyecto smartdining,         clon /srv/smartdining
+# Cualquier otro valor, o ninguno: sale con 2 sin tocar nada.
 #
 # Contenedor: RESPALDO_CONTENEDOR (los workflows pasan el postgres de su
-# compose) o, si no se da, el único postgres en marcha de smartdining o de
-# smartdining-staging (nunca corren a la vez; si están los dos, falla).
+# compose), que TIENE que ser del proyecto de ENTORNO; o, si no se da, el
+# postgres en marcha de ese proyecto. Así un entorno nunca escribe en la
+# carpeta del otro.
 #
 # Destino: $RESPALDOS_DIR/<proyecto>/<tipo>/<tipo>-AAAAMMDD-HHMMSS[-sha7].dump
 #          y, con el mismo nombre, .tar.gz con el volumen de imágenes.
+#   <proyecto>           smartdining-staging o smartdining, según ENTORNO
 #   RESPALDOS_DIR        por defecto /srv/respaldos (lo crea instalar-respaldos.sh)
 #   CONSERVAR_DIARIO     por defecto 7
 #   CONSERVAR_PREDEPLOY  por defecto 5
@@ -42,13 +49,29 @@ umask 027
 
 DOCKER=${DOCKER:-docker}
 RESPALDOS_DIR=${RESPALDOS_DIR:-/srv/respaldos}
-TIPO=${1:-}
-SHA=${2:-}
 
 fallar() {
   echo "respaldo: ERROR: $*" >&2
   exit 1
 }
+
+# --- 0. Entorno (obligatorio) ----------------------------------------------------
+if [ "${1:-}" = "--entorno" ]; then
+  ENTORNO=${2:-}
+  if [ "$#" -ge 2 ]; then shift 2; else shift; fi
+fi
+case "${ENTORNO:-}" in
+  staging) proyecto_esperado=smartdining-staging ruta=/srv/smartdining-staging ;;
+  produccion) proyecto_esperado=smartdining ruta=/srv/smartdining ;;
+  *)
+    echo "respaldo: ERROR: ENTORNO debe ser 'staging' o 'produccion' (recibido: '${ENTORNO:-}'). No se respaldó nada." >&2
+    echo "uso: ENTORNO=staging|produccion sh $0 predeploy <sha> | diario   (o: sh $0 --entorno <entorno> ...)" >&2
+    exit 2
+    ;;
+esac
+
+TIPO=${1:-}
+SHA=${2:-}
 
 case "$TIPO" in
   diario)
@@ -68,31 +91,19 @@ esac
 printf '%s' "$conservar" | grep -Eq '^[1-9][0-9]*$' || fallar "la cantidad a conservar debe ser un entero mayor que 0 (recibido: '$conservar')"
 
 # --- 1. Contenedor de postgres y proyecto --------------------------------------
-un_solo_id() {
-  [ "$(printf '%s\n' "$1" | grep -c .)" -le 1 ] || fallar "hay más de un postgres de $2 corriendo"
-}
-
 if [ -n "${RESPALDO_CONTENEDOR:-}" ]; then
   id=$RESPALDO_CONTENEDOR
 else
-  id=
-  for p in smartdining smartdining-staging; do
-    c=$("$DOCKER" ps -q --filter "label=com.docker.compose.project=$p" --filter "label=com.docker.compose.service=postgres") \
-      || fallar "no se pudo consultar Docker"
-    [ -n "$c" ] || continue
-    un_solo_id "$c" "$p"
-    [ -z "$id" ] || fallar "están corriendo los postgres de smartdining y de smartdining-staging; no se sabe cuál respaldar"
-    id=$c
-  done
-  [ -n "$id" ] || fallar "no hay ningún postgres de smartdining ni de smartdining-staging corriendo"
+  id=$("$DOCKER" ps -q --filter "label=com.docker.compose.project=$proyecto_esperado" --filter "label=com.docker.compose.service=postgres") \
+    || fallar "no se pudo consultar Docker"
+  [ -n "$id" ] || fallar "no hay ningún postgres de $proyecto_esperado (ENTORNO=$ENTORNO) corriendo"
+  [ "$(printf '%s\n' "$id" | grep -c .)" -le 1 ] || fallar "hay más de un postgres de $proyecto_esperado corriendo"
 fi
 
 proyecto=$("$DOCKER" inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$id") \
   || fallar "no existe el contenedor $id"
-case "$proyecto" in
-  smartdining | smartdining-staging) ;;
-  *) fallar "el contenedor $id es del proyecto '$proyecto', no de smartdining ni de smartdining-staging" ;;
-esac
+[ "$proyecto" = "$proyecto_esperado" ] \
+  || fallar "el contenedor $id es del proyecto '$proyecto', no de $proyecto_esperado (ENTORNO=$ENTORNO); no se respaldó nada"
 
 # --- 2. Carpeta ----------------------------------------------------------------
 # La carpeta del proyecto la crea instalar-respaldos.sh (root): $RESPALDOS_DIR
@@ -102,10 +113,10 @@ esac
 if [ ! -d "$RESPALDOS_DIR/$proyecto" ]; then
   raiz=$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)
   if [ -n "$raiz" ] && [ -f "$raiz/infra/scripts/instalar-respaldos.sh" ]; then
-    comando="cd $raiz && sudo sh infra/scripts/instalar-respaldos.sh"
+    comando="cd $raiz && sudo ENTORNO=$ENTORNO sh infra/scripts/instalar-respaldos.sh"
   else
-    # Corriendo desde /usr/local/lib/smartdining (timer): desde cualquiera de los clones.
-    comando="cd /home/deploy/smartdining && sudo sh infra/scripts/instalar-respaldos.sh   (o desde /srv/smartdining-staging)"
+    # Corriendo desde /usr/local/lib/smartdining (timer): desde el clon de ese entorno.
+    comando="cd $ruta && sudo ENTORNO=$ENTORNO sh infra/scripts/instalar-respaldos.sh"
   fi
   fallar "no existe $RESPALDOS_DIR/$proyecto: no se respaldó nada (un despliegue se detiene aquí, antes de migrar). Prepáralo UNA vez en el VPS, con un usuario con sudo:
   $comando

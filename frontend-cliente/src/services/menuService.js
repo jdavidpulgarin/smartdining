@@ -133,7 +133,12 @@ export function aplicarDisponibilidadPlato(menu, idPlato, disponible) {
     if (!Array.isArray(cat.platos)) return cat;
     const nuevosPlatos = cat.platos.map((plato) => {
       if (Number(plato.id_plato) === idNum) {
-        return { ...plato, disponible: Boolean(disponible) };
+        const disp = Boolean(disponible);
+        return {
+          ...plato,
+          disponible: disp,
+          disponible_plato: disp,
+        };
       }
       return plato;
     });
@@ -159,11 +164,141 @@ export function actualizarDisponibilidadPlatoEnCache(idPlato, disponible) {
   });
 }
 
+/**
+ * Limpia la marca local de agotado para un plato o ingrediente repuesto.
+ *
+ * @param {'plato'|'ingrediente'} tipo
+ * @param {number|string} id
+ */
+export function limpiarMarcaAgotado(tipo, id) {
+  const idNum = Number(id);
+  if (!idNum) return;
+  marcasAgotadoLocal = actualizarMarcasPorDisponibilidad(marcasAgotadoLocal, {
+    tipo,
+    id: idNum,
+    disponible: true,
+  });
+}
+
+/**
+ * Verifica si un plato armable tiene stock en todos sus pasos obligatorios.
+ * Si algún paso obligatorio se queda sin ingredientes disponibles, el armable no se puede pedir.
+ *
+ * @param {object} platoArmable
+ * @returns {boolean}
+ */
+export function armableTieneStock(platoArmable) {
+  if (!platoArmable) return false;
+  if (!Array.isArray(platoArmable.pasos)) return true;
+
+  for (const paso of platoArmable.pasos) {
+    const esObligatorio = Boolean(
+      paso.obligatorio || Number(paso.min_sel) > 0 || Number(paso.minimo) > 0
+    );
+    if (esObligatorio) {
+      const ings = Array.isArray(paso.ingredientes) ? paso.ingredientes : [];
+      const hayDisponibles = ings.some((ing) => ing.disponible !== false);
+      if (!hayDisponibles && ings.length > 0) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Función pura que actualiza la disponibilidad de un plato en una lista plana de platos.
+ *
+ * @param {Array<object>} platos
+ * @param {number|string} idPlato
+ * @param {boolean} disponible
+ * @returns {Array<object>}
+ */
+export function aplicarDisponibilidadEnListaPlatos(platos = [], idPlato, disponible) {
+  if (!Array.isArray(platos)) return [];
+  const idNum = Number(idPlato);
+  if (!idNum) return platos;
+
+  return platos.map((p) => {
+    const pId = Number(p.id ?? p.id_plato);
+    if (pId === idNum) {
+      const dispPlato = Boolean(disponible);
+      const tieneStock = Array.isArray(p.pasos) ? armableTieneStock(p) : true;
+      return {
+        ...p,
+        disponible: dispPlato && tieneStock,
+        disponible_plato: dispPlato,
+      };
+    }
+    return p;
+  });
+}
+
+/**
+ * Función pura que actualiza la disponibilidad de un ingrediente en una lista de platos armables.
+ * Si el ingrediente agotado hace que un paso obligatorio no tenga opciones, el plato armable se agota.
+ * Respeta si el admin desactivó el plato por separado (disponible_plato).
+ *
+ * @param {Array<object>} armables
+ * @param {number|string} idIngrediente
+ * @param {boolean} disponible
+ * @returns {Array<object>}
+ */
+export function aplicarDisponibilidadIngredienteEnArmables(armables = [], idIngrediente, disponible) {
+  if (!Array.isArray(armables)) return [];
+  const idNum = Number(idIngrediente);
+  if (!idNum) return armables;
+
+  return armables.map((plato) => {
+    if (!Array.isArray(plato.pasos)) return plato;
+    let huboCambio = false;
+
+    const nuevosPasos = plato.pasos.map((paso) => {
+      if (!Array.isArray(paso.ingredientes)) return paso;
+      const nuevosIngs = paso.ingredientes.map((ing) => {
+        if (Number(ing.id_ingrediente) === idNum) {
+          huboCambio = true;
+          return { ...ing, disponible: Boolean(disponible) };
+        }
+        return ing;
+      });
+      return { ...paso, ingredientes: nuevosIngs };
+    });
+
+    if (!huboCambio) return plato;
+
+    const platoActualizado = { ...plato, pasos: nuevosPasos };
+    const tieneStock = armableTieneStock(platoActualizado);
+    const dispPlato =
+      plato.disponible_plato !== undefined
+        ? plato.disponible_plato
+        : plato.disponible !== false;
+
+    return {
+      ...platoActualizado,
+      disponible_plato: dispPlato,
+      disponible: dispPlato !== false && tieneStock,
+    };
+  });
+}
+
 export function aplicarFaltantesMenu(menu, faltantes = []) {
   if (!menu || !Array.isArray(faltantes) || faltantes.length === 0) return menu;
   let actual = menu;
   for (const f of faltantes) {
     if (!f || typeof f !== 'object') continue;
+    // Con disponible > 0 NO debe marcarlo agotado (solo con 0 o sin dato / null)
+    const dispNum = Number(f.disponible);
+    const tieneDisponiblePositivo =
+      f.disponible !== undefined &&
+      f.disponible !== null &&
+      f.disponible !== '' &&
+      Number.isInteger(dispNum) &&
+      dispNum > 0;
+    if (tieneDisponiblePositivo) {
+      continue;
+    }
+
     if (f.tipo === 'plato' && f.id != null) {
       actual = aplicarDisponibilidadPlato(actual, f.id, false);
     } else if (f.tipo === 'ingrediente') {
@@ -212,6 +347,19 @@ export function marcarFaltantesEnCache(faltantes = []) {
   for (const f of faltantes) {
     if (!f || typeof f !== 'object') continue;
     if (f.tipo !== 'plato' && f.tipo !== 'ingrediente') continue;
+
+    // Con disponible > 0 NO debe marcarlo agotado (solo con 0 o sin dato / null)
+    const dispNum = Number(f.disponible);
+    const tieneDisponiblePositivo =
+      f.disponible !== undefined &&
+      f.disponible !== null &&
+      f.disponible !== '' &&
+      Number.isInteger(dispNum) &&
+      dispNum > 0;
+    if (tieneDisponiblePositivo) {
+      continue;
+    }
+
     const idRaw = f.id;
     const idNum =
       idRaw !== null && idRaw !== undefined && idRaw !== ''
@@ -301,21 +449,35 @@ export function adaptarPlatosArmables(rawMenu) {
   return cats
     .flatMap((cat) => cat.platos || [])
     .filter((plato) => plato.personalizable === true)
-    .map((plato) => ({
-      ...plato,
-      url_imagen: urlImagen(plato.url_imagen),
-      pasos: Array.isArray(plato.pasos)
+    .map((plato) => {
+      const pasosAdaptados = Array.isArray(plato.pasos)
         ? plato.pasos.map((paso) => ({
             ...paso,
             ingredientes: Array.isArray(paso.ingredientes)
               ? paso.ingredientes.map((ing) => ({
                   ...ing,
+                  disponible: ing.disponible !== false,
                   url_imagen: urlImagen(ing.url_imagen),
                 }))
               : [],
           }))
-        : [],
-    }));
+        : [];
+      const dispPlato =
+        plato.disponible_plato !== undefined
+          ? plato.disponible_plato
+          : plato.disponible !== false;
+      const objArmable = {
+        ...plato,
+        url_imagen: urlImagen(plato.url_imagen),
+        pasos: pasosAdaptados,
+        disponible_plato: dispPlato,
+      };
+      const tieneStock = armableTieneStock(objArmable);
+      return {
+        ...objArmable,
+        disponible: dispPlato !== false && tieneStock,
+      };
+    });
 }
 
 export function adaptarPlatoArmable(rawMenu, idPlato) {
@@ -382,6 +544,10 @@ export default {
   actualizarDisponibilidadEnCache,
   aplicarDisponibilidadPlato,
   actualizarDisponibilidadPlatoEnCache,
+  limpiarMarcaAgotado,
+  armableTieneStock,
+  aplicarDisponibilidadEnListaPlatos,
+  aplicarDisponibilidadIngredienteEnArmables,
   aplicarFaltantesMenu,
   marcarFaltantesEnCache,
 };

@@ -13,7 +13,7 @@ import {
   Sparkles,
   RefreshCw,
 } from 'lucide-react'
-import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
+import { mesasApi, pedidosApi, transaccionesApi, excedentesApi, getAuthToken } from '../services/api'
 import { useAuth, useSocketListener, useTables } from '../hooks'
 import { crearUltimaPeticion } from '../utils/ultimaPeticion'
 import {
@@ -29,6 +29,7 @@ import {
   voucherDelCobro,
   VOUCHER_MAX,
 } from '../utils/caja'
+import { listaExcedentes, textoExcedente, yaNoPendiente, mensajeErrorDevuelto } from '../utils/excedentes'
 
 function formatCOP(monto) {
   const num = Number(monto) || 0
@@ -54,7 +55,7 @@ export function Caja() {
 }
 
 function CajaRegistradora() {
-  const { cargarMesas } = useTables()
+  const { cargarMesas, tables } = useTables()
   const [searchParams] = useSearchParams()
 
   const [loading, setLoading] = useState(() => Boolean(getAuthToken()))
@@ -218,11 +219,58 @@ function CajaRegistradora() {
     }
   }, [cargarCuentas, ultimaCarga])
 
+  // T4 (§8.7): excedentes del pago en línea por devolver en efectivo. Se cargan
+  // al montar, al (re)conectar y con cada pago:excedente (solo llega al panel).
+  const [excedentes, setExcedentes] = useState([])
+  const [avisoExcedente, setAvisoExcedente] = useState(null)
+  const [devolviendo, setDevolviendo] = useState(null)
+  const cargarExcedentes = useCallback(async () => {
+    try {
+      setExcedentes(listaExcedentes(await excedentesApi.pendientes()))
+    } catch {
+      // Sin respuesta se queda la lista que había; el próximo aviso la recarga.
+    }
+  }, [])
+  useEffect(() => {
+    let cancel = false
+    excedentesApi
+      .pendientes()
+      .then((r) => {
+        if (!cancel) setExcedentes(listaExcedentes(r))
+      })
+      .catch(() => {
+        // Sin respuesta: la lista vacía; el próximo aviso o la reconexión la cargan.
+      })
+    return () => {
+      cancel = true
+    }
+  }, [])
+  useSocketListener('pago:excedente', () => cargarExcedentes())
+  const numeroMesa = useCallback(
+    (id) => (tables || []).find((t) => Number(t.id_mesa ?? t.id) === Number(id))?.numero ?? id,
+    [tables]
+  )
+  const marcarDevuelto = async (x) => {
+    setDevolviendo(x.id)
+    setAvisoExcedente(null)
+    try {
+      await excedentesApi.marcarDevuelto(x.id)
+      setExcedentes((l) => l.filter((e) => e.id !== x.id))
+    } catch (err) {
+      setAvisoExcedente(mensajeErrorDevuelto(err))
+      if (yaNoPendiente(err)) setExcedentes((l) => l.filter((e) => e.id !== x.id))
+    } finally {
+      setDevolviendo(null)
+      cargarExcedentes()
+    }
+  }
+
   // Al (re)conectar el socket se recargan las cuentas y lo cobrado hoy: los
   // avisos que llegaron con el socket caído se perdieron (T4).
   useSocketListener('connect', () => {
     cargarCuentas()
     cargarDia()
+    cargarExcedentes()
   })
 
   // Escuchar eventos de WebSockets en tiempo real para mantener la caja sincronizada
@@ -489,6 +537,36 @@ function CajaRegistradora() {
             <span className="sd-counter-alert">{formatCOP(totalSaldoSalon)} POR COBRAR</span>
           </div>
         </header>
+
+        {(excedentes.length > 0 || avisoExcedente) && (
+          <section
+            aria-labelledby="titulo-excedentes"
+            data-testid="caja-excedentes"
+            className="table-toast-banner error"
+            role="alert"
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 10, marginBottom: 20 }}
+          >
+            {excedentes.length > 0 && (
+              <h2 id="titulo-excedentes" style={{ margin: 0, fontFamily: 'var(--sd-font-heading)', fontSize: 18, textTransform: 'uppercase' }}>
+                Devolver en efectivo ({excedentes.length})
+              </h2>
+            )}
+            {excedentes.map((x) => (
+              <div key={x.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <span>{textoExcedente(x, formatCOP, numeroMesa)}</span>
+                <button
+                  type="button"
+                  className="sd-btn sd-btn-primary"
+                  onClick={() => marcarDevuelto(x)}
+                  disabled={devolviendo === x.id}
+                >
+                  {devolviendo === x.id ? 'Marcando…' : 'Devuelto en efectivo'}
+                </button>
+              </div>
+            ))}
+            {avisoExcedente && <span>{avisoExcedente}</span>}
+          </section>
+        )}
 
         {errorMessage && (
           <div className="table-toast-banner info" style={{ marginBottom: 20 }}>
