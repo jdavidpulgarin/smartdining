@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { puedeAbrirMesa } from '../utils/estadoMesa'
 import { TableCard } from './TableCard'
 import { QRModal } from './QRModal'
 import { TableDetailModal } from './TableDetailModal'
@@ -38,6 +39,9 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
     : null
 
   const handleOpenQRModal = (table) => {
+    // Reservada o en mantenimiento: no se abre sin confirmar (utils/estadoMesa.js).
+    const mesa = { estado: table.estado || table.status, numero: table.number || table.numero || table.id }
+    if (!puedeAbrirMesa(mesa, (m) => window.confirm(m))) return
     setSelectedTableIdForQR(table.id || table.number)
   }
 

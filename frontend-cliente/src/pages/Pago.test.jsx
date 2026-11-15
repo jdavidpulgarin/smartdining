@@ -226,4 +226,59 @@ describe('Pago.jsx - renderizado de sección de pago', () => {
     expect(html).not.toContain('PAGAR EN CAJA');
     expect(html).not.toContain('¿CÓMO QUIERES PAGAR?');
   });
+
+  it('e) estado en_revision → muestra aviso, sin botón de reintentar, botón de pago en línea deshabilitado y pagar en caja visible', () => {
+    mockCuentaActual = {
+      id_mesa: 5,
+      numero: 5,
+      ubicacion: 'Terraza',
+      total: 35000,
+      pagado: 0,
+      saldo: 35000,
+      items_totales: 2,
+      mia: {
+        subtotal: 35000,
+        pagado: 0,
+        saldo: 35000,
+      },
+      comensales: [
+        {
+          nombre: 'Ana',
+          esMio: true,
+          subtotal: 35000,
+          pagado: 0,
+          saldo: 35000,
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <Pago
+          errorPagoInicial={{
+            tipo: 'en_revision',
+            mensaje: 'Tu pago anterior está en revisión. No vuelvas a pagar; pregúntale al mesero.',
+          }}
+        />
+      </MemoryRouter>
+    );
+
+    // Muestra el texto de pago en revisión
+    expect(html).toContain('Tu pago anterior está en revisión. No vuelvas a pagar; pregúntale al mesero.');
+
+    // NO debe haber botón de reintentar
+    expect(html.toLowerCase()).not.toContain('reintentar');
+
+    // El botón de pagar en línea está deshabilitado
+    const botones = Array.from(html.matchAll(/<button[\s\S]*?<\/button>/g)).map((m) => m[0]);
+    const botonWompi = botones.find((b) => b.includes('PAGAR LA CUENTA'));
+    const botonCaja = botones.find((b) => b.includes('PAGAR EN CAJA'));
+
+    expect(botonWompi).toBeDefined();
+    expect(botonWompi).toContain('disabled=""');
+
+    // "Pagar en caja" sigue visible y no deshabilitado
+    expect(botonCaja).toBeDefined();
+    expect(botonCaja).not.toContain('disabled');
+  });
 });

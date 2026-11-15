@@ -4,6 +4,7 @@ import {
   setManejadorSesionInvalida,
   ErrorApi,
 } from '../api';
+import { accionErrorQuitar } from '../../utils/seguimiento';
 
 describe('Interceptor HTTP en frontend-cliente (pedirJson)', () => {
   beforeEach(() => {
@@ -134,5 +135,79 @@ describe('Interceptor HTTP en frontend-cliente (pedirJson)', () => {
       status: 503,
       motivo: 'reintentar',
     });
+  });
+
+  it('debe conservar detalle en ErrorApi ante 409 pago_en_curso y permitir a accionErrorQuitar mostrar el mensaje correcto', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        error: 'No se pudo verificar el pago en curso',
+        motivo: 'pago_en_curso',
+        detalle: 'sin_verificar',
+      }),
+    });
+
+    let errorConDetalle = null;
+    try {
+      await pedirJson('/pedidos/123/items/456/cancelar', { method: 'POST' });
+    } catch (err) {
+      errorConDetalle = err;
+    }
+
+    expect(errorConDetalle).toBeInstanceOf(ErrorApi);
+    expect(errorConDetalle.detalle).toBe('sin_verificar');
+    expect(accionErrorQuitar(errorConDetalle).mensaje).toBe(
+      'No se pudo comprobar el pago; espera unos segundos e inténtalo otra vez.'
+    );
+
+    // Caso sin detalle
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        error: 'Hay un pago en curso en la mesa',
+        motivo: 'pago_en_curso',
+      }),
+    });
+
+    let errorSinDetalle = null;
+    try {
+      await pedirJson('/pedidos/123/items/456/cancelar', { method: 'POST' });
+    } catch (err) {
+      errorSinDetalle = err;
+    }
+
+    expect(errorSinDetalle).toBeInstanceOf(ErrorApi);
+    expect(errorSinDetalle.detalle).toBeNull();
+    expect(accionErrorQuitar(errorSinDetalle).mensaje).toBe(
+      'Alguien de la mesa está pagando en línea; espera a que termine e inténtalo otra vez.'
+    );
+  });
+
+  it('debe conservar codigo y tipo en ErrorApi cuando la API los retorna', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        error: 'Tu pago anterior se está confirmando',
+        codigo: 'PAGO_EN_REVISION',
+        tipo: 'en_revision',
+      }),
+    });
+
+    let errorCapturado = null;
+    try {
+      await pedirJson('/pagos/intencion', { method: 'POST' });
+    } catch (err) {
+      errorCapturado = err;
+    }
+
+    expect(errorCapturado).toBeInstanceOf(ErrorApi);
+    expect(errorCapturado.codigo).toBe('PAGO_EN_REVISION');
+    expect(errorCapturado.tipo).toBe('en_revision');
   });
 });
