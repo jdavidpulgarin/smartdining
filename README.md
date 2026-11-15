@@ -229,3 +229,5 @@ Un VPS con Docker Compose, HTTPS de Let's Encrypt y despliegue automático al fu
 - [ ] **Paso 6:** Integración con datos simulados (mocks) en frontend.
 - [ ] **Paso 7:** Conexión completa Frontend ↔ Backend ↔ Base de Datos.
 - [ ] **Paso 8:** Pruebas integrales y puesta a punto para Exposoftware.
+
+<!-- Prueba de la protección de main (PR cerrado sin fusionar). -->
