@@ -73,6 +73,13 @@ personas caben. Arriba están los filtros **TODAS**, **DISPONIBLES**,
 - Una mesa **Disponible** dice "Lista para asignar" y tiene el botón **ABRIR / QR**.
 - Una mesa **Ocupada** dice "Sesión activa · QR generado" y tiene **VER QR** y
   **LIBERAR**.
+- Una mesa **Reservada** (borde dorado punteado) o **En mantenimiento**
+  (atenuada, "no se asigna") tiene el botón **ABRIR IGUAL**. Antes de abrirla, o
+  de enviarle un pedido, el panel pregunta: «La mesa 5 está reservada. ¿Abrirla
+  igual?» (o «en mantenimiento»). Si cancelas, no pasa nada.
+
+Las mesas se actualizan solas cuando otro mesero o el administrador las abre,
+libera, crea, edita o borra: no hace falta recargar.
 
 ### 3.2 Abrir una mesa y entregar el QR
 
@@ -374,7 +381,7 @@ nunca cambió, lo dice.
 
 ![Insumos](capturas-personal/11a_insumos_1280x800.png)
 
-**Inventario** tiene tres pestañas: **INSUMOS**, **RECETAS** y **CONSUMO**.
+**Inventario** tiene dos pestañas: **INSUMOS** y **RECETAS**.
 
 En **INSUMOS** está lo que hay en bodega, con su stock y su estado. Arriba dice
 cuántos insumos están **bajo el mínimo** y cuántos **agotados**. Los filtros son
