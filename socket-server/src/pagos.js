@@ -14,6 +14,13 @@ const {
   calcularMonto, validarCuenta, MODOS, MODO_RETIRADO,
 } = require('./cuenta');
 const { ttlIntencionRegistroSeg } = require('./pasarelas/wompi');
+const { notificarPagoConfirmado } = require('./suscripciones');
+
+/** Push del pago a quien pagó, sin esperar: un fallo de push no frena el pago. */
+function avisarPagoPorPush(ctx, idMesa, comensal) {
+  notificarPagoConfirmado(ctx, { id_mesa: idMesa, comensal })
+    .catch((err) => log.error('push: fallo al notificar el pago', { id_mesa: idMesa, error: err }));
+}
 
 // 5 intenciones por minuto por comensal: de sobra para reintentar un pago
 // fallido y corta a quien intenta martillar al backend o a la pasarela.
@@ -547,6 +554,10 @@ async function recibirEventoPasarela(req, res, ctx) {
       excedente: registro.excedente,
       soloAdmin: registro.motivoExcedente === 'otra_visita',
     });
+    // Un pago de un grupo que ya se fue tampoco se avisa por push.
+    if (registro.motivoExcedente !== 'otra_visita') {
+      avisarPagoPorPush(ctx, intencion.id_mesa, intencion.comensal);
+    }
     if (registro.excedente > 0) {
       emitirPagoExcedente(ctx.io, {
         tx, intencion, referencia: evento.referencia, registro,
@@ -636,6 +647,7 @@ async function difundirPagoConfirmado(ctx, p) {
     saldoCentavos: p.saldo_restante_centavos,
     referencia: p.referencia_externa,
   });
+  avisarPagoPorPush(ctx, p.id_mesa, p.comensal);
   if (anotado) ctx.presencia.programar(p.id_mesa);
   return exito({ eventId: p.eventId, duplicado: false });
 }

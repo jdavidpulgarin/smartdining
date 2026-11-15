@@ -171,7 +171,7 @@ test('resumen por cambio de estado: enviados, fallidos, caducados y cuántas por
     [subs[3].endpoint, { statusCode: 201 }],
   ]);
   const ctx = ctxDe(subs, (s) => respuestas.get(s.endpoint));
-  await notificarCambioEstado(ctx, cambio('en_preparacion'));
+  await notificarCambioEstado(ctx, cambio('listo'));
 
   assert.deepStrictEqual(ctx.quitadas, [subs[1].endpoint], 'la caducada se borra');
   assert.strictEqual(log.de('push: enviado').length + log.de('push: suscripción caducada').length + log.de('push: error al enviar').length, 4, 'una línea por envío');
@@ -180,20 +180,20 @@ test('resumen por cambio de estado: enviados, fallidos, caducados y cuántas por
   const { ts, nivel, servicio, msg, ...campos } = resumen;
   assert.strictEqual(nivel, 'info');
   assert.deepStrictEqual(campos, {
-    estado: 'en_preparacion',
+    estado: 'listo',
     destinatarios: 4,
     enviados: 2,
     fallidos: 1,
     caducados: 1,
     servicios: { 'fcm.googleapis.com': 2, 'web.push.apple.com': 1, 'updates.push.services.mozilla.com': 1 },
   });
-  sinDatosSensibles(log.lineas, subs, { titulo: 'Tu pedido está en preparación', cuerpo: 'PED-20261113-0042' });
+  sinDatosSensibles(log.lineas, subs, { titulo: '¡Tu plato está listo!', cuerpo: 'PED-20261113-0042' });
   assert.ok(!log.lineas.join('\n').includes('"Ana"'), 'ni el alias del comensal');
 });
 
 test('resumen con 0 destinatarios: también se registra (nadie de la mesa activó avisos)', async (t) => {
   const log = capturarLog(t);
-  await notificarCambioEstado(ctxDe([], () => ({ statusCode: 201 })), cambio('en_preparacion'));
+  await notificarCambioEstado(ctxDe([], () => ({ statusCode: 201 })), cambio('listo'));
   const [resumen] = log.de('push: resumen del envío');
   assert.deepStrictEqual(
     [resumen.destinatarios, resumen.enviados, resumen.fallidos, resumen.caducados, resumen.servicios],
@@ -209,9 +209,9 @@ test('«listo» solo a quien lo pidió: el resumen cuenta a los destinatarios fi
   assert.deepStrictEqual([resumen.destinatarios, resumen.enviados, resumen.servicios], [1, 1, { 'fcm.googleapis.com': 1 }]);
 });
 
-test('un estado sin aviso (recibido, entregado) no envía ni deja resumen', async (t) => {
+test('un estado sin aviso (recibido, en preparación, cancelado, entregado) no envía ni deja resumen', async (t) => {
   const log = capturarLog(t);
-  for (const estado of ['recibido', 'entregado', 'pagado']) {
+  for (const estado of ['recibido', 'en_preparacion', 'cancelado', 'entregado', 'pagado']) {
     await notificarCambioEstado(ctxDe([suscripcion('fcm.googleapis.com')], () => ({ statusCode: 201 })), cambio(estado));
   }
   assert.deepStrictEqual(log.lineas, []);

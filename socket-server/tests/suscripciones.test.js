@@ -21,9 +21,15 @@ function pushFalso() {
 const post = (s, metodo, cuerpo, token) => fetch(`${s.url}/push/suscripcion`, {
   method: metodo, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(cuerpo),
 });
-// Por defecto "en_preparacion" (se avisa a toda la mesa); "listo" va solo a
-// los dueños del pedido y se prueba en push-duenos.test.js.
-const cambio = (extra) => ({ eventId: randomUUID(), id_pedido: 1, id_mesa: 5, codigo_pedido: 'PED-1', estado: 'en_preparacion', ...extra });
+// Por defecto "listo", el único estado con push; va solo a los dueños del
+// pedido (ver push-duenos.test.js), así que cada prueba lo registra a nombre
+// del alias de la suscripción con /internal/order-created.
+const cambio = (extra) => ({ eventId: randomUUID(), id_pedido: 1, id_mesa: 5, codigo_pedido: 'PED-1', estado: 'listo', ...extra });
+const deAna = (s, idPedido = 1, idMesa = 5) => fetch(`${s.url}/internal/order-created`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'x-internal-key': CLAVE_INTERNA },
+  body: JSON.stringify({ eventId: randomUUID(), pedido: { id_pedido: idPedido, id_mesa: idMesa, estado: 'recibido', items: [{ id_plato: 3, comensal: 'Ana' }] } }),
+});
 const pausa = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
 test('validarSuscripcion rechaza endpoints peligrosos (SSRF) y llaves malformadas', () => {
@@ -74,26 +80,28 @@ test('por socket: exige sala; el alias es el del JWT; es idempotente y push:unsu
 test('un cambio de estado envía push solo a las suscripciones de ESA mesa', async () => {
   const push = pushFalso();
   const s = await levantar({}, { push });
-  s.suscripciones.agregar(5, sub(1));
-  s.suscripciones.agregar(6, sub(2));
+  s.suscripciones.agregar(5, { ...sub(1), comensal: 'Ana' });
+  s.suscripciones.agregar(6, { ...sub(2), comensal: 'Ana' });
+  await deAna(s);
   const cocina = await s.conectar(tokenPersonal('cocina'));
   await emitir(cocina, 'order:status', cambio());
   await pausa();
   assert.deepStrictEqual(push.enviados.map((e) => e.endpoint), [sub(1).endpoint]);
-  assert.strictEqual(push.enviados[0].payload.titulo, 'Tu pedido está en preparación');
+  assert.strictEqual(push.enviados[0].payload.titulo, '¡Tu plato está listo!');
   // Estados que no ameritan interrumpir al comensal no generan push.
   await emitir(cocina, 'order:status', cambio({ estado: 'en_preparacion' }));
   const mesero = await s.conectar(tokenPersonal('mesero'));
   await emitir(mesero, 'order:status', cambio({ estado: 'entregado' }));
   await pausa();
-  assert.strictEqual(push.enviados.length, 2);
+  assert.strictEqual(push.enviados.length, 1);
   await s.cerrar();
 });
 
 test('un evento duplicado no reenvía push y las suscripciones caducadas se eliminan', async () => {
   const push = pushFalso();
   const s = await levantar({}, { push });
-  s.suscripciones.agregar(5, sub(1));
+  s.suscripciones.agregar(5, { ...sub(1), comensal: 'Ana' });
+  await deAna(s);
   const cocina = await s.conectar(tokenPersonal('cocina'));
   const evento = cambio();
   await emitir(cocina, 'order:status', evento);

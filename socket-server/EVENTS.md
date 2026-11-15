@@ -1410,11 +1410,16 @@ un extra para cuando el comensal cerró la PWA. En **iPhone** Web Push solo func
 
 Qué se envía:
 
-| Estado del pedido | A quién | Título |
+| Evento | A quién | Título |
 |---|---|---|
-| `en_preparacion` | Todas las suscripciones de la mesa | Tu pedido está en preparación |
-| `listo` | **Solo a los dueños del pedido** | ¡Tu plato está listo! |
-| `cancelado` | Todas las suscripciones de la mesa | Tu pedido fue cancelado |
+| `order:status` con `listo` | **Solo a los dueños del pedido** | ¡Tu plato está listo! |
+| `payment:confirmed` (Wompi o caja) | **Solo a quien pagó** (su alias, con `claveAlias`) | Tu pago está confirmado |
+
+Nada más manda push: `en_preparacion`, `cancelado` y los demás estados se ven en vivo en
+la PWA con `order:status`. Con un aviso por cada paso, Chrome en Android marcaba las
+notificaciones como «Posible spam». El del pago no se manda si el cobro no trae alias
+(la caja cobró la mesa entera) ni si es de un grupo que ya se fue; su payload es
+`{ titulo, cuerpo, url: "/pago" }`, sin `estado`, sin montos ni nombres.
 
 Los dueños se anotan al crear el pedido: **solo** los alias de `items[].comensal` de
 `order:created` (quienes lo enviaron), no todos los que tienen líneas en el carrito de la mesa.
