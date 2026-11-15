@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useContext } from 'react'
+import { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
@@ -6,6 +6,7 @@ import { useSocketListener } from '../hooks'
 import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { mesaDelAviso } from '../utils/avisos'
+import { aplicarMesaActualizada, fusionarCargaConAvisos } from '../utils/mesaActualizada'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
 
@@ -102,6 +103,11 @@ export function TablesProvider({ children }) {
     }
   }, [tables])
 
+  // Cargas de GET /api/mesas en curso: cada una anota las mesas que reciben un
+  // mesa:actualizada MIENTRAS se pide, para que la respuesta (más vieja) no las
+  // pise (revisión de Roberto en el #278).
+  const cargasEnCurso = useRef(new Set())
+
   /**
    * Carga las mesas desde el backend real: GET /api/mesas
    */
@@ -116,19 +122,17 @@ export function TablesProvider({ children }) {
     }
 
     setLoading(true)
+    const avisadas = new Map()
+    cargasEnCurso.current.add(avisadas)
     try {
       const data = await mesasApi.listar()
       if (data?.mesas && Array.isArray(data.mesas)) {
-        setTables((prevTables) => {
-          const prevMap = new Map(prevTables.map((t) => [t.id, t]))
-          return data.mesas.map((m) =>
-            normalizarMesa(m, prevMap.get(m.id_mesa) || prevMap.get(m.numero) || {})
-          )
-        })
+        setTables((prevTables) => fusionarCargaConAvisos(prevTables, data.mesas, avisadas, normalizarMesa))
       }
     } catch (err) {
       console.warn('Aviso: no se pudieron cargar las mesas desde el backend:', err.message)
     } finally {
+      cargasEnCurso.current.delete(avisadas)
       setLoading(false)
     }
   }, [])
@@ -198,6 +202,7 @@ export function TablesProvider({ children }) {
   // la notificación ni el sonido. Una ventana por tipo, de los últimos 200.
   const [createdVisto] = useState(() => crearVentanaEventos())
   const [statusVisto] = useState(() => crearVentanaEventos())
+  const [mesaVista] = useState(() => crearVentanaEventos())
 
   // Escuchar cuando entra un pedido nuevo (order:created)
   useSocketListener('order:created', (data) => {
@@ -349,6 +354,33 @@ export function TablesProvider({ children }) {
     socket.on('connect', pedirPresencia)
     return () => socket.off('connect', pedirPresencia)
   }, [])
+
+  // T12 (EVENTS.md §5.7): el backend avisa cada cambio de mesa (abrir, estado,
+  // crear, editar, liberar, borrar) con mesa:actualizada, solo a room:admin.
+  // La lista de mesas, el admin y la Caja la ven sin recargar. Un eventId
+  // repetido se ignora (ventana de los últimos 200).
+  useSocketListener('mesa:actualizada', (data) => {
+    if (mesaVista(data?.eventId)) return
+    const id = Number(data?.id_mesa)
+    if (Number.isInteger(id) && id > 0) {
+      for (const avisadas of cargasEnCurso.current) avisadas.set(id, data.motivo === 'eliminada' ? 'eliminada' : 'actualizada')
+    }
+    setTables((prev) => aplicarMesaActualizada(prev, data, normalizarMesa))
+  })
+
+  // Al RECONECTAR se vuelven a pedir las mesas: desde #239 los avisos que se
+  // perdieron sin conexión no se reenvían. Se marca el corte (disconnect) y se
+  // recarga en el connect que le sigue; la primera conexión no la necesita (las
+  // mesas se cargan al montar).
+  const huboCorte = useRef(false)
+  useSocketListener('disconnect', () => {
+    huboCorte.current = true
+  })
+  useSocketListener('connect', () => {
+    if (!huboCorte.current) return
+    huboCorte.current = false
+    cargarMesas()
+  })
 
   // Escuchar presencia de comensales en vivo (room:admin recibe cambios de todas las mesas).
   // Guardarla en el contexto evita perderla al cerrar y volver a abrir "Tomar pedido".
