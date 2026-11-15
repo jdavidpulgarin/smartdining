@@ -14,6 +14,7 @@ import {
   TEXTO_SUGERENCIA_SIN_CELULAR,
   debeMostrarSugerenciaSinCelular,
   mensajePagoConfirmado,
+  avisoExcedentePago,
   eventIdParaIntento,
   infoTuParte,
   montoTuParte,
@@ -22,6 +23,7 @@ import {
   decidirVisibilidadPago,
 } from '../utils/cuenta';
 import { crearDeduplicador } from '../utils/deduplicador';
+import { claveAlias } from '../utils/apodo';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout, cerrarWidget } from '../services/wompiWidget';
 import { uuidV4 } from '../services/clienteMesa';
@@ -33,7 +35,7 @@ import { uuidV4 } from '../services/clienteMesa';
  * las opciones para pagar (Pagar lo mío, Pagar toda la cuenta), y los flujos
  * de confirmación y pago en caja.
  */
-function Pago() {
+function Pago({ errorPagoInicial = null } = {}) {
   const { cuenta, cargando, error, recargar, idMesa, comensal } = useCuentaMesa();
   const { on: socketOn, enviar, presencia, estado: estadoSocket } = useMesaSocket();
 
@@ -60,11 +62,20 @@ function Pago() {
   const [avisoCuenta, setAvisoCuenta] = useState(ESTADO_CUENTA_INICIAL);
   const [avisoMesero, setAvisoMesero] = useState(null);
   const [iniciandoPago, setIniciandoPago] = useState(false);
-  const [errorPago, setErrorPago] = useState(null);
+  const [errorPago, setErrorPago] = useState(errorPagoInicial);
+  const [avisoExcedente, setAvisoExcedente] = useState(null);
   const [intencionActual, setIntencionActual] = useState(null);
   const [ultimoPago, setUltimoPago] = useState(0);
   const [tipoConfirmado, setTipoConfirmado] = useState('mesa');
   const intentoPrevioRef = useRef(null);
+  const cuentaAnteriorRef = useRef(cuenta);
+
+  const esErrorEnRevision =
+    Boolean(
+      errorPago && typeof errorPago === 'object' && errorPago.tipo === 'en_revision'
+    ) || errorPago === 'en_revision';
+  const textoErrorPago =
+    typeof errorPago === 'object' ? errorPago?.mensaje : errorPago;
 
   const estadoEsperaRef = useRef({ pantalla, origenEspera, widgetAbierto, intencionActual });
   useEffect(() => {
@@ -137,6 +148,7 @@ function Pago() {
       if (trans.apagarEspera) {
         setIniciandoPago(false);
       }
+      setErrorPago(null);
 
       if (tipo === 'propio' || tipo === 'mesa') {
         if (intentoPrevioRef.current) {
@@ -147,6 +159,15 @@ function Pago() {
           : (evento.monto_centavos != null ? Number(evento.monto_centavos) / 100 : 0);
         setUltimoPago(monto);
         setTipoConfirmado(tipo);
+        const esMio = Boolean(
+          claveAlias(comensal) &&
+          claveAlias(evento.comensal) === claveAlias(comensal)
+        );
+        if (tipo === 'propio' || (tipo === 'mesa' && esMio)) {
+          setAvisoExcedente(avisoExcedentePago(evento));
+        } else {
+          setAvisoExcedente(null);
+        }
         setPantalla(trans.pantalla);
       }
       // 'otro' con saldo restante > 0: solo el aviso "X pagó", sin cambiar de pantalla
@@ -193,6 +214,14 @@ function Pago() {
     }
     estadoSocketAnteriorRef.current = estadoSocket;
   }, [estadoSocket, pantalla, recargar]);
+
+  // Limpiar error de pago al recargar la cuenta (useCuentaMesa ya recarga con payment:confirmed)
+  useEffect(() => {
+    if (cuentaAnteriorRef.current && cuenta !== cuentaAnteriorRef.current) {
+      setErrorPago(null);
+    }
+    cuentaAnteriorRef.current = cuenta;
+  }, [cuenta]);
 
   // Si el saldo de la mesa bajó respecto al que había antes del pago, salir de espera
   useEffect(() => {
@@ -416,6 +445,7 @@ function Pago() {
   };
 
   const handlePagarWompi = async () => {
+    if (esErrorEnRevision) return;
     setIniciandoPago(true);
     setErrorPago(null);
 
@@ -485,7 +515,16 @@ function Pago() {
         });
       }
     } catch (err) {
-      setErrorPago(err.mensaje || err.message || 'No pudimos iniciar el pago');
+      if (err?.tipo === 'en_revision' || err?.codigo === 'PAGO_EN_REVISION') {
+        setErrorPago({
+          tipo: 'en_revision',
+          mensaje:
+            err.mensaje ||
+            'Tu pago anterior está en revisión. No vuelvas a pagar; pregúntale al mesero.',
+        });
+      } else {
+        setErrorPago(err.mensaje || err.message || 'No pudimos iniciar el pago');
+      }
     } finally {
       setIniciandoPago(false);
     }
@@ -505,6 +544,7 @@ function Pago() {
     setIniciandoPago(false);
     setPantalla(trans.pantalla);
     setErrorPago(null);
+    setAvisoExcedente(null);
     setTipoConfirmado('mesa');
   };
 
@@ -543,7 +583,7 @@ function Pago() {
           className="bg-superficie border border-primario text-white px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg toast-entra"
         >
           <span className="w-2 h-2 rounded-full bg-primario shrink-0" />
-          <span>{errorPago}</span>
+          <span>{textoErrorPago}</span>
         </div>
       )}
 
@@ -687,7 +727,9 @@ function Pago() {
                           aria-checked={activo}
                           onClick={() => {
                             setModo(k);
-                            setErrorPago(null);
+                            if (!esErrorEnRevision) {
+                              setErrorPago(null);
+                            }
                           }}
                           className={`min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
                             activo
@@ -751,7 +793,9 @@ function Pago() {
                       type="button"
                       onClick={() => {
                         setModo('total');
-                        setErrorPago(null);
+                        if (!esErrorEnRevision) {
+                          setErrorPago(null);
+                        }
                       }}
                       className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#2A2A2A] hover:bg-[#333333] active:bg-[#3a3a3a] text-white font-etiqueta font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer border border-[#3A3A3A] flex items-center justify-center"
                     >
@@ -768,7 +812,7 @@ function Pago() {
                   className="bg-superficie border border-primario text-white px-4 py-3 rounded-xl flex items-center gap-2.5 text-xs font-semibold shadow-md toast-entra"
                 >
                   <span className="w-2 h-2 rounded-full bg-primario shrink-0" />
-                  <span>{errorPago}</span>
+                  <span>{textoErrorPago}</span>
                 </div>
               )}
 
@@ -776,9 +820,9 @@ function Pago() {
               <button
                 type="button"
                 onClick={handlePagarWompi}
-                disabled={iniciandoPago || montoModo <= 0}
+                disabled={iniciandoPago || montoModo <= 0 || esErrorEnRevision}
                 className={`min-h-[56px] rounded-2xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-[19px] tracking-wider flex items-center justify-center gap-2.5 transition-colors shadow-sm ${
-                  iniciandoPago || montoModo <= 0
+                  iniciandoPago || montoModo <= 0 || esErrorEnRevision
                     ? 'opacity-70 cursor-not-allowed'
                     : 'cursor-pointer'
                 }`}
@@ -1021,13 +1065,27 @@ function Pago() {
           </h1>
 
           {tipoConfirmado === 'propio' ? (
-            <p className="m-0 text-[15px] text-white">
-              Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
-            </p>
+            <div className="flex flex-col gap-1">
+              <p className="m-0 text-[15px] text-white">
+                Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
+              </p>
+              {avisoExcedente && (
+                <p className="m-0 text-sm text-acento font-semibold">
+                  {avisoExcedente}
+                </p>
+              )}
+            </div>
           ) : (
-            <p className="m-0 text-[15px] text-white">
-              La mesa quedó pagada.
-            </p>
+            <div className="flex flex-col gap-1">
+              <p className="m-0 text-[15px] text-white">
+                La mesa quedó pagada.
+              </p>
+              {avisoExcedente && (
+                <p className="m-0 text-sm text-acento font-semibold">
+                  {avisoExcedente}
+                </p>
+              )}
+            </div>
           )}
 
           <div className="w-full box-border bg-superficie-2 border border-borde rounded-xl p-3 flex justify-between items-center text-sm">

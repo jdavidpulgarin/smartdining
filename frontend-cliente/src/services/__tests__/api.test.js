@@ -186,4 +186,28 @@ describe('Interceptor HTTP en frontend-cliente (pedirJson)', () => {
       'Alguien de la mesa está pagando en línea; espera a que termine e inténtalo otra vez.'
     );
   });
+
+  it('debe conservar codigo y tipo en ErrorApi cuando la API los retorna', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        error: 'Tu pago anterior se está confirmando',
+        codigo: 'PAGO_EN_REVISION',
+        tipo: 'en_revision',
+      }),
+    });
+
+    let errorCapturado = null;
+    try {
+      await pedirJson('/pagos/intencion', { method: 'POST' });
+    } catch (err) {
+      errorCapturado = err;
+    }
+
+    expect(errorCapturado).toBeInstanceOf(ErrorApi);
+    expect(errorCapturado.codigo).toBe('PAGO_EN_REVISION');
+    expect(errorCapturado.tipo).toBe('en_revision');
+  });
 });
