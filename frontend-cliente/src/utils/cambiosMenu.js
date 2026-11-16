@@ -86,7 +86,8 @@ export function crearOyenteMenuActualizado({
     if (deduplicador?.visto(data?.eventId)) return Promise.resolve(null);
     const antes = leerAntes();
     return Promise.resolve()
-      .then(() => refrescar())
+      // Un plato borrado no se conserva aunque estuviera marcado agotado.
+      .then(() => refrescar(data?.accion === 'plato-eliminado' && data?.id_plato ? { olvidar: [data.id_plato] } : undefined))
       .then((menu) => {
         if (!menu) return null;
         alRecibirMenu(menu);
@@ -99,4 +100,44 @@ export function crearOyenteMenuActualizado({
         return null;
       });
   };
+}
+
+const categoriasDe = (menu) => (Array.isArray(menu) ? menu : Array.isArray(menu?.categorias) ? menu.categorias : null);
+const claveCategoria = (c) => (c?.id_categoria != null ? `id:${c.id_categoria}` : `nombre:${c?.categoria ?? c?.nombre ?? ''}`);
+
+/**
+ * GET /menu solo trae los platos que se pueden pedir. Al volver a pedirlo
+ * (menu:actualizado, o al abrir el Menú), un plato que el comensal ya veía
+ * marcado AGOTADO (`disponible === false` en el menú anterior) desaparecería;
+ * se conserva tal cual, marcado, al final de su categoría. Lo que el servidor sí
+ * trae manda (si volvió, se ve disponible). Los de `olvidar` (borrados) no se
+ * conservan. Devuelve `nuevo` igual si no hay nada que conservar.
+ *
+ * @param {object|Array|null} anterior  el menú que se estaba mostrando
+ * @param {object|Array} nuevo  el que acaba de llegar del servidor
+ * @param {number[]} [olvidar]  ids de platos que no se conservan
+ */
+export function conservarAgotados(anterior, nuevo, olvidar = []) {
+  const viejas = categoriasDe(anterior);
+  const nuevas = categoriasDe(nuevo);
+  if (!viejas || !nuevas) return nuevo;
+  const presentes = new Set(nuevas.flatMap((c) => (c.platos || []).map((p) => Number(p.id_plato))));
+  const fuera = new Set((olvidar || []).map(Number));
+  const porCategoria = new Map();
+  for (const c of viejas) {
+    const agotados = (c.platos || []).filter((p) => p?.disponible === false
+      && !presentes.has(Number(p.id_plato)) && !fuera.has(Number(p.id_plato)));
+    if (agotados.length > 0) porCategoria.set(claveCategoria(c), { categoria: c, agotados });
+  }
+  if (porCategoria.size === 0) return nuevo;
+
+  const resultado = nuevas.map((c) => {
+    const extra = porCategoria.get(claveCategoria(c));
+    if (!extra) return c;
+    porCategoria.delete(claveCategoria(c));
+    return { ...c, platos: [...(c.platos || []), ...extra.agotados] };
+  });
+  // Una categoría que se quedó sin nada que pedir no llega: vuelve con sus agotados.
+  for (const { categoria, agotados } of porCategoria.values()) resultado.push({ ...categoria, platos: agotados });
+  return Array.isArray(nuevo) ? resultado : { ...nuevo, categorias: resultado };
 }

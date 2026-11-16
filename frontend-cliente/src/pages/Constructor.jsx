@@ -6,6 +6,7 @@ import {
   adaptarPlatoArmable,
   obtenerPlatoArmable,
   recargarMenu,
+  refrescarMenu,
   suscribirCambiosMenu,
 } from '../services/menuService';
 import { useMesaSocketContext } from '../context/MesaSocketContext';
@@ -62,7 +63,7 @@ function Constructor() {
     async function cargarPlato() {
       try {
         // Siempre la carta vigente al abrir (red de seguridad de menu:actualizado).
-        recargarMenu();
+        refrescarMenu().catch(() => {});
         const resultado = await obtenerPlatoArmable(idPlato);
         if (activo) {
           setEstadoCarga({ idCargado: idPlato, plato: resultado });

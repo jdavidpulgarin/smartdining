@@ -7,8 +7,9 @@ import {
   suscribirCambiosMenu,
   adaptarPlatoArmable,
   limpiarMarcasAgotadoLocal,
+  actualizarDisponibilidadPlatoEnCache,
 } from '../services/menuService';
-import { avisosCambiosCarrito, unirAvisos, crearOyenteMenuActualizado } from './cambiosMenu';
+import { avisosCambiosCarrito, unirAvisos, crearOyenteMenuActualizado, conservarAgotados } from './cambiosMenu';
 import { enriquecerItems, buscarPlatoEnMenu } from './carritoCompartido';
 import { crearDeduplicador } from './deduplicador';
 import { constructorReducer, estadoInicial } from '../components/constructor/constructorReducer';
@@ -171,5 +172,71 @@ describe('constructorReducer: PODAR_SELECCIONES (la carta cambió en el Construc
     const estado = { ...estadoInicial, selecciones: { 301: { 30: 'normal' } } };
     const plato = { pasos: [{ id_paso: 301, ingredientes: [{ id_ingrediente: 30, disponible: true }] }] };
     expect(constructorReducer(estado, { type: 'PODAR_SELECCIONES', plato })).toBe(estado);
+  });
+});
+
+describe('conservarAgotados: volver a pedir el menú no borra lo que el comensal ya veía AGOTADO', () => {
+  const agotada = { ...limonada(), disponible: false };
+
+  it('un plato marcado agotado que el servidor ya no trae se conserva (marcado) en su categoría', () => {
+    const anterior = menu([arepa(), agotada]);
+    const servidor = menu([arepa({ nombre: 'Arepa Rellena Especial' })]);
+    const r = conservarAgotados(anterior, servidor);
+    expect(r.categorias[0].platos.map((p) => [p.nombre, p.disponible])).toEqual([['Arepa Rellena Especial', true], ['Limonada de Coco', false]]);
+  });
+
+  it('lo que el servidor trae manda; un plato que estaba disponible y ya no viene, no vuelve; los de olvidar tampoco', () => {
+    expect(conservarAgotados(menu([agotada]), menu([limonada()])).categorias[0].platos[0].disponible).toBe(true);
+    expect(conservarAgotados(menu([arepa(), limonada()]), menu([arepa()])).categorias[0].platos).toHaveLength(1);
+    expect(conservarAgotados(menu([arepa(), agotada]), menu([arepa()]), [1020]).categorias[0].platos).toHaveLength(1);
+  });
+
+  it('una categoría que el servidor ya no trae vuelve con sus agotados; sin nada que conservar devuelve el mismo menú', () => {
+    const otra = { id_categoria: 200, categoria: 'Bebidas', platos: [{ ...agotada, id_plato: 2001, nombre: 'Jugo de Mora' }] };
+    const r = conservarAgotados({ categorias: [V1.categorias[0], otra] }, V1);
+    expect(r.categorias.map((c) => c.categoria)).toEqual(['Arma tu plato', 'Bebidas']);
+    expect(conservarAgotados(V1, V2)).toBe(V2);
+    expect(conservarAgotados(null, V2)).toBe(V2);
+  });
+});
+
+describe('refrescarMenu conserva los agotados del menú en memoria (demo G-08, paso 7)', () => {
+  let respuesta;
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.stubEnv('VITE_MODO_SIMULADO', 'false');
+    limpiarMarcasAgotadoLocal();
+    recargarMenu();
+    respuesta = V1;
+    vi.spyOn(apiModule, 'pedirJson').mockImplementation(async () => structuredClone(respuesta));
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('la limonada se agotó (plato:disponibilidad) y el servidor ya no la trae: sigue en la carta como agotada', async () => {
+    await obtenerMenuRaw();
+    actualizarDisponibilidadPlatoEnCache(1020, false);
+    respuesta = menu([arepa()]); // GET /menu sin la limonada (sin stock)
+    const nuevo = await refrescarMenu();
+    expect(nuevo.categorias[0].platos.map((p) => [p.id_plato, p.disponible])).toEqual([[1003, true], [1020, false]]);
+  });
+
+  it('con olvidar (plato-eliminado) el agotado borrado no vuelve; recargarMenu a secas no conserva nada', async () => {
+    await obtenerMenuRaw();
+    actualizarDisponibilidadPlatoEnCache(1020, false);
+    respuesta = menu([arepa()]);
+    expect((await refrescarMenu({ olvidar: [1020] })).categorias[0].platos).toHaveLength(1);
+    recargarMenu();
+    expect((await obtenerMenuRaw()).categorias[0].platos).toHaveLength(1);
+  });
+
+  it('el oyente olvida el plato borrado (accion plato-eliminado)', async () => {
+    const refrescar = vi.fn(async () => V1);
+    const oyente = crearOyenteMenuActualizado({
+      refrescar, leerAntes: () => [], enriquecer: () => [], estaEnCarta: () => true,
+      alRecibirMenu: () => {}, alAvisar: () => {}, deduplicador: crearDeduplicador(),
+    });
+    await oyente({ eventId: 'e1', id_plato: 1020, accion: 'plato-eliminado' });
+    await oyente({ eventId: 'e2', id_plato: 1003, accion: 'plato-editado' });
+    expect(refrescar.mock.calls).toEqual([[{ olvidar: [1020] }], [undefined]]);
   });
 });

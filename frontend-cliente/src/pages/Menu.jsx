@@ -5,6 +5,7 @@ import {
   obtenerPlatos,
   obtenerPlatosArmables,
   recargarMenu,
+  refrescarMenu,
   actualizarDisponibilidadPlatoEnCache,
   actualizarDisponibilidadEnCache,
   suscribirCambiosMenu,
@@ -132,7 +133,7 @@ function Menu() {
   // recargaba con marcas locales de un 409 y, si no, pintaba la copia en memoria.
   useEffect(() => {
     let activo = true;
-    recargarMenu();
+    refrescarMenu().catch(() => {});
     (async () => {
       try {
         const [cats, plats, armables] = await Promise.all([
