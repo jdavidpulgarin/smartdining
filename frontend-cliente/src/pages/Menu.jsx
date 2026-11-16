@@ -5,7 +5,7 @@ import {
   obtenerPlatos,
   obtenerPlatosArmables,
   recargarMenu,
-  tieneMarcasAgotadoLocal,
+  refrescarMenu,
   actualizarDisponibilidadPlatoEnCache,
   actualizarDisponibilidadEnCache,
   suscribirCambiosMenu,
@@ -127,12 +127,13 @@ function Menu() {
     }
   }, []);
 
-  // Carga inicial al montar el componente (si había marcas locales de 409, recarga GET /menu)
+  // Carga inicial al montar: SIEMPRE vuelve a pedir GET /menu. Es la red de
+  // seguridad de menu:actualizado (EVENTS.md §5.8): si el aviso no llegó (socket
+  // caído, celular dormido), volver al Menú trae la carta vigente. Antes solo
+  // recargaba con marcas locales de un 409 y, si no, pintaba la copia en memoria.
   useEffect(() => {
     let activo = true;
-    if (tieneMarcasAgotadoLocal()) {
-      recargarMenu();
-    }
+    refrescarMenu().catch(() => {});
     (async () => {
       try {
         const [cats, plats, armables] = await Promise.all([

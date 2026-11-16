@@ -4,6 +4,7 @@ import {
   actualizarMarcasPorDisponibilidad,
 } from '../utils/sinStock';
 import { urlImagen } from '../utils/imagenes';
+import { conservarAgotados } from '../utils/cambiosMenu';
 
 let cacheMenuPromise = null;
 let marcasAgotadoLocal = [];
@@ -43,6 +44,26 @@ export function recargarMenu() {
   cacheMenuPromise = null;
 }
 
+/**
+ * Vuelve a pedir GET /menu YA (sin esperar a que alguien lo lea) y avisa a los
+ * suscritos (Menú, Constructor, Carrito). Es lo que hace la PWA al recibir
+ * `menu:actualizado` (EVENTS.md §5.8): sin esto, el menú quedaba guardado en
+ * memoria y el comensal no veía un plato editado hasta recargar la página.
+ *
+ * GET /menu solo trae lo que se puede pedir: un plato que se AGOTÓ (y que el
+ * comensal ya veía marcado «AGOTADO» por plato:disponibilidad) desaparecería
+ * de su carta. Se conserva marcado como agotado, salvo los de `olvidar` (un
+ * plato borrado, menu:actualizado con accion plato-eliminado).
+ *
+ * @param {{ olvidar?: number[] }} [opciones]
+ * @returns {Promise<object>} el menú nuevo
+ */
+export function refrescarMenu({ olvidar = [] } = {}) {
+  const anterior = cacheMenuPromise;
+  cacheMenuPromise = null;
+  return obtenerMenuRaw({ anterior, olvidar });
+}
+
 async function fetchMenuRaw() {
   if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
     const modulo = await import('../mocks/menu-simulado.json');
@@ -51,16 +72,23 @@ async function fetchMenuRaw() {
   return pedirJson('/menu');
 }
 
-export function obtenerMenuRaw() {
+/**
+ * El menú (GET /menu), guardado en memoria hasta recargarMenu/refrescarMenu.
+ * `anterior` (solo lo pasa refrescarMenu) es la promesa del menú que se estaba
+ * mostrando: de él se conservan los platos agotados que el servidor ya no trae.
+ */
+export function obtenerMenuRaw({ anterior = null, olvidar = [] } = {}) {
   if (!cacheMenuPromise) {
     cacheMenuPromise = fetchMenuRaw()
-      .then((menuNuevo) => {
+      .then(async (menuServidor) => {
         if (marcasAgotadoLocal.length > 0) {
           marcasAgotadoLocal = marcasAgotadoTrasRecarga(
             marcasAgotadoLocal,
-            menuNuevo
+            menuServidor
           );
         }
+        const menuViejo = anterior ? await anterior.catch(() => null) : null;
+        const menuNuevo = conservarAgotados(menuViejo, menuServidor, olvidar);
         const menuEfectivo =
           marcasAgotadoLocal.length > 0
             ? aplicarFaltantesMenu(menuNuevo, marcasAgotadoLocal)
@@ -527,6 +555,7 @@ export default {
   obtenerPlatosArmables,
   obtenerPlatoArmable,
   recargarMenu,
+  refrescarMenu,
   obtenerMenuRaw,
   suscribirCambiosMenu,
   obtenerMarcasAgotadoLocal,

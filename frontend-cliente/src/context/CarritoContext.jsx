@@ -30,8 +30,11 @@ import {
   aplicarFaltantesMenu,
   marcarFaltantesEnCache,
   recargarMenu,
+  refrescarMenu,
   suscribirCambiosMenu,
 } from '../services/menuService';
+import { crearOyenteMenuActualizado, unirAvisos } from '../utils/cambiosMenu';
+import { crearDeduplicador } from '../utils/deduplicador';
 
 const CarritoContext = createContext(null);
 
@@ -194,6 +197,9 @@ export function CarritoProvider({ children }) {
   const [menuRaw, setMenuRaw] = useState(null);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState(null);
+  // Avisos de la carta (menu:actualizado): un precio que cambió o un plato que
+  // salió de la carta con el carrito lleno. Se ven hasta que el comensal los cierra.
+  const [avisosMenu, setAvisosMenu] = useState(ARRAY_VACIO);
 
   useEffect(() => {
     if (!mesa) return undefined;
@@ -249,6 +255,33 @@ export function CarritoProvider({ children }) {
       bajaPlato?.();
     };
   }, [socketOn]);
+
+  // menu:actualizado (EVENTS.md §5.8): el admin editó la carta. Se vuelve a
+  // pedir GET /menu (refrescarMenu avisa a los suscritos: Menú, Constructor y
+  // este contexto) y se compara el carrito de antes con el de ahora para avisar
+  // si una línea cambió de precio o su plato salió de la carta.
+  const lineasEnriquecidasRef = useRef(ARRAY_VACIO);
+  const itemsSocketRef = useRef(ARRAY_VACIO);
+  const aliasRef = useRef('');
+  const deduplicadorMenu = useMemo(() => crearDeduplicador(), []);
+  useEffect(() => {
+    if (!socketOn) return undefined;
+    const oyente = crearOyenteMenuActualizado({
+      refrescar: refrescarMenu,
+      leerAntes: () => lineasEnriquecidasRef.current,
+      enriquecer: (menu) => enriquecerItems(itemsSocketRef.current, menu, aliasRef.current),
+      estaEnCarta: (menu, id) => Boolean(buscarPlatoEnMenu(menu, id)),
+      alRecibirMenu: setMenuRaw,
+      alAvisar: (avisos) => setAvisosMenu((prev) => unirAvisos(prev, avisos)),
+      deduplicador: deduplicadorMenu,
+    });
+    const baja = socketOn('menu:actualizado', oyente);
+    return () => {
+      baja?.();
+    };
+  }, [socketOn, deduplicadorMenu]);
+
+  const descartarAvisosMenu = useCallback(() => setAvisosMenu(ARRAY_VACIO), []);
 
   // Recargar menú al reconectar el socket (de reconectando a conectado)
   const estadoSocket = mesaSocket?.estado;
@@ -316,6 +349,12 @@ export function CarritoProvider({ children }) {
       mesaSocket?.comensal
     );
   }, [modo, mesaSocket?.carrito?.items, menuRaw, mesaSocket?.comensal]);
+
+  useEffect(() => {
+    lineasEnriquecidasRef.current = lineasCompartidasEnriquecidas;
+    itemsSocketRef.current = mesaSocket?.carrito?.items || ARRAY_VACIO;
+    aliasRef.current = mesaSocket?.comensal || '';
+  }, [lineasCompartidasEnriquecidas, mesaSocket?.carrito?.items, mesaSocket?.comensal]);
 
   const { mias: misLineasCompartidas, otros: otrosCompartidos } = useMemo(() => {
     if (modo !== 'compartido') return { mias: ARRAY_VACIO, otros: ARRAY_VACIO };
@@ -565,6 +604,8 @@ export function CarritoProvider({ children }) {
       enviando,
       error,
       limpiarError,
+      avisosMenu,
+      descartarAvisosMenu,
     }),
     [
       modo,
@@ -586,6 +627,8 @@ export function CarritoProvider({ children }) {
       enviando,
       error,
       limpiarError,
+      avisosMenu,
+      descartarAvisosMenu,
     ]
   );
 

@@ -14,7 +14,7 @@ import { crearDeduplicador } from '../../utils/deduplicador';
 
 function Layout({ children }) {
   const { mesa, comensal, valida, cargando, motivoCierre } = useMesaSession();
-  const { totalUnidades } = useCarrito();
+  const { totalUnidades, avisosMenu = [], descartarAvisosMenu } = useCarrito();
   const { on: socketOn } = useMesaSocketContext();
 
   const [toastPedido, setToastPedido] = useState(null);
@@ -160,6 +160,29 @@ function Layout({ children }) {
             aria-label="Cerrar notificación"
           >
             ✕
+          </button>
+        </div>
+      )}
+
+      {/* La carta cambió con el carrito lleno (menu:actualizado): precio nuevo o plato retirado */}
+      {avisosMenu.length > 0 && (
+        <div
+          role="alert"
+          data-testid="avisos-menu"
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-md bg-superficie-2 border border-acento p-3.5 rounded-2xl shadow-2xl animate-fadeIn text-xs text-texto"
+        >
+          <p className="font-etiqueta font-bold uppercase tracking-wide text-acento mb-1.5">La carta cambió</p>
+          <ul className="space-y-1.5 leading-relaxed">
+            {avisosMenu.map((aviso) => (
+              <li key={aviso.clave}>{aviso.texto}</li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={descartarAvisosMenu}
+            className="mt-2.5 min-h-11 w-full rounded-xl border border-borde font-etiqueta font-bold uppercase text-texto hover:border-acento cursor-pointer"
+          >
+            Entendido
           </button>
         </div>
       )}
