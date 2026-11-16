@@ -101,6 +101,9 @@ export const MENSAJE_URL_IMAGEN =
 /** Foto local de la Arepa Rellena: solo si el plato NO tiene una propia. */
 export const FOTO_AREPA = '/img/arepa-rellena.png'
 
+/** La Arepa Rellena es el único plato con foto local de respaldo. */
+export const esArepaRellena = (nombre) => typeof nombre === 'string' && nombre.toLowerCase().includes('arepa rellena')
+
 /**
  * La foto que se PINTA para un plato (nunca la que se guarda). Primero la suya,
  * por la lista blanca de urlImagen; si no tiene, la foto local de la Arepa
@@ -112,6 +115,6 @@ export const FOTO_AREPA = '/img/arepa-rellena.png'
 export function fotoDePlato(nombre, url, respaldo = null, apiBase = API_URL) {
   const propia = urlImagen(url, apiBase)
   if (propia) return propia
-  if (typeof nombre === 'string' && nombre.toLowerCase().includes('arepa rellena')) return FOTO_AREPA
+  if (esArepaRellena(nombre)) return FOTO_AREPA
   return respaldo
 }

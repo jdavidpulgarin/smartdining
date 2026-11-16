@@ -5,6 +5,9 @@ import { Menu } from '../Menu'
 import { Home } from '../Home'
 import { AuthContext } from '../../context/authContextDef'
 import { fotoDePlato, FOTO_AREPA } from '../../utils/imagenes'
+import { MenuItem } from '../../components/MenuItem'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
 
 vi.mock('../../hooks', () => ({
   useSocketListener: () => {},
@@ -72,5 +75,32 @@ describe('Panel: la Arepa Rellena con imagen propia', () => {
     conAdmin(<Home />)
     await waitFor(() => expect(screen.getByAltText('Arepa Rellena')).toBeInTheDocument())
     expect(screen.getByAltText('Arepa Rellena')).toHaveAttribute('src', FOTO_AREPA)
+  })
+})
+
+describe('Ningún plato con foto fija en el panel', () => {
+  it('MenuItem: la Arepa con imagen propia pinta la suya; sin imagen, la local', () => {
+    const { unmount } = render(<MenuItem name="Arepa Rellena" price="$1" imageUrl={FOTO_NUEVA} />)
+    expect(screen.getByAltText('Arepa Rellena')).toHaveAttribute('src', FOTO_NUEVA)
+    unmount()
+    render(<MenuItem name="Arepa Rellena" price="$1" imageUrl={null} />)
+    expect(screen.getByAltText('Arepa Rellena')).toHaveAttribute('src', FOTO_AREPA)
+  })
+
+  it('solo utils/imagenes.js nombra fotos locales de platos (/img/ que no sea el fondo)', () => {
+    const raiz = join(process.cwd(), 'src')
+    const archivos = []
+    const recorrer = (dir) => {
+      for (const n of readdirSync(dir)) {
+        const p = join(dir, n)
+        if (statSync(p).isDirectory()) { if (!['__tests__', 'test'].includes(n)) recorrer(p) }
+        else if (/\.(jsx?|tsx?)$/.test(n) && !/\.test\./.test(n)) archivos.push(p)
+      }
+    }
+    recorrer(raiz)
+    const conFotoLocal = archivos
+      .filter((p) => /['"`]\/img\/(?!fondo\.webp)/.test(readFileSync(p, 'utf8')))
+      .map((p) => relative(raiz, p).split(/[\\/]/).join('/'))
+    expect(conFotoLocal).toEqual(['utils/imagenes.js'])
   })
 })

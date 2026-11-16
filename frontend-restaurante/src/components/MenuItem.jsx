@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Utensils } from 'lucide-react'
+import { FOTO_AREPA, esArepaRellena } from '../utils/imagenes'
 
 export function MenuItem({ name, tag, price, imageUrl }) {
-  const isArepa = name?.toLowerCase().includes('arepa rellena')
-  const imgSource = imageUrl || (isArepa ? '/img/arepa-rellena.png' : null)
+  // La foto propia manda; la local de la arepa es solo de respaldo.
+  const imgSource = imageUrl || (esArepaRellena(name) ? FOTO_AREPA : null)
   // Si la imagen no carga (borrada, sin red), se pinta el ícono en vez de la
   // imagen rota. Se recuerda para qué URL falló: si cambia, se vuelve a probar.
   const [fallo, setFallo] = useState(null)

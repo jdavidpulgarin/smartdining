@@ -25,7 +25,7 @@ import { AuthContext } from '../context/authContextDef'
 import { useSocketListener } from '../hooks'
 import { crearUltimoPorId } from '../utils/dedupeEventos'
 import { confirmacionAlCambiar, ETIQUETA_DISPONIBILIDAD, NO_DISPONIBLE } from '../utils/disponibilidadPlato'
-import { urlImagenGuardable, MENSAJE_URL_IMAGEN, fotoDePlato, FOTO_AREPA } from '../utils/imagenes'
+import { urlImagenGuardable, MENSAJE_URL_IMAGEN, fotoDePlato, FOTO_AREPA, esArepaRellena } from '../utils/imagenes'
 
 /**
  * Carta para ADMINISTRAR: todas las categorías y TODOS los platos, también los
@@ -583,7 +583,8 @@ export function Menu() {
                     alt={dish.name}
                     loading="lazy"
                     onError={(e) => {
-                      e.target.src = dish.name?.toLowerCase().includes('arepa rellena') ? FOTO_AREPA : FOTO_RESPALDO
+                      // La foto propia no cargó: respaldo (la local, si es la arepa).
+                      e.target.src = esArepaRellena(dish.name) ? FOTO_AREPA : FOTO_RESPALDO
                     }}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
