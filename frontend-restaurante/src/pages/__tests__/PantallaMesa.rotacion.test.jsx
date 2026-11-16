@@ -15,6 +15,9 @@ vi.mock('../../services/qrService', () => ({
   notificarQrRotado: vi.fn(),
   rotarTokenQrMesa: (...args) => rotar(...args),
   decodificarTokenQr: () => ({ sid: 'abc' }),
+  haySesionPersonal: () => true,
+  mesaPublica: () => new Promise(() => {}),
+  configurarTabletConLogin: vi.fn(),
 }))
 vi.mock('socket.io-client', () => ({ io: () => ({ on: vi.fn(), disconnect: vi.fn(), connected: false }) }))
 

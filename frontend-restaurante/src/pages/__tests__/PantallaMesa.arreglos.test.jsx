@@ -10,6 +10,10 @@ const servicios = vi.hoisted(() => ({
   notificarQrRotado: vi.fn(),
   rotarTokenQrMesa: vi.fn(),
   decodificarTokenQr: vi.fn(() => ({ sid: 'SID-ABC' })),
+  // Personal en la misma pestaña (con sesión): ROTAR QR disponible.
+  haySesionPersonal: vi.fn(() => true),
+  mesaPublica: vi.fn(() => new Promise(() => {})),
+  configurarTabletConLogin: vi.fn(),
 }))
 vi.mock('../../services/qrService', () => servicios)
 
@@ -36,7 +40,9 @@ describe('PantallaMesa: sin datos inventados ni botones de desarrollo', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     socket.oyentes = {}
+    localStorage.clear()
     for (const f of Object.values(servicios)) f.mockClear()
+    servicios.haySesionPersonal.mockReturnValue(true)
     servicios.solicitarTokenPantalla.mockResolvedValue({ token: 'jwt-pantalla-secreto-0123456789abcdef' })
     estadoTablas = { tables: [conToken], pedidosActivos: [] }
   })
