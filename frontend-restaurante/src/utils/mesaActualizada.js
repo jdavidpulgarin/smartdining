@@ -16,7 +16,29 @@
  */
 
 const entero = (v) => (Number.isInteger(v) && v > 0 ? v : null)
-const mismaMesa = (t, id) => Number(t?.id_mesa ?? t?.id) === id
+
+/**
+ * ¿Es esta la mesa con este id_mesa? SIEMPRE y SOLO por id_mesa: el número es
+ * lo que se ve, el id es lo que usan el backend y el socket. Comparar «por id o
+ * por número» confunde dos mesas en cuanto el id de una es el número de otra
+ * (mesas creadas o borradas en Configuración): abrir la 13 abría la 10.
+ */
+export const mismaMesa = (t, id) => {
+  const n = Number(id)
+  return Number.isInteger(n) && n > 0 && Number(t?.id_mesa ?? t?.id) === n
+}
+
+/** La mesa de la lista con ese id_mesa (o undefined). */
+export const buscarMesa = (tablas, id) => (Array.isArray(tablas) ? tablas.find((t) => mismaMesa(t, id)) : undefined)
+
+/**
+ * El número que se le muestra a la gente para un id_mesa. Si la mesa no está
+ * en la lista, el id (mejor que nada).
+ */
+export function numeroDeMesa(tablas, id) {
+  const m = buscarMesa(tablas, id)
+  return m?.numero ?? m?.number ?? id
+}
 
 /**
  * El resultado de GET /api/mesas cuando, MIENTRAS se pedía, llegaron avisos

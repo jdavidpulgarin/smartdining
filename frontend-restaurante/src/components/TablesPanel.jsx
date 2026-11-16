@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { puedeAbrirMesa } from '../utils/estadoMesa'
+import { mismaMesa } from '../utils/mesaActualizada'
 import { TableCard } from './TableCard'
 import { QRModal } from './QRModal'
 import { TableDetailModal } from './TableDetailModal'
@@ -34,7 +35,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
   // Encontrar la mesa activa para el modal QR
   const selectedTableForQR = selectedTableIdForQR
     ? tablesList.find(
-        (t) => t.id === selectedTableIdForQR || t.number === selectedTableIdForQR
+        (t) => mismaMesa(t, selectedTableIdForQR)
       )
     : null
 
@@ -51,7 +52,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
     }
     setLocalTables((prev) =>
       prev.map((t) =>
-        t.id === idMesa || t.number === idMesa
+        mismaMesa(t, idMesa)
           ? { ...t, status: 'Ocupada', active: true, detail: 'Sesión activa' }
           : t
       )
@@ -64,7 +65,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
     }
     setLocalTables((prev) =>
       prev.map((t) =>
-        t.id === idMesa || t.number === idMesa
+        mismaMesa(t, idMesa)
           ? {
               ...t,
               status: 'Disponible',

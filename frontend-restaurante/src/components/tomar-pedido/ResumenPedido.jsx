@@ -180,7 +180,7 @@ export function ResumenPedido({
             Resumen de la Comanda
           </h2>
           <span style={{ fontSize: '0.85rem', color: 'var(--sd-text-muted)' }}>
-            Mesa #{idMesa} · {carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'} en total
+            Mesa #{numeroMesa ?? idMesa} · {carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'} en total
           </span>
         </div>
 

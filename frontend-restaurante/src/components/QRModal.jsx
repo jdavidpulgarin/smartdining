@@ -74,14 +74,14 @@ export function QRModal({
   const qrRef = useRef(null)
   const { pedidosActivos, presenciaPorMesa } = useTables()
 
-  const tableId = Number(table?.id || table?.number)
+  const tableId = Number(table?.id_mesa ?? table?.id)
   const isDisponible = (table?.status || '').toLowerCase() === 'disponible'
   const isOcupada = (table?.status || '').toLowerCase() === 'ocupada'
 
   // Determinar si hay comensales o pedidos activos en la mesa
   const pedidosMesa = (pedidosActivos || []).filter(
     (p) =>
-      (Number(p.id_mesa) === tableId || Number(p.mesa) === tableId) &&
+      Number(p.id_mesa) === tableId &&
       p.estado !== 'cancelado'
   )
   // Presencia en vivo del socket-server (mesa:presencia, room:admin): quién está
