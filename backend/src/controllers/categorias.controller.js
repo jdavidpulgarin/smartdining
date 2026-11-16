@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const categoriasService = require('../services/categorias.service');
 const menuService = require('../services/menu.service');
+const { avisarMenuActualizado } = require('../services/avisos-menu');
 
 // Columnas segun docs/modelo-er.md: orden_visualizacion (no "orden") y activo.
 const categoriaSchema = z.object({
@@ -36,6 +37,8 @@ async function crear(req, res, next) {
   try {
     const categoria = await categoriasService.crear(parsed.data);
     await menuService.invalidarMenu();
+    // Una categoría mueve varios platos: id_plato va null (EVENTS.md §5.8).
+    avisarMenuActualizado('categoria-creada');
     return res.status(201).json(categoria);
   } catch (err) {
     return next(err);
@@ -52,6 +55,7 @@ async function actualizar(req, res, next) {
 
     const categoria = await categoriasService.actualizar(req.params.id, { ...actual, ...parsed.data });
     await menuService.invalidarMenu();
+    avisarMenuActualizado('categoria-editada');
     return res.json(categoria);
   } catch (err) {
     return next(err);
@@ -63,6 +67,7 @@ async function eliminar(req, res, next) {
     const eliminada = await categoriasService.eliminar(req.params.id);
     if (!eliminada) return res.status(404).json({ error: 'Categoría no encontrada' });
     await menuService.invalidarMenu();
+    avisarMenuActualizado('categoria-eliminada');
     return res.status(204).send();
   } catch (err) {
     return next(err);
