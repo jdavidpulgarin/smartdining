@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { io } from 'socket.io-client'
@@ -22,6 +22,9 @@ import {
   rotarTokenQrMesa,
   notificarQrRotado,
   decodificarTokenQr,
+  haySesionPersonal,
+  mesaPublica,
+  configurarTabletConLogin,
 } from '../services/qrService'
 import {
   extraerHostDeUrl,
@@ -31,23 +34,133 @@ import {
 } from '../utils/qrUrl'
 import { errorDeRotacion, tabletSinQr, tokenDeUrl, accionTabletAlReconectar } from '../utils/qrRotacion'
 import { buscarMesa } from '../utils/mesaActualizada'
-import { mesasApi } from '../services/api'
+import { tomarFragmentoTablet, guardarTablet, olvidarTablet, urlConToken } from '../utils/enlaceTablet'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
+
+// localStorage de la tablet: solo la credencial de pantalla y el último QR.
+const almacen = () => {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Configurar una tablet física que no tiene credencial: alguien del personal
+ * inicia sesión UNA vez solo para obtenerla (y el QR vigente). La contraseña y
+ * la sesión del personal no se guardan en la tablet.
+ */
+function ConfigurarPantalla({ numero, onConfigurar, onCerrar }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [cargando, setCargando] = useState(false)
+
+  const enviar = async (e) => {
+    e.preventDefault()
+    if (cargando) return
+    setCargando(true)
+    setError('')
+    try {
+      await onConfigurar(email.trim(), password)
+    } catch (err) {
+      setError(err?.message || 'No se pudo configurar la pantalla')
+    } finally {
+      setPassword('')
+      setCargando(false)
+    }
+  }
+
+  return (
+    <div className="sd-modal-backdrop" onClick={onCerrar}>
+      <form
+        className="sd-card sd-table-detail-modal"
+        style={{ maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 12 }}
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={enviar}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Configurar pantalla"
+      >
+        <h3 className="sd-card-title" style={{ margin: 0, fontSize: 20 }}>
+          Configurar pantalla{numero ? ` · Mesa ${numero}` : ''}
+        </h3>
+        <p style={{ margin: 0, fontSize: 14, color: 'var(--sd-text-muted)' }}>
+          Solo para el personal. Lo más fácil es pulsar «Lanzar Pantalla» o «Copiar URL Tablet» en el panel. Si no,
+          inicia sesión aquí una vez: la pantalla guarda su credencial y la sesión se cierra enseguida.
+        </p>
+        <input
+          type="email"
+          required
+          autoComplete="off"
+          placeholder="Correo del personal"
+          aria-label="Correo del personal"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="sd-input"
+        />
+        <input
+          type="password"
+          required
+          autoComplete="off"
+          placeholder="Contraseña"
+          aria-label="Contraseña"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="sd-input"
+        />
+        {error && (
+          <p role="alert" style={{ margin: 0, color: 'var(--sd-red-text)', fontWeight: 700 }}>
+            {error}
+          </p>
+        )}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" className="sd-btn sd-btn-secondary" onClick={onCerrar}>
+            Cancelar
+          </button>
+          <button type="submit" className="sd-btn sd-btn-primary" disabled={cargando}>
+            {cargando ? 'Configurando…' : 'Configurar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
 
 export function PantallaMesa() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { tables, pedidosActivos, cargarMesas } = useTables()
 
-  const numMesa = Number(id) || 1
-  const tableData = buscarMesa(tables, numMesa)
+  // La ruta lleva el id_mesa, no el número: con mesas de id ≠ número la tablet
+  // escuchaba otra mesa. El número que se muestra sale de la propia mesa.
+  const idMesa = Number(id) || 1
+  const tableData = buscarMesa(tables, idMesa)
+
+  // Lo que dejó el panel en el # (credencial de pantalla y QR vigente) o lo ya
+  // guardado en esta tablet (utils/enlaceTablet.js). El # se quita de la barra.
+  const [tablet, setTablet] = useState(() =>
+    tomarFragmentoTablet(almacen(), idMesa, typeof window !== 'undefined' ? window.location.hash : '')
+  )
+  useEffect(() => {
+    if (window.location.hash) {
+      window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+    }
+  }, [])
+  // Estado y número de la mesa por la ruta pública (la tablet no tiene sesión).
+  const [mesaPub, setMesaPub] = useState(null)
+  const numeroVisible = tableData?.numero ?? tableData?.number ?? mesaPub?.numero ?? null
+  const conSesion = haySesionPersonal()
+  const [configurando, setConfigurando] = useState(false)
 
   // Token QR y URL activa de la mesa
   // Sin token real de la mesa NO se inventa uno: el QR esperaría un token que el
-  // backend rechaza. La tablet espera el de qr:actualizado o el de ROTAR QR.
-  const [tokenQr, setTokenQr] = useState(() => tableData?.token_qr || null)
-  const [qrUrl, setQrUrl] = useState(() => tableData?.qr_url || '')
+  // backend rechaza. La tablet espera el de qr:actualizado, el que le dejó el panel
+  // o el de ROTAR QR (solo con sesión del personal).
+  const [tokenQr, setTokenQr] = useState(() => tableData?.token_qr || tablet.token || null)
+  const [qrUrl, setQrUrl] = useState(() => tableData?.qr_url || tablet.qrUrl || '')
   const [prevTableToken, setPrevTableToken] = useState(tableData?.token_qr)
   if (tableData?.token_qr !== prevTableToken) {
     setPrevTableToken(tableData?.token_qr)
@@ -105,7 +218,7 @@ export function PantallaMesa() {
   const diningUrl = resolverDiningUrl({
     backendUrl,
     token: tokenQr,
-    tableNumber: numMesa,
+    tableNumber: idMesa,
     hostIp,
     useWifiIp,
     fallbackPort: clientPort,
@@ -119,7 +232,7 @@ export function PantallaMesa() {
 
   // Detectar si la mesa tiene pedidos activos o comensales
   const pedidosMesa = (pedidosActivos || []).filter(
-    (p) => Number(p.id_mesa) === numMesa && p.estado !== 'cancelado'
+    (p) => Number(p.id_mesa) === idMesa && p.estado !== 'cancelado'
   )
   const tieneComensales = pedidosMesa.length > 0 || Boolean(tableData?.comensales?.length > 0)
 
@@ -130,6 +243,54 @@ export function PantallaMesa() {
     return () => clearInterval(timer)
   }, [])
 
+  // Un QR nuevo (del panel, de ROTAR QR o de qr:actualizado): se muestra y se
+  // guarda en la tablet. qr:actualizado trae solo el token: se pone en la url.
+  const qrUrlRef = useRef(qrUrl)
+  useEffect(() => {
+    qrUrlRef.current = qrUrl
+  }, [qrUrl])
+  const ponerQr = useCallback(
+    (token, url) => {
+      if (!token) return
+      const nueva = url || urlConToken(qrUrlRef.current, token)
+      setTokenQr(token)
+      setQrUrl(nueva)
+      qrUrlRef.current = nueva
+      // Sin url conocida se guarda el token (la tablet arma la url del comensal).
+      guardarTablet(almacen(), idMesa, nueva ? { qrUrl: nueva } : { qrUrl: null, token })
+      setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: token }))
+    },
+    [idMesa]
+  )
+
+  // La mesa quedó libre (mesa:liberada o la ruta pública): su QR está revocado.
+  const quedoLibre = useCallback(() => {
+    setSinQr((actual) => tabletSinQr(actual, { tipo: 'mesa:liberada' }))
+    guardarTablet(almacen(), idMesa, { qrUrl: null })
+  }, [idMesa])
+
+  // Estado real de la mesa por la ruta pública GET /api/mesas/:id (sin sesión):
+  // al abrir la tablet y al reconectar. Libre → «Mesa disponible».
+  const revisarMesa = useCallback(async () => {
+    const m = await mesaPublica(idMesa)
+    setMesaPub(m)
+    if (m?.estado === 'disponible') quedoLibre()
+    return m
+  }, [idMesa, quedoLibre])
+  useEffect(() => {
+    let cancelado = false
+    mesaPublica(idMesa)
+      .then((m) => {
+        if (cancelado) return
+        setMesaPub(m)
+        if (m?.estado === 'disponible') quedoLibre()
+      })
+      .catch(() => {})
+    return () => {
+      cancelado = true
+    }
+  }, [idMesa, quedoLibre])
+
   // T3: la tablet NO rota el QR por su cuenta. Lo rota el socket-server cada
   // 3 min solo mientras la mesa está vacía (conoce la presencia real) y avisa
   // con qr:actualizado. Antes la tablet tenía su propio temporizador: con la
@@ -137,17 +298,14 @@ export function PantallaMesa() {
   // fuera a quien ya estaba dentro. El botón manual también pide solo_si_vacia:
   // con gente en la mesa el backend responde 409 mesa_con_comensales y el QR
   // se queda, con un aviso (un clic sin querer ya no saca a nadie).
+  // Solo con sesión del personal en esta pestaña: la tablet no la tiene.
   const handleRotarQr = useCallback(async () => {
     if (loadingAction) return
     setLoadingAction(true)
     setErrorPantalla('')
     try {
-      const res = await rotarTokenQrMesa(numMesa, undefined, { soloSiVacia: true })
-      if (res?.token) {
-        setTokenQr(res.token)
-        if (res?.url) setQrUrl(res.url)
-      }
-      setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: res?.token || tokenDeUrl(res?.url) }))
+      const res = await rotarTokenQrMesa(idMesa, undefined, { soloSiVacia: true })
+      ponerQr(res?.token || tokenDeUrl(res?.url), res?.url)
       setJustRotated(true)
       setTimeout(() => setJustRotated(false), 2500)
     } catch (err) {
@@ -155,30 +313,58 @@ export function PantallaMesa() {
     } finally {
       setLoadingAction(false)
     }
-  }, [loadingAction, numMesa])
+  }, [loadingAction, idMesa, ponerQr])
+
+  // Una tablet sin credencial: alguien del personal inicia sesión UNA vez solo
+  // para prepararla (credencial de pantalla + QR vigente si la mesa está
+  // ocupada). La sesión del personal no se guarda: se descarta enseguida.
+  const configurar = useCallback(
+    async (email, password) => {
+      const r = await configurarTabletConLogin(idMesa, email, password)
+      guardarTablet(almacen(), idMesa, { credencial: r.credencial })
+      setMesaPub({ estado: r.estado, numero: r.numero })
+      if (r.estado === 'ocupada' && r.token) ponerQr(r.token, r.qrUrl)
+      else if (r.estado === 'disponible') quedoLibre()
+      setErrorPantalla('')
+      setConfigurando(false)
+      setTablet((t) => ({ ...t, credencial: r.credencial }))
+    },
+    [idMesa, ponerQr, quedoLibre]
+  )
 
   // Inicializar conexión Socket.io con rol 'pantalla' para esta mesa
+  const credencial = tablet.credencial
   useEffect(() => {
     let socket = null
     let isCancelled = false
 
     async function initSocketPantalla() {
-      // 1. Obtener credencial JWT para esta tablet de mesa (POST /qr/pantalla)
-      let cred
-      try {
-        cred = await solicitarTokenPantalla(numMesa)
-      } catch (err) {
+      // 1. La credencial de PANTALLA: la que dejó el panel (guardada en la
+      //    tablet) o, si en esta pestaña hay sesión del personal, se pide
+      //    (POST /qr/pantalla). Sin ninguna: hay que configurar la tablet.
+      let cred = credencial
+      if (!cred && haySesionPersonal()) {
+        try {
+          cred = (await solicitarTokenPantalla(idMesa)).token
+        } catch (err) {
+          if (isCancelled) return
+          setSocketStatus('desconectado')
+          setErrorPantalla(err.message)
+          return
+        }
         if (isCancelled) return
+        guardarTablet(almacen(), idMesa, { credencial: cred })
+      }
+      if (!cred) {
         setSocketStatus('desconectado')
-        setErrorPantalla(err.message)
+        setConfigurando(true)
         return
       }
-      if (isCancelled) return
       setErrorPantalla('')
 
-      // 2. Conectar al socket server con el token emitido
+      // 2. Conectar al socket server con la credencial de pantalla
       socket = io(SOCKET_URL, {
-        auth: { token: cred.token },
+        auth: { token: cred },
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
@@ -198,26 +384,20 @@ export function PantallaMesa() {
       async function revisarAlReconectar() {
         let mesa
         try {
-          const data = await mesasApi.listar()
-          mesa = buscarMesa(data?.mesas, numMesa)
+          mesa = await revisarMesa() // libre → «Mesa disponible»
         } catch {
           return // sin respuesta: se queda lo que hay; el próximo evento lo corrige
         }
         if (isCancelled) return
         cargarMesas?.()
-        const accion = accionTabletAlReconectar(mesa?.estado)
-        if (accion === 'sin_qr') {
-          setSinQr((actual) => tabletSinQr(actual, { tipo: 'mesa:liberada' }))
-        } else if (accion === 'pedir_qr') {
+        // Ocupada: con sesión del personal se pide el QR vigente (solo_si_vacia).
+        // La tablet sin sesión se queda con el que tiene; si la mesa está vacía,
+        // el socket-server la rota en ≤ 3 min y llega por qr:actualizado.
+        if (accionTabletAlReconectar(mesa?.estado) === 'pedir_qr' && haySesionPersonal()) {
           try {
-            const res = await notificarQrRotado(numMesa)
+            const res = await notificarQrRotado(idMesa)
             if (isCancelled) return
-            const token = res?.token || tokenDeUrl(res?.url)
-            if (token) {
-              setTokenQr(token)
-              if (res?.url) setQrUrl(res.url)
-            }
-            setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: token }))
+            ponerQr(res?.token || tokenDeUrl(res?.url), res?.url)
           } catch (err) {
             if (isCancelled) return
             // Con gente en la mesa (409) el QR no pudo rotar: se queda el que hay.
@@ -233,27 +413,32 @@ export function PantallaMesa() {
 
       socket.on('connect_error', (err) => {
         if (isCancelled) return
+        // Credencial vencida o rechazada: se olvida y se pide configurar.
+        if (/TOKEN_INVALIDO|AUTH_REQUERIDA/.test(err?.message || '')) {
+          olvidarTablet(almacen(), idMesa)
+          socket.disconnect()
+          setSocketStatus('desconectado')
+          setConfigurando(true)
+          return
+        }
         setSocketStatus('reconectando')
-        console.warn(`[Tablet Mesa ${numMesa}] Error de socket:`, err.message)
+        console.warn(`[Tablet Mesa ${idMesa}] Error de socket:`, err.message)
       })
 
       // 3. Escuchar evento de Roberto: 'qr:actualizado'
       socket.on('qr:actualizado', (data) => {
         if (isCancelled) return
         if (data?.token_qr) {
-          setTokenQr(data.token_qr)
-          if (data?.url) setQrUrl(data.url)
-          setSinQr((actual) => tabletSinQr(actual, { tipo: 'qr', token_qr: data.token_qr }))
+          ponerQr(data.token_qr, data.url)
           setJustRotated(true)
           setTimeout(() => setJustRotated(false), 3000)
         }
       })
 
-      // También escuchar mesa liberada
       // Al liberar, el QR queda revocado: «Mesa disponible» hasta el siguiente.
       socket.on('mesa:liberada', () => {
         if (isCancelled) return
-        setSinQr((actual) => tabletSinQr(actual, { tipo: 'mesa:liberada' }))
+        quedoLibre()
       })
     }
 
@@ -265,7 +450,7 @@ export function PantallaMesa() {
         socket.disconnect()
       }
     }
-  }, [numMesa, cargarMesas])
+  }, [idMesa, cargarMesas, credencial, revisarMesa, ponerQr, quedoLibre])
 
   // Manejo de pantalla completa
   const toggleFullscreen = () => {
@@ -433,7 +618,7 @@ export function PantallaMesa() {
           <span className="sd-pantalla-pre-title">SMARTDINING EXPERIENCIA DIGITAL</span>
 
           <h1 className="sd-page-title sd-pantalla-giant-number">
-            MESA {numMesa}
+            MESA {numeroVisible ?? '—'}
           </h1>
 
           {tableData?.location && (
@@ -474,7 +659,7 @@ export function PantallaMesa() {
             </div>
           ) : (
             <div className="sd-pantalla-qr-white-frame" role="status" style={{ width: 260, height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 16, color: '#0a0f1d', fontWeight: 700 }}>
-              Esperando el código QR de la mesa. Pide al personal que abra la mesa o toque ROTAR QR.
+              Esperando el código QR de la mesa. Pide al personal que abra la mesa o que configure esta pantalla.
             </div>
           )}
 
@@ -509,19 +694,35 @@ export function PantallaMesa() {
             )}
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button
-                type="button"
-                className="sd-pantalla-btn-rotate"
-                onClick={handleRotarQr}
-                disabled={loadingAction}
-                title="Rotar código QR"
-              >
-                <RotateCw size={16} className={loadingAction ? 'spin' : ''} />
-                <span>ROTAR QR</span>
-              </button>
+              {conSesion ? (
+                <button
+                  type="button"
+                  className="sd-pantalla-btn-rotate"
+                  onClick={handleRotarQr}
+                  disabled={loadingAction}
+                  title="Rotar código QR"
+                >
+                  <RotateCw size={16} className={loadingAction ? 'spin' : ''} />
+                  <span>ROTAR QR</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="sd-pantalla-btn-rotate"
+                  onClick={() => setConfigurando(true)}
+                  title="Configurar pantalla (personal)"
+                >
+                  <Sliders size={16} />
+                  <span>CONFIGURAR PANTALLA</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
+
+        {configurando && (
+          <ConfigurarPantalla numero={numeroVisible} onConfigurar={configurar} onCerrar={() => setConfigurando(false)} />
+        )}
 
         {/* Instrucciones y Beneficios de comensal */}
         <div className="sd-pantalla-features-row" style={{ marginTop: 20 }}>
@@ -584,7 +785,7 @@ export function PantallaMesa() {
           >
             <div className="sd-modal-header">
               <h3 className="sd-card-title" style={{ margin: 0, fontSize: 22 }}>
-                ⚙️ Ajustes de Pantalla de Mesa #{numMesa}
+                ⚙️ Ajustes de Pantalla de Mesa #{numeroVisible ?? idMesa}
               </h3>
               <button
                 type="button"

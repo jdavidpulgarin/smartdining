@@ -22,7 +22,7 @@ import {
   RotateCw,
   AlertCircle,
 } from 'lucide-react'
-import { decodificarTokenQr } from '../services/qrService'
+import { decodificarTokenQr, prepararTabletDesdePanel } from '../services/qrService'
 import { useSocketListener, useTables } from '../hooks'
 import {
   ROTACION_SOCKET_SEGUNDOS,
@@ -49,6 +49,8 @@ export function QRModal({
 }) {
   const [copied, setCopied] = useState(false)
   const [copiedTablet, setCopiedTablet] = useState(false)
+  const [errorTablet, setErrorTablet] = useState('')
+  const [preparandoTablet, setPreparandoTablet] = useState(false)
   const [token, setToken] = useState(table?.token_qr || '')
   const [prevTableToken, setPrevTableToken] = useState(table?.token_qr)
   if (table?.token_qr !== prevTableToken) {
@@ -277,10 +279,58 @@ export function QRModal({
   // Aviso cuando el QR apunta a localhost y no se podrá abrir desde celular
   const qrApuntaALocalhost = useWifiIp && esHostLocal(hostIp)
 
-  const tabletUrl =
-    typeof window !== 'undefined'
-      ? `${window.location.origin}/pantalla/mesa/${table.number || table.id}`
-      : `/pantalla/mesa/${table.number || table.id}`
+  // Tablet de la mesa (regresión v1.0.0, FALLO 1): la tablet no tiene la sesión
+  // del personal. El panel le prepara la credencial de pantalla y el QR vigente
+  // (solo si la mesa está ocupada) y se los pasa en el # de
+  // /pantalla/mesa/<id_mesa> (services/qrService.js, prepararTabletDesdePanel).
+  const prepararEnlace = () => prepararTabletDesdePanel(tableId, window.location.origin)
+
+  const lanzarPantalla = async () => {
+    if (preparandoTablet) return
+    // La pestaña se abre YA, dentro del clic (si no, el navegador la bloquea);
+    // el enlace con la credencial llega cuando esté listo.
+    const ventana = window.open('', '_blank')
+    setErrorTablet('')
+    setPreparandoTablet(true)
+    try {
+      const { enlace } = await prepararEnlace()
+      if (ventana) {
+        // La pestaña abierta desde el panel hereda una COPIA de su sessionStorage
+        // (la sesión del personal). La tablet no debe tenerla: se vacía antes
+        // de cargar la pantalla (es del mismo origen, about:blank).
+        try {
+          ventana.sessionStorage.clear()
+        } catch {
+          // otro origen o sin almacenamiento: no hay nada copiado
+        }
+        ventana.opener = null
+        ventana.location.replace(enlace)
+      } else {
+        window.open(enlace, '_blank', 'noopener')
+      }
+    } catch (err) {
+      ventana?.close()
+      setErrorTablet(err?.message || 'No se pudo preparar la pantalla de la mesa')
+    } finally {
+      setPreparandoTablet(false)
+    }
+  }
+
+  const copiarUrlTablet = async () => {
+    if (preparandoTablet) return
+    setErrorTablet('')
+    setPreparandoTablet(true)
+    try {
+      const { enlace } = await prepararEnlace()
+      await navigator.clipboard.writeText(enlace)
+      setCopiedTablet(true)
+      setTimeout(() => setCopiedTablet(false), 2000)
+    } catch (err) {
+      setErrorTablet(err?.message || 'No se pudo copiar el enlace de la pantalla')
+    } finally {
+      setPreparandoTablet(false)
+    }
+  }
 
   const handleCopy = () => {
     // Un enlace vencido o que todavía no se renovó no se copia.
@@ -719,30 +769,32 @@ export function QRModal({
                 </div>
               </div>
               <div className="tablet-mode-buttons">
-                <a
-                  href={tabletUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={lanzarPantalla}
+                  disabled={preparandoTablet}
                   className="sd-qr-btn sd-qr-btn-primary tablet-launch-btn"
                   title="Abrir la interfaz dedicada para la tablet física de la mesa"
                 >
                   <Monitor size={14} />
                   <span>Lanzar Pantalla</span>
-                </a>
+                </button>
                 <button
                   type="button"
                   className={`sd-qr-btn sd-qr-btn-secondary tablet-copy-btn ${copiedTablet ? 'copied' : ''}`}
-                  onClick={() => {
-                    navigator.clipboard.writeText(tabletUrl)
-                    setCopiedTablet(true)
-                    setTimeout(() => setCopiedTablet(false), 2000)
-                  }}
-                  title="Copiar URL para configurar la tablet del restaurante"
+                  onClick={copiarUrlTablet}
+                  disabled={preparandoTablet}
+                  title="Copiar URL para configurar la tablet del restaurante (lleva su credencial: compártela solo con la tablet)"
                 >
                   {copiedTablet ? <Check size={14} /> : <Copy size={14} />}
                   <span>{copiedTablet ? 'Copiada' : 'Copiar URL Tablet'}</span>
                 </button>
               </div>
+              {errorTablet && (
+                <p role="alert" className="tablet-mode-desc" style={{ color: 'var(--sd-red-text)', fontWeight: 700, margin: '8px 0 0 0' }}>
+                  {errorTablet}
+                </p>
+              )}
             </div>
 
             {/* Selector de Conexión Wi-Fi vs Local */}
@@ -894,16 +946,16 @@ export function QRModal({
               )}
 
               {token && (
-                <a
-                  href={tabletUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={lanzarPantalla}
+                  disabled={preparandoTablet}
                   className="sd-qr-btn sd-qr-btn-sec qr-action-btn tablet-link-btn"
                   title="Abrir vista de tablet para esta mesa"
                 >
                   <Tablet size={16} />
                   <span>Pantalla Tablet</span>
-                </a>
+                </button>
               )}
 
               {token && (

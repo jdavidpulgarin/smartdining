@@ -10,7 +10,8 @@
  * Payload: { m: id_mesa, iat: emitido_ms, exp: expira_ms, sid: id_sesion }
  */
 
-import { mesasApi } from './api'
+import { mesasApi, authApi, apiFetch } from './api'
+import { prepararTablet } from '../utils/enlaceTablet'
 import { tokenDeUrl } from '../utils/qrRotacion'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
@@ -158,60 +159,83 @@ export async function liberarMesaRemota(idMesa) {
 }
 
 /**
- * Solicita el JWT de autenticación para la tablet física de la mesa (rol 'pantalla')
- * llamando a POST /qr/pantalla del socket-server (EVENTS.md §6).
- *
- * Si falla, se reutiliza solo un token de PANTALLA emitido antes para esta mesa.
- * Nunca se usa el JWT del personal en su lugar: la tablet queda a la vista de
- * los comensales y con ese token cualquiera podría actuar como mesero (abrir y
- * liberar mesas, ver todas las salas). Sin credencial, se lanza un error para
- * que la pantalla lo muestre.
- *
- * @throws Error si no hay token de pantalla emitido ni en caché
+ * ¿Hay sesión del personal en ESTA pestaña? (el panel, o alguien del personal
+ * que abrió la pantalla en su propia pestaña). Una tablet preparada desde el
+ * panel NO la tiene: solo guarda su credencial de pantalla.
  */
-export async function solicitarTokenPantalla(idMesa) {
-  const staffToken = getStaffToken()
-  const storageKey = `smartdining_pantalla_token_${idMesa}`
-  let motivo = 'sin sesión de personal'
+export function haySesionPersonal() {
+  return Boolean(getStaffToken())
+}
 
-  if (staffToken) {
-    try {
-      const res = await fetch(`${SOCKET_URL}/qr/pantalla`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${staffToken}`,
-        },
-        body: JSON.stringify({ id_mesa: Number(idMesa) }),
-      })
-
-      if (res.ok) {
-        const data = await res.json()
-        try {
-          sessionStorage.setItem(storageKey, data.token)
-        } catch {
-          // ignorar
-        }
-        return data
-      }
-      motivo = `el servidor respondió ${res.status}`
-    } catch (err) {
-      motivo = 'el servidor de tiempo real no responde'
-      console.warn('Aviso: no se pudo obtener token de /qr/pantalla:', err.message)
-    }
+/**
+ * Pide el JWT de la PANTALLA de la mesa (rol 'pantalla'): POST /qr/pantalla
+ * del socket-server (EVENTS.md §6), con el JWT de un usuario del personal.
+ *
+ * `staffToken`: el de la sesión de esta pestaña por defecto, o uno de un login
+ * de una sola vez en la tablet (configurarTabletConLogin), que no se guarda.
+ * Nunca se usa el JWT del personal como credencial de la tablet: queda a la
+ * vista de los comensales y con él cualquiera podría actuar como mesero.
+ *
+ * @throws Error si no hay sesión o el servidor no la emite
+ */
+export async function solicitarTokenPantalla(idMesa, staffToken = getStaffToken()) {
+  if (!staffToken) {
+    throw new Error('No se pudo obtener la credencial de la pantalla (sin sesión de personal). Configura la pantalla desde el panel.')
   }
-
-  // Respaldo: reutilizar un token de pantalla ya emitido para esta mesa
+  let res
   try {
-    const cached = sessionStorage.getItem(storageKey)
-    if (cached) {
-      return { token: cached, id_mesa: Number(idMesa), expira_en: 'cached' }
-    }
+    res = await fetch(`${SOCKET_URL}/qr/pantalla`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${staffToken}` },
+      body: JSON.stringify({ id_mesa: Number(idMesa) }),
+    })
   } catch {
-    // ignorar
+    throw new Error('No se pudo obtener la credencial de la pantalla (el servidor de tiempo real no responde).')
   }
+  if (!res.ok) throw new Error(`No se pudo obtener la credencial de la pantalla (el servidor respondió ${res.status}).`)
+  const data = await res.json()
+  if (!data?.token) throw new Error('El servidor no devolvió la credencial de la pantalla')
+  return data
+}
 
-  throw new Error(`No se pudo obtener la credencial de la pantalla (${motivo}). Inicia sesión como personal y recarga.`)
+/** La mesa vista por la ruta pública GET /api/mesas/:id (estado y número, sin token_qr). */
+export function mesaPublica(idMesa) {
+  return apiFetch(`/mesas/${Number(idMesa)}`, { skipAuth: true })
+}
+
+/**
+ * «Lanzar Pantalla» / «Copiar URL Tablet» desde el panel (con su sesión):
+ * credencial de pantalla + QR vigente (solo si la mesa está ocupada) y el
+ * enlace /pantalla/mesa/<id_mesa>#t=…&qr=… (utils/enlaceTablet.js).
+ */
+export function prepararTabletDesdePanel(idMesa, origen = '') {
+  return prepararTablet(Number(idMesa), {
+    origen,
+    pedirCredencial: (id) => solicitarTokenPantalla(id),
+    obtenerMesa: mesaPublica,
+    abrirMesa: (id) => mesasApi.abrir(id),
+  })
+}
+
+/**
+ * Una tablet física sin credencial: alguien del personal inicia sesión UNA vez
+ * solo para prepararla. El JWT del personal vive en esta función y se
+ * descarta al terminar: no se guarda en la tablet (ni en sessionStorage).
+ */
+export async function configurarTabletConLogin(idMesa, email, password) {
+  const login = await authApi.login(email, password)
+  let staffToken = login?.token
+  if (!staffToken) throw new Error('No se pudo iniciar sesión')
+  try {
+    return await prepararTablet(Number(idMesa), {
+      pedirCredencial: (id) => solicitarTokenPantalla(id, staffToken),
+      obtenerMesa: mesaPublica,
+      abrirMesa: (id) =>
+        apiFetch(`/mesas/${id}/abrir`, { method: 'POST', skipAuth: true, headers: { Authorization: `Bearer ${staffToken}` } }),
+    })
+  } finally {
+    staffToken = null
+  }
 }
 
 /**
