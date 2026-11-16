@@ -3494,6 +3494,7 @@ Contrato completo en [socket-server/EVENTS.md](../../socket-server/EVENTS.md).
 | **La caja cobra** (efectivo, datáfono o abono parcial) | `POST /internal/payment-confirmed` → `payment:confirmed` |
 | Se libera una mesa (manual o automática) | `POST /internal/mesa-liberada`, con `motivo` si la cerró un pago; **y además** `mesa-actualizada` (`liberada`, ver abajo) |
 | **Cambia una mesa** (T12): se abre, cambia de estado, se crea, se editan sus datos, se libera o se borra | `POST /internal/mesa-actualizada` → `mesa:actualizada` a `room:admin` (ver abajo) |
+| **Cambia la carta**: se crea, edita o borra un plato, una categoría o un paso u opción del constructor | `POST /internal/menu-actualizado` → `menu:actualizado` a todas las mesas y a `room:admin` (ver abajo) |
 
 ### `mesa-actualizada` al panel (T12)
 
@@ -3523,6 +3524,34 @@ relectura ni siquiera lo selecciona (solo `token_qr IS NOT NULL AS sesion_abiert
 alguien cambió la mesa entre el COMMIT y la relectura (por ejemplo, la reabrieron): entonces el
 aviso va **sin `motivo`**, y el panel recibe igual el estado real. Si la relectura falla, no se
 avisa (log con el código). **La rotación del QR no se avisa** (la mesa no cambia).
+
+### `menu-actualizado` a las mesas y al panel
+
+Antes, editar un plato (nombre, precio, descripción, imagen) o una opción del constructor no le
+llegaba al comensal hasta recargar la página: solo se avisaba la **disponibilidad**. Ahora toda
+escritura de la carta avisa `POST /internal/menu-actualizado` (`socket-server/EVENTS.md` §5.8), que
+emite `menu:actualizado` a todas las mesas y a `room:admin`. La PWA, al recibirlo, vuelve a pedir
+`GET /menu`.
+
+Va **después del COMMIT y después de invalidar la caché del menú** (`cache:menu`): al revés, la PWA
+recibiría la copia vieja. No se espera (cadena de avisos): un socket-server caído, `NO_CONFIGURADO`
+o un 4xx **no cambian la respuesta**. Se reintenta con el **mismo `eventId`** solo ante
+`500/502/503 ERROR_INTERNO`. Un 404 o un 400 no avisan.
+
+Cuerpo exacto `{ eventId, id_plato, accion }` (el socket-server rechaza campos de más). `id_plato`
+va `null` con una categoría, o cuando la ruta no lo sabe sin otra consulta:
+
+| Ruta | `accion` | `id_plato` |
+|---|---|---|
+| `POST /platos`, `PUT /platos/:id`, `DELETE /platos/:id` | `plato-creado`, `plato-editado`, `plato-eliminado` | el plato |
+| `POST /categorias`, `PUT /categorias/:id`, `DELETE /categorias/:id` | `categoria-creada`, `categoria-editada`, `categoria-eliminada` | `null` |
+| `POST /platos/:id/pasos`, `PUT /pasos/:id` | `paso-creado`, `paso-editado` | el plato |
+| `DELETE /pasos/:id` | `paso-eliminado` | `null` |
+| `POST /pasos/:id/ingredientes` | `opcion-creada` | el plato del paso |
+| `PUT /ingredientes/:id`, `DELETE /ingredientes/:id` | `opcion-editada`, `opcion-eliminada` | `null` |
+
+`PATCH /platos/:id/disponible` y `PATCH /ingredientes/:id/disponible` **no** lo mandan: siguen con
+su aviso propio (`plato-disponibilidad` / `ingrediente-disponibilidad`), más fino.
 
 ### `origen` en `order-status` (pedido de Juan)
 

@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const platosService = require('../services/platos.service');
 const menuService = require('../services/menu.service');
+const { avisarMenuActualizado } = require('../services/avisos-menu');
 const { disponibilidadEfectiva } = require('../services/disponibilidad-efectiva');
 const socketNotifier = require('../services/socket.notifier');
 const { urlImagenSchema } = require('../utils/url-imagen');
@@ -71,6 +72,8 @@ async function crear(req, res, next) {
   try {
     const plato = await platosService.crear(parsed.data);
     await menuService.invalidarMenu();
+    // Después del COMMIT y de la caché: la PWA vuelve a pedir el menú (EVENTS.md §5.8).
+    avisarMenuActualizado('plato-creado', plato.id_plato);
     return res.status(201).json(plato);
   } catch (err) {
     return next(err);
@@ -93,6 +96,9 @@ async function actualizar(req, res, next) {
       { idUsuario: req.user?.id_usuario ?? null }
     );
     await menuService.invalidarMenu();
+    // Nombre, precio, descripción o imagen: sin este aviso el comensal seguía
+    // viendo el plato viejo hasta recargar la página.
+    avisarMenuActualizado('plato-editado', plato.id_plato);
     return res.json(plato);
   } catch (err) {
     return next(err);
@@ -163,6 +169,7 @@ async function eliminar(req, res, next) {
     const eliminado = await platosService.eliminar(req.params.id);
     if (!eliminado) return res.status(404).json({ error: 'Plato no encontrado' });
     await menuService.invalidarMenu();
+    avisarMenuActualizado('plato-eliminado', req.params.id);
     return res.status(204).send();
   } catch (err) {
     return next(err);
