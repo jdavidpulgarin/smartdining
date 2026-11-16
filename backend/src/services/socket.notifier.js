@@ -604,6 +604,37 @@ async function notificarMesaActualizada(mesa, motivo) {
   return enviarConReintento('/internal/mesa-actualizada', cuerpoMesaActualizada(mesa, motivo));
 }
 
+/** Acciones de menu-actualizado (EVENTS.md §5.8). */
+const ACCIONES_MENU = [
+  'plato-creado', 'plato-editado', 'plato-eliminado',
+  'categoria-creada', 'categoria-editada', 'categoria-eliminada',
+  'paso-creado', 'paso-editado', 'paso-eliminado',
+  'opcion-creada', 'opcion-editada', 'opcion-eliminada',
+];
+
+/**
+ * POST /internal/menu-actualizado (EVENTS.md §5.8) — cambió la carta (un plato,
+ * una categoría o un paso u opción del constructor). El socket-server emite
+ * `menu:actualizado` a todas las mesas y a room:admin, y la PWA vuelve a pedir
+ * GET /api/menu sin recargar.
+ *
+ * Solo viajan los tres campos del contrato: la validación del socket-server es
+ * estricta y un campo de más sería un 400. `id_plato` va null si no se sabe (o
+ * con una categoría). Con reintento ante 500/502/503 ERROR_INTERNO y el MISMO
+ * eventId. Nunca lanza.
+ *
+ * @param {string} accion  una de ACCIONES_MENU
+ * @param {number|null} [id_plato]
+ */
+async function notificarMenuActualizado(accion, id_plato = null) {
+  const id = Number(id_plato);
+  return enviarConReintento('/internal/menu-actualizado', {
+    eventId: nuevoEventId(),
+    id_plato: Number.isSafeInteger(id) && id > 0 ? id : null,
+    accion,
+  });
+}
+
 /**
  * POST /internal/ingrediente-disponibilidad (D-05) — un ingrediente se agotó
  * (`false`) o volvió (`true`). El socket-server lo difunde a TODOS los sockets
@@ -992,6 +1023,8 @@ module.exports = {
   MOTIVOS_MESA_ACTUALIZADA,
   notificarIngredienteDisponibilidad,
   notificarPlatoDisponibilidad,
+  notificarMenuActualizado,
+  ACCIONES_MENU,
   notificarMesaComensal,
   enviarConReintento,
   esReintentable,
