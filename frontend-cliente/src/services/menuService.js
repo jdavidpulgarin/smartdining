@@ -43,6 +43,19 @@ export function recargarMenu() {
   cacheMenuPromise = null;
 }
 
+/**
+ * Vuelve a pedir GET /menu YA (sin esperar a que alguien lo lea) y avisa a los
+ * suscritos (Menú, Constructor, Carrito). Es lo que hace la PWA al recibir
+ * `menu:actualizado` (EVENTS.md §5.8): sin esto, el menú quedaba guardado en
+ * memoria y el comensal no veía un plato editado hasta recargar la página.
+ *
+ * @returns {Promise<object>} el menú nuevo
+ */
+export function refrescarMenu() {
+  recargarMenu();
+  return obtenerMenuRaw();
+}
+
 async function fetchMenuRaw() {
   if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
     const modulo = await import('../mocks/menu-simulado.json');
@@ -527,6 +540,7 @@ export default {
   obtenerPlatosArmables,
   obtenerPlatoArmable,
   recargarMenu,
+  refrescarMenu,
   obtenerMenuRaw,
   suscribirCambiosMenu,
   obtenerMarcasAgotadoLocal,

@@ -3,9 +3,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   actualizarDisponibilidadEnCache,
   actualizarDisponibilidadPlatoEnCache,
+  adaptarPlatoArmable,
   obtenerPlatoArmable,
   recargarMenu,
-  tieneMarcasAgotadoLocal,
+  suscribirCambiosMenu,
 } from '../services/menuService';
 import { useMesaSocketContext } from '../context/MesaSocketContext';
 import {
@@ -60,9 +61,8 @@ function Constructor() {
 
     async function cargarPlato() {
       try {
-        if (tieneMarcasAgotadoLocal()) {
-          recargarMenu();
-        }
+        // Siempre la carta vigente al abrir (red de seguridad de menu:actualizado).
+        recargarMenu();
         const resultado = await obtenerPlatoArmable(idPlato);
         if (activo) {
           setEstadoCarga({ idCargado: idPlato, plato: resultado });
@@ -82,6 +82,18 @@ function Constructor() {
     return () => {
       activo = false;
     };
+  }, [idPlato]);
+
+  // La carta cambió (menu:actualizado, o el menú se volvió a pedir): el plato
+  // se repinta con su nombre, precio y opciones nuevos sin salir del
+  // Constructor, y se sueltan las elecciones que ya no existen.
+  useEffect(() => {
+    return suscribirCambiosMenu((nuevoMenu) => {
+      if (!nuevoMenu) return;
+      const platoNuevo = adaptarPlatoArmable(nuevoMenu, idPlato);
+      setEstadoCarga((prev) => (prev.idCargado === idPlato ? { idCargado: idPlato, plato: platoNuevo } : prev));
+      if (platoNuevo) despachador({ type: 'PODAR_SELECCIONES', plato: platoNuevo });
+    });
   }, [idPlato]);
 
   useEffect(() => {
