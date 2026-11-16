@@ -30,6 +30,7 @@ import {
   resolverDiningUrl,
 } from '../utils/qrUrl'
 import { errorDeRotacion, tabletSinQr, tokenDeUrl, accionTabletAlReconectar } from '../utils/qrRotacion'
+import { buscarMesa } from '../utils/mesaActualizada'
 import { mesasApi } from '../services/api'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
@@ -40,7 +41,7 @@ export function PantallaMesa() {
   const { tables, pedidosActivos, cargarMesas } = useTables()
 
   const numMesa = Number(id) || 1
-  const tableData = tables?.find((t) => t.id === numMesa || t.number === numMesa)
+  const tableData = buscarMesa(tables, numMesa)
 
   // Token QR y URL activa de la mesa
   // Sin token real de la mesa NO se inventa uno: el QR esperaría un token que el
@@ -118,7 +119,7 @@ export function PantallaMesa() {
 
   // Detectar si la mesa tiene pedidos activos o comensales
   const pedidosMesa = (pedidosActivos || []).filter(
-    (p) => (Number(p.id_mesa) === numMesa || Number(p.mesa) === numMesa) && p.estado !== 'cancelado'
+    (p) => Number(p.id_mesa) === numMesa && p.estado !== 'cancelado'
   )
   const tieneComensales = pedidosMesa.length > 0 || Boolean(tableData?.comensales?.length > 0)
 
@@ -198,7 +199,7 @@ export function PantallaMesa() {
         let mesa
         try {
           const data = await mesasApi.listar()
-          mesa = (data?.mesas || []).find((m) => Number(m.id_mesa) === numMesa || Number(m.numero) === numMesa)
+          mesa = buscarMesa(data?.mesas, numMesa)
         } catch {
           return // sin respuesta: se queda lo que hay; el próximo evento lo corrige
         }

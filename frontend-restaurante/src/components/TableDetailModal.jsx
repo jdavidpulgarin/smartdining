@@ -29,7 +29,7 @@ export function TableDetailModal({
   const userRole = (user?.rol || user?.role || '').toLowerCase()
   const canTakeOrder = userRole === 'mesero' || userRole === 'admin'
 
-  const idMesa = Number(table?.id || table?.number)
+  const idMesa = Number(table?.id_mesa ?? table?.id)
   const tableName = table?.name || `Mesa ${idMesa}`
   const tableStatus = (table?.status || table?.estado || 'Disponible').toLowerCase()
   const isOcupada = tableStatus === 'ocupada'
@@ -105,7 +105,7 @@ export function TableDetailModal({
         <div className="table-detail-header">
           <div className="table-detail-header-left">
             <div className="table-detail-title-row">
-              <div className="table-badge-large">#{idMesa}</div>
+              <div className="table-badge-large">#{table?.numero ?? table?.number ?? idMesa}</div>
               <h2 className="table-detail-title">{tableName}</h2>
             </div>
             <div className="table-detail-subtitle-row">

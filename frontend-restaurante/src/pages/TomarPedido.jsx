@@ -18,6 +18,7 @@ import {
 } from '../utils/tomarPedido'
 import { MenuCatalogo } from '../components/tomar-pedido/MenuCatalogo'
 import { ResumenPedido } from '../components/tomar-pedido/ResumenPedido'
+import { buscarMesa } from '../utils/mesaActualizada'
 
 export function TomarPedido() {
   const { id } = useParams()
@@ -30,7 +31,7 @@ export function TomarPedido() {
   const esPersonalAutorizado = userRole === 'mesero' || userRole === 'admin'
 
   const mesaActual = useMemo(() => {
-    return tables?.find((t) => Number(t.id || t.number) === idMesa)
+    return buscarMesa(tables, idMesa)
   }, [tables, idMesa])
 
   // Estado de comensales y datos de mesa

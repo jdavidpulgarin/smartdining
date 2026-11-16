@@ -7,7 +7,7 @@ import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { mesaDelAviso } from '../utils/avisos'
 import { detalleMesa } from '../utils/estadoMesa'
-import { aplicarMesaActualizada, fusionarCargaConAvisos } from '../utils/mesaActualizada'
+import { aplicarMesaActualizada, fusionarCargaConAvisos, mismaMesa, numeroDeMesa } from '../utils/mesaActualizada'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
 
@@ -55,6 +55,14 @@ export function TablesProvider({ children }) {
     return []
   })
 
+  // Los eventos traen id_mesa; lo que se le muestra a la gente es el NÚMERO.
+  // Con mesas de id ≠ número, «Mesa {id}» nombraba otra mesa.
+  const tablasRef = useRef(tables)
+  useEffect(() => {
+    tablasRef.current = tables
+  }, [tables])
+  const nombreMesa = useCallback((idMesa) => textoMesa(idMesa ? numeroDeMesa(tablasRef.current, idMesa) : null), [])
+
   const [pedidosActivos, setPedidosActivos] = useState([])
   const [presenciaPorMesa, setPresenciaPorMesa] = useState({})
   const [alertas, setAlertas] = useState([])
@@ -76,6 +84,8 @@ export function TablesProvider({ children }) {
         hora: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         atendida: false,
         ...nuevaAlerta,
+        // La bandeja muestra el número, no el id (mesas de id ≠ número).
+        ...(nuevaAlerta?.idMesa ? { numeroMesa: numeroDeMesa(tablasRef.current, nuevaAlerta.idMesa) } : {}),
       },
       ...prev,
     ])
@@ -217,7 +227,7 @@ export function TablesProvider({ children }) {
       // Marcar la mesa como ocupada y activa en el plano
       setTables((prev) =>
         prev.map((t) =>
-          t.id === idMesa || t.number === idMesa
+          mismaMesa(t, idMesa)
             ? {
                 ...t,
                 status: 'Ocupada',
@@ -228,7 +238,7 @@ export function TablesProvider({ children }) {
             : t
         )
       )
-      showNotification(`Nuevo pedido recibido: ${p.codigo_pedido || `#${p.id_pedido}`} (Mesa ${idMesa})`, 'info')
+      showNotification(`Nuevo pedido recibido: ${p.codigo_pedido || `#${p.id_pedido}`} (${nombreMesa(idMesa)})`, 'info')
     }
   })
 
@@ -252,7 +262,7 @@ export function TablesProvider({ children }) {
         })
         emitirSonidoAlerta()
         showNotification(
-          `🍽️ ¡Pedido ${data.codigo_pedido || `#${idPedido}`} LISTO para servir (Mesa ${data.id_mesa})!`,
+          `🍽️ ¡Pedido ${data.codigo_pedido || `#${idPedido}`} LISTO para servir (${nombreMesa(data.id_mesa)})!`,
           'success'
         )
       } else if (nuevoEstado === 'entregado') {
@@ -271,10 +281,10 @@ export function TablesProvider({ children }) {
       agregarAlerta({
         tipo: 'pago',
         idMesa: data.id_mesa,
-        mensaje: `Pago confirmado por $${montoFormateado} (Mesa ${data.id_mesa})`,
+        mensaje: `Pago confirmado por $${montoFormateado} (${nombreMesa(data.id_mesa)})`,
       })
       emitirSonidoAlerta()
-      showNotification(`💰 Pago confirmado de $${montoFormateado} para Mesa ${data.id_mesa}`, 'success')
+      showNotification(`💰 Pago confirmado de $${montoFormateado} para ${nombreMesa(data.id_mesa)}`, 'success')
       cargarMesas()
       cargarPedidosActivos()
     }
@@ -290,7 +300,7 @@ export function TablesProvider({ children }) {
       mensaje: data?.motivo || `Comensal solicita asistencia urgente en mesa`,
     })
     emitirSonidoAlerta()
-    showNotification(`🔔 ${textoMesa(idMesa)} llama al mesero`, 'info')
+    showNotification(`🔔 ${nombreMesa(idMesa)} llama al mesero`, 'info')
   })
 
   useSocketListener('waiter:call', (data) => {
@@ -302,7 +312,7 @@ export function TablesProvider({ children }) {
       mensaje: data?.motivo || `Comensal solicita asistencia en mesa`,
     })
     emitirSonidoAlerta()
-    showNotification(`🔔 ${textoMesa(idMesa)} llama al mesero`, 'info')
+    showNotification(`🔔 ${nombreMesa(idMesa)} llama al mesero`, 'info')
   })
 
   // Escuchar solicitud de cuenta (cuenta:solicitada / bill:requested)
@@ -315,7 +325,7 @@ export function TablesProvider({ children }) {
       mensaje: `Comensales solicitan la cuenta y factura`,
     })
     emitirSonidoAlerta()
-    showNotification(`🧾 ${textoMesa(idMesa)} solicita la cuenta`, 'info')
+    showNotification(`🧾 ${nombreMesa(idMesa)} solicita la cuenta`, 'info')
   })
 
   useSocketListener('bill:requested', (data) => {
@@ -327,7 +337,7 @@ export function TablesProvider({ children }) {
       mensaje: `Comensales solicitan la cuenta y factura`,
     })
     emitirSonidoAlerta()
-    showNotification(`🧾 ${textoMesa(idMesa)} solicita la cuenta`, 'info')
+    showNotification(`🧾 ${nombreMesa(idMesa)} solicita la cuenta`, 'info')
   })
 
 
@@ -402,7 +412,7 @@ export function TablesProvider({ children }) {
       })
       setTables((prev) =>
         prev.map((t) =>
-          t.id === numId || t.number === numId
+          mismaMesa(t, numId)
             ? {
                 ...t,
                 status: 'Disponible',
@@ -416,7 +426,7 @@ export function TablesProvider({ children }) {
             : t
         )
       )
-      showNotification(`Mesa ${numId} liberada por el sistema`, 'info')
+      showNotification(`${nombreMesa(numId)} liberada por el sistema`, 'info')
     }
   }
 
@@ -429,7 +439,7 @@ export function TablesProvider({ children }) {
       const numId = Number(data.id_mesa)
       setTables((prev) =>
         prev.map((t) =>
-          t.id === numId || t.number === numId
+          mismaMesa(t, numId)
             ? {
                 ...t,
                 token_qr: data.token_qr,
@@ -442,7 +452,7 @@ export function TablesProvider({ children }) {
             : t
         )
       )
-      showNotification(`Mesa ${numId}: Código QR actualizado en vivo`, 'info')
+      showNotification(`${nombreMesa(numId)}: Código QR actualizado en vivo`, 'info')
     }
   })
 
@@ -452,7 +462,7 @@ export function TablesProvider({ children }) {
    */
   const abrirMesa = useCallback(async (idMesa, ttlMinutos = 240) => {
     const numId = Number(idMesa)
-    const tableActual = tables.find((t) => t.id === numId || t.number === numId)
+    const tableActual = tables.find((t) => mismaMesa(t, numId))
     const tableName = tableActual?.name || `Mesa ${numId}`
 
     try {
@@ -461,7 +471,7 @@ export function TablesProvider({ children }) {
 
       setTables((prev) =>
         prev.map((t) => {
-          if (t.id === numId || t.number === numId) {
+          if (mismaMesa(t, numId)) {
             return {
               ...t,
               status: 'Ocupada',
@@ -493,7 +503,7 @@ export function TablesProvider({ children }) {
    */
   const liberarMesa = useCallback(async (idMesa) => {
     const numId = Number(idMesa)
-    const tableActual = tables.find((t) => t.id === numId || t.number === numId)
+    const tableActual = tables.find((t) => mismaMesa(t, numId))
     const tableName = tableActual?.name || `Mesa ${numId}`
 
     try {
@@ -508,7 +518,7 @@ export function TablesProvider({ children }) {
 
       setTables((prev) =>
         prev.map((t) => {
-          if (t.id === numId || t.number === numId) {
+          if (mismaMesa(t, numId)) {
             return {
               ...t,
               status: 'Disponible',
@@ -541,7 +551,7 @@ export function TablesProvider({ children }) {
   // un toast ni en el éxito ni en el error; el modal muestra su propio estado.
   const regenerarQr = useCallback(async (idMesa, ttlMinutos = 240, { silencioso = false, soloSiVacia = false } = {}) => {
     const numId = Number(idMesa)
-    const tableActual = tables.find((t) => t.id === numId || t.number === numId)
+    const tableActual = tables.find((t) => mismaMesa(t, numId))
     const tableName = tableActual?.name || `Mesa ${numId}`
 
     try {
@@ -550,7 +560,7 @@ export function TablesProvider({ children }) {
 
       setTables((prev) =>
         prev.map((t) => {
-          if (t.id === numId || t.number === numId) {
+          if (mismaMesa(t, numId)) {
             return {
               ...t,
               token_qr: qrResult.token,
