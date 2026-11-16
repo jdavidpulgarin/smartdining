@@ -173,6 +173,13 @@ test('id_plato: el de la URL llega como número; lo que no es un id válido va n
 });
 
 test('las acciones del backend son las del contrato del socket-server', () => {
-  const { ACCIONES } = require('../../socket-server/src/menu-actualizado');
+  // Se LEE el archivo, no se carga: el job del backend en el CI no instala las
+  // dependencias del socket-server (require arrastraría jsonwebtoken).
+  const fuente = require('node:fs').readFileSync(
+    require('node:path').resolve(__dirname, '../../socket-server/src/menu-actualizado.js'), 'utf8'
+  );
+  const bloque = fuente.slice(fuente.indexOf('const ACCIONES_PLATO'), fuente.indexOf('const ACCIONES ='));
+  const ACCIONES = [...bloque.matchAll(/'([a-z]+-[a-z]+)'/g)].map((m) => m[1]);
+  assert.strictEqual(ACCIONES.length, 12, 'se leyeron las 12 acciones del socket-server');
   assert.deepStrictEqual([...ACCIONES_MENU].sort(), [...ACCIONES].sort());
 });
