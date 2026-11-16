@@ -4,6 +4,7 @@ const platosService = require('../services/platos.service');
 const menuService = require('../services/menu.service');
 const { disponibilidadEfectiva } = require('../services/disponibilidad-efectiva');
 const socketNotifier = require('../services/socket.notifier');
+const { avisarMenuActualizado } = require('../services/avisos-menu');
 const { esUrlImagenValida, MENSAJE_URL_IMAGEN } = require('../utils/url-imagen');
 
 /**
@@ -19,10 +20,13 @@ const { esUrlImagenValida, MENSAJE_URL_IMAGEN } = require('../utils/url-imagen')
  * el comensal seguiría viendo el constructor viejo hasta que expire el TTL.
  * invalidarMenu nunca lanza (cache.borrar devuelve false si Redis está caído).
  *
- * Al socket-server solo se le avisa de la DISPONIBILIDAD (D-05): no existe un
- * evento de "cambió el menú" en EVENTS.md, y platos tampoco avisa. Cambiar el
- * nombre o el precio de un ingrediente no mueve el constructor de nadie en
- * vivo; agotarlo, sí (ingrediente:disponibilidad, §5.3).
+ * Además de la caché, cada escritura avisa `menu-actualizado` (EVENTS.md §5.8)
+ * para que la PWA vuelva a pedir el menú sin recargar: antes, cambiar el nombre
+ * o el precio de una opción no le llegaba al comensal hasta recargar. El
+ * `id_plato` va cuando se sabe sin otra consulta; si no, null.
+ *
+ * La DISPONIBILIDAD (D-05) tiene además su propio aviso, más fino
+ * (ingrediente:disponibilidad, §5.3): agotar una opción la deshabilita en vivo.
  *
  * Ese aviso sale por los DOS caminos que pueden cambiar `disponible`: el PATCH
  * dedicado y el PUT del editor, que también puede tocarlo. En el PUT solo
@@ -204,6 +208,7 @@ async function crearPaso(req, res, next) {
 
     const paso = await constructorService.crearPaso(idPlato, parsed.data);
     await menuService.invalidarMenu();
+    avisarMenuActualizado('paso-creado', idPlato);
     return res.status(201).json(paso);
   } catch (err) {
     return next(err);
@@ -228,6 +233,7 @@ async function actualizarPaso(req, res, next) {
     if (!paso) return res.status(404).json({ error: 'Paso no encontrado' });
 
     await menuService.invalidarMenu();
+    avisarMenuActualizado('paso-editado', paso.id_plato);
     return res.json(paso);
   } catch (err) {
     return next(err);
@@ -243,6 +249,7 @@ async function eliminarPaso(req, res, next) {
     if (!eliminado) return res.status(404).json({ error: 'Paso no encontrado' });
 
     await menuService.invalidarMenu();
+    avisarMenuActualizado('paso-eliminado');
     return res.status(204).send();
   } catch (err) {
     return next(err);
@@ -272,6 +279,7 @@ async function crearIngrediente(req, res, next) {
 
     const ingrediente = await constructorService.crearIngrediente(idPaso, datos);
     await menuService.invalidarMenu();
+    avisarMenuActualizado('opcion-creada', paso.id_plato);
     return res.status(201).json(ingrediente);
   } catch (err) {
     return next(err);
@@ -302,6 +310,8 @@ async function actualizarIngrediente(req, res, next) {
 
     const { ingrediente, anterior } = resultado;
     await menuService.invalidarMenu();
+    // Nombre, precio extra, imagen…: la PWA vuelve a pedir el menú.
+    avisarMenuActualizado('opcion-editada');
 
     // D-05: el editor del panel también puede agotar o reponer por aquí, y sin
     // este aviso el cambio no llegaría en vivo a los celulares. Solo cuando
@@ -365,6 +375,7 @@ async function eliminarIngrediente(req, res, next) {
     if (!eliminado) return res.status(404).json({ error: 'Ingrediente no encontrado' });
 
     await menuService.invalidarMenu();
+    avisarMenuActualizado('opcion-eliminada');
     return res.status(204).send();
   } catch (err) {
     return next(err);
