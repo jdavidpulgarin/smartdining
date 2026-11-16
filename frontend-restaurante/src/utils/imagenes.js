@@ -97,3 +97,24 @@ export function urlImagenGuardable(valor) {
 
 export const MENSAJE_URL_IMAGEN =
   'La imagen debe ser una dirección https:// o una imagen subida (/imagenes/<código>.webp).'
+
+/** Foto local de la Arepa Rellena: solo si el plato NO tiene una propia. */
+export const FOTO_AREPA = '/img/arepa-rellena.png'
+
+/** La Arepa Rellena es el único plato con foto local de respaldo. */
+export const esArepaRellena = (nombre) => typeof nombre === 'string' && nombre.toLowerCase().includes('arepa rellena')
+
+/**
+ * La foto que se PINTA para un plato (nunca la que se guarda). Primero la suya,
+ * por la lista blanca de urlImagen; si no tiene, la foto local de la Arepa
+ * Rellena para ese plato, y si no, `respaldo`.
+ *
+ * Antes la Arepa iba con la foto local SIEMPRE: el admin le cambiaba la imagen
+ * y el panel seguía pintando la misma, ni recargando.
+ */
+export function fotoDePlato(nombre, url, respaldo = null, apiBase = API_URL) {
+  const propia = urlImagen(url, apiBase)
+  if (propia) return propia
+  if (esArepaRellena(nombre)) return FOTO_AREPA
+  return respaldo
+}

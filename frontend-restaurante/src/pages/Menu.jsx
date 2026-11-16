@@ -25,7 +25,7 @@ import { AuthContext } from '../context/authContextDef'
 import { useSocketListener } from '../hooks'
 import { crearUltimoPorId } from '../utils/dedupeEventos'
 import { confirmacionAlCambiar, ETIQUETA_DISPONIBILIDAD, NO_DISPONIBLE } from '../utils/disponibilidadPlato'
-import { urlImagen as urlParaPintar, urlImagenGuardable, MENSAJE_URL_IMAGEN } from '../utils/imagenes'
+import { urlImagenGuardable, MENSAJE_URL_IMAGEN, fotoDePlato, FOTO_AREPA, esArepaRellena } from '../utils/imagenes'
 
 /**
  * Carta para ADMINISTRAR: todas las categorías y TODOS los platos, también los
@@ -38,7 +38,6 @@ const estaDisponible = (dish) => dish.available && dish.stockOk !== false
 
 // Fotos SOLO para pintar la tarjeta; nunca se mandan como url_imagen.
 const FOTO_RESPALDO = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
-const FOTO_AREPA = '/img/arepa-rellena.png'
 
 async function obtenerCartaAdmin() {
   const [respCategorias, respPlatos] = await Promise.all([categoriasApi.listar(), platosApi.listar()])
@@ -96,7 +95,6 @@ export function Menu() {
     const platosParsed = cats.flatMap((c) => {
       const catNombre = c.categoria || c.nombre || 'General'
       return (c.platos || []).map((p) => {
-        const isArepa = p.nombre?.toLowerCase().includes('arepa rellena')
         return {
           id: p.id_plato,
           name: p.nombre,
@@ -107,13 +105,13 @@ export function Menu() {
           prepTime: p.tiempo_estimado ?? p.tiempo_preparacion_estimado ?? 15,
           tag: catNombre,
           description: p.descripcion || '',
-          // imageUrl es SOLO para pintar la tarjeta (con la foto local de la
-          // arepa o la de respaldo). Lo que se edita y se guarda es
+          // imageUrl es SOLO para pintar la tarjeta: la foto del plato y, si no
+          // tiene, la local de la arepa o la de respaldo. Lo que se edita y se guarda es
           // urlImagenGuardada: el url_imagen real del plato, o '' si no tiene.
           // La url_imagen pasa por la lista blanca de la app (#212): una
           // /imagenes/<uuid>.webp subida al backend se pinta con el origen de
           // la API; http://, javascript:, data: y demás, con el respaldo.
-          imageUrl: (isArepa ? FOTO_AREPA : null) || urlParaPintar(p.url_imagen) || FOTO_RESPALDO,
+          imageUrl: fotoDePlato(p.nombre, p.url_imagen, FOTO_RESPALDO),
           urlImagenGuardada: p.url_imagen || '',
           // available = interruptor MANUAL de la cocina (platos.disponible).
           // stockOk = lo que calcula la base desde el inventario (stock_suficiente,
@@ -585,7 +583,8 @@ export function Menu() {
                     alt={dish.name}
                     loading="lazy"
                     onError={(e) => {
-                      e.target.src = dish.name?.toLowerCase().includes('arepa rellena') ? FOTO_AREPA : FOTO_RESPALDO
+                      // La foto propia no cargó: respaldo (la local, si es la arepa).
+                      e.target.src = esArepaRellena(dish.name) ? FOTO_AREPA : FOTO_RESPALDO
                     }}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
