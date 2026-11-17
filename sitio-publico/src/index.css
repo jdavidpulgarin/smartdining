@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --color-fondo: #0B0B0B;
+  --color-superficie: #161616;
+  --color-superficie-2: #1F1F1F;
+  --color-borde: #2A2A2A;
+  --color-primario: #E3242B;
+  --color-primario-hover: #C81E24;
+  --color-primario-texto: #FF5A5F;
+  --color-texto: #FFFFFF;
+  --color-texto-suave: #B5B5B5;
+  --color-texto-tenue: #969696;
+  --color-acento: #F2B705;
+  --color-exito: #2FA35A;
+
+  /* Compatibilidad durante migración */
+  --color-primary: #E3242B;
+  --color-primary-hover: #C81E24;
+  --color-crema: #0B0B0B;
+  --color-cafe: #FFFFFF;
+  --color-verde: #2FA35A;
+
+  /* Tipografias */
+  --font-titulo: 'Bebas Neue', sans-serif;
+  --font-etiqueta: 'Barlow Condensed', sans-serif;
+  --font-cuerpo: 'Inter', sans-serif;
+}
+
+@layer base {
+  body {
+    background-color: #0B0B0B;
+    color: #FFFFFF;
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: 'Bebas Neue', sans-serif;
+  }
+
+  :focus-visible {
+    outline: 2px solid #FF5A5F;
+    outline-offset: 2px;
+  }
+
+  dialog:modal {
+    overscroll-behavior: contain;
+  }
+
+  dialog::backdrop {
+    overflow: hidden;
+    overscroll-behavior: contain;
+    background-color: rgb(0 0 0 / 0.7);
+    backdrop-filter: blur(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

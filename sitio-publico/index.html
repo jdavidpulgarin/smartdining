@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0B0B0B" />
+    <meta name="robots" content="index, follow" />
+    <title>SmartDining - Carta Digital</title>
+    <meta name="description" content="Explora nuestro menú digital, platos a la parrilla, bebidas y combinaciones personalizadas." />
+    <link rel="canonical" href="%VITE_SITIO_URL%/" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="restaurant" />
+    <meta property="og:title" content="SmartDining - Carta Digital" />
+    <meta property="og:description" content="Explora nuestro menú digital, platos a la parrilla, bebidas y combinaciones personalizadas." />
+    <meta property="og:url" content="%VITE_SITIO_URL%/" />
+    <meta property="og:image" content="%VITE_SITIO_URL%/og.png" />
+    <meta property="og:locale" content="es_CO" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SmartDining - Carta Digital" />
+    <meta name="twitter:description" content="Explora nuestro menú digital, platos a la parrilla, bebidas y combinaciones personalizadas." />
+    <meta name="twitter:image" content="%VITE_SITIO_URL%/og.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://images.unsplash.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap"
+    />
+
+    <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json" id="restaurant-jsonld">
+    {
+      "@context": "https://schema.org",
+      "@type": "Restaurant",
+      "name": "SmartDining",
+      "description": "Menú digital interactivo y platos a la carta",
+      "servesCuisine": "Parrilla, Fusión, Internacional",
+      "url": "%VITE_SITIO_URL%/"
+    }
+    </script>
+  </head>
+  <body class="bg-[#0B0B0B] text-neutral-100 min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
