@@ -32,4 +32,9 @@ describe('index.html SEO y metadatos', () => {
     expect(html).toContain('"@type": "Restaurant"');
     expect(html).toContain('"@context": "https://schema.org"');
   });
+
+  it('no contiene servesCuisine ni la palabra parrilla', () => {
+    expect(html).not.toContain('servesCuisine');
+    expect(html.toLowerCase()).not.toContain('parrilla');
+  });
 });

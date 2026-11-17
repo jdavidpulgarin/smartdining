@@ -5,7 +5,7 @@ import './index.css';
 import { obtenerConfiguracionPublica } from './services/configuracionService.js';
 import { SITIO_URL } from './config.js';
 
-// Enriquecer JSON-LD en runtime cuando llega la configuración
+// Enriquecer JSON-LD en runtime SOLO cuando la API responde con éxito
 if (typeof document !== 'undefined') {
   obtenerConfiguracionPublica()
     .then((config) => {
@@ -16,8 +16,7 @@ if (typeof document !== 'undefined') {
             '@context': 'https://schema.org',
             '@type': 'Restaurant',
             name: config.nombre || 'SmartDining',
-            description: 'Menú digital interactivo y platos a la carta',
-            servesCuisine: 'Parrilla, Fusión, Internacional',
+            description: 'Carta digital de SmartDining: pide y paga desde tu mesa con el QR.',
             url: SITIO_URL,
           };
           if (config.telefono) jsonLd.telephone = config.telefono;
@@ -35,7 +34,7 @@ if (typeof document !== 'undefined') {
       }
     })
     .catch(() => {
-      // Fallback: si falla la carga, el JSON-LD estático permanece intacto
+      // Si la configuración falló, el JSON-LD estático se deja tal cual
     });
 }
 

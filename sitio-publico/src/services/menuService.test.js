@@ -5,9 +5,23 @@ import { pedirJson, ErrorApi } from './api.js';
 describe('menuService y api.js', () => {
   it('200 devuelve { categorias, platos, armables } y nunca envía cabecera Authorization', async () => {
     const mockRespuesta = {
-      categorias: [{ id: 1, nombre: 'Entradas' }],
-      platos: [{ id: 10, nombre: 'Papas bravas', precio: 15000 }],
-      armables: [],
+      categorias: [
+        {
+          id_categoria: 1,
+          categoria: 'Entradas',
+          orden: 1,
+          platos: [
+            {
+              id_plato: 10,
+              nombre: 'Papas bravas',
+              precio: '15000',
+              url_imagen: null,
+              disponible: true,
+              personalizable: false,
+            },
+          ],
+        },
+      ],
     };
 
     const mockFetch = vi.fn().mockResolvedValue({
@@ -28,11 +42,16 @@ describe('menuService y api.js', () => {
     expect(opcionesLlamada.headers?.Accept).toBe('application/json');
     expect(opcionesLlamada.headers?.Authorization).toBeUndefined();
 
-    expect(resultado).toEqual({
-      categorias: [{ id: 1, nombre: 'Entradas' }],
-      platos: [{ id: 10, nombre: 'Papas bravas', precio: 15000 }],
-      armables: [],
+    expect(resultado.categorias).toEqual([
+      { id: 1, nombre: 'Entradas', orden: 1 },
+    ]);
+    expect(resultado.platos[0]).toMatchObject({
+      id: 10,
+      nombre: 'Papas bravas',
+      precio: 15000,
+      disponible: true,
     });
+    expect(resultado.armables).toEqual([]);
   });
 
   it('500 lanza ErrorApi con status y mensaje', async () => {
@@ -67,5 +86,41 @@ describe('menuService y api.js', () => {
       expect(err.status).toBe(0);
       expect(err.motivo).toBe('sin_conexion');
     }
+  });
+
+  it('un plato con disponible=false en la respuesta cruda sale con disponible: false pasando por obtenerMenuPublico', async () => {
+    const mockRespuestaCruda = {
+      categorias: [
+        {
+          id_categoria: 1,
+          categoria: 'Entradas',
+          orden: 1,
+          platos: [
+            {
+              id_plato: 10,
+              nombre: 'Papas bravas',
+              precio: '15000',
+              url_imagen: null,
+              disponible: false,
+              personalizable: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (h) => (h.toLowerCase() === 'content-type' ? 'application/json' : null),
+      },
+      json: async () => mockRespuestaCruda,
+    });
+
+    const resultado = await obtenerMenuPublico(mockFetch);
+    expect(resultado.platos).toHaveLength(1);
+    expect(resultado.platos[0].id).toBe(10);
+    expect(resultado.platos[0].disponible).toBe(false);
   });
 });

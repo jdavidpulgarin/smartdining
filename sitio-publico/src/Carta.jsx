@@ -183,16 +183,20 @@ export function TarjetaPlatoArmablePublico({ plato }) {
 
 export function Carta({
   menuInicial = null,
+  configuracionInicial = null,
   configInicial = null,
   cargandoInicial = false,
   errorInicial = false,
+  errorConfiguracion = false,
 } = {}) {
+  const confIn = configuracionInicial ?? configInicial;
   const [categorias, setCategorias] = useState(() => menuInicial?.categorias ?? []);
   const [platos, setPlatos] = useState(() => menuInicial?.platos ?? []);
   const [armables, setArmables] = useState(() => menuInicial?.armables ?? []);
   const [config, setConfig] = useState(() =>
-    configInicial ? normalizarConfiguracion(configInicial) : normalizarConfiguracion(null)
+    confIn ? normalizarConfiguracion(confIn) : normalizarConfiguracion(null)
   );
+  const [errorConfig, setErrorConfig] = useState(() => Boolean(errorConfiguracion));
   const [cargando, setCargando] = useState(() =>
     menuInicial ? false : cargandoInicial || true
   );
@@ -235,19 +239,11 @@ export function Carta({
 
     async function cargarInicial() {
       try {
-        const [datosMenu, datosConfig] = await Promise.all([
-          obtenerMenuPublico(),
-          obtenerConfiguracionPublica().catch(() =>
-            normalizarConfiguracion(null)
-          ),
-        ]);
-
+        const datosMenu = await obtenerMenuPublico();
         if (!cancelado) {
           setCategorias(datosMenu.categorias);
           setPlatos(datosMenu.platos);
           setArmables(datosMenu.armables);
-          setConfig(datosConfig);
-          setLogoFallido(false);
         }
       } catch (err) {
         console.error('Error al cargar el menú público:', err);
@@ -257,6 +253,21 @@ export function Carta({
       } finally {
         if (!cancelado) {
           setCargando(false);
+        }
+      }
+
+      try {
+        const datosConfig = await obtenerConfiguracionPublica();
+        if (!cancelado) {
+          setConfig(datosConfig);
+          setErrorConfig(false);
+          setLogoFallido(false);
+        }
+      } catch (errConfig) {
+        console.warn('No se pudo cargar la configuración del restaurante:', errConfig);
+        if (!cancelado) {
+          setErrorConfig(true);
+          setConfig(normalizarConfiguracion(null));
         }
       }
     }
@@ -276,13 +287,18 @@ export function Carta({
     try {
       const [datosMenu, datosConfig] = await Promise.all([
         obtenerMenuPublico(),
-        obtenerConfiguracionPublica(),
+        obtenerConfiguracionPublica().catch(() => null),
       ]);
 
       setCategorias(datosMenu.categorias);
       setPlatos(datosMenu.platos);
       setArmables(datosMenu.armables);
-      setConfig(datosConfig);
+      if (datosConfig) {
+        setConfig(datosConfig);
+        setErrorConfig(false);
+      } else {
+        setErrorConfig(true);
+      }
       setLogoFallido(false);
     } catch (err) {
       console.error('Error al reintentar la carga del menú:', err);
@@ -656,7 +672,11 @@ export function Carta({
             </h2>
           </div>
 
-          {mostrarInfoRestaurante ? (
+          {errorConfig || !mostrarInfoRestaurante ? (
+            <p className="text-sm text-texto-suave">
+              No pudimos cargar el horario y el contacto. Intenta más tarde.
+            </p>
+          ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {config.direccion && (
                 <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-2">
@@ -753,10 +773,6 @@ export function Carta({
                 </div>
               )}
             </div>
-          ) : (
-            <p className="text-sm text-texto-suave">
-              Consulta en el local nuestros horarios y canales de atención.
-            </p>
           )}
         </section>
 
@@ -788,7 +804,7 @@ export function Carta({
             <p className="font-titulo text-2xl tracking-wider uppercase text-texto">
               {nombreRestaurante}
             </p>
-            {(config.direccion || config.telefono || config.correo) && (
+            {!errorConfig && (config.direccion || config.telefono || config.correo) && (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-texto-suave">
                 {config.direccion && <span>{config.direccion}</span>}
                 {config.telefono && <span>Tel: {config.telefono}</span>}

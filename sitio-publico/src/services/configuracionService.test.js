@@ -191,13 +191,20 @@ describe('configuracionService', () => {
       expect(conf.horario.length).toBeGreaterThan(0);
     });
 
-    it('hace fallback a configuracion-simulada si el backend falla', async () => {
+    it('rechaza con ErrorApi cuando el backend responde 500 y NO devuelve telefono ni direccion del mock', async () => {
+      vi.spyOn(apiModule, 'pedirJson').mockRejectedValue(
+        new apiModule.ErrorApi({ status: 500, mensaje: 'Error interno' })
+      );
+
+      await expect(obtenerConfiguracionPublica({ forzar: true })).rejects.toThrow(
+        apiModule.ErrorApi
+      );
+    });
+
+    it('rechaza cuando fetch lanza error de red y NO devuelve telefono ni direccion del mock', async () => {
       vi.spyOn(apiModule, 'pedirJson').mockRejectedValue(new Error('Network error'));
 
-      const conf = await obtenerConfiguracionPublica();
-      expect(conf.nombre).toBe('SmartDining');
-      expect(conf.telefono).toBe('+57 604 321 4567');
-      expect(conf.direccion).toContain('Calle 10');
+      await expect(obtenerConfiguracionPublica({ forzar: true })).rejects.toThrow();
     });
   });
 });

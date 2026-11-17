@@ -1,5 +1,4 @@
 import { pedirJson } from './api.js';
-import configuracionSimulada from '../mocks/configuracion-simulada.json';
 
 let cacheConfigPromise = null;
 
@@ -220,22 +219,11 @@ export function recargarConfiguracion() {
 }
 
 async function fetchConfiguracionRaw() {
-  if (import.meta.env.VITE_MODO_SIMULADO === 'true') {
-    return configuracionSimulada;
+  if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
+    const modulo = await import('../mocks/configuracion-simulada.json');
+    return modulo.default || modulo;
   }
-  try {
-    try {
-      return await pedirJson('/configuracion/publica');
-    } catch (err) {
-      if (err?.status === 404) {
-        return await pedirJson('/configuracion');
-      }
-      throw err;
-    }
-  } catch {
-    // Fallback: si el backend está caído, 404 o 500, usa el JSON simulado
-    return configuracionSimulada;
-  }
+  return pedirJson('/configuracion');
 }
 
 export function obtenerConfiguracionRaw({ forzar = false } = {}) {
