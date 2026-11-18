@@ -73,7 +73,7 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Define INTERNAL_API_KEY en infra/.env}
       SOCKET_URL: http://socket-server:4001
       FRONTEND_CLIENTE_URL: https://app.${DOMINIO}
-      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO}
+      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO},https://${DOMINIO}
       # Solo de nginx (IP fija abajo) se cree X-Forwarded-For; de cualquier otro contenedor no (backend/server.js).
       TRUST_PROXY: 172.31.250.10
       # Límites por IP (backend/src/middleware/limites.middleware.js). Un local
@@ -117,7 +117,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: "4001"
-      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO}
+      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO},https://${DOMINIO}
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       QR_SECRET: ${QR_SECRET:?Define QR_SECRET en infra/.env}
@@ -155,6 +155,12 @@ services:
         DOMINIO: ${DOMINIO:?Define DOMINIO en infra/.env}
     environment:
       DOMINIO: ${DOMINIO}
+      # Proyecto de compose del entorno: "smartdining" en producción (name: de
+      # arriba) y "smartdining-staging" en staging (COMPOSE_PROJECT_NAME del
+      # .env.staging, lo exige deploy-staging.yml). La plantilla lo usa para que
+      # SOLO el raíz de producción sea indexable (map $sd_robots). Lleva el
+      # prefijo NGINX_ para que validar-nginx.sh lo pase al nginx -t.
+      NGINX_PROYECTO: ${COMPOSE_PROJECT_NAME:-smartdining}
       # Zonas limit_req de nginx (infra/nginx/templates/smartdining.conf.template),
       # por IP. Se ajustan en infra/.env (docs/despliegue.md, "Límites de
       # peticiones"). Un valor mal escrito impide arrancar nginx: valídalo antes.

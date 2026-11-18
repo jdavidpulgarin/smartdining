@@ -2,6 +2,8 @@
 # al arrancar (envsubst sobre /etc/nginx/templates). Las variables propias de
 # nginx ($host, $remote_addr...) no se tocan porque no son de entorno.
 #
+#   ${DOMINIO}         sitio público          (estático: sitio-publico)
+#   www.${DOMINIO}     301 al raíz (solo tiene DNS y certificado en producción)
 #   app.${DOMINIO}     PWA del comensal       (estático: frontend-cliente)
 #   staff.${DOMINIO}   panel del restaurante  (estático: frontend-restaurante)
 #   cocina.${DOMINIO}  pantalla de cocina     (estático: frontend-kds)
@@ -41,6 +43,21 @@ limit_req_zone $binary_remote_addr zone=login:10m rate=${NGINX_LIMITE_LOGIN};
 limit_req_zone $binary_remote_addr zone=pagos:10m rate=${NGINX_LIMITE_PAGOS};
 limit_req_zone $binary_remote_addr zone=webhook:10m rate=${NGINX_LIMITE_WEBHOOK};
 limit_req_status 429;
+
+# --- X-Robots-Tag: ningún buscador indexa los subdominios (app., staff.,
+# cocina., api., rt.) ni NADA de staging. La única excepción es el raíz de
+# PRODUCCIÓN, el sitio público. La clave sin cabecera es un LITERAL (host
+# smartdining.com.co y proyecto "smartdining"), no ${DOMINIO}: así ni un
+# DOMINIO mal puesto ni un proyecto mal puesto bastan por sí solos para abrir
+# la indexación. NGINX_PROYECTO es el proyecto de compose de cada entorno
+# (docker-compose.prod.yml: "smartdining" en producción, "smartdining-staging"
+# en staging, que exige deploy-staging.yml). Todo lo demás cae en default:
+# noindex. Un valor vacío hace que add_header NO mande la cabecera
+# (seguridad.conf). Prueba: infra/scripts/nginx-sitio.test.cjs.
+map "$host|${NGINX_PROYECTO}" $sd_robots {
+    default                              "noindex, nofollow";
+    "smartdining.com.co|smartdining"     "";
+}
 
 map $http_upgrade $connection_upgrade {
     default upgrade;
@@ -93,13 +110,15 @@ upstream tiempo_real { server socket-server:4001; }
 server {
     listen 80;
     listen [::]:80;
-    server_name ${DOMINIO} app.${DOMINIO} staff.${DOMINIO} cocina.${DOMINIO} api.${DOMINIO} rt.${DOMINIO};
+    server_name ${DOMINIO} www.${DOMINIO} app.${DOMINIO} staff.${DOMINIO} cocina.${DOMINIO} api.${DOMINIO} rt.${DOMINIO};
     access_log /var/log/nginx/access.log sd_sin_token;
 
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
+    # www va directo al raíz con HTTPS (un salto, no dos).
     location / {
+        if ($host = www.${DOMINIO}) { return 301 https://${DOMINIO}$request_uri; }
         return 301 https://$host$request_uri;
     }
 }
@@ -113,15 +132,46 @@ ssl_session_cache shared:SSL:10m;
 ssl_session_timeout 1d;
 ssl_session_tickets off;
 
-# --- Dominio raíz: a la PWA.
+# --- www: 301 al raíz. Este server existe en los dos entornos, pero solo
+# recibe tráfico en producción: www.staging.<dominio> no tiene registro DNS
+# (y no hay comodín), así que en staging nadie llega aquí. El certificado de
+# producción incluye www (primer-certificado.sh); el de staging no lo necesita.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name www.${DOMINIO};
+    access_log /var/log/nginx/access.log sd_sin_token;
+    include /etc/nginx/snippets/seguridad.conf;
+    return 301 https://${DOMINIO}$request_uri;
+}
+
+# --- Dominio raíz: sitio público (sitio-publico). Solo lectura: la carta en
+# vivo la pide a api.${DOMINIO}/api/menu (pública) y las fotos a
+# api.${DOMINIO}/imagenes/. El JSON-LD de index.html es un bloque de datos
+# (type="application/ld+json"): el navegador no lo ejecuta, así que no choca
+# con script-src 'self'. React pone estilos por CSSOM (elemento.style), que la
+# CSP no bloquea: no hace falta 'unsafe-inline'.
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
     server_name ${DOMINIO};
     access_log /var/log/nginx/access.log sd_sin_token;
-    include /etc/nginx/snippets/seguridad.conf;
-    return 301 https://app.${DOMINIO}$request_uri;
+    root /usr/share/nginx/html/sitio;
+    client_max_body_size 64k;
+
+    set $csp "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://api.${DOMINIO} https://images.unsplash.com; connect-src 'self' https://api.${DOMINIO}; frame-src https://www.google.com; media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+    include /etc/nginx/snippets/cabeceras-sitio.conf;
+    include /etc/nginx/snippets/bloqueo-interno.conf;
+
+    # /assets lleva hash: un año, inmutable. Los videos no llevan hash: caché
+    # corta (1 h). index.html, robots.txt y sitemap.xml: sin caché.
+    location /assets/ { expires 1y; add_header Cache-Control "public, immutable" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
+    location /videos/ { add_header Cache-Control "public, max-age=3600" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
+    location = /robots.txt { add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
+    location = /sitemap.xml { add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
+    location / { try_files $uri $uri/ /index.html; add_header Cache-Control "no-cache" always; include /etc/nginx/snippets/cabeceras-sitio.conf; }
 }
 
 # --- PWA del comensal
