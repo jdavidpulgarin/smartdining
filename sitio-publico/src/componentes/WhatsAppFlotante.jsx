@@ -49,7 +49,7 @@ function WhatsAppFlotante({
       rel="noopener noreferrer"
       aria-label={`Escribir por WhatsApp a ${nombre} (se abre en otra pestaña)`}
       style={{ bottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))' }}
-      className="fixed right-4 sm:right-6 z-40 w-14 h-14 w-[56px] h-[56px] rounded-full bg-exito hover:brightness-110 active:brightness-95 text-white flex items-center justify-center shadow-xl cursor-pointer motion-safe:transition-transform motion-safe:duration-200 motion-safe:hover:scale-110 motion-safe:active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto focus-visible:ring-offset-2 focus-visible:ring-offset-fondo"
+      className="fixed right-4 sm:right-6 z-40 w-14 h-14 rounded-full bg-exito hover:brightness-110 active:brightness-95 text-white flex items-center justify-center shadow-xl cursor-pointer motion-safe:transition-transform motion-safe:duration-200 motion-safe:hover:scale-110 motion-safe:active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto focus-visible:ring-offset-2 focus-visible:ring-offset-fondo"
     >
       <svg
         className="w-7 h-7 fill-current"

@@ -30,4 +30,10 @@ describe('Contacto (fachada de mapa y horario)', () => {
     // El enlace exterior a Google Maps sigue visible
     expect(html).toContain('Abrir en Google Maps');
   });
+
+  it('Contacto con el marcador contiene "a7.5 7.5 0 1115 0z" y no contiene "11-15 0z"', () => {
+    const html = renderToStaticMarkup(<Contacto datosRestaurante={restaurante} />);
+    expect(html).toContain('a7.5 7.5 0 1115 0z');
+    expect(html).not.toContain('11-15 0z');
+  });
 });

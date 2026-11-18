@@ -47,4 +47,15 @@ describe('WhatsAppFlotante', () => {
     expect(html).not.toContain('<a');
     expect(html).toBe('');
   });
+
+  it('no contiene "w-[56px]" ni "h-[56px]" y sí "w-14" y "h-14"', () => {
+    const html = renderToStaticMarkup(
+      <WhatsAppFlotante datosRestaurante={restaurante} visibleInicial={true} />
+    );
+
+    expect(html).not.toContain('w-[56px]');
+    expect(html).not.toContain('h-[56px]');
+    expect(html).toContain('w-14');
+    expect(html).toContain('h-14');
+  });
 });

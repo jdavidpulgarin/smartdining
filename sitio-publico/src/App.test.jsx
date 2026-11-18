@@ -6,6 +6,7 @@ import { TarjetaPlatoArmablePublico } from './secciones/Carta.jsx';
 import { obtenerMenuPublico } from './services/menuService.js';
 import * as apiModule from './services/api.js';
 import restaurante from './datos/restaurante.js';
+import Pie from './secciones/Pie.jsx';
 import { elegirFuentePortada } from './utils/portada.js';
 
 describe('App y Sitio Público Completo', () => {
@@ -304,6 +305,13 @@ describe('App y Sitio Público Completo', () => {
 
     // Pie contiene información académica
     expect(html).toContain('Proyecto académico · UPC');
+  });
+
+  it('Pie renderizado contiene pb-28 y md:pb-12 en el footer', () => {
+    const html = renderToStaticMarkup(<Pie />);
+    expect(html).toContain('pb-28');
+    expect(html).toContain('md:pb-12');
+    expect(html).toMatch(/<footer[^>]*class="[^"]*pb-28[^"]*md:pb-12[^"]*"/);
   });
 
   it('con origen "fija" aparece "Carta de referencia"; con "vivo" no aparece', async () => {
