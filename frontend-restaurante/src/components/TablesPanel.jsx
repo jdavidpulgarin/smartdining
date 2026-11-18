@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { puedeAbrirMesa } from '../utils/estadoMesa'
-import { mismaMesa } from '../utils/mesaActualizada'
+import { mismaMesa, buscarMesa } from '../utils/mesaActualizada'
 import { TableCard } from './TableCard'
 import { QRModal } from './QRModal'
 import { TableDetailModal } from './TableDetailModal'
@@ -37,6 +37,13 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
     ? tablesList.find(
         (t) => mismaMesa(t, selectedTableIdForQR)
       )
+    : null
+
+  // El detalle enseña la mesa VIVA (la del contexto, que actualiza el socket),
+  // no la copia de cuando se abrió: si la liberan con el modal abierto, deja de
+  // mostrar la cuenta de esa visita.
+  const tableForDetail = selectedTableForDetail
+    ? buscarMesa(tablesList, selectedTableForDetail.id_mesa ?? selectedTableForDetail.id) || selectedTableForDetail
     : null
 
   const handleOpenQRModal = (table) => {
@@ -261,7 +268,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
       {selectedTableForDetail && (
         <TableDetailModal
           key={`detail-${selectedTableForDetail.id || selectedTableForDetail.number}`}
-          table={selectedTableForDetail}
+          table={tableForDetail}
           pedidos={pedidosActivos}
           onClose={() => setSelectedTableForDetail(null)}
           onOpenQR={handleOpenQRModal}

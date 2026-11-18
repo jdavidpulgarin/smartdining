@@ -16,6 +16,34 @@ export function puedeUsarCaja(rol) {
 }
 
 /**
+ * ¿La mesa tiene una visita en curso? Es la regla con la que la Caja decide qué
+ * cuentas cargar: ocupada o con sesión abierta. Una mesa disponible no tiene
+ * cuenta: GET /mesas/:id/cuenta le devolvería la visita ANTERIOR (el backend
+ * no borra sesion_iniciada_en al liberar), y eso no es consumo de nadie.
+ * Acepta la mesa de la API (`estado`) o la del panel (`status`).
+ */
+export function mesaConSesionActiva(mesa) {
+  if (!mesa) return false
+  const estado = String(mesa.estado ?? mesa.status ?? '').toLowerCase()
+  return estado === 'ocupada' || Boolean(mesa.sesion_abierta)
+}
+
+/**
+ * Eventos del socket que cambian la cuenta de una mesa. La Caja y el detalle
+ * de la mesa recargan GET /mesas/:id/cuenta con cada uno.
+ */
+export const EVENTOS_QUE_CAMBIAN_LA_CUENTA = Object.freeze([
+  'connect',
+  'order:created',
+  'order:status',
+  'item:cancelado',
+  'payment:confirmed',
+  'mesa:liberada',
+  'mesa-liberada',
+  'cuenta:solicitada',
+])
+
+/**
  * UUID v4. `crypto.randomUUID` solo existe en contextos seguros (https o
  * localhost): en la demo por la red local (http://192.168.x.x) no está, así que
  * se arma con `crypto.getRandomValues`, que sí está en cualquier contexto.

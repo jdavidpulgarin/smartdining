@@ -18,6 +18,7 @@ import { useAuth, useSocketListener, useTables } from '../hooks'
 import { crearUltimaPeticion } from '../utils/ultimaPeticion'
 import {
   puedeUsarCaja,
+  mesaConSesionActiva,
   comensalDelCobro,
   idCobroParaEnviar,
   mensajeDeErrorCobro,
@@ -158,9 +159,7 @@ function CajaRegistradora() {
       const listaMesas = mesasRes?.mesas || []
 
       // 2. Para cada mesa ocupada, su cuenta desglosada
-      const mesasOcupadas = listaMesas.filter(
-        (m) => m.estado === 'ocupada' || Boolean(m.sesion_abierta)
-      )
+      const mesasOcupadas = listaMesas.filter(mesaConSesionActiva)
 
       const promesas = mesasOcupadas.map(async (mesa) => {
         try {

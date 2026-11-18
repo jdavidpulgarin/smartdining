@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   X,
   CheckCircle2,
@@ -8,13 +8,21 @@ import {
   LogOut,
   ArrowRight,
   UserCheck,
+  AlertTriangle,
 } from 'lucide-react'
 
 import { StateBadge, StatusBadge } from './ui/Badge'
 import { decodificarTokenQr } from '../services/qrService'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../hooks'
-import { puedeUsarCaja } from '../utils/caja'
+import { useAuth, useSocket } from '../hooks'
+import { mesasApi } from '../services/api'
+import { puedeUsarCaja, mesaConSesionActiva, EVENTOS_QUE_CAMBIAN_LA_CUENTA } from '../utils/caja'
+import { crearUltimaPeticion } from '../utils/ultimaPeticion'
+import {
+  resumenDetalleMesa,
+  avisoDeEstaMesa,
+  AVISO_PAGADA_SIN_ENTREGAR,
+} from '../utils/detalleMesa'
 
 export function TableDetailModal({
   table,
@@ -38,61 +46,70 @@ export function TableDetailModal({
   const sesionInfo = table?.token_qr ? decodificarTokenQr(table.token_qr) : null
   const sid = sesionInfo?.sid && sesionInfo.sid !== 'N/A' ? sesionInfo.sid.slice(0, 8) : null
 
-  // Filtrar pedidos activos de esta mesa
-  const pedidosMesa = useMemo(() => {
-    return (pedidos || []).filter(
-      (p) => Number(p.id_mesa) === idMesa && p.estado !== 'cancelado'
-    )
-  }, [pedidos, idMesa])
+  // Consumo, pagado, saldo, reparto y comandas: GET /mesas/:id/cuenta, como la
+  // Caja (utils/detalleMesa.js). Solo se pide con una visita en curso: para una
+  // mesa libre la cuenta sería la del grupo anterior.
+  const conSesion = mesaConSesionActiva(table)
+  const [cuenta, setCuenta] = useState(null)
+  const [errorCuenta, setErrorCuenta] = useState(null)
+  const [ultimaCarga] = useState(() => crearUltimaPeticion())
 
-  // Desglose financiero y comensales
-  const resumenFinanciero = useMemo(() => {
-    let totalConsumido = 0
-    let totalItems = 0
-    const comensalesMap = new Map()
-
-    pedidosMesa.forEach((pedido) => {
-      const items = pedido.detalles || pedido.items || []
-      const totalPed = Number(pedido.total || 0)
-      totalConsumido += totalPed
-
-      items.forEach((item) => {
-        const nombreComensal = (item.comensal || 'General').trim()
-        const cant = Number(item.cantidad || 1)
-        const subtotal = Number(item.subtotal || item.precio_unitario * cant || 0)
-        totalItems += cant
-
-        if (!comensalesMap.has(nombreComensal)) {
-          comensalesMap.set(nombreComensal, {
-            nombre: nombreComensal,
-            itemsCount: 0,
-            subtotal: 0,
-            items: [],
-          })
-        }
-
-        const com = comensalesMap.get(nombreComensal)
-        com.itemsCount += cant
-        com.subtotal += subtotal
-        com.items.push(item)
-      })
-    })
-
-    const pagado = 0 // Los cobros en sala se liquidan en /caja
-    const saldo = Math.max(0, totalConsumido - pagado)
-
-    return {
-      totalConsumido,
-      totalItems,
-      pagado,
-      saldo,
-      comensales: Array.from(comensalesMap.values()),
+  const cargarCuenta = useCallback(async () => {
+    const peticion = ultimaCarga.nueva()
+    if (!conSesion || !Number.isInteger(idMesa) || idMesa <= 0) {
+      setCuenta(null)
+      setErrorCuenta(null)
+      return
     }
-  }, [pedidosMesa])
+    try {
+      const datos = await mesasApi.obtenerCuenta(idMesa)
+      if (!peticion.vigente()) return
+      setCuenta(datos || null)
+      setErrorCuenta(null)
+    } catch {
+      if (!peticion.vigente()) return
+      setErrorCuenta('No se pudo cargar la cuenta de la mesa.')
+    }
+  }, [conSesion, idMesa, ultimaCarga])
+
+  // Al abrir (en la microtarea siguiente, como la Caja) y al cambiar de mesa o
+  // de estado. Al cerrar, lo que esté en vuelo se descarta.
+  useEffect(() => {
+    let montado = true
+    Promise.resolve().then(() => {
+      if (montado) cargarCuenta()
+    })
+    return () => {
+      montado = false
+      ultimaCarga.invalidar()
+    }
+  }, [cargarCuenta, ultimaCarga])
+
+  // En vivo: los mismos eventos con los que la Caja recarga sus cuentas.
+  const socket = useSocket()
+  useEffect(() => {
+    if (!socket) return undefined
+    const alAviso = (data) => {
+      if (avisoDeEstaMesa(data, idMesa)) cargarCuenta()
+    }
+    EVENTOS_QUE_CAMBIAN_LA_CUENTA.forEach((ev) => socket.on(ev, alAviso))
+    return () => {
+      EVENTOS_QUE_CAMBIAN_LA_CUENTA.forEach((ev) => socket.off(ev, alAviso))
+    }
+  }, [socket, idMesa, cargarCuenta])
+
+  const resumen = useMemo(
+    () => resumenDetalleMesa({ mesa: table, cuenta, pedidosPanel: pedidos }),
+    [table, cuenta, pedidos]
+  )
+  const pedidosMesa = resumen.comandas
+  // Con visita en curso pero sin cuenta todavía (cargando o error): sin cifras.
+  const sinCifras = resumen.conSesion && !cuenta
 
   const formatearDinero = (monto) => {
     return `$${Number(monto || 0).toLocaleString('es-CO')}`
   }
+  const cifra = (monto) => (sinCifras ? '—' : formatearDinero(monto))
 
   return (
     <div className="qr-modal-backdrop" onClick={onClose}>
@@ -136,36 +153,53 @@ export function TableDetailModal({
           <div className="table-metric-card">
             <span className="table-metric-caption">Consumo Mesa</span>
             <strong className="table-metric-value">
-              {formatearDinero(resumenFinanciero.totalConsumido)}
+              {cifra(resumen.total)}
             </strong>
             <span className="table-metric-subtext">
-              {resumenFinanciero.totalItems} ítems ordenados
+              {resumen.total > 0 ? `${resumen.items} ítems ordenados` : 'Sin consumo'}
             </span>
           </div>
 
           <div className="table-metric-card">
             <span className="table-metric-caption">Comensales</span>
             <strong className="table-metric-value">
-              {resumenFinanciero.comensales.length > 0 ? resumenFinanciero.comensales.length : (isOcupada ? '1+' : '0')}
+              {resumen.comensales.length > 0 ? resumen.comensales.length : (resumen.conSesion ? '1+' : '0')}
             </strong>
             <span className="table-metric-subtext">
-              {isOcupada ? 'Grupo activo' : 'Mesa libre'}
+              {resumen.conSesion ? 'Grupo activo' : 'Mesa libre'}
             </span>
           </div>
 
           <div className="table-metric-card table-metric-card-saldo">
             <span className="table-metric-caption-saldo">Saldo Pendiente</span>
             <strong className="table-metric-value">
-              {formatearDinero(resumenFinanciero.saldo)}
+              {cifra(resumen.saldo)}
             </strong>
             <span className="table-metric-subtext">
-              Por liquidar en caja
+              {resumen.pagado > 0 ? `Pagado ${formatearDinero(resumen.pagado)}` : 'Por liquidar en caja'}
             </span>
           </div>
         </div>
 
+        {errorCuenta && (
+          <div role="alert" className="table-detail-empty-box" style={{ marginBottom: '12px' }}>
+            {errorCuenta}
+          </div>
+        )}
+
+        {resumen.pagadaSinEntregar && (
+          <div
+            role="status"
+            className="table-detail-empty-box"
+            style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', borderColor: 'var(--sd-gold)' }}
+          >
+            <AlertTriangle size={16} style={{ color: 'var(--sd-gold)', flexShrink: 0 }} />
+            <span>{AVISO_PAGADA_SIN_ENTREGAR}</span>
+          </div>
+        )}
+
         {/* Desglose de Comensales (si hay consumos) */}
-        {resumenFinanciero.comensales.length > 0 && (
+        {resumen.comensales.length > 0 && (
           <div className="detail-section-block" style={{ marginBottom: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
               <UserCheck size={16} style={{ color: 'var(--sd-red)' }} />
@@ -180,7 +214,7 @@ export function TableDetailModal({
               maxHeight: '160px',
               overflowY: 'auto',
             }}>
-              {resumenFinanciero.comensales.map((c) => (
+              {resumen.comensales.map((c) => (
                 <div
                   key={c.nombre}
                   style={{
@@ -196,12 +230,17 @@ export function TableDetailModal({
                   <div>
                     <strong style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>{c.nombre}</strong>
                     <span style={{ color: 'var(--sd-text-muted)', fontSize: '0.75rem', marginLeft: '8px' }}>
-                      ({c.itemsCount} {c.itemsCount === 1 ? 'ítem' : 'ítems'})
+                      ({c.items} {c.items === 1 ? 'ítem' : 'ítems'})
                     </span>
                   </div>
-                  <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
-                    {formatearDinero(c.subtotal)}
-                  </strong>
+                  <span style={{ textAlign: 'right' }}>
+                    <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
+                      {formatearDinero(c.subtotal)}
+                    </strong>
+                    <span style={{ display: 'block', color: 'var(--sd-text-muted)', fontSize: '0.72rem' }}>
+                      {c.saldo > 0 ? `Saldo ${formatearDinero(c.saldo)}` : 'Pagado'}
+                    </span>
+                  </span>
                 </div>
               ))}
             </div>
@@ -293,9 +332,11 @@ export function TableDetailModal({
             </div>
           ) : (
             <div className="table-detail-empty-box">
-              {isOcupada
-                ? 'Sesión abierta esperando comandas de los comensales.'
-                : 'Mesa libre. No hay pedidos registrados.'}
+              {resumen.conSesion && sinCifras
+                ? (errorCuenta ? 'Sin datos de la cuenta.' : 'Cargando cuenta…')
+                : resumen.conSesion
+                ? 'Sin consumo. Sesión abierta esperando comandas de los comensales.'
+                : 'Sin consumo. Mesa libre.'}
             </div>
           )}
         </div>
