@@ -27,6 +27,13 @@ import { claveAlias } from '../utils/apodo';
 import { crearIntencion } from '../services/pagoService';
 import { abrirCheckout, cerrarWidget } from '../services/wompiWidget';
 import { uuidV4 } from '../services/clienteMesa';
+import {
+  esLlaveDePrueba,
+  leerModoPrueba,
+  marcarModoPrueba,
+  decidirApertura,
+} from '../utils/modoPago';
+import AvisoModoDemostracion from '../components/pago/AvisoModoDemostracion';
 
 /**
  * Pantalla principal de La Cuenta y Pagos (J-08).
@@ -65,6 +72,8 @@ function Pago({ errorPagoInicial = null } = {}) {
   const [errorPago, setErrorPago] = useState(errorPagoInicial);
   const [avisoExcedente, setAvisoExcedente] = useState(null);
   const [intencionActual, setIntencionActual] = useState(null);
+  const [intencionPendienteDemo, setIntencionPendienteDemo] = useState(null);
+  const [modoPrueba, setModoPrueba] = useState(() => leerModoPrueba());
   const [ultimoPago, setUltimoPago] = useState(0);
   const [tipoConfirmado, setTipoConfirmado] = useState('mesa');
   const intentoPrevioRef = useRef(null);
@@ -444,6 +453,53 @@ function Pago({ errorPagoInicial = null } = {}) {
     setPantalla('caja');
   };
 
+  const ejecutarAperturaCheckout = (intencion) => {
+    setOrigenEspera('widget');
+    setWidgetAbierto(true);
+    setPantalla('espera');
+
+    // En modo real, abrir el widget emergente de Wompi
+    if (!(import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true')) {
+      abrirCheckout(intencion, (resultado) => {
+        setWidgetAbierto(false);
+        setOrigenEspera(null);
+        setIntencionActual(null);
+
+        const trans = transicionPantallaPago({
+          tipo: 'widget_resultado',
+          resultadoWidget: resultado,
+        });
+
+        if (trans.cerrarWidget) {
+          cerrarWidget();
+        }
+        if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
+          sessionStorage.removeItem('smartdining_saldo_antes_pago');
+        }
+        if (trans.apagarEspera) {
+          setIniciandoPago(false);
+        }
+        if (trans.errorPago) {
+          setErrorPago(trans.errorPago);
+        }
+        if (trans.pantalla !== 'espera') {
+          setPantalla(trans.pantalla);
+        }
+      }).catch((err) => {
+        setWidgetAbierto(false);
+        setOrigenEspera(null);
+        setIntencionActual(null);
+        cerrarWidget();
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          sessionStorage.removeItem('smartdining_saldo_antes_pago');
+        }
+        setIniciandoPago(false);
+        setPantalla('cuenta');
+        setErrorPago(err.message || 'No se pudo abrir la ventana de Wompi');
+      });
+    }
+  };
+
   const handlePagarWompi = async () => {
     if (esErrorEnRevision) return;
     setIniciandoPago(true);
@@ -470,50 +526,25 @@ function Pago({ errorPagoInicial = null } = {}) {
         yoSim: comensal,
       });
       setIntencionActual(intencion);
-      setOrigenEspera('widget');
-      setWidgetAbierto(true);
-      setPantalla('espera');
 
-      // En modo real, abrir el widget emergente de Wompi
-      if (!(import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true')) {
-        abrirCheckout(intencion, (resultado) => {
-          setWidgetAbierto(false);
-          setOrigenEspera(null);
-          setIntencionActual(null);
+      const llave = intencion?.llave_publica;
+      const avisoVisto = leerModoPrueba();
+      const decision = decidirApertura({
+        llave,
+        avisoVisto,
+      });
 
-          const trans = transicionPantallaPago({
-            tipo: 'widget_resultado',
-            resultadoWidget: resultado,
-          });
-
-          if (trans.cerrarWidget) {
-            cerrarWidget();
-          }
-          if (trans.limpiarAlmacenamiento && typeof window !== 'undefined' && window.sessionStorage) {
-            sessionStorage.removeItem('smartdining_saldo_antes_pago');
-          }
-          if (trans.apagarEspera) {
-            setIniciandoPago(false);
-          }
-          if (trans.errorPago) {
-            setErrorPago(trans.errorPago);
-          }
-          if (trans.pantalla !== 'espera') {
-            setPantalla(trans.pantalla);
-          }
-        }).catch((err) => {
-          setWidgetAbierto(false);
-          setOrigenEspera(null);
-          setIntencionActual(null);
-          cerrarWidget();
-          if (typeof window !== 'undefined' && window.sessionStorage) {
-            sessionStorage.removeItem('smartdining_saldo_antes_pago');
-          }
-          setIniciandoPago(false);
-          setPantalla('cuenta');
-          setErrorPago(err.message || 'No se pudo abrir la ventana de Wompi');
-        });
+      if (esLlaveDePrueba(llave)) {
+        marcarModoPrueba();
+        setModoPrueba(true);
       }
+
+      if (decision === 'aviso') {
+        setIntencionPendienteDemo(intencion);
+        return;
+      }
+
+      ejecutarAperturaCheckout(intencion);
     } catch (err) {
       if (err?.tipo === 'en_revision' || err?.codigo === 'PAGO_EN_REVISION') {
         setErrorPago({
@@ -534,6 +565,7 @@ function Pago({ errorPagoInicial = null } = {}) {
     setWidgetAbierto(false);
     setOrigenEspera(null);
     setIntencionActual(null);
+    setIntencionPendienteDemo(null);
     const trans = transicionPantallaPago({ tipo: 'volver_cuenta' });
     if (trans.cerrarWidget) {
       cerrarWidget();
@@ -706,6 +738,8 @@ function Pago({ errorPagoInicial = null } = {}) {
           {/* Opciones y acciones de pago si hay saldo pendiente */}
           {mostrarSeccionPago && (
             <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-3">
+              {modoPrueba && <AvisoModoDemostracion />}
+
               {mostrarSelector && (
                 <>
                   <h2 className="m-0 font-etiqueta font-bold text-sm tracking-wider text-white uppercase">
@@ -1175,6 +1209,21 @@ function Pago({ errorPagoInicial = null } = {}) {
             Prefiero pagar con Wompi
           </button>
         </section>
+      )}
+
+      {/* Modal alertdialog de modo demostración */}
+      {intencionPendienteDemo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-md">
+            <AvisoModoDemostracion
+              onContinuar={() => {
+                const intencion = intencionPendienteDemo;
+                setIntencionPendienteDemo(null);
+                ejecutarAperturaCheckout(intencion);
+              }}
+            />
+          </div>
+        </div>
       )}
     </div>
   );
