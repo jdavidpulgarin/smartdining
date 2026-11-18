@@ -7,8 +7,10 @@ const PATRON_HTTPS = /^https:\/\/[^\s/?#\x00-\x1f\x7f]+(?:[/?#][^\s\x00-\x1f\x7f
 
 /**
  * Resuelve la URL pública de una imagen según su origen con lista blanca.
+ * Si apiBase es una ruta relativa (empieza por '/'), devuelve la ruta tal cual
+ * para que el servidor de desarrollo la sirva mediante su proxy de mismo origen.
  */
-export function resolverUrlImagen(url, apiBase) {
+export function resolverUrlImagen(url, apiBase = API_URL) {
   if (url === null || url === undefined || typeof url !== 'string') {
     return null;
   }
@@ -18,9 +20,12 @@ export function resolverUrlImagen(url, apiBase) {
     return null;
   }
 
+  const apiTrim = typeof apiBase === 'string' ? apiBase.trim() : '';
+  const esRelativo = apiTrim.startsWith('/');
+
   let origenApi = null;
-  if (typeof apiBase === 'string') {
-    const m = PATRON_ORIGEN.exec(apiBase.trim());
+  if (!esRelativo) {
+    const m = PATRON_ORIGEN.exec(apiTrim);
     if (m) {
       origenApi = m[1];
     }
@@ -28,6 +33,9 @@ export function resolverUrlImagen(url, apiBase) {
 
   // 1. Ruta relativa /imagenes/<uuid>.webp que cumple PATRON_RUTA exacto
   if (PATRON_RUTA.test(limpia)) {
+    if (esRelativo) {
+      return limpia;
+    }
     if (!origenApi) return null;
     return `${origenApi}${limpia}`;
   }

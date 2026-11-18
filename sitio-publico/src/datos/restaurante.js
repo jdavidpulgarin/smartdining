@@ -31,26 +31,20 @@ const restaurante = {
     { nombre: 'Facebook', url: 'https://www.facebook.com/smartdining' },
     { nombre: 'TikTok', url: 'https://www.tiktok.com/@smartdining' },
   ],
-  videos: [
-    {
+  videosPlatos: {
+    'Arepa Rellena': {
       archivo: '/videos/arepa.mp4',
       poster: '/videos/arepa-poster.webp',
-      titulo: 'Arepa a tu gusto',
-      descripcion:
-        'Rellena de carne desmechada y queso derretido. Una de las opciones de Arma tu plato.',
       ia: true,
       credito: '',
     },
-    {
+    'Bowl Personalizado': {
       archivo: '/videos/bowl.mp4',
       poster: '/videos/bowl-poster.webp',
-      titulo: 'Bowl a tu gusto',
-      descripcion:
-        'Arroz, salmón, edamame y vegetales frescos. Una de las opciones de Arma tu plato.',
       ia: true,
       credito: 'Imagen base: Freepik',
     },
-  ],
+  },
 };
 
 export default restaurante;

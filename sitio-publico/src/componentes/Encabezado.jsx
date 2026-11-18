@@ -44,7 +44,8 @@ function Encabezado({ secciones = [], datosRestaurante = {} }) {
             className="w-10 h-10 rounded-xl object-cover shrink-0"
           />
           <span className="font-titulo text-2xl sm:text-3xl tracking-wider uppercase text-texto truncate">
-            {nombreRestaurante}
+            <span className="md:hidden">SmartDining</span>
+            <span className="hidden md:inline">{nombreRestaurante}</span>
           </span>
         </a>
 

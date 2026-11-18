@@ -65,14 +65,15 @@ describe('restaurante.js - datos informativos', () => {
     }
   });
 
-  it('valida que videos sea un array y cada elemento tenga estructura completa, incluyendo ia (boolean) y credito (string)', () => {
-    expect(Array.isArray(restaurante.videos)).toBe(true);
-    expect(restaurante.videos.length).toBeGreaterThan(0);
-    for (const vid of restaurante.videos) {
+  it('valida que videosPlatos sea un objeto con la estructura requerida (archivo, poster, ia y credito)', () => {
+    expect(restaurante.videosPlatos).toBeDefined();
+    expect(typeof restaurante.videosPlatos).toBe('object');
+    const nombres = Object.keys(restaurante.videosPlatos);
+    expect(nombres.length).toBeGreaterThan(0);
+    for (const nombre of nombres) {
+      const vid = restaurante.videosPlatos[nombre];
       expect(typeof vid.archivo).toBe('string');
       expect(typeof vid.poster).toBe('string');
-      expect(typeof vid.titulo).toBe('string');
-      expect(typeof vid.descripcion).toBe('string');
       expect(typeof vid.ia).toBe('boolean');
       expect(typeof vid.credito).toBe('string');
     }

@@ -3,16 +3,84 @@ import CategoriaFiltro from '../components/menu/CategoriaFiltro.jsx';
 import PlatoCard from '../components/menu/PlatoCard.jsx';
 import Button from '../components/ui/Button.jsx';
 import { formatearPrecio } from '../utils/formato.js';
-import { describirReglaPaso } from '../utils/sitioPublico.js';
+import {
+  describirReglaPaso,
+  leerPreferenciasVideoNavegador,
+  debeCargarVideo,
+} from '../utils/sitioPublico.js';
+import restaurante from '../datos/restaurante.js';
 
-export function TarjetaPlatoArmablePublico({ plato }) {
+export function TarjetaPlatoArmablePublico({ plato, onSeleccionar }) {
   const pasos = Array.isArray(plato.pasos) ? plato.pasos : [];
+  const videoRef = useRef(null);
+  const containerRef = useRef(null);
+  const videoInfo = restaurante.videosPlatos?.[plato.nombre];
+  const [desactivarVideo, setDesactivarVideo] = useState(false);
+
+  useEffect(() => {
+    if (!videoInfo) return undefined;
+    const prefs = leerPreferenciasVideoNavegador();
+    if (!debeCargarVideo(prefs)) {
+      setDesactivarVideo(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!videoRef.current) return;
+          if (entry.isIntersecting) {
+            videoRef.current.play().catch(() => {});
+          } else {
+            videoRef.current.pause();
+          }
+        });
+      },
+      { threshold: 0.4 }
+    );
+
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [videoInfo]);
+
+  const mostrarVideo = Boolean(videoInfo && !desactivarVideo);
 
   return (
     <article className="bg-superficie rounded-3xl border border-borde overflow-hidden flex flex-col justify-between shadow-lg">
       <div>
-        <div className="relative w-full aspect-[16/9] bg-superficie-2 border-b border-borde overflow-hidden">
-          {plato.url_imagen ? (
+        <div
+          ref={containerRef}
+          className="relative w-full aspect-[16/9] bg-superficie-2 border-b border-borde overflow-hidden"
+        >
+          {mostrarVideo ? (
+            <video
+              ref={videoRef}
+              src={videoInfo.archivo}
+              poster={videoInfo.poster}
+              muted
+              loop
+              playsInline
+              preload="none"
+              aria-hidden="true"
+              tabIndex={-1}
+              className="w-full h-full object-cover"
+            />
+          ) : videoInfo ? (
+            <img
+              src={videoInfo.poster}
+              alt={`Plato personalizable ${plato.nombre}`}
+              width={640}
+              height={360}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover"
+            />
+          ) : plato.url_imagen ? (
             <img
               src={plato.url_imagen}
               alt={`Plato personalizable ${plato.nombre}`}
@@ -23,12 +91,26 @@ export function TarjetaPlatoArmablePublico({ plato }) {
               className="w-full h-full object-cover"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-texto-tenue font-etiqueta uppercase tracking-wider text-sm">
-              Arma tu plato
+            <div className="w-full h-full bg-superficie-2" />
+          )}
+
+          {/* Insignia de video IA si aplica */}
+          {videoInfo && (
+            <div className="absolute top-3 left-3 z-10 flex flex-col items-start gap-1">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-etiqueta font-semibold tracking-wider text-texto border border-white/10 uppercase">
+                <span className="w-1.5 h-1.5 rounded-full bg-acento animate-pulse" />
+                Video generado con IA
+              </span>
+              {videoInfo.credito ? (
+                <span className="px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-[10px] text-texto-tenue font-cuerpo">
+                  {videoInfo.credito}
+                </span>
+              ) : null}
             </div>
           )}
+
           <div className="absolute inset-0 bg-gradient-to-t from-superficie via-superficie/30 to-transparent" />
-          <div className="absolute bottom-3 left-4 right-4 flex items-end justify-between gap-3">
+          <div className="absolute bottom-3 left-4 right-4 flex flex-wrap items-end justify-between gap-3">
             <div>
               <span className="inline-block px-2.5 py-0.5 rounded-full bg-acento text-fondo font-etiqueta font-bold text-xs uppercase tracking-wider mb-1">
                 Personalizable
@@ -37,7 +119,7 @@ export function TarjetaPlatoArmablePublico({ plato }) {
                 {plato.nombre}
               </h3>
             </div>
-            <span className="shrink-0 font-etiqueta font-bold text-2xl text-acento bg-fondo/85 backdrop-blur-sm px-3 py-1 rounded-xl border border-borde">
+            <span className="shrink-0 font-etiqueta font-bold text-xl sm:text-2xl text-acento bg-fondo/85 backdrop-blur-sm px-3 py-1 rounded-xl border border-borde">
               Desde {formatearPrecio(plato.precio)}
             </span>
           </div>
@@ -115,9 +197,19 @@ export function TarjetaPlatoArmablePublico({ plato }) {
         </div>
       </div>
 
-      <div className="px-5 py-3.5 bg-superficie-2 border-t border-borde flex items-center gap-2.5 text-xs sm:text-sm text-acento font-semibold">
-        <span className="w-2 h-2 rounded-full bg-acento shrink-0" />
-        <p>Este plato lo armas a tu gusto en la mesa</p>
+      <div className="px-5 py-3.5 bg-superficie-2 border-t border-borde flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 text-xs sm:text-sm text-acento font-semibold">
+          <span className="w-2 h-2 rounded-full bg-acento shrink-0" />
+          <p>Este plato lo armas a tu gusto en la mesa</p>
+        </div>
+        <Button
+          type="button"
+          variante="secundario"
+          onClick={() => onSeleccionar?.(plato)}
+          className="text-xs sm:text-sm"
+        >
+          Ver ingredientes
+        </Button>
       </div>
     </article>
   );
@@ -285,6 +377,7 @@ function CartaSeccion({
                   <TarjetaPlatoArmablePublico
                     key={plato.id_plato}
                     plato={plato}
+                    onSeleccionar={onSeleccionarPlato}
                   />
                 ))}
               </div>

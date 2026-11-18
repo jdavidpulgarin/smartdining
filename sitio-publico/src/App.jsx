@@ -6,7 +6,6 @@ import Encabezado from './componentes/Encabezado.jsx';
 import Inicio from './secciones/Inicio.jsx';
 import Nosotros from './secciones/Nosotros.jsx';
 import CartaSeccion from './secciones/Carta.jsx';
-import Videos from './secciones/Videos.jsx';
 import ComoPedir from './secciones/ComoPedir.jsx';
 import Proximamente from './secciones/Proximamente.jsx';
 import Contacto from './secciones/Contacto.jsx';
@@ -14,27 +13,17 @@ import Pie from './secciones/Pie.jsx';
 import PlatoDetalleModal from './components/menu/PlatoDetalleModal.jsx';
 
 /**
- * Devuelve la lista de enlaces de secciones activos según los datos del restaurante.
- * Solo incluye '#videos' si restaurante.videos contiene elementos.
+ * Devuelve la lista de enlaces de secciones activos del sitio público.
  */
-export function obtenerSecciones(datosRestaurante = {}) {
-  const lista = [
+export function obtenerSecciones() {
+  return [
     { href: '#inicio', etiqueta: 'Inicio' },
     { href: '#nosotros', etiqueta: 'Nosotros' },
     { href: '#carta', etiqueta: 'Carta' },
-  ];
-
-  if (Array.isArray(datosRestaurante.videos) && datosRestaurante.videos.length > 0) {
-    lista.push({ href: '#videos', etiqueta: 'Videos' });
-  }
-
-  lista.push(
     { href: '#como-pedir', etiqueta: '¿Cómo pedir?' },
     { href: '#proximamente', etiqueta: 'Próximamente' },
-    { href: '#contacto', etiqueta: 'Contacto' }
-  );
-
-  return lista;
+    { href: '#contacto', etiqueta: 'Contacto' },
+  ];
 }
 
 /**
@@ -80,12 +69,9 @@ export function App({
   };
 
   const secciones = useMemo(
-    () => obtenerSecciones(datosRestaurante),
-    [datosRestaurante]
+    () => obtenerSecciones(),
+    []
   );
-
-  const tieneVideos =
-    Array.isArray(datosRestaurante.videos) && datosRestaurante.videos.length > 0;
 
   return (
     <div className="min-h-screen bg-fondo text-texto font-cuerpo flex flex-col overflow-x-hidden">
@@ -100,7 +86,6 @@ export function App({
           onReintentar={manejarReintentar}
           onSeleccionarPlato={setPlatoSeleccionado}
         />
-        {tieneVideos && <Videos datosRestaurante={datosRestaurante} />}
         <ComoPedir />
         <Proximamente />
         <Contacto datosRestaurante={datosRestaurante} />
@@ -109,7 +94,7 @@ export function App({
 
       {/* Modal de detalle en solo lectura */}
       <PlatoDetalleModal
-        key={platoSeleccionado?.id ?? 'cerrado'}
+        key={platoSeleccionado?.id ?? platoSeleccionado?.id_plato ?? 'cerrado'}
         plato={platoSeleccionado}
         abierto={Boolean(platoSeleccionado)}
         onCerrar={() => setPlatoSeleccionado(null)}

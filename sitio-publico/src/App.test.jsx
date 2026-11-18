@@ -44,9 +44,30 @@ describe('App y Sitio Público Completo', () => {
           },
           {
             id_plato: 201,
-            nombre: 'Bowl Parrillero',
+            nombre: 'Arepa Rellena',
+            descripcion: 'Arepa artesanal rellena a tu gusto.',
+            precio: '14000',
+            url_imagen: '/imagenes/arepa.webp',
+            disponible: true,
+            personalizable: true,
+            pasos: [
+              {
+                id_paso: 1,
+                nombre: 'Tipo de Arepa',
+                obligatorio: true,
+                min_sel: 1,
+                max_sel: 1,
+                ingredientes: [
+                  { id_ingrediente: 1, nombre: 'Arepa de Maíz', precio_extra: 0, disponible: true },
+                ],
+              },
+            ],
+          },
+          {
+            id_plato: 202,
+            nombre: 'Bowl Personalizado',
             descripcion: 'Arma tu combinación favorita',
-            precio: '32000',
+            precio: '28000',
             url_imagen: 'https://images.unsplash.com/bowl.jpg',
             disponible: true,
             personalizable: true,
@@ -58,8 +79,28 @@ describe('App y Sitio Público Completo', () => {
                 min_sel: 1,
                 max_sel: 1,
                 ingredientes: [
-                  { id_ingrediente: 1, nombre: 'Arroz salvaje', precio_extra: 0, disponible: true },
                   { id_ingrediente: 2, nombre: 'Quinoa', precio_extra: 2000, disponible: true },
+                ],
+              },
+            ],
+          },
+          {
+            id_plato: 203,
+            nombre: 'Wrap Personalizado',
+            descripcion: 'Wrap fresco enrollado a tu gusto.',
+            precio: '22000',
+            url_imagen: '/imagenes/wrap.webp',
+            disponible: true,
+            personalizable: true,
+            pasos: [
+              {
+                id_paso: 1,
+                nombre: 'Tortilla',
+                obligatorio: true,
+                min_sel: 1,
+                max_sel: 1,
+                ingredientes: [
+                  { id_ingrediente: 3, nombre: 'Integral', precio_extra: 0, disponible: true },
                 ],
               },
             ],
@@ -115,7 +156,6 @@ describe('App y Sitio Público Completo', () => {
       'inicio',
       'nosotros',
       'carta',
-      'videos',
       'como-pedir',
       'proximamente',
       'contacto',
@@ -130,7 +170,7 @@ describe('App y Sitio Público Completo', () => {
     }
 
     // Cada enlace de secciones en el nav apunta a un id existente
-    const secciones = obtenerSecciones(restaurante);
+    const secciones = obtenerSecciones();
     for (const sec of secciones) {
       const idSinHash = sec.href.replace('#', '');
       expect(html).toContain(`id="${idSinHash}"`);
@@ -162,45 +202,44 @@ describe('App y Sitio Público Completo', () => {
     expect(elegirFuentePortada({ anchoPantalla: 1280, prefs: {} })).toBe('/videos/portada.mp4');
   });
 
-  it('App con los videos reales: aparece #videos y su enlace en el nav, 2 <video> con muted, playsinline, preload="none", controls, poster y sin autoplay; aparecen 2 veces "Video generado con IA" y una vez "Imagen base: Freepik"', async () => {
+  it('videos dentro de los armables: Arepa Rellena y Bowl Personalizado tienen su <video> con los atributos requeridos e insignia "Video generado con IA"', async () => {
     const menu = await obtenerMenuPublico();
     const html = renderToStaticMarkup(<App menuInicial={menu} datosRestaurante={restaurante} />);
 
-    // Aparece la sección #videos y el enlace en el nav
-    expect(html).toContain('id="videos"');
-    expect(html).toContain('href="#videos"');
+    // No debe existir la sección #videos ni su enlace en el nav
+    expect(html).not.toContain('id="videos"');
+    expect(html).not.toContain('href="#videos"');
 
-    // 2 videos de platos
-    const videoTags = html.match(/<video[^>]*>/g) || [];
+    // Debe contener las tarjetas de Arepa Rellena y Bowl Personalizado
+    expect(html).toContain('Arepa Rellena');
+    expect(html).toContain('Bowl Personalizado');
+
+    const videoTags = html.match(/<video[^>]*src="\/videos\/(arepa|bowl)\.mp4"[^>]*>/g) || [];
     expect(videoTags).toHaveLength(2);
 
     for (const tag of videoTags) {
-      expect(tag).toContain('controls');
       expect(tag).toContain('muted');
+      expect(tag).toMatch(/loop/i);
       expect(tag).toMatch(/playsinline/i);
       expect(tag).toContain('preload="none"');
       expect(tag).toContain('poster=');
-      expect(tag).toContain('width="1280"');
-      expect(tag).toContain('height="720"');
-      expect(tag).not.toContain('autoplay');
+      expect(tag).toContain('aria-hidden="true"');
     }
 
-    // 2 veces "Video generado con IA"
+    // Insignia de IA en los armables
     const matchesIA = html.match(/Video generado con IA/g) || [];
-    expect(matchesIA).toHaveLength(2);
+    expect(matchesIA.length).toBeGreaterThanOrEqual(2);
 
-    // 1 vez "Imagen base: Freepik"
-    const matchesFreepik = html.match(/Imagen base: Freepik/g) || [];
-    expect(matchesFreepik).toHaveLength(1);
+    // Crédito en Bowl Personalizado
+    expect(html).toContain('Imagen base: Freepik');
   });
 
-  it('sin videos de platos no hay #videos ni su enlace en el nav', async () => {
+  it('Wrap Personalizado NO tiene video: muestra <img> normal y ningún <video>', async () => {
     const menu = await obtenerMenuPublico();
-    const htmlSinVideos = renderToStaticMarkup(
-      <App menuInicial={menu} datosRestaurante={{ ...restaurante, videos: [] }} />
-    );
-    expect(htmlSinVideos).not.toContain('id="videos"');
-    expect(htmlSinVideos).not.toContain('href="#videos"');
+    const html = renderToStaticMarkup(<App menuInicial={menu} datosRestaurante={restaurante} />);
+
+    expect(html).toContain('Wrap Personalizado');
+    expect(html).not.toMatch(/<video[^>]*wrap/i);
   });
 
   it('el iframe tiene title y loading="lazy"; WhatsApp usa https://wa.me/573046654848; las redes tienen rel="noopener noreferrer"', async () => {

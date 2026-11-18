@@ -62,8 +62,14 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
+        target: 'https://api.staging.smartdining.com.co',
         changeOrigin: true,
+        secure: true,
+      },
+      '/imagenes': {
+        target: 'https://api.staging.smartdining.com.co',
+        changeOrigin: true,
+        secure: true,
       },
     },
   },

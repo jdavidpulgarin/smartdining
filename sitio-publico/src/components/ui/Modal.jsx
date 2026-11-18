@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-function Modal({ abierto = false, onCerrar, titulo, children }) {
+function Modal({ abierto = false, onCerrar, titulo, tamano = 'normal', children }) {
   const tituloId = useId();
   const modalRef = useRef(null);
   const onCerrarRef = useRef(onCerrar);
@@ -67,9 +67,15 @@ function Modal({ abierto = false, onCerrar, titulo, children }) {
     return null;
   }
 
+  const esGrande = tamano === 'grande';
+
   const modalNode = (
     <div
-      className="fixed inset-0 z-60 flex items-end justify-center md:items-center p-0 md:p-4"
+      className={`fixed inset-0 z-60 flex justify-center p-0 ${
+        esGrande
+          ? 'items-stretch md:items-center md:p-4'
+          : 'items-end md:items-center md:p-4'
+      }`}
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           onCerrar?.();
@@ -91,21 +97,25 @@ function Modal({ abierto = false, onCerrar, titulo, children }) {
         aria-labelledby={tituloId}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="relative z-10 w-full max-h-[90vh] flex flex-col bg-superficie border border-borde rounded-t-2xl md:rounded-2xl max-w-md shadow-2xl focus:outline-none overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0 text-texto"
+        className={`relative z-10 w-full flex flex-col bg-superficie shadow-2xl focus:outline-none overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0 text-texto ${
+          esGrande
+            ? 'h-[100dvh] md:h-auto md:max-h-[90vh] md:rounded-3xl border-none md:border md:border-borde max-w-none md:max-w-4xl'
+            : 'max-h-[90vh] border border-borde rounded-t-2xl md:rounded-2xl max-w-md'
+        }`}
       >
         {/* Cabecera del modal */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-borde shrink-0">
-          <h2 id={tituloId} className="text-xl font-etiqueta uppercase tracking-wide font-bold text-texto truncate">
+        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 border-b border-borde shrink-0 bg-superficie">
+          <h2 id={tituloId} className="text-xl md:text-2xl font-etiqueta uppercase tracking-wide font-bold text-texto truncate mr-2">
             {titulo}
           </h2>
           <button
             type="button"
             onClick={onCerrar}
             aria-label="Cerrar"
-            className="min-w-12 min-h-12 -mr-2 inline-flex items-center justify-center text-texto-suave hover:text-texto hover:bg-superficie-2 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto cursor-pointer"
+            className="min-w-11 min-h-11 -mr-2 inline-flex items-center justify-center text-texto-suave hover:text-texto hover:bg-superficie-2 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto cursor-pointer shrink-0"
           >
             <svg
-              className="w-5 h-5"
+              className="w-5 h-5 sm:w-6 sm:h-6"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -118,7 +128,7 @@ function Modal({ abierto = false, onCerrar, titulo, children }) {
         </div>
 
         {/* Cuerpo con scroll interno */}
-        <div className="overflow-y-auto flex-1">
+        <div className="overflow-y-auto flex-1 flex flex-col">
           {children}
         </div>
       </div>
