@@ -47,6 +47,23 @@ export function marcarModoPrueba(
 }
 
 /**
+ * Envuelve una función para que solo se ejecute la primera vez que se invoca.
+ * Las llamadas subsecuentes no hacen nada y retornan undefined.
+ *
+ * @template T
+ * @param {(...args: any[]) => T} fn
+ * @returns {(...args: any[]) => T | undefined}
+ */
+export function crearUnaVez(fn) {
+  let ejecutado = false;
+  return function unaVez(...args) {
+    if (ejecutado) return undefined;
+    ejecutado = true;
+    return typeof fn === 'function' ? fn(...args) : undefined;
+  };
+}
+
+/**
  * Decide si se debe mostrar el aviso de modo demostración o abrir directamente el widget.
  *
  * @param {object} opciones

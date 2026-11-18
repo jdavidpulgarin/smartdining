@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   esLlaveDePrueba,
   leerModoPrueba,
   marcarModoPrueba,
   decidirApertura,
+  crearUnaVez,
   CLAVE_PAGO_PRUEBA,
 } from './modoPago';
 
@@ -83,6 +84,27 @@ describe('modoPago utilities', () => {
     it('maneja storage nulo o indefinido sin lanzar errores', () => {
       expect(() => marcarModoPrueba(null)).not.toThrow();
       expect(leerModoPrueba(null)).toBe(false);
+    });
+  });
+
+  describe('crearUnaVez', () => {
+    it('dos llamadas seguidas ejecutan fn una sola vez', () => {
+      const fn = vi.fn((x) => x * 2);
+      const unaVez = crearUnaVez(fn);
+
+      const res1 = unaVez(5);
+      const res2 = unaVez(10);
+
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(fn).toHaveBeenCalledWith(5);
+      expect(res1).toBe(10);
+      expect(res2).toBeUndefined();
+    });
+
+    it('no falla si fn no es una función', () => {
+      const unaVez = crearUnaVez(null);
+      expect(() => unaVez()).not.toThrow();
+      expect(unaVez()).toBeUndefined();
     });
   });
 });

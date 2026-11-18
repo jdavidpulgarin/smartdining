@@ -534,14 +534,14 @@ function Pago({ errorPagoInicial = null } = {}) {
         avisoVisto,
       });
 
-      if (esLlaveDePrueba(llave)) {
-        marcarModoPrueba();
-        setModoPrueba(true);
-      }
-
       if (decision === 'aviso') {
         setIntencionPendienteDemo(intencion);
         return;
+      }
+
+      if (esLlaveDePrueba(llave)) {
+        marcarModoPrueba();
+        setModoPrueba(true);
       }
 
       ejecutarAperturaCheckout(intencion);
@@ -1218,9 +1218,12 @@ function Pago({ errorPagoInicial = null } = {}) {
             <AvisoModoDemostracion
               onContinuar={() => {
                 const intencion = intencionPendienteDemo;
+                marcarModoPrueba();
+                setModoPrueba(true);
                 setIntencionPendienteDemo(null);
                 ejecutarAperturaCheckout(intencion);
               }}
+              onCancelar={handleVolverCuenta}
             />
           </div>
         </div>
