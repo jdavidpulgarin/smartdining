@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import Pago from './Pago';
@@ -8,6 +8,7 @@ import Pago from './Pago';
 let mockCuentaActual = null;
 let mockCargando = false;
 let mockError = null;
+let sessionStorageMock = {};
 
 vi.mock('../hooks/useCuentaMesa', () => ({
   useCuentaMesa: () => ({
@@ -33,6 +34,23 @@ describe('Pago.jsx - renderizado de sección de pago', () => {
   beforeEach(() => {
     mockCargando = false;
     mockError = null;
+    sessionStorageMock = {};
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key) => sessionStorageMock[key] ?? null,
+      setItem: (key, val) => {
+        sessionStorageMock[key] = String(val);
+      },
+      removeItem: (key) => {
+        delete sessionStorageMock[key];
+      },
+      clear: () => {
+        sessionStorageMock = {};
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('a) 1 comensal en la cuenta con saldo > 0 → aparece el botón "PAGAR LA CUENTA" con el monto, y NO aparece el selector de 2 opciones', () => {
@@ -280,5 +298,76 @@ describe('Pago.jsx - renderizado de sección de pago', () => {
     // "Pagar en caja" sigue visible y no deshabilitado
     expect(botonCaja).toBeDefined();
     expect(botonCaja).not.toContain('disabled');
+  });
+
+  it('f) con sessionStorage marcado aparece "Modo demostración"', () => {
+    sessionStorage.setItem('smartdining_pago_prueba', '1');
+    mockCuentaActual = {
+      id_mesa: 5,
+      numero: 5,
+      ubicacion: 'Terraza',
+      total: 35000,
+      pagado: 0,
+      saldo: 35000,
+      items_totales: 2,
+      mia: {
+        subtotal: 35000,
+        pagado: 0,
+        saldo: 35000,
+      },
+      comensales: [
+        {
+          nombre: 'Ana',
+          esMio: true,
+          subtotal: 35000,
+          pagado: 0,
+          saldo: 35000,
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <Pago />
+      </MemoryRouter>
+    );
+
+    expect(html).toContain('Modo demostración');
+    expect(html).toContain('4242 4242 4242 4242');
+  });
+
+  it('g) sin sessionStorage marcado NO aparece "Modo demostración"', () => {
+    sessionStorage.removeItem('smartdining_pago_prueba');
+    mockCuentaActual = {
+      id_mesa: 5,
+      numero: 5,
+      ubicacion: 'Terraza',
+      total: 35000,
+      pagado: 0,
+      saldo: 35000,
+      items_totales: 2,
+      mia: {
+        subtotal: 35000,
+        pagado: 0,
+        saldo: 35000,
+      },
+      comensales: [
+        {
+          nombre: 'Ana',
+          esMio: true,
+          subtotal: 35000,
+          pagado: 0,
+          saldo: 35000,
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <Pago />
+      </MemoryRouter>
+    );
+
+    expect(html).not.toContain('Modo demostración');
   });
 });
