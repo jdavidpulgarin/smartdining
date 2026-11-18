@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import React from 'react';
 import { App, obtenerSecciones } from './App.jsx';
+import { TarjetaPlatoArmablePublico } from './secciones/Carta.jsx';
 import { obtenerMenuPublico } from './services/menuService.js';
 import * as apiModule from './services/api.js';
 import restaurante from './datos/restaurante.js';
@@ -230,8 +231,25 @@ describe('App y Sitio Público Completo', () => {
     const matchesIA = html.match(/Video generado con IA/g) || [];
     expect(matchesIA.length).toBeGreaterThanOrEqual(2);
 
-    // Crédito en Bowl Personalizado
-    expect(html).toContain('Imagen base: Freepik');
+    // Crédito e insignia juntos en un solo elemento en Bowl Personalizado
+    expect(html).toContain('Video generado con IA · Imagen base: Freepik');
+    expect(html).toMatch(/<span[^>]*>[^<]*Video generado con IA · Imagen base: Freepik[^<]*<\/span>/);
+  });
+
+  it('la tarjeta del Bowl Personalizado tiene el texto "Video generado con IA · Imagen base: Freepik" en un solo elemento', () => {
+    const bowl = {
+      id_plato: 202,
+      nombre: 'Bowl Personalizado',
+      descripcion: 'Arma tu bowl a tu gusto.',
+      precio: 28000,
+      url_imagen: 'https://images.unsplash.com/bowl.jpg',
+      disponible: true,
+      personalizable: true,
+      pasos: [],
+    };
+    const html = renderToStaticMarkup(<TarjetaPlatoArmablePublico plato={bowl} />);
+    expect(html).toContain('Video generado con IA · Imagen base: Freepik');
+    expect(html).toMatch(/<span[^>]*>[^<]*Video generado con IA · Imagen base: Freepik[^<]*<\/span>/);
   });
 
   it('Wrap Personalizado NO tiene video: muestra <img> normal y ningún <video>', async () => {

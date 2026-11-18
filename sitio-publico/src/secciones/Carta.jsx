@@ -96,16 +96,14 @@ export function TarjetaPlatoArmablePublico({ plato, onSeleccionar }) {
 
           {/* Insignia de video IA si aplica */}
           {videoInfo && (
-            <div className="absolute top-3 left-3 z-10 flex flex-col items-start gap-1">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-etiqueta font-semibold tracking-wider text-texto border border-white/10 uppercase">
-                <span className="w-1.5 h-1.5 rounded-full bg-acento animate-pulse" />
-                Video generado con IA
-              </span>
-              {videoInfo.credito ? (
-                <span className="px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-[10px] text-texto-tenue font-cuerpo">
-                  {videoInfo.credito}
+            <div className="absolute top-3 left-3 right-3 z-10 flex items-start">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[10px] sm:text-[11px] font-etiqueta font-semibold tracking-wider text-texto border border-white/10 uppercase max-w-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-acento animate-pulse shrink-0" />
+                <span>
+                  Video generado con IA
+                  {videoInfo.credito ? ` · ${videoInfo.credito}` : ''}
                 </span>
-              ) : null}
+              </span>
             </div>
           )}
 
