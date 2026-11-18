@@ -86,16 +86,15 @@ function PlatoDetalleModal({
     return null;
   }, [plato, esArmable]);
 
-  if (!plato) {
-    return null;
-  }
-
-  const pasos = Array.isArray(plato.pasos) ? plato.pasos : [];
-  const imagenUrl = plato.imagen || plato.url_imagen;
+  const pasos = useMemo(
+    () => (Array.isArray(plato?.pasos) ? plato.pasos : []),
+    [plato]
+  );
 
   // Extraer ingredientes (de plato.ingredientes o de los pasos si es armable)
   const listaIngredientes = useMemo(() => {
-    if (Array.isArray(plato.ingredientes) && plato.ingredientes.length > 0) {
+    if (!plato) return [];
+    if (Array.isArray(plato?.ingredientes) && plato.ingredientes.length > 0) {
       return plato.ingredientes.map((i) => (typeof i === 'string' ? i : i.nombre));
     }
     if (pasos.length > 0) {
@@ -104,11 +103,12 @@ function PlatoDetalleModal({
       );
     }
     return [];
-  }, [plato.ingredientes, pasos]);
+  }, [plato, pasos]);
 
   // Extraer alérgenos declarados
   const listaAlergenos = useMemo(() => {
-    if (Array.isArray(plato.alergenos) && plato.alergenos.length > 0) {
+    if (!plato) return [];
+    if (Array.isArray(plato?.alergenos) && plato.alergenos.length > 0) {
       return plato.alergenos;
     }
     // Si los pasos traen alérgenos en sus ingredientes
@@ -122,7 +122,13 @@ function PlatoDetalleModal({
       return Array.from(alergs);
     }
     return [];
-  }, [plato.alergenos, pasos]);
+  }, [plato, pasos]);
+
+  if (!plato) {
+    return null;
+  }
+
+  const imagenUrl = plato.imagen || plato.url_imagen;
 
   return (
     <Modal

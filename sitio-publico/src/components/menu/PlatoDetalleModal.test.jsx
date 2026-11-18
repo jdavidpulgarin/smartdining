@@ -227,4 +227,55 @@ describe('PlatoDetalleModal (soloLectura)', () => {
     expect(html).toContain('Para pedir, escanea el código QR de tu mesa.');
     expect(html).toContain('Cerrar');
   });
+
+  it('renderiza con plato null sin lanzar error y devuelve vacío', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDetalleModal plato={null} abierto={true} onCerrar={() => {}} />
+    );
+    expect(html).toBe('');
+  });
+
+  it('renderiza plato con pasos, ingredientes y alérgenos mostrando chips y alérgenos', () => {
+    const plato = {
+      id: 401,
+      nombre: 'Bowl Personalizado',
+      descripcion: 'Crea tu combinación favorita.',
+      precio: 28000,
+      personalizable: true,
+      ingredientes: ['Arroz integral', 'Pollo', 'Aguacate'],
+      alergenos: ['gluten', 'sesamo'],
+      pasos: [
+        {
+          id_paso: 1,
+          nombre: 'Base',
+          obligatorio: true,
+          min_sel: 1,
+          max_sel: 1,
+          ingredientes: [
+            {
+              id_ingrediente: 1,
+              nombre: 'Arroz integral',
+              calorias: 150,
+              precio_extra: 0,
+              disponible: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      <PlatoDetalleModal plato={plato} abierto={true} onCerrar={() => {}} />
+    );
+
+    expect(html).toContain('Bowl Personalizado');
+    expect(html).toContain('Ingredientes');
+    expect(html).toContain('Arroz integral');
+    expect(html).toContain('Pollo');
+    expect(html).toContain('Aguacate');
+    expect(html).toContain('Alérgenos');
+    expect(html).toContain('Gluten');
+    expect(html).toContain('Sésamo');
+    expect(html).toContain('Así lo armas');
+  });
 });
