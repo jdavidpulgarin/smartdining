@@ -1,4 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Button from '../components/ui/Button.jsx';
+import restauranteDefault from '../datos/restaurante.js';
+import { estadoHorario } from '../utils/horario.js';
 
 const DIAS_SEMANA = [
   { clave: 'lunes', etiqueta: 'Lunes' },
@@ -11,12 +14,36 @@ const DIAS_SEMANA = [
 ];
 
 /**
- * Sección 'Contacto': dirección con address, mapa embebido de Google Maps,
+ * Sección 'Contacto': dirección con address, mapa interactivo (fachada bajo demanda),
  * teléfono, WhatsApp con mensaje inicial, correo, horario completo y redes sociales.
  */
-function Contacto({ datosRestaurante = {} }) {
+function Contacto({ datosRestaurante = {}, mapaVisibleInicial = false }) {
   const nombre = datosRestaurante.nombre || 'SmartDining Restaurante';
   const direccion = datosRestaurante.direccion;
+  const horario = datosRestaurante.horario || restauranteDefault.horario;
+
+  const [mapaVisible, setMapaVisible] = useState(() => Boolean(mapaVisibleInicial));
+  const iframeRef = useRef(null);
+
+  const [estado, setEstado] = useState(() => estadoHorario(new Date(), horario));
+
+  useEffect(() => {
+    setEstado(estadoHorario(new Date(), horario));
+    const timer = setInterval(() => {
+      setEstado(estadoHorario(new Date(), horario));
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [horario]);
+
+  const activarMapa = () => {
+    setMapaVisible(true);
+  };
+
+  useEffect(() => {
+    if (mapaVisible && iframeRef.current) {
+      iframeRef.current.focus();
+    }
+  }, [mapaVisible]);
 
   const direccionTexto = useMemo(() => {
     if (!direccion) return '';
@@ -121,21 +148,33 @@ function Contacto({ datosRestaurante = {} }) {
           </div>
 
           {/* Horario de atención */}
-          {(datosRestaurante.horarioVisible || datosRestaurante.horario) && (
+          {(datosRestaurante.horarioVisible || horario) && (
             <div className="bg-superficie rounded-3xl border border-borde p-6 space-y-4 shadow-lg">
-              <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-                Horario de atención
-              </h3>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
+                  Horario de atención
+                </h3>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-superficie-2 border border-borde text-xs font-etiqueta font-semibold tracking-wider text-texto shrink-0">
+                  <span
+                    aria-hidden="true"
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      estado.abierto ? 'bg-exito' : 'bg-texto-tenue'
+                    }`}
+                  />
+                  <span>{estado.texto}</span>
+                </span>
+              </div>
+
               {datosRestaurante.horarioVisible && (
                 <p className="text-base text-texto font-cuerpo font-medium">
                   {datosRestaurante.horarioVisible}
                 </p>
               )}
 
-              {datosRestaurante.horario && typeof datosRestaurante.horario === 'object' && (
+              {horario && typeof horario === 'object' && (
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm pt-3 border-t border-borde/60">
                   {DIAS_SEMANA.map(({ clave, etiqueta }) => {
-                    const dia = datosRestaurante.horario[clave];
+                    const dia = horario[clave];
                     const textoDia =
                       dia && dia.abre && dia.cierra
                         ? `${dia.abre} - ${dia.cierra}`
@@ -182,7 +221,7 @@ function Contacto({ datosRestaurante = {} }) {
           )}
         </div>
 
-        {/* Columna derecha: Mapa interactivo embebido */}
+        {/* Columna derecha: Mapa interactivo (fachada con carga bajo demanda) */}
         <div className="bg-superficie rounded-3xl border border-borde p-6 space-y-4 shadow-lg sticky top-24">
           <div className="flex items-center justify-between gap-2">
             <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
@@ -199,13 +238,53 @@ function Contacto({ datosRestaurante = {} }) {
           </div>
 
           <div className="w-full h-72 sm:h-96 rounded-2xl overflow-hidden border border-borde bg-superficie-2">
-            <iframe
-              title={`Mapa de ${nombre}`}
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-              src={`https://www.google.com/maps?q=${queryMapa}&output=embed`}
-              className="w-full h-full border-0"
-            />
+            {mapaVisible ? (
+              <iframe
+                ref={iframeRef}
+                tabIndex={0}
+                title={`Mapa de ${nombre}`}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                src={`https://www.google.com/maps?q=${queryMapa}&output=embed`}
+                className="w-full h-full border-0"
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-4">
+                <div className="w-14 h-14 rounded-full bg-superficie flex items-center justify-center border border-borde text-acento shrink-0">
+                  <svg
+                    className="w-7 h-7"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.75}
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 11-15 0z"
+                    />
+                  </svg>
+                </div>
+                {direccionTexto && (
+                  <p className="text-sm sm:text-base text-texto font-cuerpo max-w-xs leading-relaxed">
+                    {direccionTexto}
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variante="secundario"
+                  onClick={activarMapa}
+                >
+                  Ver mapa
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </div>

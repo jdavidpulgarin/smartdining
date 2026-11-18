@@ -253,19 +253,26 @@ describe('App y Sitio Público Completo', () => {
     expect(html).toMatch(/<span[^>]*>[^<]*Video generado con IA · Imagen base: Freepik[^<]*<\/span>/);
   });
 
-  it('el iframe tiene title y loading="lazy"; WhatsApp usa https://wa.me/573046654848; las redes tienen rel="noopener noreferrer"', async () => {
+  it('el iframe tiene title y loading="lazy" al estar visible; la fachada muestra "Ver mapa"; WhatsApp usa https://wa.me/573046654848; las redes tienen rel="noopener noreferrer"', async () => {
     const menu = await obtenerMenuPublico();
-    const html = renderToStaticMarkup(<App menuInicial={menu} />);
+    const htmlInicial = renderToStaticMarkup(<App menuInicial={menu} />);
 
-    // Iframe con title y loading="lazy"
-    expect(html).toMatch(/<iframe[^>]*title="Mapa de [^"]+"[^>]*loading="lazy"/);
+    // Fachada inicial sin iframe
+    expect(htmlInicial).not.toContain('<iframe');
+    expect(htmlInicial).toContain('Ver mapa');
+
+    // Iframe con title y loading="lazy" al activar el mapa
+    const htmlConMapa = renderToStaticMarkup(
+      <App menuInicial={menu} mapaVisibleInicial={true} />
+    );
+    expect(htmlConMapa).toMatch(/<iframe[^>]*title="Mapa de [^"]+"[^>]*loading="lazy"/);
 
     // Enlace a WhatsApp
-    expect(html).toContain('https://wa.me/573046654848');
+    expect(htmlInicial).toContain('https://wa.me/573046654848');
 
     // Redes sociales seguras
-    expect(html).toContain('rel="noopener noreferrer"');
-    expect(html).toContain('target="_blank"');
+    expect(htmlInicial).toContain('rel="noopener noreferrer"');
+    expect(htmlInicial).toContain('target="_blank"');
   });
 
   it('todas las <img> tienen alt (o alt=""), width y height', async () => {

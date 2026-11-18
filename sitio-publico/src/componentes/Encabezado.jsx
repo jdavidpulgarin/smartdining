@@ -1,13 +1,26 @@
 import { useEffect, useState } from 'react';
+import restauranteDefault from '../datos/restaurante.js';
+import { estadoHorario } from '../utils/horario.js';
 
 /**
  * Encabezado principal accesible y responsivo.
- * Incluye enlace 'Saltar al contenido' en primer lugar, logo, navegación
- * de escritorio y menú móvil interactivo con cierre mediante tecla Escape.
+ * Incluye enlace 'Saltar al contenido' en primer lugar, logo, pastilla de horario,
+ * navegación de escritorio y menú móvil interactivo con cierre mediante tecla Escape.
  */
 function Encabezado({ secciones = [], datosRestaurante = {} }) {
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
   const nombreRestaurante = datosRestaurante.nombre || 'SmartDining';
+  const horario = datosRestaurante.horario || restauranteDefault.horario;
+
+  const [estado, setEstado] = useState(() => estadoHorario(new Date(), horario));
+
+  useEffect(() => {
+    setEstado(estadoHorario(new Date(), horario));
+    const timer = setInterval(() => {
+      setEstado(estadoHorario(new Date(), horario));
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [horario]);
 
   useEffect(() => {
     if (!menuMovilAbierto) return undefined;
@@ -49,21 +62,33 @@ function Encabezado({ secciones = [], datosRestaurante = {} }) {
           </span>
         </a>
 
-        {/* Navegación de escritorio */}
-        <nav
-          aria-label="Principal"
-          className="hidden md:flex items-center gap-1 lg:gap-3"
-        >
-          {secciones.map((sec) => (
-            <a
-              key={sec.href}
-              href={sec.href}
-              className="min-h-11 px-3 inline-flex items-center font-etiqueta uppercase tracking-wider text-base font-bold text-texto-suave hover:text-acento transition-colors rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
-            >
-              {sec.etiqueta}
-            </a>
-          ))}
-        </nav>
+        {/* Pastilla y navegación de escritorio */}
+        <div className="hidden md:flex items-center gap-4 lg:gap-6">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-superficie-2 border border-borde text-xs font-etiqueta font-semibold tracking-wider text-texto shrink-0">
+            <span
+              aria-hidden="true"
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                estado.abierto ? 'bg-exito' : 'bg-texto-tenue'
+              }`}
+            />
+            <span>{estado.texto}</span>
+          </span>
+
+          <nav
+            aria-label="Principal"
+            className="flex items-center gap-1 lg:gap-3"
+          >
+            {secciones.map((sec) => (
+              <a
+                key={sec.href}
+                href={sec.href}
+                className="min-h-11 px-3 inline-flex items-center font-etiqueta uppercase tracking-wider text-base font-bold text-texto-suave hover:text-acento transition-colors rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+              >
+                {sec.etiqueta}
+              </a>
+            ))}
+          </nav>
+        </div>
 
         {/* Botón menú hamburguesa en celular */}
         <button
@@ -113,8 +138,19 @@ function Encabezado({ secciones = [], datosRestaurante = {} }) {
         <nav
           id="menu-movil"
           aria-label="Principal móvil"
-          className="md:hidden border-t border-borde bg-superficie px-4 py-3 space-y-1"
+          className="md:hidden border-t border-borde bg-superficie px-4 py-3 space-y-2"
         >
+          <div className="px-3 py-2 border-b border-borde/40">
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-superficie-2 border border-borde text-xs font-etiqueta font-semibold tracking-wider text-texto">
+              <span
+                aria-hidden="true"
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  estado.abierto ? 'bg-exito' : 'bg-texto-tenue'
+                }`}
+              />
+              <span>{estado.texto}</span>
+            </span>
+          </div>
           {secciones.map((sec) => (
             <a
               key={sec.href}

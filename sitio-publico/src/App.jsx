@@ -3,6 +3,7 @@ import restauranteDefault from './datos/restaurante.js';
 import { obtenerMenuPublico } from './services/menuService.js';
 import { efectoCarta } from './utils/efectoCarta.js';
 import Encabezado from './componentes/Encabezado.jsx';
+import WhatsAppFlotante from './componentes/WhatsAppFlotante.jsx';
 import Inicio from './secciones/Inicio.jsx';
 import Nosotros from './secciones/Nosotros.jsx';
 import CartaSeccion from './secciones/Carta.jsx';
@@ -35,6 +36,7 @@ export function App({
   cargandoInicial = false,
   errorInicial = false,
   datosRestaurante = restauranteDefault,
+  mapaVisibleInicial = false,
 } = {}) {
   const [menu, setMenu] = useState(() => menuInicial ?? null);
   const [cargando, setCargando] = useState(() =>
@@ -88,9 +90,18 @@ export function App({
         />
         <ComoPedir />
         <Proximamente />
-        <Contacto datosRestaurante={datosRestaurante} />
+        <Contacto
+          datosRestaurante={datosRestaurante}
+          mapaVisibleInicial={mapaVisibleInicial}
+        />
       </main>
       <Pie datosRestaurante={datosRestaurante} secciones={secciones} />
+
+      {/* Botón flotante de WhatsApp */}
+      <WhatsAppFlotante
+        datosRestaurante={datosRestaurante}
+        oculto={platoSeleccionado != null}
+      />
 
       {/* Modal de detalle en solo lectura */}
       <PlatoDetalleModal
