@@ -73,10 +73,6 @@ personas caben. Arriba están los filtros **TODAS**, **DISPONIBLES**,
 - Una mesa **Disponible** dice "Lista para asignar" y tiene el botón **ABRIR / QR**.
 - Una mesa **Ocupada** dice "Sesión activa · QR generado" y tiene **VER QR** y
   **LIBERAR**.
-- Una mesa **Reservada** (borde dorado punteado) o **En mantenimiento**
-  (atenuada, "no se asigna") tiene el botón **ABRIR IGUAL**. Antes de abrirla, o
-  de enviarle un pedido, el panel pregunta: «La mesa 5 está reservada. ¿Abrirla
-  igual?» (o «en mantenimiento»). Si cancelas, no pasa nada.
 
 Las mesas se actualizan solas cuando otro mesero o el administrador las abre,
 libera, crea, edita o borra: no hace falta recargar.
