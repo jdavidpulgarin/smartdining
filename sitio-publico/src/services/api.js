@@ -18,7 +18,7 @@ export class ErrorApi extends Error {
   }
 }
 
-export async function pedirJson(ruta, { fetchFn = fetch } = {}) {
+export async function pedirJson(ruta, { fetchFn = fetch, signal } = {}) {
   const rutaNormalizada = ruta.startsWith('/') ? ruta : `/${ruta}`;
   const url = `${API_URL}${rutaNormalizada}`;
 
@@ -29,12 +29,16 @@ export async function pedirJson(ruta, { fetchFn = fetch } = {}) {
       headers: {
         Accept: 'application/json',
       },
+      signal,
     });
   } catch (error) {
     throw new ErrorApi({
       status: 0,
-      motivo: 'sin_conexion',
-      mensaje: 'Sin conexión. Revisa tu internet e intenta de nuevo.',
+      motivo: error?.name === 'AbortError' ? 'timeout' : 'sin_conexion',
+      mensaje:
+        error?.name === 'AbortError'
+          ? 'Tiempo de espera agotado.'
+          : 'Sin conexión. Revisa tu internet e intenta de nuevo.',
       detalle: error?.message,
     });
   }

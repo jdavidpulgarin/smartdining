@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import restauranteDefault from './datos/restaurante.js';
 import { obtenerMenuPublico } from './services/menuService.js';
-import {
-  normalizarConfiguracion,
-  obtenerConfiguracionPublica,
-  recargarConfiguracion,
-  tieneDatosRestaurante,
-} from './services/configuracionService.js';
+import { combinarMenu } from './utils/combinarMenu.js';
+import { iniciarRefresco } from './utils/refrescoCarta.js';
 import CategoriaFiltro from './components/menu/CategoriaFiltro.jsx';
 import PlatoCard from './components/menu/PlatoCard.jsx';
 import PlatoDetalleModal from './components/menu/PlatoDetalleModal.jsx';
@@ -183,20 +180,11 @@ export function TarjetaPlatoArmablePublico({ plato }) {
 
 export function Carta({
   menuInicial = null,
-  configuracionInicial = null,
-  configInicial = null,
   cargandoInicial = false,
   errorInicial = false,
-  errorConfiguracion = false,
+  datosRestaurante = restauranteDefault,
 } = {}) {
-  const confIn = configuracionInicial ?? configInicial;
-  const [categorias, setCategorias] = useState(() => menuInicial?.categorias ?? []);
-  const [platos, setPlatos] = useState(() => menuInicial?.platos ?? []);
-  const [armables, setArmables] = useState(() => menuInicial?.armables ?? []);
-  const [config, setConfig] = useState(() =>
-    confIn ? normalizarConfiguracion(confIn) : normalizarConfiguracion(null)
-  );
-  const [errorConfig, setErrorConfig] = useState(() => Boolean(errorConfiguracion));
+  const [menu, setMenu] = useState(() => menuInicial ?? null);
   const [cargando, setCargando] = useState(() =>
     menuInicial ? false : cargandoInicial || true
   );
@@ -233,17 +221,14 @@ export function Carta({
   }, []);
 
   useEffect(() => {
-    if (menuInicial) return;
-
     let cancelado = false;
 
     async function cargarInicial() {
       try {
         const datosMenu = await obtenerMenuPublico();
         if (!cancelado) {
-          setCategorias(datosMenu.categorias);
-          setPlatos(datosMenu.platos);
-          setArmables(datosMenu.armables);
+          setMenu(datosMenu);
+          setError(false);
         }
       } catch (err) {
         console.error('Error al cargar el menú público:', err);
@@ -255,51 +240,38 @@ export function Carta({
           setCargando(false);
         }
       }
-
-      try {
-        const datosConfig = await obtenerConfiguracionPublica();
-        if (!cancelado) {
-          setConfig(datosConfig);
-          setErrorConfig(false);
-          setLogoFallido(false);
-        }
-      } catch (errConfig) {
-        console.warn('No se pudo cargar la configuración del restaurante:', errConfig);
-        if (!cancelado) {
-          setErrorConfig(true);
-          setConfig(normalizarConfiguracion(null));
-        }
-      }
     }
 
-    cargarInicial();
+    if (!menuInicial) {
+      cargarInicial();
+    }
+
+    const { detener } = iniciarRefresco({
+      cargar: async () => {
+        try {
+          const nuevo = await obtenerMenuPublico();
+          if (!cancelado) {
+            setMenu((prev) => combinarMenu(prev, nuevo));
+          }
+        } catch {
+          // Fallo silencioso en background
+        }
+      },
+      intervaloMs: 15000,
+    });
 
     return () => {
       cancelado = true;
+      detener();
     };
   }, [menuInicial]);
 
   const manejarReintentar = async () => {
-    recargarConfiguracion();
     setCargando(true);
     setError(false);
-
     try {
-      const [datosMenu, datosConfig] = await Promise.all([
-        obtenerMenuPublico(),
-        obtenerConfiguracionPublica().catch(() => null),
-      ]);
-
-      setCategorias(datosMenu.categorias);
-      setPlatos(datosMenu.platos);
-      setArmables(datosMenu.armables);
-      if (datosConfig) {
-        setConfig(datosConfig);
-        setErrorConfig(false);
-      } else {
-        setErrorConfig(true);
-      }
-      setLogoFallido(false);
+      const datosMenu = await obtenerMenuPublico();
+      setMenu(datosMenu);
     } catch (err) {
       console.error('Error al reintentar la carga del menú:', err);
       setError(true);
@@ -307,6 +279,10 @@ export function Carta({
       setCargando(false);
     }
   };
+
+  const categorias = useMemo(() => menu?.categorias ?? [], [menu]);
+  const platos = useMemo(() => menu?.platos ?? [], [menu]);
+  const armables = useMemo(() => menu?.armables ?? [], [menu]);
 
   const permitirVideo = useMemo(
     () => debeCargarVideo(preferenciasVideo),
@@ -333,9 +309,15 @@ export function Carta({
     });
   }, [platos, categoriaActiva]);
 
-  const nombreRestaurante = config.nombre || 'SmartDining';
-  const mostrarInfoRestaurante = tieneDatosRestaurante(config);
+  const nombreRestaurante = datosRestaurante?.nombre || 'SmartDining';
   const anioActual = new Date().getFullYear();
+
+  const direccionTexto = useMemo(() => {
+    const dir = datosRestaurante?.direccion;
+    if (!dir) return '';
+    const partes = [dir.calle, dir.ciudad, dir.region].filter(Boolean);
+    return partes.join(', ');
+  }, [datosRestaurante]);
 
   return (
     <div className="min-h-screen bg-fondo text-texto font-cuerpo flex flex-col overflow-x-hidden">
@@ -346,9 +328,9 @@ export function Carta({
             href="#portada"
             className="flex items-center gap-3 min-w-0 min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto rounded-xl"
           >
-            {config.url_logo && !logoFallido ? (
+            {datosRestaurante?.url_logo && !logoFallido ? (
               <img
-                src={config.url_logo}
+                src={datosRestaurante.url_logo}
                 alt={`Logo de ${nombreRestaurante}`}
                 loading="lazy"
                 onError={() => setLogoFallido(true)}
@@ -672,108 +654,101 @@ export function Carta({
             </h2>
           </div>
 
-          {errorConfig || !mostrarInfoRestaurante ? (
-            <p className="text-sm text-texto-suave">
-              No pudimos cargar el horario y el contacto. Intenta más tarde.
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {config.direccion && (
-                <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-2">
-                  <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-                    Dirección
-                  </h3>
-                  <p className="text-base text-texto font-cuerpo leading-relaxed">
-                    {config.direccion}
-                  </p>
-                </div>
-              )}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {direccionTexto && (
+              <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-2">
+                <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
+                  Dirección
+                </h3>
+                <p className="text-base text-texto font-cuerpo leading-relaxed">
+                  {direccionTexto}
+                </p>
+              </div>
+            )}
 
-              {config.telefono && (
-                <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-2">
-                  <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-                    Teléfono
-                  </h3>
-                  <p className="text-base text-texto font-cuerpo">
-                    <a
-                      href={`tel:${config.telefono.replace(/\s+/g, '')}`}
-                      className="min-h-11 inline-flex items-center hover:text-acento underline decoration-borde underline-offset-4 transition-colors"
-                    >
-                      {config.telefono}
-                    </a>
-                  </p>
-                </div>
-              )}
+            {datosRestaurante?.telefonoVisible && (
+              <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-2">
+                <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
+                  Teléfono
+                </h3>
+                <p className="text-base text-texto font-cuerpo">
+                  <a
+                    href={`tel:${datosRestaurante.telefono}`}
+                    className="min-h-11 inline-flex items-center hover:text-acento underline decoration-borde underline-offset-4 transition-colors"
+                  >
+                    {datosRestaurante.telefonoVisible}
+                  </a>
+                </p>
+              </div>
+            )}
 
-              {config.correo && (
-                <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-2">
-                  <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-                    Correo
-                  </h3>
-                  <p className="text-base text-texto font-cuerpo break-all">
-                    <a
-                      href={`mailto:${config.correo}`}
-                      className="min-h-11 inline-flex items-center hover:text-acento underline decoration-borde underline-offset-4 transition-colors"
-                    >
-                      {config.correo}
-                    </a>
-                  </p>
-                </div>
-              )}
+            {datosRestaurante?.whatsappVisible && (
+              <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-2">
+                <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
+                  WhatsApp
+                </h3>
+                <p className="text-base text-texto font-cuerpo">
+                  <a
+                    href={`https://wa.me/${datosRestaurante.whatsapp}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-h-11 inline-flex items-center hover:text-acento underline decoration-borde underline-offset-4 transition-colors"
+                  >
+                    {datosRestaurante.whatsappVisible}
+                  </a>
+                </p>
+              </div>
+            )}
 
-              {config.horario && config.horario.length > 0 && (
-                <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-3 md:col-span-2 lg:col-span-2">
-                  <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-                    Horario de atención
-                  </h3>
-                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                    {config.horario.map((item) => (
-                      <div
-                        key={item.dia}
-                        className="flex items-center justify-between py-1.5 border-b border-borde/60 last:border-b-0"
+            {datosRestaurante?.correo && (
+              <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-2">
+                <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
+                  Correo
+                </h3>
+                <p className="text-base text-texto font-cuerpo break-all">
+                  <a
+                    href={`mailto:${datosRestaurante.correo}`}
+                    className="min-h-11 inline-flex items-center hover:text-acento underline decoration-borde underline-offset-4 transition-colors"
+                  >
+                    {datosRestaurante.correo}
+                  </a>
+                </p>
+              </div>
+            )}
+
+            {datosRestaurante?.horarioVisible && (
+              <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-3 md:col-span-2 lg:col-span-2">
+                <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
+                  Horario de atención
+                </h3>
+                <p className="text-base text-texto font-cuerpo">
+                  {datosRestaurante.horarioVisible}
+                </p>
+              </div>
+            )}
+
+            {Array.isArray(datosRestaurante?.redes) && datosRestaurante.redes.length > 0 && (
+              <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-3">
+                <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
+                  Redes sociales
+                </h3>
+                <ul className="flex flex-wrap gap-2">
+                  {datosRestaurante.redes.map((red) => (
+                    <li key={red.url || red.nombre}>
+                      <a
+                        href={red.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-h-11 px-3.5 py-2 rounded-xl bg-superficie border border-borde hover:border-acento text-sm font-etiqueta uppercase tracking-wider font-bold text-texto inline-flex items-center gap-1.5 transition-colors"
                       >
-                        <dt className="font-semibold text-texto">{item.dia}</dt>
-                        <dd className="text-texto-suave font-etiqueta tracking-wide text-base">
-                          {item.texto}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                </div>
-              )}
-
-              {config.redes && config.redes.length > 0 && (
-                <div className="bg-superficie-2 rounded-2xl border border-borde p-5 space-y-3">
-                  <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-                    Redes sociales
-                  </h3>
-                  <ul className="flex flex-wrap gap-2">
-                    {config.redes.map((red) => (
-                      <li key={`${red.nombre}-${red.valor}`}>
-                        {red.url ? (
-                          <a
-                            href={red.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="min-h-11 px-3.5 py-2 rounded-xl bg-superficie border border-borde hover:border-acento text-sm font-etiqueta uppercase tracking-wider font-bold text-texto inline-flex items-center gap-1.5 transition-colors"
-                          >
-                            <span>{red.nombre}</span>
-                          </a>
-                        ) : (
-                          <span className="min-h-11 px-3.5 py-2 rounded-xl bg-superficie border border-borde text-sm font-cuerpo text-texto inline-flex items-center gap-1.5">
-                            <strong className="font-etiqueta uppercase tracking-wider text-acento">
-                              {red.nombre}:
-                            </strong>{' '}
-                            <span>{red.valor}</span>
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
+                        <span>{red.nombre}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </section>
 
         {/* f) Llamado final */}
@@ -804,11 +779,13 @@ export function Carta({
             <p className="font-titulo text-2xl tracking-wider uppercase text-texto">
               {nombreRestaurante}
             </p>
-            {!errorConfig && (config.direccion || config.telefono || config.correo) && (
+            {(direccionTexto || datosRestaurante?.telefonoVisible || datosRestaurante?.correo) && (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-texto-suave">
-                {config.direccion && <span>{config.direccion}</span>}
-                {config.telefono && <span>Tel: {config.telefono}</span>}
-                {config.correo && <span>{config.correo}</span>}
+                {direccionTexto && <span>{direccionTexto}</span>}
+                {datosRestaurante?.telefonoVisible && (
+                  <span>Tel: {datosRestaurante.telefonoVisible}</span>
+                )}
+                {datosRestaurante?.correo && <span>{datosRestaurante.correo}</span>}
               </div>
             )}
           </div>

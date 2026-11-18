@@ -1,5 +1,6 @@
-import { pedirJson } from './api.js';
+import { pedirJson, ErrorApi } from './api.js';
 import { urlImagen } from '../utils/imagenes.js';
+import cartaFija from '../datos/carta-fija.json';
 
 export function armableTieneStock(platoArmable) {
   if (!platoArmable) return false;
@@ -120,28 +121,94 @@ export function adaptarPlatoArmable(rawMenu, idPlato) {
   };
 }
 
-async function fetchMenuRaw(fetchFn = fetch) {
+export function obtenerMenuFijo() {
+  const armablesCrudos = adaptarPlatosArmables(cartaFija);
+  const categorias = adaptarCategorias(cartaFija);
+  const platos = adaptarPlatos(cartaFija).map((p) => ({
+    ...p,
+    disponible: true,
+  }));
+  const armables = armablesCrudos.map((p) => {
+    const adaptado = adaptarPlatoArmable(cartaFija, p.id_plato) || p;
+    return {
+      ...adaptado,
+      disponible: true,
+      disponible_plato: true,
+      pasos: Array.isArray(adaptado.pasos)
+        ? adaptado.pasos.map((paso) => ({
+            ...paso,
+            ingredientes: Array.isArray(paso.ingredientes)
+              ? paso.ingredientes.map((ing) => ({ ...ing, disponible: true }))
+              : [],
+          }))
+        : [],
+    };
+  });
+
+  return {
+    categorias,
+    platos,
+    armables,
+    origen: 'fija',
+  };
+}
+
+async function fetchMenuRaw(fetchFn = fetch, signal) {
   if (import.meta.env.DEV && import.meta.env.VITE_MODO_SIMULADO === 'true') {
     const modulo = await import('../mocks/menu-simulado.json');
     return modulo.default || modulo;
   }
-  return pedirJson('/menu', { fetchFn });
+  return pedirJson('/menu', { fetchFn, signal });
 }
 
-export async function obtenerMenuPublico(opcionesOFetchFn = fetch) {
-  const fetchFn = typeof opcionesOFetchFn === 'function'
-    ? opcionesOFetchFn
-    : (opcionesOFetchFn?.fetchFn || fetch);
+export async function obtenerMenuPublico(opcionesOFetchFn = {}) {
+  const opciones =
+    typeof opcionesOFetchFn === 'function'
+      ? { fetchFn: opcionesOFetchFn }
+      : opcionesOFetchFn || {};
 
-  const raw = await fetchMenuRaw(fetchFn);
-  const armablesCrudos = adaptarPlatosArmables(raw);
-  return {
-    categorias: adaptarCategorias(raw),
-    platos: adaptarPlatos(raw),
-    armables: armablesCrudos.map(
-      (p) => adaptarPlatoArmable(raw, p.id_plato) || p
-    ),
-  };
+  const fetchFn = opciones.fetchFn || fetch;
+  const timeoutMs = Number(opciones.timeoutMs) || 6000;
+
+  const controller =
+    typeof AbortController !== 'undefined' ? new AbortController() : null;
+  let timer = null;
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      try {
+        controller?.abort();
+      } catch {
+        // Ignorar
+      }
+      reject(
+        new ErrorApi({
+          status: 0,
+          motivo: 'timeout',
+          mensaje: 'Tiempo de espera agotado',
+        })
+      );
+    }, timeoutMs);
+  });
+
+  try {
+    const fetchPromise = fetchMenuRaw(fetchFn, controller?.signal);
+    const raw = await Promise.race([fetchPromise, timeoutPromise]);
+    if (timer) clearTimeout(timer);
+
+    const armablesCrudos = adaptarPlatosArmables(raw);
+    return {
+      categorias: adaptarCategorias(raw),
+      platos: adaptarPlatos(raw),
+      armables: armablesCrudos.map(
+        (p) => adaptarPlatoArmable(raw, p.id_plato) || p
+      ),
+      origen: 'vivo',
+    };
+  } catch {
+    if (timer) clearTimeout(timer);
+    return obtenerMenuFijo();
+  }
 }
 
 export default {
@@ -152,5 +219,6 @@ export default {
   adaptarPlatos,
   adaptarPlatosArmables,
   adaptarPlatoArmable,
+  obtenerMenuFijo,
   obtenerMenuPublico,
 };

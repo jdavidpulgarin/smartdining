@@ -4,10 +4,7 @@ import React from 'react';
 import { Carta } from './Carta.jsx';
 import { obtenerMenuPublico } from './services/menuService.js';
 import * as apiModule from './services/api.js';
-import {
-  obtenerConfiguracionPublica,
-  recargarConfiguracion,
-} from './services/configuracionService.js';
+import restaurante from './datos/restaurante.js';
 
 describe('Carta (sitio público)', () => {
   const rawMenuBackend = {
@@ -82,27 +79,10 @@ describe('Carta (sitio público)', () => {
     ],
   };
 
-  const rawConfigBackend = {
-    nombre: 'SmartDining Steakhouse',
-    direccion: 'Carrera 43A #1-50, Medellín',
-    telefono: '+57 300 123 4567',
-    correo: 'info@smartdining.com',
-    horario: {
-      lunes: { abre: '12:00', cierra: '22:00' },
-    },
-    redes: {
-      instagram: 'https://instagram.com/smartdining',
-    },
-  };
-
   beforeEach(() => {
     vi.restoreAllMocks();
-    recargarConfiguracion();
 
     vi.spyOn(apiModule, 'pedirJson').mockImplementation(async (ruta) => {
-      if (ruta.includes('configuracion')) {
-        return rawConfigBackend;
-      }
       if (ruta.includes('menu')) {
         return rawMenuBackend;
       }
@@ -112,10 +92,9 @@ describe('Carta (sitio público)', () => {
 
   it('renderToStaticMarkup renderiza categorías, platos con precios y aviso de agotado', async () => {
     const menu = await obtenerMenuPublico();
-    const config = await obtenerConfiguracionPublica({ forzar: true });
 
     const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} configuracionInicial={config} />
+      <Carta menuInicial={menu} />
     );
 
     // Renderiza categorías adaptadas desde la respuesta cruda del backend
@@ -136,10 +115,9 @@ describe('Carta (sitio público)', () => {
 
   it('renderiza pasos e ingredientes de "Arma tu plato"', async () => {
     const menu = await obtenerMenuPublico();
-    const config = await obtenerConfiguracionPublica({ forzar: true });
 
     const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} configuracionInicial={config} />
+      <Carta menuInicial={menu} />
     );
 
     expect(html).toContain('Bowl Parrillero');
@@ -154,30 +132,29 @@ describe('Carta (sitio público)', () => {
     expect(html).toContain('Obligatorio · Elige 1');
   });
 
-  it('renderiza la información del restaurante y enlaces seguros de redes', async () => {
+  it('renderiza la información fija del restaurante y enlaces seguros de redes', async () => {
     const menu = await obtenerMenuPublico();
-    const config = await obtenerConfiguracionPublica({ forzar: true });
 
     const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} configuracionInicial={config} />
+      <Carta menuInicial={menu} />
     );
 
-    expect(html).toContain('SmartDining Steakhouse');
-    expect(html).toContain('Carrera 43A #1-50, Medellín');
-    expect(html).toContain('+57 300 123 4567');
-    expect(html).toContain('tel:+573001234567');
-    expect(html).toContain('info@smartdining.com');
-    expect(html).toContain('mailto:info@smartdining.com');
+    expect(html).toContain(restaurante.nombre);
+    expect(html).toContain('Carrera 9 # 16-45, Centro');
+    expect(html).toContain(restaurante.telefonoVisible);
+    expect(html).toContain(`tel:${restaurante.telefono}`);
+    expect(html).toContain(restaurante.correo);
+    expect(html).toContain(`mailto:${restaurante.correo}`);
+    expect(html).toContain(restaurante.horarioVisible);
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
   });
 
   it('NO contiene botones de añadir al carrito ni de enviar pedidos a cocina', async () => {
     const menu = await obtenerMenuPublico();
-    const config = await obtenerConfiguracionPublica({ forzar: true });
 
     const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} configuracionInicial={config} />
+      <Carta menuInicial={menu} />
     );
 
     // No debe haber acciones de carrito o pedido interactivo en mesa
@@ -188,29 +165,22 @@ describe('Carta (sitio público)', () => {
     expect(html).not.toMatch(/Aumentar cantidad/i);
   });
 
-  it('Carta renderizada después de que la configuración falló no contiene "El Poblado" ni "+57 604" y muestra mensaje de error de contacto', async () => {
-    vi.spyOn(apiModule, 'pedirJson').mockImplementation(async (ruta) => {
-      if (ruta.includes('configuracion')) {
-        throw new apiModule.ErrorApi({ status: 500, mensaje: 'Error interno' });
-      }
-      if (ruta.includes('menu')) {
-        return rawMenuBackend;
-      }
-      return null;
+  it('si la API falla, la Carta muestra el respaldo de la carta fija y la información del local', async () => {
+    vi.spyOn(apiModule, 'pedirJson').mockImplementation(async () => {
+      throw new apiModule.ErrorApi({ status: 500, mensaje: 'Error del servidor' });
     });
 
-    // La llamada real al servicio falla
-    await expect(obtenerConfiguracionPublica({ forzar: true })).rejects.toThrow();
-
     const menu = await obtenerMenuPublico();
+    expect(menu.origen).toBe('fija');
 
-    // Carta montada con configuración fallida
     const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} configuracionInicial={null} errorConfiguracion={true} />
+      <Carta menuInicial={menu} />
     );
 
-    expect(html).not.toContain('El Poblado');
-    expect(html).not.toContain('+57 604');
-    expect(html).toContain('No pudimos cargar el horario y el contacto. Intenta más tarde.');
+    // Muestra platos de la carta fija sin romperse
+    expect(html).toContain('Carta');
+    expect(html).toContain(restaurante.nombre);
+    expect(html).toContain('Carrera 9 # 16-45, Centro');
+    expect(html).not.toContain('No pudimos cargar la carta');
   });
 });
