@@ -54,6 +54,9 @@ export default defineConfig({
     react(),
     pluginSeo(),
   ],
+  test: {
+    fileParallelism: false,
+  },
   server: {
     port: 5176,
     strictPort: true,

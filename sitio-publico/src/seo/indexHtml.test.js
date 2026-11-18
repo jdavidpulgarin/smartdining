@@ -31,6 +31,14 @@ describe('index.html SEO y metadatos', () => {
     expect(html).toMatch(/<meta[^>]*property=["']og:locale["'][^>]*content=["']es_CO["']/);
   });
 
+  it('tiene favicon.ico, apple-touch-icon, og:image:width y el preload del póster; ya no enlaza favicon.svg', () => {
+    expect(html).toContain('href="/favicon.ico"');
+    expect(html).toContain('href="/apple-touch-icon.png"');
+    expect(html).toContain('property="og:image:width"');
+    expect(html).toContain('href="/videos/portada-poster.webp"');
+    expect(html).not.toMatch(/<link[^>]*href=["'][^"']*favicon\.svg["']/);
+  });
+
   it('tiene Schema.org Restaurant JSON-LD', () => {
     expect(html).toMatch(/<script[^>]*type=["']application\/ld\+json["']/);
     expect(html).toContain('"@type": "Restaurant"');
