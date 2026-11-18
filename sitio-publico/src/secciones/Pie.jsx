@@ -1,6 +1,6 @@
 /**
  * Pie de página institucional del sitio público.
- * Video de portada: Mixkit (licencia gratuita de Mixkit)
+ * Video de portada: generado con IA (Gemini)
  */
 function Pie({ datosRestaurante = {}, secciones = [] }) {
   const nombre = datosRestaurante.nombre || 'SmartDining';

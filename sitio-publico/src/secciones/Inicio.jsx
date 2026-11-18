@@ -76,19 +76,25 @@ function Inicio({ datosRestaurante = {} }) {
         className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/80 to-fondo/45"
       />
 
-      {/* Control WCAG 2.2.2 para pausar/reanudar movimiento de video */}
+      {/* Control WCAG 2.2.2 para pausar/reanudar movimiento de video y etiqueta de IA */}
       {videoSrc && (
-        <button
-          type="button"
-          onClick={alternarReproduccion}
-          aria-pressed={!reproduciendo}
-          aria-label={
-            reproduciendo ? 'Pausar video de portada' : 'Reproducir video de portada'
-          }
-          className="absolute bottom-4 right-4 z-20 px-3.5 py-1.5 rounded-xl bg-superficie/80 hover:bg-superficie text-texto text-xs font-etiqueta font-bold uppercase tracking-wider border border-borde backdrop-blur-sm cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
-        >
-          {reproduciendo ? 'Pausar video' : 'Reproducir video'}
-        </button>
+        <div className="absolute bottom-4 right-4 z-20 flex flex-wrap items-center justify-end gap-2">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/75 backdrop-blur-md text-[10px] sm:text-[11px] font-etiqueta font-semibold tracking-wider text-texto border border-white/10 uppercase">
+            <span className="w-1.5 h-1.5 rounded-full bg-acento animate-pulse shrink-0" />
+            <span>Video generado con IA</span>
+          </span>
+          <button
+            type="button"
+            onClick={alternarReproduccion}
+            aria-pressed={!reproduciendo}
+            aria-label={
+              reproduciendo ? 'Pausar video de portada' : 'Reproducir video de portada'
+            }
+            className="px-3.5 py-1.5 rounded-xl bg-superficie/80 hover:bg-superficie text-texto text-xs font-etiqueta font-bold uppercase tracking-wider border border-borde backdrop-blur-sm cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+          >
+            {reproduciendo ? 'Pausar video' : 'Reproducir video'}
+          </button>
+        </div>
       )}
 
       {/* Contenido centrado de la portada */}
