@@ -70,11 +70,62 @@ test('si no se sabe de quién es el pedido, el push de listo no le llega a nadie
   assert.strictEqual(push.enviados.length, 0);
 });
 
-test('otros estados (en preparación) siguen avisando a toda la mesa', async (t) => {
-  const { s, push } = await escenario(t);
-  await interno(s, '/internal/order-status', listo({ estado: 'en_preparacion' }));
+test('"Tu pedido fue cancelado" llega SOLO al dueño: otro comensal de la mesa no lo recibe', async (t) => {
+  const { s, push, ana, beto } = await escenario(t);
+  await emitir(ana, 'cart:update', linea('Ana'));
+  await emitir(beto, 'cart:update', linea('Beto'));
+  await interno(s, '/internal/order-created', {
+    eventId: randomUUID(), pedido: { id_pedido: 87, id_mesa: 5, estado: 'recibido', items: [{ id_plato: 3, comensal: 'Ana' }] },
+  });
+  await interno(s, '/internal/order-status', listo({ estado: 'cancelado' }));
   await pausa();
-  assert.strictEqual(push.enviados.length, 2);
+  assert.deepStrictEqual(push.enviados.map((e) => e.endpoint), [sub(1).endpoint]);
+  assert.strictEqual(push.enviados[0].payload.titulo, 'Tu pedido fue cancelado');
+});
+
+test('cancelado de un pedido sin dueño conocido: nadie (mismo mecanismo que listo)', async (t) => {
+  const { s, push } = await escenario(t);
+  await interno(s, '/internal/order-status', listo({ id_pedido: 999, estado: 'cancelado' }));
+  await pausa();
+  assert.strictEqual(push.enviados.length, 0);
+});
+
+test('en preparación (y recibido, entregado) no mandan push a nadie, ni al dueño', async (t) => {
+  const { s, push } = await escenario(t);
+  await interno(s, '/internal/order-created', {
+    eventId: randomUUID(), pedido: { id_pedido: 87, id_mesa: 5, estado: 'recibido', items: [{ id_plato: 3, comensal: 'Ana' }] },
+  });
+  for (const estado of ['recibido', 'en_preparacion', 'entregado']) {
+    await interno(s, '/internal/order-status', listo({ estado }));
+  }
+  await pausa();
+  assert.strictEqual(push.enviados.length, 0);
+});
+
+const pagoCaja = (extra = {}) => ({
+  eventId: randomUUID(), id_mesa: 5, monto_centavos: 2500000, saldo_restante_centavos: 0, ...extra,
+});
+
+test('pago confirmado: push solo a quien pagó (alias comparado sin tildes ni mayúsculas), sin montos', async (t) => {
+  const { s, push } = await escenario(t);
+  assert.strictEqual((await interno(s, '/internal/payment-confirmed', pagoCaja({ comensal: ' beto ' }))).status, 200);
+  await pausa();
+  assert.deepStrictEqual(push.enviados.map((e) => e.endpoint), [sub(2).endpoint]);
+  const { payload } = push.enviados[0];
+  assert.strictEqual(payload.titulo, 'Tu pago está confirmado');
+  assert.strictEqual(payload.url, '/pago');
+  assert.ok(!('estado' in payload), 'sin estado: el service worker usa titulo y cuerpo');
+  assert.ok(!/25000|Beto|beto/.test(JSON.stringify(payload)), 'sin monto ni nombre');
+});
+
+test('pago confirmado sin alias (la caja cobró la mesa entera) o duplicado: no manda push', async (t) => {
+  const { s, push } = await escenario(t);
+  await interno(s, '/internal/payment-confirmed', pagoCaja({ comensal: null }));
+  const repetido = pagoCaja({ comensal: 'Ana' });
+  await interno(s, '/internal/payment-confirmed', repetido);
+  await interno(s, '/internal/payment-confirmed', repetido);
+  await pausa();
+  assert.deepStrictEqual(push.enviados.map((e) => e.endpoint), [sub(1).endpoint], 'solo el de Ana, una vez');
 });
 
 test('payload mínimo: sin nombres, montos ni mesa; abre /seguimiento', async (t) => {

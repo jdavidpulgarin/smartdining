@@ -14,6 +14,26 @@ const {
   calcularMonto, validarCuenta, MODOS, MODO_RETIRADO,
 } = require('./cuenta');
 const { ttlIntencionRegistroSeg } = require('./pasarelas/wompi');
+const { notificarPagoConfirmado } = require('./suscripciones');
+
+/**
+ * Push del pago confirmado a quien pagó. UNA vez por pago: `clave` es la
+ * referencia de la intención (Wompi) o el eventId (caja), y se reserva en
+ * registroPagos antes de enviar. Así, si Wompi reintenta el webhook después
+ * de que el push ya salió (p. ej. falló algo posterior y se liberó la marca
+ * del evento), no se manda otra vez. No espera ni lanza nunca: un fallo del
+ * push (o de la reserva) no frena ni deshace el pago, que ya está guardado.
+ */
+function avisarPagoPorPush(ctx, { idMesa, comensal, clave }) {
+  try {
+    (async () => {
+      if (clave && ctx.registroPagos && !(await ctx.registroPagos.reservar(`push:pago:${clave}`))) return;
+      await notificarPagoConfirmado(ctx, { id_mesa: idMesa, comensal });
+    })().catch((err) => log.error('push: fallo al notificar el pago', { id_mesa: idMesa, error: err }));
+  } catch (err) {
+    log.error('push: fallo al notificar el pago', { id_mesa: idMesa, error: err });
+  }
+}
 
 // 5 intenciones por minuto por comensal: de sobra para reintentar un pago
 // fallido y corta a quien intenta martillar al backend o a la pasarela.
@@ -547,6 +567,12 @@ async function recibirEventoPasarela(req, res, ctx) {
       excedente: registro.excedente,
       soloAdmin: registro.motivoExcedente === 'otra_visita',
     });
+    // Push a quien pagó: solo aquí, con la intención ya en "pagada" (los
+    // caminos de en_revision salen antes). Un pago de un grupo que ya se fue
+    // tampoco se avisa por push.
+    if (registro.motivoExcedente !== 'otra_visita') {
+      avisarPagoPorPush(ctx, { idMesa: intencion.id_mesa, comensal: intencion.comensal, clave: evento.referencia });
+    }
     if (registro.excedente > 0) {
       emitirPagoExcedente(ctx.io, {
         tx, intencion, referencia: evento.referencia, registro,
@@ -636,6 +662,7 @@ async function difundirPagoConfirmado(ctx, p) {
     saldoCentavos: p.saldo_restante_centavos,
     referencia: p.referencia_externa,
   });
+  avisarPagoPorPush(ctx, { idMesa: p.id_mesa, comensal: p.comensal, clave: `caja:${p.eventId}` });
   if (anotado) ctx.presencia.programar(p.id_mesa);
   return exito({ eventId: p.eventId, duplicado: false });
 }
@@ -654,5 +681,5 @@ const rutasPagos = {
 };
 
 module.exports = {
-  rutasPagos, generarReferencia, compararTransaccion, emitirPagoConfirmado, difundirPagoConfirmado, LIMITE_INTENCIONES,
+  rutasPagos, generarReferencia, compararTransaccion, emitirPagoConfirmado, difundirPagoConfirmado, avisarPagoPorPush, LIMITE_INTENCIONES,
 };
