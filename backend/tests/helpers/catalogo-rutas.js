@@ -90,6 +90,20 @@ const TABLA = [
     acceso: INTERNA,
     cuerpo: {},
   },
+  // D-20b: el cobro y el pago anticipado de los pedidos de la app (socket-server).
+  {
+    metodo: 'GET',
+    patron: '/api/pedidos-domicilio/:id/cobro/interno',
+    url: '/api/pedidos-domicilio/87/cobro/interno?id_cliente=5',
+    acceso: INTERNA,
+  },
+  {
+    metodo: 'POST',
+    patron: '/api/pedidos-domicilio/:id/pago/interno',
+    url: '/api/pedidos-domicilio/87/pago/interno',
+    acceso: INTERNA,
+    cuerpo: {},
+  },
 
   // --- Autenticación --------------------------------------------------------
   {

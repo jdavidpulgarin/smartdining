@@ -11,6 +11,7 @@ const { servirImagenesLocales } = require('./src/middleware/imagenes-estaticas')
 const pool = require('./src/config/db');
 const { redisClient } = require('./src/config/redis');
 const inventarioAvisos = require('./src/services/inventario-avisos');
+const vencimientoPorPagar = require('./src/services/vencimiento-por-pagar');
 
 const app = express();
 
@@ -131,10 +132,14 @@ function apagadoOrdenado(servidor, { log = console.log, salir = process.exit } =
       // cancela cualquier reconexion pendiente.
       await inventarioAvisos.detener();
 
+      // D-20b: el vencimiento de los pedidos en por_pagar usa el pool: se
+      // detiene (y se espera su pasada en curso) ANTES de cerrarlo.
+      await vencimientoPorPagar.tarea.detener();
+
       await pool.end();
 
       clearTimeout(rendirse);
-      log('Cerrado: servidor HTTP, Redis, canal de inventario y pool de PostgreSQL.');
+      log('Cerrado: servidor HTTP, Redis, canal de inventario, vencimiento por_pagar y pool de PostgreSQL.');
       salir(0);
     } catch (err) {
       clearTimeout(rendirse);
@@ -163,6 +168,10 @@ if (require.main === module) {
   // Sin await a proposito: el backend ya esta sirviendo peticiones. Si el canal
   // no se puede abrir, el oyente reintenta solo y nada mas se entera.
   inventarioAvisos.iniciar();
+
+  // D-20b: cada minuto, cancelar_por_pagar_vencidos(). Aquí y no al cargar el
+  // módulo, por lo mismo que el oyente de arriba: las pruebas no lo arrancan.
+  vencimientoPorPagar.tarea.iniciar();
 
   const alApagar = apagadoOrdenado(servidor);
   process.on('SIGTERM', () => alApagar('SIGTERM'));

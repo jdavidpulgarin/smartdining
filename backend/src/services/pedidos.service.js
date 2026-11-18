@@ -113,10 +113,49 @@ async function detallesDePedidos(idsPedido, ejecutor = pool) {
  * El pedido pertenece a la mesa: id_usuario solo alimenta la auditoría de
  * historial_estados y va null cuando lo crea un comensal.
  */
-async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_generales = null }) {
+async function crearConDetalles({
+  id_mesa, id_usuario = null, items, notas_generales = null,
+  // D-20b: un pedido de la app (para llevar o a domicilio), sin mesa, del
+  // cliente y en 'por_pagar'. `domicilio` es la fila de pedidos_domicilio ya
+  // armada (copia de la dirección, zona y costo), o null en para_llevar. Sin
+  // `anticipado`, el pedido de mesa de siempre, con EXACTAMENTE el mismo SQL.
+  anticipado = null,
+}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // D-20b (ajuste de Juan): UN solo pedido en 'por_pagar' por cliente. La
+    // fila del cliente se bloquea PRIMERO (orden: clientes -> pedidos ->
+    // pedidos_domicilio -> detalles_pedido): dos pedidos a la vez del mismo
+    // cliente se ponen en fila aquí, y el segundo ve el del primero. Si ya tiene
+    // uno sin vencer, no se crea otro (lo responde quien llama: 409
+    // pedido_pendiente con ese pedido; también cubre el reintento de la app
+    // cuando se pierde la respuesta). Uno vencido que el temporizador todavía no
+    // canceló no cuenta: se cancela aquí mismo con cancelar_pedido_por_pagar
+    // (lo bloquea, misma guarda que el pago; el stock vuelve).
+    if (anticipado) {
+      await client.query('SELECT id_cliente FROM clientes WHERE id_cliente = $1::int FOR UPDATE', [anticipado.id_cliente]);
+      const pendientes = await client.query(
+        `SELECT id_pedido,
+                (now() >= creado_en + make_interval(mins => fn_minutos_pago_anticipado())) AS vencido
+           FROM pedidos
+          WHERE id_cliente = $1::int AND estado = 'por_pagar'
+          ORDER BY id_pedido`,
+        [anticipado.id_cliente]
+      );
+      const vigente = pendientes.rows.find((r) => !r.vencido);
+      if (vigente) {
+        await client.query('ROLLBACK');
+        return { pendiente: vigente.id_pedido };
+      }
+      for (const vencido of pendientes.rows) {
+        await client.query('SELECT cancelar_pedido_por_pagar($1::int, $2::varchar)', [
+          vencido.id_pedido,
+          'Pago anticipado no aprobado a tiempo',
+        ]);
+      }
+    }
 
     // codigo_pedido es único: si choca con uno existente se reintenta con otro
     // sin abortar la transacción completa.
@@ -124,11 +163,17 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     for (let intento = 0; intento < MAX_INTENTOS_CODIGO && !pedido; intento++) {
       await client.query('SAVEPOINT intento_codigo');
       try {
-        const pedidoResult = await client.query(
-          `INSERT INTO pedidos (id_mesa, codigo_pedido, notas_generales)
-           VALUES ($1, $2, $3) RETURNING *`,
-          [id_mesa, generarCodigoPedido(), notas_generales]
-        );
+        const pedidoResult = anticipado
+          ? await client.query(
+            `INSERT INTO pedidos (id_mesa, codigo_pedido, notas_generales, canal, id_cliente, estado)
+             VALUES (NULL, $1::text, $2::text, $3::text, $4::int, 'por_pagar') RETURNING *`,
+            [generarCodigoPedido(), notas_generales, anticipado.canal, anticipado.id_cliente]
+          )
+          : await client.query(
+            `INSERT INTO pedidos (id_mesa, codigo_pedido, notas_generales)
+             VALUES ($1, $2, $3) RETURNING *`,
+            [id_mesa, generarCodigoPedido(), notas_generales]
+          );
         pedido = pedidoResult.rows[0];
       } catch (err) {
         if (err.code !== '23505') throw err;
@@ -137,6 +182,22 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
     }
     if (!pedido) {
       throw { status: 500, message: 'No se pudo generar un codigo_pedido único' };
+    }
+
+    // D-20b: la entrega va DESPUÉS del pedido y ANTES de las líneas, el orden de
+    // bloqueos de todos los caminos (pedidos -> pedidos_domicilio ->
+    // detalles_pedido). El costo de envío entra al total por tr_total_por_envio.
+    if (anticipado && anticipado.domicilio) {
+      const d = anticipado.domicilio;
+      await client.query(
+        `INSERT INTO pedidos_domicilio
+           (id_pedido, id_direccion, direccion_texto, barrio, referencia, lat, lng,
+            telefono_contacto, id_zona, costo_envio)
+         VALUES ($1::int, $2::int, $3::text, $4::text, $5::text, $6::numeric, $7::numeric,
+                 $8::text, $9::int, $10::numeric)`,
+        [pedido.id_pedido, d.id_direccion, d.direccion, d.barrio, d.referencia, d.lat, d.lng,
+          d.telefono_contacto, d.id_zona, d.costo_envio]
+      );
     }
 
     for (const item of items) {
@@ -177,12 +238,21 @@ async function crearConDetalles({ id_mesa, id_usuario = null, items, notas_gener
       await client.query('SELECT validar_selecciones_detalle($1)', [idDetalle]);
     }
 
-    await client.query(
-      `INSERT INTO historial_estados
-        (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones)
-       VALUES ($1, $2, NULL, 'recibido', 'Pedido creado')`,
-      [pedido.id_pedido, id_usuario]
-    );
+    if (anticipado) {
+      await client.query(
+        `INSERT INTO historial_estados
+          (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones)
+         VALUES ($1::int, NULL, NULL, 'por_pagar', 'Pedido creado desde la app')`,
+        [pedido.id_pedido]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO historial_estados
+          (id_pedido, id_usuario, estado_anterior, estado_nuevo, observaciones)
+         VALUES ($1, $2, NULL, 'recibido', 'Pedido creado')`,
+        [pedido.id_pedido, id_usuario]
+      );
+    }
 
     // El total y los subtotales los dejaron los triggers: se releen, no se calculan.
     const conTotal = await client.query('SELECT * FROM pedidos WHERE id_pedido = $1', [
