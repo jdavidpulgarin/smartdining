@@ -7,7 +7,7 @@ function Pie({ datosRestaurante = {}, secciones = [] }) {
   const anioActual = new Date().getFullYear();
 
   return (
-    <footer className="border-t border-borde bg-superficie py-12 px-4 sm:px-6">
+    <footer className="border-t border-borde bg-superficie pt-12 pb-28 md:pb-12 px-4 sm:px-6">
       <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="text-center md:text-left space-y-1.5">
           <p className="font-titulo text-2xl tracking-wider uppercase text-texto">
