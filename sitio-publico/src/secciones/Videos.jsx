@@ -39,8 +39,8 @@ function Videos({ datosRestaurante = {} }) {
                 playsInline
                 preload="none"
                 poster={vid.poster}
-                width={640}
-                height={360}
+                width={1280}
+                height={720}
                 className="w-full h-full object-cover"
               >
                 <source src={vid.archivo} type="video/mp4" />
@@ -48,7 +48,7 @@ function Videos({ datosRestaurante = {} }) {
               </video>
             </div>
 
-            <div className="p-5 space-y-2 flex-1 flex flex-col justify-between">
+            <div className="p-5 space-y-3 flex-1 flex flex-col justify-between">
               <div className="space-y-1">
                 <h3 className="font-titulo text-2xl uppercase tracking-wide text-texto">
                   {vid.titulo}
@@ -60,10 +60,19 @@ function Videos({ datosRestaurante = {} }) {
                 )}
               </div>
 
-              {vid.ia && (
-                <p className="text-xs text-texto-tenue font-cuerpo italic pt-2 border-t border-borde/40">
-                  Video generado con IA
-                </p>
+              {(vid.ia || vid.credito) && (
+                <div className="pt-2 border-t border-borde/40 space-y-0.5">
+                  {vid.ia && (
+                    <p className="text-xs text-texto-tenue font-cuerpo italic">
+                      Video generado con IA
+                    </p>
+                  )}
+                  {vid.credito && (
+                    <p className="text-[11px] text-texto-tenue font-cuerpo">
+                      {vid.credito}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           </article>

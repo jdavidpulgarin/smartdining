@@ -115,6 +115,7 @@ describe('App y Sitio Público Completo', () => {
       'inicio',
       'nosotros',
       'carta',
+      'videos',
       'como-pedir',
       'proximamente',
       'contacto',
@@ -161,46 +162,45 @@ describe('App y Sitio Público Completo', () => {
     expect(elegirFuentePortada({ anchoPantalla: 1280, prefs: {} })).toBe('/videos/portada.mp4');
   });
 
-  it('sin videos de platos no hay #videos ni su enlace; con un video muestra muted, playsinline, preload="none", poster y controls sin autoplay; con ia: true aparece "Video generado con IA"', async () => {
+  it('App con los videos reales: aparece #videos y su enlace en el nav, 2 <video> con muted, playsinline, preload="none", controls, poster y sin autoplay; aparecen 2 veces "Video generado con IA" y una vez "Imagen base: Freepik"', async () => {
     const menu = await obtenerMenuPublico();
+    const html = renderToStaticMarkup(<App menuInicial={menu} datosRestaurante={restaurante} />);
 
-    // 1. Sin videos en restaurante
+    // Aparece la sección #videos y el enlace en el nav
+    expect(html).toContain('id="videos"');
+    expect(html).toContain('href="#videos"');
+
+    // 2 videos de platos
+    const videoTags = html.match(/<video[^>]*>/g) || [];
+    expect(videoTags).toHaveLength(2);
+
+    for (const tag of videoTags) {
+      expect(tag).toContain('controls');
+      expect(tag).toContain('muted');
+      expect(tag).toMatch(/playsinline/i);
+      expect(tag).toContain('preload="none"');
+      expect(tag).toContain('poster=');
+      expect(tag).toContain('width="1280"');
+      expect(tag).toContain('height="720"');
+      expect(tag).not.toContain('autoplay');
+    }
+
+    // 2 veces "Video generado con IA"
+    const matchesIA = html.match(/Video generado con IA/g) || [];
+    expect(matchesIA).toHaveLength(2);
+
+    // 1 vez "Imagen base: Freepik"
+    const matchesFreepik = html.match(/Imagen base: Freepik/g) || [];
+    expect(matchesFreepik).toHaveLength(1);
+  });
+
+  it('sin videos de platos no hay #videos ni su enlace en el nav', async () => {
+    const menu = await obtenerMenuPublico();
     const htmlSinVideos = renderToStaticMarkup(
       <App menuInicial={menu} datosRestaurante={{ ...restaurante, videos: [] }} />
     );
     expect(htmlSinVideos).not.toContain('id="videos"');
     expect(htmlSinVideos).not.toContain('href="#videos"');
-
-    // 2. Con un video con IA
-    const datosConVideo = {
-      ...restaurante,
-      videos: [
-        {
-          archivo: '/videos/plato-demo.mp4',
-          titulo: 'Picaña Flambeada',
-          poster: '/videos/poster-picanha.jpg',
-          descripcion: 'Demostración de corte artesanal',
-          ia: true,
-        },
-      ],
-    };
-
-    const htmlConVideo = renderToStaticMarkup(
-      <App menuInicial={menu} datosRestaurante={datosConVideo} />
-    );
-
-    expect(htmlConVideo).toContain('id="videos"');
-    expect(htmlConVideo).toContain('href="#videos"');
-    expect(htmlConVideo).toContain('Picaña Flambeada');
-    expect(htmlConVideo).toContain('Video generado con IA');
-
-    // Atributos requeridos del video
-    expect(htmlConVideo).toMatch(/<video[^>]*controls/);
-    expect(htmlConVideo).toMatch(/<video[^>]*muted/);
-    expect(htmlConVideo).toMatch(/<video[^>]*playsinline/i);
-    expect(htmlConVideo).toMatch(/<video[^>]*preload="none"/);
-    expect(htmlConVideo).toMatch(/<video[^>]*poster="\/videos\/poster-picanha\.jpg"/);
-    expect(htmlConVideo).not.toMatch(/<video[^>]*autoplay/);
   });
 
   it('el iframe tiene title y loading="lazy"; WhatsApp usa https://wa.me/573046654848; las redes tienen rel="noopener noreferrer"', async () => {

@@ -65,7 +65,16 @@ describe('restaurante.js - datos informativos', () => {
     }
   });
 
-  it('valida que videos sea un array', () => {
+  it('valida que videos sea un array y cada elemento tenga estructura completa, incluyendo ia (boolean) y credito (string)', () => {
     expect(Array.isArray(restaurante.videos)).toBe(true);
+    expect(restaurante.videos.length).toBeGreaterThan(0);
+    for (const vid of restaurante.videos) {
+      expect(typeof vid.archivo).toBe('string');
+      expect(typeof vid.poster).toBe('string');
+      expect(typeof vid.titulo).toBe('string');
+      expect(typeof vid.descripcion).toBe('string');
+      expect(typeof vid.ia).toBe('boolean');
+      expect(typeof vid.credito).toBe('string');
+    }
   });
 });
