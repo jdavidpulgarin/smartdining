@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Modal from '../ui/Modal.jsx';
 import Button from '../ui/Button.jsx';
-import Imagen from '../ui/Imagen.jsx';
 import { formatearPrecio } from '../../utils/formato.js';
-import { ETIQUETAS_MAP, ALERGENOS_MAP } from '../../constants/dieta.js';
+import { ALERGENOS_MAP } from '../../constants/dieta.js';
 import {
   describirReglaPaso,
   leerPreferenciasVideoNavegador,
@@ -40,8 +39,23 @@ export function calcularCaloriasArmable(pasos = []) {
   return hayObligatoriosConCalorias ? sumaMinima : null;
 }
 
-function PlatoDetalleModal({ plato, abierto, onCerrar }) {
+/**
+ * Modal de detalle de plato al estilo póster de restaurante.
+ * Papel crema (bg-papel, texto tinta), foto/video a la izquierda y texto a la derecha,
+ * precio en primario, descripción, chips punteados de ingredientes y chips rojos de alérgenos.
+ */
+function PlatoDetalleModal({
+  plato,
+  abierto,
+  onCerrar,
+  errorImagenInicial = false,
+}) {
   const [desactivarVideo, setDesactivarVideo] = useState(false);
+  const [errorImagen, setErrorImagen] = useState(errorImagenInicial);
+
+  useEffect(() => {
+    setErrorImagen(errorImagenInicial);
+  }, [plato?.id, plato?.id_plato, plato?.imagen, plato?.url_imagen, errorImagenInicial]);
 
   const esArmable = Boolean(
     plato?.personalizable === true ||
@@ -72,11 +86,48 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
     return null;
   }, [plato, esArmable]);
 
+  const pasos = useMemo(
+    () => (Array.isArray(plato?.pasos) ? plato.pasos : []),
+    [plato]
+  );
+
+  // Extraer ingredientes (de plato.ingredientes o de los pasos si es armable)
+  const listaIngredientes = useMemo(() => {
+    if (!plato) return [];
+    if (Array.isArray(plato?.ingredientes) && plato.ingredientes.length > 0) {
+      return plato.ingredientes.map((i) => (typeof i === 'string' ? i : i.nombre));
+    }
+    if (pasos.length > 0) {
+      return pasos.flatMap((p) =>
+        (p.ingredientes || []).map((i) => i.nombre)
+      );
+    }
+    return [];
+  }, [plato, pasos]);
+
+  // Extraer alérgenos declarados
+  const listaAlergenos = useMemo(() => {
+    if (!plato) return [];
+    if (Array.isArray(plato?.alergenos) && plato.alergenos.length > 0) {
+      return plato.alergenos;
+    }
+    // Si los pasos traen alérgenos en sus ingredientes
+    if (pasos.length > 0) {
+      const alergs = new Set();
+      pasos.forEach((p) => {
+        (p.ingredientes || []).forEach((i) => {
+          (i.alergenos || []).forEach((a) => alergs.add(a));
+        });
+      });
+      return Array.from(alergs);
+    }
+    return [];
+  }, [plato, pasos]);
+
   if (!plato) {
     return null;
   }
 
-  const pasos = Array.isArray(plato.pasos) ? plato.pasos : [];
   const imagenUrl = plato.imagen || plato.url_imagen;
 
   return (
@@ -85,13 +136,16 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
       onCerrar={onCerrar}
       titulo={plato.nombre}
       tamano="grande"
+      tema="papel"
+      mostrarCabecera={false}
+      className="bg-papel text-tinta"
     >
-      <div className="flex-1 flex flex-col justify-between">
-        <div className="p-4 sm:p-6 lg:p-8 space-y-8">
-          {/* Cabecera en 2 columnas: Columna izquierda: foto/video 4:3; Columna derecha: información */}
+      <div className="flex-1 flex flex-col justify-between bg-papel text-tinta">
+        <div className="p-5 sm:p-7 lg:p-8 space-y-6">
+          {/* Estructura en 2 columnas: Foto/Video a la izquierda, Texto a la derecha */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 items-start">
-            {/* Columna Izquierda: Foto o Video grande 4:3 */}
-            <div className="relative aspect-[4/3] w-full rounded-2xl md:rounded-3xl overflow-hidden bg-superficie-2 border border-borde shrink-0 shadow-inner">
+            {/* Foto o Video */}
+            <div className="relative aspect-[4/3] md:aspect-auto md:min-h-[320px] w-full rounded-xl overflow-hidden bg-gradient-to-br from-[#43201a] to-[#150c0c] shrink-0 shadow-md">
               {mostrarVideo ? (
                 <video
                   src={videoInfo.archivo}
@@ -105,173 +159,127 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
                   tabIndex={-1}
                   className="w-full h-full object-cover"
                 />
-              ) : videoInfo ? (
-                <Imagen
+              ) : videoInfo?.poster && !errorImagen ? (
+                <img
                   src={videoInfo.poster}
                   alt={plato.nombre}
                   width={640}
                   height={480}
-                  aspecto="4/3"
+                  loading="lazy"
+                  decoding="async"
+                  onError={() => setErrorImagen(true)}
                   className="w-full h-full object-cover"
                 />
-              ) : imagenUrl ? (
-                <Imagen
+              ) : imagenUrl && !errorImagen ? (
+                <img
                   src={imagenUrl}
                   alt={plato.nombre}
                   width={640}
                   height={480}
-                  aspecto="4/3"
+                  loading="lazy"
+                  decoding="async"
+                  onError={() => setErrorImagen(true)}
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-texto-tenue font-etiqueta uppercase tracking-wider text-sm">
-                  Sin imagen
+                <div
+                  aria-hidden="true"
+                  className="w-full h-full bg-gradient-to-br from-[#43201a] to-[#150c0c] flex items-center justify-center font-titulo text-2xl uppercase tracking-wider text-papel/40 select-none p-4 text-center"
+                >
+                  {plato.nombre}
                 </div>
               )}
             </div>
 
-            {/* Columna Derecha: Información del plato */}
+            {/* Información del plato */}
             <div className="space-y-4">
-              <div>
-                {esArmable && (
-                  <span className="inline-block px-2.5 py-0.5 rounded-full bg-acento text-fondo font-etiqueta font-bold text-xs uppercase tracking-wider mb-2">
-                    Personalizable en mesa
-                  </span>
-                )}
-                <h3 className="font-titulo text-3xl sm:text-4xl text-texto uppercase tracking-wide leading-tight">
-                  {plato.nombre}
-                </h3>
+              <h3 className="font-titulo text-3xl sm:text-4xl text-tinta uppercase tracking-wide leading-tight m-0">
+                {plato.nombre}
+              </h3>
+
+              <div className="font-titulo text-2xl sm:text-3xl text-primario tracking-wide">
+                {esArmable ? `Desde ${formatearPrecio(plato.precio)}` : formatearPrecio(plato.precio)}
               </div>
 
-              {/* Precio formateado */}
-              <div className="flex items-baseline gap-2">
-                <span className="font-etiqueta font-bold text-acento text-2xl sm:text-3xl tracking-wide">
-                  {esArmable
-                    ? `Desde ${formatearPrecio(plato.precio)}`
-                    : formatearPrecio(plato.precio)}
-                </span>
-              </div>
-
-              {/* Aviso de agotado si disponible === false */}
-              {plato.disponible === false && (
-                <div className="bg-primario/15 text-primario-texto border border-primario/30 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-primario shrink-0" />
-                  <span>Agotado: este plato no está disponible por ahora</span>
-                </div>
-              )}
-
-              {/* Badges dietéticos */}
-              {Array.isArray(plato.etiquetas) && plato.etiquetas.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {plato.etiquetas.map((tag) => {
-                    const conf = ETIQUETAS_MAP[tag] || {
-                      label: tag.replace('_', ' '),
-                      style:
-                        'bg-superficie-2 text-texto-suave border border-borde font-etiqueta text-xs uppercase font-semibold',
-                    };
-                    return (
-                      <span
-                        key={tag}
-                        className={`px-2.5 py-0.5 rounded-full text-xs font-etiqueta uppercase ${conf.style}`}
-                      >
-                        {conf.label}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Descripción completa sin truncar */}
               {plato.descripcion && (
-                <p className="text-sm sm:text-base text-texto-suave leading-relaxed font-cuerpo pt-1">
+                <p className="font-cuerpo-poster text-base text-tinta/85 leading-relaxed m-0">
                   {plato.descripcion}
                 </p>
               )}
 
-              {/* Fichas informativas: Calorías, Tiempo estimado y Alérgenos */}
-              <div className="pt-2 space-y-3">
-                <div className="flex flex-wrap items-center gap-2.5">
+              {/* Fichas adicionales: calorías y tiempo estimado */}
+              {(caloriasTexto || plato.tiempo_estimado) && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
                   {caloriasTexto && (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-superficie-2 border border-borde font-etiqueta text-xs uppercase font-bold text-texto">
-                      <svg
-                        className="w-3.5 h-3.5 text-acento"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        aria-hidden="true"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z"
-                        />
-                      </svg>
+                    <span className="px-3 py-1 rounded-full text-xs font-titulo tracking-wider uppercase bg-tinta/10 text-tinta">
                       {caloriasTexto}
                     </span>
                   )}
-
                   {plato.tiempo_estimado && (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-superficie-2 border border-borde font-etiqueta text-xs uppercase font-bold text-texto">
-                      <svg
-                        className="w-3.5 h-3.5 text-acento"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        aria-hidden="true"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                        />
-                      </svg>
+                    <span className="px-3 py-1 rounded-full text-xs font-titulo tracking-wider uppercase bg-tinta/10 text-tinta">
                       {plato.tiempo_estimado} min
                     </span>
                   )}
                 </div>
+              )}
 
-                {/* Alérgenos */}
-                <div>
-                  <h4 className="text-xs font-etiqueta uppercase tracking-wider text-texto-suave mb-2 font-bold">
-                    Alérgenos
+              {/* Ingredientes como chips punteados */}
+              {listaIngredientes.length > 0 && (
+                <div className="pt-2 space-y-2">
+                  <h4 className="font-titulo text-lg uppercase tracking-wide text-tinta m-0">
+                    Ingredientes
                   </h4>
-                  {Array.isArray(plato.alergenos) &&
-                  plato.alergenos.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {plato.alergenos.map((alergeno) => (
-                        <span
-                          key={alergeno}
-                          className="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-lg bg-superficie-2 text-texto-suave border border-borde font-cuerpo"
-                        >
-                          {ALERGENOS_MAP[alergeno] ?? alergeno}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-texto-tenue italic font-cuerpo">
-                      Sin alérgenos declarados
-                    </p>
-                  )}
+                  <ul className="flex flex-wrap gap-2 list-none p-0 m-0">
+                    {listaIngredientes.map((ing) => (
+                      <li
+                        key={ing}
+                        className="px-3 py-1 rounded-full text-xs font-cuerpo-poster font-medium border border-dashed border-tinta/40 text-tinta"
+                      >
+                        {ing}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
+              )}
+
+              {/* Alérgenos */}
+              <div className="pt-2 space-y-2">
+                <h4 className="font-titulo text-lg uppercase tracking-wide text-tinta m-0">
+                  Alérgenos
+                </h4>
+                {listaAlergenos.length > 0 ? (
+                  <ul className="flex flex-wrap gap-2 list-none p-0 m-0">
+                    {listaAlergenos.map((alergeno) => (
+                      <li
+                        key={alergeno}
+                        className="px-3 py-1 rounded-full text-xs font-cuerpo-poster font-semibold border border-primario text-primario"
+                      >
+                        {ALERGENOS_MAP[alergeno] ?? alergeno}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="font-cuerpo-poster text-sm text-tinta/80 m-0">
+                    Si tienes alguna alergia, pregúntale a nuestro equipo antes de pedir.
+                  </p>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Sección Exclusiva para platos armables: 'Así lo armas' */}
+          {/* Sección 'Así lo armas' para platos armables */}
           {esArmable && pasos.length > 0 && (
-            <div className="border-t border-borde pt-6 space-y-6">
+            <div className="border-t border-tinta/15 pt-6 space-y-6">
               <div>
-                <span className="font-etiqueta uppercase tracking-widest text-xs font-bold text-acento">
+                <span className="font-titulo tracking-widest text-sm text-ambar uppercase block">
                   Paso a paso
                 </span>
-                <h4 className="font-titulo text-2xl sm:text-3xl uppercase tracking-wider text-texto">
+                <h4 className="font-titulo text-3xl uppercase tracking-wider text-tinta m-0">
                   Así lo armas
                 </h4>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-5">
                 {pasos.map((paso, idx) => {
                   const ingredientes = Array.isArray(paso.ingredientes)
                     ? paso.ingredientes
@@ -281,24 +289,22 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
                   return (
                     <div
                       key={paso.id_paso ?? idx}
-                      className="bg-superficie-2/50 rounded-2xl border border-borde p-4 sm:p-5 space-y-3"
+                      className="bg-tinta/5 rounded-xl border border-tinta/10 p-4 space-y-3"
                     >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h5 className="font-etiqueta font-bold text-base uppercase tracking-wide text-texto">
-                          <span className="text-acento mr-2">
-                            Paso {idx + 1}.
-                          </span>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-dashed border-tinta/25 pb-2">
+                        <h5 className="font-titulo text-xl uppercase tracking-wide text-tinta m-0">
+                          <span className="text-primario mr-2">Paso {idx + 1}.</span>
                           {paso.nombre}
                         </h5>
                         {regla && (
-                          <span className="text-xs font-etiqueta uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-superficie text-texto-suave border border-borde font-semibold">
+                          <span className="text-xs font-cuerpo-poster font-semibold text-tinta/80">
                             {regla}
                           </span>
                         )}
                       </div>
 
                       {ingredientes.length > 0 && (
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 pt-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-1">
                           {ingredientes.map((ing) => {
                             const extra = Number(ing.precio_extra) || 0;
                             const agotado = ing.disponible === false;
@@ -306,46 +312,53 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
                             return (
                               <div
                                 key={ing.id_ingrediente ?? ing.nombre}
-                                className={`p-2.5 rounded-2xl border flex flex-col justify-between gap-2 transition-colors ${
+                                className={`p-2.5 rounded-xl border flex flex-col justify-between gap-2 bg-papel ${
                                   agotado
-                                    ? 'bg-superficie-2/40 border-borde/60 opacity-60'
-                                    : 'bg-superficie border-borde'
+                                    ? 'border-tinta/20 opacity-60'
+                                    : 'border-tinta/20'
                                 }`}
                               >
-                                <div className="space-y-2">
-                                  <div className="aspect-square w-full rounded-xl overflow-hidden bg-superficie-2 border border-borde">
-                                    <Imagen
-                                      src={ing.url_imagen}
-                                      alt={ing.nombre}
-                                      aspecto="cuadrada"
-                                      className="w-full h-full object-cover"
-                                    />
+                                <div className="space-y-1.5">
+                                  <div className="aspect-square w-full rounded-lg overflow-hidden bg-tinta/10 relative">
+                                    {ing.url_imagen ? (
+                                      <img
+                                        src={ing.url_imagen}
+                                        alt=""
+                                        width={160}
+                                        height={160}
+                                        loading="lazy"
+                                        decoding="async"
+                                        className="w-full h-full object-cover"
+                                      />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center font-titulo text-xl text-tinta/30">
+                                        {ing.nombre?.charAt(0)}
+                                      </div>
+                                    )}
                                   </div>
-                                  <div>
-                                    <h6 className="font-cuerpo font-semibold text-xs text-texto leading-snug line-clamp-2">
-                                      {ing.nombre}
-                                    </h6>
-                                    {ing.calorias != null &&
-                                      !isNaN(Number(ing.calorias)) && (
-                                        <span className="text-[11px] text-texto-tenue font-cuerpo">
-                                          {ing.calorias} kcal
-                                        </span>
-                                      )}
-                                  </div>
+                                  <h6 className="font-cuerpo-poster font-semibold text-xs text-tinta line-clamp-2 m-0">
+                                    {ing.nombre}
+                                  </h6>
+                                  {ing.calorias != null &&
+                                    !isNaN(Number(ing.calorias)) && (
+                                      <span className="text-[11px] text-tinta/60 font-cuerpo-poster block">
+                                        {ing.calorias} kcal
+                                      </span>
+                                    )}
                                 </div>
 
-                                <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-borde/40 text-xs">
+                                <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-dashed border-tinta/20 text-xs">
                                   {extra > 0 ? (
-                                    <span className="font-etiqueta font-bold text-acento">
+                                    <span className="font-titulo text-base text-primario tracking-wide">
                                       +{formatearPrecio(extra)}
                                     </span>
                                   ) : (
-                                    <span className="text-[10px] text-texto-tenue font-etiqueta uppercase">
+                                    <span className="text-[11px] text-tinta/60 font-cuerpo-poster font-medium">
                                       Incluido
                                     </span>
                                   )}
                                   {agotado && (
-                                    <span className="text-[10px] font-etiqueta font-bold uppercase tracking-wider text-primario-texto bg-primario/15 px-1.5 py-0.5 rounded">
+                                    <span className="text-[10px] font-bold uppercase text-primario">
                                       Agotado
                                     </span>
                                   )}
@@ -364,15 +377,15 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
         </div>
 
         {/* Pie del modal */}
-        <div className="sticky bottom-0 bg-superficie border-t border-borde px-4 py-3 sm:px-6 sm:py-4 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-          <p className="text-xs sm:text-sm text-texto-suave font-cuerpo text-center sm:text-left">
+        <div className="sticky bottom-0 bg-papel border-t border-tinta/15 px-4 py-3 sm:px-6 sm:py-4 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+          <p className="text-xs sm:text-sm text-tinta/80 font-cuerpo-poster text-center sm:text-left m-0">
             Para pedir, escanea el código QR de tu mesa.
           </p>
           <Button
             type="button"
             variante="secundario"
             onClick={onCerrar}
-            className="w-full sm:w-auto min-h-11 px-6 text-sm font-bold uppercase tracking-wider"
+            className="w-full sm:w-auto min-h-11 px-6 text-sm font-bold uppercase tracking-wider border-tinta text-tinta hover:bg-tinta/10"
           >
             Cerrar
           </Button>

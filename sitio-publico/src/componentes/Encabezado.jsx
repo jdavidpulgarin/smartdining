@@ -3,13 +3,13 @@ import restauranteDefault from '../datos/restaurante.js';
 import { estadoHorario } from '../utils/horario.js';
 
 /**
- * Encabezado principal accesible y responsivo.
- * Incluye enlace 'Saltar al contenido' en primer lugar, logo, pastilla de horario,
- * navegación de escritorio y menú móvil interactivo con cierre mediante tecla Escape.
+ * Encabezado principal accesible y responsivo al estilo póster de restaurante.
+ * Incluye enlace 'Saltar al contenido' en primer lugar, logo con nombre 'SMARTDINING',
+ * navegación de escritorio con enlace 'Cómo pedir' en pastilla ámbar,
+ * y menú móvil interactivo con pastilla de estado de horario.
  */
 function Encabezado({ secciones = [], datosRestaurante = {} }) {
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
-  const nombreRestaurante = datosRestaurante.nombre || 'SmartDining';
   const horario = datosRestaurante.horario || restauranteDefault.horario;
 
   const [estado, setEstado] = useState(() => estadoHorario(new Date(), horario));
@@ -33,8 +33,14 @@ function Encabezado({ secciones = [], datosRestaurante = {} }) {
     return () => window.removeEventListener('keydown', manejarTeclaEscape);
   }, [menuMovilAbierto]);
 
+  const enlacesPrincipales = secciones.filter((sec) => sec.href !== '#como-pedir');
+  const enlaceComoPedir = secciones.find((sec) => sec.href === '#como-pedir') || {
+    href: '#como-pedir',
+    etiqueta: 'Cómo pedir',
+  };
+
   return (
-    <header className="sticky top-0 z-50 bg-fondo/95 backdrop-blur-md border-b border-borde">
+    <header className="sticky top-0 z-50 bg-fondo/95 backdrop-blur-md border-b border-papel/10">
       {/* Enlace accesible 'Saltar al contenido' */}
       <a
         href="#contenido"
@@ -43,61 +49,54 @@ function Encabezado({ secciones = [], datosRestaurante = {} }) {
         Saltar al contenido
       </a>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-4">
         {/* Logo y nombre con enlace a #inicio */}
         <a
           href="#inicio"
-          className="flex items-center gap-3 min-w-0 min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto rounded-xl"
+          className="flex items-center gap-3 min-w-0 min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto rounded-xl shrink-0"
         >
           <img
             src="/logo.png"
-            alt={nombreRestaurante}
+            alt="SmartDining"
             width={40}
             height={40}
             className="w-10 h-10 rounded-xl object-cover shrink-0"
           />
-          <span className="font-titulo text-2xl sm:text-3xl tracking-wider uppercase text-texto truncate">
-            <span className="md:hidden">SmartDining</span>
-            <span className="hidden md:inline">{nombreRestaurante}</span>
+          <span className="font-titulo text-2xl sm:text-3xl tracking-widest uppercase text-papel whitespace-nowrap">
+            SmartDining
           </span>
         </a>
 
-        {/* Pastilla y navegación de escritorio */}
-        <div className="hidden md:flex items-center gap-4 lg:gap-6">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-superficie-2 border border-borde text-xs font-etiqueta font-semibold tracking-wider text-texto shrink-0">
-            <span
-              aria-hidden="true"
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                estado.abierto ? 'bg-exito' : 'bg-texto-tenue'
-              }`}
-            />
-            <span>{estado.texto}</span>
-          </span>
-
-          <nav
-            aria-label="Principal"
-            className="flex items-center gap-1 lg:gap-3"
+        {/* Navegación de escritorio: Inicio, Nosotros, Carta, Próximamente, Contacto y pastilla Cómo pedir */}
+        <nav
+          aria-label="Principal"
+          className="hidden lg:flex items-center gap-4 xl:gap-7"
+        >
+          {enlacesPrincipales.map((sec) => (
+            <a
+              key={sec.href}
+              href={sec.href}
+              className="min-h-11 px-2 inline-flex items-center font-titulo uppercase tracking-wider text-base xl:text-lg text-papel/80 hover:text-ambar transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto rounded-lg"
+            >
+              {sec.etiqueta}
+            </a>
+          ))}
+          <a
+            href={enlaceComoPedir.href}
+            className="min-h-10 px-5 inline-flex items-center justify-center font-titulo uppercase tracking-wider text-base xl:text-lg bg-ambar text-tinta hover:bg-ambar/90 transition-colors rounded-full whitespace-nowrap shrink-0 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
           >
-            {secciones.map((sec) => (
-              <a
-                key={sec.href}
-                href={sec.href}
-                className="min-h-11 px-3 inline-flex items-center font-etiqueta uppercase tracking-wider text-base font-bold text-texto-suave hover:text-acento transition-colors rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
-              >
-                {sec.etiqueta}
-              </a>
-            ))}
-          </nav>
-        </div>
+            Cómo pedir
+          </a>
+        </nav>
 
-        {/* Botón menú hamburguesa en celular */}
+        {/* Botón menú hamburguesa en celular/tablet */}
         <button
           type="button"
           onClick={() => setMenuMovilAbierto((prev) => !prev)}
           aria-expanded={menuMovilAbierto}
           aria-controls="menu-movil"
           aria-label={menuMovilAbierto ? 'Cerrar menú' : 'Abrir menú'}
-          className="md:hidden min-w-11 min-h-11 p-2.5 rounded-xl border border-borde bg-superficie-2 text-texto hover:bg-superficie inline-flex items-center justify-center cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+          className="lg:hidden min-w-11 min-h-11 p-2.5 rounded-xl border border-borde bg-superficie-2 text-texto hover:bg-superficie inline-flex items-center justify-center cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
         >
           {menuMovilAbierto ? (
             <svg
@@ -138,7 +137,7 @@ function Encabezado({ secciones = [], datosRestaurante = {} }) {
         <nav
           id="menu-movil"
           aria-label="Principal móvil"
-          className="md:hidden border-t border-borde bg-superficie px-4 py-3 space-y-2"
+          className="lg:hidden border-t border-borde bg-superficie px-4 py-3 space-y-2"
         >
           <div className="px-3 py-2 border-b border-borde/40">
             <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-superficie-2 border border-borde text-xs font-etiqueta font-semibold tracking-wider text-texto">

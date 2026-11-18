@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import TituloSeccion from '../componentes/TituloSeccion.jsx';
 import Button from '../components/ui/Button.jsx';
 import restauranteDefault from '../datos/restaurante.js';
 import { estadoHorario } from '../utils/horario.js';
@@ -13,11 +14,38 @@ const DIAS_SEMANA = [
   { clave: 'domingo', etiqueta: 'Domingo' },
 ];
 
+const DIAS_EN_A_ES = {
+  Monday: 'lunes',
+  Tuesday: 'martes',
+  Wednesday: 'miercoles',
+  Thursday: 'jueves',
+  Friday: 'viernes',
+  Saturday: 'sabado',
+  Sunday: 'domingo',
+};
+
+function obtenerDiaActualBogota() {
+  try {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Bogota',
+      weekday: 'long',
+    });
+    const diaEn = dtf.format(new Date());
+    return DIAS_EN_A_ES[diaEn] || 'lunes';
+  } catch {
+    return 'lunes';
+  }
+}
+
 /**
- * Sección 'Contacto': dirección con address, mapa interactivo (fachada bajo demanda),
- * teléfono, WhatsApp con mensaje inicial, correo, horario completo y redes sociales.
+ * Sección 'Contacto' al estilo póster de restaurante.
+ * - Título 'Ven y / escríbenos'.
+ * - Tarjetas-enlace para WhatsApp, Llámanos y Correo.
+ * - Horario semanal en comanda de papel crema con corte zigzag y día de hoy resaltado.
+ * - Mapa interactivo bajo demanda con fachada y enlaces de cómo llegar.
+ * - Redes sociales institucionales.
  */
-function Contacto({ datosRestaurante = {}, mapaVisibleInicial = false }) {
+function Contacto({ datosRestaurante = restauranteDefault, mapaVisibleInicial = false }) {
   const nombre = datosRestaurante.nombre || 'SmartDining Restaurante';
   const direccion = datosRestaurante.direccion;
   const horario = datosRestaurante.horario || restauranteDefault.horario;
@@ -26,11 +54,14 @@ function Contacto({ datosRestaurante = {}, mapaVisibleInicial = false }) {
   const iframeRef = useRef(null);
 
   const [estado, setEstado] = useState(() => estadoHorario(new Date(), horario));
+  const [diaHoy, setDiaHoy] = useState(() => obtenerDiaActualBogota());
 
   useEffect(() => {
     setEstado(estadoHorario(new Date(), horario));
+    setDiaHoy(obtenerDiaActualBogota());
     const timer = setInterval(() => {
       setEstado(estadoHorario(new Date(), horario));
+      setDiaHoy(obtenerDiaActualBogota());
     }, 60000);
     return () => clearInterval(timer);
   }, [horario]);
@@ -65,226 +96,243 @@ function Contacto({ datosRestaurante = {}, mapaVisibleInicial = false }) {
   return (
     <section
       id="contacto"
-      aria-labelledby="titulo-contacto"
-      className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-20 scroll-mt-16 space-y-12"
+      aria-labelledby="contacto-titulo"
+      className="fondo-poster-brillo-bl text-papel py-16 sm:py-24 scroll-mt-16 border-b border-papel/10"
     >
-      <div className="space-y-2">
-        <span className="font-etiqueta uppercase tracking-widest text-xs font-bold text-acento">
-          Encuéntranos
-        </span>
-        <h2
-          id="titulo-contacto"
-          className="font-titulo text-4xl sm:text-5xl uppercase tracking-wider text-texto leading-none"
-        >
-          Contacto
-        </h2>
-      </div>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 space-y-12">
+        <TituloSeccion
+          id="contacto-titulo"
+          linea1="Ven y"
+          linea2="escríbenos"
+          descripcion="Estamos en el centro de Valledupar, todos los días. Si prefieres, pregunta por WhatsApp."
+        />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-        {/* Columna izquierda: Información, horario y canales */}
-        <div className="space-y-6">
-          {direccionTexto && (
-            <div className="bg-superficie rounded-3xl border border-borde p-6 space-y-2 shadow-lg">
-              <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-                Ubicación
-              </h3>
-              <address className="not-italic text-base text-texto font-cuerpo leading-relaxed">
-                {direccionTexto}
-              </address>
-            </div>
-          )}
-
-          {/* Teléfono, WhatsApp y Correo */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {datosRestaurante.telefono && datosRestaurante.telefonoVisible && (
-              <div className="bg-superficie rounded-2xl border border-borde p-5 space-y-1.5 shadow-sm">
-                <h4 className="font-etiqueta uppercase tracking-wider text-xs font-bold text-acento">
-                  Teléfono
-                </h4>
-                <p className="text-base text-texto font-cuerpo">
-                  <a
-                    href={`tel:${datosRestaurante.telefono}`}
-                    className="min-h-11 inline-flex items-center hover:text-acento underline decoration-borde underline-offset-4 transition-colors"
-                  >
-                    {datosRestaurante.telefonoVisible}
-                  </a>
-                </p>
-              </div>
-            )}
-
-            {urlWhatsapp && datosRestaurante.whatsappVisible && (
-              <div className="bg-superficie rounded-2xl border border-borde p-5 space-y-1.5 shadow-sm">
-                <h4 className="font-etiqueta uppercase tracking-wider text-xs font-bold text-acento">
-                  WhatsApp
-                </h4>
-                <p className="text-base text-texto font-cuerpo">
-                  <a
-                    href={urlWhatsapp}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="min-h-11 inline-flex items-center hover:text-acento underline decoration-borde underline-offset-4 transition-colors"
-                  >
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Columna izquierda: Enlaces rápidos y Horario en comanda */}
+          <div className="lg:col-span-6 space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* WhatsApp ancho en rojo */}
+              {urlWhatsapp && (
+                <a
+                  href={urlWhatsapp}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="sm:col-span-2 bg-primario border border-primario rounded-xl p-5 text-white flex flex-col gap-2 relative overflow-hidden group hover:scale-[1.01] transition-transform shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+                >
+                  <span className="etiqueta-girada bg-white text-tinta text-xs font-titulo tracking-wider px-2.5 py-0.5 self-start">
+                    WhatsApp
+                  </span>
+                  <b className="font-titulo text-3xl sm:text-4xl tracking-wide text-white">
                     {datosRestaurante.whatsappVisible}
-                  </a>
-                </p>
-              </div>
-            )}
-
-            {datosRestaurante.correo && (
-              <div className="bg-superficie rounded-2xl border border-borde p-5 space-y-1.5 shadow-sm sm:col-span-2">
-                <h4 className="font-etiqueta uppercase tracking-wider text-xs font-bold text-acento">
-                  Correo electrónico
-                </h4>
-                <p className="text-base text-texto font-cuerpo break-all">
-                  <a
-                    href={`mailto:${datosRestaurante.correo}`}
-                    className="min-h-11 inline-flex items-center hover:text-acento underline decoration-borde underline-offset-4 transition-colors"
-                  >
-                    {datosRestaurante.correo}
-                  </a>
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Horario de atención */}
-          {(datosRestaurante.horarioVisible || horario) && (
-            <div className="bg-superficie rounded-3xl border border-borde p-6 space-y-4 shadow-lg">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-                  Horario de atención
-                </h3>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-superficie-2 border border-borde text-xs font-etiqueta font-semibold tracking-wider text-texto shrink-0">
-                  <span
-                    aria-hidden="true"
-                    className={`w-2 h-2 rounded-full shrink-0 ${
-                      estado.abierto ? 'bg-exito' : 'bg-texto-tenue'
-                    }`}
-                  />
-                  <span>{estado.texto}</span>
-                </span>
-              </div>
-
-              {datosRestaurante.horarioVisible && (
-                <p className="text-base text-texto font-cuerpo font-medium">
-                  {datosRestaurante.horarioVisible}
-                </p>
+                  </b>
+                  <span className="text-sm font-cuerpo-poster text-white/90">
+                    Escríbenos y te respondemos al momento.
+                  </span>
+                </a>
               )}
 
-              {horario && typeof horario === 'object' && (
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm pt-3 border-t border-borde/60">
+              {/* Llámanos */}
+              {datosRestaurante.telefono && (
+                <a
+                  href={`tel:${datosRestaurante.telefono}`}
+                  className="bg-[#161010] border border-papel/15 rounded-xl p-5 text-papel flex flex-col gap-2 hover:border-primario transition-colors shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+                >
+                  <span className="etiqueta-girada text-xs font-titulo tracking-wider px-2.5 py-0.5 self-start">
+                    Llámanos
+                  </span>
+                  <b className="font-titulo text-2xl sm:text-3xl tracking-wide text-papel">
+                    {datosRestaurante.telefonoVisible}
+                  </b>
+                </a>
+              )}
+
+              {/* Correo */}
+              {datosRestaurante.correo && (
+                <a
+                  href={`mailto:${datosRestaurante.correo}`}
+                  className="bg-[#161010] border border-papel/15 rounded-xl p-5 text-papel flex flex-col gap-2 hover:border-primario transition-colors shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+                >
+                  <span className="etiqueta-girada text-xs font-titulo tracking-wider px-2.5 py-0.5 self-start">
+                    Correo
+                  </span>
+                  <b className="font-titulo text-base sm:text-lg lg:text-xl tracking-wide text-papel">
+                    {(() => {
+                      const correo = datosRestaurante.correo;
+                      const partes = correo.split('@');
+                      if (partes.length === 2) {
+                        return (
+                          <>
+                            {partes[0]}@<wbr />{partes[1]}
+                          </>
+                        );
+                      }
+                      return correo;
+                    })()}
+                  </b>
+                </a>
+              )}
+            </div>
+
+            {/* Horario como comanda de papel con zigzag */}
+            <div className="filter drop-shadow-xl pt-2">
+              <div className="comanda p-6 sm:p-7 pb-10">
+                <div className="flex justify-between items-center gap-3 pb-3 border-b-2 border-dashed border-tinta/35">
+                  <strong className="font-titulo text-2xl sm:text-3xl tracking-wider uppercase text-tinta">
+                    HORARIO
+                  </strong>
+                  <span
+                    role="status"
+                    className="inline-flex items-center gap-2 text-xs font-cuerpo-poster font-semibold text-tinta"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                        estado.abierto ? 'bg-exito' : 'bg-primario'
+                      }`}
+                    />
+                    <span>{estado.texto}</span>
+                  </span>
+                </div>
+
+                <ul className="list-none m-0 p-0 pt-2">
                   {DIAS_SEMANA.map(({ clave, etiqueta }) => {
-                    const dia = horario[clave];
-                    const textoDia =
-                      dia && dia.abre && dia.cierra
-                        ? `${dia.abre} - ${dia.cierra}`
+                    const dia = horario?.[clave];
+                    const horas =
+                      dia?.abre && dia?.cierra
+                        ? `${dia.abre} – ${dia.cierra}`
                         : 'Cerrado';
+                    const esHoy = diaHoy === clave;
+
                     return (
-                      <div
+                      <li
                         key={clave}
-                        className="flex items-center justify-between py-1.5 border-b border-borde/40 last:border-b-0"
+                        aria-current={esHoy ? 'date' : undefined}
+                        className={`flex items-baseline gap-3 py-1.5 border-b border-dashed border-tinta/20 last:border-b-0 ${
+                          esHoy
+                            ? 'bg-ambar/35 -mx-2 px-2 rounded font-bold'
+                            : ''
+                        }`}
                       >
-                        <dt className="font-semibold text-texto">{etiqueta}</dt>
-                        <dd className="text-texto-suave font-etiqueta tracking-wide text-base">
-                          {textoDia}
-                        </dd>
-                      </div>
+                        <span className="font-titulo text-lg sm:text-xl uppercase tracking-wide text-tinta">
+                          {etiqueta}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="flex-1 border-b-2 border-dotted border-tinta/30 translate-y-[-4px]"
+                        />
+                        <span className="font-titulo text-lg sm:text-xl tracking-wide text-tinta">
+                          {horas}
+                        </span>
+                      </li>
                     );
                   })}
-                </dl>
+                </ul>
+
+                <p className="mt-5 text-xs font-cuerpo-poster font-semibold text-center text-tinta/85 m-0">
+                  {datosRestaurante.horarioVisible ||
+                    'Todos los días, de 11:30 a. m. a 11:00 p. m.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Columna derecha: Mapa interactivo y Redes sociales */}
+          <div className="lg:col-span-6 bg-[#161010] border border-papel/15 rounded-2xl overflow-hidden flex flex-col shadow-xl">
+            <div className="p-5 sm:p-6 flex flex-wrap justify-between items-center gap-4">
+              <div>
+                <h3 className="font-titulo text-2xl sm:text-3xl uppercase tracking-wider text-papel m-0">
+                  Dónde estamos
+                </h3>
+                {direccionTexto && (
+                  <address className="not-italic text-sm text-papel/70 font-cuerpo-poster mt-1">
+                    {direccionTexto}
+                  </address>
+                )}
+              </div>
+              <a
+                href={`https://www.google.com/maps?q=${queryMapa}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Abrir en Google Maps"
+                className="min-h-11 px-5 rounded-full bg-primario hover:bg-primario-hover text-white font-titulo text-lg uppercase tracking-wider inline-flex items-center transition-colors shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+              >
+                <span>Cómo llegar</span>
+                <span className="sr-only"> (Abrir en Google Maps)</span>
+              </a>
+            </div>
+
+            {/* Marco de mapa con fachada bajo demanda */}
+            <div className="relative border-t-2 border-dashed border-papel/20 aspect-[4/3] sm:aspect-[16/10] bg-[#1b1212]">
+              {mapaVisible ? (
+                <iframe
+                  ref={iframeRef}
+                  tabIndex={0}
+                  title={`Mapa de ${nombre}`}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  src={`https://www.google.com/maps?q=${queryMapa}&output=embed`}
+                  className="absolute inset-0 w-full h-full border-0"
+                />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-4">
+                  <div className="w-14 h-14 rounded-full bg-[#161010] flex items-center justify-center border border-papel/20 text-ambar shrink-0">
+                    <svg
+                      className="w-7 h-7"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"
+                      />
+                    </svg>
+                  </div>
+                  {direccionTexto && (
+                    <p className="text-sm font-cuerpo-poster text-papel/80 max-w-xs m-0">
+                      {direccionTexto}
+                    </p>
+                  )}
+                  <Button
+                    type="button"
+                    variante="secundario"
+                    onClick={activarMapa}
+                    className="font-titulo text-lg uppercase tracking-wider border-papel/40 text-papel hover:bg-papel/10"
+                  >
+                    Ver mapa
+                  </Button>
+                </div>
               )}
             </div>
-          )}
 
-          {/* Redes sociales */}
-          {Array.isArray(datosRestaurante.redes) && datosRestaurante.redes.length > 0 && (
-            <div className="bg-superficie rounded-3xl border border-borde p-6 space-y-3 shadow-lg">
-              <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-                Redes sociales
-              </h3>
-              <ul className="flex flex-wrap gap-2.5">
-                {datosRestaurante.redes.map((red) => (
-                  <li key={red.url || red.nombre}>
+            {/* Redes sociales */}
+            {Array.isArray(datosRestaurante.redes) &&
+              datosRestaurante.redes.length > 0 && (
+                <div className="flex flex-wrap items-center gap-3 p-5 border-t border-papel/15">
+                  <span className="font-titulo text-lg text-papel/60 uppercase tracking-wider mr-1">
+                    Síguenos
+                  </span>
+                  {datosRestaurante.redes.map((red) => (
                     <a
+                      key={red.nombre}
                       href={red.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      aria-label={`${red.nombre} de ${nombre} (se abre en otra pestaña)`}
-                      className="min-h-11 px-4 py-2 rounded-xl bg-superficie-2 border border-borde hover:border-acento text-sm font-etiqueta uppercase tracking-wider font-bold text-texto inline-flex items-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+                      className="min-h-10 px-4 py-1.5 rounded-full border border-papel/20 text-papel hover:border-ambar hover:bg-ambar/10 font-titulo text-base uppercase tracking-wider transition-colors inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
                     >
-                      <span>{red.nombre}</span>
+                      {red.nombre}
                     </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-
-        {/* Columna derecha: Mapa interactivo (fachada con carga bajo demanda) */}
-        <div className="bg-superficie rounded-3xl border border-borde p-6 space-y-4 shadow-lg sticky top-24">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="font-etiqueta uppercase tracking-wider text-sm font-bold text-acento">
-              Mapa
-            </h3>
-            <a
-              href={`https://www.google.com/maps?q=${queryMapa}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-acento hover:underline font-semibold inline-flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto rounded-lg"
-            >
-              Abrir en Google Maps ↗
-            </a>
-          </div>
-
-          <div className="w-full h-72 sm:h-96 rounded-2xl overflow-hidden border border-borde bg-superficie-2">
-            {mapaVisible ? (
-              <iframe
-                ref={iframeRef}
-                tabIndex={0}
-                title={`Mapa de ${nombre}`}
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                src={`https://www.google.com/maps?q=${queryMapa}&output=embed`}
-                className="w-full h-full border-0"
-              />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-4">
-                <div className="w-14 h-14 rounded-full bg-superficie flex items-center justify-center border border-borde text-acento shrink-0">
-                  <svg
-                    className="w-7 h-7"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"
-                    />
-                  </svg>
+                  ))}
                 </div>
-                {direccionTexto && (
-                  <p className="text-sm sm:text-base text-texto font-cuerpo max-w-xs leading-relaxed">
-                    {direccionTexto}
-                  </p>
-                )}
-                <Button
-                  type="button"
-                  variante="secundario"
-                  onClick={activarMapa}
-                >
-                  Ver mapa
-                </Button>
-              </div>
-            )}
+              )}
           </div>
         </div>
       </div>

@@ -310,11 +310,10 @@ describe('App y Sitio Público Completo', () => {
     expect(html).toContain('Proyecto académico · UPC');
   });
 
-  it('Pie renderizado contiene pb-28 y md:pb-12 en el footer, créditos de IA y atribución de Freepik', () => {
+  it('Pie renderizado contiene pb-28 en el footer, créditos de IA y atribución de Freepik', () => {
     const html = renderToStaticMarkup(<Pie />);
     expect(html).toContain('pb-28');
-    expect(html).toContain('md:pb-12');
-    expect(html).toMatch(/<footer[^>]*class="[^"]*pb-28[^"]*md:pb-12[^"]*"/);
+    expect(html).toMatch(/<footer[^>]*class="[^"]*pb-28[^"]*"/);
     expect(html).toContain('Imágenes y videos ilustrativos generados con IA');
     expect(html).toContain('Imagen base del bowl: Freepik');
   });

@@ -30,6 +30,42 @@ describe('PlatoDetalleModal (soloLectura)', () => {
     expect(html).not.toMatch(/Aumentar cantidad/i);
   });
 
+  it('el <img> del detalle tiene manejador de error y, si se simula el error, no se muestra la imagen y sí el fondo de respaldo', () => {
+    const plato = {
+      id: 10,
+      nombre: 'Parrillada Mixta',
+      descripcion: 'Cortes premium a la brasa',
+      precio: 45000,
+      imagen: 'https://images.unsplash.com/parrillada.jpg',
+      disponible: true,
+    };
+
+    // Caso 1: Carga normal (sin error) -> se renderiza la imagen
+    const htmlNormal = renderToStaticMarkup(
+      <PlatoDetalleModal
+        plato={plato}
+        abierto={true}
+        onCerrar={() => {}}
+        errorImagenInicial={false}
+      />
+    );
+    expect(htmlNormal).toContain('<img');
+    expect(htmlNormal).toContain('src="https://images.unsplash.com/parrillada.jpg"');
+
+    // Caso 2: Simulación de error de imagen -> se oculta el <img> y se muestra el fondo oscuro con el nombre
+    const htmlConError = renderToStaticMarkup(
+      <PlatoDetalleModal
+        plato={plato}
+        abierto={true}
+        onCerrar={() => {}}
+        errorImagenInicial={true}
+      />
+    );
+    expect(htmlConError).not.toContain('<img');
+    expect(htmlConError).toContain('Parrillada Mixta');
+    expect(htmlConError).toContain('bg-gradient-to-br from-[#43201a] to-[#150c0c]');
+  });
+
   it('detalle de un plato armable (Arepa Rellena): muestra el paso a paso ("Así lo armas"), los 3-4 pasos con sus reglas, los ingredientes con sus fotos, "180 kcal" en la de maíz, "+$ 1.500" en la de chócolo y el cálculo de calorías con "Desde"', () => {
     const arepaRellena = {
       id_plato: 201,
@@ -190,5 +226,56 @@ describe('PlatoDetalleModal (soloLectura)', () => {
     // Pie
     expect(html).toContain('Para pedir, escanea el código QR de tu mesa.');
     expect(html).toContain('Cerrar');
+  });
+
+  it('renderiza con plato null sin lanzar error y devuelve vacío', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDetalleModal plato={null} abierto={true} onCerrar={() => {}} />
+    );
+    expect(html).toBe('');
+  });
+
+  it('renderiza plato con pasos, ingredientes y alérgenos mostrando chips y alérgenos', () => {
+    const plato = {
+      id: 401,
+      nombre: 'Bowl Personalizado',
+      descripcion: 'Crea tu combinación favorita.',
+      precio: 28000,
+      personalizable: true,
+      ingredientes: ['Arroz integral', 'Pollo', 'Aguacate'],
+      alergenos: ['gluten', 'sesamo'],
+      pasos: [
+        {
+          id_paso: 1,
+          nombre: 'Base',
+          obligatorio: true,
+          min_sel: 1,
+          max_sel: 1,
+          ingredientes: [
+            {
+              id_ingrediente: 1,
+              nombre: 'Arroz integral',
+              calorias: 150,
+              precio_extra: 0,
+              disponible: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      <PlatoDetalleModal plato={plato} abierto={true} onCerrar={() => {}} />
+    );
+
+    expect(html).toContain('Bowl Personalizado');
+    expect(html).toContain('Ingredientes');
+    expect(html).toContain('Arroz integral');
+    expect(html).toContain('Pollo');
+    expect(html).toContain('Aguacate');
+    expect(html).toContain('Alérgenos');
+    expect(html).toContain('Gluten');
+    expect(html).toContain('Sésamo');
+    expect(html).toContain('Así lo armas');
   });
 });
