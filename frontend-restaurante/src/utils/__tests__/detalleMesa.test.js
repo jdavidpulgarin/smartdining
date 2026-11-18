@@ -152,9 +152,34 @@ describe('resumenDetalleMesa', () => {
         ],
       }),
     })
-    expect(r.comensales.map((c) => [c.nombre, c.saldo])).toEqual([['Daniel', 0], ['General', 0]])
-    expect(r.comensales.every((c) => c.saldo === 0)).toBe(true)
+    // Todos "Pagado" y sin la fila "General (0 ítems)".
+    expect(r.comensales.map((c) => [c.nombre, c.saldo])).toEqual([['Daniel', 0]])
     expect(r.pagadaSinEntregar).toBe(true)
+  })
+
+  it('cuenta saldada: se ocultan las filas con subtotal 0; con saldo pendiente se muestran', () => {
+    const comensales = [
+      { comensal: 'Ana', items_pedidos: 1, subtotal: 30000, pagado: 0, saldo: 30000 },
+      { comensal: 'Luis', items_pedidos: 1, subtotal: 20000, pagado: 0, saldo: 20000 },
+      { comensal: 'General', items_pedidos: 0, subtotal: 0, pagado: 50000, saldo: 0 },
+    ]
+    const saldada = resumenDetalleMesa({
+      mesa: ocupada,
+      cuenta: cuenta({ total_mesa: 50000, pagado_mesa: 50000, saldo_mesa: 0, comensales }),
+    })
+    expect(saldada.comensales.map((c) => c.nombre)).toEqual(['Ana', 'Luis'])
+    expect(saldada.comensales.every((c) => c.saldo === 0)).toBe(true)
+
+    const parcial = resumenDetalleMesa({
+      mesa: ocupada,
+      cuenta: cuenta({
+        total_mesa: 50000,
+        pagado_mesa: 10000,
+        saldo_mesa: 40000,
+        comensales: comensales.map((c) => (c.comensal === 'General' ? { ...c, pagado: 10000 } : c)),
+      }),
+    })
+    expect(parcial.comensales.map((c) => c.nombre)).toEqual(['Ana', 'Luis', 'General'])
   })
 
   it('con saldo pendiente en la mesa, el saldo por comensal se respeta', () => {

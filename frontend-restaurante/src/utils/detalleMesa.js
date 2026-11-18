@@ -85,7 +85,9 @@ export function resumenDetalleMesa({ mesa, cuenta, pedidosPanel = [] } = {}) {
       pagado: num(c.pagado),
       saldo: cuentaSaldada ? 0 : num(c.saldo),
     }))
-    .filter((c) => c.subtotal > 0 || c.pagado > 0)
+    // Saldada: solo quien consumió (la fila "General (0 ítems)" que recibió el
+    // pago no aporta nada). Con saldo, se ve también quién ha pagado.
+    .filter((c) => (cuentaSaldada ? c.subtotal > 0 : c.subtotal > 0 || c.pagado > 0))
 
   const pagadaSinEntregar =
     cuentaSaldada &&

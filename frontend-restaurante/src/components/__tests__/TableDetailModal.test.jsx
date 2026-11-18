@@ -136,8 +136,10 @@ describe('TableDetailModal: consumo y saldo de la cuenta de la mesa', () => {
     )
     montar({ id_mesa: 3, numero: 3, status: 'Ocupada' })
     expect(await screen.findByText('Daniel')).toBeInTheDocument()
-    expect(screen.getAllByText('Pagado')).toHaveLength(2)
+    expect(screen.getAllByText('Pagado')).toHaveLength(1)
     expect(screen.queryByText(/^Saldo \$/)).not.toBeInTheDocument()
+    // La fila "General (0 ítems)" no aparece con la cuenta saldada.
+    expect(screen.queryByText('General')).not.toBeInTheDocument()
   })
 
   it('si la cuenta falla: aviso de error y sin cifras inventadas', async () => {
