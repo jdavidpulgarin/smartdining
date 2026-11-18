@@ -17,6 +17,9 @@ function Pie({ datosRestaurante = {}, secciones = [] }) {
             Proyecto académico · UPC
           </p>
           <p className="text-xs text-texto-tenue font-cuerpo">
+            Imágenes y videos ilustrativos generados con IA · Imagen base del bowl: Freepik
+          </p>
+          <p className="text-xs text-texto-tenue font-cuerpo">
             © {anioActual} {nombre}
           </p>
         </div>
