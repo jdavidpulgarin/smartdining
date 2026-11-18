@@ -1,102 +1,87 @@
 import { formatearPrecio } from '../../utils/formato.js';
-import { ETIQUETAS_MAP } from '../../constants/dieta.js';
-import Imagen from '../ui/Imagen.jsx';
 
+/**
+ * Tarjeta de plato individual estilo póster de restaurante.
+ * Renderizada como <button> accesible que abre el detalle al tocarla.
+ * Presenta foto arriba (o degradado de respaldo), nombre con title y line-clamp-2,
+ * descripción en 2 líneas y precio en ámbar.
+ */
 function PlatoCard({ plato, onSeleccionar, soloLectura = true }) {
-  const { nombre, descripcion, precio, imagen, etiquetas, disponible = true } = plato;
+  if (!plato) return null;
 
-  const handleKeyDown = (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      onSeleccionar?.(plato);
-    }
-  };
+  const {
+    nombre = '',
+    descripcion = '',
+    precio = 0,
+    imagen,
+    url_imagen,
+    disponible = true,
+  } = plato;
+
+  const imagenUrl = imagen || url_imagen;
 
   return (
-    <article
-      role="button"
-      tabIndex={0}
-      aria-haspopup="dialog"
-      aria-label={`Ver detalle de ${nombre}`}
+    <button
+      type="button"
       onClick={() => onSeleccionar?.(plato)}
-      onKeyDown={handleKeyDown}
-      className={`bg-superficie rounded-2xl border border-borde overflow-hidden flex gap-3 p-3 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto group ${
-        !disponible
-          ? 'opacity-40 grayscale-[25%]'
-          : 'hover:border-primario/40 hover:-translate-y-0.5'
+      aria-label={`Ver detalle de ${nombre}`}
+      className={`group flex flex-col w-full text-left p-0 overflow-hidden bg-[#161010] border border-papel/15 rounded-xl hover:border-primario motion-safe:transition-all motion-safe:duration-200 hover:-translate-y-1 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto shadow-lg ${
+        !disponible ? 'opacity-50 grayscale-[25%]' : ''
       }`}
     >
-      {/* Contenedor de Imagen con overlay si está agotado */}
-      <div className="relative w-24 h-24 shrink-0 rounded-xl overflow-hidden bg-superficie-2 border border-borde">
-        <Imagen
-          src={imagen}
-          alt={nombre}
-          width={96}
-          height={96}
-          aspecto="1/1"
-          className="w-full h-full"
-        />
+      {/* Contenedor de foto con respaldo de degradado */}
+      <div className="relative aspect-[16/11] w-full overflow-hidden bg-gradient-to-br from-[#43201a] to-[#150c0c] shrink-0">
+        {imagenUrl ? (
+          <img
+            src={imagenUrl}
+            alt=""
+            width={640}
+            height={440}
+            loading="lazy"
+            decoding="async"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        ) : null}
+
         {!disponible && (
-          <span className="absolute inset-0 bg-black/70 backdrop-blur-[1px] flex items-center justify-center text-primario-texto text-xs font-etiqueta font-bold uppercase tracking-wider text-center px-1">
-            AGOTADO
-          </span>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px] flex items-center justify-center">
+            <span className="font-titulo text-lg tracking-wider uppercase text-primario-texto bg-fondo/80 border border-primario/30 px-3 py-1 rounded">
+              AGOTADO
+            </span>
+          </div>
         )}
       </div>
 
-      {/* Información del plato */}
-      <div className="flex flex-col justify-between flex-1 min-w-0">
-        <div>
-          <div className="flex items-start justify-between gap-1">
-            <h3 className="font-etiqueta font-bold text-texto text-lg leading-snug uppercase tracking-wide truncate">
-              {nombre}
-            </h3>
-            {!disponible && (
-              <span className="shrink-0 text-[10px] font-etiqueta font-bold uppercase text-primario-texto bg-primario/15 border border-primario/30 px-1.5 py-0.5 rounded">
-                AGOTADO
-              </span>
-            )}
-          </div>
-          {descripcion && (
-            <p className="text-xs text-texto-suave font-cuerpo line-clamp-2 mt-0.5">
-              {descripcion}
-            </p>
-          )}
+      {/* Cuerpo de la tarjeta */}
+      <div className="p-4 sm:p-5 flex flex-col gap-2 flex-1 w-full">
+        <h3
+          title={nombre}
+          className="font-titulo text-2xl uppercase tracking-wide text-papel line-clamp-2 leading-tight m-0"
+        >
+          {nombre}
+        </h3>
 
-          {/* Badges de etiquetas */}
-          {etiquetas && etiquetas.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {etiquetas.map((tag) => {
-                const conf = ETIQUETAS_MAP[tag] || {
-                  label: tag.replace('_', ' '),
-                  style:
-                    'bg-superficie-2 text-texto-suave border border-borde font-etiqueta text-[10px] uppercase font-semibold',
-                };
-                return (
-                  <span
-                    key={tag}
-                    className={`px-1.5 py-0.5 rounded ${conf.style}`}
-                  >
-                    {conf.label}
-                  </span>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        {descripcion && (
+          <p className="font-cuerpo-poster text-sm text-papel/70 line-clamp-2 leading-relaxed m-0">
+            {descripcion}
+          </p>
+        )}
 
-        {/* Precio y Ver detalle */}
-        <div className="mt-2 flex items-center justify-between">
-          <span className="font-etiqueta font-bold text-texto text-xl tracking-wide">
+        <div className="mt-auto pt-3 flex items-center justify-between gap-2 border-t border-papel/10">
+          <span className="font-titulo text-2xl text-ambar tracking-wide">
             {formatearPrecio(precio)}
           </span>
           {soloLectura && (
-            <span className="text-xs font-etiqueta uppercase tracking-wider text-texto-suave group-hover:text-texto transition-colors">
+            <span className="text-xs font-etiqueta uppercase tracking-wider text-papel/60 group-hover:text-papel transition-colors">
               Ver detalle →
             </span>
           )}
         </div>
       </div>
-    </article>
+    </button>
   );
 }
 

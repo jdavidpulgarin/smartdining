@@ -31,6 +31,11 @@ const restaurante = {
     { nombre: 'Facebook', url: 'https://www.facebook.com/smartdining' },
     { nombre: 'TikTok', url: 'https://www.tiktok.com/@smartdining' },
   ],
+  platosDestacados: [
+    'Nachos Supremos',
+    'Costillas BBQ St. Louis',
+    'Hamburguesa Smart Angus',
+  ],
   videosPlatos: {
     'Arepa Rellena': {
       archivo: '/videos/arepa.mp4',

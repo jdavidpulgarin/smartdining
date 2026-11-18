@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import React from 'react';
 import { Carta } from './Carta.jsx';
+import CartaSeccion from './secciones/Carta.jsx';
+import DialogoSimuladorPlato from './components/menu/DialogoSimuladorPlato.jsx';
 import { obtenerMenuPublico } from './services/menuService.js';
 import * as apiModule from './services/api.js';
 import restaurante from './datos/restaurante.js';
@@ -93,9 +95,7 @@ describe('Carta (sitio público)', () => {
   it('renderToStaticMarkup renderiza categorías, platos con precios y aviso de agotado', async () => {
     const menu = await obtenerMenuPublico();
 
-    const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} />
-    );
+    const html = renderToStaticMarkup(<Carta menuInicial={menu} />);
 
     // Renderiza categorías adaptadas desde la respuesta cruda del backend
     expect(html).toContain('Entradas');
@@ -113,31 +113,112 @@ describe('Carta (sitio público)', () => {
     expect(html).toContain('AGOTADO');
   });
 
-  it('renderiza pasos e ingredientes de "Arma tu plato"', async () => {
+  it('renderiza título de dos líneas con "Nuestra" y "Carta" en el h2', async () => {
     const menu = await obtenerMenuPublico();
+    const html = renderToStaticMarkup(<CartaSeccion menu={menu} />);
 
+    expect(html).toContain('Nuestra');
+    expect(html).toContain('Carta');
+    expect(html).toMatch(/<h2[^>]*id="carta-titulo"[^>]*>[\s\S]*Nuestra[\s\S]*Carta[\s\S]*<\/h2>/);
+  });
+
+  it('con la carta fija aparece "Los más pedidos" con los 3 destacados y estos no se repiten en "Toda la carta"', async () => {
+    vi.spyOn(apiModule, 'pedirJson').mockImplementation(async () => {
+      throw new apiModule.ErrorApi({ status: 500, mensaje: 'Error' });
+    });
+
+    const menu = await obtenerMenuPublico();
+    const html = renderToStaticMarkup(<CartaSeccion menu={menu} datosRestaurante={restaurante} />);
+
+    expect(html).toContain('Los más pedidos');
+    expect(html).toContain('Nachos Supremos');
+    expect(html).toContain('Costillas BBQ St. Louis');
+    expect(html).toContain('Hamburguesa Smart Angus');
+    expect(html).toContain('Toda la carta');
+
+    // En "Toda la carta" no se repiten los destacados
+    const todaLaCartaPos = html.indexOf('Toda la carta');
+    const bloqueTodaLaCarta = html.slice(todaLaCartaPos);
+    expect(bloqueTodaLaCarta).not.toContain('Nachos Supremos');
+    expect(bloqueTodaLaCarta).not.toContain('Costillas BBQ St. Louis');
+    expect(bloqueTodaLaCarta).not.toContain('Hamburguesa Smart Angus');
+  });
+
+  it('los nombres de los platos llevan line-clamp-2 y title', async () => {
+    const menu = await obtenerMenuPublico();
+    const html = renderToStaticMarkup(<CartaSeccion menu={menu} />);
+
+    expect(html).toMatch(/<h3[^>]*title="Empanadas de Carne"[^>]*class="[^"]*line-clamp-2[^"]*"[^>]*>/);
+  });
+
+  it('en la categoría adicionales se muestra la lista tipo menú con puntos guía', () => {
+    const menuConAdicionales = {
+      categorias: [{ id: 99, nombre: 'Adicionales', orden: 9 }],
+      platos: [
+        {
+          id: 501,
+          categoriaId: 99,
+          nombre: 'Aguacate Extra',
+          descripcion: 'Porción fresca de aguacate hass',
+          precio: 4000,
+          disponible: true,
+        },
+      ],
+      armables: [],
+      origen: 'fija',
+    };
+
+    // Renderizamos la sección simulando que la categoría seleccionada es Adicionales
     const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} />
+      <CartaSeccion menu={menuConAdicionales} categoriaInicial={99} />
     );
 
-    expect(html).toContain('Bowl Parrillero');
-    expect(html).toContain('Paso 1');
-    expect(html).toContain('Base');
-    expect(html).toContain('Arroz salvaje');
-    expect(html).toContain('Quinoa');
-    expect(html).toContain('Paso 2');
-    expect(html).toContain('Proteína');
-    expect(html).toContain('Lomo saltado');
-    expect(html).toContain('Pollo parrillero');
-    expect(html).toContain('Obligatorio · Elige 1');
+    expect(html).toContain('Adicionales');
+    expect(html).toContain('Aguacate Extra');
+    expect(html).toContain('4.000');
+    expect(html).toContain('Pídelos junto a cualquiera de tus platos.');
+  });
+
+  it('tarjeta armable y simulador de "Arma tu plato": tarjeta contiene "Personalizable", "Desde" y "Ver ingredientes", y el diálogo renderiza pasos e ingredientes', () => {
+    const bowlParrillero = rawMenuBackend.categorias[1].platos[1];
+
+    // 1. Tarjeta en la carta
+    const menu = {
+      categorias: [{ id: 1, nombre: 'Parrilla' }],
+      platos: [],
+      armables: [bowlParrillero],
+      origen: 'fija',
+    };
+    const htmlCarta = renderToStaticMarkup(<CartaSeccion menu={menu} />);
+
+    expect(htmlCarta).toContain('Bowl Parrillero');
+    expect(htmlCarta).toContain('Personalizable');
+    expect(htmlCarta).toContain('Desde');
+    expect(htmlCarta).toContain('Ver ingredientes');
+    expect(htmlCarta).toContain('Base, Proteína');
+
+    // 2. Diálogo del simulador
+    const htmlDialogo = renderToStaticMarkup(
+      <DialogoSimuladorPlato plato={bowlParrillero} abierto={true} onCerrar={() => {}} />
+    );
+
+    expect(htmlDialogo).toContain('Bowl Parrillero');
+    expect(htmlDialogo).toContain('Paso 1');
+    expect(htmlDialogo).toContain('Base');
+    expect(htmlDialogo).toContain('Arroz salvaje');
+    expect(htmlDialogo).toContain('Quinoa');
+    expect(htmlDialogo).toContain('Paso 2');
+    expect(htmlDialogo).toContain('Proteína');
+    expect(htmlDialogo).toContain('Lomo saltado');
+    expect(htmlDialogo).toContain('Pollo parrillero');
+    expect(htmlDialogo).toContain('Obligatorio, elige 1');
+    expect(htmlDialogo).toContain('Agotado');
   });
 
   it('renderiza la información fija del restaurante y enlaces seguros de redes', async () => {
     const menu = await obtenerMenuPublico();
 
-    const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} />
-    );
+    const html = renderToStaticMarkup(<Carta menuInicial={menu} />);
 
     expect(html).toContain(restaurante.nombre);
     expect(html).toContain('Carrera 9 # 16-45, Centro');
@@ -153,11 +234,8 @@ describe('Carta (sitio público)', () => {
   it('NO contiene botones de añadir al carrito ni de enviar pedidos a cocina', async () => {
     const menu = await obtenerMenuPublico();
 
-    const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} />
-    );
+    const html = renderToStaticMarkup(<Carta menuInicial={menu} />);
 
-    // No debe haber acciones de carrito o pedido interactivo en mesa
     expect(html).not.toMatch(/Añadir \d/i);
     expect(html).not.toMatch(/Agregar al carrito/i);
     expect(html).not.toMatch(/Enviar mi pedido/i);
@@ -173,9 +251,7 @@ describe('Carta (sitio público)', () => {
     const menu = await obtenerMenuPublico();
     expect(menu.origen).toBe('fija');
 
-    const html = renderToStaticMarkup(
-      <Carta menuInicial={menu} />
-    );
+    const html = renderToStaticMarkup(<Carta menuInicial={menu} />);
 
     // Muestra platos de la carta fija sin romperse
     expect(html).toContain('Carta');
