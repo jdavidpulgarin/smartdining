@@ -69,7 +69,10 @@ describe('restaurante.js - datos informativos', () => {
     expect(restaurante.videosPlatos).toBeDefined();
     expect(typeof restaurante.videosPlatos).toBe('object');
     const nombres = Object.keys(restaurante.videosPlatos);
-    expect(nombres.length).toBeGreaterThan(0);
+    expect(nombres).toEqual(
+      expect.arrayContaining(['Arepa Rellena', 'Bowl Personalizado', 'Wrap Personalizado'])
+    );
+    expect(nombres.length).toBe(3);
     for (const nombre of nombres) {
       const vid = restaurante.videosPlatos[nombre];
       expect(typeof vid.archivo).toBe('string');

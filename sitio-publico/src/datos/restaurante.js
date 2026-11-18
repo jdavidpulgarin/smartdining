@@ -44,6 +44,12 @@ const restaurante = {
       ia: true,
       credito: 'Imagen base: Freepik',
     },
+    'Wrap Personalizado': {
+      archivo: '/videos/wrap.mp4',
+      poster: '/videos/wrap-poster.webp',
+      ia: true,
+      credito: '',
+    },
   },
 };
 
