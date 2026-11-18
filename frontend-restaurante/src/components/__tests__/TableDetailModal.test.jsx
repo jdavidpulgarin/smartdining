@@ -121,6 +121,25 @@ describe('TableDetailModal: consumo y saldo de la cuenta de la mesa', () => {
     expect(obtenerCuenta).toHaveBeenCalledTimes(2)
   })
 
+  it('pago total a nombre de "General": todos los comensales se ven "Pagado", sin "Saldo $X"', async () => {
+    obtenerCuenta.mockResolvedValue(
+      cuenta({
+        total_mesa: 24000,
+        pagado_mesa: 24000,
+        saldo_mesa: 0,
+        items_totales: 1,
+        comensales: [
+          { comensal: 'Daniel', items_pedidos: 1, subtotal: 24000, pagado: 0, saldo: 24000 },
+          { comensal: 'General', items_pedidos: 0, subtotal: 0, pagado: 24000, saldo: 0 },
+        ],
+      })
+    )
+    montar({ id_mesa: 3, numero: 3, status: 'Ocupada' })
+    expect(await screen.findByText('Daniel')).toBeInTheDocument()
+    expect(screen.getAllByText('Pagado')).toHaveLength(2)
+    expect(screen.queryByText(/^Saldo \$/)).not.toBeInTheDocument()
+  })
+
   it('si la cuenta falla: aviso de error y sin cifras inventadas', async () => {
     obtenerCuenta.mockRejectedValue(new Error('500'))
     montar({ id_mesa: 3, numero: 3, status: 'Ocupada' })

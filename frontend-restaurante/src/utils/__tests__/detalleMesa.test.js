@@ -136,6 +136,43 @@ describe('resumenDetalleMesa', () => {
     expect(r).toMatchObject({ total: 50000, pagado: 50000, saldo: 0, pagadaSinEntregar: false, comandas: [] })
   })
 
+  it('pago total a nombre de "General" con otro comensal con subtotal: todos quedan sin saldo ("Pagado")', () => {
+    // El caso real de staging: cobrar "toda la cuenta" deja el pago en General
+    // y a Daniel con su subtotal como saldo, aunque la mesa tenga saldo 0.
+    const r = resumenDetalleMesa({
+      mesa: ocupada,
+      cuenta: cuenta({
+        total_mesa: 24000,
+        pagado_mesa: 24000,
+        saldo_mesa: 0,
+        pedidos: [{ id_pedido: 62, codigo_pedido: 'PED-B', estado: 'listo', total: 24000 }],
+        comensales: [
+          { comensal: 'Daniel', items_pedidos: 1, subtotal: 24000, pagado: 0, saldo: 24000 },
+          { comensal: 'General', items_pedidos: 0, subtotal: 0, pagado: 24000, saldo: 0 },
+        ],
+      }),
+    })
+    expect(r.comensales.map((c) => [c.nombre, c.saldo])).toEqual([['Daniel', 0], ['General', 0]])
+    expect(r.comensales.every((c) => c.saldo === 0)).toBe(true)
+    expect(r.pagadaSinEntregar).toBe(true)
+  })
+
+  it('con saldo pendiente en la mesa, el saldo por comensal se respeta', () => {
+    const r = resumenDetalleMesa({
+      mesa: ocupada,
+      cuenta: cuenta({
+        total_mesa: 24000,
+        pagado_mesa: 10000,
+        saldo_mesa: 14000,
+        comensales: [
+          { comensal: 'Daniel', items_pedidos: 1, subtotal: 24000, pagado: 0, saldo: 24000 },
+          { comensal: 'General', items_pedidos: 0, subtotal: 0, pagado: 10000, saldo: 0 },
+        ],
+      }),
+    })
+    expect(r.comensales.find((c) => c.nombre === 'Daniel').saldo).toBe(24000)
+  })
+
   it('si la cuenta ya dice que la mesa está disponible, gana aunque el panel siga en ocupada', () => {
     const r = resumenDetalleMesa({
       mesa: ocupada,

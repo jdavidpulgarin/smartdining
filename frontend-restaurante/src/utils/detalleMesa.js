@@ -68,23 +68,27 @@ export function resumenDetalleMesa({ mesa, cuenta, pedidosPanel = [] } = {}) {
     .filter((p) => !ESTADOS_CERRADOS.includes(String(p.estado || '').toLowerCase()))
     .map((p) => ({ ...p, detalles: itemsPorPedido.get(Number(p.id_pedido)) || [] }))
 
+  const total = num(cuenta.total_mesa)
+  const pagado = num(cuenta.pagado_mesa)
+  const saldo = Math.max(0, num(cuenta.saldo_mesa))
+
+  // Mesa saldada: nadie debe nada. Al cobrar "toda la cuenta" el pago queda a
+  // nombre de "General" y el reparto de la base deja a los demás comensales con
+  // su subtotal como saldo; con el saldo de la mesa en 0 eso no es deuda real.
+  const cuentaSaldada = total > 0 && saldo === 0
+
   const comensales = (cuenta.comensales || [])
     .map((c) => ({
       nombre: (c.comensal || 'General').trim() || 'General',
       items: num(c.items_pedidos),
       subtotal: num(c.subtotal),
       pagado: num(c.pagado),
-      saldo: num(c.saldo),
+      saldo: cuentaSaldada ? 0 : num(c.saldo),
     }))
     .filter((c) => c.subtotal > 0 || c.pagado > 0)
 
-  const total = num(cuenta.total_mesa)
-  const pagado = num(cuenta.pagado_mesa)
-  const saldo = Math.max(0, num(cuenta.saldo_mesa))
-
   const pagadaSinEntregar =
-    total > 0 &&
-    saldo === 0 &&
+    cuentaSaldada &&
     comandas.some((p) => ESTADOS_SIN_ENTREGAR.includes(String(p.estado || '').toLowerCase()))
 
   return {
