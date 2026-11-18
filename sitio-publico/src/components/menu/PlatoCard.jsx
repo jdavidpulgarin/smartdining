@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { formatearPrecio } from '../../utils/formato.js';
 
 /**
@@ -7,6 +8,8 @@ import { formatearPrecio } from '../../utils/formato.js';
  * descripción en 2 líneas y precio en ámbar.
  */
 function PlatoCard({ plato, onSeleccionar, soloLectura = true }) {
+  const [errorImagen, setErrorImagen] = useState(false);
+
   if (!plato) return null;
 
   const {
@@ -31,7 +34,7 @@ function PlatoCard({ plato, onSeleccionar, soloLectura = true }) {
     >
       {/* Contenedor de foto con respaldo de degradado */}
       <div className="relative aspect-[16/11] w-full overflow-hidden bg-gradient-to-br from-[#43201a] to-[#150c0c] shrink-0">
-        {imagenUrl ? (
+        {imagenUrl && !errorImagen ? (
           <img
             src={imagenUrl}
             alt=""
@@ -39,9 +42,7 @@ function PlatoCard({ plato, onSeleccionar, soloLectura = true }) {
             height={440}
             loading="lazy"
             decoding="async"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
+            onError={() => setErrorImagen(true)}
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         ) : null}

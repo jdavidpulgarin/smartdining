@@ -9,6 +9,98 @@ import {
   reglaTextoPaso,
 } from '../../utils/simuladorPlato.js';
 
+function BotonOpcionIngrediente({
+  ing,
+  estaMarcado,
+  agotado,
+  onClick,
+}) {
+  const [errorImagen, setErrorImagen] = useState(false);
+  const extra = Number(ing.precio_extra) || 0;
+  const tieneImagen = Boolean(ing.url_imagen && !errorImagen);
+
+  return (
+    <button
+      type="button"
+      aria-pressed={estaMarcado}
+      disabled={agotado}
+      onClick={onClick}
+      className={`relative flex flex-col text-left p-2.5 rounded-xl border transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto ${
+        agotado
+          ? 'bg-fondo/40 border-papel/10 opacity-40 cursor-not-allowed'
+          : estaMarcado
+          ? 'bg-ambar/10 border-ambar shadow-[inset_0_0_0_1px_rgba(255,184,28,1)]'
+          : 'bg-fondo border-papel/15 hover:border-papel/50'
+      }`}
+    >
+      <div className="relative aspect-square w-full rounded-lg overflow-hidden bg-gradient-to-br from-[#43201a] to-[#150c0c] flex items-center justify-center mb-2">
+        {tieneImagen ? (
+          <img
+            src={ing.url_imagen}
+            alt=""
+            width={160}
+            height={160}
+            loading="lazy"
+            decoding="async"
+            onError={() => setErrorImagen(true)}
+            className="w-full h-full object-cover"
+          />
+        ) : null}
+
+        <span
+          aria-hidden="true"
+          className="font-titulo text-2xl text-papel/20"
+        >
+          {ing.nombre?.charAt(0)}
+        </span>
+
+        {!agotado && (
+          <span
+            aria-hidden="true"
+            className={`absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
+              estaMarcado
+                ? 'bg-primario text-white border-2 border-primario'
+                : 'bg-black/60 text-transparent border-2 border-papel/40'
+            }`}
+          >
+            ✓
+          </span>
+        )}
+      </div>
+
+      <div className="flex-1 flex flex-col justify-between w-full">
+        <div>
+          <strong className="block font-cuerpo-poster font-semibold text-xs sm:text-sm text-papel leading-snug line-clamp-2">
+            {ing.nombre}
+          </strong>
+          {ing.calorias != null &&
+            !isNaN(Number(ing.calorias)) && (
+              <small className="block text-[11px] text-papel/60 font-cuerpo-poster mt-0.5">
+                {ing.calorias} kcal
+              </small>
+            )}
+        </div>
+
+        <div className="mt-2 pt-1.5 border-t border-dashed border-papel/15">
+          {agotado ? (
+            <span className="text-xs font-bold text-primario-texto block">
+              Agotado
+            </span>
+          ) : extra > 0 ? (
+            <span className="font-titulo text-base text-ambar tracking-wide block">
+              +{formatearPrecio(extra)}
+            </span>
+          ) : (
+            <span className="text-xs font-semibold text-papel/60 block font-cuerpo-poster">
+              Incluido
+            </span>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 /**
  * Diálogo interactivo del simulador 'Arma tu plato'.
  * Permite explorar los ingredientes de un plato personalizable,
@@ -111,90 +203,15 @@ function DialogoSimuladorPlato({ plato, abierto = false, onCerrar }) {
                     {ingredientes.map((ing, ii) => {
                       const estaMarcado = seleccionadosPaso.includes(ii);
                       const agotado = ing.disponible === false;
-                      const extra = Number(ing.precio_extra) || 0;
 
                       return (
-                        <button
+                        <BotonOpcionIngrediente
                           key={ing.id_ingrediente ?? ii}
-                          type="button"
-                          aria-pressed={estaMarcado}
-                          disabled={agotado}
+                          ing={ing}
+                          estaMarcado={estaMarcado}
+                          agotado={agotado}
                           onClick={() => manejarOpcionClick(si, ii)}
-                          className={`relative flex flex-col text-left p-2.5 rounded-xl border transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto ${
-                            agotado
-                              ? 'bg-fondo/40 border-papel/10 opacity-40 cursor-not-allowed'
-                              : estaMarcado
-                              ? 'bg-ambar/10 border-ambar shadow-[inset_0_0_0_1px_rgba(255,184,28,1)]'
-                              : 'bg-fondo border-papel/15 hover:border-papel/50'
-                          }`}
-                        >
-                          <div className="relative aspect-square w-full rounded-lg overflow-hidden bg-gradient-to-br from-[#43201a] to-[#150c0c] flex items-center justify-center mb-2">
-                            {ing.url_imagen ? (
-                              <img
-                                src={ing.url_imagen}
-                                alt=""
-                                width={160}
-                                height={160}
-                                loading="lazy"
-                                decoding="async"
-                                onError={(e) => {
-                                  e.currentTarget.style.display = 'none';
-                                }}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : null}
-
-                            <span
-                              aria-hidden="true"
-                              className="font-titulo text-2xl text-papel/20"
-                            >
-                              {ing.nombre?.charAt(0)}
-                            </span>
-
-                            {!agotado && (
-                              <span
-                                aria-hidden="true"
-                                className={`absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
-                                  estaMarcado
-                                    ? 'bg-primario text-white border-2 border-primario'
-                                    : 'bg-black/60 text-transparent border-2 border-papel/40'
-                                }`}
-                              >
-                                ✓
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex-1 flex flex-col justify-between w-full">
-                            <div>
-                              <strong className="block font-cuerpo-poster font-semibold text-xs sm:text-sm text-papel leading-snug line-clamp-2">
-                                {ing.nombre}
-                              </strong>
-                              {ing.calorias != null &&
-                                !isNaN(Number(ing.calorias)) && (
-                                  <small className="block text-[11px] text-papel/60 font-cuerpo-poster mt-0.5">
-                                    {ing.calorias} kcal
-                                  </small>
-                                )}
-                            </div>
-
-                            <div className="mt-2 pt-1.5 border-t border-dashed border-papel/15">
-                              {agotado ? (
-                                <span className="text-xs font-bold text-primario-texto block">
-                                  Agotado
-                                </span>
-                              ) : extra > 0 ? (
-                                <span className="font-titulo text-base text-ambar tracking-wide block">
-                                  +{formatearPrecio(extra)}
-                                </span>
-                              ) : (
-                                <span className="text-xs font-semibold text-papel/60 block">
-                                  Incluido
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </button>
+                        />
                       );
                     })}
                   </div>

@@ -31,13 +31,16 @@ describe('Componente Encabezado', () => {
     expect(navDesktop).not.toContain('bg-exito');
   });
 
-  it('conserva el logo y nombre SMARTDINING', () => {
+  it('conserva el logo y muestra "SmartDining" sin truncate', () => {
     const secciones = obtenerSecciones();
     const html = renderToStaticMarkup(
       <Encabezado secciones={secciones} datosRestaurante={restaurante} />
     );
 
-    expect(html).toContain('SMARTDINING');
+    expect(html).toContain('SmartDining');
     expect(html).toContain('src="/logo.png"');
+    // Verifica que el span del nombre no lleva la clase truncate y sí whitespace-nowrap
+    expect(html).not.toMatch(/class="[^"]*\btruncate\b[^"]*"[^>]*>SmartDining/);
+    expect(html).toMatch(/class="[^"]*\bwhitespace-nowrap\b[^"]*"[^>]*>SmartDining/);
   });
 });

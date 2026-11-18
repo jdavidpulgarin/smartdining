@@ -30,6 +30,42 @@ describe('PlatoDetalleModal (soloLectura)', () => {
     expect(html).not.toMatch(/Aumentar cantidad/i);
   });
 
+  it('el <img> del detalle tiene manejador de error y, si se simula el error, no se muestra la imagen y sí el fondo de respaldo', () => {
+    const plato = {
+      id: 10,
+      nombre: 'Parrillada Mixta',
+      descripcion: 'Cortes premium a la brasa',
+      precio: 45000,
+      imagen: 'https://images.unsplash.com/parrillada.jpg',
+      disponible: true,
+    };
+
+    // Caso 1: Carga normal (sin error) -> se renderiza la imagen
+    const htmlNormal = renderToStaticMarkup(
+      <PlatoDetalleModal
+        plato={plato}
+        abierto={true}
+        onCerrar={() => {}}
+        errorImagenInicial={false}
+      />
+    );
+    expect(htmlNormal).toContain('<img');
+    expect(htmlNormal).toContain('src="https://images.unsplash.com/parrillada.jpg"');
+
+    // Caso 2: Simulación de error de imagen -> se oculta el <img> y se muestra el fondo oscuro con el nombre
+    const htmlConError = renderToStaticMarkup(
+      <PlatoDetalleModal
+        plato={plato}
+        abierto={true}
+        onCerrar={() => {}}
+        errorImagenInicial={true}
+      />
+    );
+    expect(htmlConError).not.toContain('<img');
+    expect(htmlConError).toContain('Parrillada Mixta');
+    expect(htmlConError).toContain('bg-gradient-to-br from-[#43201a] to-[#150c0c]');
+  });
+
   it('detalle de un plato armable (Arepa Rellena): muestra el paso a paso ("Así lo armas"), los 3-4 pasos con sus reglas, los ingredientes con sus fotos, "180 kcal" en la de maíz, "+$ 1.500" en la de chócolo y el cálculo de calorías con "Desde"', () => {
     const arepaRellena = {
       id_plato: 201,

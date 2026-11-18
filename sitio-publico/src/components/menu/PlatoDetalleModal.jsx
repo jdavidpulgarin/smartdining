@@ -44,8 +44,18 @@ export function calcularCaloriasArmable(pasos = []) {
  * Papel crema (bg-papel, texto tinta), foto/video a la izquierda y texto a la derecha,
  * precio en primario, descripción, chips punteados de ingredientes y chips rojos de alérgenos.
  */
-function PlatoDetalleModal({ plato, abierto, onCerrar }) {
+function PlatoDetalleModal({
+  plato,
+  abierto,
+  onCerrar,
+  errorImagenInicial = false,
+}) {
   const [desactivarVideo, setDesactivarVideo] = useState(false);
+  const [errorImagen, setErrorImagen] = useState(errorImagenInicial);
+
+  useEffect(() => {
+    setErrorImagen(errorImagenInicial);
+  }, [plato?.id, plato?.id_plato, plato?.imagen, plato?.url_imagen, errorImagenInicial]);
 
   const esArmable = Boolean(
     plato?.personalizable === true ||
@@ -143,7 +153,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
                   tabIndex={-1}
                   className="w-full h-full object-cover"
                 />
-              ) : videoInfo?.poster ? (
+              ) : videoInfo?.poster && !errorImagen ? (
                 <img
                   src={videoInfo.poster}
                   alt={plato.nombre}
@@ -151,9 +161,10 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
                   height={480}
                   loading="lazy"
                   decoding="async"
+                  onError={() => setErrorImagen(true)}
                   className="w-full h-full object-cover"
                 />
-              ) : imagenUrl ? (
+              ) : imagenUrl && !errorImagen ? (
                 <img
                   src={imagenUrl}
                   alt={plato.nombre}
@@ -161,10 +172,14 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
                   height={480}
                   loading="lazy"
                   decoding="async"
+                  onError={() => setErrorImagen(true)}
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center font-titulo text-2xl uppercase tracking-wider text-papel/40">
+                <div
+                  aria-hidden="true"
+                  className="w-full h-full bg-gradient-to-br from-[#43201a] to-[#150c0c] flex items-center justify-center font-titulo text-2xl uppercase tracking-wider text-papel/40 select-none p-4 text-center"
+                >
                   {plato.nombre}
                 </div>
               )}

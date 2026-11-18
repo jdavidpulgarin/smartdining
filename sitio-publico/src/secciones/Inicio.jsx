@@ -100,9 +100,9 @@ function Inicio({ datosRestaurante = {} }) {
         className="absolute inset-0 bg-[radial-gradient(circle_at_75%_35%,rgba(163,20,28,0.22),transparent_65%)] bg-gradient-to-t from-fondo via-transparent to-transparent pointer-events-none"
       />
 
-      {/* Control accesible WCAG 2.2.2 para pausar/reanudar movimiento de video y animación */}
+      {/* Control accesible WCAG 2.2.2 para pausar/reanudar movimiento de video y animación (en escritorio) */}
       {montado && (
-        <div className="absolute bottom-20 sm:bottom-24 right-4 sm:right-8 z-20 flex items-center justify-end">
+        <div className="hidden sm:flex absolute bottom-24 right-8 z-20 items-center justify-end">
           <button
             type="button"
             onClick={alternarReproduccion}
@@ -144,7 +144,7 @@ function Inicio({ datosRestaurante = {} }) {
           </h1>
 
           {eslogan && (
-            <p className="text-base sm:text-xl text-papel/85 font-cuerpo-poster max-w-lg leading-relaxed">
+            <p className="mt-6 sm:mt-8 text-base sm:text-xl text-papel/85 font-cuerpo-poster max-w-lg leading-relaxed">
               {eslogan}
             </p>
           )}
@@ -168,7 +168,7 @@ function Inicio({ datosRestaurante = {} }) {
         </div>
 
         {/* Columna derecha: Emblema circular con logo, anillo SVG rotativo y ticket ABIERTO/CERRADO */}
-        <div className="lg:col-span-5 flex justify-center lg:justify-end">
+        <div className="lg:col-span-5 flex flex-col items-center lg:items-end">
           <div className="relative w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 flex items-center justify-center">
             {/* Círculo rojo central con el chef */}
             <div className="w-44 h-44 sm:w-56 sm:h-56 md:w-64 md:h-64 rounded-full bg-primario flex items-center justify-center shadow-2xl relative z-0">
@@ -198,10 +198,15 @@ function Inicio({ datosRestaurante = {} }) {
               </defs>
               <text
                 fill="#FFF3E6"
-                className="font-titulo text-[16px] uppercase tracking-[0.22em]"
+                className="font-titulo text-[14px] uppercase tracking-[0.18em]"
               >
-                <textPath href="#textoAnilloPath" startOffset="0%">
-                  SABOR VALLENATO <tspan fill="#FFB81C">•</tspan> SERVICIO INTELIGENTE <tspan fill="#FFB81C">•</tspan> SABOR VALLENATO <tspan fill="#FFB81C">•</tspan> SERVICIO INTELIGENTE <tspan fill="#FFB81C">•</tspan>
+                <textPath
+                  href="#textoAnilloPath"
+                  startOffset="0%"
+                  textLength="785.4"
+                  lengthAdjust="spacing"
+                >
+                  SABOR VALLENATO <tspan fill="#FFB81C">•</tspan> SERVICIO INTELIGENTE <tspan fill="#FFB81C">•</tspan> SABOR VALLENATO <tspan fill="#FFB81C">•</tspan> SERVICIO INTELIGENTE <tspan fill="#FFB81C">•</tspan>{' '}
                 </textPath>
               </text>
             </svg>
@@ -224,19 +229,38 @@ function Inicio({ datosRestaurante = {} }) {
               </p>
             </div>
           </div>
+
+          {/* En celular: botón debajo del emblema para no tapar el ticket de horario */}
+          {montado && (
+            <div className="mt-6 flex sm:hidden justify-center z-20">
+              <button
+                type="button"
+                onClick={alternarReproduccion}
+                aria-pressed={!reproduciendo}
+                aria-label={
+                  reproduciendo
+                    ? 'Pausar video y animación de la portada'
+                    : 'Reproducir video y animación de la portada'
+                }
+                className="px-3.5 py-1.5 rounded-xl bg-superficie/85 hover:bg-superficie text-texto text-xs font-etiqueta font-bold uppercase tracking-wider border border-borde backdrop-blur-sm cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto shadow-lg"
+              >
+                {reproduciendo ? 'Pausar animación' : 'Reproducir animación'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Cinta ámbar inclinada al pie (-rotate-2, sin scroll horizontal) */}
+      {/* Cinta ámbar inclinada al pie (-rotate-2, sin scroll horizontal, centrada y adaptable en celular) */}
       <div className="relative z-10 w-full overflow-hidden mt-8 sm:mt-12 -mb-2 sm:-mb-3">
-        <div className="w-[120%] -ml-[10%] bg-ambar text-tinta py-3 -rotate-2 shadow-2xl select-none">
-          <ul className="flex items-center justify-around gap-4 font-titulo text-base sm:text-lg md:text-xl tracking-wider uppercase whitespace-nowrap px-4 list-none m-0">
+        <div className="w-[120%] -ml-[10%] bg-ambar text-tinta py-2.5 sm:py-3.5 -rotate-2 shadow-2xl select-none flex justify-center">
+          <ul className="flex flex-wrap items-center justify-center gap-x-3 sm:gap-x-6 gap-y-1 font-titulo text-xs sm:text-base md:text-lg tracking-wider uppercase text-center px-4 max-w-5xl mx-auto list-none m-0">
             <li>PIDE DESDE TU MESA</li>
-            <li aria-hidden="true" className="text-primario text-sm sm:text-base">✦</li>
+            <li aria-hidden="true" className="text-primario text-xs sm:text-sm">✦</li>
             <li>ESCANEA EL QR</li>
-            <li aria-hidden="true" className="text-primario text-sm sm:text-base">✦</li>
+            <li aria-hidden="true" className="text-primario text-xs sm:text-sm">✦</li>
             <li>SIGUE TU PEDIDO EN VIVO</li>
-            <li aria-hidden="true" className="text-primario text-sm sm:text-base">✦</li>
+            <li aria-hidden="true" className="text-primario text-xs sm:text-sm">✦</li>
             <li>SIN APPS</li>
           </ul>
         </div>

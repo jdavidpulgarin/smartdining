@@ -155,8 +155,19 @@ function Contacto({ datosRestaurante = restauranteDefault, mapaVisibleInicial = 
                   <span className="etiqueta-girada text-xs font-titulo tracking-wider px-2.5 py-0.5 self-start">
                     Correo
                   </span>
-                  <b className="font-titulo text-xl sm:text-2xl tracking-wide text-papel break-all">
-                    {datosRestaurante.correo}
+                  <b className="font-titulo text-base sm:text-lg lg:text-xl tracking-wide text-papel">
+                    {(() => {
+                      const correo = datosRestaurante.correo;
+                      const partes = correo.split('@');
+                      if (partes.length === 2) {
+                        return (
+                          <>
+                            {partes[0]}@<wbr />{partes[1]}
+                          </>
+                        );
+                      }
+                      return correo;
+                    })()}
                   </b>
                 </a>
               )}

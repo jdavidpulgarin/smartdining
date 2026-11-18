@@ -76,4 +76,12 @@ describe('Contacto (fachada de mapa, horario y enlaces estilo póster)', () => {
     expect(html).toContain('a7.5 7.5 0 1115 0z');
     expect(html).not.toContain('11-15 0z');
   });
+
+  it('el correo lleva <wbr> después de la @ y no usa break-all', () => {
+    const html = renderToStaticMarkup(<Contacto datosRestaurante={restaurante} />);
+
+    expect(html).toContain(`mailto:${restaurante.correo}`);
+    expect(html).toContain('<wbr');
+    expect(html).not.toMatch(/class="[^"]*\bbreak-all\b[^"]*"[^>]*>[^<]*<wbr/);
+  });
 });

@@ -10,7 +10,6 @@ import { estadoHorario } from '../utils/horario.js';
  */
 function Encabezado({ secciones = [], datosRestaurante = {} }) {
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
-  const nombreRestaurante = datosRestaurante.nombre || 'SmartDining';
   const horario = datosRestaurante.horario || restauranteDefault.horario;
 
   const [estado, setEstado] = useState(() => estadoHorario(new Date(), horario));
@@ -54,17 +53,17 @@ function Encabezado({ secciones = [], datosRestaurante = {} }) {
         {/* Logo y nombre con enlace a #inicio */}
         <a
           href="#inicio"
-          className="flex items-center gap-3 min-w-0 min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto rounded-xl"
+          className="flex items-center gap-3 min-w-0 min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto rounded-xl shrink-0"
         >
           <img
             src="/logo.png"
-            alt={nombreRestaurante}
+            alt="SmartDining"
             width={40}
             height={40}
             className="w-10 h-10 rounded-xl object-cover shrink-0"
           />
-          <span className="font-titulo text-2xl sm:text-3xl tracking-widest uppercase text-papel truncate">
-            SMARTDINING
+          <span className="font-titulo text-2xl sm:text-3xl tracking-widest uppercase text-papel whitespace-nowrap">
+            SmartDining
           </span>
         </a>
 

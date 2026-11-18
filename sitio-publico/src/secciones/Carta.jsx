@@ -37,6 +37,7 @@ export function TarjetaPlatoArmablePublico({
     datosRestaurante.videosPlatos?.[plato.nombre] ||
     restauranteDefault.videosPlatos?.[plato.nombre];
   const [desactivarVideo, setDesactivarVideo] = useState(false);
+  const [errorImagen, setErrorImagen] = useState(false);
 
   useEffect(() => {
     if (!videoInfo) return undefined;
@@ -101,7 +102,7 @@ export function TarjetaPlatoArmablePublico({
             tabIndex={-1}
             className="w-full h-full object-cover"
           />
-        ) : videoInfo?.poster ? (
+        ) : videoInfo?.poster && !errorImagen ? (
           <img
             src={videoInfo.poster}
             alt={`Plato personalizable ${plato.nombre}`}
@@ -109,9 +110,10 @@ export function TarjetaPlatoArmablePublico({
             height={440}
             loading="lazy"
             decoding="async"
+            onError={() => setErrorImagen(true)}
             className="w-full h-full object-cover"
           />
-        ) : imagenUrl ? (
+        ) : imagenUrl && !errorImagen ? (
           <img
             src={imagenUrl}
             alt={`Plato personalizable ${plato.nombre}`}
@@ -119,6 +121,7 @@ export function TarjetaPlatoArmablePublico({
             height={440}
             loading="lazy"
             decoding="async"
+            onError={() => setErrorImagen(true)}
             className="w-full h-full object-cover"
           />
         ) : (
@@ -170,6 +173,55 @@ export function TarjetaPlatoArmablePublico({
         </button>
       </div>
     </article>
+  );
+}
+
+function TarjetaPlatoDestacado({ plato, onSeleccionarPlato }) {
+  const [errorImagen, setErrorImagen] = useState(false);
+  const img = plato.imagen || plato.url_imagen;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSeleccionarPlato?.(plato)}
+      className="group relative w-full aspect-[4/5] text-left p-0 border-0 rounded-xl overflow-hidden bg-gradient-to-br from-[#43201a] to-[#150c0c] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto shadow-xl"
+    >
+      {img && !errorImagen ? (
+        <img
+          src={img}
+          alt=""
+          width={640}
+          height={800}
+          loading="lazy"
+          decoding="async"
+          onError={() => setErrorImagen(true)}
+          className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+        />
+      ) : null}
+
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-gradient-to-t from-[#0c0707]/95 via-[#0c0707]/35 to-transparent pointer-events-none"
+      />
+
+      <span className="absolute top-4 -right-1 z-10 etiqueta-girada font-titulo text-2xl tracking-wide px-3.5 py-1.5 shadow-xl rotate-[3deg]">
+        {formatearPrecio(plato.precio)}
+      </span>
+
+      <div className="absolute left-0 right-0 bottom-0 z-10 p-5 sm:p-6 space-y-1.5">
+        <h3
+          title={plato.nombre}
+          className="font-titulo text-3xl sm:text-4xl text-papel uppercase tracking-wide leading-none line-clamp-2 m-0"
+        >
+          {plato.nombre}
+        </h3>
+        {plato.descripcion && (
+          <p className="font-cuerpo-poster text-sm sm:text-base text-papel/75 line-clamp-2 leading-snug m-0">
+            {plato.descripcion}
+          </p>
+        )}
+      </div>
+    </button>
   );
 }
 
@@ -360,55 +412,13 @@ function CartaSeccion({
                       Los más pedidos
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      {platosDestacados.map((plato) => {
-                        const img = plato.imagen || plato.url_imagen;
-                        return (
-                          <button
-                            key={plato.id}
-                            type="button"
-                            onClick={() => onSeleccionarPlato?.(plato)}
-                            className="group relative w-full aspect-[4/5] text-left p-0 border-0 rounded-xl overflow-hidden bg-gradient-to-br from-[#43201a] to-[#150c0c] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto shadow-xl"
-                          >
-                            {img ? (
-                              <img
-                                src={img}
-                                alt=""
-                                width={640}
-                                height={800}
-                                loading="lazy"
-                                decoding="async"
-                                onError={(e) => {
-                                  e.currentTarget.style.display = 'none';
-                                }}
-                                className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                              />
-                            ) : null}
-
-                            <div
-                              aria-hidden="true"
-                              className="absolute inset-0 bg-gradient-to-t from-[#0c0707]/95 via-[#0c0707]/35 to-transparent pointer-events-none"
-                            />
-
-                            <span className="absolute top-4 -right-1 z-10 etiqueta-girada font-titulo text-2xl tracking-wide px-3.5 py-1.5 shadow-xl rotate-[3deg]">
-                              {formatearPrecio(plato.precio)}
-                            </span>
-
-                            <div className="absolute left-0 right-0 bottom-0 z-10 p-5 sm:p-6 space-y-1.5">
-                              <h3
-                                title={plato.nombre}
-                                className="font-titulo text-3xl sm:text-4xl text-papel uppercase tracking-wide leading-none line-clamp-2 m-0"
-                              >
-                                {plato.nombre}
-                              </h3>
-                              {plato.descripcion && (
-                                <p className="font-cuerpo-poster text-sm sm:text-base text-papel/75 line-clamp-2 leading-snug m-0">
-                                  {plato.descripcion}
-                                </p>
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
+                      {platosDestacados.map((plato) => (
+                        <TarjetaPlatoDestacado
+                          key={plato.id}
+                          plato={plato}
+                          onSeleccionarPlato={onSeleccionarPlato}
+                        />
+                      ))}
                     </div>
                   </div>
                 )}

@@ -22,15 +22,19 @@ describe('Sección Inicio (Hero Póster)', () => {
     expect(html).toMatch(/fetchpriority="high"/i);
   });
 
-  it('contiene el anillo circular SVG aria-hidden con textPath "SABOR VALLENATO"', () => {
+  it('contiene el anillo circular SVG aria-hidden con textPath exacto (textLength y lengthAdjust="spacing")', () => {
     const html = renderToStaticMarkup(<Inicio datosRestaurante={restaurante} />);
 
     expect(html).toMatch(/<svg[^>]*aria-hidden="true"[^>]*>[\s\S]*<textPath[^>]*>[\s\S]*SABOR VALLENATO[\s\S]*<\/textPath>[\s\S]*<\/svg>/);
+    expect(html).toContain('textLength="785.4"');
+    expect(html).toContain('lengthAdjust="spacing"');
   });
 
-  it('renderiza la cinta estática con <ul> y los 4 textos de llamado a la acción', () => {
+  it('renderiza la cinta estática con <ul>, justify-center, flex-wrap y los 4 textos de llamado a la acción', () => {
     const html = renderToStaticMarkup(<Inicio datosRestaurante={restaurante} />);
 
+    expect(html).toMatch(/<ul[^>]*class="[^"]*\bjustify-center\b[^"]*"[^>]*>/);
+    expect(html).toMatch(/<ul[^>]*class="[^"]*\bflex-wrap\b[^"]*"[^>]*>/);
     expect(html).toMatch(/<ul[^>]*>[\s\S]*PIDE DESDE TU MESA[\s\S]*ESCANEA EL QR[\s\S]*SIGUE TU PEDIDO EN VIVO[\s\S]*SIN APPS[\s\S]*<\/ul>/);
     expect(html).toContain('PIDE DESDE TU MESA');
     expect(html).toContain('ESCANEA EL QR');
