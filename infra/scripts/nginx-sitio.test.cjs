@@ -102,6 +102,19 @@ test('X-Robots-Tag: noindex en todos los subdominios y en TODO staging; sin cabe
   // Un proyecto desconocido (o NGINX_PROYECTO vacío) no abre nada.
   assert.strictEqual(robots(config('smartdining.com.co', 'otro'), 'smartdining.com.co'), 'noindex, nofollow');
   assert.strictEqual(robots(config('smartdining.com.co', ''), 'smartdining.com.co'), 'noindex, nofollow');
+  // Staging con NGINX_PROYECTO=smartdining por error: su raíz sigue con noindex.
+  const stagingMalProyecto = config('staging.smartdining.com.co', 'smartdining');
+  assert.strictEqual(robots(stagingMalProyecto, 'staging.smartdining.com.co'), 'noindex, nofollow');
+  for (const sub of SUBDOMINIOS) {
+    assert.strictEqual(robots(stagingMalProyecto, `${sub}.staging.smartdining.com.co`), 'noindex, nofollow');
+  }
+});
+
+test('la única clave sin X-Robots-Tag es el literal "smartdining.com.co|smartdining"', () => {
+  const bloque = PLANTILLA.match(/map "\$host\|\$\{NGINX_PROYECTO\}" \$sd_robots \{([\s\S]*?)\n\}/)[1];
+  const vacias = bloque.split('\n').map((l) => l.trim()).filter((l) => /""\s*;$/.test(l));
+  assert.deepStrictEqual(vacias.map((l) => l.split(/\s+/)[0]), ['"smartdining.com.co|smartdining"']);
+  assert.doesNotMatch(bloque, /\$\{DOMINIO\}/);
 });
 
 test('X-Robots-Tag sale en cada server HTTPS y en cada location con add_header propio', () => {
@@ -117,6 +130,63 @@ test('X-Robots-Tag sale en cada server HTTPS y en cada location con add_header p
   // El location de imágenes de api. tiene add_header en varias líneas: repite seguridad.conf.
   const imagenes = PROD.match(/location ~ "\^\/imagenes\/[\s\S]*?\n    \}/)[0];
   assert.match(imagenes, /include \/etc\/nginx\/snippets\/seguridad\.conf;/);
+});
+
+/** Bloques "location … { … }" de primer nivel dentro de un server (llaves anidadas incluidas). */
+function locations(server) {
+  const lista = [];
+  // Una regex entre comillas puede llevar llaves ({36}): no cuentan.
+  const re = /\n {4}location /g;
+  let m;
+  while ((m = re.exec(server))) {
+    let nivel = 0;
+    let comillas = false;
+    let i = m.index;
+    for (; i < server.length; i++) {
+      if (server[i] === '"') comillas = !comillas;
+      if (comillas) continue;
+      if (server[i] === '{') nivel++;
+      if (server[i] === '}' && --nivel === 0) break;
+    }
+    lista.push(server.slice(m.index + 1, i + 1));
+  }
+  return lista;
+}
+const INCLUYE_CABECERAS = /include \/etc\/nginx\/snippets\/(seguridad|cabeceras-sitio)\.conf;/;
+
+test('X-Robots-Tag efectiva en TODAS las location de todos los server HTTPS (herencia de add_header de nginx)', () => {
+  // nginx: un location con algún add_header propio NO hereda los del server;
+  // uno sin add_header los hereda. Se evalúa cada location con esa regla.
+  const vistos = [];
+  for (const s of servers(PROD).filter((x) => x.includes('listen 443'))) {
+    const nombre = s.match(/server_name ([^;]+);/)[1];
+    let nivelServer = s;
+    const locs = locations(s);
+    for (const l of locs) nivelServer = nivelServer.replace(l, '');
+    for (const l of locs) {
+      // "location … {" hasta la llave de apertura (fuera de comillas).
+      const primera = l.split('\n')[0];
+      const cabecera = primera.slice(0, primera.search(/ \{(?=(?:[^"]*"[^"]*")*[^"]*$)/)).trim();
+      const efectiva = /add_header /.test(l) ? INCLUYE_CABECERAS.test(l) : INCLUYE_CABECERAS.test(nivelServer);
+      assert.ok(efectiva, `${nombre} · ${cabecera}: sin X-Robots-Tag`);
+      vistos.push(`${nombre} ${cabecera}`);
+    }
+    // Un server sin location (www) responde desde el nivel del server.
+    if (locs.length === 0) assert.match(nivelServer, INCLUYE_CABECERAS, nombre);
+  }
+  // Las que pidió la revisión, por nombre (para que la prueba falle si desaparecen).
+  for (const esperada of [
+    'smartdining.com.co location /assets/',
+    'app.smartdining.com.co location /assets/',
+    'staff.smartdining.com.co location /assets/',
+    'cocina.smartdining.com.co location /assets/',
+    'api.smartdining.com.co location ~ ^/api(/v1)?/mesas/qr/[^/]+/sesion$',
+    'api.smartdining.com.co location ~ "^/imagenes/[0-9a-f-]{36}\\.webp$"',
+    'rt.smartdining.com.co location ^~ /pagos/',
+    'rt.smartdining.com.co location /socket.io/',
+  ]) {
+    assert.ok(vistos.includes(esperada), `no se evaluó: ${esperada}`);
+  }
 });
 
 test('NGINX_PROYECTO sale del proyecto de compose de cada entorno', () => {
