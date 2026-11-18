@@ -53,7 +53,8 @@ const TOKEN = 'v1.eyJtIjoyLCJzaWQiOiJmYWxzbyJ9.FirmaFalsaDePrueba_-123';
 
 test('cada server de la plantilla escribe su access log con el formato sin tokens', () => {
   const servers = PLANTILLA.split(/^server \{$/m).slice(1);
-  assert.strictEqual(servers.length, 7);
+  // 80, www (301 al raíz), raíz (sitio público), app., staff., cocina., api. y rt.
+  assert.strictEqual(servers.length, 8);
   for (const s of servers) {
     const nombre = /server_name ([^;]+);/.exec(s)[1];
     assert.ok(s.includes(ACCESS_LOG), `falta "${ACCESS_LOG}" en ${nombre}`);

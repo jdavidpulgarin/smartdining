@@ -22,12 +22,22 @@
 #     sh infra/scripts/validar-nginx.sh
 #
 # Se mandan por stdin (tar) al mismo nginx y solo viven en su carpeta temporal.
-# Los snippets son siempre los de la imagen.
+# Los snippets son los de la imagen, salvo que SNIPPETS=<carpeta> (*.conf, solo
+# junto con PLANTILLAS) mande también los de la rama: entonces los include de
+# /etc/nginx/snippets/ apuntan a esa copia temporal.
+#
+#   PLANTILLAS=/tmp/rama/infra/nginx/templates SNIPPETS=/tmp/rama/infra/nginx/snippets \
+#     ENV_FILE=infra/.env.staging sh infra/scripts/validar-nginx.sh
 set -eu
 
 if [ -n "${PLANTILLAS:-}" ]; then
   PLANTILLAS=$(cd "$PLANTILLAS" && pwd) || { echo "PLANTILLAS no es una carpeta: $PLANTILLAS" >&2; exit 1; }
   ls "$PLANTILLAS"/*.template > /dev/null 2>&1 || { echo "No hay archivos .template en $PLANTILLAS" >&2; exit 1; }
+fi
+if [ -n "${SNIPPETS:-}" ]; then
+  [ -n "${PLANTILLAS:-}" ] || { echo "SNIPPETS solo va junto con PLANTILLAS" >&2; exit 1; }
+  SNIPPETS=$(cd "$SNIPPETS" && pwd) || { echo "SNIPPETS no es una carpeta: $SNIPPETS" >&2; exit 1; }
+  ls "$SNIPPETS"/*.conf > /dev/null 2>&1 || { echo "No hay archivos .conf en $SNIPPETS" >&2; exit 1; }
 fi
 
 cd "$(dirname "$0")/../.."
@@ -53,12 +63,24 @@ done
 entrada() {
   if [ -n "${PLANTILLAS:-}" ]; then
     echo "Plantillas: $PLANTILLAS" >&2
-    (cd "$PLANTILLAS" && tar -cf - ./*.template)
+    if [ -n "${SNIPPETS:-}" ]; then
+      echo "Snippets: $SNIPPETS" >&2
+      # Los .template en la raíz del tar (igual que sin SNIPPETS) y los .conf en ./snippets/.
+      copia=$(mktemp -d)
+      mkdir "$copia/snippets"
+      cp "$PLANTILLAS"/*.template "$copia/"
+      cp "$SNIPPETS"/*.conf "$copia/snippets/"
+      (cd "$copia" && tar -cf - ./*.template ./snippets)
+      rm -rf "$copia"
+    else
+      (cd "$PLANTILLAS" && tar -cf - ./*.template)
+    fi
   else
     cat /dev/null
   fi
 }
 [ -n "${PLANTILLAS:-}" ] && args="$args -e SD_PLANTILLAS_STDIN=1"
+[ -n "${SNIPPETS:-}" ] && args="$args -e SD_SNIPPETS_STDIN=1"
 
 # shellcheck disable=SC2086 # $args son pares -e VAR=valor sin espacios.
 if entrada < /dev/null | dc exec -T $args nginx sh -c '
@@ -72,9 +94,15 @@ if entrada < /dev/null | dc exec -T $args nginx sh -c '
     mkdir "$origen"
     tar -xf - -C "$origen"
   fi
+  snip=""
+  if [ "${SD_SNIPPETS_STDIN:-}" = 1 ]; then
+    snip="$origen/snippets"
+    for s in "$snip"/*.conf; do sed -i "s#/etc/nginx/snippets/#$snip/#g" "$s"; done
+  fi
   vars=$(printf "\${%s} " $(env | cut -d= -f1))
   for t in "$origen"/*.template; do
     envsubst "$vars" < "$t" > "$dir/conf.d/$(basename "$t" .template)"
+    [ -z "$snip" ] || sed -i "s#/etc/nginx/snippets/#$snip/#g" "$dir/conf.d/$(basename "$t" .template)"
   done
   # nginx.conf FUERA de conf.d: si no, el include *.conf lo incluiría a él mismo.
   sed "s#include /etc/nginx/conf.d/\*.conf;#include $dir/conf.d/*.conf;#" /etc/nginx/nginx.conf > "$dir/nginx.conf"

@@ -29,7 +29,9 @@
 # personal tenga una contraseña conocida o publicada (passwords-demo.sh).
 #
 # Requisito: los registros DNS de DOMINIO y de app., staff., cocina., api. y rt.
-# ya apuntan a la IP del VPS y los puertos 80 y 443 están abiertos.
+# ya apuntan a la IP del VPS y los puertos 80 y 443 están abiertos. En
+# producción también www.DOMINIO (el certificado lo incluye; staging no tiene
+# www). certbot renew conserva los mismos nombres: los toma del renewal/*.conf.
 set -eu
 
 if [ "${1:-}" = "--entorno" ]; then
@@ -37,8 +39,8 @@ if [ "${1:-}" = "--entorno" ]; then
   if [ "$#" -ge 2 ]; then shift 2; else shift; fi
 fi
 case "${ENTORNO:-}" in
-  staging) RUTA=/srv/smartdining-staging ENV_ENTORNO=infra/.env.staging PROYECTO=smartdining-staging EJEMPLO=infra/.env.staging.example ;;
-  produccion) RUTA=/srv/smartdining ENV_ENTORNO=infra/.env PROYECTO=smartdining EJEMPLO=infra/.env.example ;;
+  staging) RUTA=/srv/smartdining-staging ENV_ENTORNO=infra/.env.staging PROYECTO=smartdining-staging EJEMPLO=infra/.env.staging.example WWW=0 ;;
+  produccion) RUTA=/srv/smartdining ENV_ENTORNO=infra/.env PROYECTO=smartdining EJEMPLO=infra/.env.example WWW=1 ;;
   *)
     echo "primer-certificado: ERROR: ENTORNO debe ser 'staging' o 'produccion' (recibido: '${ENTORNO:-}'). No se hizo nada." >&2
     echo "uso: ENTORNO=staging|produccion sh $0   (o: sh $0 --entorno <entorno>)" >&2
@@ -113,10 +115,13 @@ echo "5/6 Pidiendo el certificado real"
 certbot sh "rm -rf $VIVO /etc/letsencrypt/archive/$DOMINIO /etc/letsencrypt/renewal/$DOMINIO.conf"
 PRUEBA=""
 [ "${STAGING:-0}" = "1" ] && PRUEBA="--staging"
+# www solo en producción: en staging no tiene DNS y Let's Encrypt fallaría.
+NOMBRE_WWW=""
+[ "$WWW" = "1" ] && NOMBRE_WWW="-d www.$DOMINIO"
 certbot sh "certbot certonly --webroot -w /var/www/certbot $PRUEBA \
   --cert-name $DOMINIO --email $CERTBOT_EMAIL --agree-tos --no-eff-email \
   --rsa-key-size 4096 --non-interactive \
-  -d $DOMINIO -d app.$DOMINIO -d staff.$DOMINIO -d cocina.$DOMINIO -d api.$DOMINIO -d rt.$DOMINIO"
+  -d $DOMINIO $NOMBRE_WWW -d app.$DOMINIO -d staff.$DOMINIO -d cocina.$DOMINIO -d api.$DOMINIO -d rt.$DOMINIO"
 
 echo "6/6 Recargando nginx"
 dc exec nginx nginx -s reload

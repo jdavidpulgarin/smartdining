@@ -78,6 +78,31 @@ test('PLANTILLAS: manda por stdin un tar con SOLO los .template de esa carpeta',
   assert.match(r.stdout, /OK: las plantillas de .* son válidas con infra\/\.env\.staging/);
 });
 
+test('SNIPPETS: el tar lleva los .template en la raíz y los .conf en ./snippets/, y avisa al contenedor', () => {
+  const plantillas = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-plantillas-'));
+  fs.writeFileSync(path.join(plantillas, 'smartdining.conf.template'), 'server_tokens off;\n');
+  const snippets = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-snippets-'));
+  fs.writeFileSync(path.join(snippets, 'seguridad.conf'), 'add_header X-Prueba 1;\n');
+  fs.writeFileSync(path.join(snippets, 'LEEME.md'), 'no va\n');
+  const r = correr(CONFIG, { PLANTILLAS: plantillas, SNIPPETS: snippets, ENV_FILE: 'infra/.env.staging' });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.exec, /-e SD_PLANTILLAS_STDIN=1 /);
+  assert.match(r.exec, /-e SD_SNIPPETS_STDIN=1 /);
+  assert.match(r.exec, /sed -i "s#\/etc\/nginx\/snippets\/#\$snip\/#g"/, 'los include apuntan a la copia');
+  const lista = spawnSync('tar', ['-tf', '-'], { input: r.stdin, encoding: 'utf8' });
+  const entradas = lista.stdout.trim().split('\n').map((e) => e.replace(/\/$/, '')).sort();
+  assert.deepStrictEqual(entradas, ['./smartdining.conf.template', './snippets', './snippets/seguridad.conf']);
+});
+
+test('SNIPPETS sin PLANTILLAS: sale con 1 sin llamar a docker', () => {
+  const snippets = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-snippets-'));
+  fs.writeFileSync(path.join(snippets, 'seguridad.conf'), '\n');
+  const r = correr(CONFIG, { SNIPPETS: snippets });
+  assert.strictEqual(r.status, 1);
+  assert.match(r.stderr, /SNIPPETS solo va junto con PLANTILLAS/);
+  assert.strictEqual(r.exec, '');
+});
+
 test('PLANTILLAS sin .template o que no existe: sale con 1 sin llamar a docker', () => {
   const vacia = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-plantillas-'));
   for (const p of [vacia, path.join(vacia, 'no-existe')]) {
