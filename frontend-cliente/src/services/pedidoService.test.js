@@ -1,13 +1,21 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { crearPedido } from './pedidoService';
+import {
+  crearPedido,
+  listarPedidosMesa,
+  cancelarItem,
+  cancelarPedido,
+  NOTAS_MAX_SERVIDOR,
+  NOTAS_GENERALES_MAX_SERVIDOR,
+} from './pedidoService';
 import * as apiModule from './api';
 import { CLAVE_SESION } from '../utils/sesion';
 
-describe('pedidoService (H-05, H-06)', () => {
+describe('pedidoService (H-05, H-06, J-05)', () => {
   let store = {};
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.stubEnv('VITE_MODO_SIMULADO', 'false');
     store = {};
 
     globalThis.sessionStorage = {
@@ -23,6 +31,7 @@ describe('pedidoService (H-05, H-06)', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     delete globalThis.sessionStorage;
     delete globalThis.window;
   });
@@ -42,7 +51,7 @@ describe('pedidoService (H-05, H-06)', () => {
         id_linea: 'linea-1',
         id_plato: 5,
         cantidad: 2,
-        comensal: 'Ana', // Provisto en el cliente para la UI
+        comensal: 'Ana',
         apodo: 'Ana',
         notas: 'Sin cebolla',
       },
@@ -57,7 +66,6 @@ describe('pedidoService (H-05, H-06)', () => {
     expect(opciones.method).toBe('POST');
     expect(opciones.token).toBe('jwt.comensal.ana');
 
-    // Comprobar que en body.items NO se manda 'comensal' ni 'apodo' (H-05)
     expect(opciones.body.items[0]).toEqual({
       id_plato: 5,
       cantidad: 2,
@@ -99,5 +107,530 @@ describe('pedidoService (H-05, H-06)', () => {
     await expect(crearPedido({ lineas: muchasLineas })).rejects.toThrow(
       /no puede contener más de 50 ítems/
     );
+  });
+
+  it('J-05: mapea ingredientes de platos armados desde el constructor (linea.ingredientes)', async () => {
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({ id_pedido: 12, total: 30000 });
+
+    const lineas = [
+      {
+        id_linea: 'linea-armada',
+        id_plato: 1001,
+        cantidad: 1,
+        precioUnitario: 30000,
+        precio: 30000,
+        subtotal: 30000,
+        comensal: 'Carlos',
+        apodo: 'Carlos',
+        id_mesa: 5,
+        ingredientes: [
+          { id_ingrediente: 10, porcion: 'extra' },
+          { id_ingrediente: 15, porcion: 'ligera' },
+        ],
+        detalle: [{ nombre: 'Arroz' }],
+      },
+    ];
+
+    await crearPedido({ lineas });
+
+    const body = spyPedirJson.mock.calls[0][1].body;
+    const item = body.items[0];
+
+    expect(item).toEqual({
+      id_plato: 1001,
+      cantidad: 1,
+      ingredientes: [
+        { id_ingrediente: 10, porcion: 'extra' },
+        { id_ingrediente: 15, porcion: 'ligera' },
+      ],
+    });
+    // Verifica que no se filtran precios, mesa ni comensal
+    expect(item.precio).toBeUndefined();
+    expect(item.precioUnitario).toBeUndefined();
+    expect(item.precio_unitario).toBeUndefined();
+    expect(item.subtotal).toBeUndefined();
+    expect(item.total).toBeUndefined();
+    expect(item.comensal).toBeUndefined();
+    expect(item.apodo).toBeUndefined();
+    expect(item.id_mesa).toBeUndefined();
+    expect(body.id_mesa).toBeUndefined();
+    expect(body.total).toBeUndefined();
+  });
+
+  it('J-05: omite la propiedad ingredientes si el plato no tiene ingredientes', async () => {
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({ id_pedido: 15, total: 10000 });
+
+    const lineas = [
+      {
+        id_plato: 50,
+        cantidad: 1,
+        ingredientes: [],
+      },
+    ];
+
+    await crearPedido({ lineas });
+    const item = spyPedirJson.mock.calls[0][1].body.items[0];
+
+    expect(item.id_plato).toBe(50);
+    expect(item.cantidad).toBe(1);
+    expect('ingredientes' in item).toBe(false);
+  });
+
+  it('J-05: rechaza platos con mas de 20 ingredientes o con ingredientes repetidos', async () => {
+    const masDe20 = Array.from({ length: 21 }, (_, i) => ({
+      id_ingrediente: i + 1,
+      porcion: 'normal',
+    }));
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1, cantidad: 1, ingredientes: masDe20 }],
+      })
+    ).rejects.toThrow(/no puede superar 20 ingredientes/);
+
+    const repetidos = [
+      { id_ingrediente: 5, porcion: 'normal' },
+      { id_ingrediente: 5, porcion: 'extra' },
+    ];
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1, cantidad: 1, ingredientes: repetidos }],
+      })
+    ).rejects.toThrow(/repetir ingredientes/);
+  });
+
+  it('J-05: corta notas individuales a 200 y notas generales a 500 caracteres', async () => {
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({ id_pedido: 20 });
+
+    const notaLarga = 'A'.repeat(300);
+    const notasGenLarga = 'B'.repeat(600);
+
+    await crearPedido({
+      lineas: [{ id_plato: 1, cantidad: 1, notas: notaLarga }],
+      notasGenerales: notasGenLarga,
+    });
+
+    const body = spyPedirJson.mock.calls[0][1].body;
+    expect(body.items[0].notas.length).toBe(NOTAS_MAX_SERVIDOR);
+    expect(body.notas_generales.length).toBe(NOTAS_GENERALES_MAX_SERVIDOR);
+  });
+
+  it('J-05: en modo simulado delega en crearPedidoSimulado', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+
+    const res = await crearPedido({
+      lineas: [
+        { id_plato: 1, cantidad: 2, precioUnitario: 15000 },
+        { id_plato: 2, cantidad: 1, precioUnitario: 20000 },
+      ],
+    });
+
+    expect(res).toHaveProperty('id_pedido');
+    expect(res).toHaveProperty('codigo_pedido');
+    expect(res.codigo_pedido).toMatch(/^PED-[A-Z0-9]{4}$/);
+    expect(res.total).toBe(50000);
+    expect(res.estado).toBe('recibido');
+  });
+
+  it('J-05: en modo simulado lanza 409 si alguna nota dice "agotado"', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1, cantidad: 1, notas: 'con salsa, pero si está agotado no' }],
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      motivo: 'agotado',
+    });
+  });
+
+  it('listarPedidosMesa: consulta GET /pedidos/mesa con el token de la sesión', async () => {
+    globalThis.sessionStorage.setItem(
+      CLAVE_SESION,
+      JSON.stringify({ token: 'jwt.comensal.beto', comensal: 'Beto' })
+    );
+
+    const mockPedidos = [{ id_pedido: 101, estado: 'recibido' }];
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({ id_mesa: 5, pedidos: mockPedidos });
+
+    const pedidos = await listarPedidosMesa();
+    expect(spyPedirJson).toHaveBeenCalledWith('/pedidos/mesa', {
+      method: 'GET',
+      token: 'jwt.comensal.beto',
+    });
+    expect(pedidos).toEqual(mockPedidos);
+  });
+
+  it('listarPedidosMesa: en modo simulado lee los pedidos de sessionStorage', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const { CLAVE_PEDIDOS_SIMULADOS } = await import('./pedidoSimulado');
+    const simulados = [
+      { id_pedido: 55, id_mesa: 5, estado: 'recibido' },
+      { id_pedido: 66, id_mesa: 9, estado: 'en_preparacion' },
+    ];
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify(simulados)
+    );
+
+    const pedidosMesa5 = await listarPedidosMesa(5);
+    expect(pedidosMesa5).toHaveLength(1);
+    expect(pedidosMesa5[0].id_pedido).toBe(55);
+  });
+
+  it('J-17: en modo simulado fuerza 409 sin_stock con forma real [{ tipo, id, nombre }] cuando smartdining_sim_pedido = sin_stock', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    globalThis.sessionStorage.setItem('smartdining_sim_pedido', 'sin_stock');
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1008, cantidad: 1, nombre: 'Limonada de Coco' }],
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      motivo: 'sin_stock',
+      faltantes: [
+        { tipo: 'plato', id: 1008, nombre: 'Limonada de Coco' },
+        { tipo: 'ingrediente', id: 10, nombre: 'Aguacate' },
+      ],
+    });
+  });
+
+  it('J-17: en modo simulado fuerza 503 reintentar cuando smartdining_sim_pedido = reintentar', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    globalThis.sessionStorage.setItem('smartdining_sim_pedido', 'reintentar');
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1006, cantidad: 1, nombre: 'Hamburguesa Smart Angus' }],
+      })
+    ).rejects.toMatchObject({
+      status: 503,
+      motivo: 'reintentar',
+    });
+  });
+
+  it('J-17: en modo simulado fuerza 409 ingrediente_agotado con la forma real cuando smartdining_sim_pedido = ingrediente_agotado', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    globalThis.sessionStorage.setItem(
+      'smartdining_sim_pedido',
+      'ingrediente_agotado'
+    );
+
+    await expect(
+      crearPedido({
+        lineas: [
+          {
+            id_plato: 1001,
+            cantidad: 1,
+            nombre: 'Bowl Personalizado',
+            ingredientes: [{ id_ingrediente: 10, porcion: 'normal' }],
+          },
+        ],
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      motivo: 'ingrediente_agotado',
+      mensaje: 'El ingrediente "Aguacate" está agotado',
+    });
+  });
+
+  it('J-17: en modo simulado fuerza 409 sin_stock con faltantes [] cuando smartdining_sim_pedido = sin_stock_vacio', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    globalThis.sessionStorage.setItem(
+      'smartdining_sim_pedido',
+      'sin_stock_vacio'
+    );
+
+    await expect(
+      crearPedido({
+        lineas: [{ id_plato: 1006, cantidad: 1, nombre: 'Hamburguesa Smart Angus' }],
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      motivo: 'sin_stock',
+      faltantes: [],
+    });
+  });
+
+  it('J-14 cancelarItem: envia POST sin cuerpo y con JWT en Authorization', async () => {
+    globalThis.sessionStorage.setItem(
+      CLAVE_SESION,
+      JSON.stringify({ token: 'jwt.comensal.ana', comensal: 'Ana' })
+    );
+
+    const respuesta200 = {
+      pedido: {
+        id_pedido: 87,
+        codigo_pedido: 'PED-87',
+        estado: 'recibido',
+        total: 18000,
+        items: [
+          {
+            id_detalle: 210,
+            plato_nombre: 'Bandeja paisa',
+            estado_item: 'cancelado',
+            comensal: 'Ana',
+            ingredientes: [],
+          },
+        ],
+      },
+    };
+    const spyPedirJson = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue(respuesta200);
+
+    const res = await cancelarItem(87, 210);
+
+    expect(spyPedirJson).toHaveBeenCalledTimes(1);
+    const [ruta, opciones] = spyPedirJson.mock.calls[0];
+    expect(ruta).toBe('/pedidos/87/items/210/cancelar');
+    expect(opciones.method).toBe('POST');
+    expect(opciones.token).toBe('jwt.comensal.ana');
+    expect(opciones.body).toBeUndefined();
+    expect(res).toEqual(respuesta200);
+  });
+
+  it('J-14 cancelarItem: rechaza identificadores invalidos', async () => {
+    await expect(cancelarItem(0, 10)).rejects.toThrow(/inválidos/);
+    await expect(cancelarItem(10, -1)).rejects.toThrow(/inválidos/);
+  });
+
+  it('J-14 cancelarItem (simulado): devuelve el 200 real y pasa pedido a cancelado al quitar el ultimo plato', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const { CLAVE_PEDIDOS_SIMULADOS } = await import('./pedidoSimulado');
+
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify([
+        {
+          id_pedido: 87,
+          codigo_pedido: 'PED-87',
+          id_mesa: 5,
+          estado: 'recibido',
+          total: 54000,
+          detalles: [
+            {
+              id_detalle: 210,
+              id_plato: 12,
+              plato_nombre: 'Bandeja paisa',
+              cantidad: 2,
+              subtotal: 36000,
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+              ingredientes: [],
+            },
+            {
+              id_detalle: 211,
+              id_plato: 1001,
+              plato_nombre: 'Bowl Personalizado',
+              cantidad: 1,
+              subtotal: 18000,
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+              ingredientes: [{ id_ingrediente: 3, nombre: 'Arroz' }],
+            },
+          ],
+        },
+      ])
+    );
+
+    const primero = await cancelarItem(87, 210);
+    expect(primero.pedido.id_pedido).toBe(87);
+    expect(primero.pedido.codigo_pedido).toBe('PED-87');
+    expect(primero.pedido.estado).toBe('recibido');
+    expect(primero.pedido.total).toBe(18000);
+    expect(primero.pedido.items[0].estado_item).toBe('cancelado');
+    expect(primero.pedido.items[0].plato_nombre).toBe('Bandeja paisa');
+    expect(primero.pedido.items[1].estado_item).toBe('pendiente');
+
+    const segundo = await cancelarItem(87, 211);
+    expect(segundo.pedido.estado).toBe('cancelado');
+    expect(segundo.pedido.total).toBe(0);
+    expect(segundo.pedido.items.every((i) => i.estado_item === 'cancelado')).toBe(true);
+  });
+
+  it('J-14 cancelarItem (simulado): fuerza errores con smartdining_sim_quitar y pasa el pedido a en_preparacion', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const { CLAVE_PEDIDOS_SIMULADOS } = await import('./pedidoSimulado');
+
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify([
+        {
+          id_pedido: 87,
+          codigo_pedido: 'PED-87',
+          id_mesa: 5,
+          estado: 'recibido',
+          total: 36000,
+          detalles: [
+            {
+              id_detalle: 210,
+              plato_nombre: 'Bandeja paisa',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+            {
+              id_detalle: 211,
+              plato_nombre: 'Limonada',
+              estado_item: 'cancelado',
+              comensal: 'Ana',
+            },
+          ],
+        },
+      ])
+    );
+
+    const casos = [
+      ['item_ya_cancelado', 409],
+      ['item_en_preparacion', 409],
+      ['pago_registrado', 409],
+      ['no_es_tuyo', 403],
+    ];
+
+    for (const [motivo, status] of casos) {
+      globalThis.sessionStorage.setItem('smartdining_sim_quitar', motivo);
+      await expect(cancelarItem(87, 210)).rejects.toMatchObject({
+        status,
+        motivo,
+      });
+    }
+
+    const guardados = JSON.parse(
+      globalThis.sessionStorage.getItem(CLAVE_PEDIDOS_SIMULADOS)
+    );
+    expect(guardados[0].estado).toBe('en_preparacion');
+    expect(guardados[0].detalles[0].estado_item).toBe('en_preparacion');
+    expect(guardados[0].detalles[1].estado_item).toBe('cancelado');
+  });
+
+  it('D-12 cancelarPedido: envia POST sin cuerpo y con JWT en Authorization', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'false');
+    globalThis.sessionStorage.setItem(
+      CLAVE_SESION,
+      JSON.stringify({ token: 'jwt.comensal.ana', comensal: 'Ana' })
+    );
+    const spy = vi
+      .spyOn(apiModule, 'pedirJson')
+      .mockResolvedValue({
+        pedido: {
+          id_pedido: 90,
+          codigo_pedido: 'PED-90',
+          estado: 'cancelado',
+          total: 0,
+          items: [],
+        },
+      });
+
+    const res = await cancelarPedido(90);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [ruta, opciones] = spy.mock.calls[0];
+    expect(ruta).toBe('/pedidos/90/cancelar');
+    expect(opciones.method).toBe('POST');
+    expect(opciones.token).toBe('jwt.comensal.ana');
+    expect(opciones.body).toBeUndefined();
+    expect(res.pedido.estado).toBe('cancelado');
+  });
+
+  it('D-12 cancelarPedido: rechaza identificadores invalidos', async () => {
+    await expect(cancelarPedido(0)).rejects.toThrow(/inválido/);
+    await expect(cancelarPedido(-5)).rejects.toThrow(/inválido/);
+    await expect(cancelarPedido('invalido')).rejects.toThrow(/inválido/);
+  });
+
+  it('D-12 cancelarPedido (simulado): marca pedido y todas las lineas como cancelados con total 0', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const CLAVE_PEDIDOS_SIMULADOS = 'smartdining_pedidos_simulados';
+
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify([
+        {
+          id_pedido: 95,
+          codigo_pedido: 'PED-95',
+          id_mesa: 5,
+          estado: 'recibido',
+          total: 35000,
+          detalles: [
+            {
+              id_detalle: 301,
+              plato_nombre: 'Hamburguesa',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+            {
+              id_detalle: 302,
+              plato_nombre: 'Papas',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+          ],
+        },
+      ])
+    );
+
+    const res = await cancelarPedido(95);
+    expect(res.pedido.estado).toBe('cancelado');
+    expect(res.pedido.total).toBe(0);
+    expect(res.pedido.items.every((d) => d.estado_item === 'cancelado')).toBe(true);
+
+    const guardados = JSON.parse(
+      globalThis.sessionStorage.getItem(CLAVE_PEDIDOS_SIMULADOS)
+    );
+    expect(guardados[0].estado).toBe('cancelado');
+    expect(guardados[0].total).toBe(0);
+    expect(guardados[0].cancelado_por).toBe('comensal');
+  });
+
+  it('D-12 cancelarPedido (simulado): fuerza errores con smartdining_sim_cancelar', async () => {
+    vi.stubEnv('VITE_MODO_SIMULADO', 'true');
+    const CLAVE_PEDIDOS_SIMULADOS = 'smartdining_pedidos_simulados';
+
+    globalThis.sessionStorage.setItem(
+      CLAVE_PEDIDOS_SIMULADOS,
+      JSON.stringify([
+        {
+          id_pedido: 96,
+          codigo_pedido: 'PED-96',
+          id_mesa: 5,
+          estado: 'recibido',
+          total: 20000,
+          detalles: [
+            {
+              id_detalle: 303,
+              plato_nombre: 'Pizza',
+              estado_item: 'pendiente',
+              comensal: 'Ana',
+            },
+          ],
+        },
+      ])
+    );
+
+    const casos = [
+      ['pedido_compartido', 409],
+      ['no_cancelable', 409],
+      ['pago_registrado', 409],
+      ['pedido_ya_cancelado', 409],
+      ['no_es_tuyo', 403],
+    ];
+
+    for (const [motivo, status] of casos) {
+      globalThis.sessionStorage.setItem('smartdining_sim_cancelar', motivo);
+      await expect(cancelarPedido(96)).rejects.toMatchObject({
+        status,
+        motivo,
+      });
+    }
   });
 });

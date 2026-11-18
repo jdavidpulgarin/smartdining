@@ -4,6 +4,7 @@ import { crearSocket, esErrorDeToken } from '../services/socket'
 import {
   aplicarCreado,
   aplicarEstado,
+  aplicarItemCancelado,
   cargarInicial,
   estadoInicial,
   marcarCargando,
@@ -26,6 +27,8 @@ const ACCIONES = {
   error: marcarError,
   creado: aplicarCreado,
   estado: aplicarEstado,
+  // D-13 / #180: alguien quito UNA linea; se tacha en vivo.
+  itemCancelado: aplicarItemCancelado,
   // Movimiento optimista tras un PATCH propio: no espera al socket.
   local: (estado, { id_pedido, nuevoEstado }) => marcarEstadoLocal(estado, id_pedido, nuevoEstado),
 }
@@ -38,7 +41,13 @@ function reducer(estado, accion) {
 /** Cada cuanto se repinta el cronometro de las tarjetas, sin pedir nada. */
 const REFRESCO_RELOJ_MS = 30_000
 
-export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
+export function useTablero({
+  token,
+  alCaducarSesion,
+  alLlegarComandaNueva,
+  alCambiarDisponibilidad,
+  alCambiarDisponibilidadPlato,
+}) {
   const [estado, despachar] = useReducer(reducer, undefined, estadoInicial)
   const [conectado, setConectado] = useState(false)
 
@@ -57,6 +66,25 @@ export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
   useEffect(() => {
     alLlegarRef.current = alLlegarComandaNueva
   }, [alLlegarComandaNueva])
+
+  // D-10: el panel de agotados necesita `ingrediente:disponibilidad`, y el
+  // socket del KDS ya esta abierto aqui. Se reenvia por callback (con ref, como
+  // los de arriba) en vez de abrir una segunda conexion para lo mismo: el rol
+  // `cocina` ya recibe el evento, porque el socket-server lo difunde a TODOS
+  // los sockets (EVENTS.md §5.3). Quien no pase el callback no nota nada.
+  const alCambiarDisponibilidadRef = useRef(alCambiarDisponibilidad)
+  useEffect(() => {
+    alCambiarDisponibilidadRef.current = alCambiarDisponibilidad
+  }, [alCambiarDisponibilidad])
+
+  // D-14: y lo mismo con los PLATOS. Es otro evento (`plato:disponibilidad`,
+  // EVENTS.md 5.4) con otro id en el cuerpo, asi que va por su propio callback
+  // en vez de mezclar los dos en uno: quien reciba el de platos no tiene que
+  // adivinar de que lista hablan.
+  const alCambiarDisponibilidadPlatoRef = useRef(alCambiarDisponibilidadPlato)
+  useEffect(() => {
+    alCambiarDisponibilidadPlatoRef.current = alCambiarDisponibilidadPlato
+  }, [alCambiarDisponibilidadPlato])
 
   // El aviso sonoro solo debe sonar por una comanda que ENTRA por el socket, no
   // al recargar ni al reconectar. Para saber si el evento aporta algo nuevo hay
@@ -138,6 +166,20 @@ export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
       if (vivo) despachar({ tipo: 'estado', datos: evento })
     })
 
+    // item:cancelado (socket-server #181): una linea del pedido se quito, por el
+    // comensal o por el personal. La regla esta en aplicarItemCancelado.
+    socket.on('item:cancelado', (evento) => {
+      if (vivo) despachar({ tipo: 'itemCancelado', datos: evento })
+    })
+
+    socket.on('ingrediente:disponibilidad', (evento) => {
+      if (vivo) alCambiarDisponibilidadRef.current?.(evento)
+    })
+
+    socket.on('plato:disponibilidad', (evento) => {
+      if (vivo) alCambiarDisponibilidadPlatoRef.current?.(evento)
+    })
+
     return () => {
       vivo = false
       socket.removeAllListeners()
@@ -162,16 +204,26 @@ export function useTablero({ token, alCaducarSesion, alLlegarComandaNueva }) {
     async (idPedido, nuevoEstado) => {
       try {
         const comanda = await cambiarEstadoComanda(token, idPedido, nuevoEstado)
+        const estadoReal = comanda?.estado || nuevoEstado
         despachar({
           tipo: 'local',
-          datos: { id_pedido: idPedido, nuevoEstado: comanda?.estado || nuevoEstado },
+          datos: { id_pedido: idPedido, nuevoEstado: estadoReal },
         })
-        return { ok: true }
+        // T10: "Todo listo" encadena pasos y necesita saber donde quedo de
+        // verdad el pedido, no donde se pidio que fuera.
+        return { ok: true, estado: estadoReal }
       } catch (error) {
         // 401 ya cerro la sesion en el servicio. Para el resto, el tablero se
         // vuelve a leer porque puede estar desincronizado.
         if (error.status !== 401) recargar()
-        return { ok: false, mensaje: error.message || 'No se pudo cambiar el estado' }
+        // Sin status no hubo respuesta: el fetch ni siquiera llego (red caida,
+        // backend apagado). Es distinto de un 409 del trigger, y la tarjeta
+        // decide cosas distintas con cada uno.
+        return {
+          ok: false,
+          mensaje: error.message || 'No se pudo cambiar el estado',
+          sinRespuesta: !error.status,
+        }
       }
     },
     [token, recargar]

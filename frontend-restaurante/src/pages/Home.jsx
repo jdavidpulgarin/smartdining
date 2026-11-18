@@ -6,6 +6,7 @@ import {
   MenuSection,
 } from '../components'
 import { menuApi } from '../services/api'
+import { fotoDePlato } from '../utils/imagenes'
 import { useTables } from '../hooks'
 
 export function Home() {
@@ -21,11 +22,16 @@ export function Home() {
         if (!isMounted) return
         const cats = data?.categorias || []
         const platos = cats.flatMap((cat) =>
-          (cat.platos || []).map((p) => ({
-            name: p.nombre,
-            price: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
-            tag: cat.nombre || 'Menú',
-          }))
+          (cat.platos || []).map((p) => {
+            return {
+              name: p.nombre,
+              price: `$${Number(p.precio || 0).toLocaleString('es-CO')}`,
+              tag: cat.nombre || 'Menú',
+              // La foto del plato con la misma lista blanca que la app (#212); si
+              // no tiene, la local de la arepa; null → MenuItem pinta el ícono.
+              imageUrl: fotoDePlato(p.nombre, p.url_imagen),
+            }
+          })
         )
         setMenuItems(platos.slice(0, 4))
       })

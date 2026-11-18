@@ -33,6 +33,9 @@ test('GET /api/mesas/:id (pública) no devuelve token_qr', async () => {
       capacidad: 4,
       ubicacion: 'Terraza',
       estado: 'ocupada',
+      // D-16 parte B: una mesa inactiva esta retirada del servicio, y el
+      // comensal necesita saberlo para entender por que su QR dejo de servir.
+      activa: true,
     });
   } finally {
     db.restaurar();

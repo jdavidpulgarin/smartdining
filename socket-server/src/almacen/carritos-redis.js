@@ -58,10 +58,13 @@ function crearAlmacenCarritosRedis({ cliente, ttlSeg = TTL_CARRITO_SEG }) {
             await iso.unwatch();
             return calculado;
           }
-          const tx = iso.multi().set(kc, JSON.stringify(calculado.carrito), { EX: ttlSeg });
+          const tx = iso.multi();
+          // Sin cambios (remove_de que no encontró líneas) no se reescribe el
+          // carrito, pero el eventId sí se marca dentro de la misma transacción.
+          if (!calculado.sinCambios) tx.set(kc, JSON.stringify(calculado.carrito), { EX: ttlSeg });
           if (ki) tx.set(ki, '1', { EX: TTL_IDEM_SEG });
           await tx.exec();
-          return { duplicado: false, snapshot: calculado.carrito };
+          return { duplicado: false, snapshot: calculado.carrito, ...(calculado.sinCambios && { sinCambios: true }) };
         });
         return r;
       } catch (err) {
@@ -73,7 +76,8 @@ function crearAlmacenCarritosRedis({ cliente, ttlSeg = TTL_CARRITO_SEG }) {
 
   async function aplicar(idMesa, op) {
     const r = await aplicarUnaVez(idMesa, op, null);
-    return r.error ? r : { snapshot: r.snapshot };
+    if (r.error) return r;
+    return r.sinCambios ? { snapshot: r.snapshot, sinCambios: true } : { snapshot: r.snapshot };
   }
 
   async function vaciar(idMesa) {

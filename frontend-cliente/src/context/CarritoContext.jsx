@@ -6,20 +6,51 @@ import {
   useMemo,
   useCallback,
   useRef,
+  useState,
 } from 'react';
 import { useMesaSession } from '../hooks/useMesaSession';
 import { CLAVE_SESION } from '../utils/sesion';
+import MesaSocketContext from './MesaSocketContext';
+import {
+  enriquecerItems,
+  agruparPorComensal,
+  construirSet,
+  construirRemove,
+  totalesMesa,
+  traducirErrorSocket,
+  buscarPlatoEnMenu,
+  sonLineasIdenticas,
+} from '../utils/carritoCompartido';
+import {
+  obtenerMenuRaw,
+  aplicarDisponibilidad,
+  actualizarDisponibilidadEnCache,
+  aplicarDisponibilidadPlato,
+  actualizarDisponibilidadPlatoEnCache,
+  aplicarFaltantesMenu,
+  marcarFaltantesEnCache,
+  recargarMenu,
+  refrescarMenu,
+  suscribirCambiosMenu,
+} from '../services/menuService';
+import { crearOyenteMenuActualizado, unirAvisos } from '../utils/cambiosMenu';
+import { crearDeduplicador } from '../utils/deduplicador';
 
 const CarritoContext = createContext(null);
 
-const ESTADO_INICIAL = {
+const ARRAY_VACIO = [];
+
+// oxlint-disable-next-line react/only-export-components
+export const ESTADO_INICIAL = {
   lineas: [],
 };
 
-function obtenerMesaInicial() {
+// oxlint-disable-next-line react/only-export-components
+export function obtenerMesaInicial() {
   try {
     if (typeof window !== 'undefined') {
-      const sesionGuardada = sessionStorage.getItem(CLAVE_SESION);
+      const sesionGuardada =
+        localStorage.getItem(CLAVE_SESION) || sessionStorage.getItem(CLAVE_SESION);
       if (sesionGuardada) {
         const parsed = JSON.parse(sesionGuardada);
         if (parsed?.idMesa && !isNaN(Number(parsed.idMesa))) {
@@ -28,19 +59,21 @@ function obtenerMesaInicial() {
       }
     }
   } catch {
-    // Si ocurre un error al acceder a sessionStorage o parsear, continuar con null
+    // Si ocurre un error al acceder a storage o parsear, continuar con null
   }
   return null;
 }
 
-function obtenerClaveCarrito(mesa) {
+// oxlint-disable-next-line react/only-export-components
+export function obtenerClaveCarrito(mesa) {
   if (mesa !== null && mesa !== undefined && mesa !== '') {
     return `smartdining_carrito_mesa_${mesa}`;
   }
   return null;
 }
 
-function cargarCarritoDeStorage(clave) {
+// oxlint-disable-next-line react/only-export-components
+export function cargarCarritoDeStorage(clave) {
   if (!clave) return [];
   try {
     const raw = localStorage.getItem(clave);
@@ -58,7 +91,8 @@ function cargarCarritoDeStorage(clave) {
   }
 }
 
-function guardarCarritoEnStorage(clave, lineas) {
+// oxlint-disable-next-line react/only-export-components
+export function guardarCarritoEnStorage(clave, lineas) {
   if (!clave) return;
   try {
     localStorage.setItem(clave, JSON.stringify(lineas));
@@ -67,13 +101,36 @@ function guardarCarritoEnStorage(clave, lineas) {
   }
 }
 
-function carritoReducer(state, action) {
+// oxlint-disable-next-line react/only-export-components
+export function carritoReducer(state, action) {
   switch (action.type) {
     case 'AGREGAR_LINEA': {
-      // Cada adición desde el modal genera una línea independiente con su propio id_linea
+      const nueva = action.payload;
+      const indiceExistente = state.lineas.findIndex((l) =>
+        sonLineasIdenticas(l, nueva)
+      );
+
+      if (indiceExistente >= 0) {
+        const lineaExistente = state.lineas[indiceExistente];
+        const cantActual = Number(lineaExistente.cantidad) || 1;
+        const cantASumar = Number(nueva.cantidad) || 1;
+        const cantFinal = Math.min(20, Math.max(1, cantActual + cantASumar));
+
+        const nuevasLineas = [...state.lineas];
+        nuevasLineas[indiceExistente] = {
+          ...lineaExistente,
+          cantidad: cantFinal,
+        };
+
+        return {
+          ...state,
+          lineas: nuevasLineas,
+        };
+      }
+
       return {
         ...state,
-        lineas: [...state.lineas, action.payload],
+        lineas: [...state.lineas, nueva],
       };
     }
 
@@ -116,7 +173,8 @@ function carritoReducer(state, action) {
   }
 }
 
-function inicializarEstado() {
+// oxlint-disable-next-line react/only-export-components
+export function inicializarEstado() {
   const mesaInicial = obtenerMesaInicial();
   const clave = obtenerClaveCarrito(mesaInicial);
   const lineas = cargarCarritoDeStorage(clave);
@@ -125,78 +183,457 @@ function inicializarEstado() {
 
 export function CarritoProvider({ children }) {
   const { idMesa: mesa } = useMesaSession();
-  const [state, dispatch] = useReducer(carritoReducer, ESTADO_INICIAL, inicializarEstado);
+  const mesaSocket = useContext(MesaSocketContext);
+  const modo = mesaSocket?.modo || 'local';
+
+  const [state, dispatch] = useReducer(
+    carritoReducer,
+    ESTADO_INICIAL,
+    inicializarEstado
+  );
   const mesaInicial = useMemo(() => obtenerMesaInicial(), []);
   const mesaAnteriorRef = useRef(mesaInicial);
 
-  // Sincronizar estado cuando la mesa cambia de valor numérico
+  const [menuRaw, setMenuRaw] = useState(null);
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState(null);
+  // Avisos de la carta (menu:actualizado): un precio que cambió o un plato que
+  // salió de la carta con el carrito lleno. Se ven hasta que el comensal los cierra.
+  const [avisosMenu, setAvisosMenu] = useState(ARRAY_VACIO);
+
   useEffect(() => {
+    if (!mesa) return undefined;
+    let activo = true;
+    const cancelarSuscripcion = suscribirCambiosMenu((nuevoMenu) => {
+      if (activo && nuevoMenu) {
+        setMenuRaw(nuevoMenu);
+      }
+    });
+    obtenerMenuRaw()
+      .then((menu) => {
+        if (activo) setMenuRaw(menu);
+      })
+      .catch((err) => {
+        console.error('Error al cargar menú en CarritoContext:', err);
+      });
+    return () => {
+      activo = false;
+      cancelarSuscripcion();
+    };
+  }, [mesa]);
+
+  // Escuchar ingrediente:disponibilidad y plato:disponibilidad en tiempo real para actualizar el menú en memoria
+  const socketOn = mesaSocket?.on;
+  useEffect(() => {
+    if (!socketOn) return undefined;
+    const bajaIng = socketOn('ingrediente:disponibilidad', (data) => {
+      const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
+      const disponible = Boolean(data?.disponible);
+      if (!idIng) return;
+
+      actualizarDisponibilidadEnCache(idIng, disponible);
+      setMenuRaw((prev) => {
+        if (!prev) return prev;
+        return aplicarDisponibilidad(prev, idIng, disponible);
+      });
+    });
+
+    const bajaPlato = socketOn('plato:disponibilidad', (data) => {
+      const idPlato = Number(data?.id_plato ?? data?.idPlato);
+      const disponible = Boolean(data?.disponible);
+      if (!idPlato) return;
+
+      actualizarDisponibilidadPlatoEnCache(idPlato, disponible);
+      setMenuRaw((prev) => {
+        if (!prev) return prev;
+        return aplicarDisponibilidadPlato(prev, idPlato, disponible);
+      });
+    });
+
+    return () => {
+      bajaIng?.();
+      bajaPlato?.();
+    };
+  }, [socketOn]);
+
+  // menu:actualizado (EVENTS.md §5.8): el admin editó la carta. Se vuelve a
+  // pedir GET /menu (refrescarMenu avisa a los suscritos: Menú, Constructor y
+  // este contexto) y se compara el carrito de antes con el de ahora para avisar
+  // si una línea cambió de precio o su plato salió de la carta.
+  const lineasEnriquecidasRef = useRef(ARRAY_VACIO);
+  const itemsSocketRef = useRef(ARRAY_VACIO);
+  const aliasRef = useRef('');
+  const deduplicadorMenu = useMemo(() => crearDeduplicador(), []);
+  useEffect(() => {
+    if (!socketOn) return undefined;
+    const oyente = crearOyenteMenuActualizado({
+      refrescar: refrescarMenu,
+      leerAntes: () => lineasEnriquecidasRef.current,
+      enriquecer: (menu) => enriquecerItems(itemsSocketRef.current, menu, aliasRef.current),
+      estaEnCarta: (menu, id) => Boolean(buscarPlatoEnMenu(menu, id)),
+      alRecibirMenu: setMenuRaw,
+      alAvisar: (avisos) => setAvisosMenu((prev) => unirAvisos(prev, avisos)),
+      deduplicador: deduplicadorMenu,
+    });
+    const baja = socketOn('menu:actualizado', oyente);
+    return () => {
+      baja?.();
+    };
+  }, [socketOn, deduplicadorMenu]);
+
+  const descartarAvisosMenu = useCallback(() => setAvisosMenu(ARRAY_VACIO), []);
+
+  // Recargar menú al reconectar el socket (de reconectando a conectado)
+  const estadoSocket = mesaSocket?.estado;
+  const estadoAnteriorSocketRef = useRef(estadoSocket);
+  useEffect(() => {
+    if (
+      estadoAnteriorSocketRef.current === 'reconectando' &&
+      estadoSocket === 'conectado'
+    ) {
+      recargarMenu();
+      obtenerMenuRaw()
+        .then((menu) => {
+          setMenuRaw(menu);
+        })
+        .catch((err) => {
+          console.error('Error al recargar menú tras reconexión:', err);
+        });
+    }
+    estadoAnteriorSocketRef.current = estadoSocket;
+  }, [estadoSocket]);
+
+  // Recargar menú al volver a primer plano (visibilidad, BFCache, online)
+  const resync = mesaSocket?.resync;
+  const resyncAnteriorRef = useRef(resync);
+  useEffect(() => {
+    if (resyncAnteriorRef.current !== resync) {
+      resyncAnteriorRef.current = resync;
+      recargarMenu();
+      obtenerMenuRaw()
+        .then((menu) => {
+          if (menu) setMenuRaw(menu);
+        })
+        .catch((err) => {
+          console.error('Error al recargar menú tras volver a primer plano:', err);
+        });
+    }
+  }, [resync]);
+
+  // Sincronizar estado cuando la mesa cambia (modo local)
+  useEffect(() => {
+    if (modo === 'compartido') return;
     if (mesa !== null && mesa !== undefined && mesa !== mesaAnteriorRef.current) {
       mesaAnteriorRef.current = mesa;
       const clave = obtenerClaveCarrito(mesa);
       const lineasGuardadas = cargarCarritoDeStorage(clave);
       dispatch({ type: 'CARGAR_CARRITO', payload: lineasGuardadas });
     }
-  }, [mesa]);
+  }, [mesa, modo]);
 
-  // Persistir en localStorage cuando cambian las líneas
+  // Persistir en localStorage cuando cambian las líneas (modo local)
   useEffect(() => {
+    if (modo === 'compartido') return;
     const clave = obtenerClaveCarrito(mesaAnteriorRef.current);
     if (clave) {
       guardarCarritoEnStorage(clave, state.lineas);
     }
-  }, [state.lineas]);
+  }, [state.lineas, modo]);
 
-  const agregarLinea = useCallback((linea) => {
-    dispatch({ type: 'AGREGAR_LINEA', payload: linea });
-  }, []);
+  // Enriquecer ítems del socket con el menú
+  const lineasCompartidasEnriquecidas = useMemo(() => {
+    if (modo !== 'compartido') return ARRAY_VACIO;
+    return enriquecerItems(
+      mesaSocket?.carrito?.items || [],
+      menuRaw,
+      mesaSocket?.comensal
+    );
+  }, [modo, mesaSocket?.carrito?.items, menuRaw, mesaSocket?.comensal]);
 
-  const actualizarCantidad = useCallback((id_linea, cantidad) => {
-    dispatch({ type: 'ACTUALIZAR_CANTIDAD', payload: { id_linea, cantidad } });
-  }, []);
+  useEffect(() => {
+    lineasEnriquecidasRef.current = lineasCompartidasEnriquecidas;
+    itemsSocketRef.current = mesaSocket?.carrito?.items || ARRAY_VACIO;
+    aliasRef.current = mesaSocket?.comensal || '';
+  }, [lineasCompartidasEnriquecidas, mesaSocket?.carrito?.items, mesaSocket?.comensal]);
 
-  const eliminarLinea = useCallback((id_linea) => {
-    dispatch({ type: 'ELIMINAR_LINEA', payload: { id_linea } });
-  }, []);
+  const { mias: misLineasCompartidas, otros: otrosCompartidos } = useMemo(() => {
+    if (modo !== 'compartido') return { mias: ARRAY_VACIO, otros: ARRAY_VACIO };
+    return agruparPorComensal(
+      lineasCompartidasEnriquecidas,
+      mesaSocket?.comensal
+    );
+  }, [modo, lineasCompartidasEnriquecidas, mesaSocket?.comensal]);
 
-  const vaciarCarrito = useCallback(() => {
-    dispatch({ type: 'VACIAR_CARRITO' });
-  }, []);
+  const totalesCompartidos = useMemo(() => {
+    if (modo !== 'compartido') return { mio: 0, mesa: 0, unidades: 0 };
+    return totalesMesa(lineasCompartidasEnriquecidas);
+  }, [modo, lineasCompartidasEnriquecidas]);
 
-  const lineas = state.lineas;
+  const totalUnidadesMiasCompartidas = useMemo(() => {
+    if (modo !== 'compartido') return 0;
+    return misLineasCompartidas.reduce(
+      (acc, l) => acc + (Number(l.cantidad) || 0),
+      0
+    );
+  }, [modo, misLineasCompartidas]);
 
-  const totalUnidades = useMemo(
-    () => lineas.reduce((acc, l) => acc + (Number(l.cantidad) || 0), 0),
-    [lineas]
+  const totalUnidadesLocales = useMemo(
+    () => state.lineas.reduce((acc, l) => acc + (Number(l.cantidad) || 0), 0),
+    [state.lineas]
   );
 
-  const total = useMemo(
+  const totalLocal = useMemo(
     () =>
-      lineas.reduce(
+      state.lineas.reduce(
         (acc, l) =>
           acc + (Number(l.precioUnitario) || 0) * (Number(l.cantidad) || 0),
         0
       ),
-    [lineas]
+    [state.lineas]
   );
+
+  const agregarLinea = useCallback(
+    async (linea) => {
+      if (modo !== 'compartido') {
+        dispatch({ type: 'AGREGAR_LINEA', payload: linea });
+        return true;
+      }
+      if (!mesaSocket?.enviar) return false;
+      setEnviando(true);
+      setError(null);
+      try {
+        const lineaExistente = misLineasCompartidas.find((l) =>
+          sonLineasIdenticas(l, linea)
+        );
+
+        if (lineaExistente) {
+          const cantActual = Number(lineaExistente.cantidad) || 1;
+          const cantASumar = Number(linea.cantidad) || 1;
+          const cantFinal = Math.min(20, Math.max(1, cantActual + cantASumar));
+          const payload = construirSet({
+            ...lineaExistente,
+            cantidad: cantFinal,
+          });
+          await mesaSocket.enviar('cart:update', payload);
+          return true;
+        }
+
+        const payload = construirSet(linea);
+        await mesaSocket.enviar('cart:update', payload);
+        return true;
+      } catch (err) {
+        const msg = traducirErrorSocket(null, err);
+        setError(msg);
+        return false;
+      } finally {
+        setEnviando(false);
+      }
+    },
+    [modo, mesaSocket, misLineasCompartidas]
+  );
+
+  const actualizarCantidad = useCallback(
+    async (id_linea, cantidad) => {
+      if (modo !== 'compartido') {
+        dispatch({
+          type: 'ACTUALIZAR_CANTIDAD',
+          payload: { id_linea, cantidad },
+        });
+        return true;
+      }
+      if (!mesaSocket?.enviar) return false;
+      setEnviando(true);
+      setError(null);
+      try {
+        const cantNum = Math.floor(Number(cantidad));
+        if (cantNum <= 0) {
+          const payload = construirRemove(id_linea);
+          await mesaSocket.enviar('cart:update', payload);
+          return true;
+        }
+        const itemActual = (mesaSocket?.carrito?.items || []).find(
+          (x) => String(x.id_linea) === String(id_linea)
+        );
+        if (!itemActual) {
+          return false;
+        }
+        const payload = construirSet({
+          ...itemActual,
+          cantidad: cantNum,
+        });
+        await mesaSocket.enviar('cart:update', payload);
+        return true;
+      } catch (err) {
+        const msg = traducirErrorSocket(null, err);
+        setError(msg);
+        return false;
+      } finally {
+        setEnviando(false);
+      }
+    },
+    [modo, mesaSocket]
+  );
+
+  const eliminarLinea = useCallback(
+    async (id_linea) => {
+      if (modo !== 'compartido') {
+        dispatch({ type: 'ELIMINAR_LINEA', payload: { id_linea } });
+        return true;
+      }
+      if (!mesaSocket?.enviar) return false;
+      setEnviando(true);
+      setError(null);
+      try {
+        const payload = construirRemove(id_linea);
+        await mesaSocket.enviar('cart:update', payload);
+        return true;
+      } catch (err) {
+        const msg = traducirErrorSocket(null, err);
+        setError(msg);
+        return false;
+      } finally {
+        setEnviando(false);
+      }
+    },
+    [modo, mesaSocket]
+  );
+
+  const vaciarCarrito = useCallback(async () => {
+    if (modo !== 'compartido') {
+      dispatch({ type: 'VACIAR_CARRITO' });
+      return true;
+    }
+    if (!mesaSocket?.enviar) return false;
+    setEnviando(true);
+    setError(null);
+    try {
+      await Promise.all(
+        misLineasCompartidas.map((l) =>
+          mesaSocket.enviar('cart:update', construirRemove(l.id_linea))
+        )
+      );
+      return true;
+    } catch (err) {
+      const msg = traducirErrorSocket(null, err);
+      setError(msg);
+      return false;
+    } finally {
+      setEnviando(false);
+    }
+  }, [modo, misLineasCompartidas, mesaSocket]);
+
+  const limpiarError = useCallback(() => setError(null), []);
+
+  const marcarFaltantesEnMenu = useCallback((faltantes = []) => {
+    if (!Array.isArray(faltantes) || faltantes.length === 0) return;
+    marcarFaltantesEnCache(faltantes);
+    setMenuRaw((prev) => {
+      if (!prev) return prev;
+      return aplicarFaltantesMenu(prev, faltantes);
+    });
+  }, []);
+
+  const lineasLocales = useMemo(() => {
+    if (modo === 'compartido') return state.lineas;
+    if (!menuRaw) return state.lineas;
+    return state.lineas.map((linea) => {
+      const idPlato = Number(linea.id_plato ?? linea.idPlato);
+      const plato = buscarPlatoEnMenu(menuRaw, idPlato);
+      if (!plato) return linea;
+
+      const platoAgotado = plato.disponible === false;
+      let ingredienteAgotado = false;
+      let disponible = !platoAgotado;
+      if (disponible && Array.isArray(linea.ingredientes) && Array.isArray(plato.pasos)) {
+        for (const ingItem of linea.ingredientes) {
+          const idIngNum = Number(ingItem.id_ingrediente ?? ingItem.idIngrediente);
+          for (const paso of plato.pasos) {
+            const ingObj = (paso.ingredientes || []).find(
+              (i) => Number(i.id_ingrediente) === idIngNum
+            );
+            if (ingObj && ingObj.disponible === false) {
+              disponible = false;
+              ingredienteAgotado = true;
+              break;
+            }
+          }
+          if (!disponible) break;
+        }
+      }
+
+      return {
+        ...linea,
+        disponible,
+        platoAgotado,
+        ingredienteAgotado,
+      };
+    });
+  }, [modo, state.lineas, menuRaw]);
+
+  const lineas = modo === 'compartido' ? misLineasCompartidas : lineasLocales;
+  const misLineas = modo === 'compartido' ? misLineasCompartidas : lineasLocales;
+  const otros = modo === 'compartido' ? otrosCompartidos : ARRAY_VACIO;
+  const lineasMesa =
+    modo === 'compartido' ? lineasCompartidasEnriquecidas : lineasLocales;
+  const total = modo === 'compartido' ? totalesCompartidos.mio : totalLocal;
+  const totalMio = modo === 'compartido' ? totalesCompartidos.mio : totalLocal;
+  const totalMesa = modo === 'compartido' ? totalesCompartidos.mesa : totalLocal;
+  const totalUnidades =
+    modo === 'compartido' ? totalUnidadesMiasCompartidas : totalUnidadesLocales;
+  const totalUnidadesMesa =
+    modo === 'compartido' ? totalesCompartidos.unidades : totalUnidadesLocales;
 
   const value = useMemo(
     () => ({
+      modo,
+      estadoConexion: mesaSocket?.estado || 'local',
       lineas,
-      totalUnidades,
+      misLineas,
+      otros,
+      lineasMesa,
       total,
+      totalMio,
+      totalMesa,
+      totalUnidades,
+      totalUnidadesMesa,
       agregarLinea,
       actualizarCantidad,
       eliminarLinea,
       vaciarCarrito,
+      marcarFaltantesEnMenu,
+      enviando,
+      error,
+      limpiarError,
+      avisosMenu,
+      descartarAvisosMenu,
     }),
-    [lineas, totalUnidades, total, agregarLinea, actualizarCantidad, eliminarLinea, vaciarCarrito]
+    [
+      modo,
+      mesaSocket?.estado,
+      lineas,
+      misLineas,
+      otros,
+      lineasMesa,
+      total,
+      totalMio,
+      totalMesa,
+      totalUnidades,
+      totalUnidadesMesa,
+      agregarLinea,
+      actualizarCantidad,
+      eliminarLinea,
+      vaciarCarrito,
+      marcarFaltantesEnMenu,
+      enviando,
+      error,
+      limpiarError,
+      avisosMenu,
+      descartarAvisosMenu,
+    ]
   );
 
   return (
-    <CarritoContext.Provider value={value}>
-      {children}
-    </CarritoContext.Provider>
+    <CarritoContext.Provider value={value}>{children}</CarritoContext.Provider>
   );
 }
 

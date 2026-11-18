@@ -2,9 +2,23 @@
 # Emite el PRIMER certificado de Let's Encrypt en el VPS. Se corre una sola vez;
 # después el servicio certbot del compose lo renueva solo.
 #
-#   sh infra/scripts/primer-certificado.sh            # certificado real
-#   STAGING=1 sh infra/scripts/primer-certificado.sh  # prueba (sin límite de Let's Encrypt)
-#   SEED_DEMO=1 sh infra/scripts/primer-certificado.sh # además carga los datos de la demo
+#   cd /srv/smartdining && ENTORNO=produccion sh infra/scripts/primer-certificado.sh
+#   cd /srv/smartdining-staging && ENTORNO=staging sh infra/scripts/primer-certificado.sh
+#   sh infra/scripts/primer-certificado.sh --entorno staging
+#   STAGING=1 ...   certificado de PRUEBA de Let's Encrypt (sin su límite); no tiene
+#                   nada que ver con el entorno staging
+#   SEED_DEMO=1 ... además carga los datos de la demo
+#
+# ENTORNO (variable o --entorno, OBLIGATORIO y sin valor por defecto):
+#   staging    clon /srv/smartdining-staging, infra/.env.staging, proyecto smartdining-staging
+#   produccion clon /srv/smartdining, infra/.env, proyecto smartdining
+# Se corre desde el clon de ese entorno, y COMPOSE_PROJECT_NAME del .env tiene
+# que ser el del proyecto (en producción puede no estar: docker-compose.prod.yml
+# ya se llama "smartdining"). Si ENV_FILE viene, tiene que ser el del entorno.
+# Cualquier otro valor de ENTORNO, o ninguno: sale con 2 sin tocar nada.
+#
+# Si ya hay un certificado de PRUEBA (de una corrida con STAGING=1), la corrida
+# sin STAGING lo reemplaza por el real. Un certificado real no se toca.
 #
 # Problema que resuelve: nginx no arranca sin los archivos del certificado, y
 # certbot necesita a nginx sirviendo /.well-known/acme-challenge/ para emitirlo.
@@ -15,12 +29,36 @@
 # personal tenga una contraseña conocida o publicada (passwords-demo.sh).
 #
 # Requisito: los registros DNS de DOMINIO y de app., staff., cocina., api. y rt.
-# ya apuntan a la IP del VPS y los puertos 80 y 443 están abiertos.
+# ya apuntan a la IP del VPS y los puertos 80 y 443 están abiertos. En
+# producción también www.DOMINIO (el certificado lo incluye; staging no tiene
+# www). certbot renew conserva los mismos nombres: los toma del renewal/*.conf.
 set -eu
 
+if [ "${1:-}" = "--entorno" ]; then
+  ENTORNO=${2:-}
+  if [ "$#" -ge 2 ]; then shift 2; else shift; fi
+fi
+case "${ENTORNO:-}" in
+  staging) RUTA=/srv/smartdining-staging ENV_ENTORNO=infra/.env.staging PROYECTO=smartdining-staging EJEMPLO=infra/.env.staging.example WWW=0 ;;
+  produccion) RUTA=/srv/smartdining ENV_ENTORNO=infra/.env PROYECTO=smartdining EJEMPLO=infra/.env.example WWW=1 ;;
+  *)
+    echo "primer-certificado: ERROR: ENTORNO debe ser 'staging' o 'produccion' (recibido: '${ENTORNO:-}'). No se hizo nada." >&2
+    echo "uso: ENTORNO=staging|produccion sh $0   (o: sh $0 --entorno <entorno>)" >&2
+    exit 2
+    ;;
+esac
+
 cd "$(dirname "$0")/../.."
-ENV_FILE=infra/.env
-[ -f "$ENV_FILE" ] || { echo "Falta $ENV_FILE (cp infra/.env.example infra/.env)"; exit 1; }
+[ "$(pwd -P)" = "$RUTA" ] || { echo "ENTORNO=$ENTORNO se corre desde su clon, $RUTA (estás en $(pwd -P))"; exit 1; }
+[ -z "${ENV_FILE:-}" ] || [ "$ENV_FILE" = "$ENV_ENTORNO" ] \
+  || { echo "ENV_FILE=$ENV_FILE no es el de ENTORNO=$ENTORNO ($ENV_ENTORNO)"; exit 1; }
+ENV_FILE=$ENV_ENTORNO
+# passwords-demo.sh (pasos 1 y 2) debe usar el mismo entorno.
+export ENV_FILE
+[ -f "$ENV_FILE" ] || { echo "Falta $ENV_FILE (cp $EJEMPLO $ENV_FILE)"; exit 1; }
+nombre=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$ENV_FILE" | tr -d '\r')
+[ "${nombre:-smartdining}" = "$PROYECTO" ] \
+  || { echo "$ENV_FILE tiene COMPOSE_PROJECT_NAME=${nombre:-<vacío>} y ENTORNO=$ENTORNO necesita $PROYECTO"; exit 1; }
 
 DOMINIO=$(sed -n 's/^DOMINIO=//p' "$ENV_FILE" | tr -d '\r')
 CERTBOT_EMAIL=$(sed -n 's/^CERTBOT_EMAIL=//p' "$ENV_FILE" | tr -d '\r')
@@ -34,12 +72,22 @@ certbot() { dc run --rm --no-deps --entrypoint "$1" certbot -c "$2"; }
 VIVO=/etc/letsencrypt/live/$DOMINIO
 
 if certbot sh "test -f $VIVO/fullchain.pem && ! test -f $VIVO/.temporal"; then
-  echo "Ya existe un certificado para $DOMINIO; certbot del compose lo renueva."
-  exit 0
+  # Un certificado de prueba de Let's Encrypt lo emite "(STAGING) ...". Sin
+  # STAGING=1 se reemplaza por el real; cualquier otro caso ya está listo.
+  if [ "${STAGING:-0}" != "1" ] && certbot sh "openssl x509 -in $VIVO/fullchain.pem -noout -issuer | grep -q STAGING"; then
+    echo "Hay un certificado de PRUEBA para $DOMINIO: se reemplaza por el real."
+  else
+    echo "Ya existe un certificado para $DOMINIO; certbot del compose lo renueva."
+    exit 0
+  fi
 fi
 
 echo "1/6 Servicios internos (sin nginx: todavía nada es público)"
-dc up -d --build --wait postgres redis backend socket-server
+dc up -d --build --wait postgres redis
+# Con la base recién creada, docker-init.sh ya migró y esto no hace nada; con
+# un volumen que ya existía, aplica los scripts que falten antes del backend.
+dc exec -T postgres sh /smartdining-db/migrar.sh
+dc up -d --build --wait backend socket-server
 # docker-init.sh solo corre 00_ejecutar_todo.sql, que NO crea usuarios, mesas
 # ni platos de ejemplo: están en database/seed.sql (idempotente: WHERE NOT
 # EXISTS). Se cargan ANTES del paso 2 para que sus contraseñas pasen el control.
@@ -67,10 +115,13 @@ echo "5/6 Pidiendo el certificado real"
 certbot sh "rm -rf $VIVO /etc/letsencrypt/archive/$DOMINIO /etc/letsencrypt/renewal/$DOMINIO.conf"
 PRUEBA=""
 [ "${STAGING:-0}" = "1" ] && PRUEBA="--staging"
+# www solo en producción: en staging no tiene DNS y Let's Encrypt fallaría.
+NOMBRE_WWW=""
+[ "$WWW" = "1" ] && NOMBRE_WWW="-d www.$DOMINIO"
 certbot sh "certbot certonly --webroot -w /var/www/certbot $PRUEBA \
   --cert-name $DOMINIO --email $CERTBOT_EMAIL --agree-tos --no-eff-email \
   --rsa-key-size 4096 --non-interactive \
-  -d $DOMINIO -d app.$DOMINIO -d staff.$DOMINIO -d cocina.$DOMINIO -d api.$DOMINIO -d rt.$DOMINIO"
+  -d $DOMINIO $NOMBRE_WWW -d app.$DOMINIO -d staff.$DOMINIO -d cocina.$DOMINIO -d api.$DOMINIO -d rt.$DOMINIO"
 
 echo "6/6 Recargando nginx"
 dc exec nginx nginx -s reload

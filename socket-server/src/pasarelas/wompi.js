@@ -34,12 +34,23 @@ const TIMEOUT_API_MS = 5000;
 // Hacia el futuro solo 5 min (desfase de relojes).
 const TOLERANCIA_PASADO_SEG = 25 * 60 * 60;
 const TOLERANCIA_FUTURO_SEG = 5 * 60;
+const MARGEN_REGISTRO_INTENCION_SEG = 30 * 60;
 const MAX_PROPIEDADES = 20;
 const RUTA_PROPIEDAD = /^[a-z_]+(\.[a-z_]+){0,4}$/;
 const ID_TRANSACCION = /^[A-Za-z0-9-]{1,64}$/;
 const API_PERMITIDAS = ['https://sandbox.wompi.co/v1', 'https://production.wompi.co/v1'];
 
 const sha256 = (texto) => crypto.createHash('sha256').update(texto, 'utf8').digest('hex');
+
+/**
+ * TTL del registro de una intención (TTL_INTENCION_REGISTRO_SEG): cuánto debe
+ * seguir existiendo para reconocer su webhook. Se puede pagar hasta que vence
+ * (ttlMinutos) y el evento puede llegar hasta la tolerancia después, así que
+ * se deriva de los dos para que no se vuelvan a separar. 26 h por defecto.
+ */
+function ttlIntencionRegistroSeg({ ttlMinutos, toleranciaPasadoSeg = TOLERANCIA_PASADO_SEG }) {
+  return ttlMinutos * 60 + toleranciaPasadoSeg + MARGEN_REGISTRO_INTENCION_SEG;
+}
 
 /** Firma de integridad documentada por Wompi. */
 function firmaIntegridad({
@@ -211,5 +222,5 @@ function crearPasarelaWompi({
 }
 
 module.exports = {
-  crearPasarelaWompi, firmaIntegridad, verificarEventoWompi, sha256, MONEDA, API_PERMITIDAS, TOLERANCIA_PASADO_SEG,
+  crearPasarelaWompi, firmaIntegridad, verificarEventoWompi, sha256, MONEDA, API_PERMITIDAS, TOLERANCIA_PASADO_SEG, ttlIntencionRegistroSeg,
 };

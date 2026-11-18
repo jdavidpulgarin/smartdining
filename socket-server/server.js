@@ -19,6 +19,9 @@ httpServer.listen(config.puerto, () => {
   log.info('socket-server escuchando', {
     puerto: config.puerto, entorno: config.entorno, origenes: config.origenes, redis: Boolean(config.redisUrl), pagos: Boolean(config.wompi),
   });
+  if (config.redLocal) {
+    log.warn('modo red local activo (NODE_ENV=development): CORS acepta también http://<IP privada>:5173-5175 de la Wi-Fi; nunca en producción');
+  }
 });
 
 const cierre = crearCierreOrdenado({ httpServer, io: servidor.io, ctx: servidor.ctx });

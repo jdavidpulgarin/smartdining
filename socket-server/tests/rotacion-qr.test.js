@@ -24,7 +24,10 @@ function relojManual() {
   };
 }
 
-/** Backend falso: guarda el token por mesa con compare-and-swap, como el contrato. */
+/**
+ * Backend falso con el compare-and-swap del contrato (#168): token_anterior
+ * tiene que ser el vigente, y null también es 409 (no hay cambio a ciegas).
+ */
 function backendFalso({ responder } = {}) {
   const llamadas = [];
   const tokens = new Map();
@@ -35,8 +38,8 @@ function backendFalso({ responder } = {}) {
       llamadas.push({ ruta, cuerpo });
       if (responder) return responder(ruta, cuerpo);
       const id = Number(ruta.split('/')[3]);
-      if (cuerpo.token_anterior && tokens.has(id) && tokens.get(id) !== cuerpo.token_anterior) {
-        return { ok: false, status: 409, cuerpo: null };
+      if (cuerpo.token_anterior === null || tokens.get(id) !== cuerpo.token_anterior) {
+        return { ok: false, status: 409, cuerpo: { motivo: 'token_anterior_distinto' } };
       }
       tokens.set(id, cuerpo.token_qr);
       return { ok: true, status: 200, cuerpo: { ok: true } };
@@ -168,9 +171,69 @@ test('quien entró antes de una rotación sigue operando en el socket', async (t
     eventId: randomUUID(), accion: 'set', id_linea: randomUUID(), comensal: 'Ana', id_plato: 1, cantidad: 1,
   });
   assert.strictEqual(ack.ok, true, 'rotar no revoca: solo liberar la mesa corta las sesiones');
-  // La continuidad en el BACKEND (middleware que compara sid) está BLOQUEADA
-  // para Daniel: ver docs/rotacion-qr.md.
+  // En el BACKEND, quien ya reservó su alias o pidió hace que no se rote
+  // (409 mesa_con_comensales, #168): ver docs/rotacion-qr.md.
 });
+
+test('abrir: /qr/generar arranca con el token firmado, nunca con null (también al reabrir)', async (t) => {
+  const { s, reloj, backend, abrir } = await escenario(t);
+  const espiado = [];
+  const original = s.rotador.abrir;
+  s.rotador.abrir = (idMesa, token) => { espiado.push(token); return original(idMesa, token); };
+  t.after(() => { s.rotador.abrir = original; });
+
+  const primero = await abrir(5);
+  const segundo = await abrir(5); // el mesero vuelve a generar: reinicia con el token nuevo
+  assert.deepStrictEqual(espiado, [primero, segundo]);
+  for (const token of espiado) {
+    assert.strictEqual(typeof token, 'string');
+    assert.match(token, /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  }
+
+  await reloj.avanzar();
+  assert.strictEqual(backend.llamadas.length, 1, 'reabrir reemplaza la cuenta, no la duplica');
+  assert.strictEqual(backend.llamadas[0].cuerpo.token_anterior, segundo);
+  assert.notStrictEqual(backend.llamadas[0].cuerpo.token_anterior, null);
+});
+
+for (const [status, motivo] of [
+  [404, undefined],
+  [409, 'mesa_no_ocupada'],
+  [409, 'token_anterior_distinto'],
+  [409, 'mesa_con_comensales'],
+]) {
+  test(`${status}${motivo ? ` ${motivo}` : ''} del backend: deja de rotar esa mesa y no avisa a la tablet`, async (t) => {
+    const backend = backendFalso({ responder: () => ({ ok: false, status, cuerpo: motivo ? { motivo } : { error: 'Mesa no encontrada' } }) });
+    const { s, reloj, abrir, pantalla } = await escenario(t, { backend });
+    await abrir(5);
+    const nada = esperar(pantalla, 'qr:actualizado', 200);
+    await reloj.avanzar();
+    assert.strictEqual(await nada, null);
+    assert.strictEqual(s.rotador.activa(5), false);
+    assert.strictEqual(reloj.pendientes, 0, 'no queda ningún reintento programado');
+  });
+}
+
+for (const [status, motivo] of [
+  [503, 'alias_no_disponible'],
+  [500, undefined],
+  [401, undefined],
+  [400, 'cuerpo_invalido'],
+]) {
+  test(`${status}${motivo ? ` ${motivo}` : ''} del backend: conserva el QR anterior y reintenta en 3 min`, async (t) => {
+    const backend = backendFalso({ responder: () => ({ ok: false, status, cuerpo: motivo ? { motivo } : null }) });
+    const { s, reloj, abrir, pantalla } = await escenario(t, { backend });
+    const inicial = await abrir(5);
+    const nada = esperar(pantalla, 'qr:actualizado', 200);
+    await reloj.avanzar();
+    assert.strictEqual(await nada, null, 'sin 200 la tablet no cambia de QR');
+    assert.strictEqual(s.rotador.activa(5), true);
+    assert.strictEqual(reloj.pendientes, 1, 'queda programado el reintento');
+    await reloj.avanzar();
+    assert.strictEqual(backend.llamadas.length, 2);
+    assert.strictEqual(backend.llamadas[1].cuerpo.token_anterior, inicial, 'el vigente sigue siendo el anterior');
+  });
+}
 
 test('sin BACKEND_URL la rotación automática queda apagada', async (t) => {
   const s = await levantar();

@@ -5,5 +5,6 @@
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }],
     "no-console": ["error", { "allow": ["warn", "error"] }]
-  }
+  },
+  "ignorePatterns": ["playwright-report/**", "test-results/**", "dist/**"]
 }

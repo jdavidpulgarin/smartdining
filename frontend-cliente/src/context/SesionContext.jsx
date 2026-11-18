@@ -9,43 +9,24 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { setManejadorSesionInvalida } from '../services/api';
 import { crearSesion } from '../services/sesionService';
-import { CLAVE_SESION, leerExpiracionJwt, validarNombre } from '../utils/sesion';
+import { aliasDelToken } from '../services/clienteMesa';
+import {
+  CLAVE_SESION,
+  validarNombre,
+  borrarSesionDeStorages,
+  leerSesionAlmacenada,
+  guardarSesionCerrada,
+  borrarSesionCerrada,
+  esMotivo401,
+} from '../utils/sesion';
+import { CLAVE_ULTIMO_PEDIDO } from '../utils/seguimiento';
 
 const SesionContext = createContext(null);
 
 const CLAVES_OBSOLETAS = [
   'smartdining_mesa_session',
   'smartdining_apodo',
-  CLAVE_SESION,
 ];
-
-function leerSesionAlmacenada() {
-  try {
-    const crudo = sessionStorage.getItem(CLAVE_SESION);
-    if (!crudo) return null;
-    const datos = JSON.parse(crudo);
-    if (!datos || !datos.token || !datos.idMesa) {
-      sessionStorage.removeItem(CLAVE_SESION);
-      return null;
-    }
-
-    const expMs = leerExpiracionJwt(datos.token);
-    if (expMs !== null && expMs <= Date.now()) {
-      sessionStorage.removeItem(CLAVE_SESION);
-      return null;
-    }
-
-    return {
-      token: datos.token,
-      comensal: datos.comensal || '',
-      idMesa: Number(datos.idMesa),
-      numeroMesa: Number(datos.numeroMesa ?? datos.idMesa),
-      expiraEn: datos.expiraEn || null,
-    };
-  } catch {
-    return null;
-  }
-}
 
 function obtenerEstadoInicial() {
   let tokenUrl = null;
@@ -61,28 +42,33 @@ function obtenerEstadoInicial() {
     // Ignorar error de lectura de URL
   }
 
+  const sesionAlmacenada = leerSesionAlmacenada();
+  const mesaInicial =
+    sesionAlmacenada?.numeroMesa ?? sesionAlmacenada?.idMesa ?? null;
+
   if (tokenUrl) {
     return {
-      sesion: leerSesionAlmacenada(),
+      sesion: sesionAlmacenada,
       tokenQrPendiente: tokenUrl,
       estado: 'pide_nombre',
       error: null,
       enviando: false,
       recienUnido: false,
       motivoCierre: null,
+      ultimaMesa: mesaInicial,
     };
   }
 
-  const sesionGuardada = leerSesionAlmacenada();
-  if (sesionGuardada) {
+  if (sesionAlmacenada) {
     return {
-      sesion: sesionGuardada,
+      sesion: sesionAlmacenada,
       tokenQrPendiente: null,
       estado: 'activa',
       error: null,
       enviando: false,
       recienUnido: false,
       motivoCierre: null,
+      ultimaMesa: mesaInicial,
     };
   }
 
@@ -94,6 +80,7 @@ function obtenerEstadoInicial() {
     enviando: false,
     recienUnido: false,
     motivoCierre: null,
+    ultimaMesa: null,
   };
 }
 
@@ -130,19 +117,37 @@ export function SesionProvider({ children }) {
   const cerrarSesion = useCallback((motivo = null) => {
     setState((prev) => {
       const idMesaActual = prev.sesion?.idMesa;
+      const comensalActual = prev.sesion?.comensal;
+      borrarSesionDeStorages();
+      if (comensalActual && esMotivo401(motivo)) {
+        guardarSesionCerrada(comensalActual);
+      } else {
+        borrarSesionCerrada();
+      }
       try {
-        sessionStorage.removeItem(CLAVE_SESION);
+        sessionStorage.removeItem(CLAVE_ULTIMO_PEDIDO);
       } catch {
         // Ignorar errores de sessionStorage
       }
       try {
-        localStorage.removeItem(CLAVE_SESION);
         if (idMesaActual !== undefined && idMesaActual !== null) {
           localStorage.removeItem(`smartdining_carrito_mesa_${idMesaActual}`);
         }
       } catch {
         // Ignorar errores de localStorage
       }
+
+      const motivosPrioritarios = ['pagada', 'liberada'];
+      const motivoFinal =
+        motivo === 'MESA_LIBERADA' && motivosPrioritarios.includes(prev.motivoCierre)
+          ? prev.motivoCierre
+          : motivo;
+
+      const ultimaMesa =
+        prev.sesion?.numeroMesa ??
+        prev.sesion?.idMesa ??
+        prev.ultimaMesa ??
+        null;
 
       return {
         sesion: null,
@@ -151,7 +156,8 @@ export function SesionProvider({ children }) {
         error: null,
         enviando: false,
         recienUnido: false,
-        motivoCierre: motivo,
+        motivoCierre: motivoFinal,
+        ultimaMesa,
       };
     });
   }, []);
@@ -225,16 +231,25 @@ export function SesionProvider({ children }) {
 
       try {
         const respuesta = await crearSesion(tokenQr, validacion.nombre);
+        borrarSesionCerrada();
+        const aliasJwt = aliasDelToken(respuesta.token);
+        const comensalFinal =
+          aliasJwt || respuesta.comensal || validacion.nombre;
         const nuevaSesion = {
           token: respuesta.token,
-          comensal: respuesta.comensal || validacion.nombre,
+          comensal: comensalFinal,
           idMesa: Number(respuesta.mesa?.id_mesa),
           numeroMesa: Number(respuesta.mesa?.numero ?? respuesta.mesa?.id_mesa),
           expiraEn: respuesta.expira_en || null,
         };
 
         try {
-          sessionStorage.setItem(CLAVE_SESION, JSON.stringify(nuevaSesion));
+          localStorage.setItem(CLAVE_SESION, JSON.stringify(nuevaSesion));
+        } catch {
+          // Ignorar si localStorage no está disponible
+        }
+        try {
+          sessionStorage.removeItem(CLAVE_SESION);
         } catch {
           // Ignorar si sessionStorage no está disponible
         }
@@ -288,6 +303,7 @@ export function SesionProvider({ children }) {
       enviando: state.enviando,
       recienUnido: state.recienUnido,
       motivoCierre: state.motivoCierre,
+      ultimaMesa: state.ultimaMesa,
       unirse,
       cerrarSesion,
       despedir,

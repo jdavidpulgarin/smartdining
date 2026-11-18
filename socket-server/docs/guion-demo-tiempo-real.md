@@ -58,7 +58,7 @@ la demo, se usa la alternativa:
 
 | Momento | Depende de | Alternativa |
 | :--- | :--- | :--- |
-| QR que rota solo | Backend: `POST /api/mesas/:id/token-qr/interno` (Daniel, [rotacion-qr.md](rotacion-qr.md)) | Rotar a mano desde el panel (`POST /api/mesas/:id/rotar-qr`, rama `feature/mesas-rotar-qr`) |
+| QR que rota solo | Backend: `POST /api/mesas/:id/token-qr/interno` (**fusionado en #168**, [rotacion-qr.md](rotacion-qr.md)); necesita `BACKEND_URL` en el socket-server | Rotar a mano desde el panel (`POST /api/mesas/:id/rotar-qr`) |
 | Pago dividido | Backend: cuenta de la mesa (§8.2) y registro de pagos (§8.4 de [EVENTS.md](../EVENTS.md)) | Plan B, paso 3 |
 | Mesa liberada al pagar | Backend: liberar al llegar a saldo 0 | El mesero libera la mesa desde el panel: mismo efecto en vivo |
 | "Tu plato está listo" solo al dueño | Backend: `comensal` en cada ítem de `order:created` | Llega igual por las líneas del carrito (`order:status` lo ve toda la mesa) |

@@ -266,8 +266,9 @@ test('una mesa creada ya ocupada arranca con su sesion', async () => {
 
     assert.strictEqual(res.status, 201);
     const insert = db.buscar('INSERT INTO mesas');
-    assert.ok(insert.sql.includes('CASE WHEN $4 = $6 THEN NOW() ELSE NULL END'));
-    assert.strictEqual(insert.params[5], 'ocupada');
+    assert.ok(insert.sql.includes('CASE WHEN $6 THEN NOW() ELSE NULL END'));
+    assert.strictEqual(insert.params[3], 'ocupada');
+    assert.strictEqual(insert.params[5], true);
   } finally {
     db.restaurar();
   }
@@ -284,6 +285,13 @@ test('el reparto de un pago interno solo mira los pedidos de la visita actual', 
   const db = instalarFakeDb((sql) => {
     if (sql.includes('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE')) {
       return { rows: [{ id_mesa: ID_MESA }] };
+    }
+    // T4: el pago en línea bloquea la mesa diciendo si es otra visita.
+    if (sql.includes('FROM mesas WHERE id_mesa = $1::int FOR UPDATE')) {
+      return { rows: [{ id_mesa: ID_MESA, otra_visita: false }] };
+    }
+    if (sql.includes('LEFT JOIN excedentes_pago_en_linea')) {
+      return { rows: [{ aplicado: '0', id_primera: null, excedente_centavos: null, motivo: null, id_del_excedente: null }] };
     }
     if (sql.includes('SUM(ROUND(obtener_saldo_pendiente')) {
       return { rows: [{ saldo_centavos: '0' }] };

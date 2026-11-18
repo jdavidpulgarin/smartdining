@@ -6,8 +6,13 @@
  * Todo en centavos enteros (COP × 100), sin decimales en ningún paso.
  */
 
-const MODOS = ['total', 'igual', 'propio'];
-const CENTAVOS_POR_PESO = 100;
+const { claveAlias } = require('./alias');
+
+// «igual» (Dividir) se quitó en T2: quedan «pagar lo mío» (propio) y «pagar
+// toda la cuenta» (total). pagos.js responde 400 si llega (EVENTS.md §8.1).
+// `calcularMonto` solo recibe modos ya validados.
+const MODOS = ['total', 'propio'];
+const MODO_RETIRADO = 'igual';
 
 const esCentavos = (v) => Number.isSafeInteger(v) && v >= 0;
 
@@ -35,38 +40,30 @@ function validarCuenta(c, idMesa) {
 
 /**
  * @param {object} datos
- * @param {'total'|'igual'|'propio'} datos.modo
+ * @param {'total'|'propio'} datos.modo
  * @param {object} datos.cuenta      Cuenta ya validada (validarCuenta)
  * @param {string} datos.comensal    Alias de quien paga
- * @param {number} datos.presentes   Personas en la mesa (mesa:presencia.total)
  * @returns {{ montoCentavos: number } | { error: 'SIN_SALDO' }}
  */
-function calcularMonto({
-  modo, cuenta, comensal, presentes,
-}) {
+function calcularMonto({ modo, cuenta, comensal }) {
   const saldo = cuenta.saldo_centavos;
   if (saldo <= 0) return { error: 'SIN_SALDO' };
 
   if (modo === 'total') return { montoCentavos: saldo };
 
-  if (modo === 'propio') {
-    const propio = cuenta.por_comensal.find((p) => p.comensal === comensal);
-    const monto = Math.min(propio ? propio.saldo_centavos : 0, saldo);
-    return monto > 0 ? { montoCentavos: monto } : { error: 'SIN_SALDO' };
-  }
-
-  // igual: se reparte el TOTAL de la cuenta (no el saldo que va quedando),
-  // así las partes son iguales aunque se paguen en momentos distintos. Cada
-  // parte se redondea a pesos. El residuo del redondeo lo cubre quien paga
-  // de último, y nunca se cobra más que el saldo.
-  const n = Math.max(1, presentes);
-  const parte = Math.round(cuenta.total_centavos / n / CENTAVOS_POR_PESO) * CENTAVOS_POR_PESO;
-  const residuo = Math.max(0, cuenta.total_centavos - parte * n);
-  // "Último en pagar": lo que queda cabe en una parte más el residuo.
-  if (parte <= 0 || saldo <= parte + residuo) return { montoCentavos: saldo };
-  return { montoCentavos: parte };
+  // propio: lo que el backend atribuye a este comensal, sin pasar del saldo.
+  // El comensal de la cuenta (el texto que guardó el backend en cada línea) se
+  // compara por la CLAVE del alias, no por el texto exacto: « ana » y «Ana» son
+  // la misma persona. Si el backend trae a la misma persona en dos filas (dos
+  // formas de escribirla), sus saldos se suman.
+  const mia = claveAlias(comensal);
+  const propio = mia === null ? 0 : cuenta.por_comensal
+    .filter((p) => claveAlias(p.comensal) === mia)
+    .reduce((s, p) => s + p.saldo_centavos, 0);
+  const monto = Math.min(propio, saldo);
+  return monto > 0 ? { montoCentavos: monto } : { error: 'SIN_SALDO' };
 }
 
 module.exports = {
-  calcularMonto, validarCuenta, MODOS, CENTAVOS_POR_PESO,
+  calcularMonto, validarCuenta, MODOS, MODO_RETIRADO,
 };

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  levantar, emitir, esperar, tokenComensal, tokenPersonal,
+  levantar, emitir, esperar, tokenComensal, tokenPantalla, tokenPersonal,
 } = require('./helpers');
 const {
   WOMPI_ENV, backendFalso, pasarelaFalsa, sinRespuesta,
@@ -32,7 +32,7 @@ async function escenario(t, { api = { [ID_TX]: txApi() }, apiCaida = false, ruta
   t.after(() => s.cerrar());
   // Intención pendiente de Ana en la mesa 5, como la deja POST /pagos/intencion.
   await s.almacenPagos.guardarIntencion(REF, {
-    id_mesa: 5, comensal: 'Ana', modo: 'igual', monto_centavos: MONTO, estado: 'pendiente', creada_en: new Date().toISOString(), expira_en: new Date(Date.now() + 1800e3).toISOString(),
+    id_mesa: 5, comensal: 'Ana', modo: 'total', monto_centavos: MONTO, estado: 'pendiente', creada_en: new Date().toISOString(), expira_en: new Date(Date.now() + 1800e3).toISOString(),
   }, 1800);
   await s.almacenPagos.reservarPendiente(5, 'Ana', REF, 1800);
 
@@ -76,8 +76,9 @@ test('pago aprobado y coherente: se registra en el backend y SOLO después se an
 
   const [registro] = llamadasA(backend, '/api/transacciones/internal');
   assert.deepStrictEqual(registro.cuerpo, {
-    referencia_externa: REF, id_transaccion_pasarela: ID_TX, pasarela: 'wompi', id_mesa: 5, comensal: 'Ana', modo: 'igual', monto_centavos: MONTO, moneda: 'COP', metodo_pago: 'online',
+    referencia_externa: REF, id_transaccion_pasarela: ID_TX, pasarela: 'wompi', id_mesa: 5, comensal: 'Ana', modo: 'total', monto_centavos: MONTO, moneda: 'COP', metodo_pago: 'online', intencion_creada_en: registro.cuerpo.intencion_creada_en,
   });
+  assert.ok(!Number.isNaN(Date.parse(registro.cuerpo.intencion_creada_en)), 'manda la creación de la intención');
   // Reverificación con la llave PRIVADA.
   assert.strictEqual(fetch.llamadas[0].opts.headers.Authorization, `Bearer ${WOMPI_ENV.WOMPI_PRIVATE_KEY}`);
   assert.strictEqual((await s.almacenPagos.obtener(REF)).estado, 'pagada');
@@ -113,7 +114,8 @@ test('monto distinto al esperado: no se registra; intento fallido y pago:alerta 
   const [fallido] = llamadasA(backend, '/api/pagos/intentos-fallidos/interno');
   assert.deepStrictEqual([fallido.cuerpo.motivo, fallido.cuerpo.monto_centavos, fallido.cuerpo.monto_esperado_centavos], ['monto_distinto', 100, MONTO]);
   assert.strictEqual(await nadaMesa, null);
-  assert.strictEqual((await s.almacenPagos.obtener(REF)).estado, 'pendiente');
+  // Wompi lo cobró (la API lo confirma): no se queda en pendiente, lo revisa el personal.
+  assert.strictEqual((await s.almacenPagos.obtener(REF)).estado, 'en_revision');
 });
 
 test('el evento dice APPROVED pero la API no: gana la API (alerta, sin registro)', async (t) => {
@@ -241,4 +243,96 @@ test('un pago aprobado DESPUÉS de uno rechazado de la misma referencia no se ac
   const alerta = esperar(admin, 'pago:alerta');
   await enviar(evento());
   assert.strictEqual((await alerta).motivo, 'intencion_no_pendiente');
+});
+
+// --- pago:alerta con monto y alias (panel, pedido de Jarrinson) ---------------
+
+/** El payload COMPLETO: cualquier clave de más (o de menos) rompe la prueba. */
+const sinFecha = (a) => {
+  assert.match(a.emitidoEn, /^\d{4}-\d{2}-\d{2}T/);
+  return { ...a, emitidoEn: '…' };
+};
+const alertaEsperada = (motivo, extra) => ({
+  eventId: `${ID_TX}:${motivo}`,
+  id_mesa: 5,
+  comensal: 'Ana',
+  monto_centavos: MONTO,
+  monto_esperado_centavos: MONTO,
+  referencia_externa: REF,
+  id_transaccion_pasarela: ID_TX,
+  motivo,
+  emitidoEn: '…',
+  ...extra,
+});
+
+test('pago:alerta monto_distinto: lo cobrado (API), lo esperado y el alias', async (t) => {
+  const { admin, enviar, evento } = await escenario(t, { api: { [ID_TX]: txApi({ amount_in_cents: 100 }) } });
+  const alerta = esperar(admin, 'pago:alerta');
+  await enviar(evento({ monto: 100 }));
+  assert.deepStrictEqual(sinFecha(await alerta), alertaEsperada('monto_distinto', { monto_centavos: 100 }));
+});
+
+test('pago:alerta transaccion_inexistente: el monto sale del evento (la API no la conoce)', async (t) => {
+  const { admin, enviar, evento } = await escenario(t, { api: {} });
+  const alerta = esperar(admin, 'pago:alerta');
+  await enviar(evento({ monto: 4_000_000 }));
+  assert.deepStrictEqual(sinFecha(await alerta), alertaEsperada('transaccion_inexistente', { monto_centavos: 4_000_000 }));
+});
+
+test('pago:alerta referencia_desconocida: sin intención, comensal y monto esperado en null', async (t) => {
+  const otraRef = 'SD-5-1-desconocida';
+  const { admin, enviar } = await escenario(t, { api: { [ID_TX]: txApi({ reference: otraRef }) } });
+  const alerta = esperar(admin, 'pago:alerta');
+  await enviar(eventoWompi({ secreto: SECRETO, id: ID_TX, referencia: otraRef, monto: MONTO }));
+  assert.deepStrictEqual(sinFecha(await alerta), alertaEsperada('referencia_desconocida', {
+    id_mesa: null, comensal: null, monto_esperado_centavos: null, referencia_externa: otraRef,
+  }));
+});
+
+test('pago:alerta intencion_no_pendiente y backend_rechazo_409: monto y alias conocidos', async (t) => {
+  {
+    const { admin, enviar, evento } = await escenario(t);
+    await enviar(evento({ estado: 'DECLINED' }));
+    const alerta = esperar(admin, 'pago:alerta');
+    await enviar(evento());
+    assert.deepStrictEqual(sinFecha(await alerta), alertaEsperada('intencion_no_pendiente'));
+  }
+  {
+    const { admin, enviar, evento } = await escenario(t, {
+      rutas: {
+        'POST /api/transacciones/internal': () => ({ status: 409, cuerpo: { error: 'excede el saldo' } }),
+        'POST /api/pagos/intentos-fallidos/interno': () => ({ status: 201, cuerpo: { ok: true } }),
+      },
+    });
+    const alerta = esperar(admin, 'pago:alerta');
+    await enviar(evento());
+    assert.deepStrictEqual(sinFecha(await alerta), alertaEsperada('backend_rechazo_409'));
+  }
+});
+
+test('pago:alerta: un monto que no es entero llega como null al panel, sin cambiar lo que se guarda', async (t) => {
+  const { backend, admin, enviar, evento } = await escenario(t, { api: { [ID_TX]: txApi({ amount_in_cents: '100' }) } });
+  const alerta = esperar(admin, 'pago:alerta');
+  await enviar(evento({ monto: 100 }));
+  const a = await alerta;
+  assert.strictEqual(a.motivo, 'monto_distinto');
+  assert.strictEqual(a.monto_centavos, null);
+  const [fallido] = llamadasA(backend, '/api/pagos/intentos-fallidos/interno');
+  assert.strictEqual(fallido.cuerpo.monto_centavos, '100', 'el cuerpo del backend no cambia');
+});
+
+test('pago:alerta solo llega al personal de room:admin: ni comensal, ni tablet, ni cocina', async (t) => {
+  const {
+    s, admin, mesa5, mesa6, enviar, evento,
+  } = await escenario(t, { api: { [ID_TX]: txApi({ amount_in_cents: 100 }) } });
+  const pantalla = await s.conectar(tokenPantalla(5));
+  const cocina = await s.conectar(tokenPersonal('cocina'));
+  const cajero = await s.conectar(tokenPersonal('cajero'));
+  const enAdmin = esperar(admin, 'pago:alerta');
+  const enCajero = esperar(cajero, 'pago:alerta');
+  const fuera = [mesa5, mesa6, pantalla, cocina].map((c) => esperar(c, 'pago:alerta', 300));
+  await enviar(evento({ monto: 100 }));
+  assert.strictEqual((await enAdmin).comensal, 'Ana');
+  assert.strictEqual((await enCajero).comensal, 'Ana');
+  assert.deepStrictEqual(await Promise.all(fuera), [null, null, null, null]);
 });

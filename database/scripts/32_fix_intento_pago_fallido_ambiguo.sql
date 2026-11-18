@@ -1,0 +1,25 @@
+-- ==============================================================================
+-- PROYECTO: SmartDining
+-- SCRIPT: 32_fix_intento_pago_fallido_ambiguo.sql
+-- MÓDULO: Pagos · registro de intentos fallidos (H-08)
+-- ==============================================================================
+-- El script 23 creó registrar_intento_pago_fallido() DOS veces:
+--   - la completa, de 9 parámetros, con los 5 últimos opcionales
+--     (referencia, id_mesa, id_transaccion_pasarela, pasarela, moneda = 'COP');
+--   - una "sobrecarga simple" de 4 parámetros que solo llamaba a la completa
+--     con NULL, NULL, NULL, NULL y 'COP'.
+--
+-- Las dos aceptan una llamada con 4 argumentos, así que PostgreSQL no puede
+-- elegir: "function registrar_intento_pago_fallido(integer, unknown, numeric,
+-- unknown) is not unique". La de 4 nunca pudo usarse; por eso fallaba
+-- database/tests/test_h08_intentos_pago_fallidos.sql desde el principio.
+--
+-- Arreglo: se borra la de 4. La de 9 atiende igual una llamada de 4 argumentos
+-- (los demás toman su valor por omisión, los mismos que ponía la de 4), así que
+-- nada cambia para quien la llame. Nadie llama a la de 4 (ni el backend ni el
+-- socket-server la usan).
+--
+-- Lo aplica database/migrar.sh. Sin BEGIN/COMMIT propios. Idempotente.
+-- ==============================================================================
+
+DROP FUNCTION IF EXISTS registrar_intento_pago_fallido(INTEGER, VARCHAR, DECIMAL, TEXT);

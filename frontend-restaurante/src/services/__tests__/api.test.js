@@ -9,7 +9,17 @@ import {
   navegarALogin,
   EVENT_UNAUTHORIZED,
   EVENT_RATE_LIMITED,
+  mensajeNoGuardado,
+  usarMocks,
+  constructorApi,
+  platosApi,
+  mesasApi,
+  pedidosApi,
+  registrarComensal,
+  enviarPedido,
+  obtenerCuenta,
 } from '../api'
+import { generarTokenQrMesa, rotarTokenQrMesa } from '../qrService'
 
 describe('Interceptor y cliente HTTP (apiFetch)', () => {
   const originalLocation = window.location
@@ -224,6 +234,104 @@ describe('Interceptor y cliente HTTP (apiFetch)', () => {
     })
   })
 
+  describe('Tiempo de espera de las peticiones', () => {
+    // fetch que nunca responde, salvo que se aborte su señal
+    function fetchColgado() {
+      return vi.spyOn(global, 'fetch').mockImplementation(
+        (_url, config) =>
+          new Promise((_resolve, reject) => {
+            config.signal.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted')
+              err.name = 'AbortError'
+              reject(err)
+            })
+          })
+      )
+    }
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('aborta la petición y lanza un mensaje claro si el backend no responde', async () => {
+      vi.useFakeTimers()
+      fetchColgado()
+
+      const promesa = apiFetch('/pedidos/activos', { timeout: 10000 })
+      const verificacion = expect(promesa).rejects.toThrow('Tiempo de espera agotado al conectar con el servidor (10s)')
+      await vi.advanceTimersByTimeAsync(10000)
+      await verificacion
+    })
+
+    it('respeta la señal propia de quien llama y no le impone el tiempo de espera', async () => {
+      vi.useFakeTimers()
+      fetchColgado()
+      const controller = new AbortController()
+
+      let resuelta = false
+      const promesa = apiFetch('/pedidos/activos', { signal: controller.signal }).catch((err) => {
+        resuelta = true
+        return err
+      })
+      await vi.advanceTimersByTimeAsync(15000)
+      expect(resuelta).toBe(false)
+
+      controller.abort()
+      await promesa
+      expect(resuelta).toBe(true)
+    })
+  })
+
+  describe('P-13: sin respaldos falsos', () => {
+    it('un fallo de red se marca como sinConexion', async () => {
+      vi.spyOn(global, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+
+      const err = await apiFetch('/platos/1/disponible', { method: 'PATCH' }).catch((e) => e)
+      expect(err.sinConexion).toBe(true)
+      expect(err.message).toBe('Sin conexión con el servidor')
+      expect(mensajeNoGuardado(err)).toBe('Sin conexión, no se guardó')
+    })
+
+    it('mensajeNoGuardado muestra el error real cuando el servidor sí respondió', () => {
+      const err = Object.assign(new Error('Ese plato no existe'), { status: 404 })
+      expect(mensajeNoGuardado(err)).toBe('No se guardó: Ese plato no existe')
+    })
+
+    it('el constructor no guarda en localStorage si el backend no responde', async () => {
+      vi.spyOn(global, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+      const setItem = vi.spyOn(Storage.prototype, 'setItem')
+
+      await expect(constructorApi.guardarPaso(1, { nombre: 'Base' })).rejects.toMatchObject({ sinConexion: true })
+      await expect(constructorApi.eliminarIngrediente(5)).rejects.toMatchObject({ sinConexion: true })
+      await expect(constructorApi.obtenerPasos(1)).rejects.toMatchObject({ sinConexion: true })
+      expect(setItem.mock.calls.filter(([clave]) => String(clave).includes('constructor'))).toHaveLength(0)
+    })
+
+    it('marcarPersonalizable ya no finge éxito si el backend lo rechaza', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 400,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ error: 'Required' }),
+      })
+      await expect(platosApi.marcarPersonalizable(1, { personalizable: true })).rejects.toThrow('Required')
+    })
+
+    it('abrir o rotar el QR sin conexión falla en vez de fabricar un token con firma falsa', async () => {
+      vi.spyOn(global, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'))
+
+      await expect(generarTokenQrMesa(3)).rejects.toMatchObject({ sinConexion: true })
+      await expect(rotarTokenQrMesa(3)).rejects.toMatchObject({ sinConexion: true })
+    })
+
+    it('usarMocks solo es verdadero en desarrollo y con VITE_USE_MOCKS=true', () => {
+      expect(usarMocks({ DEV: true, VITE_USE_MOCKS: 'true' })).toBe(true)
+      expect(usarMocks({ DEV: false, VITE_USE_MOCKS: 'true' })).toBe(false)
+      expect(usarMocks({ DEV: true, VITE_USE_MOCKS: 'false' })).toBe(false)
+      expect(usarMocks({ DEV: true })).toBe(false)
+    })
+  })
+
   describe('Funciones auxiliares de almacenamiento y navegación', () => {
     it('setStoredAuthMessage y getStoredAuthMessage recuperan y consumen el mensaje una sola vez', () => {
       setStoredAuthMessage('Sesión cerrada')
@@ -247,6 +355,120 @@ describe('Interceptor y cliente HTTP (apiFetch)', () => {
       window.location.pathname = '/home'
       navegarALogin()
       expect(window.location.assign).toHaveBeenCalledWith('/login')
+    })
+  })
+
+  describe('Servicios para toma de pedidos del mesero (J-16)', () => {
+    it('registrarComensal hace POST /api/mesas/:id/comensales y conserva status y motivo en caso de error', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 409,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          error: 'Ese nombre ya lo usa otra persona en la mesa, elige otro',
+          motivo: 'alias_en_uso',
+        }),
+      })
+
+      try {
+        await registrarComensal(5, 'Abuela')
+        expect.fail('debió fallar')
+      } catch (err) {
+        expect(err.status).toBe(409)
+        expect(err.motivo).toBe('alias_en_uso')
+        expect(err.message).toContain('Ese nombre ya lo usa otra persona')
+      }
+    })
+
+    it('registrarComensal devuelve el alias normalizado en caso exitoso (201)', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 201,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({ id_mesa: 5, alias: 'Abuela' }),
+      })
+
+      const res = await registrarComensal(5, '  abuela  ')
+      expect(res).toEqual({ id_mesa: 5, alias: 'Abuela' })
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/mesas/5/comensales'),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ alias: '  abuela  ' }),
+        })
+      )
+
+      // También verificar método en mesasApi
+      const resMetodo = await mesasApi.registrarComensal(5, 'Abuela')
+      expect(resMetodo).toEqual({ id_mesa: 5, alias: 'Abuela' })
+    })
+
+    it('enviarPedido hace POST /api/pedidos y conserva status, motivo, alias y faltantes en error 409', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 409,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          error: 'Esa persona no está registrada en la mesa',
+          motivo: 'comensal_no_registrado',
+          alias: 'Abuela',
+        }),
+      })
+
+      try {
+        await enviarPedido({ id_mesa: 5, items: [{ id_plato: 1, cantidad: 1, comensal: 'Abuela' }] })
+        expect.fail('debió fallar')
+      } catch (err) {
+        expect(err.status).toBe(409)
+        expect(err.motivo).toBe('comensal_no_registrado')
+        expect(err.alias).toBe('Abuela')
+      }
+
+      // También verificar método en pedidosApi
+      await expect(
+        pedidosApi.enviarPedido({ id_mesa: 5, items: [] })
+      ).rejects.toMatchObject({ status: 409, motivo: 'comensal_no_registrado' })
+    })
+
+    it('enviarPedido conserva status y motivo también en el 503 reintentar (D-17)', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 503,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          error: 'intenta de nuevo',
+          motivo: 'reintentar',
+        }),
+      })
+
+      try {
+        await enviarPedido({ id_mesa: 5, items: [{ id_plato: 10, cantidad: 1, comensal: 'Abuela' }] })
+        expect.fail('debió fallar con 503')
+      } catch (err) {
+        expect(err.status).toBe(503)
+        expect(err.motivo).toBe('reintentar')
+      }
+    })
+
+    it('obtenerCuenta hace GET /api/mesas/:id/cuenta', async () => {
+      const mockCuenta = {
+        id_mesa: 5,
+        total_mesa: 50000,
+        comensales: [{ comensal: 'Abuela', subtotal: 50000 }],
+      }
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => mockCuenta,
+      })
+
+      const res = await obtenerCuenta(5)
+      expect(res).toEqual(mockCuenta)
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/mesas/5/cuenta'),
+        expect.anything()
+      )
     })
   })
 })

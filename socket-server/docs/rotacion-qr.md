@@ -47,48 +47,81 @@ sequenceDiagram
     S->>S: firma un QR nuevo (v1, HMAC)
     S->>B: POST /api/mesas/:id/token-qr/interno { token_qr, token_anterior } (x-internal-key)
     alt 200
-      B-->>S: guardado (FOR UPDATE, mesa ocupada, token_anterior coincide)
+      B-->>S: guardado (FOR UPDATE, mesa ocupada, token_anterior coincide, sin comensales)
       S->>P: qr:actualizado { id_mesa, token_qr }
-    else 409 / 404
-      B-->>S: la mesa ya no está ocupada o alguien rotó a mano
+      S->>S: reintenta en 3 min con el nuevo como token_anterior
+    else 404 / 409 mesa_no_ocupada / token_anterior_distinto
+      B-->>S: la mesa ya no está abierta o alguien rotó a mano
       S->>S: deja de rotar esa mesa
-    else error o sin respuesta (1500 ms)
+    else 409 mesa_con_comensales
+      B-->>S: la sesión ya tiene pedidos o alias reservados (alguien entró sin socket)
+      S->>S: deja de rotar esa mesa (QR fijo hasta liberarla)
+    else 503 alias_no_disponible, otro error o sin respuesta (1500 ms)
+      B-->>S: no se pudo comprobar (Redis) o falló algo
       S->>S: conserva el QR anterior (sigue válido) y reintenta en 3 min
     end
   end
 ```
 
-## BLOQUEADO para Daniel: contrato del endpoint del backend
+## Contrato del backend (implementado en #168)
+
+Referencia completa: `POST /mesas/:id/token-qr/interno` en
+[`backend/docs/api-spec.md`](../../backend/docs/api-spec.md).
 
 ```
 POST /api/mesas/:id/token-qr/interno
 x-internal-key: <INTERNAL_API_KEY>
 Content-Type: application/json
 
-{ "token_qr": "v1.<payload>.<firma>", "token_anterior": "v1...." }
+{ "token_qr": "v1.<datos>.<firma>", "token_anterior": "v1.<datos>.<firma>" }
 ```
 
-Comportamiento esperado:
+Lo que hace el backend, en una transacción y con la mesa bloqueada (`FOR UPDATE`):
 
-1. Exigir `x-internal-key` con comparación en tiempo constante; sin ella, `401`.
-2. `BEGIN`; `SELECT ... FROM mesas WHERE id_mesa = $1 FOR UPDATE`.
-3. `404` si la mesa no existe. `409` si `estado <> 'ocupada'`.
-4. **Compare-and-swap:** `409` si `token_anterior` no es `NULL` y no coincide con
-   `mesas.token_qr` (alguien rotó o liberó a mano mientras tanto).
-5. `UPDATE mesas SET token_qr = $1`, `COMMIT`, y responder `200 { "ok": true }`.
-6. **No** llamar a `/internal/qr-rotado`: el socket-server ya avisa a la tablet cuando recibe
-   el `200`.
-7. Opcional: registrar el token anterior en `token_qr_historico`.
+1. Exige `x-internal-key` con comparación en tiempo constante; sin ella o equivocada, `401`.
+2. Valida el cuerpo (`token_qr` y `token_anterior` con forma `v1.<datos>.<firma>`, distintos
+   entre sí; `token_anterior` es obligatorio). La firma no la valida: es del socket-server.
+3. `404` si la mesa no existe. `409 mesa_no_ocupada` si no está `ocupada`.
+4. **Compare-and-swap:** `409 token_anterior_distinto` si `token_anterior` no es el
+   `token_qr` vigente (alguien rotó o liberó a mano mientras tanto). **`token_anterior: null`
+   también responde `409 token_anterior_distinto`**: no hay cambio a ciegas.
+5. **Continuidad:** `409 mesa_con_comensales` si la sesión de mesa ya tiene pedidos o alias
+   reservados. Si las reservas de alias no se pueden leer (Redis), `503 alias_no_disponible`.
+6. Cambia `mesas.token_qr`, `COMMIT`, y responde `200 { "ok": true }`. **No** llama a
+   `/internal/qr-rotado`: el socket-server ya avisa a la tablet cuando recibe el `200`.
+7. **Hecho:** el token anterior se guarda en `token_qr_historico`.
 
-## BLOQUEADO para Daniel: continuidad de quienes ya entraron
+Qué hace el rotador con cada respuesta (`src/rotacion.js`):
+
+| Respuesta del backend | Significa | El rotador |
+| :--- | :--- | :--- |
+| `200 { "ok": true }` | El QR nuevo es el vigente | Emite `qr:actualizado` y vuelve a contar 3 min |
+| `400 cuerpo_invalido` | El socket-server mandó un cuerpo mal formado (no debería pasar) | Reintenta en 3 min con el QR anterior y lo deja en el log |
+| `401` | `INTERNAL_API_KEY` distinta entre los dos servicios | Reintenta en 3 min y lo deja en el log |
+| `404` | La mesa no existe | **Deja de rotar** esa mesa |
+| `409 mesa_no_ocupada` | La mesa se liberó | **Deja de rotar** |
+| `409 token_anterior_distinto` | Alguien rotó o liberó a mano | **Deja de rotar** (el backend manda) |
+| `409 mesa_con_comensales` | Ya entró alguien (pedidos o alias reservados) | **Deja de rotar**: el QR queda fijo hasta liberar la mesa |
+| `503 alias_no_disponible` | El backend no pudo comprobar los alias (Redis) | Reintenta en 3 min; el QR anterior sigue valiendo |
+| Otro error, sin respuesta o timeout (1500 ms) | — | Reintenta en 3 min; el QR anterior sigue valiendo |
+
+El rotador **nunca** manda `token_anterior: null`. Arranca siempre con el token firmado que
+acaba de devolver `/qr/generar`, que es el mismo que el backend guarda al abrir o rotar a mano,
+y cada `200` encadena el nuevo como `token_anterior` del ciclo siguiente.
+
+## Continuidad de quienes ya entraron
 
 El socket-server **no revoca** nada al rotar: un comensal que entró con el QR anterior conserva
-su socket, su sala y su carrito (cubierto por las pruebas). Pero el backend hoy invalida toda
-sesión cuyo `sid` no coincida con el `token_qr` vigente (`sesionDeMesaVigente` en
-`auth.middleware.js`). Por eso, después de una rotación, quien escaneó el QR anterior y todavía
-no se había conectado recibiría `401` del backend.
+su socket, su sala y su carrito (cubierto por las pruebas). El backend invalida toda sesión
+cuyo `sid` no coincida con el `token_qr` vigente (`sesionDeMesaVigente` en
+`auth.middleware.js`), así que rotar dejaría sin sesión a quien escaneó el QR anterior.
 
-Propuesta: que el JWT del comensal se ate a la **sesión de mesa** y no a un QR concreto. Por
-ejemplo, guardar en `token_qr_historico` los `sid` emitidos desde que la mesa se abrió y aceptar
-cualquiera de ellos hasta que la mesa se libere. La liberación sigue cortando a todos, porque
-borra el historial de esa sesión.
+Eso ya no pasa: el `409 mesa_con_comensales` cubre a quien ya entró. Todo el que entra por QR
+reserva su alias (y el personal reserva el de quien no tiene celular), y cada pedido queda en la
+sesión. Con cualquiera de los dos el backend no rota y el QR queda fijo. Esto incluye a quien
+escaneó y todavía no abrió su socket, que el socket-server no puede ver.
+
+**Mejora futura, no bloqueante:** guardar el historial de `sid` emitidos desde que la mesa se
+abrió y aceptar cualquiera hasta liberarla. Solo hace falta si se quiere que un QR **viejo**
+siga valiendo después de rotar, por ejemplo para alguien que escaneó y tardó más de 3 minutos
+en escribir su alias. Hoy ese QR viejo deja de servir y basta con volver a escanear la tablet.

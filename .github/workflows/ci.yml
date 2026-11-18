@@ -11,10 +11,12 @@ on:
 permissions:
   contents: read
 
-# Un push nuevo al mismo PR cancela la corrida anterior.
+# Un push nuevo al mismo PR cancela la corrida anterior. En develop y main no:
+# la corrida puede llevar dentro el despliegue de staging, y un despliegue no
+# se corta a la mitad.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:
@@ -70,15 +72,42 @@ jobs:
     name: infra · scripts de despliegue
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # PostgreSQL real para las pruebas de datos de mesas-feria.sh (se omiten
+    # en local sin SD_PG_URL). Solo esquemas de prueba; nada de la app.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: prueba
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      SD_PG_URL: postgresql://postgres:prueba@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Sintaxis de los scripts de shell
-        run: for f in infra/scripts/*.sh; do sh -n "$f"; done
-      - name: Pruebas (contraseñas del personal)
-        run: node --test "infra/scripts/*.test.cjs"
+        # Cada script con el intérprete de su shebang: sh es dash en ubuntu y
+        # no entiende la sintaxis de bash (arreglos, [[ ]]).
+        run: |
+          for f in infra/scripts/*.sh; do
+            if head -n 1 "$f" | grep -q bash; then
+              echo "bash -n $f"; bash -n "$f"
+            else
+              echo "sh -n   $f"; sh -n "$f"
+            fi
+          done
+      - name: Pruebas de los scripts (contraseñas, respaldo, mesas y nginx)
+        run: |
+          psql --version
+          node --test "infra/scripts/*.test.cjs"
 
   frontends:
     name: ${{ matrix.app }} · lint y build
@@ -87,7 +116,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [frontend-cliente, frontend-restaurante]
+        app: [frontend-cliente, frontend-restaurante, frontend-kds, sitio-publico]
     defaults:
       run:
         working-directory: ${{ matrix.app }}
@@ -100,4 +129,117 @@ jobs:
           cache-dependency-path: ${{ matrix.app }}/package-lock.json
       - run: npm ci
       - run: npm run lint
+      # Pruebas unitarias. No necesitan servicios ni variables (la suite e2e de
+      # Playwright del panel queda fuera: frontend-restaurante/vite.config.js).
+      # El KDS usa node --test: el script falla también si quedan pruebas
+      # CANCELADAS, que node --test no cuenta como fallidas. Vitest (cliente y
+      # panel) sí falla solo, y ese script no entiende su resumen.
+      - name: npm test
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          if [ "$APP" = "frontend-kds" ]; then
+            bash "$GITHUB_WORKSPACE/.github/scripts/npm-test-sin-canceladas.sh"
+          else
+            npm test
+          fi
       - run: npm run build
+
+  # Pruebas de integración del backend contra PostgreSQL real
+  # (backend/tests/integracion). Job APARTE: no está en el `needs` de
+  # deploy-staging ni de ningún otro, así que no frena el resto del CI; si
+  # vuelve a ser requerido se decide en la protección de ramas.
+  backend-integracion:
+    name: backend · integración (con PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: backend
+    # El mismo PostgreSQL que el job infra. "prueba" es la contraseña de este
+    # contenedor de un solo uso, no un secreto: no hay secrets ni vars del repo.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: prueba
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    # Las suites leen las variables estándar de PostgreSQL (tests/helpers/
+    # base-prueba.js): con PGHOST definida, una base que no responde es un
+    # FALLO, no un salto. Sin Redis a propósito: las suites que lo usan ponen
+    # su propio doble y el resto sigue sin caché, como en producción con Redis
+    # caído.
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: prueba
+      PGDATABASE: smartdining_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            socket-server/package-lock.json
+      - run: npm ci
+      - name: npm ci en socket-server (lo usa mesas-rotacion-sql)
+        # Esa suite carga el servicio QR real de socket-server/src (qr.js,
+        # rotacion.js, backend.js), que necesita sus dependencias (jsonwebtoken).
+        # Sin ellas la suite entera falla con "Cannot find module".
+        working-directory: socket-server
+        run: npm ci
+      - name: psql en el runner
+        # ubuntu-latest ya lo trae (el job infra lo usa); si una imagen nueva
+        # no lo trajera, se instala el cliente.
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q postgresql-client
+          fi
+          psql --version
+      - name: Crear y migrar la base (todos los scripts de database/scripts)
+        # migrar.sh sobre una base vacía carga la línea base (schema, scripts y
+        # seed) y después los scripts nuevos. El inventario de la demo se carga
+        # a mano, como en local: las suites cuentan con sus insumos y recetas.
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -d postgres -c "CREATE DATABASE $PGDATABASE"
+          sh "$GITHUB_WORKSPACE/database/migrar.sh"
+          psql -X -q -v ON_ERROR_STOP=1 -f "$GITHUB_WORKSPACE/database/seed_inventario_demo.sql"
+      - name: Zona de la base y columnas de fecha (test_43, solo lectura)
+        # Falla si la base no quedó en America/Bogota (script 43) o si una
+        # columna de fecha nueva no es TIMESTAMPTZ. Las pruebas de integración
+        # de abajo corren ya con la base en hora de Bogotá, como en el VPS.
+        working-directory: database/tests
+        run: psql -X -v ON_ERROR_STOP=1 -f test_43_zona_horaria.sql
+      - name: JWT_SECRET aleatorio para esta corrida
+        # Se genera aquí y se enmascara en el log; nada viene de un .env ni de
+        # los secretos del repo.
+        run: |
+          secreto="$(openssl rand -hex 32)"
+          echo "::add-mask::$secreto"
+          echo "JWT_SECRET=$secreto" >> "$GITHUB_ENV"
+      - name: npm run test:integracion (falla si hay fallidas, canceladas o saltadas)
+        # La salida completa queda en el log: si falla una prueba intermitente
+        # (p. ej. quitar-item-sql d y f, o reportes-consumo-sql), aquí está el
+        # error exacto.
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/integracion-sin-saltadas.sh"
+
+  # Despliegue a staging: solo en un push a develop, si TODO lo anterior pasó y
+  # el dueño del repo activó la variable DEPLOY_STAGING=true (mientras no exista
+  # el environment "staging" con sus secretos, el job queda "skipped" y el CI
+  # sigue en verde). Ver docs/despliegue.md, sección "Staging".
+  deploy-staging:
+    name: staging · desplegar
+    needs: [backend, socket-server, infra, frontends]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && vars.DEPLOY_STAGING == 'true'
+    uses: ./.github/workflows/deploy-staging.yml
+    secrets: inherit

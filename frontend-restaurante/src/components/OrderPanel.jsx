@@ -1,8 +1,13 @@
 import { Utensils, CheckCircle2, Flame, User, Clock, ArrowRight } from 'lucide-react'
+import { useContext } from 'react'
 import { Link } from 'react-router-dom'
 import { StateBadge } from './ui/Badge'
+import { AuthContext } from '../context/authContextDef'
+import { puedeUsarCaja } from '../utils/caja'
 
 export function OrderPanel({ order, onDeliver }) {
+  // Sin AuthProvider (algunas pruebas) no hay rol: el enlace a Caja no se muestra.
+  const rol = useContext(AuthContext)?.user?.rol
   if (!order) {
     return (
       <div className="panel order-panel empty-selection">
@@ -13,9 +18,9 @@ export function OrderPanel({ order, onDeliver }) {
           <Utensils size={42} className="text-muted" />
           <h3>Sin comanda seleccionada</h3>
           <p>Selecciona una mesa ocupada en el plano para monitorear sus platos en cocina o gestionar su consumo.</p>
-          <Link to="/mesas" className="primary-button small inline-flex-center">
+          <Link to="/mesas" className="btn-mapa-mesas">
             <span>Ver Mapa de Mesas</span>
-            <ArrowRight size={14} />
+            <ArrowRight size={16} />
           </Link>
         </div>
       </div>
@@ -93,16 +98,18 @@ export function OrderPanel({ order, onDeliver }) {
               type="button"
               className="primary-button small flex-1 text-center btn-entregar-order"
               onClick={() => onDeliver(order.id_pedido || order.id)}
-              style={{ backgroundColor: 'var(--emerald-600, #059669)', color: '#fff' }}
+              style={{ backgroundColor: '#EE1C25', color: '#fff' }}
             >
               <CheckCircle2 size={15} />
               <span>Marcar Entregado</span>
             </button>
           )}
 
-          <Link to="/caja" className="ghost-button small flex-1 text-center">
-            <span>Cobrar en Caja</span>
-          </Link>
+          {puedeUsarCaja(rol) && (
+            <Link to="/caja" className="ghost-button small flex-1 text-center">
+              <span>Cobrar en Caja</span>
+            </Link>
+          )}
           <Link to="/pedidos" className="ghost-button small text-center">
             <Flame size={15} />
             <span>KDS Cocina</span>

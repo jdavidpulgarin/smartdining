@@ -1,39 +1,223 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCarrito } from '../context/CarritoContext';
+import { useMesaSocket } from '../context/MesaSocketContext';
 import { formatearPrecio } from '../utils/formato';
+import { obtenerApodo } from '../utils/apodo';
+import { pluralizar } from '../utils/pluralizar';
+import { puedoEnviar } from '../utils/carritoCompartido';
 import LineaCarrito from '../components/carrito/LineaCarrito';
+import Button from '../components/ui/Button';
+import Modal from '../components/ui/Modal';
+import { crearPedido } from '../services/pedidoService';
+import {
+  recargarMenu,
+  marcarFaltantesEnCache,
+  actualizarDisponibilidadPlatoEnCache,
+  actualizarDisponibilidadEnCache,
+} from '../services/menuService';
+import {
+  faltantesDelItem,
+  resumenFaltantes,
+  accionErrorPedido,
+  actualizarMarcasPorDisponibilidad,
+  aplicarAjusteFaltantes,
+} from '../utils/sinStock';
 
-function Carrito() {
+function Carrito({ faltantesIniciales = [], errorPedidoInicial = null } = {}) {
+  const navigate = useNavigate();
   const {
-    lineas,
+    modo,
+    estadoConexion,
+    misLineas,
+    otros,
+    totalMio,
+    totalMesa,
     totalUnidades,
-    total,
     actualizarCantidad,
     eliminarLinea,
     vaciarCarrito,
+    marcarFaltantesEnMenu,
   } = useCarrito();
-  const [confirmandoVaciar, setConfirmandoVaciar] = useState(false);
+  const { on: socketOn } = useMesaSocket();
 
-  if (lineas.length === 0) {
+  const [confirmandoVaciar, setConfirmandoVaciar] = useState(false);
+  const [modalConfirmarAbierto, setModalConfirmarAbierto] = useState(false);
+  const [notasGenerales, setNotasGenerales] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const [errorPedido, setErrorPedido] = useState(errorPedidoInicial);
+  const [faltantesStock, setFaltantesStock] = useState(
+    faltantesIniciales.length > 0
+      ? faltantesIniciales
+      : (errorPedidoInicial?.faltantes || [])
+  );
+  const [bloqueoSegundos, setBloqueoSegundos] = useState(0);
+
+  const miNombre = obtenerApodo();
+  const validacionEnvio = puedoEnviar(misLineas);
+  const resumenStock = useMemo(
+    () => resumenFaltantes(misLineas, faltantesStock),
+    [misLineas, faltantesStock]
+  );
+  const tieneFaltantesPendientes =
+    (errorPedido?.tipo === 'sin_stock' && (errorPedido?.idsLineasAfectadas?.length ?? 0) > 0) ||
+    resumenStock.idsLineasAfectadas.length > 0;
+  const errorMarcabaLineas =
+    (errorPedido?.idsLineasAfectadas?.length ?? 0) > 0;
+  const errorPedidoVisible =
+    errorPedido?.tipo === 'sin_stock' &&
+    errorMarcabaLineas &&
+    !tieneFaltantesPendientes &&
+    validacionEnvio.ok
+      ? null
+      : errorPedido;
+
+  useEffect(() => {
+    if (!socketOn) return undefined;
+    const bajaPlato = socketOn('plato:disponibilidad', (data) => {
+      const idPlato = Number(data?.id_plato ?? data?.idPlato);
+      const disponible = Boolean(data?.disponible);
+      if (!idPlato || !disponible) return;
+      actualizarDisponibilidadPlatoEnCache(idPlato, true);
+      setFaltantesStock((prev) =>
+        actualizarMarcasPorDisponibilidad(prev, {
+          tipo: 'plato',
+          id: idPlato,
+          disponible: true,
+        })
+      );
+    });
+    const bajaIng = socketOn('ingrediente:disponibilidad', (data) => {
+      const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
+      const disponible = Boolean(data?.disponible);
+      if (!idIng || !disponible) return;
+      actualizarDisponibilidadEnCache(idIng, true);
+      setFaltantesStock((prev) =>
+        actualizarMarcasPorDisponibilidad(prev, {
+          tipo: 'ingrediente',
+          id: idIng,
+          disponible: true,
+        })
+      );
+    });
+    return () => {
+      bajaPlato?.();
+      bajaIng?.();
+    };
+  }, [socketOn]);
+
+  useEffect(() => {
+    if (bloqueoSegundos <= 0) return;
+    const interval = setInterval(() => {
+      setBloqueoSegundos((prev) => {
+        if (prev <= 1) {
+          setErrorPedido(null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [bloqueoSegundos]);
+
+  const manejarConfirmarPedido = async () => {
+    if (
+      enviando ||
+      bloqueoSegundos > 0 ||
+      !validacionEnvio.ok ||
+      tieneFaltantesPendientes
+    ) {
+      return;
+    }
+
+    setEnviando(true);
+    setErrorPedido(null);
+
+    try {
+      const respuesta = await crearPedido({
+        lineas: misLineas,
+        notasGenerales,
+      });
+
+      setModalConfirmarAbierto(false);
+      setFaltantesStock([]);
+      await vaciarCarrito();
+      navigate('/seguimiento', { state: { pedido: respuesta } });
+    } catch (err) {
+      const infoError = accionErrorPedido(err, misLineas);
+      if (infoError.ignorar) return;
+
+      if (infoError.tipo === 'sin_stock') {
+        const listaFaltantes = infoError.faltantes || [];
+        setFaltantesStock(listaFaltantes);
+        if (listaFaltantes.length > 0) {
+          marcarFaltantesEnCache(listaFaltantes);
+          marcarFaltantesEnMenu?.(listaFaltantes);
+        } else {
+          recargarMenu();
+        }
+        setModalConfirmarAbierto(false);
+        setErrorPedido(infoError);
+        return;
+      }
+
+      if (infoError.recargarMenu) {
+        recargarMenu();
+      }
+      if (infoError.bloquearSegundos) {
+        setBloqueoSegundos(infoError.bloquearSegundos);
+      }
+      setErrorPedido(infoError);
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  const manejarAjustarCantidad = async (idLinea, cantidadDisponible) => {
+    await actualizarCantidad(idLinea, cantidadDisponible);
+    // Limpiar la marca de esa línea y dejar enviar el pedido
+    setErrorPedido((prev) => {
+      const base = prev || (resumenStock?.hayFaltantes ? resumenStock : null);
+      if (!base) return null;
+      const nuevo = aplicarAjusteFaltantes(base, {
+        idLinea,
+        nuevaCantidad: cantidadDisponible,
+        lineas: misLineas,
+      });
+      return nuevo?.hayFaltantes ? nuevo : null;
+    });
+    setFaltantesStock((prev) => {
+      const nuevo = aplicarAjusteFaltantes(prev, {
+        idLinea,
+        nuevaCantidad: cantidadDisponible,
+        lineas: misLineas,
+      });
+      return Array.isArray(nuevo) ? nuevo : (nuevo?.faltantes ?? []);
+    });
+  };
+
+  const estaVacioTotal = misLineas.length === 0 && otros.length === 0;
+
+  if (estaVacioTotal) {
     return (
       <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
         <div
           aria-hidden="true"
-          className="w-20 h-20 rounded-full bg-primary/10 text-primary flex items-center justify-center text-3xl mb-4 shadow-inner"
+          className="w-20 h-20 rounded-full bg-superficie border border-borde text-texto-suave flex items-center justify-center text-3xl mb-4 shadow-inner"
         >
           🛒
         </div>
-        <h2 className="text-xl font-bold text-cafe mb-2">
+        <h1 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
           Tu carrito está vacío
-        </h2>
-        <p className="text-sm text-gray-600 max-w-xs mb-6">
+        </h1>
+        <p className="text-sm text-texto-suave max-w-xs mb-6">
           Aún no has agregado ningún plato a tu pedido. Revisa nuestro menú para
           elegir tus favoritos.
         </p>
         <Link
           to="/menu"
-          className="min-h-12 inline-flex items-center justify-center px-6 py-3 bg-primary hover:bg-primary-hover active:bg-primary-hover text-white font-bold text-sm rounded-xl transition-colors shadow-sm"
+          className="min-h-12 inline-flex items-center justify-center px-6 py-3 bg-primario hover:bg-primario-hover text-white font-etiqueta uppercase tracking-wider font-bold text-sm rounded-xl transition-colors shadow-sm"
         >
           Explorar menú
         </Link>
@@ -43,98 +227,421 @@ function Carrito() {
 
   return (
     <div className="space-y-4 pb-8">
-      {/* Título de la página y botón vaciar */}
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-extrabold text-cafe">Tu Carrito</h1>
-          <p className="text-xs text-gray-600">
-            {totalUnidades} {totalUnidades === 1 ? 'producto' : 'productos'}
+      {/* Portada Hero Carrito */}
+      <div className="-mx-4 -mt-4 mb-2 relative h-40 sm:h-48 overflow-hidden rounded-b-3xl bg-superficie">
+        <img
+          src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=75&auto=format"
+          alt="Comida fresca"
+          width={800}
+          height={533}
+          fetchPriority="high"
+          decoding="async"
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />
+        <div className="absolute bottom-0 inset-x-0 p-4">
+          <h1 className="font-titulo text-4xl sm:text-5xl text-primario tracking-wider leading-none uppercase">
+            CARRITO DE LA MESA
+          </h1>
+          <p className="text-xs text-texto-suave flex items-center gap-1.5 mt-1">
+            <span className="w-2 h-2 rounded-full bg-exito inline-block" />
+            Se actualiza en vivo con lo que piden todos
           </p>
         </div>
+      </div>
 
-        {confirmandoVaciar ? (
-          <div className="flex items-center gap-2">
+      {/* Banner de estado de conexión compartida */}
+      {modo === 'compartido' && estadoConexion !== 'conectado' && (
+        <div
+          role="status"
+          className="bg-superficie rounded-2xl border border-borde p-3 flex items-center gap-3 text-xs text-texto-suave"
+        >
+          {estadoConexion === 'conectando' ||
+          estadoConexion === 'reconectando' ? (
+            <>
+              <span className="w-2.5 h-2.5 rounded-full bg-acento animate-pulse shrink-0" />
+              <span>
+                Conectando con la mesa… Se sincronizarán los cambios
+                automáticamente.
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="w-2.5 h-2.5 rounded-full bg-primario shrink-0" />
+              <span className="text-primario-texto">
+                Sin conexión con la mesa. Reintentando…
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Aviso superior cuando algo se agotó o hubo cruce al enviar */}
+      {errorPedidoVisible && (
+        <div
+          role="alert"
+          className="p-4 bg-superficie rounded-2xl border-2 border-primario text-primario-texto text-sm space-y-1.5 animate-fadeIn"
+        >
+          <p className="font-semibold text-white">
+            {errorPedidoVisible.tipo === 'sin_stock'
+              ? resumenStock.texto || errorPedidoVisible.mensaje
+              : errorPedidoVisible.mensaje}
+          </p>
+          {errorPedidoVisible.ayuda && (
+            <p className="text-xs text-texto-suave font-medium">
+              {errorPedidoVisible.ayuda}
+            </p>
+          )}
+          {(errorPedidoVisible.esConexion ||
+            errorPedidoVisible.esReintentable) && (
             <button
               type="button"
-              onClick={() => {
-                vaciarCarrito();
-                setConfirmandoVaciar(false);
-              }}
-              className="min-h-12 text-xs font-bold text-primary hover:text-primary-hover bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+              disabled={enviando}
+              onClick={manejarConfirmarPedido}
+              className="min-h-11 px-3 py-2 text-xs font-bold text-acento hover:underline inline-flex items-center cursor-pointer"
             >
-              Sí, vaciar
+              Reintentar envío
             </button>
+          )}
+        </div>
+      )}
+
+      {/* Barra de conteo y botón vaciar lo mío */}
+      <div className="flex items-center justify-between gap-2 px-1">
+        <span className="text-xs text-texto-suave font-medium">
+          {totalUnidades} {pluralizar(totalUnidades, 'producto', 'productos')} en tu
+          pedido
+        </span>
+
+        {misLineas.length > 0 &&
+          (confirmandoVaciar ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  vaciarCarrito();
+                  setConfirmandoVaciar(false);
+                }}
+                className="min-h-11 text-xs font-bold text-primario-texto hover:underline px-2.5 py-1 rounded transition-colors cursor-pointer"
+              >
+                Sí, vaciar lo mío
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmandoVaciar(false)}
+                className="min-h-11 text-xs font-semibold text-texto-suave hover:text-texto px-2.5 py-1 rounded transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
             <button
               type="button"
-              onClick={() => setConfirmandoVaciar(false)}
-              className="min-h-12 text-xs font-semibold text-cafe hover:text-cafe bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+              onClick={() => setConfirmandoVaciar(true)}
+              className="min-h-11 text-xs font-medium text-texto-suave hover:text-primario-texto py-1 px-2.5 rounded transition-colors cursor-pointer"
             >
-              Cancelar
+              Vaciar lo mío
             </button>
+          ))}
+      </div>
+
+      {/* Sección LO TUYO con borde rojo */}
+      <section className="bg-superficie rounded-2xl border-2 border-primario p-3.5 sm:p-4 space-y-3">
+        <div className="flex items-center justify-between pb-2 border-b border-borde">
+          <h2 className="font-etiqueta font-bold text-base uppercase tracking-wider text-white">
+            LO TUYO{miNombre ? ` · ${miNombre.toUpperCase()}` : ''}
+          </h2>
+          <span className="font-etiqueta font-bold text-base text-white">
+            {formatearPrecio(totalMio)}
+          </span>
+        </div>
+
+        {misLineas.length === 0 ? (
+          <div className="py-6 text-center space-y-2">
+            <p className="text-xs text-texto-suave">
+              No tienes platos agregados a tu pedido personal.
+            </p>
+            <Link
+              to="/menu"
+              className="min-h-11 inline-flex items-center justify-center px-3 text-xs font-bold text-primario-texto hover:underline"
+            >
+              + Agregar platos desde el menú
+            </Link>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => setConfirmandoVaciar(true)}
-            className="min-h-12 text-xs font-medium text-gray-600 hover:text-primary py-1.5 px-3 rounded-lg hover:bg-primary/10 transition-colors cursor-pointer"
-          >
-            Vaciar carrito
-          </button>
+          <div className="space-y-3">
+            {misLineas.map((linea) => {
+              const itemAfectado = resumenStock.itemsAfectados.find(
+                (it) => it.id_linea === linea.id_linea || it.idLinea === linea.id_linea
+              );
+              return (
+                <LineaCarrito
+                  key={linea.id_linea}
+                  linea={linea}
+                  faltantes={
+                    itemAfectado
+                      ? itemAfectado.faltantes
+                      : faltantesDelItem(linea, faltantesStock)
+                  }
+                  disponible={itemAfectado?.disponible}
+                  puedeAjustar={itemAfectado?.puedeAjustar}
+                  onAjustarCantidad={manejarAjustarCantidad}
+                  onActualizarCantidad={actualizarCantidad}
+                  onEliminar={eliminarLinea}
+                />
+              );
+            })}
+          </div>
         )}
-      </div>
+      </section>
 
-      {/* Lista de líneas */}
-      <div className="space-y-3">
-        {lineas.map((linea) => (
-          <LineaCarrito
-            key={linea.id_linea}
-            linea={linea}
-            onActualizarCantidad={actualizarCantidad}
-            onEliminar={eliminarLinea}
-          />
-        ))}
-      </div>
+      {/* Sección DE LA MESA (otros comensales, solo lectura) */}
+      {modo === 'compartido' && otros.length > 0 && (
+        <div className="space-y-4 pt-2">
+          <div className="flex items-center gap-2 px-1">
+            <span className="w-2 h-2 rounded-full bg-texto-suave" />
+            <h2 className="font-etiqueta uppercase font-bold text-sm text-texto-suave tracking-wider">
+              DE LA MESA ({otros.reduce((acc, g) => acc + g.lineas.length, 0)}{' '}
+              {pluralizar(
+                otros.reduce((acc, g) => acc + g.lineas.length, 0),
+                'plato',
+                'platos'
+              )}{' '}
+              de otros comensales)
+            </h2>
+          </div>
 
-      {/* Resumen del pedido y botón confirmar */}
-      <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm space-y-3">
-        <div className="flex justify-between items-center text-sm text-gray-600">
-          <span>
-            Subtotal ({totalUnidades}{' '}
-            {totalUnidades === 1 ? 'producto' : 'productos'})
-          </span>
-          <span className="font-semibold text-cafe">
-            {formatearPrecio(total)}
-          </span>
+          {otros.map((grupo) => (
+            <section
+              key={grupo.comensal}
+              className="bg-superficie rounded-2xl border border-borde p-3.5 sm:p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-borde">
+                <span className="font-etiqueta font-bold text-sm uppercase tracking-wider text-texto-suave">
+                  De {grupo.comensal}
+                </span>
+                <span className="font-etiqueta font-bold text-sm text-texto-suave">
+                  {formatearPrecio(grupo.subtotal)}
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {grupo.lineas.map((linea) => (
+                  <LineaCarrito
+                    key={linea.id_linea}
+                    linea={linea}
+                    soloLectura={true}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
-        <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
-          <span className="font-bold text-cafe text-base">Total</span>
-          <span className="font-black text-xl text-primary">
-            {formatearPrecio(total)}
-          </span>
-        </div>
-      </div>
+      )}
 
-      {/* Acciones finales: confirmar pedido (deshabilitado) y volver al menú */}
-      <div className="space-y-2 pt-2">
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          className="w-full min-h-12 py-3 px-4 bg-gray-200 text-gray-500 font-bold text-base rounded-xl cursor-not-allowed flex flex-col items-center justify-center gap-0.5"
+      {/* Notas generales para la cocina */}
+      <div className="bg-superficie rounded-2xl p-4 border border-borde space-y-2">
+        <label
+          htmlFor="notas-generales-pedido"
+          className="block text-xs font-etiqueta uppercase tracking-wider font-bold text-texto"
         >
-          <span>Confirmar pedido</span>
-          <span className="text-xs font-semibold text-gray-400">
-            (próximamente)
+          Notas para la cocina (opcional)
+        </label>
+        <textarea
+          id="notas-generales-pedido"
+          rows={2}
+          maxLength={500}
+          value={notasGenerales}
+          onChange={(e) => setNotasGenerales(e.target.value)}
+          placeholder="Ej. Traer todo al mismo tiempo, sin cubiertos plásticos..."
+          className="w-full text-sm p-3 rounded-xl border border-borde bg-superficie-2 text-texto placeholder:text-texto-tenue focus:outline-none focus-visible:ring-2 focus-visible:ring-primario resize-none"
+        />
+      </div>
+
+      {/* Resumen del pedido */}
+      <div className="bg-superficie rounded-2xl p-4 border border-borde space-y-3">
+        <div className="flex justify-between items-center text-sm text-texto-suave">
+          <span>
+            Subtotal lo tuyo ({misLineas.length}{' '}
+            {pluralizar(misLineas.length, 'producto', 'productos')})
           </span>
-        </button>
+          <span className="font-etiqueta font-bold text-texto text-base">
+            {formatearPrecio(totalMio)}
+          </span>
+        </div>
+
+        {modo === 'compartido' && totalMesa > totalMio && (
+          <div className="flex justify-between items-center text-xs text-texto-tenue pt-1 border-t border-borde/50">
+            <span>Total acumulado en la mesa</span>
+            <span className="font-etiqueta font-semibold text-texto-suave text-sm">
+              {formatearPrecio(totalMesa)}
+            </span>
+          </div>
+        )}
+
+        <div className="border-t border-borde pt-3 flex justify-between items-center">
+          <span className="font-etiqueta uppercase font-bold text-texto text-lg tracking-wide">
+            Total a pagar por ti
+          </span>
+          <span className="font-etiqueta font-black text-2xl text-white">
+            {formatearPrecio(totalMio)}
+          </span>
+        </div>
+      </div>
+
+      {/* Acciones finales: confirmar pedido y volver al menú */}
+      <div className="space-y-2 pt-2">
+        <Button
+          type="button"
+          variante="primario"
+          onClick={() => setModalConfirmarAbierto(true)}
+          disabled={
+            enviando ||
+            bloqueoSegundos > 0 ||
+            misLineas.length === 0 ||
+            !validacionEnvio.ok ||
+            tieneFaltantesPendientes
+          }
+          className="w-full min-h-12 py-3 px-4 font-bold font-etiqueta uppercase text-base rounded-xl flex items-center justify-center gap-2"
+        >
+          {bloqueoSegundos > 0 ? (
+            <span>Espera {bloqueoSegundos}s...</span>
+          ) : (
+            <span>Enviar mi pedido a cocina</span>
+          )}
+        </Button>
+
+        {(!validacionEnvio.ok || tieneFaltantesPendientes) &&
+          misLineas.length > 0 && (
+            <p className="text-xs text-primario-texto text-center font-medium">
+              {(errorPedido?.tipo === 'sin_stock'
+                ? errorPedido.texto || errorPedido.mensaje
+                : null) ||
+                resumenStock.texto ||
+                validacionEnvio.motivo}
+            </p>
+          )}
+
+        <p className="text-xs text-texto-suave text-center">
+          Se envía todo lo tuyo a la cocina. Cada quien paga lo suyo al final.
+        </p>
 
         <Link
           to="/menu"
-          className="min-h-12 inline-flex items-center justify-center w-full text-center py-2.5 text-sm font-semibold text-primary hover:text-primary-hover active:text-primary-hover transition-colors"
+          className="min-h-11 inline-flex items-center justify-center w-full text-center py-2 text-sm font-semibold text-primario-texto hover:underline transition-colors"
         >
           ← Seguir pidiendo
         </Link>
       </div>
+
+      {/* Modal de confirmación para enviar solo lo mío */}
+      <Modal
+        abierto={modalConfirmarAbierto}
+        onCerrar={() => !enviando && setModalConfirmarAbierto(false)}
+        titulo="Confirmar mi pedido"
+      >
+        <div className="p-4 space-y-4">
+          <p className="text-xs text-texto-suave">
+            Estás a punto de enviar tus platos a la cocina. Cada comensal de la
+            mesa envía y paga sus propios platos.
+          </p>
+
+          {/* Lista resumida de platos a enviar */}
+          <div className="bg-superficie-2 rounded-xl p-3 border border-borde space-y-2 max-h-48 overflow-y-auto">
+            {misLineas.map((linea) => (
+              <div
+                key={linea.id_linea}
+                className="flex items-center justify-between text-xs py-1 border-b border-borde/40 last:border-b-0"
+              >
+                <div className="flex-1 min-w-0 pr-2">
+                  <span className="font-semibold text-texto truncate block">
+                    {linea.nombre}
+                  </span>
+                  <span className="text-texto-tenue">
+                    Cantidad: {linea.cantidad}
+                  </span>
+                </div>
+                <span className="font-bold font-etiqueta text-sm text-white shrink-0">
+                  {formatearPrecio(
+                    linea.subtotal ??
+                      Number(linea.precioUnitario) * Number(linea.cantidad)
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {notasGenerales && (
+            <div className="text-xs bg-superficie-2 p-2.5 rounded-xl border border-borde text-texto-suave">
+              <span className="font-bold text-texto block mb-0.5">
+                Notas para la cocina:
+              </span>
+              <p className="italic">{notasGenerales}</p>
+            </div>
+          )}
+
+          <div className="flex justify-between items-center pt-2 border-t border-borde">
+            <span className="font-etiqueta uppercase font-bold text-base text-texto">
+              Total de tu pedido
+            </span>
+            <span className="font-etiqueta font-black text-2xl text-white">
+              {formatearPrecio(totalMio)}
+            </span>
+          </div>
+
+          {!validacionEnvio.ok && (
+            <div
+              role="alert"
+              className="p-3 bg-superficie rounded-xl border border-primario text-primario-texto text-xs"
+            >
+              {validacionEnvio.motivo}
+            </div>
+          )}
+
+          {errorPedidoVisible && (
+            <div
+              role="alert"
+              className="p-3 bg-superficie rounded-xl border border-primario text-primario-texto text-xs space-y-1"
+            >
+              <p className="font-semibold">{errorPedidoVisible.mensaje}</p>
+              {errorPedidoVisible.ayuda && (
+                <p className="text-texto-suave">{errorPedidoVisible.ayuda}</p>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2 pt-2">
+            <Button
+              type="button"
+              variante="primario"
+              onClick={manejarConfirmarPedido}
+              disabled={enviando || !validacionEnvio.ok}
+              className="w-full min-h-12 py-3 px-4 font-bold font-etiqueta uppercase text-base rounded-xl flex items-center justify-center gap-2"
+            >
+              {enviando ? (
+                <>
+                  <span
+                    className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"
+                    aria-hidden="true"
+                  />
+                  <span>Enviando a cocina…</span>
+                </>
+              ) : (
+                <span>Confirmar y enviar</span>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variante="secundario"
+              onClick={() => setModalConfirmarAbierto(false)}
+              disabled={enviando}
+              className="w-full min-h-11"
+            >
+              Revisar platos
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -10,33 +10,19 @@
  * Payload: { m: id_mesa, iat: emitido_ms, exp: expira_ms, sid: id_sesion }
  */
 
-import { mesasApi } from './api'
+import { mesasApi, authApi, apiFetch } from './api'
+import { prepararTablet } from '../utils/enlaceTablet'
+import { tokenDeUrl } from '../utils/qrRotacion'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
 
-// Utilidad base64url para codificar/decodificar payloads sin dependencias externas
-function toBase64Url(str) {
-  return btoa(unescape(encodeURIComponent(str)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
-}
-
+// Decodifica base64url sin dependencias externas
 function fromBase64Url(str) {
   let base64 = str.replace(/-/g, '+').replace(/_/g, '/')
   while (base64.length % 4) {
     base64 += '='
   }
   return decodeURIComponent(escape(atob(base64)))
-}
-
-function generarCadenaAleatoria(longitud = 12) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
-  let result = ''
-  for (let i = 0; i < longitud; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return result
 }
 
 /**
@@ -108,113 +94,49 @@ export function decodificarTokenQr(token) {
 export async function generarTokenQrMesa(idMesa, ttlMinutos = 240) {
   const numId = Number(idMesa)
 
-  // 1. Intento principal contra el Backend oficial (POST /api/mesas/:id/abrir)
-  try {
-    const data = await mesasApi.abrir(numId)
-    if (data?.token) {
-      const decodificado = decodificarTokenQr(data.token)
-      return {
-        token: data.token,
-        url: data.url,
-        id_mesa: numId,
-        reutilizado: Boolean(data.reutilizado),
-        emitido_en: decodificado.emitido_en || Date.now(),
-        expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
-        sid: decodificado.sid,
-        servidor: 'backend-api',
-      }
-    }
-  } catch (err) {
-    console.warn('Aviso: backend mesas/:id/abrir falló o está offline:', err.message)
-    // Si el error es 401, 403 o 409 (reglas de negocio), relanzar para que la UI informe
-    if (err.status && err.status < 500) {
-      throw err
-    }
+  // Sin respaldo (P-13): si el backend falla, el error sube a la pantalla. Un
+  // QR inventado aquí no tendría una firma válida y el comensal no podría
+  // entrar, aunque el panel mostrara la mesa como abierta.
+  const data = await mesasApi.abrir(numId)
+  if (!data?.token) {
+    throw new Error('El servidor no devolvió el código QR de la mesa')
   }
-
-  // 2. Fallback sintético local en caso de entorno de desarrollo sin backend levantado
-  const iat = Date.now()
-  const exp = iat + ttlMinutos * 60 * 1000
-  const sid = generarCadenaAleatoria(12)
-  const payload = {
-    m: numId,
-    iat,
-    exp,
-    sid,
-  }
-
-  const cuerpo = `v1.${toBase64Url(JSON.stringify(payload))}`
-  const firmaMock = toBase64Url(`sig_${sid}_${iat}`).slice(0, 43)
-  const token = `${cuerpo}.${firmaMock}`
-
+  const decodificado = decodificarTokenQr(data.token)
   return {
-    token,
-    url: `http://localhost:5173/?token=${encodeURIComponent(token)}`,
+    token: data.token,
+    url: data.url,
     id_mesa: numId,
-    emitido_en: iat,
-    expira_en: exp,
-    sid,
-    servidor: 'local-fallback',
+    reutilizado: Boolean(data.reutilizado),
+    emitido_en: decodificado.emitido_en || Date.now(),
+    expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
+    sid: decodificado.sid,
+    servidor: 'backend-api',
   }
 }
 
 /**
- * Rota el token QR de una mesa en curso:
- * Intenta POST /api/mesas/:id/rotar-qr en el backend oficial.
- * Si el backend está desconectado o no implementa la ruta, genera un nuevo sid firmado
- * y notifica /internal/qr-rotado al socket-server.
+ * Rota el token QR de una mesa en curso: POST /api/mesas/:id/rotar-qr.
+ * Sin respaldo (P-13): si el backend falla, el error sube a la pantalla.
  */
-export async function rotarTokenQrMesa(idMesa, ttlMinutos = 240) {
+export async function rotarTokenQrMesa(idMesa, ttlMinutos = 240, { soloSiVacia = false } = {}) {
   const numId = Number(idMesa)
 
-  // 1. Intento contra el Backend oficial (POST /api/mesas/:id/rotar-qr)
-  try {
-    const data = await mesasApi.rotarQr(numId)
-    if (data?.token) {
-      const decodificado = decodificarTokenQr(data.token)
-      return {
-        token: data.token,
-        url: data.url,
-        id_mesa: numId,
-        emitido_en: decodificado.emitido_en || Date.now(),
-        expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
-        sid: decodificado.sid,
-        servidor: 'backend-api',
-      }
-    }
-  } catch (err) {
-    console.warn('Aviso: endpoint rotarQr no disponible o falló:', err.message)
-    if (err.status && err.status === 409) {
-      throw err
-    }
+  const data = await mesasApi.rotarQr(numId, { soloSiVacia })
+  // rotar-qr responde { url, expira_en, mesa }: el token NO viaja suelto (el
+  // contrato solo lo da en /abrir), pero va dentro del url del comensal.
+  const token = data?.token || tokenDeUrl(data?.url)
+  if (!token) {
+    throw new Error('El servidor no devolvió el nuevo código QR de la mesa')
   }
-
-  // 2. Fallback sintético local: genera nuevo sid firmado y avisa al socket-server
-  const iat = Date.now()
-  const exp = iat + ttlMinutos * 60 * 1000
-  const sid = generarCadenaAleatoria(12)
-  const payload = {
-    m: numId,
-    iat,
-    exp,
-    sid,
-  }
-
-  const cuerpo = `v1.${toBase64Url(JSON.stringify(payload))}`
-  const firmaMock = toBase64Url(`sig_${sid}_${iat}`).slice(0, 43)
-  const nuevoToken = `${cuerpo}.${firmaMock}`
-
-  // Notificar al socket-server para que tablets físicas reciban 'qr:actualizado'
-  await notificarQrRotado(numId, nuevoToken)
-
+  const decodificado = decodificarTokenQr(token)
   return {
-    token: nuevoToken,
-    url: `http://localhost:5173/?token=${encodeURIComponent(nuevoToken)}&mesa=${numId}`,
+    token,
+    url: data.url,
     id_mesa: numId,
-    emitido_en: iat,
-    expira_en: exp,
-    sid,
-    servidor: 'local-fallback-rotado',
+    emitido_en: decodificado.emitido_en || Date.now(),
+    expira_en: decodificado.expira_en || (Date.now() + ttlMinutos * 60 * 1000),
+    sid: decodificado.sid,
+    servidor: 'backend-api',
   }
 }
 
@@ -237,60 +159,83 @@ export async function liberarMesaRemota(idMesa) {
 }
 
 /**
- * Solicita el JWT de autenticación para la tablet física de la mesa (rol 'pantalla')
- * llamando a POST /qr/pantalla del socket-server (EVENTS.md §6).
- *
- * Si falla, se reutiliza solo un token de PANTALLA emitido antes para esta mesa.
- * Nunca se usa el JWT del personal en su lugar: la tablet queda a la vista de
- * los comensales y con ese token cualquiera podría actuar como mesero (abrir y
- * liberar mesas, ver todas las salas). Sin credencial, se lanza un error para
- * que la pantalla lo muestre.
- *
- * @throws Error si no hay token de pantalla emitido ni en caché
+ * ¿Hay sesión del personal en ESTA pestaña? (el panel, o alguien del personal
+ * que abrió la pantalla en su propia pestaña). Una tablet preparada desde el
+ * panel NO la tiene: solo guarda su credencial de pantalla.
  */
-export async function solicitarTokenPantalla(idMesa) {
-  const staffToken = getStaffToken()
-  const storageKey = `smartdining_pantalla_token_${idMesa}`
-  let motivo = 'sin sesión de personal'
+export function haySesionPersonal() {
+  return Boolean(getStaffToken())
+}
 
-  if (staffToken) {
-    try {
-      const res = await fetch(`${SOCKET_URL}/qr/pantalla`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${staffToken}`,
-        },
-        body: JSON.stringify({ id_mesa: Number(idMesa) }),
-      })
-
-      if (res.ok) {
-        const data = await res.json()
-        try {
-          sessionStorage.setItem(storageKey, data.token)
-        } catch {
-          // ignorar
-        }
-        return data
-      }
-      motivo = `el servidor respondió ${res.status}`
-    } catch (err) {
-      motivo = 'el servidor de tiempo real no responde'
-      console.warn('Aviso: no se pudo obtener token de /qr/pantalla:', err.message)
-    }
+/**
+ * Pide el JWT de la PANTALLA de la mesa (rol 'pantalla'): POST /qr/pantalla
+ * del socket-server (EVENTS.md §6), con el JWT de un usuario del personal.
+ *
+ * `staffToken`: el de la sesión de esta pestaña por defecto, o uno de un login
+ * de una sola vez en la tablet (configurarTabletConLogin), que no se guarda.
+ * Nunca se usa el JWT del personal como credencial de la tablet: queda a la
+ * vista de los comensales y con él cualquiera podría actuar como mesero.
+ *
+ * @throws Error si no hay sesión o el servidor no la emite
+ */
+export async function solicitarTokenPantalla(idMesa, staffToken = getStaffToken()) {
+  if (!staffToken) {
+    throw new Error('No se pudo obtener la credencial de la pantalla (sin sesión de personal). Configura la pantalla desde el panel.')
   }
-
-  // Respaldo: reutilizar un token de pantalla ya emitido para esta mesa
+  let res
   try {
-    const cached = sessionStorage.getItem(storageKey)
-    if (cached) {
-      return { token: cached, id_mesa: Number(idMesa), expira_en: 'cached' }
-    }
+    res = await fetch(`${SOCKET_URL}/qr/pantalla`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${staffToken}` },
+      body: JSON.stringify({ id_mesa: Number(idMesa) }),
+    })
   } catch {
-    // ignorar
+    throw new Error('No se pudo obtener la credencial de la pantalla (el servidor de tiempo real no responde).')
   }
+  if (!res.ok) throw new Error(`No se pudo obtener la credencial de la pantalla (el servidor respondió ${res.status}).`)
+  const data = await res.json()
+  if (!data?.token) throw new Error('El servidor no devolvió la credencial de la pantalla')
+  return data
+}
 
-  throw new Error(`No se pudo obtener la credencial de la pantalla (${motivo}). Inicia sesión como personal y recarga.`)
+/** La mesa vista por la ruta pública GET /api/mesas/:id (estado y número, sin token_qr). */
+export function mesaPublica(idMesa) {
+  return apiFetch(`/mesas/${Number(idMesa)}`, { skipAuth: true })
+}
+
+/**
+ * «Lanzar Pantalla» / «Copiar URL Tablet» desde el panel (con su sesión):
+ * credencial de pantalla + QR vigente (solo si la mesa está ocupada) y el
+ * enlace /pantalla/mesa/<id_mesa>#t=…&qr=… (utils/enlaceTablet.js).
+ */
+export function prepararTabletDesdePanel(idMesa, origen = '') {
+  return prepararTablet(Number(idMesa), {
+    origen,
+    pedirCredencial: (id) => solicitarTokenPantalla(id),
+    obtenerMesa: mesaPublica,
+    abrirMesa: (id) => mesasApi.abrir(id),
+  })
+}
+
+/**
+ * Una tablet física sin credencial: alguien del personal inicia sesión UNA vez
+ * solo para prepararla. El JWT del personal vive en esta función y se
+ * descarta al terminar: no se guarda en la tablet (ni en sessionStorage).
+ */
+export async function configurarTabletConLogin(idMesa, email, password) {
+  const login = await authApi.login(email, password)
+  let staffToken = login?.token
+  if (!staffToken) throw new Error('No se pudo iniciar sesión')
+  try {
+    return await prepararTablet(Number(idMesa), {
+      pedirCredencial: (id) => solicitarTokenPantalla(id, staffToken),
+      obtenerMesa: mesaPublica,
+      abrirMesa: (id) =>
+        apiFetch(`/mesas/${id}/abrir`, { method: 'POST', skipAuth: true, headers: { Authorization: `Bearer ${staffToken}` } }),
+    })
+  } finally {
+    staffToken = null
+  }
 }
 
 /**
@@ -305,8 +250,10 @@ export async function solicitarTokenPantalla(idMesa) {
  * @returns {Promise<{ ok: true, token: string, url: string, expira_en: number|null }>}
  * @throws Error con .status si el backend rechaza (401/403/409/503)
  */
-export async function notificarQrRotado(idMesa) {
-  const data = await mesasApi.rotarQr(Number(idMesa))
+export async function notificarQrRotado(idMesa, { soloSiVacia = true } = {}) {
+  // Desde la tablet nunca se fuerza: con gente en la mesa el backend responde
+  // 409 mesa_con_comensales y el QR se queda (T3).
+  const data = await mesasApi.rotarQr(Number(idMesa), { soloSiVacia })
   // El backend solo devuelve la url; el token se lee de ahí para redibujar.
   let token = null
   try {

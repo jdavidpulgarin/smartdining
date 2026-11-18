@@ -1,6 +1,12 @@
-import { AlertTriangle, Check, ChefHat, Clock, Hash, LoaderCircle, StickyNote, User } from 'lucide-react'
+import { Ban, Clock, FileText, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
-import { ingredientesPorPaso, siguientePaso } from '../lib/comandas'
+import {
+  comensalesDeComanda,
+  debeEsperarConexion,
+  ingredientesPorPaso,
+  lineaCancelada,
+  siguientePaso,
+} from '../lib/comandas'
 import { minutosDesdeCreacion, senalDeEsperaDeComanda, textoDeEspera } from '../lib/espera'
 import {
   avisoSinRecoger,
@@ -29,7 +35,8 @@ const PORCIONES = {
   },
   ligera: {
     texto: 'LIGERA',
-    clase: 'bg-[color:var(--color-nuevas)]/25 text-[color:var(--color-nuevas)] font-semibold',
+    clase:
+      'border border-[color:var(--color-borde)] text-[color:var(--color-texto-suave)] font-semibold',
   },
 }
 
@@ -38,6 +45,17 @@ const COLOR_ESPERA = {
   ambar: 'var(--color-preparacion)',
   rojo: 'var(--color-alerta)',
   neutro: 'var(--color-texto-suave)',
+}
+
+/**
+ * El chip del reloj. El rojo va relleno y no solo con borde: una comanda
+ * atrasada tiene que encontrarse barriendo la pantalla con la vista, sin leer.
+ */
+const CHIP_ESPERA = {
+  normal: 'bg-[color:var(--color-panel)] text-[color:var(--color-texto)]',
+  neutro: 'bg-[color:var(--color-panel)] text-[color:var(--color-texto-suave)]',
+  ambar: 'border-2 border-[color:var(--color-preparacion)] text-[color:var(--color-preparacion)]',
+  rojo: 'bg-[color:var(--color-alerta)] text-white',
 }
 
 function Ingredientes({ item }) {
@@ -56,7 +74,7 @@ function Ingredientes({ item }) {
                 {indice > 0 && <span className="text-[color:var(--color-texto-suave)]"> · </span>}
                 <span>{ing.nombre}</span>
                 {marca && (
-                  <span className={`ml-1 rounded px-1.5 py-0.5 text-sm uppercase ${marca.clase}`}>
+                  <span className={`display ml-1 rounded px-1.5 py-0.5 text-sm ${marca.clase}`}>
                     {marca.texto}
                   </span>
                 )}
@@ -69,9 +87,35 @@ function Ingredientes({ item }) {
   )
 }
 
-export default function ComandaCard({ comanda, ahora, onAvanzar }) {
+/**
+ * T10: dentro de un bloque la tarjeta se dibuja en una columna que puede no
+ * ser la de su estado (el bloque va en la del pedido más atrasado), así que el
+ * estado se dice con texto y con el color de su columna.
+ */
+const ETIQUETA_ESTADO = {
+  recibido: { texto: 'Nuevo', color: 'var(--color-nuevas)' },
+  en_preparacion: { texto: 'En preparación', color: 'var(--color-preparacion)' },
+  listo: { texto: 'Listo', color: 'var(--color-listas)' },
+}
+
+export default function ComandaCard({
+  comanda,
+  ahora,
+  conectado = true,
+  onAvanzar,
+  // T10: la tarjeta va dentro del bloque de su mesa (el "Mesa N" lo pone el
+  // bloque) y `bloqueado` la congela mientras corre "Todo listo".
+  enBloque = false,
+  bloqueado = false,
+}) {
   const [enVuelo, setEnVuelo] = useState(false)
   const [error, setError] = useState(null)
+  const [ultimoFallo, setUltimoFallo] = useState(null)
+
+  // Derivado, no guardado: en cuanto vuelve el tiempo real el boton vuelve
+  // solo, sin un efecto que lo "despierte". La reconexion es la señal de que
+  // la red esta otra vez, y nadie deberia tener que recargar para poder tocar.
+  const esperandoConexion = debeEsperarConexion(ultimoFallo, conectado)
 
   const minutos = minutosDesdeCreacion(comanda, ahora)
   // En Listas la señal es neutra: la comanda ya salió de la cocina.
@@ -88,16 +132,30 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
   // El socket no manda el numero de mesa: se cae al id, que al menos identifica.
   const mesa = comanda.mesa_numero ?? comanda.id_mesa ?? '—'
   const paso = siguientePaso(comanda.estado)
+  const comensales = comensalesDeComanda(comanda)
+
+  const tituloDelReloj = conSemaforo
+    ? `${espera.etiqueta}: ${textoDeEspera(minutos)}`
+    : tituloDelPase(enPase, minutos)
+
+  const etiquetaEstado = ETIQUETA_ESTADO[comanda.estado]
 
   async function alTocar() {
-    if (enVuelo || !paso) return
+    if (enVuelo || bloqueado || !paso) return
     setEnVuelo(true)
     setError(null)
+    setUltimoFallo(null)
     const resultado = await onAvanzar?.(comanda.id_pedido, paso.estado)
     // Si salió bien, la tarjeta se mueve de columna y este componente se
     // desmonta; dejar enVuelo en true evita un parpadeo del botón justo antes.
     if (!resultado?.ok) {
       setError(resultado?.mensaje || 'No se pudo cambiar el estado')
+      setUltimoFallo(resultado)
+      setEnVuelo(false)
+    } else if (enBloque) {
+      // T10: dentro de un bloque la tarjeta NO se desmonta al avanzar (el
+      // bloque sigue en su columna mientras le quede un pedido atrasado), así
+      // que el botón tiene que volver por sí solo con su siguiente paso.
       setEnVuelo(false)
     }
   }
@@ -106,95 +164,142 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
     <article
       // Atenuada, no escondida: una comanda olvidada tiene que seguir viendose,
       // solo deja de competir por la atencion con las que acaban de salir.
-      className={`rounded-xl border-2 bg-[color:var(--color-panel-alto)] p-4 shadow-lg${
-        olvidada ? ' opacity-60' : ''
-      }`}
+      className={`rounded-xl border-2 ${
+        enBloque ? 'bg-[color:var(--color-panel)] p-3' : 'bg-[color:var(--color-panel-alto)] p-4 shadow-lg'
+      }${olvidada ? ' opacity-60' : ''}`}
       style={{
         borderColor:
           conSemaforo && espera.nivel !== 'normal' ? colorEspera : 'var(--color-borde)',
       }}
     >
-      <header className="flex items-start justify-between gap-3 border-b border-[color:var(--color-borde)] pb-3">
-        <div>
-          <p className="text-3xl font-bold leading-none">Mesa {mesa}</p>
-          {comanda.codigo_pedido && (
-            <p className="mt-1 flex items-center gap-1 text-sm text-[color:var(--color-texto-suave)]">
-              <Hash size={14} aria-hidden="true" />
-              {comanda.codigo_pedido}
+      <header className="flex items-start justify-between gap-3">
+        {enBloque ? (
+          // Dentro del bloque: quién pidió (el alias, que es con lo que se canta
+          // el pase), el código y en qué estado va ESTE pedido.
+          <div>
+            <p className="display text-2xl font-bold leading-tight">
+              {comensales.length > 0 ? comensales.join(', ') : 'Pedido'}
             </p>
-          )}
-        </div>
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-base leading-none text-[color:var(--color-texto-suave)]">
+              {comanda.codigo_pedido && <span>{comanda.codigo_pedido}</span>}
+              {etiquetaEstado && (
+                <span
+                  className="display rounded px-1.5 py-0.5 text-sm font-bold uppercase tracking-wide"
+                  style={{ border: `2px solid ${etiquetaEstado.color}`, color: etiquetaEstado.color }}
+                >
+                  {etiquetaEstado.texto}
+                </span>
+              )}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <p className="display text-4xl font-bold leading-none">Mesa {mesa}</p>
+            {(comanda.codigo_pedido || comensales.length > 0) && (
+              <p className="mt-1.5 text-base leading-none text-[color:var(--color-texto-suave)]">
+                {[comanda.codigo_pedido, comensales.join(', ')].filter(Boolean).join(' · ')}
+              </p>
+            )}
+          </div>
+        )}
 
-        {/* El tiempo no se señala solo con color: lleva signo y texto, por si el
-            monitor está mal calibrado o quien mira no distingue rojo de ámbar. */}
+        {/* El diseño señala el nivel solo con el color del chip; el texto sigue
+            estando, en el title y para los lectores de pantalla, porque un
+            monitor mal calibrado o quien no distingue rojo de ámbar se quedaría
+            sin la única pista. */}
         <p
-          className="flex shrink-0 flex-col items-end text-2xl font-semibold tabular-nums"
-          style={{ color: colorEspera }}
-          title={
-            conSemaforo
-              ? `${espera.etiqueta}: ${textoDeEspera(minutos)}`
-              : tituloDelPase(enPase, minutos)
-          }
+          className={`display flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1 text-2xl font-bold tabular-nums ${CHIP_ESPERA[espera.nivel]}`}
+          title={tituloDelReloj}
         >
-          <span className="flex items-center gap-1">
-            <Clock size={20} aria-hidden="true" />
-            {textoDeEspera(reloj.minutos)}
-          </span>
-          {conSemaforo && (
-            <span className="text-sm font-bold uppercase tracking-wide">
-              {espera.signo} {espera.etiqueta}
-            </span>
-          )}
-          {/* Aviso para el mesero, sin rojo ni "retrasada": la cocina ya hizo
-              su parte, esto es que nadie ha venido a recogerla. */}
-          {olvidada && (
-            <span className="text-sm font-semibold normal-case text-[color:var(--color-texto-suave)]">
-              {avisoSinRecoger(enPase, reloj.minutos)}
-            </span>
-          )}
+          <Clock size={20} aria-hidden="true" />
+          {textoDeEspera(reloj.minutos)}
+          {/* En el pase el reloj cuenta otra cosa, así que lo dice. */}
+          {reloj.enPase && <span className="text-lg font-semibold">en pase</span>}
+          <span className="sr-only">{tituloDelReloj}</span>
         </p>
       </header>
 
-      {comanda.notas_generales && (
-        <p className="mt-3 flex items-start gap-2 rounded-lg bg-[color:var(--color-alerta)]/15 p-2 text-base">
-          <StickyNote size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
-          <span>{comanda.notas_generales}</span>
+      {/* Los avisos van en ancho completo bajo la cabecera: es lo primero que
+          se lee después del número de mesa, y es lo que decide qué se hace. */}
+      {espera.nivel === 'rojo' && (
+        <p className="display mt-3 rounded-lg bg-[color:var(--color-alerta)] px-3 py-1.5 text-lg font-bold text-white">
+          {espera.etiqueta} · prioridad
         </p>
       )}
 
-      <ul className="mt-3 space-y-3">
-        {comanda.items.map((item, indice) => (
-          <li key={item.id_detalle ?? `${comanda.id_pedido}-${indice}`}>
-            <div className="flex flex-wrap items-baseline gap-2">
-              <span className="min-w-10 rounded-lg bg-[color:var(--color-panel)] px-2 py-0.5 text-center text-2xl font-bold tabular-nums">
-                {item.cantidad}
-              </span>
-              <span className="text-2xl font-semibold leading-tight">
-                {item.plato_nombre || 'Plato sin nombre'}
-              </span>
-              {item.comensal && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--color-panel)] px-2 py-0.5 text-base text-[color:var(--color-texto-suave)]">
-                  <User size={14} aria-hidden="true" />
-                  {item.comensal}
-                </span>
+      {olvidada && (
+        <p className="display mt-3 rounded-lg border-2 border-[color:var(--color-alerta)] px-3 py-1.5 text-lg font-bold text-[color:var(--color-alerta)]">
+          {avisoSinRecoger(enPase, reloj.minutos)} · avisar al mesero
+        </p>
+      )}
+
+      <ul className="mt-3 space-y-3 border-t border-[color:var(--color-borde)] pt-3">
+        {comanda.items.map((item, indice) => {
+          // Una linea cancelada (D-13 / #180) se ve TACHADA, igual en vivo que al
+          // recargar (ver lineaCancelada). Sin ingredientes ni notas: ya no hay
+          // nada que preparar, solo dejar constancia de que se quito.
+          const cancelada = lineaCancelada(item)
+          return (
+            <li
+              key={item.id_detalle ?? `${comanda.id_pedido}-${indice}`}
+              className={cancelada ? 'opacity-60' : undefined}
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                <div className={`flex flex-wrap items-baseline gap-2 ${cancelada ? 'line-through' : ''}`}>
+                  <span
+                    className={`display text-2xl font-bold tabular-nums ${
+                      cancelada ? 'text-[color:var(--color-texto-suave)]' : 'text-[color:var(--color-marca)]'
+                    }`}
+                  >
+                    {item.cantidad}×
+                  </span>
+                  <span className="display text-2xl font-bold leading-tight">
+                    {item.plato_nombre || 'Plato sin nombre'}
+                  </span>
+                </div>
+                {cancelada ? (
+                  <span className="flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-[color:var(--color-alerta)]">
+                    <Ban size={14} aria-hidden="true" />
+                    Cancelado
+                  </span>
+                ) : (
+                  item.comensal && (
+                    <span className="text-base text-[color:var(--color-texto-suave)]">
+                      {item.comensal}
+                    </span>
+                  )
+                )}
+              </div>
+
+              {!cancelada && <Ingredientes item={item} />}
+
+              {!cancelada && item.notas_especiales && (
+                <p className="mt-2 flex items-start gap-2 rounded-lg border border-[color:var(--color-preparacion)] p-2 text-base font-semibold text-[color:var(--color-preparacion)]">
+                  <FileText size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  <span>{item.notas_especiales}</span>
+                </p>
               )}
-            </div>
-
-            <Ingredientes item={item} />
-
-            {item.notas_especiales && (
-              <p className="mt-1 flex items-start gap-1 text-base font-semibold text-[color:var(--color-preparacion)]">
-                <AlertTriangle size={16} className="mt-1 shrink-0" aria-hidden="true" />
-                {item.notas_especiales}
-              </p>
-            )}
-          </li>
-        ))}
+            </li>
+          )
+        })}
       </ul>
 
       {comanda.items.length === 0 && (
         <p className="mt-3 text-base text-[color:var(--color-texto-suave)]">
           Esta comanda llegó sin ítems
+        </p>
+      )}
+
+      {/* La nota de la mesa va DEBAJO de los platos y pegada al botón: es lo
+          último que hay que leer antes de darle, no un encabezado. */}
+      {comanda.notas_generales && (
+        <p className="mt-3 flex items-start gap-2 rounded-lg border border-[color:var(--color-preparacion)] p-2.5 text-base">
+          <FileText
+            size={18}
+            className="mt-0.5 shrink-0 text-[color:var(--color-preparacion)]"
+            aria-hidden="true"
+          />
+          <span>{comanda.notas_generales}</span>
         </p>
       )}
 
@@ -207,27 +312,30 @@ export default function ComandaCard({ comanda, ahora, onAvanzar }) {
         </p>
       )}
 
-      {paso && (
+      {paso && esperandoConexion && (
+        // El PATCH no llego al servidor y el tiempo real tampoco esta: tocar
+        // otra vez solo repetiria el mismo fallo. En cuanto vuelva la conexion
+        // este bloque se va solo y el boton vuelve.
+        <p className="display mt-4 flex h-16 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[color:var(--color-borde)] text-xl font-bold text-[color:var(--color-texto-suave)]">
+          <LoaderCircle size={22} className="animate-spin" aria-hidden="true" />
+          Esperando conexión…
+        </p>
+      )}
+
+      {paso && !esperandoConexion && (
         <button
           type="button"
           onClick={alTocar}
-          disabled={enVuelo}
+          disabled={enVuelo || bloqueado}
           // 64 px de alto: objetivo tactil holgado para una pantalla de cocina.
-          className="mt-4 flex h-16 w-full items-center justify-center gap-2 rounded-xl text-2xl font-bold text-[color:var(--color-fondo)] disabled:opacity-60"
-          style={{
-            backgroundColor:
-              paso.estado === 'en_preparacion'
-                ? 'var(--color-preparacion)'
-                : 'var(--color-listas)',
-          }}
+          className="display mt-4 flex h-16 w-full items-center justify-center gap-2 rounded-xl text-2xl font-bold disabled:opacity-60"
+          style={
+            paso.estado === 'en_preparacion'
+              ? { backgroundColor: 'var(--color-marca)', color: '#ffffff' }
+              : { backgroundColor: 'var(--color-listas)', color: 'var(--color-fondo)' }
+          }
         >
-          {enVuelo ? (
-            <LoaderCircle size={26} className="animate-spin" aria-hidden="true" />
-          ) : paso.estado === 'en_preparacion' ? (
-            <ChefHat size={26} aria-hidden="true" />
-          ) : (
-            <Check size={26} aria-hidden="true" />
-          )}
+          {enVuelo && <LoaderCircle size={26} className="animate-spin" aria-hidden="true" />}
           {enVuelo ? 'Enviando…' : paso.etiqueta}
         </button>
       )}

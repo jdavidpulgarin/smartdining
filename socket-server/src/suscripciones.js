@@ -6,6 +6,8 @@ const {
 } = require('./http');
 const { verificarJwt, esComensalSinAlias, ROL_COMENSAL } = require('./auth');
 const { estaEnMesa } = require('./salas');
+const { log } = require('./log');
+const { claveAlias } = require('./alias');
 
 const MAX_SUSCRIPCIONES_POR_MESA = 20; // una mesa tiene pocos comensales; evita llenar memoria
 const MAX_ENDPOINT = 2048;
@@ -158,16 +160,29 @@ const rutasSuscripciones = {
   },
 };
 
-// Texto que ve el comensal por cada estado. Solo se avisa de lo que le
-// importa a quien espera: "recibido", "entregado" y "pagado" no requieren
-// interrumpirlo con una notificación.
+// Push SOLO en: pedido "listo" y "cancelado" (al dueño del pedido) y pago
+// confirmado (a quien pagó, más abajo). "en_preparacion" y los demás estados
+// no (se ven en vivo en la PWA con order:status): con un aviso por cada paso,
+// Chrome en Android marcaba las notificaciones como «Posible spam».
 const MENSAJES_ESTADO = {
-  en_preparacion: 'Tu pedido está en preparación',
   listo: '¡Tu plato está listo!',
   cancelado: 'Tu pedido fue cancelado',
 };
 // Al tocar la notificación, la PWA abre el seguimiento del pedido.
 const URL_SEGUIMIENTO = '/seguimiento';
+// Y, en la del pago, la pantalla de pago.
+const URL_PAGO = '/pago';
+const TITULO_PAGO = 'Tu pago está confirmado';
+
+/**
+ * Las suscripciones de quien pidió el pedido (sus dueños). Mismo mecanismo
+ * para "listo" y "cancelado": si no se sabe quién lo pidió, nadie (la sala
+ * igual recibe order:status en vivo). Otro comensal de la mesa no lo recibe.
+ */
+async function soloDuenosDelPedido(ctx, idPedido, suscripciones) {
+  const duenos = ctx.duenosPedidos ? await ctx.duenosPedidos.obtener(idPedido) : [];
+  return suscripciones.filter((s) => s.comensal && duenos.includes(s.comensal));
+}
 
 /**
  * Envía la notificación push a las suscripciones de la mesa y elimina las
@@ -186,19 +201,60 @@ async function notificarCambioEstado(ctx, cambio) {
     estado: cambio.estado,
     url: URL_SEGUIMIENTO,
   };
-  let destinatarios = await ctx.suscripciones.listar(cambio.id_mesa);
-  if (cambio.estado === 'listo') {
-    // "¡Tu plato está listo!" solo a quien lo pidió. Si no se sabe quién fue,
-    // no se avisa a nadie por push (la sala igual recibe order:status en vivo).
-    const duenos = ctx.duenosPedidos ? await ctx.duenosPedidos.obtener(cambio.id_pedido) : [];
-    destinatarios = destinatarios.filter((s) => s.comensal && duenos.includes(s.comensal));
-  }
-  await Promise.all(destinatarios.map(async (s) => {
+  const destinatarios = await soloDuenosDelPedido(ctx, cambio.id_pedido, await ctx.suscripciones.listar(cambio.id_mesa));
+  const resultados = await Promise.all(destinatarios.map(async (s) => {
     const r = await ctx.push.enviar(s, payload);
     if (r.caducada) await ctx.suscripciones.quitar(cambio.id_mesa, s.endpoint);
+    return r;
   }));
+  log.info('push: resumen del envío', resumirEnvio(cambio.estado, resultados));
+}
+
+/**
+ * Push del pago confirmado (Wompi o caja), SOLO a quien pagó: sus
+ * suscripciones en esa mesa (mismo alias, comparado con claveAlias como la
+ * presencia). Sin alias (la caja cobró la mesa entera) no se avisa a nadie:
+ * la mesa igual recibe payment:confirmed en vivo. Payload sin montos ni
+ * nombres, como el de los pedidos. Se llama sin `await` y nunca lanza.
+ */
+async function notificarPagoConfirmado(ctx, { id_mesa: idMesa, comensal }) {
+  if (!ctx.push?.habilitado || !ctx.suscripciones || typeof comensal !== 'string') return;
+  const clave = claveAlias(comensal);
+  if (!clave) return;
+  const payload = {
+    titulo: TITULO_PAGO,
+    cuerpo: 'Gracias. Ya quedó registrado en la cuenta de la mesa.',
+    url: URL_PAGO,
+  };
+  const destinatarios = (await ctx.suscripciones.listar(idMesa))
+    .filter((s) => s.comensal && claveAlias(s.comensal) === clave);
+  const resultados = await Promise.all(destinatarios.map(async (s) => {
+    const r = await ctx.push.enviar(s, payload);
+    if (r.caducada) await ctx.suscripciones.quitar(idMesa, s.endpoint);
+    return r;
+  }));
+  log.info('push: resumen del envío', resumirEnvio('pago_confirmado', resultados));
+}
+
+/**
+ * Un resumen por cambio de estado (T9): a cuántas suscripciones se mandó y
+ * cómo les fue, y cuántas por servicio (solo el host). `destinatarios: 0` es
+ * también un dato: nadie de la mesa tenía avisos activados.
+ */
+function resumirEnvio(estado, resultados) {
+  const resumen = {
+    estado, destinatarios: resultados.length, enviados: 0, fallidos: 0, caducados: 0, servicios: {},
+  };
+  for (const r of resultados) {
+    if (r.ok) resumen.enviados += 1;
+    else if (r.caducada) resumen.caducados += 1;
+    else resumen.fallidos += 1;
+    const servicio = r.servicio || 'desconocido';
+    resumen.servicios[servicio] = (resumen.servicios[servicio] || 0) + 1;
+  }
+  return resumen;
 }
 
 module.exports = {
-  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, URL_SEGUIMIENTO, rutasSuscripciones, notificarCambioEstado, validarSuscripcion,
+  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, URL_SEGUIMIENTO, URL_PAGO, rutasSuscripciones, notificarCambioEstado, notificarPagoConfirmado, soloDuenosDelPedido, resumirEnvio, validarSuscripcion,
 };

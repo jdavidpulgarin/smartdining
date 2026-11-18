@@ -15,6 +15,7 @@ const DETALLES = [
     id_detalle: 1,
     id_pedido: 87,
     id_plato: 3,
+    estado_item: 'pendiente',
     cantidad: 2,
     comensal: 'Ana',
     notas_especiales: 'sin cebolla',
@@ -25,6 +26,7 @@ const DETALLES = [
     id_detalle: 2,
     id_pedido: 87,
     id_plato: 5,
+    estado_item: 'pendiente',
     cantidad: 1,
     comensal: 'Pipe',
     notas_especiales: null,
@@ -94,7 +96,9 @@ test('los items usan "nombre" (formato de Roberto), no "plato_nombre"', async ()
     const { items } = socket.buscar('/internal/order-created').cuerpo.pedido;
     assert.strictEqual(items.length, 2);
     assert.deepStrictEqual(items[0], {
+      id_detalle: 1,
       id_plato: 3,
+      estado_item: 'pendiente',
       nombre: 'Hamburguesa Smart Angus',
       cantidad: 2,
       comensal: 'Ana',
@@ -103,11 +107,174 @@ test('los items usan "nombre" (formato de Roberto), no "plato_nombre"', async ()
     });
     assert.ok(!('plato_nombre' in items[0]), 'no debe filtrarse el nombre de columna de la base');
 
-    // Los ingredientes salen con los cuatro campos del contrato: id_paso y paso
-    // se quedan en la API REST porque EVENTS.md no los pide.
+    // Los ingredientes llevan el nombre del paso; id_paso no, que es clave
+    // interna y quien recibe el evento agrupa por el nombre.
     assert.deepStrictEqual(items[1].ingredientes, [
-      { id_ingrediente: 10, nombre: 'Aguacate', porcion: 'extra', precio_aplicado: '1500.00' },
+      {
+        id_ingrediente: 10,
+        nombre: 'Aguacate',
+        porcion: 'extra',
+        precio_aplicado: '1500.00',
+        paso: 'Anade Toppings',
+      },
     ]);
+    assert.ok(!('id_paso' in items[1].ingredientes[0]), 'id_paso se queda en la API REST');
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('cada linea de order:created lleva id_detalle (entero, primero) y estado_item pendiente', async () => {
+  // Los otros comensales y el KDS reciben las lineas solo por este evento: sin
+  // id_detalle no pueden tachar la linea cuando llega item:cancelado.
+  const db = instalarFakeDb(dbCreacionOk);
+  const socket = instalarFakeSocket();
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send(bodyPedido);
+
+    const { items } = socket.buscar('/internal/order-created').cuerpo.pedido;
+    assert.strictEqual(items.length, 2);
+    assert.deepStrictEqual(items.map((i) => i.id_detalle), [1, 2]);
+    for (const item of items) {
+      assert.ok(Number.isInteger(item.id_detalle), 'id_detalle es entero');
+      assert.strictEqual(Object.keys(item)[0], 'id_detalle', 'id_detalle va primero');
+      assert.strictEqual(item.estado_item, 'pendiente');
+    }
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('order:created: estado_item que no llega de la base sale null, no se omite', () => {
+  const { armarPedido } = require('../src/services/socket.notifier');
+  const [item] = armarPedido(PEDIDO, [{ id_detalle: 7, id_plato: 3, cantidad: 1 }]).items;
+  assert.strictEqual(item.id_detalle, 7);
+  assert.ok('estado_item' in item);
+  assert.strictEqual(item.estado_item, null);
+});
+
+test('el nombre del paso viaja en el evento, en el orden del constructor', async () => {
+  // Sin esto, una comanda que entra EN VIVO al KDS se ve plana ("Ingredientes:
+  // a · b · c") mientras que la misma comanda, tras recargar, sale agrupada por
+  // paso: los mismos datos vistos de dos formas segun por donde llegaron.
+  const armado = [
+    {
+      id_detalle: 9,
+      id_pedido: 87,
+      id_plato: 1001,
+      cantidad: 1,
+      comensal: 'Ana',
+      notas_especiales: null,
+      plato_nombre: 'Bowl Personalizado',
+      // Como los entrega la consulta: ya ordenados por pasos_constructor.orden.
+      ingredientes: [
+        { id_ingrediente: 2, nombre: 'Quinoa', porcion: 'normal', precio_aplicado: '0.00', id_paso: 101, paso: 'Elige tu Base' },
+        { id_ingrediente: 4, nombre: 'Pollo', porcion: 'extra', precio_aplicado: '3000.00', id_paso: 102, paso: 'Elige tu Proteina' },
+        { id_ingrediente: 8, nombre: 'Maiz', porcion: 'normal', precio_aplicado: '0.00', id_paso: 103, paso: 'Anade Toppings' },
+        { id_ingrediente: 10, nombre: 'Aguacate', porcion: 'ligera', precio_aplicado: '0.00', id_paso: 103, paso: 'Anade Toppings' },
+      ],
+    },
+  ];
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('FROM detalles_pedido dp')) return { rows: armado };
+    return dbCreacionOk(sql);
+  });
+  const socket = instalarFakeSocket();
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [{ id_plato: 1001, cantidad: 1, apodo: 'Ana' }] });
+
+    const { items } = socket.buscar('/internal/order-created').cuerpo.pedido;
+    assert.deepStrictEqual(
+      items[0].ingredientes.map((i) => i.paso),
+      ['Elige tu Base', 'Elige tu Proteina', 'Anade Toppings', 'Anade Toppings'],
+      'el orden del constructor se conserva tal cual lo entrega la consulta'
+    );
+
+    // Agrupar por `paso` en ese orden reconstruye el plato como se arma, que es
+    // justo lo que hace el KDS con el evento.
+    const pasos = [...new Set(items[0].ingredientes.map((i) => i.paso))];
+    assert.deepStrictEqual(pasos, ['Elige tu Base', 'Elige tu Proteina', 'Anade Toppings']);
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('un ingrediente sin paso viaja con paso null, no sin el campo', async () => {
+  // Un plato no personalizable no tiene pasos. El campo va igual para que quien
+  // reciba el evento no tenga que distinguir "sin paso" de "este evento es de
+  // una version que todavia no mandaba el dato".
+  const sinPaso = [
+    {
+      id_detalle: 7,
+      id_pedido: 87,
+      id_plato: 1042,
+      cantidad: 1,
+      comensal: null,
+      notas_especiales: null,
+      plato_nombre: 'Hamburguesa Smart Angus',
+      ingredientes: [
+        { id_ingrediente: 50, nombre: 'Tocineta', porcion: 'normal', precio_aplicado: '0.00', id_paso: null, paso: null },
+      ],
+    },
+  ];
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('FROM detalles_pedido dp')) return { rows: sinPaso };
+    return dbCreacionOk(sql);
+  });
+  const socket = instalarFakeSocket();
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [{ id_plato: 1042, cantidad: 1 }] });
+
+    const [ingrediente] = socket.buscar('/internal/order-created').cuerpo.pedido.items[0].ingredientes;
+    assert.ok('paso' in ingrediente, 'el campo esta presente aunque no haya paso');
+    assert.strictEqual(ingrediente.paso, null);
+  } finally {
+    socket.restaurar();
+    db.restaurar();
+  }
+});
+
+test('un ingrediente al que la consulta no le puso paso tampoco rompe el payload', async () => {
+  // Defensa barata: si algun dia una consulta deja de traer la columna, el
+  // evento sigue saliendo con paso null en vez de con undefined (que JSON.
+  // stringify borraria, dejando el campo ausente sin querer).
+  const sinColumna = [
+    {
+      id_detalle: 8,
+      id_pedido: 87,
+      id_plato: 1042,
+      cantidad: 1,
+      comensal: null,
+      notas_especiales: null,
+      plato_nombre: 'Nachos Supremos',
+      ingredientes: [{ id_ingrediente: 51, nombre: 'Queso', porcion: 'normal', precio_aplicado: '0.00' }],
+    },
+  ];
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('FROM detalles_pedido dp')) return { rows: sinColumna };
+    return dbCreacionOk(sql);
+  });
+  const socket = instalarFakeSocket();
+  try {
+    await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(5)}`)
+      .send({ items: [{ id_plato: 1042, cantidad: 1 }] });
+
+    const [ingrediente] = socket.buscar('/internal/order-created').cuerpo.pedido.items[0].ingredientes;
+    assert.strictEqual(ingrediente.paso, null);
   } finally {
     socket.restaurar();
     db.restaurar();
@@ -363,7 +530,9 @@ test("un cobro 'completada' avisa mesa-liberada y el cambio a pagado", async () 
 
     const liberada = socket.buscar('/internal/mesa-liberada');
     assert.ok(liberada, 'debe cerrarse la sesión de mesa');
-    assert.deepStrictEqual(liberada.cuerpo, { id_mesa: 5 });
+    // H-22: el cobro en caja libera la mesa POR UN PAGO, así que el motivo
+    // viaja explícito y no se queda en el 'liberada' por omisión.
+    assert.deepStrictEqual(liberada.cuerpo, { id_mesa: 5, motivo: 'pagada' });
 
     const estado = socket.buscar('/internal/order-status');
     assert.ok(estado);

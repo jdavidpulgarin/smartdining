@@ -20,22 +20,22 @@ function SelectorPersonalizacion({
 
   return (
     <fieldset className="space-y-2">
-      <legend className="w-full text-sm font-semibold text-cafe mb-1">
+      <legend className="w-full text-sm font-etiqueta uppercase tracking-wide font-bold text-texto mb-1">
         <span className="flex items-center justify-between gap-2">
           <span>{grupo.nombre}</span>
           <span className="flex items-center gap-1.5 text-xs font-normal font-cuerpo">
             {!esUnica && grupo.max && (
-              <span className="text-gray-600">
+              <span className="text-texto-suave">
                 Elige hasta {grupo.max}
               </span>
             )}
             {grupo.obligatorio ? (
-              <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wider border border-primary/30">
-                Obligatorio
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-etiqueta uppercase font-bold tracking-wider bg-primario text-white">
+                OBLIGATORIO
               </span>
             ) : (
-              <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-medium border border-gray-200">
-                Opcional
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-etiqueta uppercase font-semibold tracking-wider bg-superficie-2 text-texto-suave border border-borde">
+                OPCIONAL
               </span>
             )}
           </span>
@@ -51,13 +51,13 @@ function SelectorPersonalizacion({
           return (
             <label
               key={opcion.id}
-              className={`flex items-center justify-between w-full min-h-12 px-3 py-2 rounded-lg border transition-colors ${
+              className={`flex items-center justify-between w-full min-h-12 px-3 py-2 rounded-xl border transition-colors ${
                 estaSeleccionada
-                  ? 'border-primary bg-primary/10'
-                  : 'border-gray-200 hover:border-gray-300 bg-white'
+                  ? 'border-2 border-primario bg-superficie-2'
+                  : 'border-borde hover:border-primario/40 bg-superficie-2'
               } ${
                 opcionDeshabilitada
-                  ? 'opacity-50 cursor-not-allowed'
+                  ? 'opacity-40 cursor-not-allowed'
                   : 'cursor-pointer'
               }`}
             >
@@ -79,14 +79,14 @@ function SelectorPersonalizacion({
                       }
                     }
                   }}
-                  className="w-4 h-4 accent-primary shrink-0 cursor-pointer disabled:cursor-not-allowed"
+                  className="w-4 h-4 accent-primario shrink-0 cursor-pointer disabled:cursor-not-allowed"
                 />
                 <span className="block min-w-0 flex-1">
-                  <span className="text-sm font-medium text-cafe block">
+                  <span className="text-sm font-etiqueta uppercase tracking-wide font-semibold text-texto block">
                     {opcion.nombre}
                   </span>
                   {opcion.alergenos && opcion.alergenos.length > 0 && (
-                    <span className="text-xs text-gray-600 block mt-0.5">
+                    <span className="text-xs text-texto-suave block mt-0.5 font-cuerpo">
                       Contiene:{' '}
                       {opcion.alergenos
                         .map((a) => ALERGENOS_MAP[a] ?? a)
@@ -97,7 +97,7 @@ function SelectorPersonalizacion({
               </span>
 
               {opcion.precioExtra > 0 && (
-                <span className="text-xs font-semibold text-gray-600 shrink-0 ml-3">
+                <span className="text-xs font-semibold text-primario-texto shrink-0 ml-3">
                   + {formatearPrecio(opcion.precioExtra)}
                 </span>
               )}

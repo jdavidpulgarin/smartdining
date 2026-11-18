@@ -45,7 +45,7 @@ test('en Nuevas el boton empieza la preparacion', () => {
 test('en En preparacion el boton marca listo', () => {
   assert.deepStrictEqual(lib.siguientePaso('en_preparacion'), {
     estado: 'listo',
-    etiqueta: 'Listo',
+    etiqueta: 'Marcar listo',
   })
 })
 

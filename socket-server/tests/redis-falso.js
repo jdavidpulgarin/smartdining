@@ -15,6 +15,8 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
   const emisor = new EventEmitter();
   // Gancho para simular que OTRO proceso escribe entre el WATCH y el EXEC.
   let antesDeExec = null;
+  // Falla inyectada: el primer comando que cumpla el predicado lanza UNA vez.
+  let fallaPendiente = null;
 
   const vigente = (k) => {
     const e = datos.get(k);
@@ -25,6 +27,14 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
   const verificar = () => {
     if (caido) {
       const err = new Error('The client is offline');
+      err.name = 'ClientOfflineError';
+      throw err;
+    }
+  };
+  const inyectarFalla = (nombre, args) => {
+    if (fallaPendiente && fallaPendiente(nombre, args)) {
+      fallaPendiente = null;
+      const err = new Error(`Falla simulada en ${nombre}`);
       err.name = 'ClientOfflineError';
       throw err;
     }
@@ -55,6 +65,8 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
       return n;
     },
     async expire(k, seg) { verificar(); const e = vigente(k); if (!e) return 0; e.expira = ahora() + seg * 1000; return 1; },
+    // Como Redis: -2 si no existe, -1 si no vence, si no los segundos que le quedan.
+    async ttl(k) { verificar(); const e = vigente(k); if (!e) return -2; if (e.expira === null) return -1; return Math.ceil((e.expira - ahora()) / 1000); },
     async hSet(k, campo, valor) {
       verificar();
       const e = vigente(k);
@@ -64,6 +76,16 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
       escribir(k, h, e ? e.expira : null);
       return nuevo ? 1 : 0;
     },
+    async hSetNX(k, campo, valor) {
+      verificar();
+      const e = vigente(k);
+      if (e && e.valor.has(campo)) return false;
+      const h = e ? new Map(e.valor) : new Map();
+      h.set(campo, String(valor));
+      escribir(k, h, e ? e.expira : null);
+      return true;
+    },
+    async hGetAll(k) { verificar(); const e = vigente(k); return e ? Object.fromEntries(e.valor) : {}; },
     async hGet(k, campo) { verificar(); const e = vigente(k); return e && e.valor.has(campo) ? e.valor.get(campo) : null; },
     async hDel(k, campo) {
       verificar();
@@ -78,6 +100,13 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
     async hVals(k) { verificar(); const e = vigente(k); return e ? [...e.valor.values()] : []; },
   };
 
+  // Cada comando pasa primero por la falla inyectada. `crudos` se queda sin
+  // ella: lo usa EXEC para aplicar la cola, que en Redis es todo o nada.
+  const crudos = { ...comandos };
+  for (const [nombre, fn] of Object.entries(crudos)) {
+    comandos[nombre] = async (...args) => { inyectarFalla(nombre, args); return fn(...args); };
+  }
+
   function multi(vigiladas) {
     const cola = [];
     const cadena = {};
@@ -86,10 +115,11 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
     }
     cadena.exec = async () => {
       verificar();
+      inyectarFalla('exec', [cola]);
       if (antesDeExec) { const f = antesDeExec; antesDeExec = null; await f(); }
       for (const [k, v] of vigiladas) if (versionDe(k) !== v) throw new WatchError();
       const res = [];
-      for (const [nombre, args] of cola) res.push(await comandos[nombre](...args));
+      for (const [nombre, args] of cola) res.push(await crudos[nombre](...args));
       return res;
     };
     return cadena;
@@ -123,6 +153,13 @@ function crearRedisFalso({ ahora = Date.now } = {}) {
     levantar() { caido = false; emisor.emit('ready'); },
     /** La próxima EXEC verá antes una escritura de "otro proceso". */
     interferir(fn) { antesDeExec = fn; },
+    /**
+     * El primer comando que cumpla `predicado(nombre, args)` lanza como si
+     * Redis se hubiera caído, UNA sola vez; los siguientes funcionan. `nombre`
+     * es el comando ('get', 'set'…) o 'exec' (args = [cola de la MULTI]).
+     */
+    fallarUnaVez(predicado) { fallaPendiente = predicado; },
+    get fallaPendiente() { return fallaPendiente !== null; },
     llaves: () => [...datos.keys()].filter((k) => vigente(k)),
     WatchError,
   };

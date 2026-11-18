@@ -10,23 +10,23 @@ import ProgressBar from '../../components/ui/ProgressBar';
 const INGREDIENTES_MUESTRA = [
   {
     id: 'ing-pollo',
-    nombre: 'Pechuga a la parrilla con hierbas',
+    nombre: 'Pollo a la Plancha',
     imagen: 'https://images.unsplash.com/photo-1532550907401-a500c9a57435?auto=format&fit=crop&w=300&q=80',
-    precioExtra: 6000,
-    calorias: 210,
+    precioExtra: 0,
+    calorias: 220,
     disabled: false,
   },
   {
-    id: 'ing-aguacate',
-    nombre: 'Aguacate Hass en láminas',
+    id: 'ing-carne',
+    nombre: 'Carne Desmechada',
     imagen: 'https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?auto=format&fit=crop&w=300&q=80',
-    precioExtra: 4500,
-    calorias: 160,
+    precioExtra: 2500,
+    calorias: 260,
     disabled: false,
   },
   {
     id: 'ing-arroz',
-    nombre: 'Arroz artesanal al cilantro',
+    nombre: 'Arroz Artesanal',
     imagen: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=300&q=80',
     precioExtra: 0,
     calorias: 185,
@@ -34,7 +34,7 @@ const INGREDIENTES_MUESTRA = [
   },
   {
     id: 'ing-queso',
-    nombre: 'Queso madurado de la casa',
+    nombre: 'Queso Madurado',
     imagen: 'https://images.unsplash.com/photo-1452195100486-9cc805987862?auto=format&fit=crop&w=300&q=80',
     precioExtra: 3500,
     calorias: 120,
@@ -52,8 +52,8 @@ function UiShowcase() {
     );
   };
 
-  const precioBase = 24000;
-  const caloriasBase = 320;
+  const precioBase = 15000;
+  const caloriasBase = 400;
 
   const totalExtra = INGREDIENTES_MUESTRA.filter((i) => seleccionados.includes(i.id)).reduce(
     (acc, i) => acc + i.precioExtra,
@@ -67,107 +67,109 @@ function UiShowcase() {
     );
 
   return (
-    <div className="min-h-screen bg-crema text-cafe pb-28">
-      <header className="bg-white border-b border-gray-200 px-4 py-4">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
+    <div className="min-h-screen bg-fondo text-texto pb-28">
+      <header className="bg-superficie border-b border-borde px-4 py-4">
+        <div className="max-w-md mx-auto flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              SmartDining · Catálogo UI Base
+            <h1 className="text-2xl font-titulo text-primario tracking-wide">
+              SmartDining · UI Base (Tema Oscuro)
             </h1>
-            <p className="text-sm text-gray-600">
-              Vista de desarrollo para verificar tokens de marca y componentes reutilizables
+            <p className="text-xs text-texto-suave font-cuerpo">
+              Catálogo de componentes del sistema de diseño oscuro
             </p>
           </div>
           <Badge variante="alerta">DEV ONLY</Badge>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-6 space-y-8">
+      <main className="max-w-md mx-auto px-4 py-6 space-y-6">
         {/* 1. Botones */}
         <Card className="space-y-4">
-          <h2 className="text-xl font-bold">1. Botones (Button)</h2>
-          <div className="flex flex-wrap gap-3">
-            <Button variante="primario">Botón Primario</Button>
-            <Button variante="secundario">Botón Secundario</Button>
+          <h2 className="text-xl font-etiqueta uppercase text-texto font-bold">1. Botones (Button)</h2>
+          <div className="flex flex-col gap-2.5">
+            <Button variante="primario">SIGUIENTE</Button>
+            <Button variante="secundario">ANTERIOR</Button>
             <Button variante="primario" disabled>
-              Primario Deshabilitado
+              DESHABILITADO
             </Button>
             <Button variante="secundario" disabled>
-              Secundario Deshabilitado
+              SECUNDARIO DESHABILITADO
             </Button>
           </div>
         </Card>
 
         {/* 2. Badges */}
         <Card className="space-y-4">
-          <h2 className="text-xl font-bold">2. Etiquetas (Badge)</h2>
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge variante="neutro">Neutro · Mesa 4</Badge>
-            <Badge variante="exito">Éxito · Confirmado</Badge>
-            <Badge variante="alerta">Alerta · Nuevo</Badge>
+          <h2 className="text-xl font-etiqueta uppercase text-texto font-bold">2. Insignias (Badge)</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variante="obligatorio">OBLIGATORIO</Badge>
+            <Badge variante="preparando">PREPARANDO</Badge>
+            <Badge variante="entregado">ENTREGADO</Badge>
+            <Badge variante="pagado">PAGADO</Badge>
+            <Badge variante="pendiente">PENDIENTE</Badge>
+            <Badge variante="neutro">MESA 5</Badge>
           </div>
         </Card>
 
         {/* 3. Barra de progreso */}
         <Card className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold">3. Progreso (ProgressBar)</h2>
+            <h2 className="text-xl font-etiqueta uppercase text-texto font-bold">3. Progreso (ProgressBar)</h2>
             <div className="flex gap-2">
               <Button
                 variante="secundario"
                 onClick={() => setPaso((p) => Math.max(1, p - 1))}
                 disabled={paso <= 1}
+                className="min-h-9 text-xs px-2.5 py-1"
               >
-                Anterior
+                ANT
               </Button>
               <Button
                 variante="primario"
                 onClick={() => setPaso((p) => Math.min(4, p + 1))}
                 disabled={paso >= 4}
+                className="min-h-9 text-xs px-2.5 py-1"
               >
-                Siguiente
+                SIG
               </Button>
             </div>
           </div>
           <ProgressBar
             pasoActual={paso}
             totalPasos={4}
-            etiqueta="Selecciona tus proteínas y acompañamientos"
+            etiqueta="Relleno principal"
           />
         </Card>
 
         {/* 4. Imágenes */}
         <Card className="space-y-4">
-          <h2 className="text-xl font-bold">4. Imágenes (Imagen con proporción y fallback)</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
+          <h2 className="text-xl font-etiqueta uppercase text-texto font-bold">4. Imágenes (Imagen)</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
               <Imagen
                 src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80"
-                alt="Bowl saludable con vegetales frescos"
+                alt="Plato de muestra"
                 aspecto="4/3"
-                className="rounded-xl"
+                className="rounded-xl border border-borde"
               />
-              <p className="text-xs text-gray-600">Imagen válida (aspecto 4/3)</p>
+              <p className="text-[11px] text-texto-suave">Imagen válida</p>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Imagen
                 src="https://url-invalida-ejemplo.local/no-existe.jpg"
                 alt="Plato con respaldo automático"
                 aspecto="4/3"
-                className="rounded-xl"
+                className="rounded-xl border border-borde"
               />
-              <p className="text-xs text-gray-600">Respaldo automático al fallar onError</p>
+              <p className="text-[11px] text-texto-suave">Respaldo oscuro</p>
             </div>
           </div>
         </Card>
 
         {/* 5. Tarjetas de ingrediente */}
         <Card className="space-y-4">
-          <h2 className="text-xl font-bold">5. Tarjetas de Ingrediente (IngredientCard)</h2>
-          <p className="text-sm text-gray-600">
-            Accesibles con teclado (Tab + Espacio/Enter). Incluye estados seleccionado, disponible y agotado.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <h2 className="text-xl font-etiqueta uppercase text-texto font-bold">5. Ingredientes (IngredientCard)</h2>
+          <div className="space-y-2.5">
             {INGREDIENTES_MUESTRA.map((ing) => (
               <IngredientCard
                 key={ing.id}
@@ -186,7 +188,7 @@ function UiShowcase() {
 
       {/* 6. Barra inferior */}
       <BottomBar precioTotal={precioBase + totalExtra} calorias={totalCalorias}>
-        <Button variante="primario">Agregar al pedido</Button>
+        <Button variante="primario">SIGUIENTE</Button>
       </BottomBar>
     </div>
   );

@@ -18,49 +18,19 @@ const { crearRedisFalso } = require('./redis-falso');
 // ---------------------------------------------------------------------------
 
 test('total: cobra el saldo completo de la mesa', () => {
-  assert.deepStrictEqual(calcularMonto({ modo: 'total', cuenta: cuenta(5, 9_000_000, 6_000_000), comensal: 'Ana', presentes: 3 }), { montoCentavos: 6_000_000 });
-});
-
-test('igual: reparte el TOTAL entre los presentes, redondeado a pesos', () => {
-  const c = cuenta(5, 10_000_000); // $100.000 entre 3 → $33.333 c/u
-  assert.deepStrictEqual(calcularMonto({ modo: 'igual', cuenta: c, comensal: 'Ana', presentes: 3 }), { montoCentavos: 3_333_300 });
-  assert.strictEqual(3_333_300 % 100, 0, 'en pesos enteros');
-});
-
-test('igual: el último cubre el residuo y nadie paga más que el saldo', () => {
-  const total = 10_000_000;
-  let saldo = total;
-  const pagos = [];
-  for (let i = 0; i < 3; i += 1) {
-    const { montoCentavos } = calcularMonto({ modo: 'igual', cuenta: cuenta(5, total, saldo), comensal: 'X', presentes: 3 });
-    assert.ok(montoCentavos <= saldo);
-    pagos.push(montoCentavos);
-    saldo -= montoCentavos;
-  }
-  assert.deepStrictEqual(pagos, [3_333_300, 3_333_300, 3_333_400]);
-  assert.strictEqual(saldo, 0);
-  // Total con centavos sueltos: la parte se redondea a pesos y el último
-  // absorbe la diferencia exacta, sin pasarse del saldo.
-  const c = cuenta(5, 1_000_050, 1_000_050); // $10.000,50 entre 2 → parte $5.000
-  const a = calcularMonto({ modo: 'igual', cuenta: c, comensal: 'X', presentes: 2 }).montoCentavos;
-  const b = calcularMonto({ modo: 'igual', cuenta: cuenta(5, 1_000_050, 1_000_050 - a), comensal: 'X', presentes: 2 }).montoCentavos;
-  assert.strictEqual(a + b, 1_000_050);
-});
-
-test('igual: sin presencia cuenta como 1 persona', () => {
-  assert.deepStrictEqual(calcularMonto({ modo: 'igual', cuenta: cuenta(5, 500_000), comensal: 'Ana', presentes: 0 }), { montoCentavos: 500_000 });
+  assert.deepStrictEqual(calcularMonto({ modo: 'total', cuenta: cuenta(5, 9_000_000, 6_000_000), comensal: 'Ana' }), { montoCentavos: 6_000_000 });
 });
 
 test('propio: el saldo de ese alias; 0 o desconocido → SIN_SALDO; nunca más que el saldo de la mesa', () => {
   const c = cuenta(5, 9_000_000, 2_000_000, { Ana: 2_500_000, Beto: 0 });
-  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Ana', presentes: 2 }), { montoCentavos: 2_000_000 });
-  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Beto', presentes: 2 }), { error: 'SIN_SALDO' });
-  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Zoe', presentes: 2 }), { error: 'SIN_SALDO' });
+  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Ana' }), { montoCentavos: 2_000_000 });
+  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Beto' }), { error: 'SIN_SALDO' });
+  assert.deepStrictEqual(calcularMonto({ modo: 'propio', cuenta: c, comensal: 'Zoe' }), { error: 'SIN_SALDO' });
 });
 
 test('saldo 0 → SIN_SALDO en cualquier modo', () => {
-  for (const modo of ['total', 'igual', 'propio']) {
-    assert.deepStrictEqual(calcularMonto({ modo, cuenta: cuenta(5, 100, 0, { Ana: 0 }), comensal: 'Ana', presentes: 1 }), { error: 'SIN_SALDO' });
+  for (const modo of ['total', 'propio']) {
+    assert.deepStrictEqual(calcularMonto({ modo, cuenta: cuenta(5, 100, 0, { Ana: 0 }), comensal: 'Ana' }), { error: 'SIN_SALDO' });
   }
 });
 
@@ -146,14 +116,29 @@ test('responde solo lo necesario para el widget, con la firma correcta y monto d
   assert.ok(minutos > 29 && minutos <= 30, 'expira en PAGOS_TTL_MINUTOS');
 });
 
-test('igual y propio calculan el monto por modo', async (t) => {
+test('total y propio calculan el monto por modo', async (t) => {
   const { sentar, pedir } = await escenario(t);
   const ana = await sentar('Ana');
   await sentar('Beto');
   await sentar('Caro');
-  assert.strictEqual((await (await pedir(ana, cuerpo('igual'))).json()).monto_en_centavos, 3_000_000);
+  assert.strictEqual((await (await pedir(ana, cuerpo('total'))).json()).monto_en_centavos, 9_000_000);
   const beto = await sentar('Beto');
   assert.strictEqual((await (await pedir(beto, cuerpo('propio', { comensal: 'Beto' }))).json()).monto_en_centavos, 5_000_000);
+});
+
+test('modo «igual» (retirado) o desconocido → 400 PAYLOAD_INVALIDO con un mensaje claro', async (t) => {
+  const { sentar, pedir } = await escenario(t);
+  const ana = await sentar('Ana');
+  const igual = await pedir(ana, cuerpo('igual'));
+  assert.strictEqual(igual.status, 400);
+  const ci = await igual.json();
+  assert.strictEqual(ci.codigo, 'PAYLOAD_INVALIDO');
+  assert.match(ci.mensaje, /«igual».*ya no existe.*«propio».*«total»/);
+  for (const modo of ['IGUAL', 'dividir', '', null, 3]) {
+    const r = await pedir(ana, cuerpo(modo));
+    assert.strictEqual(r.status, 400, String(modo));
+    assert.match((await r.json()).mensaje, /modo debe ser uno de: total, propio/);
+  }
 });
 
 test('propio sin saldo → 409 SIN_SALDO', async (t) => {
@@ -163,16 +148,22 @@ test('propio sin saldo → 409 SIN_SALDO', async (t) => {
   assert.deepStrictEqual([r.status, (await r.json()).codigo], [409, 'SIN_SALDO']);
 });
 
-test('una sola intención pendiente por comensal: otra petición devuelve la misma', async (t) => {
-  const { sentar, pedir, backend } = await escenario(t);
+test('una sola intención pendiente por comensal: mismo modo y monto devuelve la misma; otro modo la reemplaza', async (t) => {
+  const { s, sentar, pedir } = await escenario(t);
   const ana = await sentar('Ana');
+  await sentar('Beto');
   const a = await (await pedir(ana, cuerpo('total'))).json();
-  const r2 = await pedir(ana, cuerpo('igual'));
+  const r2 = await pedir(ana, cuerpo('total'));
   assert.strictEqual(r2.status, 200);
   const b = await r2.json();
-  assert.strictEqual(b.referencia, a.referencia);
-  assert.strictEqual(b.monto_en_centavos, a.monto_en_centavos);
-  assert.strictEqual(backend.llamadas.filter((l) => l.ruta.includes('/cuenta/')).length, 1, 'no vuelve a pedir la cuenta');
+  assert.deepStrictEqual([b.referencia, b.monto_en_centavos], [a.referencia, a.monto_en_centavos]);
+  // Más casos (cuenta cambiada, otra pestaña, Redis) en pagos-reemplazo.test.js.
+  const r3 = await pedir(ana, cuerpo('propio'));
+  assert.strictEqual(r3.status, 201);
+  const c = await r3.json();
+  assert.notStrictEqual(c.referencia, a.referencia);
+  assert.strictEqual(c.monto_en_centavos, 4_000_000);
+  assert.strictEqual((await s.almacenPagos.obtener(a.referencia)).estado, 'reemplazada');
 });
 
 test('mismo eventId: misma respuesta', async (t) => {
@@ -211,6 +202,15 @@ test('quien paga es el alias del JWT; `comensal` en el cuerpo es opcional', asyn
   const r = await pedir(beto, sinAlias);
   assert.strictEqual(r.status, 201);
   assert.strictEqual((await r.json()).monto_en_centavos, 5_000_000, 'lo propio de Beto');
+});
+
+test('un `comensal` distinto del JWT es 403, aunque esté mal formado (nunca 400)', async (t) => {
+  const { sentar, pedir } = await escenario(t);
+  const ana = await sentar('Ana');
+  for (const otro of ['Beto', '', 123, null, { a: 1 }]) {
+    const r = await pedir(ana, cuerpo('total', { comensal: otro }));
+    assert.deepStrictEqual([r.status, (await r.json()).codigo], [403, 'NO_AUTORIZADO'], JSON.stringify(otro));
+  }
 });
 
 test('límite: 5 intenciones por minuto por comensal', async (t) => {

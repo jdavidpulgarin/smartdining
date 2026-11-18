@@ -1,16 +1,23 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
 import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
+import { getSocket } from '../hooks/useSocket'
+import { crearVentanaEventos } from '../utils/dedupeEventos'
+import { mesaDelAviso } from '../utils/avisos'
+import { detalleMesa } from '../utils/estadoMesa'
+import { aplicarMesaActualizada, fusionarCargaConAvisos, mismaMesa, numeroDeMesa } from '../utils/mesaActualizada'
 import { TablesContext } from './tablesContextDef'
+import { AuthContext } from './authContextDef'
+
+const textoMesa = (idMesa) => (idMesa ? `Mesa ${idMesa}` : 'Una mesa sin número')
 
 function normalizarMesa(backendMesa, prev = {}) {
   const id = backendMesa.id_mesa || backendMesa.numero
   const rawEstado = (backendMesa.estado || 'disponible').toLowerCase()
   const estadoCapitalizado = rawEstado.charAt(0).toUpperCase() + rawEstado.slice(1)
   const isOcupada = rawEstado === 'ocupada'
-  const isDisponible = rawEstado === 'disponible'
 
   return {
     id,
@@ -28,17 +35,16 @@ function normalizarMesa(backendMesa, prev = {}) {
     token_qr: prev.token_qr || null,
     qr_url: prev.qr_url || null,
     active: isOcupada,
-    detail: isDisponible
-      ? 'Lista para asignar'
-      : isOcupada
-        ? (backendMesa.sesion_abierta ? 'Sesión activa · QR generado' : 'Ocupada')
-        : 'Reservada',
+    detail: detalleMesa(rawEstado, backendMesa.sesion_abierta),
     openedAt: prev.openedAt || null,
     expiresAt: prev.expiresAt || null,
   }
 }
 
 export function TablesProvider({ children }) {
+  // Sesión del personal. Tolerante a no tener AuthProvider (pruebas que montan
+  // solo este contexto): en ese caso se usa el token guardado.
+  const tokenSesion = useContext(AuthContext)?.user?.token || null
   const [tables, setTables] = useState(() => {
     try {
       const stored = sessionStorage.getItem('smartdining_tables_state')
@@ -49,7 +55,16 @@ export function TablesProvider({ children }) {
     return []
   })
 
+  // Los eventos traen id_mesa; lo que se le muestra a la gente es el NÚMERO.
+  // Con mesas de id ≠ número, «Mesa {id}» nombraba otra mesa.
+  const tablasRef = useRef(tables)
+  useEffect(() => {
+    tablasRef.current = tables
+  }, [tables])
+  const nombreMesa = useCallback((idMesa) => textoMesa(idMesa ? numeroDeMesa(tablasRef.current, idMesa) : null), [])
+
   const [pedidosActivos, setPedidosActivos] = useState([])
+  const [presenciaPorMesa, setPresenciaPorMesa] = useState({})
   const [alertas, setAlertas] = useState([])
   const [loading, setLoading] = useState(false)
   const [notification, setNotification] = useState(null)
@@ -69,6 +84,8 @@ export function TablesProvider({ children }) {
         hora: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         atendida: false,
         ...nuevaAlerta,
+        // La bandeja muestra el número, no el id (mesas de id ≠ número).
+        ...(nuevaAlerta?.idMesa ? { numeroMesa: numeroDeMesa(tablasRef.current, nuevaAlerta.idMesa) } : {}),
       },
       ...prev,
     ])
@@ -92,27 +109,36 @@ export function TablesProvider({ children }) {
     }
   }, [tables])
 
+  // Cargas de GET /api/mesas en curso: cada una anota las mesas que reciben un
+  // mesa:actualizada MIENTRAS se pide, para que la respuesta (más vieja) no las
+  // pise (revisión de Roberto en el #278).
+  const cargasEnCurso = useRef(new Set())
+
   /**
    * Carga las mesas desde el backend real: GET /api/mesas
    */
   const cargarMesas = useCallback(async () => {
     const token = getAuthToken()
-    if (!token) return
+    if (!token) {
+      setNotification({
+        type: 'warning',
+        message: 'Inicia sesión para ver las mesas',
+      })
+      return
+    }
 
     setLoading(true)
+    const avisadas = new Map()
+    cargasEnCurso.current.add(avisadas)
     try {
       const data = await mesasApi.listar()
       if (data?.mesas && Array.isArray(data.mesas)) {
-        setTables((prevTables) => {
-          const prevMap = new Map(prevTables.map((t) => [t.id, t]))
-          return data.mesas.map((m) =>
-            normalizarMesa(m, prevMap.get(m.id_mesa) || prevMap.get(m.numero) || {})
-          )
-        })
+        setTables((prevTables) => fusionarCargaConAvisos(prevTables, data.mesas, avisadas, normalizarMesa))
       }
     } catch (err) {
       console.warn('Aviso: no se pudieron cargar las mesas desde el backend:', err.message)
     } finally {
+      cargasEnCurso.current.delete(avisadas)
       setLoading(false)
     }
   }, [])
@@ -134,17 +160,22 @@ export function TablesProvider({ children }) {
     }
   }, [])
 
-  // Cargar mesas y pedidos al montar de forma asíncrona si hay sesión activa
+  // Cargar mesas y pedidos al montar y CADA VEZ que cambia la sesión. Este
+  // proveedor se monta también en /login, sin token: si solo cargara al montar,
+  // tras iniciar sesión el salón quedaría vacío hasta recargar la página.
   useEffect(() => {
     let isSubscribed = true
-    const token = getAuthToken()
+    const token = tokenSesion || getAuthToken()
     if (!token) return
 
     const fetchInitialData = async () => {
       try {
         const [mesasRes, pedidosRes] = await Promise.allSettled([
-          mesasApi.listar(),
-          pedidosApi.listarActivos(),
+          // El token va explícito: este efecto (hijo) corre ANTES que el de
+          // AuthProvider que lo guarda en sessionStorage, así que getAuthToken()
+          // todavía no lo tiene y la petición saldría sin sesión (401).
+          mesasApi.listar({ token }),
+          pedidosApi.listarActivos({ token }),
         ])
         if (!isSubscribed) return
 
@@ -169,11 +200,19 @@ export function TablesProvider({ children }) {
     return () => {
       isSubscribed = false
     }
-  }, [])
+  }, [tokenSesion])
 
+
+  // order:created y order:status pueden llegar repetidos si el servidor
+  // reintenta (EVENTS.md §5): un eventId ya visto se ignora entero, sin repetir
+  // la notificación ni el sonido. Una ventana por tipo, de los últimos 200.
+  const [createdVisto] = useState(() => crearVentanaEventos())
+  const [statusVisto] = useState(() => crearVentanaEventos())
+  const [mesaVista] = useState(() => crearVentanaEventos())
 
   // Escuchar cuando entra un pedido nuevo (order:created)
   useSocketListener('order:created', (data) => {
+    if (createdVisto(data?.eventId)) return
     if (data?.pedido) {
       const p = data.pedido
       const idMesa = Number(p.id_mesa)
@@ -188,7 +227,7 @@ export function TablesProvider({ children }) {
       // Marcar la mesa como ocupada y activa en el plano
       setTables((prev) =>
         prev.map((t) =>
-          t.id === idMesa || t.number === idMesa
+          mismaMesa(t, idMesa)
             ? {
                 ...t,
                 status: 'Ocupada',
@@ -199,12 +238,13 @@ export function TablesProvider({ children }) {
             : t
         )
       )
-      showNotification(`Nuevo pedido recibido: ${p.codigo_pedido || `#${p.id_pedido}`} (Mesa ${idMesa})`, 'info')
+      showNotification(`Nuevo pedido recibido: ${p.codigo_pedido || `#${p.id_pedido}`} (${nombreMesa(idMesa)})`, 'info')
     }
   })
 
   // Escuchar cambio de estado de pedido (order:status)
   useSocketListener('order:status', (data) => {
+    if (statusVisto(data?.eventId)) return
     if (data?.id_pedido) {
       const idPedido = Number(data.id_pedido)
       const nuevoEstado = data.estado
@@ -222,7 +262,7 @@ export function TablesProvider({ children }) {
         })
         emitirSonidoAlerta()
         showNotification(
-          `🍽️ ¡Pedido ${data.codigo_pedido || `#${idPedido}`} LISTO para servir (Mesa ${data.id_mesa})!`,
+          `🍽️ ¡Pedido ${data.codigo_pedido || `#${idPedido}`} LISTO para servir (${nombreMesa(data.id_mesa)})!`,
           'success'
         )
       } else if (nuevoEstado === 'entregado') {
@@ -241,10 +281,10 @@ export function TablesProvider({ children }) {
       agregarAlerta({
         tipo: 'pago',
         idMesa: data.id_mesa,
-        mensaje: `Pago confirmado por $${montoFormateado} (Mesa ${data.id_mesa})`,
+        mensaje: `Pago confirmado por $${montoFormateado} (${nombreMesa(data.id_mesa)})`,
       })
       emitirSonidoAlerta()
-      showNotification(`💰 Pago confirmado de $${montoFormateado} para Mesa ${data.id_mesa}`, 'success')
+      showNotification(`💰 Pago confirmado de $${montoFormateado} para ${nombreMesa(data.id_mesa)}`, 'success')
       cargarMesas()
       cargarPedidosActivos()
     }
@@ -252,59 +292,127 @@ export function TablesProvider({ children }) {
 
   // Escuchar llamado al mesero (mesa:llamar_mesero / waiter:call)
   useSocketListener('mesa:llamar_mesero', (data) => {
-    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    const idMesa = mesaDelAviso(data)
+    if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'llamado',
       idMesa,
       mensaje: data?.motivo || `Comensal solicita asistencia urgente en mesa`,
     })
     emitirSonidoAlerta()
-    showNotification(`🔔 Mesa ${idMesa} llama al mesero`, 'info')
+    showNotification(`🔔 ${nombreMesa(idMesa)} llama al mesero`, 'info')
   })
 
   useSocketListener('waiter:call', (data) => {
-    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    const idMesa = mesaDelAviso(data)
+    if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'llamado',
       idMesa,
       mensaje: data?.motivo || `Comensal solicita asistencia en mesa`,
     })
     emitirSonidoAlerta()
-    showNotification(`🔔 Mesa ${idMesa} llama al mesero`, 'info')
+    showNotification(`🔔 ${nombreMesa(idMesa)} llama al mesero`, 'info')
   })
 
   // Escuchar solicitud de cuenta (cuenta:solicitada / bill:requested)
   useSocketListener('cuenta:solicitada', (data) => {
-    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    const idMesa = mesaDelAviso(data)
+    if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'cuenta',
       idMesa,
       mensaje: `Comensales solicitan la cuenta y factura`,
     })
     emitirSonidoAlerta()
-    showNotification(`🧾 Mesa ${idMesa} solicita la cuenta`, 'info')
+    showNotification(`🧾 ${nombreMesa(idMesa)} solicita la cuenta`, 'info')
   })
 
   useSocketListener('bill:requested', (data) => {
-    const idMesa = Number(data?.id_mesa || data?.mesa || 1)
+    const idMesa = mesaDelAviso(data)
+    if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'cuenta',
       idMesa,
       mensaje: `Comensales solicitan la cuenta y factura`,
     })
     emitirSonidoAlerta()
-    showNotification(`🧾 Mesa ${idMesa} solicita la cuenta`, 'info')
+    showNotification(`🧾 ${nombreMesa(idMesa)} solicita la cuenta`, 'info')
   })
 
 
+
+  // Presencia ACTUAL de todas las mesas en cada conexión (también tras iniciar
+  // sesión, recargar o reconectar): mesa:presencia:solicitar (EVENTS.md §5.2,
+  // #175) la devuelve en el ack, sin depender de que los listeners ya estén
+  // registrados. Es una foto completa: una mesa que no viene tiene 0. Si falla
+  // (RATE_LIMIT, ERROR_INTERNO o un socket-server viejo sin el evento), queda el
+  // envío automático del socket-server y los avisos de abajo.
+  useEffect(() => {
+    const socket = getSocket()
+    const pedirPresencia = () => {
+      socket.timeout(5000).emit('mesa:presencia:solicitar', {}, (err, r) => {
+        if (err || !r?.ok || !Array.isArray(r.mesas)) return
+        setPresenciaPorMesa(Object.fromEntries(r.mesas.map((p) => [Number(p.id_mesa), p])))
+      })
+    }
+    if (socket.connected) pedirPresencia()
+    socket.on('connect', pedirPresencia)
+    return () => socket.off('connect', pedirPresencia)
+  }, [])
+
+  // T12 (EVENTS.md §5.7): el backend avisa cada cambio de mesa (abrir, estado,
+  // crear, editar, liberar, borrar) con mesa:actualizada, solo a room:admin.
+  // La lista de mesas, el admin y la Caja la ven sin recargar. Un eventId
+  // repetido se ignora (ventana de los últimos 200).
+  useSocketListener('mesa:actualizada', (data) => {
+    if (mesaVista(data?.eventId)) return
+    const id = Number(data?.id_mesa)
+    if (Number.isInteger(id) && id > 0) {
+      for (const avisadas of cargasEnCurso.current) avisadas.set(id, data.motivo === 'eliminada' ? 'eliminada' : 'actualizada')
+    }
+    setTables((prev) => aplicarMesaActualizada(prev, data, normalizarMesa))
+  })
+
+  // Al RECONECTAR se vuelven a pedir las mesas: desde #239 los avisos que se
+  // perdieron sin conexión no se reenvían. Se marca el corte (disconnect) y se
+  // recarga en el connect que le sigue; la primera conexión no la necesita (las
+  // mesas se cargan al montar).
+  const huboCorte = useRef(false)
+  useSocketListener('disconnect', () => {
+    huboCorte.current = true
+  })
+  useSocketListener('connect', () => {
+    if (!huboCorte.current) return
+    huboCorte.current = false
+    cargarMesas()
+  })
+
+  // Escuchar presencia de comensales en vivo (room:admin recibe cambios de todas las mesas).
+  // Guardarla en el contexto evita perderla al cerrar y volver a abrir "Tomar pedido".
+  useSocketListener('mesa:presencia', (data) => {
+    if (data && data.id_mesa != null) {
+      const numId = Number(data.id_mesa)
+      setPresenciaPorMesa((prev) => ({
+        ...prev,
+        [numId]: data,
+      }))
+    }
+  })
 
   // Escuchar si el backend o socket-server avisa de una mesa liberada (evento canónico mesa:liberada)
   const onMesaLiberada = (data) => {
     if (data?.id_mesa) {
       const numId = Number(data.id_mesa)
+      setPresenciaPorMesa((prev) => {
+        if (!prev[numId]) return prev
+        const copia = { ...prev }
+        delete copia[numId]
+        return copia
+      })
       setTables((prev) =>
         prev.map((t) =>
-          t.id === numId || t.number === numId
+          mismaMesa(t, numId)
             ? {
                 ...t,
                 status: 'Disponible',
@@ -318,7 +426,7 @@ export function TablesProvider({ children }) {
             : t
         )
       )
-      showNotification(`Mesa ${numId} liberada por el sistema`, 'info')
+      showNotification(`${nombreMesa(numId)} liberada por el sistema`, 'info')
     }
   }
 
@@ -331,7 +439,7 @@ export function TablesProvider({ children }) {
       const numId = Number(data.id_mesa)
       setTables((prev) =>
         prev.map((t) =>
-          t.id === numId || t.number === numId
+          mismaMesa(t, numId)
             ? {
                 ...t,
                 token_qr: data.token_qr,
@@ -344,7 +452,7 @@ export function TablesProvider({ children }) {
             : t
         )
       )
-      showNotification(`Mesa ${numId}: Código QR actualizado en vivo`, 'info')
+      showNotification(`${nombreMesa(numId)}: Código QR actualizado en vivo`, 'info')
     }
   })
 
@@ -354,7 +462,7 @@ export function TablesProvider({ children }) {
    */
   const abrirMesa = useCallback(async (idMesa, ttlMinutos = 240) => {
     const numId = Number(idMesa)
-    const tableActual = tables.find((t) => t.id === numId || t.number === numId)
+    const tableActual = tables.find((t) => mismaMesa(t, numId))
     const tableName = tableActual?.name || `Mesa ${numId}`
 
     try {
@@ -363,7 +471,7 @@ export function TablesProvider({ children }) {
 
       setTables((prev) =>
         prev.map((t) => {
-          if (t.id === numId || t.number === numId) {
+          if (mismaMesa(t, numId)) {
             return {
               ...t,
               status: 'Ocupada',
@@ -395,15 +503,22 @@ export function TablesProvider({ children }) {
    */
   const liberarMesa = useCallback(async (idMesa) => {
     const numId = Number(idMesa)
-    const tableActual = tables.find((t) => t.id === numId || t.number === numId)
+    const tableActual = tables.find((t) => mismaMesa(t, numId))
     const tableName = tableActual?.name || `Mesa ${numId}`
 
     try {
       await liberarMesaRemota(numId)
 
+      setPresenciaPorMesa((prev) => {
+        if (!prev[numId]) return prev
+        const copia = { ...prev }
+        delete copia[numId]
+        return copia
+      })
+
       setTables((prev) =>
         prev.map((t) => {
-          if (t.id === numId || t.number === numId) {
+          if (mismaMesa(t, numId)) {
             return {
               ...t,
               status: 'Disponible',
@@ -432,18 +547,20 @@ export function TablesProvider({ children }) {
   /**
    * Regenera el token QR de una mesa en curso (rotación de seguridad).
    */
-  const regenerarQr = useCallback(async (idMesa, ttlMinutos = 240) => {
+  // `silencioso`: la renovación automática del modal (cada ~3 min) no avisa con
+  // un toast ni en el éxito ni en el error; el modal muestra su propio estado.
+  const regenerarQr = useCallback(async (idMesa, ttlMinutos = 240, { silencioso = false, soloSiVacia = false } = {}) => {
     const numId = Number(idMesa)
-    const tableActual = tables.find((t) => t.id === numId || t.number === numId)
+    const tableActual = tables.find((t) => mismaMesa(t, numId))
     const tableName = tableActual?.name || `Mesa ${numId}`
 
     try {
-      const qrResult = await rotarTokenQrMesa(numId, ttlMinutos)
+      const qrResult = await rotarTokenQrMesa(numId, ttlMinutos, { soloSiVacia })
       const sidCorto = qrResult.sid ? qrResult.sid.slice(0, 8) : 'rotado'
 
       setTables((prev) =>
         prev.map((t) => {
-          if (t.id === numId || t.number === numId) {
+          if (mismaMesa(t, numId)) {
             return {
               ...t,
               token_qr: qrResult.token,
@@ -456,10 +573,10 @@ export function TablesProvider({ children }) {
         })
       )
 
-      showNotification(`QR regenerado para ${tableName}. Sesión actualizada.`, 'success')
+      if (!silencioso) showNotification(`QR regenerado para ${tableName}. Sesión actualizada.`, 'success')
       return qrResult
     } catch (err) {
-      showNotification(err.message || `Error al rotar QR en ${tableName}`, 'error')
+      if (!silencioso) showNotification(err.message || `Error al rotar QR en ${tableName}`, 'error')
       throw err
     }
   }, [tables, showNotification])
@@ -487,6 +604,7 @@ export function TablesProvider({ children }) {
       value={{
         tables,
         pedidosActivos,
+        presenciaPorMesa,
         alertas,
         loading,
         notification,

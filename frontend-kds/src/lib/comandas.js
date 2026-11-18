@@ -12,11 +12,38 @@
 
 import { ordenarPase } from './pase.js'
 
-/** Columnas del tablero, en el orden en que se muestran. */
+/**
+ * Columnas del tablero, en el orden en que se muestran.
+ *
+ * Cada una trae ademas el texto de su estado vacio, que no es decorativo: una
+ * columna vacia es el caso mas frecuente de esta pantalla, y es justo donde hay
+ * que explicar que se espera que aparezca ahi y de donde viene.
+ */
 export const COLUMNAS = [
-  { estado: 'recibido', titulo: 'Nuevas' },
-  { estado: 'en_preparacion', titulo: 'En preparación' },
-  { estado: 'listo', titulo: 'Listas' },
+  {
+    estado: 'recibido',
+    titulo: 'Nuevas',
+    vacio: {
+      titulo: 'Sin comandas nuevas',
+      nota: 'Sonará un aviso cuando llegue una.',
+    },
+  },
+  {
+    estado: 'en_preparacion',
+    titulo: 'En preparación',
+    vacio: {
+      titulo: 'Nada en preparación',
+      nota: 'Lo que empieces aparece aquí hasta que lo marques listo.',
+    },
+  },
+  {
+    estado: 'listo',
+    titulo: 'Listas en el pase',
+    vacio: {
+      titulo: 'El pase está vacío',
+      nota: 'Lo que marques como listo aparece aquí hasta que el mesero lo recoja.',
+    },
+  },
 ]
 
 const ESTADOS_EN_TABLERO = COLUMNAS.map((c) => c.estado)
@@ -107,6 +134,10 @@ export function comandaDesdePedido(pedido, llegadaEnMs = Date.now()) {
     codigo_pedido: pedido.codigo_pedido ?? null,
     id_mesa: pedido.id_mesa ?? null,
     mesa_numero: pedido.mesa_numero ?? null,
+    // T10: 'mesa' | 'para_llevar' | 'domicilio'. La API lo trae; el payload de
+    // order:created hoy no, y un pedido sin mesa sale como "Sin mesa" hasta
+    // la siguiente recarga (ver lib/bloques.js).
+    canal: pedido.canal ?? null,
     estado: pedido.estado || 'recibido',
     notas_generales: pedido.notas_generales ?? null,
     // Hora de paso a 'listo' (historial_estados), cuando la API la manda.
@@ -122,6 +153,9 @@ export function comandaDesdePedido(pedido, llegadaEnMs = Date.now()) {
       notas_especiales: item.notas_especiales ?? null,
       comensal: item.comensal ?? null,
       ingredientes: item.ingredientes ?? [],
+      // Una comanda nueva llega con sus lineas vivas; se guarda igual que la
+      // trae la API para que lineaCancelada funcione con las dos fuentes.
+      estado_item: item.estado_item ?? 'pendiente',
     })),
   }
 }
@@ -186,6 +220,60 @@ export function aplicarEstado(estado, evento) {
   }
 }
 
+/** Valor de estado_item de una linea cancelada (el mismo que trae la API). */
+export const ESTADO_ITEM_CANCELADO = 'cancelado'
+
+/**
+ * ¿Esta linea esta cancelada? Es lo que decide que la tarjeta la pinte TACHADA.
+ *
+ * La carga inicial (GET /api/kds/comandas) trae las lineas canceladas con
+ * `estado_item: 'cancelado'` (no las filtra), y aplicarItemCancelado deja la
+ * linea exactamente asi: por eso una linea cancelada se ve igual en vivo que al
+ * recargar.
+ */
+export function lineaCancelada(item) {
+  return item?.estado_item === ESTADO_ITEM_CANCELADO
+}
+
+/**
+ * Aplica item:cancelado (D-13 y #180: alguien quito UNA linea del pedido): la
+ * linea con ese id_detalle de esa comanda pasa a cancelada en vivo, y la tarjeta
+ * la pinta tachada, igual que la trae la API al recargar.
+ *
+ * - Deduplica por eventId, como order:created y order:status.
+ * - Una comanda que el tablero no tiene se ignora (el evento no trae los items
+ *   para inventarla; al reconectar, la carga inicial pone todo en su sitio).
+ * - NO saca la comanda aunque se quede sin lineas vivas: el order:status ->
+ *   cancelado que manda el backend despues es quien la saca, como siempre. Asi
+ *   un solo camino decide que una comanda sale del tablero.
+ */
+export function aplicarItemCancelado(estado, evento) {
+  if (esEventoRepetido(estado, evento?.eventId)) return estado
+  if (!evento || evento.id_pedido === undefined || evento.id_pedido === null) return estado
+  if (evento.id_detalle === undefined || evento.id_detalle === null) return estado
+
+  const eventos = recordarEvento(estado, evento.eventId)
+  const comanda = estado.comandas.find((c) => c.id_pedido === evento.id_pedido)
+  if (!comanda || !comanda.items.some((i) => i.id_detalle === evento.id_detalle)) {
+    return { ...estado, eventos }
+  }
+
+  return {
+    ...estado,
+    comandas: estado.comandas.map((c) =>
+      c.id_pedido === evento.id_pedido
+        ? {
+            ...c,
+            items: c.items.map((i) =>
+              i.id_detalle === evento.id_detalle ? { ...i, estado_item: ESTADO_ITEM_CANCELADO } : i
+            ),
+          }
+        : c
+    ),
+    eventos,
+  }
+}
+
 /**
  * Campos que deja un order:status en la comanda.
  *
@@ -208,7 +296,8 @@ function cambioDeEstado(evento) {
 /**
  * Siguiente estado al que puede avanzar una comanda desde el tablero.
  *
- * Es el boton de la tarjeta: "Empezar" en Nuevas y "Listo" en En preparacion.
+ * Es el boton de la tarjeta: "Empezar" en Nuevas y "Marcar listo" en En
+ * preparacion.
  * Una comanda ya lista no tiene boton — sacarla del tablero es del mesero, que
  * la marca 'entregado' desde su panel, y el KDS lo recibe por order:status.
  *
@@ -219,7 +308,7 @@ function cambioDeEstado(evento) {
  */
 export function siguientePaso(estadoActual) {
   if (estadoActual === 'recibido') return { estado: 'en_preparacion', etiqueta: 'Empezar' }
-  if (estadoActual === 'en_preparacion') return { estado: 'listo', etiqueta: 'Listo' }
+  if (estadoActual === 'en_preparacion') return { estado: 'listo', etiqueta: 'Marcar listo' }
   return null
 }
 
@@ -262,6 +351,91 @@ export function marcarEstadoLocal(estado, idPedido, nuevoEstado) {
 export function comandasDeColumna(estado, estadoColumna) {
   const deLaColumna = estado.comandas.filter((c) => c.estado === estadoColumna)
   return estadoColumna === 'listo' ? ordenarPase(deLaColumna) : deLaColumna
+}
+
+/**
+ * Que aviso toca mostrar sobre el tablero, si es que toca alguno.
+ *
+ * Son dos fallos distintos y el de conexion manda. Un socket caido NO deja
+ * ningun error de API detras —la ultima carga pudo ir bien— y sin embargo es
+ * el peor de los dos: la pantalla se queda congelada, las comandas nuevas no
+ * entran y nada mas lo delata. Por eso no se puede colgar el aviso de
+ * estado.error, que es como estaba.
+ *
+ * Con el socket vivo, un error de la API si trae un mensaje del servidor que
+ * vale la pena leer tal cual, asi que ese es el que se enseña.
+ *
+ * @returns {'desconexion'|'error'|null}
+ */
+export function avisoDelTablero({ conectado, error }) {
+  if (!conectado) return 'desconexion'
+  if (error) return 'error'
+  return null
+}
+
+/**
+ * Tras un PATCH fallido: ¿el boton se queda esperando a que vuelva la conexion?
+ *
+ * El avance va por HTTP y el tiempo real por el socket, que son dos canales
+ * distintos: que el socket este caido NO impide cambiar el estado, asi que el
+ * boton no se bloquea por eso. Se bloquea cuando el PATCH fallo de verdad **y**
+ * sin respuesta del servidor (un fallo de red, sin status), que es cuando
+ * volver a tocar solo repetiria el mismo error.
+ *
+ * Y solo si ademas el socket esta caido, para que haya quien lo desbloquee: la
+ * reconexion. Si el socket esta vivo y aun asi el PATCH no llego, el boton
+ * sigue activo con su mensaje de error, porque reintentar es lo unico sensato
+ * que puede hacer el cocinero.
+ */
+export function debeEsperarConexion(resultado, conectado) {
+  if (!resultado || resultado.ok) return false
+  return Boolean(resultado.sinRespuesta) && !conectado
+}
+
+/**
+ * Los comensales de una comanda, sin repetir y en el orden en que aparecen.
+ *
+ * Va en la cabecera de la tarjeta, junto al numero de pedido: dice de un
+ * vistazo para cuanta gente es la mesa y con que nombres va a cantar el pase,
+ * sin tener que leer item por item.
+ *
+ * Sin repetir, porque una persona que pidio tres cosas es una persona; y en
+ * orden de aparicion, no alfabetico, para que coincida con el orden en que se
+ * leen los platos justo debajo.
+ *
+ * Los items sin comensal no aportan nada aqui: el socket no siempre lo manda, y
+ * un hueco o un "—" en la cabecera solo haria dudar de si falta alguien.
+ */
+export function comensalesDeComanda(comanda) {
+  const items = comanda?.items
+  if (!Array.isArray(items)) return []
+
+  const vistos = []
+  for (const item of items) {
+    // Una linea cancelada ya no es un plato que salga al pase: su comensal no
+    // cuenta (si tiene otra linea viva, aparece por esa).
+    if (lineaCancelada(item)) continue
+    const nombre = typeof item?.comensal === 'string' ? item.comensal.trim() : ''
+    if (nombre && !vistos.includes(nombre)) vistos.push(nombre)
+  }
+  return vistos
+}
+
+/**
+ * Cuantas comandas tiene la cocina encima ahora mismo.
+ *
+ * Es la cifra de la barra de resumen. Cuenta solo lo que esta en el tablero
+ * (las tres columnas) y no lo que ya salio, aunque siga en memoria: el numero
+ * tiene que coincidir con la suma de los tres contadores que el cocinero ve
+ * justo debajo, o deja de significar nada.
+ *
+ * Incluye el pase a proposito: una comanda lista pero sin recoger sigue
+ * ocupando sitio y sigue siendo una mesa esperando.
+ */
+export function contarComandasActivas(estado) {
+  const comandas = estado?.comandas
+  if (!Array.isArray(comandas)) return 0
+  return comandas.filter((c) => ESTADOS_EN_TABLERO.includes(c?.estado)).length
 }
 
 /**

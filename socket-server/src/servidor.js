@@ -2,7 +2,9 @@ const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
 const { autenticarSocket } = require('./auth');
-const { registrarSalas, salaMesa, SALA_ADMIN } = require('./salas');
+const {
+  registrarSalas, salaMesa, SALA_ADMIN, ROLES_ADMIN,
+} = require('./salas');
 const { ROL_COMENSAL } = require('./auth');
 const { crearRegistroIdempotencia } = require('./idempotencia');
 const { crearAlmacenCarritos, registrarCarrito } = require('./carrito');
@@ -15,6 +17,7 @@ const {
 const { rutasPagos } = require('./pagos');
 const { crearRouter, enviarJson } = require('./http');
 const { log } = require('./log');
+const { crearOrigenCors } = require('./origenes');
 const { crearIpCliente } = require('./ip-cliente');
 const { crearConexionRedis } = require('./almacen/redis');
 const { crearClienteBackend } = require('./backend');
@@ -34,6 +37,11 @@ const { crearDuenosMemoria, crearDuenosRedis } = require('./almacen/duenos');
 const {
   registrarSala, crearEstadoMesasMemoria, crearPresencia, rutasSala,
 } = require('./sala');
+const { rutasMesaComensal } = require('./mesa-comensal');
+const { rutasItemCancelado } = require('./item-cancelado');
+const { rutasMesaActualizada } = require('./mesa-actualizada');
+const { rutasMenuActualizado } = require('./menu-actualizado');
+const { rutasPagosEnCurso } = require('./pagos-en-curso');
 
 const rutasBase = {
   /**
@@ -55,26 +63,32 @@ const rutasBase = {
  * las pruebas puedan levantarlo en un puerto efímero.
  */
 function crearServidor(config, deps = {}) {
-  // Se usa la misma lista blanca para HTTP (health, webhooks) y para el
-  // handshake de Socket.io, así no hay dos políticas que se desincronicen.
-  const corsHttp = cors({ origin: config.origenes, credentials: true });
+  // Se usa la misma política para HTTP (health, webhooks) y para el
+  // handshake de Socket.io, así no hay dos que se desincronicen. Es la lista
+  // blanca CORS_ORIGINS, más las IP privadas de la Wi-Fi en modo red local
+  // (solo con NODE_ENV=development, ver origenes.js).
+  const origenCors = crearOrigenCors(config);
+  const corsHttp = cors({ origin: origenCors, credentials: true });
 
   // El contexto se completa más abajo, cuando existe `io`; el router solo lo
   // lee cuando llega una petición, o sea, ya completo.
   const ctx = { config, ipCliente: crearIpCliente(config.proxiesConfiables) };
-  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala }, ctx);
+  const router = crearRouter({ ...rutasBase, ...rutasPedidos, ...rutasQr, ...rutasPush, ...rutasSuscripciones, ...rutasPagos, ...rutasSala, ...rutasMesaComensal, ...rutasItemCancelado, ...rutasMesaActualizada, ...rutasMenuActualizado, ...rutasPagosEnCurso }, ctx);
 
   const httpServer = http.createServer((req, res) => {
     corsHttp(req, res, () => router(req, res));
   });
 
   const io = new Server(httpServer, {
-    cors: { origin: config.origenes, methods: ['GET', 'POST'], credentials: true },
-    // Al reconectar tras un corte corto, Socket.io recupera la sesión y los
-    // eventos perdidos. No basta por sí solo: la garantía de no duplicar la
-    // da la idempotencia por eventId (idempotencia.js), que cubre también los
-    // cortes largos y los reenvíos manuales del cliente.
-    connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
+    cors: { origin: origenCors, methods: ['GET', 'POST'], credentials: true },
+    // SIN connectionStateRecovery, a propósito: al recuperar una sesión,
+    // Socket.io se salta los middlewares (skipMiddlewares) y devuelve las salas
+    // y socket.data. Un celular sin red mientras se liberaba su mesa volvía a
+    // room:mesa-N y leía y escribía el carrito del grupo siguiente sin pasar
+    // por sesionVigente. Cada reconexión es un socket nuevo que se autentica de
+    // cero; el cliente hace join:table y reemplaza su carrito (EVENTS.md §3.3),
+    // y la gracia de presencia (sala.js) cubre que el panel no lo vea salir.
+    // Prueba de regresión: tests/reconexion-sin-recuperacion.test.js.
     // Un mensaje más grande que esto se rechaza y se cierra esa conexión.
     maxHttpBufferSize: MAX_BUFFER_BYTES,
   });
@@ -96,6 +110,9 @@ function crearServidor(config, deps = {}) {
   // durante días, mucho más que los 10 min de los eventos de socket.
   const TTL_PAGOS_MS = 7 * 24 * 60 * 60 * 1000;
   const registro = cliente ? crearRegistroIdempotenciaRedis({ cliente }) : crearRegistroIdempotencia();
+  // Estado de sala por mesa (cuenta pedida, llamadas, quién pagó). La presencia
+  // lo lee para anunciar `pagaron`.
+  const estadoMesas = cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria();
   Object.assign(ctx, {
     io,
     redis,
@@ -104,13 +121,20 @@ function crearServidor(config, deps = {}) {
     registroPagos: cliente
       ? crearRegistroIdempotenciaRedis({ cliente, ttlMs: TTL_PAGOS_MS })
       : crearRegistroIdempotencia({ ttlMs: TTL_PAGOS_MS }),
-    estadoMesas: cliente ? crearEstadoMesasRedis({ cliente }) : crearEstadoMesasMemoria(),
+    estadoMesas,
     duenosPedidos: cliente ? crearDuenosRedis({ cliente }) : crearDuenosMemoria(),
     // Pagos: pasarela (null = pagos apagados), intenciones y límites.
     pasarela: deps.pasarela || (config.wompi ? verificarImplementacion(crearPasarelaWompi(config.wompi)) : null),
     almacenPagos: cliente ? crearAlmacenPagosRedis({ cliente }) : crearAlmacenPagosMemoria(),
     limites: cliente ? crearLimitesRedis({ cliente }) : crearLimitesMemoria(),
-    presencia: crearPresencia({ io, ...(deps.presencia || {}) }),
+    presencia: crearPresencia({
+      io,
+      estadoMesas,
+      graciaMs: config.presenciaGraciaMs,
+      // ctx.mesaLiberada se define más abajo; se lee al desconectarse alguien.
+      mesaLiberada: (idMesa) => Boolean(ctx.mesaLiberada && ctx.mesaLiberada(idMesa)),
+      ...(deps.presencia || {}),
+    }),
     // `deps.push` permite a las pruebas inyectar un servicio push falso.
     push: deps.push || crearServicioPush(config),
     suscripciones: cliente
@@ -137,6 +161,10 @@ function crearServidor(config, deps = {}) {
   const mesasLiberadas = new Set();
   // Una mesa vuelve a tener sesión cuando el personal le genera un QR nuevo.
   ctx.reabrirMesa = (idMesa) => mesasLiberadas.delete(idMesa);
+  // Guardia de /internal/mesa-comensal (409 MESA_LIBERADA). Sigue en memoria:
+  // tras un reinicio no hay marca y la ruta no la exige (el backend valida la
+  // sesión de la mesa antes del COMMIT).
+  ctx.mesaLiberada = (idMesa) => mesasLiberadas.has(idMesa);
 
   // Cuando el backend libera la mesa (al pagar o a mano) termina la sesión de
   // mesa: se invalidan sus QR, se avisa en vivo y se borra el estado de esa
@@ -146,6 +174,9 @@ function crearServidor(config, deps = {}) {
     if (mesasLiberadas.has(idMesa)) return { duplicado: true };
     mesasLiberadas.add(idMesa);
     ctx.rotador.cerrar(idMesa);
+    // Quien estaba en gracia era del grupo que se va: no debe aparecer en la
+    // presencia de la sesión siguiente.
+    ctx.presencia.cancelarGracias(idMesa);
     await ctx.qr.revocarMesa(idMesa);
     // ANTES de vaciar el carrito: quien lo reciba todavía puede mostrar qué
     // quedó sin pedir. Al panel le sirve para pintar la mesa libre al instante.
@@ -156,6 +187,10 @@ function crearServidor(config, deps = {}) {
     });
     await ctx.suscripciones.limpiarMesa(idMesa);
     await ctx.estadoMesas.limpiarMesa(idMesa);
+    // Pagos en curso del grupo que se va (T4, §6.6): sin esto, el grupo
+    // siguiente heredaba sus intenciones y el backend no podía cancelarle un
+    // plato hasta que vencieran (PAGOS_TTL_MINUTOS).
+    await ctx.almacenPagos.limpiarMesa(idMesa);
     await ctx.carritos.vaciar(idMesa);
     // Solo se echa a los comensales: la pantalla de la mesa sigue conectada
     // para mostrar el QR del siguiente grupo, y el personal sigue vigilando.
@@ -195,7 +230,13 @@ function crearServidor(config, deps = {}) {
       alCambiarSala: ctx.presencia.programar,
       // Con el primer comensal en la sala, el QR de la mesa deja de rotar.
       alEntrarComensal: ctx.rotador.fijar,
+      alVolverComensal: ctx.presencia.volverComensal,
     });
+    // El personal que entra a room:admin (o recarga el panel) recibe la
+    // presencia de todas las mesas con algo, solo en ESTE socket, 500 ms
+    // después de conectar (respaldo de mesa:presencia:solicitar; EVENTS.md
+    // §5.2). Si Redis falla, la conexión sigue igual.
+    if (ROLES_ADMIN.includes(rol)) ctx.presencia.programarInicial(socket);
     registrarCarrito(socket, ctx);
     registrarPedidos(socket, ctx);
     registrarSuscripcionesSocket(socket, ctx);

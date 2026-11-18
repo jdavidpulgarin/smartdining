@@ -9,7 +9,26 @@ const app = require('../server');
 // así que el pedido se relee y es esa relectura la que trae el total.
 const PEDIDO = { id_pedido: 87, id_mesa: 5, codigo_pedido: 'PED-260925-ABC12', estado: 'recibido' };
 
+// D-18b: cuando pide el personal, el alias del body se canonicaliza contra los
+// comensales de la mesa. Estas pruebas van del alias que QUEDA guardado, no del
+// registro, así que el doble contesta que esas personas ya están en la cuenta.
+const COMENSALES_DE_LA_MESA = [
+  { comensal: 'Ana', items_pedidos: 1, subtotal: '20000', pagado: '0', saldo: '20000' },
+  { comensal: 'Pipe', items_pedidos: 1, subtotal: '20000', pagado: '0', saldo: '20000' },
+];
+
+/** Las dos consultas con las que el controller resuelve el alias canónico. */
+function responderComensalesDeLaMesa(sql) {
+  if (sql.includes('SELECT 1 FROM mesas')) return { rows: [{ existe: 1 }] };
+  if (sql.includes('obtener_cuenta_mesa_json')) {
+    return { rows: [{ cuenta: { comensales: COMENSALES_DE_LA_MESA } }] };
+  }
+  return null;
+}
+
 function responderCreacionOk(sql) {
+  const comensales = responderComensalesDeLaMesa(sql);
+  if (comensales) return comensales;
   if (sql.includes('INSERT INTO pedidos')) return { rows: [{ ...PEDIDO, total: '0.00' }] };
   if (sql.includes('SELECT * FROM pedidos')) return { rows: [{ ...PEDIDO, total: '56000.00' }] };
   return { rows: [] };

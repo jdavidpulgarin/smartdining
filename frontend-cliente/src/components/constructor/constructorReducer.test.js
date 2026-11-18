@@ -140,4 +140,40 @@ describe('constructorReducer', () => {
     const reiniciado = constructorReducer(estado, { type: 'REINICIAR' });
     expect(reiniciado).toEqual(estadoInicial);
   });
+
+  it('QUITAR_NO_DISPONIBLE elimina el ingrediente de selecciones si estaba elegido', () => {
+    const arroz = pasoBase.ingredientes.find((i) => i.id_ingrediente === 1);
+    const pollo = pasoProteina.ingredientes.find((i) => i.id_ingrediente === 4);
+
+    let estado = constructorReducer(estadoInicial, {
+      type: 'ALTERNAR_INGREDIENTE',
+      paso: pasoBase,
+      ingrediente: arroz,
+    });
+    estado = constructorReducer(estado, {
+      type: 'ALTERNAR_INGREDIENTE',
+      paso: pasoProteina,
+      ingrediente: pollo,
+    });
+
+    expect(estado.selecciones[101][1]).toBe('normal');
+    expect(estado.selecciones[102][4]).toBe('normal');
+
+    // Quitar pollo (id 4)
+    const sinPollo = constructorReducer(estado, {
+      type: 'QUITAR_NO_DISPONIBLE',
+      id_ingrediente: 4,
+    });
+
+    expect(sinPollo.selecciones[101][1]).toBe('normal');
+    expect(sinPollo.selecciones[102][4]).toBeUndefined();
+
+    // Si el ingrediente no estaba elegido, no muta el estado
+    const sinCambio = constructorReducer(sinPollo, {
+      type: 'QUITAR_NO_DISPONIBLE',
+      id_ingrediente: 9999,
+    });
+    expect(sinCambio).toBe(sinPollo);
+  });
 });
+

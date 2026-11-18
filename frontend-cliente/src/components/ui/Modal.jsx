@@ -23,10 +23,34 @@ function Modal({ abierto = false, onCerrar, titulo, children }) {
     // Foco al contenedor del modal
     modalRef.current?.focus();
 
-    // Listener para tecla Escape
+    // Listener para Escape y focus trap con Tab / Shift+Tab dentro del modal
+    const selectorFoco =
+      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
         onCerrarRef.current?.();
+        return;
+      }
+
+      if (event.key === 'Tab' && modalRef.current) {
+        const enfocables = Array.from(modalRef.current.querySelectorAll(selectorFoco)).filter(
+          (el) => el.offsetParent !== null || el === document.activeElement
+        );
+        if (enfocables.length === 0) {
+          event.preventDefault();
+          modalRef.current.focus();
+          return;
+        }
+        const primero = enfocables[0];
+        const ultimo = enfocables[enfocables.length - 1];
+        if (event.shiftKey && (document.activeElement === primero || document.activeElement === modalRef.current)) {
+          event.preventDefault();
+          ultimo.focus();
+        } else if (!event.shiftKey && document.activeElement === ultimo) {
+          event.preventDefault();
+          primero.focus();
+        }
       }
     };
 
@@ -52,9 +76,9 @@ function Modal({ abierto = false, onCerrar, titulo, children }) {
         }
       }}
     >
-      {/* Overlay oscuro */}
+      {/* Overlay oscuro al 70% */}
       <div
-        className="fixed inset-0 bg-black/60"
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm"
         aria-hidden="true"
         onClick={onCerrar}
       />
@@ -67,18 +91,18 @@ function Modal({ abierto = false, onCerrar, titulo, children }) {
         aria-labelledby={tituloId}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="relative z-10 w-full max-h-[90vh] flex flex-col bg-white rounded-t-2xl md:rounded-2xl md:max-w-lg shadow-2xl focus:outline-none overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0"
+        className="relative z-10 w-full max-h-[90vh] flex flex-col bg-superficie border border-borde rounded-t-2xl md:rounded-2xl max-w-md shadow-2xl focus:outline-none overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0 text-texto"
       >
         {/* Cabecera del modal */}
-        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 shrink-0">
-          <h2 id={tituloId} className="text-lg font-bold text-cafe truncate">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-borde shrink-0">
+          <h2 id={tituloId} className="text-xl font-etiqueta uppercase tracking-wide font-bold text-texto truncate">
             {titulo}
           </h2>
           <button
             type="button"
             onClick={onCerrar}
             aria-label="Cerrar"
-            className="min-w-12 min-h-12 -mr-2 inline-flex items-center justify-center text-gray-600 hover:text-cafe hover:bg-gray-100 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+            className="min-w-12 min-h-12 -mr-2 inline-flex items-center justify-center text-texto-suave hover:text-texto hover:bg-superficie-2 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto cursor-pointer"
           >
             <svg
               className="w-5 h-5"

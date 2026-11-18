@@ -503,3 +503,106 @@ test('h-07: el abono parcial sigue funcionando sin tocar el estado', async () =>
     socket.restaurar();
   }
 });
+
+// ---------------------------------------------------------------------------
+// D-11: quién puede cobrar
+//
+// La matriz de roles (tests/matriz-roles.test.js) ya comprueba el 401 y el 403
+// de estas dos rutas. Lo que se añade aquí es lo que la matriz no puede decir:
+// que la guarda para ANTES de tocar la base. En una ruta que mueve dinero no
+// basta con que la respuesta sea 403; importa que no se haya abierto una
+// transacción, leído un pedido ni insertado nada en el camino.
+// ---------------------------------------------------------------------------
+
+/** Roles que NO pueden cobrar: solo admin y cajero manejan dinero. */
+const ROLES_SIN_CAJA = ['mesero', 'cocina'];
+
+for (const rol of ROLES_SIN_CAJA) {
+  test(`d-11: ${rol} no puede cobrar y no se toca la base`, async () => {
+    const socket = instalarFakeSocket();
+    const db = instalarFakeDb(responderCobro);
+    try {
+      const res = await request(app)
+        .post('/api/transacciones')
+        .set('Authorization', `Bearer ${tokenStaff(6, rol)}`)
+        .send(PAGO_COMPLETO);
+
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined, 'no se registró el cobro');
+      assert.strictEqual(db.buscar('SELECT * FROM pedidos WHERE id_pedido'), undefined, 'no se leyó el pedido');
+      assert.strictEqual(db.buscar('BEGIN'), undefined, 'no se abrió transacción');
+      assert.strictEqual(socket.avisos.length, 0, 'no se avisó al socket-server');
+    } finally {
+      db.restaurar();
+      socket.restaurar();
+    }
+  });
+
+  test(`d-11: ${rol} tampoco puede leer las transacciones de un pedido`, async () => {
+    const socket = instalarFakeSocket();
+    const db = instalarFakeDb(responderCobro);
+    try {
+      const res = await request(app)
+        .get('/api/transacciones/pedido/87')
+        .set('Authorization', `Bearer ${tokenStaff(6, rol)}`);
+
+      assert.strictEqual(res.status, 403);
+      assert.strictEqual(db.buscar('FROM transacciones'), undefined, 'no se consultó nada');
+    } finally {
+      db.restaurar();
+      socket.restaurar();
+    }
+  });
+}
+
+test('d-11: sin token no se cobra y no se toca la base', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderCobro);
+  try {
+    const res = await request(app).post('/api/transacciones').send(PAGO_COMPLETO);
+
+    assert.strictEqual(res.status, 401);
+    assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined);
+    assert.strictEqual(db.buscar('BEGIN'), undefined);
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('d-11: la ruta del personal no se abre con la clave interna', async () => {
+  // POST /api/transacciones y POST /api/transacciones/internal son dos puertas
+  // distintas al mismo recurso: la del personal pide JWT y la del socket-server
+  // pide la clave compartida. Cada una exige SU credencial, no la otra.
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderCobro);
+  try {
+    const res = await request(app)
+      .post('/api/transacciones')
+      .set('x-internal-key', 'clave-interna-de-prueba')
+      .send(PAGO_COMPLETO);
+
+    assert.strictEqual(res.status, 401);
+    assert.strictEqual(res.body.error, 'Token no proporcionado');
+    assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined);
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('d-11: el cajero sigue pudiendo cobrar', async () => {
+  // Control de la batería: si los 403 de arriba vinieran de otra causa, esto
+  // lo delata.
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderCobro, { saldoTrasPago: 0 });
+  try {
+    const res = await cobrar(PAGO_COMPLETO);
+
+    assert.strictEqual(res.status, 201);
+    assert.ok(db.buscar('INSERT INTO transacciones'));
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});

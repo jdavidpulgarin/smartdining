@@ -48,7 +48,7 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
         v_error_cantidad_alta := TRUE;
         RAISE NOTICE 'Cantidad 21 rechazada correctamente: %', SQLERRM;
-    END IF;
+    END;
 
     IF NOT v_error_cantidad_alta THEN
         RAISE EXCEPTION 'FALLÓ PRUEBA H-06: Se permitió insertar cantidad = 21.';

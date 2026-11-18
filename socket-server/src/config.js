@@ -91,6 +91,10 @@ function cargarConfig(env = process.env) {
   exigirSecretos(env);
 
   const entorno = env.NODE_ENV || 'development';
+  // Modo red local (origenes.js): solo si NODE_ENV=development está ESCRITO en
+  // el entorno. El valor por defecto de `entorno` no lo activa, así un
+  // despliegue al que le falte NODE_ENV no abre CORS a la red.
+  const redLocal = env.NODE_ENV === 'development';
   const redisUrl = (env.REDIS_URL || '').trim() || null;
   // En producción el estado (carritos, idempotencia, revocaciones de QR) DEBE
   // sobrevivir a un reinicio: arrancar en memoria en silencio perdería los
@@ -108,6 +112,14 @@ function cargarConfig(env = process.env) {
   const rotacionMin = env.ROTACION_QR_MINUTOS === undefined ? 3 : Number(env.ROTACION_QR_MINUTOS);
   if (!Number.isFinite(rotacionMin) || rotacionMin < 1 || rotacionMin > 60) {
     throw new Error('ROTACION_QR_MINUTOS debe ser un número entre 1 y 60');
+  }
+  // Gracia de presencia de un comensal que se cae (sala.js). 0 = sin gracia
+  // (sale al instante, como antes). Más de 10 min dejaría sentado a quien ya
+  // se fue: el panel y la rotación del QR contarían a alguien que no está.
+  const graciaTexto = (env.PRESENCIA_GRACIA_MS || '').trim();
+  const presenciaGraciaMs = graciaTexto === '' ? 60000 : Number(graciaTexto);
+  if (!Number.isInteger(presenciaGraciaMs) || presenciaGraciaMs < 0 || presenciaGraciaMs > 600000) {
+    throw new Error('PRESENCIA_GRACIA_MS debe ser un entero entre 0 y 600000 (ms)');
   }
 
   const wompi = leerWompi(env, backendUrl);
@@ -129,10 +141,12 @@ function cargarConfig(env = process.env) {
     // null = pagos apagados. Ojo: este objeto lleva secretos, nunca se registra.
     wompi,
     rotacionQrMs: rotacionMin * 60 * 1000,
+    presenciaGraciaMs,
     entorno,
     // Sin REDIS_URL (solo fuera de producción) el estado vive en memoria.
     redisUrl,
     origenes,
+    redLocal,
     jwtSecret: env.JWT_SECRET,
     internalApiKey: env.INTERNAL_API_KEY,
     qrSecret: env.QR_SECRET,

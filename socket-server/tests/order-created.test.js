@@ -2,29 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { randomUUID } = require('node:crypto');
 const { exigirClaveInterna } = require('../src/http');
-const { levantar, emitir, esperar, tokenComensal, tokenPersonal, CLAVE_INTERNA } = require('./helpers');
+const { emitir, esperar, tokenPersonal } = require('./helpers');
+const {
+  CLAVE, pedido, post, escenario, ALMACENES, pedidoDe, comensalesDe, mesaConAnaYBeto,
+} = require('./order-created-helpers');
 
-const CLAVE = CLAVE_INTERNA;
-const pedido = (id_pedido = 87, id_mesa = 5) => ({
-  id_pedido, codigo_pedido: `PED-${id_pedido}`, id_mesa, estado: 'recibido', total: 56000, items: [{ id_plato: 3, cantidad: 2 }],
-});
-const post = (s, ruta, cuerpo, clave = CLAVE) => fetch(`${s.url}${ruta}`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', ...(clave ? { 'x-internal-key': clave } : {}) },
-  body: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo),
-});
-
-async function escenario() {
-  const s = await levantar({});
-  const cocina = await s.conectar(tokenPersonal('cocina'));
-  const admin = await s.conectar(tokenPersonal('admin'));
-  const mesero = await s.conectar(tokenPersonal('mesero'));
-  const mesa5 = await s.conectar(tokenComensal(5));
-  const mesa6 = await s.conectar(tokenComensal(6));
-  await emitir(mesa5, 'join:table', {});
-  await emitir(mesa6, 'join:table', {});
-  return { s, cocina, admin, mesero, mesa5, mesa6 };
-}
+// POST /internal/order-created y order:created por socket. Las fallas a mitad
+// de camino (y sus reintentos) van en order-created-fallas.test.js.
 
 test('HTTP interno: difunde a KDS, Admin y a la mesa; no a otras mesas', async () => {
   const { s, cocina, admin, mesa5, mesa6 } = await escenario();
@@ -89,16 +73,62 @@ test('por socket: mesero y admin pueden emitir; comensal y cocina no', async () 
   await s.cerrar();
 });
 
-test('al crearse la comanda se vacía el carrito de esa mesa y se avisa a la mesa', async () => {
-  const { s, mesa5 } = await escenario();
-  await emitir(mesa5, 'cart:update', {
-    eventId: randomUUID(), accion: 'set', id_linea: randomUUID(), comensal: 'Ana', id_plato: 3, cantidad: 2,
+// --- Carrito al crear la comanda: se quitan SOLO las líneas de quien pidió. ---
+for (const [nombre, deps] of Object.entries(ALMACENES)) {
+  test(`[${nombre}] llega el pedido de Ana: quedan solo las líneas de Beto, sube la versión y se avisa`, async (t) => {
+    const { s, beto, antes } = await mesaConAnaYBeto(t, deps());
+    assert.deepStrictEqual(comensalesDe(antes), ['Ana', 'Ana', 'Beto']);
+    const aviso = esperar(beto, 'cart:updated');
+    const eventId = randomUUID();
+    await post(s, '/internal/order-created', { eventId, pedido: pedidoDe('Ana', 'Ana') });
+    const ev = await aviso;
+    assert.strictEqual(ev.origen, 'sistema');
+    assert.strictEqual(ev.eventId, eventId);
+    assert.deepStrictEqual(comensalesDe(ev.carrito), ['Beto']);
+    assert.strictEqual(ev.carrito.version, antes.version + 1);
+    assert.deepStrictEqual(await s.carritos.snapshot(5), ev.carrito);
   });
-  const aviso = esperar(mesa5, 'cart:updated');
-  await post(s, '/internal/order-created', { eventId: randomUUID(), pedido: pedido() });
-  const ev = await aviso;
-  assert.deepStrictEqual(ev.carrito.items, []);
-  assert.strictEqual(ev.origen, 'sistema');
-  assert.deepStrictEqual(s.carritos.snapshot(5).items, []);
-  await s.cerrar();
-});
+
+  test(`[${nombre}] pedido sin comensal (personal): el carrito queda igual y no se emite cart:updated`, async (t) => {
+    const { s, beto, antes } = await mesaConAnaYBeto(t, deps());
+    const aviso = esperar(beto, 'cart:updated');
+    // Alias vacío o de más de 40 caracteres cuenta como "sin alias".
+    const sinAlias = { ...pedido(), items: [{ id_plato: 3, cantidad: 1 }, { id_plato: 4, comensal: '  ' }, { id_plato: 5, comensal: 'x'.repeat(41) }] };
+    const r = await (await post(s, '/internal/order-created', { eventId: randomUUID(), pedido: sinAlias })).json();
+    assert.strictEqual(r.duplicado, false);
+    assert.strictEqual(await aviso, null);
+    assert.deepStrictEqual(await s.carritos.snapshot(5), antes);
+    assert.deepStrictEqual(await s.duenosPedidos.obtener(87), []);
+  });
+
+  test(`[${nombre}] duenosPedidos del pedido de Ana = [Ana], aunque Beto tenga líneas`, async (t) => {
+    const { s } = await mesaConAnaYBeto(t, deps());
+    await post(s, '/internal/order-created', { eventId: randomUUID(), pedido: pedidoDe('Ana', ' Ana ') });
+    assert.deepStrictEqual(await s.duenosPedidos.obtener(87), ['Ana']);
+  });
+
+  test(`[${nombre}] un cliente no puede usar la acción interna remove_de: PAYLOAD_INVALIDO`, async (t) => {
+    const { s, ana, antes } = await mesaConAnaYBeto(t, deps());
+    const mesero = await s.conectar(tokenPersonal('mesero'));
+    await emitir(mesero, 'join:table', { id_mesa: 5 });
+    const op = { accion: 'remove_de', comensales: ['Beto'] };
+    const deAna = await emitir(ana, 'cart:update', { eventId: randomUUID(), ...op });
+    const delMesero = await emitir(mesero, 'cart:update', { eventId: randomUUID(), id_mesa: 5, comensal: 'Beto', ...op });
+    assert.deepStrictEqual([deAna.codigo, delMesero.codigo], ['PAYLOAD_INVALIDO', 'PAYLOAD_INVALIDO']);
+    assert.deepStrictEqual(await s.carritos.snapshot(5), antes);
+  });
+
+  test(`[${nombre}] pedido repetido (mismo eventId): no quita nada dos veces`, async (t) => {
+    const { s, ana, beto, agregar } = await mesaConAnaYBeto(t, deps());
+    const cuerpo = { eventId: randomUUID(), pedido: pedidoDe('Ana') };
+    await post(s, '/internal/order-created', cuerpo);
+    // Ana empieza su segunda ronda antes de que llegue el reintento.
+    const tras = await agregar(ana);
+    assert.deepStrictEqual(comensalesDe(tras), ['Beto', 'Ana']);
+    const aviso = esperar(beto, 'cart:updated');
+    const r = await (await post(s, '/internal/order-created', cuerpo)).json();
+    assert.strictEqual(r.duplicado, true);
+    assert.strictEqual(await aviso, null);
+    assert.deepStrictEqual(await s.carritos.snapshot(5), tras);
+  });
+}

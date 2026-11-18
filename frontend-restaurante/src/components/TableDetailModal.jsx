@@ -1,20 +1,28 @@
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   X,
-  Users,
   CheckCircle2,
   Receipt,
   Utensils,
   QrCode,
   LogOut,
-  MapPin,
   ArrowRight,
   UserCheck,
+  AlertTriangle,
 } from 'lucide-react'
 
 import { StateBadge, StatusBadge } from './ui/Badge'
 import { decodificarTokenQr } from '../services/qrService'
 import { useNavigate } from 'react-router-dom'
+import { useAuth, useSocket } from '../hooks'
+import { mesasApi } from '../services/api'
+import { puedeUsarCaja, mesaConSesionActiva, EVENTOS_QUE_CAMBIAN_LA_CUENTA } from '../utils/caja'
+import { crearUltimaPeticion } from '../utils/ultimaPeticion'
+import {
+  resumenDetalleMesa,
+  avisoDeEstaMesa,
+  AVISO_PAGADA_SIN_ENTREGAR,
+} from '../utils/detalleMesa'
 
 export function TableDetailModal({
   table,
@@ -25,8 +33,11 @@ export function TableDetailModal({
   onDeliverOrder,
 }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const userRole = (user?.rol || user?.role || '').toLowerCase()
+  const canTakeOrder = userRole === 'mesero' || userRole === 'admin'
 
-  const idMesa = Number(table?.id || table?.number)
+  const idMesa = Number(table?.id_mesa ?? table?.id)
   const tableName = table?.name || `Mesa ${idMesa}`
   const tableStatus = (table?.status || table?.estado || 'Disponible').toLowerCase()
   const isOcupada = tableStatus === 'ocupada'
@@ -35,61 +46,70 @@ export function TableDetailModal({
   const sesionInfo = table?.token_qr ? decodificarTokenQr(table.token_qr) : null
   const sid = sesionInfo?.sid && sesionInfo.sid !== 'N/A' ? sesionInfo.sid.slice(0, 8) : null
 
-  // Filtrar pedidos activos de esta mesa
-  const pedidosMesa = useMemo(() => {
-    return (pedidos || []).filter(
-      (p) => Number(p.id_mesa) === idMesa && p.estado !== 'cancelado'
-    )
-  }, [pedidos, idMesa])
+  // Consumo, pagado, saldo, reparto y comandas: GET /mesas/:id/cuenta, como la
+  // Caja (utils/detalleMesa.js). Solo se pide con una visita en curso: para una
+  // mesa libre la cuenta sería la del grupo anterior.
+  const conSesion = mesaConSesionActiva(table)
+  const [cuenta, setCuenta] = useState(null)
+  const [errorCuenta, setErrorCuenta] = useState(null)
+  const [ultimaCarga] = useState(() => crearUltimaPeticion())
 
-  // Desglose financiero y comensales
-  const resumenFinanciero = useMemo(() => {
-    let totalConsumido = 0
-    let totalItems = 0
-    const comensalesMap = new Map()
-
-    pedidosMesa.forEach((pedido) => {
-      const items = pedido.detalles || pedido.items || []
-      const totalPed = Number(pedido.total || 0)
-      totalConsumido += totalPed
-
-      items.forEach((item) => {
-        const nombreComensal = (item.comensal || 'General').trim()
-        const cant = Number(item.cantidad || 1)
-        const subtotal = Number(item.subtotal || item.precio_unitario * cant || 0)
-        totalItems += cant
-
-        if (!comensalesMap.has(nombreComensal)) {
-          comensalesMap.set(nombreComensal, {
-            nombre: nombreComensal,
-            itemsCount: 0,
-            subtotal: 0,
-            items: [],
-          })
-        }
-
-        const com = comensalesMap.get(nombreComensal)
-        com.itemsCount += cant
-        com.subtotal += subtotal
-        com.items.push(item)
-      })
-    })
-
-    const pagado = 0 // Los cobros en sala se liquidan en /caja
-    const saldo = Math.max(0, totalConsumido - pagado)
-
-    return {
-      totalConsumido,
-      totalItems,
-      pagado,
-      saldo,
-      comensales: Array.from(comensalesMap.values()),
+  const cargarCuenta = useCallback(async () => {
+    const peticion = ultimaCarga.nueva()
+    if (!conSesion || !Number.isInteger(idMesa) || idMesa <= 0) {
+      setCuenta(null)
+      setErrorCuenta(null)
+      return
     }
-  }, [pedidosMesa])
+    try {
+      const datos = await mesasApi.obtenerCuenta(idMesa)
+      if (!peticion.vigente()) return
+      setCuenta(datos || null)
+      setErrorCuenta(null)
+    } catch {
+      if (!peticion.vigente()) return
+      setErrorCuenta('No se pudo cargar la cuenta de la mesa.')
+    }
+  }, [conSesion, idMesa, ultimaCarga])
+
+  // Al abrir (en la microtarea siguiente, como la Caja) y al cambiar de mesa o
+  // de estado. Al cerrar, lo que esté en vuelo se descarta.
+  useEffect(() => {
+    let montado = true
+    Promise.resolve().then(() => {
+      if (montado) cargarCuenta()
+    })
+    return () => {
+      montado = false
+      ultimaCarga.invalidar()
+    }
+  }, [cargarCuenta, ultimaCarga])
+
+  // En vivo: los mismos eventos con los que la Caja recarga sus cuentas.
+  const socket = useSocket()
+  useEffect(() => {
+    if (!socket) return undefined
+    const alAviso = (data) => {
+      if (avisoDeEstaMesa(data, idMesa)) cargarCuenta()
+    }
+    EVENTOS_QUE_CAMBIAN_LA_CUENTA.forEach((ev) => socket.on(ev, alAviso))
+    return () => {
+      EVENTOS_QUE_CAMBIAN_LA_CUENTA.forEach((ev) => socket.off(ev, alAviso))
+    }
+  }, [socket, idMesa, cargarCuenta])
+
+  const resumen = useMemo(
+    () => resumenDetalleMesa({ mesa: table, cuenta, pedidosPanel: pedidos }),
+    [table, cuenta, pedidos]
+  )
+  const pedidosMesa = resumen.comandas
+  // Con visita en curso pero sin cuenta todavía (cargando o error): sin cifras.
+  const sinCifras = resumen.conSesion && !cuenta
 
   const formatearDinero = (monto) => {
     return `$${Number(monto || 0).toLocaleString('es-CO')}`
   }
+  const cifra = (monto) => (sinCifras ? '—' : formatearDinero(monto))
 
   return (
     <div className="qr-modal-backdrop" onClick={onClose}>
@@ -99,101 +119,90 @@ export function TableDetailModal({
         style={{ maxWidth: '680px', width: '92%' }}
       >
         {/* Encabezado */}
-        <div className="qr-modal-header">
-          <div className="table-modal-title-row">
-            <div className="table-badge-large">#{idMesa}</div>
-            <div>
-              <div className="modal-title-with-pill">
-                <h2 className="qr-modal-title">{tableName}</h2>
-                <StatusBadge status={table?.status || table?.estado} />
-              </div>
-              <span className="qr-modal-subtitle">
-                <MapPin size={12} className="inline-icon" /> Zona {table?.location || table?.ubicacion || 'Principal'} ·{' '}
-                <Users size={12} className="inline-icon" /> Capacidad {table?.seats || table?.capacidad || 4} comensales
-                {sid && (
-                  <span style={{ marginLeft: '8px', color: 'var(--emerald-400, #34d399)' }}>
-                    · sid: {sid}
-                  </span>
-                )}
+        <div className="table-detail-header">
+          <div className="table-detail-header-left">
+            <div className="table-detail-title-row">
+              <div className="table-badge-large">#{table?.numero ?? table?.number ?? idMesa}</div>
+              <h2 className="table-detail-title">{tableName}</h2>
+            </div>
+            <div className="table-detail-subtitle-row">
+              <StatusBadge status={table?.status || table?.estado || 'Disponible'} />
+              <span className="table-detail-meta">
+                Zona {table?.location || table?.ubicacion || 'Principal'} · Capacidad {table?.seats || table?.capacidad || 4}
               </span>
-
+              {sid && (
+                <span className="table-detail-sid">
+                  · sid: {sid}
+                </span>
+              )}
             </div>
           </div>
 
           <button
             type="button"
-            className="qr-modal-close-btn"
+            className="table-detail-close-btn"
             onClick={onClose}
             aria-label="Cerrar modal"
           >
-            <X size={18} />
+            <X size={20} />
           </button>
         </div>
 
         {/* Tarjetas de Métricas de Mesa */}
-        <div className="table-detail-metrics-grid" style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '12px',
-          margin: '16px 0',
-        }}>
-          <div className="metric-glass-card" style={{
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '12px',
-            padding: '12px 14px',
-          }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>
-              Consumo Mesa
-            </span>
-            <strong style={{ fontSize: '1.25rem', color: '#f8fafc', display: 'block', marginTop: '4px' }}>
-              {formatearDinero(resumenFinanciero.totalConsumido)}
+        <div className="table-detail-metrics-grid">
+          <div className="table-metric-card">
+            <span className="table-metric-caption">Consumo Mesa</span>
+            <strong className="table-metric-value">
+              {cifra(resumen.total)}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--emerald-400, #34d399)' }}>
-              {resumenFinanciero.totalItems} ítems ordenados
+            <span className="table-metric-subtext">
+              {resumen.total > 0 ? `${resumen.items} ítems ordenados` : 'Sin consumo'}
             </span>
           </div>
 
-          <div className="metric-glass-card" style={{
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '12px',
-            padding: '12px 14px',
-          }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)', display: 'block' }}>
-              Comensales
-            </span>
-            <strong style={{ fontSize: '1.25rem', color: '#f8fafc', display: 'block', marginTop: '4px' }}>
-              {resumenFinanciero.comensales.length > 0 ? resumenFinanciero.comensales.length : (isOcupada ? '1+' : '0')}
+          <div className="table-metric-card">
+            <span className="table-metric-caption">Comensales</span>
+            <strong className="table-metric-value">
+              {resumen.comensales.length > 0 ? resumen.comensales.length : (resumen.conSesion ? '1+' : '0')}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>
-              {isOcupada ? 'Grupo activo' : 'Mesa libre'}
+            <span className="table-metric-subtext">
+              {resumen.conSesion ? 'Grupo activo' : 'Mesa libre'}
             </span>
           </div>
 
-          <div className="metric-glass-card" style={{
-            background: 'rgba(16, 185, 129, 0.08)',
-            border: '1px solid rgba(16, 185, 129, 0.25)',
-            borderRadius: '12px',
-            padding: '12px 14px',
-          }}>
-            <span className="metric-caption" style={{ fontSize: '0.75rem', color: 'var(--emerald-400, #34d399)', display: 'block' }}>
-              Saldo Pendiente
-            </span>
-            <strong style={{ fontSize: '1.25rem', color: 'var(--emerald-300, #6ee7b7)', display: 'block', marginTop: '4px' }}>
-              {formatearDinero(resumenFinanciero.saldo)}
+          <div className="table-metric-card table-metric-card-saldo">
+            <span className="table-metric-caption-saldo">Saldo Pendiente</span>
+            <strong className="table-metric-value">
+              {cifra(resumen.saldo)}
             </strong>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>
-              Por liquidar en caja
+            <span className="table-metric-subtext">
+              {resumen.pagado > 0 ? `Pagado ${formatearDinero(resumen.pagado)}` : 'Por liquidar en caja'}
             </span>
           </div>
         </div>
 
+        {errorCuenta && (
+          <div role="alert" className="table-detail-empty-box" style={{ marginBottom: '12px' }}>
+            {errorCuenta}
+          </div>
+        )}
+
+        {resumen.pagadaSinEntregar && (
+          <div
+            role="status"
+            className="table-detail-empty-box"
+            style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', borderColor: 'var(--sd-gold)' }}
+          >
+            <AlertTriangle size={16} style={{ color: 'var(--sd-gold)', flexShrink: 0 }} />
+            <span>{AVISO_PAGADA_SIN_ENTREGAR}</span>
+          </div>
+        )}
+
         {/* Desglose de Comensales (si hay consumos) */}
-        {resumenFinanciero.comensales.length > 0 && (
+        {resumen.comensales.length > 0 && (
           <div className="detail-section-block" style={{ marginBottom: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <UserCheck size={16} className="text-emerald" />
+              <UserCheck size={16} style={{ color: 'var(--sd-red)' }} />
               <h3 style={{ fontSize: '0.9rem', color: '#f1f5f9', margin: 0 }}>
                 Cuenta Dividida por Comensal
               </h3>
@@ -205,7 +214,7 @@ export function TableDetailModal({
               maxHeight: '160px',
               overflowY: 'auto',
             }}>
-              {resumenFinanciero.comensales.map((c) => (
+              {resumen.comensales.map((c) => (
                 <div
                   key={c.nombre}
                   style={{
@@ -220,13 +229,18 @@ export function TableDetailModal({
                 >
                   <div>
                     <strong style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>{c.nombre}</strong>
-                    <span style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.75rem', marginLeft: '8px' }}>
-                      ({c.itemsCount} {c.itemsCount === 1 ? 'ítem' : 'ítems'})
+                    <span style={{ color: 'var(--sd-text-muted)', fontSize: '0.75rem', marginLeft: '8px' }}>
+                      ({c.items} {c.items === 1 ? 'ítem' : 'ítems'})
                     </span>
                   </div>
-                  <strong style={{ color: 'var(--emerald-400, #34d399)', fontSize: '0.9rem' }}>
-                    {formatearDinero(c.subtotal)}
-                  </strong>
+                  <span style={{ textAlign: 'right' }}>
+                    <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
+                      {formatearDinero(c.subtotal)}
+                    </strong>
+                    <span style={{ display: 'block', color: 'var(--sd-text-muted)', fontSize: '0.72rem' }}>
+                      {c.saldo > 0 ? `Saldo ${formatearDinero(c.saldo)}` : 'Pagado'}
+                    </span>
+                  </span>
                 </div>
               ))}
             </div>
@@ -237,7 +251,7 @@ export function TableDetailModal({
         <div className="detail-section-block" style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Utensils size={16} className="text-emerald" />
+              <Utensils size={16} style={{ color: 'var(--sd-red)' }} />
               <h3 style={{ fontSize: '0.9rem', color: '#f1f5f9', margin: 0 }}>
                 Comandas en Curso ({pedidosMesa.length})
               </h3>
@@ -262,7 +276,7 @@ export function TableDetailModal({
                       borderRadius: '10px',
                       background: 'rgba(255, 255, 255, 0.03)',
                       border: isListo
-                        ? '1px solid rgba(16, 185, 129, 0.5)'
+                        ? '1px solid var(--sd-gold)'
                         : '1px solid rgba(255, 255, 255, 0.08)',
                       display: 'flex',
                       flexDirection: 'column',
@@ -276,13 +290,13 @@ export function TableDetailModal({
                         </strong>
                         <StateBadge state={ped.estado} />
                       </div>
-                      <strong style={{ color: 'var(--emerald-400, #34d399)', fontSize: '0.9rem' }}>
+                      <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
                         {formatearDinero(ped.total)}
                       </strong>
                     </div>
 
                     {/* Platos del pedido */}
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)' }}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--sd-text-muted)' }}>
                       {(ped.detalles || ped.items || []).map((it, idx) => (
                         <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
                           <span>
@@ -302,7 +316,7 @@ export function TableDetailModal({
                           className="primary-button small"
                           onClick={() => onDeliverOrder(ped.id_pedido)}
                           style={{
-                            background: 'var(--emerald-600, #059669)',
+                            background: 'var(--sd-red)',
                             padding: '6px 12px',
                             fontSize: '0.75rem',
                           }}
@@ -317,62 +331,67 @@ export function TableDetailModal({
               })}
             </div>
           ) : (
-            <div style={{
-              textAlign: 'center',
-              padding: '18px',
-              borderRadius: '8px',
-              background: 'rgba(255, 255, 255, 0.02)',
-              color: 'var(--text-muted, #94a3b8)',
-              fontSize: '0.85rem',
-            }}>
-              {isOcupada
-                ? 'Sesión abierta esperando comandas de los comensales.'
-                : 'Mesa libre. No hay pedidos registrados.'}
+            <div className="table-detail-empty-box">
+              {resumen.conSesion && sinCifras
+                ? (errorCuenta ? 'Sin datos de la cuenta.' : 'Cargando cuenta…')
+                : resumen.conSesion
+                ? 'Sin consumo. Sesión abierta esperando comandas de los comensales.'
+                : 'Sin consumo. Mesa libre.'}
             </div>
           )}
         </div>
 
         {/* Barra de Acciones de Mesa */}
-        <div className="table-detail-modal-footer" style={{
-          display: 'flex',
-          gap: '10px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          paddingTop: '16px',
-        }}>
+        <div className="table-detail-modal-footer">
           {onOpenQR && (
             <button
               type="button"
-              className="ghost-button small flex-1"
+              className="table-btn-secondary"
               onClick={() => {
                 onClose()
                 onOpenQR(table)
               }}
             >
-              <QrCode size={15} />
+              <QrCode size={18} />
               <span>{isOcupada ? 'Ver / Rotar QR' : 'Abrir Mesa'}</span>
             </button>
           )}
 
-          {isOcupada && (
+          {isOcupada && canTakeOrder && (
             <button
               type="button"
-              className="primary-button small flex-1"
+              className="table-btn-primary"
+              style={{ background: 'var(--sd-red)', borderColor: 'var(--sd-red)' }}
+              onClick={() => {
+                onClose()
+                navigate(`/mesas/${idMesa}/tomar-pedido`)
+              }}
+            >
+              <Utensils size={18} />
+              <span>Tomar Pedido</span>
+              <ArrowRight size={16} />
+            </button>
+          )}
+
+          {isOcupada && puedeUsarCaja(userRole) && (
+            <button
+              type="button"
+              className="table-btn-secondary"
               onClick={() => {
                 onClose()
                 navigate(`/caja?mesa=${idMesa}`)
               }}
             >
-              <Receipt size={15} />
+              <Receipt size={18} />
               <span>Cobrar en Caja</span>
-              <ArrowRight size={13} />
+              <ArrowRight size={16} />
             </button>
           )}
 
           {isOcupada && onFreeTable && (
             <button
               type="button"
-              className="ghost-button small"
-              style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+              className="table-btn-danger"
               onClick={() => {
                 if (window.confirm(`¿Liberar ${tableName}? Se revocará el QR de la sesión.`)) {
                   onFreeTable(idMesa)
@@ -380,7 +399,7 @@ export function TableDetailModal({
                 }
               }}
             >
-              <LogOut size={14} />
+              <LogOut size={16} />
               <span>Liberar</span>
             </button>
           )}

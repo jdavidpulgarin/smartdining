@@ -9,15 +9,18 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'icons/pwa-192x192.png', 'icons/pwa-512x512.png', 'icons/pwa-maskable-512x512.png'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'robots.txt', 'icons/pwa-192x192.png', 'icons/pwa-512x512.png', 'icons/pwa-maskable-512x512.png'],
       manifest: {
+        id: '/',
+        lang: 'es',
         name: 'SmartDining',
         short_name: 'SmartDining',
         description: 'Aplicación cliente para comensales SmartDining - Menú digital, pedidos y pago.',
-        theme_color: '#8B1E1E',
-        background_color: '#F7F1E8',
+        theme_color: '#0B0B0B',
+        background_color: '#0B0B0B',
         display: 'standalone',
         orientation: 'portrait',
+        categories: ['food', 'restaurant'],
         scope: '/',
         start_url: '/',
         icons: [
@@ -27,11 +30,21 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}']
+        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        importScripts: ['/sw-push.js'],
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/api\//]
       },
       devOptions: {
-        enabled: true
+        enabled: process.env.PWA_DEV === '1',
+        type: 'classic',
+        navigateFallback: 'index.html'
       }
     })
   ],
+  server: {
+    host: true,
+    port: 5174,
+    strictPort: true,
+  },
 })

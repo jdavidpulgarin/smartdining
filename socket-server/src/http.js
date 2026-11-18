@@ -82,6 +82,20 @@ function exigirClaveInterna(req, config) {
 }
 
 /**
+ * Busca el handler de "METODO /ruta". Un HEAD sin ruta HEAD propia usa el de
+ * GET (RFC 9110 §9.3.2: HEAD es GET sin cuerpo; los monitores de disponibilidad
+ * como UptimeRobot usan HEAD). SOLO cae en GET: un HEAD nunca ejecuta un
+ * handler de POST o DELETE, que tienen efectos. No hace falta quitar el cuerpo
+ * a mano: Node no lo envía en una respuesta a HEAD aunque el handler llame a
+ * res.end(cuerpo); status y cabeceras quedan iguales.
+ */
+function buscarHandler(rutas, metodo, ruta) {
+  const propio = rutas[`${metodo} ${ruta}`];
+  if (propio || metodo !== 'HEAD') return propio;
+  return rutas[`GET ${ruta}`];
+}
+
+/**
  * Router mínimo. `rutas` mapea "METODO /ruta" -> async (req, res, ctx).
  * Cualquier ErrorHttp lanzado se traduce a su respuesta; lo demás es un 500
  * genérico (el detalle solo va al log, no al cliente).
@@ -89,7 +103,7 @@ function exigirClaveInterna(req, config) {
 function crearRouter(rutas, ctx) {
   return async (req, res) => {
     const ruta = req.url.split('?')[0];
-    const handler = rutas[`${req.method} ${ruta}`];
+    const handler = buscarHandler(rutas, req.method, ruta);
     if (!handler) return enviarJson(res, 404, { error: 'Ruta no encontrada' });
     // Cerrando: lo nuevo se rechaza con 503 (Wompi y el backend reintentan) y
     // lo que ya estaba en curso termina.

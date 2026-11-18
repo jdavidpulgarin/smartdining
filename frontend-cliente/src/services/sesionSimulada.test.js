@@ -55,4 +55,50 @@ describe('crearSesionSimulada', () => {
         'No se pudo validar el QR: el servicio de tiempo real no responde',
     });
   });
+
+  it('retorna el token real provisto en jwt_dev cuando está en la URL', async () => {
+    const originalWindow = globalThis.window;
+    globalThis.window = {
+      location: {
+        search: '?jwt_dev=eyJhbGciOiJIUzI1NiJ9.token_de_prueba.firma',
+      },
+    };
+
+    try {
+      const respuesta = await crearSesionSimulada('simulado', 'Carlos');
+      expect(respuesta.token).toBe(
+        'eyJhbGciOiJIUzI1NiJ9.token_de_prueba.firma'
+      );
+      expect(respuesta.comensal).toBe('Carlos');
+    } finally {
+      globalThis.window = originalWindow;
+    }
+  });
+
+  it('extrae el alias firmado del jwt_dev ignorando el nombre escrito por el usuario', async () => {
+    const payload = Buffer.from(
+      JSON.stringify({ id_mesa: 5, rol: 'comensal', comensal: 'Ana' })
+    )
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    const jwtConAlias = `eyJhbGciOiJIUzI1NiJ9.${payload}.firma`;
+
+    const originalWindow = globalThis.window;
+    globalThis.window = {
+      location: {
+        search: `?jwt_dev=${jwtConAlias}`,
+      },
+    };
+
+    try {
+      const respuesta = await crearSesionSimulada('simulado', 'Juan');
+      expect(respuesta.token).toBe(jwtConAlias);
+      expect(respuesta.comensal).toBe('Ana');
+    } finally {
+      globalThis.window = originalWindow;
+    }
+  });
 });
+

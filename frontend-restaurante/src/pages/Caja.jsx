@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import {
   CreditCard,
   DollarSign,
@@ -7,15 +8,29 @@ import {
   CheckCircle2,
   Printer,
   X,
-  Clock,
   User,
   Users,
   Sparkles,
   RefreshCw,
-  Tag,
 } from 'lucide-react'
-import { mesasApi, pedidosApi, transaccionesApi, getAuthToken } from '../services/api'
-import { useSocketEmit, useSocketListener, useTables } from '../hooks'
+import { mesasApi, pedidosApi, transaccionesApi, excedentesApi, getAuthToken } from '../services/api'
+import { useAuth, useSocketListener, useTables } from '../hooks'
+import { crearUltimaPeticion } from '../utils/ultimaPeticion'
+import {
+  puedeUsarCaja,
+  mesaConSesionActiva,
+  comensalDelCobro,
+  idCobroParaEnviar,
+  mensajeDeErrorCobro,
+  recargarCuentasTrasError,
+  descartarIdCobro,
+  agruparCobros,
+  horaBogota,
+  usaVoucher,
+  voucherDelCobro,
+  VOUCHER_MAX,
+} from '../utils/caja'
+import { listaExcedentes, textoExcedente, yaNoPendiente, mensajeErrorDevuelto } from '../utils/excedentes'
 
 function formatCOP(monto) {
   const num = Number(monto) || 0
@@ -26,25 +41,44 @@ function formatCOP(monto) {
   }).format(num)
 }
 
-function generateRef() {
-  return 'POS-' + Date.now().toString().slice(-6)
-}
-
 function getCurrentTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+/**
+ * La Caja es de admin y cajero (el backend da 403 al resto). Al mesero ni se le
+ * muestra el enlace; si llega por la URL, vuelve al inicio.
+ */
 export function Caja() {
-  const emit = useSocketEmit()
-  const { cargarMesas } = useTables()
+  const { user } = useAuth()
+  if (!puedeUsarCaja(user?.rol)) return <Navigate to="/" replace />
+  return <CajaRegistradora />
+}
+
+function CajaRegistradora() {
+  const { cargarMesas, tables } = useTables()
+  const [searchParams] = useSearchParams()
 
   const [loading, setLoading] = useState(() => Boolean(getAuthToken()))
+  const [errorMessage, setErrorMessage] = useState(null)
   const [processingPayment, setProcessingPayment] = useState(false)
+  const [errorCobro, setErrorCobro] = useState(null)
+
+  // El cobro en curso: { clave, id_cobro }. Se guarda ANTES de enviar y solo se
+  // borra cuando el backend confirma (201 o 200 duplicado). Así un doble clic o
+  // un reintento tras un error de red repite el MISMO id_cobro y el backend no
+  // cobra dos veces; un cobro distinto (otra mesa, persona, monto o método)
+  // lleva un id nuevo.
+  const cobroPendiente = useRef(null)
+  // Bloqueo síncrono: el estado `processingPayment` tarda un render en llegar,
+  // y un doble clic dispara dos submit antes.
+  const enviando = useRef(false)
 
   // Cuentas reales cargadas desde el backend
   const [cuentasMesas, setCuentasMesas] = useState([])
-  const [selectedMesaId, setSelectedMesaId] = useState(null)
-  const [selectedComensal, setSelectedComensal] = useState('TOTAL') // 'TOTAL' o nombre del comensal
+  // "Cobrar en Caja" desde el detalle de una mesa llega con ?mesa=ID.
+  const [selectedMesaId, setSelectedMesaId] = useState(() => Number(searchParams.get('mesa')) || null)
+  const [selectedComensal, setSelectedComensal] = useState('TOTAL')
 
   // Detalles de ítems del pedido activo
   const [detallesPedido, setDetallesPedido] = useState([])
@@ -56,51 +90,76 @@ export function Caja() {
   const [cashGiven, setCashGiven] = useState('')
   const [authCode, setAuthCode] = useState('')
   const [paidReceipt, setPaidReceipt] = useState(null)
-  const [activeTab, setActiveTab] = useState('pendientes') // 'pendientes' | 'historial'
+  const [activeTab, setActiveTab] = useState('pendientes')
 
-  // Historial de transacciones de la jornada
-  const [history, setHistory] = useState(() => {
+  // Lo cobrado hoy, del BACKEND (GET /transacciones?desde=hoy, #158): "Recaudado
+  // hoy" es su `total` y el Historial sus filas. Antes salían de sessionStorage,
+  // así que en otra pestaña, otro equipo, otro cajero o al reabrir la Caja se
+  // veía $0 aunque ya se hubiera cobrado. null = todavía no se sabe.
+  const [dia, setDia] = useState(null)
+  const [errorDia, setErrorDia] = useState(null)
+
+  const cargarDia = useCallback(async () => {
     try {
-      const stored = sessionStorage.getItem('smartdining_caja_history')
-      return stored ? JSON.parse(stored) : []
-    } catch {
-      return []
+      const d = await transaccionesApi.delDia('hoy')
+      setDia(d)
+      setErrorDia(null)
+    } catch (err) {
+      setErrorDia(err?.message || 'error desconocido')
     }
-  })
+  }, [])
 
-  // Sincronizar historial con sessionStorage
   useEffect(() => {
+    let cancel = false
+    // El historial viejo de la pestaña ya no se usa.
     try {
-      sessionStorage.setItem('smartdining_caja_history', JSON.stringify(history))
+      sessionStorage.removeItem('smartdining_caja_history')
     } catch {
-      // Ignorar error de almacenamiento
+      // Sin almacenamiento no hay nada que borrar.
     }
-  }, [history])
+    transaccionesApi
+      .delDia('hoy')
+      .then((d) => {
+        if (!cancel) {
+          setDia(d)
+          setErrorDia(null)
+        }
+      })
+      .catch((err) => {
+        if (!cancel) setErrorDia(err?.message || 'error desconocido')
+      })
+    return () => {
+      cancel = true
+    }
+  }, [])
+
+  const cobrosDelDia = useMemo(() => agruparCobros(dia?.transacciones || []), [dia])
+
+  // Solo cuenta la última recarga de cuentas (T4): ver utils/ultimaPeticion.
+  const [ultimaCarga] = useState(() => crearUltimaPeticion())
 
   /**
-   * Carga las cuentas activas directamente desde la API para todas las mesas ocupadas
+   * Carga las cuentas de todas las mesas ocupadas desde la API.
+   *
+   * Varias recargas pueden salir seguidas (quitar dos platos, un cobro, el
+   * pedido que pasa a cancelado...) y responder en otro orden. Solo se aplica
+   * la respuesta de la ÚLTIMA: una vieja que llega tarde ya no pisa el saldo.
    */
   const cargarCuentas = useCallback(async () => {
     const token = getAuthToken()
     if (!token) return
 
+    const peticion = ultimaCarga.nueva()
     setLoading(true)
     setErrorMessage(null)
 
     try {
-      // 1. Obtener estado actual de las mesas
+      // 1. Estado actual de las mesas
       const mesasRes = await mesasApi.listar()
       const listaMesas = mesasRes?.mesas || []
 
-      // 2. Para cada mesa ocupada, consultar su cuenta desglosada
-      const mesasOcupadas = listaMesas.filter(
-        (m) => m.estado === 'ocupada' || Boolean(m.sesion_abierta)
-      )
-
-      if (mesasOcupadas.length === 0) {
-        setCuentasMesas([])
-        return
-      }
+      // 2. Para cada mesa ocupada, su cuenta desglosada
+      const mesasOcupadas = listaMesas.filter(mesaConSesionActiva)
 
       const promesas = mesasOcupadas.map(async (mesa) => {
         try {
@@ -122,6 +181,7 @@ export function Caja() {
         (c) => c && (Number(c.saldo_mesa) > 0 || Number(c.total_mesa) > 0)
       )
 
+      if (!peticion.vigente()) return
       setCuentasMesas(cuentas)
 
       // Seleccionar automáticamente la primera mesa si no hay una elegida
@@ -130,88 +190,97 @@ export function Caja() {
         return cuentas[0]?.id_mesa || null
       })
     } catch (err) {
+      if (!peticion.vigente()) return
       console.warn('Aviso al cargar cuentas de caja:', err.message)
-      setErrorMessage('No se pudieron consultar las cuentas del salón. Mostrando datos de respaldo.')
+      setErrorMessage('No se pudieron consultar las cuentas del salón.')
     } finally {
-      setLoading(false)
+      if (peticion.vigente()) setLoading(false)
     }
-  }, [])
+  }, [ultimaCarga])
 
   const handleSelectMesa = useCallback((mesaId) => {
     setSelectedMesaId(mesaId)
     setSelectedComensal('TOTAL')
+    setErrorCobro(null)
   }, [])
 
-  // Cargar cuentas al montar de forma asíncrona
+  // Cargar cuentas al montar, en la microtarea siguiente (fuera del cuerpo del
+  // efecto: el estado inicial ya es «cargando»). Al desmontar, lo que esté en
+  // vuelo se descarta.
+  useEffect(() => {
+    let montada = true
+    Promise.resolve().then(() => {
+      if (montada) cargarCuentas()
+    })
+    return () => {
+      montada = false
+      ultimaCarga.invalidar()
+    }
+  }, [cargarCuentas, ultimaCarga])
+
+  // T4 (§8.7): excedentes del pago en línea por devolver en efectivo. Se cargan
+  // al montar, al (re)conectar y con cada pago:excedente (solo llega al panel).
+  const [excedentes, setExcedentes] = useState([])
+  const [avisoExcedente, setAvisoExcedente] = useState(null)
+  const [devolviendo, setDevolviendo] = useState(null)
+  const cargarExcedentes = useCallback(async () => {
+    try {
+      setExcedentes(listaExcedentes(await excedentesApi.pendientes()))
+    } catch {
+      // Sin respuesta se queda la lista que había; el próximo aviso la recarga.
+    }
+  }, [])
   useEffect(() => {
     let cancel = false
-    const token = getAuthToken()
-    if (!token) return
-
-    mesasApi
-      .listar()
-      .then(async (mesasRes) => {
-        if (cancel) return
-        const listaMesas = mesasRes?.mesas || []
-        const mesasOcupadas = listaMesas.filter(
-          (m) => m.estado === 'ocupada' || Boolean(m.sesion_abierta)
-        )
-
-        if (mesasOcupadas.length === 0) {
-          if (!cancel) {
-            setCuentasMesas([])
-            setLoading(false)
-          }
-          return
-        }
-
-        const promesas = mesasOcupadas.map(async (mesa) => {
-          try {
-            const cuenta = await mesasApi.obtenerCuenta(mesa.id_mesa)
-            if (cuenta) {
-              return {
-                ...cuenta,
-                numero_mesa: mesa.numero,
-                ubicacion_mesa: mesa.ubicacion,
-              }
-            }
-          } catch {
-            // Ignorar
-          }
-          return null
-        })
-
-        const cuentas = (await Promise.all(promesas)).filter(
-          (c) => c && (Number(c.saldo_mesa) > 0 || Number(c.total_mesa) > 0)
-        )
-
-        if (!cancel) {
-          setCuentasMesas(cuentas)
-          setSelectedMesaId((prev) => {
-            if (prev && cuentas.some((c) => c.id_mesa === prev)) return prev
-            return cuentas[0]?.id_mesa || null
-          })
-          setLoading(false)
-        }
+    excedentesApi
+      .pendientes()
+      .then((r) => {
+        if (!cancel) setExcedentes(listaExcedentes(r))
       })
-      .catch((err) => {
-        if (!cancel) {
-          console.warn('Aviso al cargar cuentas de caja:', err.message)
-          setErrorMessage('No se pudieron consultar las cuentas del salón.')
-          setLoading(false)
-        }
+      .catch(() => {
+        // Sin respuesta: la lista vacía; el próximo aviso o la reconexión la cargan.
       })
-
     return () => {
       cancel = true
     }
   }, [])
+  useSocketListener('pago:excedente', () => cargarExcedentes())
+  const numeroMesa = useCallback(
+    (id) => (tables || []).find((t) => Number(t.id_mesa ?? t.id) === Number(id))?.numero ?? id,
+    [tables]
+  )
+  const marcarDevuelto = async (x) => {
+    setDevolviendo(x.id)
+    setAvisoExcedente(null)
+    try {
+      await excedentesApi.marcarDevuelto(x.id)
+      setExcedentes((l) => l.filter((e) => e.id !== x.id))
+    } catch (err) {
+      setAvisoExcedente(mensajeErrorDevuelto(err))
+      if (yaNoPendiente(err)) setExcedentes((l) => l.filter((e) => e.id !== x.id))
+    } finally {
+      setDevolviendo(null)
+      cargarExcedentes()
+    }
+  }
+
+  // Al (re)conectar el socket se recargan las cuentas y lo cobrado hoy: los
+  // avisos que llegaron con el socket caído se perdieron (T4).
+  useSocketListener('connect', () => {
+    cargarCuentas()
+    cargarDia()
+    cargarExcedentes()
+  })
 
   // Escuchar eventos de WebSockets en tiempo real para mantener la caja sincronizada
   useSocketListener('order:created', () => cargarCuentas())
   useSocketListener('order:status', () => cargarCuentas())
+  // Un plato cancelado (D-13 o el comensal) baja el saldo de la mesa.
+  useSocketListener('item:cancelado', () => cargarCuentas())
   useSocketListener('payment:confirmed', (data) => {
     cargarCuentas()
+    // Cualquier cobro (esta caja, otra, o un pago en línea) cambia lo recaudado.
+    cargarDia()
     if (data?.id_mesa) cargarMesas()
   })
   useSocketListener('mesa:liberada', () => {
@@ -234,7 +303,7 @@ export function Caja() {
     return cuentasMesas.find((c) => c.id_mesa === selectedMesaId) || null
   }, [cuentasMesas, selectedMesaId])
 
-  // Cargar detalle de ítems del pedido activo cuando se selecciona una mesa
+  // Ítems de TODOS los pedidos de la mesa (antes solo los del primero)
   useEffect(() => {
     let cancel = false
 
@@ -244,13 +313,12 @@ export function Caja() {
         return
       }
 
-      const primerPedido = selectedCuenta.pedidos[0]
       setLoadingDetalles(true)
       try {
-        const pedData = await pedidosApi.obtener(primerPedido.id_pedido)
-        if (!cancel && pedData?.detalles) {
-          setDetallesPedido(pedData.detalles)
-        }
+        const respuestas = await Promise.all(
+          selectedCuenta.pedidos.map((p) => pedidosApi.obtener(p.id_pedido).catch(() => null))
+        )
+        if (!cancel) setDetallesPedido(respuestas.flatMap((r) => r?.detalles || []))
       } catch {
         if (!cancel) setDetallesPedido([])
       } finally {
@@ -314,632 +382,710 @@ export function Caja() {
   const numericCash = parseFloat(cashGiven) || 0
   const changeDue = Math.max(0, numericCash - financialDetails.total)
 
-  // Procesar registro de pago en el backend
+  // Cobro de MESA: un solo POST /api/transacciones/mesa; el backend reparte el
+  // monto entre los pedidos de la mesa (antes iba entero al primer pedido).
   const handleProcessPayment = async (e) => {
     e.preventDefault()
-    if (!selectedCuenta) return
+    if (!selectedCuenta || enviando.current) return
+    setErrorCobro(null)
 
     if (paymentMethod === 'efectivo' && numericCash < financialDetails.total) {
-      alert(
-        `El efectivo recibido (${formatCOP(numericCash)}) es menor al total a pagar (${formatCOP(
-          financialDetails.total
-        )})`
+      setErrorCobro(
+        `El efectivo recibido (${formatCOP(numericCash)}) es menor al total a pagar (${formatCOP(financialDetails.total)}).`
       )
       return
     }
 
-    // Identificar el pedido activo con saldo en la mesa
-    const pedidoTarget = selectedCuenta.pedidos?.[0]
-    if (!pedidoTarget) {
-      alert('No se encontró un pedido activo para liquidar en esta mesa.')
+    // Voucher del datáfono (script 35): solo con tarjeta; se revisa el formato
+    // antes de enviar para no gastar un intento en un 400.
+    const voucher = voucherDelCobro(paymentMethod, authCode)
+    if (voucher.error) {
+      setErrorCobro(voucher.error)
       return
     }
 
+    // La propina no entra en el monto: el backend solo cubre el saldo de los
+    // pedidos (un monto mayor es 409 excede). Queda en el recibo.
+    const datos = {
+      id_mesa: selectedCuenta.id_mesa,
+      comensal: comensalDelCobro(selectedComensal),
+      monto: financialDetails.subtotal,
+      metodo_pago: paymentMethod,
+    }
+    // Mismo cobro que el intento anterior sin confirmar → mismo id_cobro.
+    const cobro = idCobroParaEnviar(cobroPendiente.current, datos)
+    cobroPendiente.current = cobro
+    enviando.current = true
     setProcessingPayment(true)
-    const refOperacion = authCode.trim() || generateRef()
 
     try {
-      // 1. Llamar al backend real: POST /api/transacciones
-      const resTx = await transaccionesApi.registrarPago({
-        id_pedido: pedidoTarget.id_pedido,
-        monto: financialDetails.subtotal,
-        metodo_pago: paymentMethod,
-        referencia_externa: refOperacion,
-        comensal: selectedComensal === 'TOTAL' ? null : selectedComensal,
-      })
+      const res = await transaccionesApi.cobrarMesa({ ...datos, id_cobro: cobro.id_cobro, voucher: voucher.voucher })
+      // Confirmado (201, o 200 si ya se había cobrado): el próximo cobro es otro.
+      cobroPendiente.current = null
 
-      // 2. Construir comprobante de pago
+      const transacciones = res?.transacciones || []
+      const codigos = transacciones
+        .map((t) => selectedCuenta.pedidos?.find((p) => p.id_pedido === t.id_pedido)?.codigo_pedido || `#${t.id_pedido}`)
       const receipt = {
-        id_transaccion: resTx?.id_transaccion ? `TRX-${resTx.id_transaccion}` : generateRef(),
-        id_pedido: pedidoTarget.codigo_pedido || `#${pedidoTarget.id_pedido}`,
+        id_transaccion: transacciones.length
+          ? transacciones.map((t) => `TRX-${t.id_transaccion}`).join(' · ')
+          : `COBRO ${cobro.id_cobro.slice(0, 8).toUpperCase()}`,
+        duplicado: Boolean(res?.duplicado),
+        pedidos: codigos,
         mesa: `Mesa ${selectedCuenta.numero || selectedCuenta.numero_mesa}`,
         comensal: financialDetails.comensalNombre,
         metodo_pago: paymentMethod,
-        items: detallesPedido.length > 0 ? detallesPedido : [
-          {
-            nombre: 'Consumo registrado',
-            cantidad: selectedCuenta.items_totales || 1,
-            subtotal: financialDetails.subtotal,
-          },
-        ],
         subtotal: financialDetails.subtotal,
         tip: financialDetails.tip,
         total: financialDetails.total,
         cashGiven: paymentMethod === 'efectivo' ? numericCash : null,
         changeDue: paymentMethod === 'efectivo' ? changeDue : null,
-        referencia: refOperacion,
+        // El que guardó el backend. En un duplicado vale el del primer envío,
+        // que esta respuesta no trae: no se muestra uno que quizá no se guardó.
+        voucher: transacciones.find((t) => t.voucher)?.voucher
+          ?? (res?.duplicado ? null : voucher.voucher),
+        saldoRestante: Number(res?.saldo_restante) || 0,
+        mesaLiberada: Boolean(res?.mesa_liberada),
         hora: getCurrentTime(),
       }
 
-      // 3. Emitir evento por WebSockets
-      emit('payment:confirmed', {
-        id_pedido: pedidoTarget.id_pedido,
-        id_mesa: selectedCuenta.id_mesa,
-        monto: financialDetails.total,
-        comensal: selectedComensal === 'TOTAL' ? null : selectedComensal,
-        metodo_pago: paymentMethod,
-        timestamp: new Date().toISOString(),
-      })
-
-      // 4. Agregar al historial local
-      setHistory((prev) => [
-        {
-          id_transaccion: receipt.id_transaccion,
-          id_pedido: pedidoTarget.id_pedido,
-          mesa: receipt.mesa,
-          comensal: receipt.comensal,
-          metodo_pago: receipt.metodo_pago,
-          monto: receipt.total,
-          hora: receipt.hora,
-          estado: 'completada',
-          referencia: receipt.referencia,
-        },
-        ...prev,
-      ])
-
-      // 5. Mostrar recibo y limpiar inputs
       setPaidReceipt(receipt)
       setCashGiven('')
       setAuthCode('')
-
-      // 6. Recargar mesas y cuentas
-      await cargarCuentas()
+      // Los avisos de tiempo real (payment:confirmed, order:status,
+      // mesa:liberada) los manda el backend después del COMMIT. "Recaudado hoy"
+      // y el Historial se vuelven a pedir aquí también, sin esperar al aviso
+      // (también tras un duplicado: no cambia nada, pero queda al día).
+      await Promise.all([cargarCuentas(), cargarDia()])
       await cargarMesas()
     } catch (err) {
-      alert(`Error al registrar el cobro en caja: ${err.message}`)
+      // 409 id_cobro_en_uso: no se cobró nada y ese id es de otro cobro; el
+      // siguiente clic lleva un id_cobro nuevo.
+      if (descartarIdCobro(err)) cobroPendiente.current = null
+      setErrorCobro(mensajeDeErrorCobro(err, formatCOP))
+      // El saldo cambió por otro lado: se recarga para que el cajero vea el real.
+      if (recargarCuentasTrasError(err)) await cargarCuentas()
     } finally {
+      enviando.current = false
       setProcessingPayment(false)
     }
   }
 
-  // Métricas acumuladas del turno
-  const totalRecaudadoHoy = useMemo(() => {
-    return history.reduce((acc, h) => acc + (Number(h.monto) || 0), 0)
-  }, [history])
+  // "Recaudado hoy": el total que da el backend (la propina no se registra, así
+  // que no entra). Mientras carga, "…"; si no se pudo, "—" y no un $0 engañoso.
+  const textoRecaudadoHoy = dia ? formatCOP(dia.total) : errorDia ? '—' : '…'
+
+  const totalSaldoSalon = useMemo(() => {
+    return cuentasMesas.reduce((acc, c) => acc + (Number(c.saldo_mesa) || 0), 0)
+  }, [cuentasMesas])
 
   return (
-    <main className="main-panel caja-page">
-      {/* Barra de métricas de caja */}
-      <section className="caja-stats-grid">
-        <div className="stat-card">
-          <div className="stat-label">Total Recaudado (Turno)</div>
-          <div className="stat-value">{formatCOP(totalRecaudadoHoy)}</div>
-          <div className="stat-detail positive">+{history.length} cobros registrados hoy</div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-label">Cuentas por Cobrar</div>
-          <div className="stat-value">{cuentasMesas.length}</div>
-          <div className="stat-detail">Mesas con saldo pendiente</div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-label">Saldo Total en Salón</div>
-          <div className="stat-value">
-            {formatCOP(
-              cuentasMesas.reduce((acc, c) => acc + (Number(c.saldo_mesa) || 0), 0)
-            )}
-          </div>
-          <div className="stat-detail">Consumo pendiente de cierre</div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-label">Operador de Caja</div>
-          <div className="stat-value font-mono text-emerald-neon text-lg">Activo</div>
-          <div className="stat-detail">Cobro directo · POS Digital</div>
-        </div>
-      </section>
-
-      {/* Tabs de navegación */}
-      <div className="caja-tabs-nav">
-        <button
-          className={`caja-tab-btn ${activeTab === 'pendientes' ? 'active' : ''}`}
-          onClick={() => setActiveTab('pendientes')}
-        >
-          <Receipt size={16} />
-          <span>Cuentas por Cobrar ({cuentasMesas.length})</span>
-        </button>
-        <button
-          className={`caja-tab-btn ${activeTab === 'historial' ? 'active' : ''}`}
-          onClick={() => setActiveTab('historial')}
-        >
-          <Clock size={16} />
-          <span>Historial de Pagos ({history.length})</span>
-        </button>
-      </div>
-
-      {activeTab === 'pendientes' ? (
-        <section className="caja-workspace">
-          {/* Columna Izquierda: Lista de Mesas con Cuentas Abiertas */}
-          <div className="panel caja-orders-sidebar">
-            <div className="panel-header">
-              <div className="flex items-center gap-2">
-                <h3>Mesas con Saldo</h3>
-                <span className="badge-count">{cuentasMesas.length}</span>
-              </div>
-              <button
-                className="ghost-button small"
-                onClick={cargarCuentas}
-                disabled={loading}
-                title="Actualizar cuentas"
-              >
-                <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-              </button>
-            </div>
-
-            {loading && cuentasMesas.length === 0 ? (
-              <div className="caja-loading-box">
-                <RefreshCw size={28} className="animate-spin text-emerald-neon" />
-                <p>Consultando cuentas del salón...</p>
-              </div>
-            ) : cuentasMesas.length === 0 ? (
-              <div className="empty-state">
-                <CheckCircle2 size={40} className="text-emerald-neon" />
-                <p>No hay cuentas pendientes de cobro</p>
-                <small>Todas las mesas activas están al día o libres</small>
-              </div>
-            ) : (
-              <div className="caja-orders-list">
-                {cuentasMesas.map((cuenta) => {
-                  const isSelected = cuenta.id_mesa === selectedMesaId
-                  return (
-                    <div
-                      key={cuenta.id_mesa}
-                      className={`caja-order-card ${isSelected ? 'selected' : ''}`}
-                      onClick={() => handleSelectMesa(cuenta.id_mesa)}
-                    >
-                      <div className="caja-card-header">
-                        <strong>Mesa {cuenta.numero || cuenta.numero_mesa}</strong>
-                        <span className="order-pill">
-                          {cuenta.pedidos?.[0]?.codigo_pedido || `ID: ${cuenta.id_mesa}`}
-                        </span>
-                      </div>
-                      <div className="caja-card-meta">
-                        <span>
-                          <Users size={13} /> {cuenta.comensales?.length || 1} comensales
-                        </span>
-                        <span>
-                          <Tag size={13} /> {cuenta.ubicacion || cuenta.ubicacion_mesa || 'Salón'}
-                        </span>
-                      </div>
-                      <div className="caja-card-footer">
-                        <span className="items-count">
-                          {cuenta.items_totales || cuenta.pedidos?.length || 0} ítems
-                        </span>
-                        <strong className="caja-amount">
-                          {formatCOP(cuenta.saldo_mesa)}
-                        </strong>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Columna Derecha: Panel de Liquidación y Pago */}
-          <div className="panel caja-billing-panel">
-            {selectedCuenta ? (
-              <form onSubmit={handleProcessPayment} className="caja-form">
-                <div className="panel-header">
-                  <div>
-                    <h3>Liquidación — Mesa {selectedCuenta.numero || selectedCuenta.numero_mesa}</h3>
-                    <span className="panel-subtitle">
-                      {selectedCuenta.pedidos?.[0]?.codigo_pedido
-                        ? `Pedido ${selectedCuenta.pedidos[0].codigo_pedido} · `
-                        : ''}
-                      Ubicación: {selectedCuenta.ubicacion || 'Principal'}
-                    </span>
-                  </div>
-                  <span className="status-badge-occupied">
-                    Saldo: {formatCOP(selectedCuenta.saldo_mesa)}
-                  </span>
-                </div>
-
-                {/* Selector de División de Cuenta: Toda la mesa o por comensal */}
-                <div className="comensal-selector-box">
-                  <label className="section-label">
-                    <Users size={16} />
-                    <span>Seleccionar Cobro (División de Cuenta):</span>
-                  </label>
-                  <div className="comensal-chips-group">
-                    <button
-                      type="button"
-                      className={`comensal-chip ${selectedComensal === 'TOTAL' ? 'active' : ''}`}
-                      onClick={() => setSelectedComensal('TOTAL')}
-                    >
-                      <span>Toda la Mesa</span>
-                      <strong className="chip-amount">{formatCOP(selectedCuenta.saldo_mesa)}</strong>
-                    </button>
-
-                    {(selectedCuenta.comensales || []).map((c, i) => {
-                      const owes = Number(c.saldo) > 0
-                      const isChipSelected = selectedComensal === c.comensal
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          className={`comensal-chip ${isChipSelected ? 'active' : ''} ${
-                            !owes ? 'paid-chip' : ''
-                          }`}
-                          onClick={() => owes && setSelectedComensal(c.comensal)}
-                          disabled={!owes}
-                        >
-                          <div className="chip-header">
-                            <User size={13} />
-                            <span>{c.comensal}</span>
-                          </div>
-                          <strong className="chip-amount">
-                            {owes ? formatCOP(c.saldo) : 'Pagado ✔'}
-                          </strong>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* Desglose de ítems */}
-                <div className="billing-items-box">
-                  <div className="billing-table-head">
-                    <span>Plato / Producto</span>
-                    <span className="text-center">Comensal</span>
-                    <span className="text-center">Cant.</span>
-                    <span className="text-right">Subtotal</span>
-                  </div>
-
-                  <div className="billing-table-body">
-                    {loadingDetalles ? (
-                      <div className="p-4 text-center text-sm text-muted">
-                        Cargando comanda...
-                      </div>
-                    ) : detallesPedido.length > 0 ? (
-                      detallesPedido.map((item, idx) => (
-                        <div key={idx} className="billing-row">
-                          <div className="item-title-group">
-                            <span className="item-title">{item.plato_nombre || item.nombre}</span>
-                            {item.ingredientes && item.ingredientes.length > 0 && (
-                              <small className="item-extras">
-                                {item.ingredientes.map((ing) => ing.nombre).join(', ')}
-                              </small>
-                            )}
-                          </div>
-                          <span className="item-comensal text-center text-muted text-xs">
-                            {item.comensal || 'General'}
-                          </span>
-                          <span className="item-qty text-center">x{item.cantidad}</span>
-                          <span className="item-sub text-right">
-                            {formatCOP(item.subtotal)}
-                          </span>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="billing-row">
-                        <span className="item-title">
-                          Consumo general de Mesa {selectedCuenta.numero || selectedCuenta.numero_mesa}
-                        </span>
-                        <span className="item-comensal text-center">Mesa</span>
-                        <span className="item-qty text-center">x1</span>
-                        <span className="item-sub text-right">
-                          {formatCOP(financialDetails.subtotal)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Subtotales y cálculos de cobro */}
-                <div className="billing-breakdown">
-                  <div className="breakdown-row">
-                    <span>Cobro para:</span>
-                    <strong className="text-emerald-neon">{financialDetails.comensalNombre}</strong>
-                  </div>
-                  <div className="breakdown-row">
-                    <span>Subtotal a Liquidar</span>
-                    <strong>{formatCOP(financialDetails.subtotal)}</strong>
-                  </div>
-                  <div className="breakdown-row tip-row">
-                    <label className="tip-toggle">
-                      <input
-                        type="checkbox"
-                        checked={includeTip}
-                        onChange={(e) => setIncludeTip(e.target.checked)}
-                      />
-                      <span>Incluir Propina Voluntaria sugerida (10%)</span>
-                    </label>
-                    <span>{formatCOP(financialDetails.tip)}</span>
-                  </div>
-                  <div className="breakdown-total">
-                    <span>Total a Cobrar</span>
-                    <em>{formatCOP(financialDetails.total)}</em>
-                  </div>
-                </div>
-
-                {/* Métodos de Pago */}
-                <div className="payment-methods-section">
-                  <label className="section-label">Seleccionar Método de Pago:</label>
-                  <div className="payment-methods-grid">
-                    <button
-                      type="button"
-                      className={`payment-option-btn ${paymentMethod === 'efectivo' ? 'active' : ''}`}
-                      onClick={() => setPaymentMethod('efectivo')}
-                    >
-                      <DollarSign size={18} />
-                      <span>Efectivo</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`payment-option-btn ${paymentMethod === 'tarjeta_debito' ? 'active' : ''}`}
-                      onClick={() => setPaymentMethod('tarjeta_debito')}
-                    >
-                      <CreditCard size={18} />
-                      <span>T. Débito</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`payment-option-btn ${paymentMethod === 'tarjeta_credito' ? 'active' : ''}`}
-                      onClick={() => setPaymentMethod('tarjeta_credito')}
-                    >
-                      <CreditCard size={18} />
-                      <span>T. Crédito</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`payment-option-btn ${paymentMethod === 'transferencia' ? 'active' : ''}`}
-                      onClick={() => setPaymentMethod('transferencia')}
-                    >
-                      <Smartphone size={18} />
-                      <span>Nequi / Transf.</span>
-                    </button>
-                  </div>
-
-                  {/* Detalle interactivo según método */}
-                  {paymentMethod === 'efectivo' && (
-                    <div className="cash-calculator-box">
-                      <div className="cash-input-group">
-                        <label htmlFor="efectivo-input">Efectivo Recibido (COP):</label>
-                        <input
-                          id="efectivo-input"
-                          type="number"
-                          step="1000"
-                          min={financialDetails.total}
-                          placeholder={financialDetails.total.toString()}
-                          value={cashGiven}
-                          onChange={(e) => setCashGiven(e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div className="cash-change-result">
-                        <span>Cambio / Vueltos:</span>
-                        <strong className={changeDue > 0 ? 'text-emerald-neon' : ''}>
-                          {formatCOP(changeDue)}
-                        </strong>
-                      </div>
-                    </div>
-                  )}
-
-                  {(paymentMethod === 'tarjeta_debito' || paymentMethod === 'tarjeta_credito') && (
-                    <div className="card-input-box">
-                      <label>Nro. Aprobación Datáfono (Opcional):</label>
-                      <input
-                        type="text"
-                        placeholder="Ej. AP-94812"
-                        value={authCode}
-                        onChange={(e) => setAuthCode(e.target.value)}
-                      />
-                    </div>
-                  )}
-
-                  {paymentMethod === 'transferencia' && (
-                    <div className="transfer-hint-box">
-                      <Sparkles size={16} />
-                      <span>Confirmar abono en App Bancolombia / Nequi / Daviplata antes de emitir recibo.</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Botón de Confirmación */}
-                <div className="caja-actions">
-                  <button
-                    type="submit"
-                    className="primary-button checkout-submit-btn"
-                    disabled={processingPayment || financialDetails.total <= 0}
-                  >
-                    {processingPayment ? (
-                      <>
-                        <RefreshCw size={18} className="animate-spin" />
-                        <span>Registrando cobro en base de datos...</span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 size={18} />
-                        <span>
-                          Cobrar {formatCOP(financialDetails.total)} —{' '}
-                          {financialDetails.comensalNombre}
-                        </span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <div className="empty-panel-prompt">
-                <Receipt size={48} className="text-muted" />
-                <h3>Selecciona una mesa para liquidar</h3>
-                <p>Elige una mesa con saldo en la columna izquierda para registrar el cobro y emitir factura.</p>
-              </div>
-            )}
-          </div>
-        </section>
-      ) : (
-        /* Vista de Historial de Transacciones */
-        <section className="panel history-panel">
-          <div className="panel-header">
-            <div>
-              <h3>Historial de Pagos y Cierres</h3>
-              <span className="panel-subtitle">Transacciones registradas durante la jornada de hoy</span>
-            </div>
-            <button className="ghost-button small" onClick={() => window.print()}>
-              <Printer size={15} />
-              <span>Imprimir Cuadre de Caja</span>
+    <div className="sd-caja-page-wrap">
+      {/* Franja roja con resumen financiero y pestañas */}
+      <div className="sd-red-band">
+        <div className="sd-red-band-content">
+          <div className="sd-red-band-filters">
+            <button
+              type="button"
+              className={`sd-red-band-btn ${activeTab === 'pendientes' ? 'active' : ''}`}
+              onClick={() => setActiveTab('pendientes')}
+            >
+              CUENTAS POR COBRAR <span>{cuentasMesas.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`sd-red-band-btn ${activeTab === 'historial' ? 'active' : ''}`}
+              onClick={() => setActiveTab('historial')}
+            >
+              HISTORIAL DE PAGOS <span>{cobrosDelDia.length}</span>
             </button>
           </div>
 
-          <div className="table-responsive">
-            <table className="caja-history-table">
-              <thead>
-                <tr>
-                  <th>N° Transacción</th>
-                  <th>Hora</th>
-                  <th>Mesa</th>
-                  <th>Comensal / Tipo</th>
-                  <th>Método de Pago</th>
-                  <th className="text-right">Total Cobrado</th>
-                  <th className="text-center">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((tx, idx) => (
-                  <tr key={tx.id_transaccion || idx}>
-                    <td className="font-mono font-bold text-emerald-neon">{tx.id_transaccion}</td>
-                    <td>{tx.hora}</td>
-                    <td><strong>{tx.mesa}</strong></td>
-                    <td>{tx.comensal || tx.cliente || 'Mesa'}</td>
-                    <td>
-                      <span className="method-pill">{tx.metodo_pago.replace('_', ' ')}</span>
-                    </td>
-                    <td className="text-right font-bold">{formatCOP(tx.monto)}</td>
-                    <td className="text-center">
-                      <span className="status-badge-paid">Completada</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 16, textTransform: 'uppercase' }}>
+              SALDO SALÓN: <strong>{formatCOP(totalSaldoSalon)}</strong>
+            </span>
+            <button
+              type="button"
+              className="sd-red-band-btn"
+              onClick={() => { cargarCuentas(); cargarDia() }}
+              disabled={loading}
+              title="Actualizar cuentas y lo recaudado hoy"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+              <span>ACTUALIZAR</span>
+            </button>
           </div>
-        </section>
-      )}
+        </div>
+      </div>
 
-      {/* Modal de Factura / Recibo Exitoso */}
-      {paidReceipt && (
-        <div className="modal-backdrop" onClick={() => setPaidReceipt(null)}>
-          <div className="modal-card receipt-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-title-group">
-                <div className="modal-icon-badge success-bg">
-                  <CheckCircle2 size={20} />
+      <div className="sd-page-container sd-caja-container">
+        {/* Encabezado con título editorial y contadores */}
+        <header className="sd-caja-header" style={{ marginBottom: 28 }}>
+          <h1 className="sd-page-title">
+            CAJA<br />
+            REGISTRADORA
+          </h1>
+          <div className="sd-tables-counters">
+            <span data-testid="recaudado-hoy" title={errorDia ? `No se pudo cargar lo recaudado hoy: ${errorDia}` : undefined}>
+              {textoRecaudadoHoy} RECAUDADO HOY
+            </span>
+            <span className="sd-counter-sep">·</span>
+            <span>{cuentasMesas.length} CUENTAS PENDIENTES</span>
+            <span className="sd-counter-sep">·</span>
+            <span className="sd-counter-alert">{formatCOP(totalSaldoSalon)} POR COBRAR</span>
+          </div>
+        </header>
+
+        {(excedentes.length > 0 || avisoExcedente) && (
+          <section
+            aria-labelledby="titulo-excedentes"
+            data-testid="caja-excedentes"
+            className="table-toast-banner error"
+            role="alert"
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 10, marginBottom: 20 }}
+          >
+            {excedentes.length > 0 && (
+              <h2 id="titulo-excedentes" style={{ margin: 0, fontFamily: 'var(--sd-font-heading)', fontSize: 18, textTransform: 'uppercase' }}>
+                Devolver en efectivo ({excedentes.length})
+              </h2>
+            )}
+            {excedentes.map((x) => (
+              <div key={x.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                <span>{textoExcedente(x, formatCOP, numeroMesa)}</span>
+                <button
+                  type="button"
+                  className="sd-btn sd-btn-primary"
+                  onClick={() => marcarDevuelto(x)}
+                  disabled={devolviendo === x.id}
+                >
+                  {devolviendo === x.id ? 'Marcando…' : 'Devuelto en efectivo'}
+                </button>
+              </div>
+            ))}
+            {avisoExcedente && <span>{avisoExcedente}</span>}
+          </section>
+        )}
+
+        {errorMessage && (
+          <div className="table-toast-banner info" style={{ marginBottom: 20 }}>
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {activeTab === 'pendientes' ? (
+          <div className="sd-caja-layout">
+            {/* Columna Izquierda: Botones de Cuentas (72px alto) */}
+            <aside className="sd-caja-col-accounts">
+              <h2 className="sd-card-title" style={{ fontSize: 22, marginBottom: 12 }}>
+                MESAS CON SALDO ({cuentasMesas.length})
+              </h2>
+
+              {loading && cuentasMesas.length === 0 ? (
+                <div className="sd-card sd-empty-box">
+                  <RefreshCw size={28} className="animate-spin" style={{ color: 'var(--sd-red)' }} />
+                  <p>CONSULTANDO CUENTAS DEL SALÓN...</p>
                 </div>
-                <div>
-                  <h3>Pago Procesado con Éxito</h3>
-                  <p className="modal-subtitle">Transacción guardada en base de datos</p>
+              ) : cuentasMesas.length === 0 ? (
+                <div className="sd-card sd-empty-box">
+                  <CheckCircle2 size={40} style={{ color: 'var(--sd-white)' }} />
+                  <p>NO HAY CUENTAS PENDIENTES</p>
+                  <small style={{ color: 'var(--sd-text-muted)' }}>
+                    Todas las mesas están al día o libres
+                  </small>
                 </div>
+              ) : (
+                <div className="sd-caja-accounts-list">
+                  {cuentasMesas.map((cuenta) => {
+                    const isSelected = cuenta.id_mesa === selectedMesaId
+                    const mesaNum = cuenta.numero || cuenta.numero_mesa
+
+                    return (
+                      <button
+                        key={cuenta.id_mesa}
+                        type="button"
+                        className={`sd-caja-account-btn ${isSelected ? 'selected' : ''}`}
+                        onClick={() => handleSelectMesa(cuenta.id_mesa)}
+                      >
+                        <div>
+                          <strong className="sd-account-mesa-name">
+                            Mesa {mesaNum}
+                          </strong>
+                          <span className="sd-account-meta">
+                            <Users size={12} /> {cuenta.comensales?.length || 1} COMENSALES · {cuenta.ubicacion || cuenta.ubicacion_mesa || 'SALÓN'}
+                          </span>
+                        </div>
+                        <strong className="sd-account-saldo">
+                          {formatCOP(cuenta.saldo_mesa)}
+                        </strong>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </aside>
+
+            {/* Columna Derecha: Tarjeta COBRAR / MESA NN */}
+            <main className="sd-caja-col-billing">
+              {selectedCuenta ? (
+                <div className="sd-card sd-billing-card">
+                  <header style={{ marginBottom: 20 }}>
+                    <h2 className="sd-page-title sd-billing-title" style={{ fontSize: 52 }}>
+                      COBRAR / MESA {selectedCuenta.numero || selectedCuenta.numero_mesa}
+                    </h2>
+                    <span style={{ fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-text-muted)', fontSize: 16 }}>
+                      {selectedCuenta.pedidos?.length === 1 && selectedCuenta.pedidos[0].codigo_pedido
+                        ? `PEDIDO ${selectedCuenta.pedidos[0].codigo_pedido} · `
+                        : selectedCuenta.pedidos?.length > 1
+                        ? `${selectedCuenta.pedidos.length} PEDIDOS · `
+                        : ''}
+                      UBICACIÓN: {(selectedCuenta.ubicacion || selectedCuenta.ubicacion_mesa || 'PRINCIPAL').toUpperCase()}
+                    </span>
+                  </header>
+
+                  {/* Saldo Grande de la Mesa */}
+                  <div className="sd-billing-large-saldo">
+                    <span className="sd-saldo-label">SALDO PENDIENTE MESA</span>
+                    <strong className="sd-saldo-amount">
+                      {formatCOP(selectedCuenta.saldo_mesa)}
+                    </strong>
+                  </div>
+
+                  {/* Selector de División de Cuenta: Toda la mesa o por comensal */}
+                  <div style={{ marginBottom: 20 }}>
+                    <label className="sd-input-label" style={{ marginBottom: 8 }}>
+                      SELECCIONAR COBRO (DIVISIÓN DE CUENTA):
+                    </label>
+                    <div className="sd-comensales-chips-row">
+                      <button
+                        type="button"
+                        className={`sd-comensal-chip ${selectedComensal === 'TOTAL' ? 'sd-comensal-seleccionado' : 'sd-comensal-pendiente'}`}
+                        onClick={() => setSelectedComensal('TOTAL')}
+                      >
+                        <span>TODA LA MESA</span>
+                        <strong>{formatCOP(selectedCuenta.saldo_mesa)}</strong>
+                      </button>
+
+                      {(selectedCuenta.comensales || []).map((c, i) => {
+                        const owes = Number(c.saldo) > 0
+                        const isSelectedChip = selectedComensal === c.comensal
+
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            className={`sd-comensal-chip ${
+                              isSelectedChip
+                                ? 'sd-comensal-seleccionado'
+                                : !owes
+                                ? 'sd-comensal-pagado'
+                                : 'sd-comensal-pendiente'
+                            }`}
+                            onClick={() => owes && setSelectedComensal(c.comensal)}
+                            disabled={!owes}
+                          >
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <User size={12} /> {c.comensal}
+                            </span>
+                            <strong>{owes ? formatCOP(c.saldo) : 'PAGADO ✔'}</strong>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Desglose de ítems solicitados */}
+                  <div style={{ marginBottom: 24 }}>
+                    <label className="sd-input-label" style={{ marginBottom: 8 }}>
+                      ÍTEMS CONSUMIDOS EN SALA:
+                    </label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
+                      {loadingDetalles ? (
+                        <div style={{ padding: 12, color: 'var(--sd-text-muted)' }}>Cargando consumo...</div>
+                      ) : detallesPedido.length > 0 ? (
+                        detallesPedido.map((item, idx) => (
+                          <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', borderRadius: 6 }}>
+                            <div>
+                              <strong style={{ color: 'var(--sd-text)' }}>x{item.cantidad} {item.plato_nombre || item.nombre}</strong>
+                              <span style={{ display: 'block', fontSize: 12, color: 'var(--sd-text-muted)' }}>Comensal: {item.comensal || 'General'}</span>
+                            </div>
+                            <span style={{ fontFamily: 'var(--sd-font-heading)', fontWeight: 700 }}>{formatCOP(item.subtotal)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', borderRadius: 6 }}>
+                          <span>Consumo registrado en Mesa {selectedCuenta.numero || selectedCuenta.numero_mesa}</span>
+                          <strong>{formatCOP(financialDetails.subtotal)}</strong>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Desglose / Cálculo */}
+                  <div className="sd-breakdown-card">
+                    <div className="sd-breakdown-row">
+                      <span>COBRO PARA</span>
+                      <strong>{financialDetails.comensalNombre.toUpperCase()}</strong>
+                    </div>
+                    <div className="sd-breakdown-row">
+                      <span>TOTAL A LIQUIDAR</span>
+                      <strong>{formatCOP(financialDetails.subtotal)}</strong>
+                    </div>
+
+                    <div className="sd-breakdown-row">
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={includeTip}
+                          onChange={(e) => setIncludeTip(e.target.checked)}
+                        />
+                        <span>INCLUIR PROPINA VOLUNTARIA SUGERIDA (10%)</span>
+                      </label>
+                      <span>{formatCOP(financialDetails.tip)}</span>
+                    </div>
+
+                    <div className="sd-breakdown-total-row">
+                      <span>TOTAL A COBRAR</span>
+                      <strong className="sd-total-charge-amount">{formatCOP(financialDetails.total)}</strong>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleProcessPayment} className="sd-caja-form">
+                    {/* Selector de Método de Pago */}
+                    <div style={{ marginBottom: 16 }}>
+                      <label className="sd-input-label" style={{ marginBottom: 8 }}>
+                        MÉTODO DE PAGO:
+                      </label>
+                      <div className="sd-payment-methods-row">
+                        <button
+                          type="button"
+                          className={`sd-method-btn ${paymentMethod === 'efectivo' ? 'active' : ''}`}
+                          onClick={() => setPaymentMethod('efectivo')}
+                        >
+                          <DollarSign size={18} />
+                          <span>EFECTIVO</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`sd-method-btn ${paymentMethod === 'tarjeta_debito' ? 'active' : ''}`}
+                          onClick={() => setPaymentMethod('tarjeta_debito')}
+                        >
+                          <CreditCard size={18} />
+                          <span>T. DÉBITO</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`sd-method-btn ${paymentMethod === 'tarjeta_credito' ? 'active' : ''}`}
+                          onClick={() => setPaymentMethod('tarjeta_credito')}
+                        >
+                          <CreditCard size={18} />
+                          <span>T. CRÉDITO</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`sd-method-btn ${paymentMethod === 'transferencia' ? 'active' : ''}`}
+                          onClick={() => setPaymentMethod('transferencia')}
+                        >
+                          <Smartphone size={18} />
+                          <span>TRANSFERENCIA</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Detalle interactivo si es efectivo */}
+                    {paymentMethod === 'efectivo' && (
+                      <div className="sd-cash-details-box" style={{ background: 'rgba(0,0,0,0.3)', padding: 16, borderRadius: 8, marginBottom: 20 }}>
+                        <div className="sd-input-group">
+                          <label htmlFor="efectivo-input" className="sd-input-label">
+                            EFECTIVO RECIBIDO (COP):
+                          </label>
+                          {/* Sin min/step/required: con step=1000 y min=total, un total
+                              que no es múltiplo de 1.000 (con propina, o un saldo de
+                              34.500) hacía que el navegador rechazara 50.000 en
+                              silencio. El mínimo lo comprueba handleProcessPayment. */}
+                          <input
+                            id="efectivo-input"
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            step="any"
+                            placeholder={financialDetails.total.toString()}
+                            value={cashGiven}
+                            onChange={(e) => setCashGiven(e.target.value)}
+                            className="sd-input"
+                          />
+                        </div>
+
+                        <div className="sd-change-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                          <span style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 16 }}>CAMBIO / VUELTOS:</span>
+                          <strong className="sd-change-amount" style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 24, color: 'var(--sd-white)' }}>
+                            {formatCOP(changeDue)}
+                          </strong>
+                        </div>
+                      </div>
+                    )}
+
+                    {usaVoucher(paymentMethod) && (
+                      <div className="sd-card-details-box" style={{ marginBottom: 20 }}>
+                        <div className="sd-input-group">
+                          <label htmlFor="auth-code-input" className="sd-input-label">
+                            NRO. APROBACIÓN VOUCHER (OPCIONAL):
+                          </label>
+                          {/* Se guarda en mayúsculas, como lo deja el backend.
+                              Letras, números y guiones; el formato se revisa
+                              al cobrar (handleProcessPayment). */}
+                          <input
+                            id="auth-code-input"
+                            type="text"
+                            placeholder="Ej. AP-94812"
+                            maxLength={VOUCHER_MAX}
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={authCode}
+                            onChange={(e) => setAuthCode(e.target.value.toUpperCase())}
+                            className="sd-input"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {paymentMethod === 'transferencia' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, background: 'rgba(224, 165, 38, 0.1)', border: '1px solid var(--sd-gold)', borderRadius: 8, marginBottom: 20, color: 'var(--sd-gold)' }}>
+                        <Sparkles size={16} />
+                        <span style={{ fontSize: 14 }}>Confirmar abono en App Bancolombia / Nequi / Daviplata antes de emitir recibo.</span>
+                      </div>
+                    )}
+
+                    {errorCobro && (
+                      <div className="table-toast-banner error" role="alert" style={{ marginBottom: 16 }}>
+                        <span>{errorCobro}</span>
+                      </div>
+                    )}
+
+                    {/* Botón rojo REGISTRAR PAGO / COBRAR */}
+                    <button
+                      type="submit"
+                      disabled={processingPayment || financialDetails.total <= 0}
+                      className="sd-btn sd-btn-primary sd-btn-block"
+                      style={{ minHeight: 54, fontSize: 20 }}
+                      aria-label={`Cobrar ${formatCOP(financialDetails.total)}`}
+                    >
+                      {processingPayment ? (
+                        <>
+                          <RefreshCw size={18} className="animate-spin" />
+                          <span>REGISTRANDO PAGO...</span>
+                        </>
+                      ) : (
+                        <span>COBRAR {formatCOP(financialDetails.total)}</span>
+                      )}
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <div className="sd-card sd-empty-box">
+                  <Receipt size={48} style={{ color: 'var(--sd-text-muted)' }} />
+                  <p>SELECCIONA UNA MESA PARA COBRAR</p>
+                  <small style={{ color: 'var(--sd-text-muted)' }}>
+                    Elige una mesa con saldo en la columna izquierda para registrar el pago.
+                  </small>
+                </div>
+              )}
+            </main>
+          </div>
+        ) : (
+          /* Vista de Historial de Transacciones */
+          <section className="sd-card history-panel">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h3 className="sd-card-title" style={{ margin: 0 }}>HISTORIAL DE PAGOS Y CIERRES</h3>
+                <span style={{ color: 'var(--sd-text-muted)', fontSize: 14 }}>Transacciones registradas durante la jornada de hoy</span>
               </div>
               <button
-                className="modal-close-btn"
-                onClick={() => setPaidReceipt(null)}
-                aria-label="Cerrar"
+                type="button"
+                className="sd-btn sd-btn-secondary"
+                onClick={() => window.print()}
+                style={{ minHeight: 38, fontSize: 13 }}
               >
-                <X size={18} />
+                <Printer size={15} />
+                <span>IMPRIMIR CUADRE DE CAJA</span>
               </button>
             </div>
 
-            <div className="modal-body">
-              <div className="receipt-paper" id="printable-receipt">
-                <div className="receipt-header">
-                  <h4>🍽️ SmartDining</h4>
-                  <p>Restaurante & Experiencia Digital</p>
-                  <small>NIT: 900.123.456-7 · IVA Régimen Común</small>
-                  <div className="receipt-divider"></div>
-                </div>
-
-                <div className="receipt-info-grid">
-                  <div><span>Recibo:</span> <strong>{paidReceipt.id_transaccion}</strong></div>
-                  <div><span>Fecha:</span> {new Date().toLocaleDateString()} {paidReceipt.hora}</div>
-                  <div><span>Mesa:</span> <strong>{paidReceipt.mesa}</strong></div>
-                  <div><span>Comensal:</span> {paidReceipt.comensal}</div>
-                  <div><span>Método:</span> {paidReceipt.metodo_pago.toUpperCase()}</div>
-                  <div><span>Ref:</span> {paidReceipt.referencia}</div>
-                </div>
-
-                <div className="receipt-divider"></div>
-
-                <div className="receipt-items-list">
-                  {paidReceipt.items.map((it, i) => (
-                    <div key={i} className="receipt-item-line">
-                      <span>{it.cantidad || it.qty || 1}x {it.plato_nombre || it.nombre}</span>
-                      <span>{formatCOP(it.subtotal)}</span>
-                    </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--sd-border)', textAlign: 'left', fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-text-muted)' }}>
+                    <th style={{ padding: '10px 14px' }}>N° TRANSACCIÓN</th>
+                    <th style={{ padding: '10px 14px' }}>HORA</th>
+                    <th style={{ padding: '10px 14px' }}>MESA</th>
+                    <th style={{ padding: '10px 14px' }}>COMENSAL</th>
+                    <th style={{ padding: '10px 14px' }}>MÉTODO</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right' }}>TOTAL COBRADO</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'center' }}>ESTADO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {errorDia && !dia && (
+                    <tr>
+                      <td colSpan={7} role="alert" style={{ padding: '12px 14px', color: 'var(--sd-red)' }}>
+                        No se pudo cargar el historial de hoy: {errorDia}. Pulsa ACTUALIZAR.
+                      </td>
+                    </tr>
+                  )}
+                  {dia && cobrosDelDia.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>Todavía no hay cobros hoy.</td>
+                    </tr>
+                  )}
+                  {cobrosDelDia.map((cobro) => (
+                    <tr key={cobro.clave} style={{ borderBottom: '1px solid var(--sd-border)' }}>
+                      <td style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', fontWeight: 700, color: 'var(--sd-white)' }}>
+                        {cobro.ids.map((id) => `TRX-${id}`).join(' · ')}
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>{horaBogota(cobro.fecha)}</td>
+                      <td style={{ padding: '12px 14px', fontWeight: 700 }}>Mesa {cobro.numero_mesa}</td>
+                      <td style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>{cobro.comensal || 'Mesa'}</td>
+                      <td style={{ padding: '12px 14px', textTransform: 'uppercase' }}>
+                        {String(cobro.metodo_pago || '').replace('_', ' ')}
+                        {cobro.voucher && (
+                          <small style={{ display: 'block', color: 'var(--sd-text-muted)', textTransform: 'none' }}>
+                            Voucher {cobro.voucher}
+                          </small>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700 }}>{formatCOP(cobro.monto)}</td>
+                      <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                        <span className="sd-badge sd-badge-white">Completada</span>
+                      </td>
+                    </tr>
                   ))}
+                </tbody>
+                {dia && cobrosDelDia.length > 0 && (
+                  <tfoot>
+                    <tr>
+                      <td colSpan={5} style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', textTransform: 'uppercase' }}>Total del día</td>
+                      <td data-testid="total-historial" style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800 }}>{formatCOP(dia.total)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </section>
+        )}
+      </div>
+
+      {/* Modal de Recibo Impreso / Confirmación */}
+      {paidReceipt && (
+        <div className="sd-modal-backdrop" onClick={() => setPaidReceipt(null)}>
+          <div
+            className="sd-card sd-table-detail-modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            style={{ maxWidth: 480 }}
+          >
+            <div className="sd-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <CheckCircle2 size={24} style={{ color: 'var(--sd-white)' }} />
+                <div>
+                  <h3 className="sd-card-title" style={{ margin: 0, fontSize: 24 }}>
+                    Pago Procesado con Éxito
+                  </h3>
+                  <small style={{ color: 'var(--sd-text-muted)' }}>
+                    {paidReceipt.duplicado
+                      ? 'Este cobro ya estaba registrado: no se cobró otra vez'
+                      : 'Transacción guardada en base de datos'}
+                  </small>
                 </div>
+              </div>
+              <button
+                type="button"
+                className="sd-topbar-icon-btn"
+                onClick={() => setPaidReceipt(null)}
+                aria-label="Cerrar recibo"
+              >
+                <X size={20} />
+              </button>
+            </div>
 
-                <div className="receipt-divider"></div>
+            <div style={{ margin: '20px 0', padding: 20, background: 'rgba(0,0,0,0.3)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ textAlign: 'center', borderBottom: '1px solid var(--sd-border)', paddingBottom: 12 }}>
+                <h4 style={{ fontFamily: 'var(--sd-font-heading)', margin: 0, fontSize: 22 }}>SMARTDINING</h4>
+                <p style={{ margin: '4px 0', fontSize: 13, color: 'var(--sd-text-muted)' }}>Comprobante de Pago POS</p>
+                <small style={{ fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-white)' }}>{paidReceipt.id_transaccion}</small>
+              </div>
 
-                <div className="receipt-totals">
-                  <div><span>Subtotal:</span> <span>{formatCOP(paidReceipt.subtotal)}</span></div>
-                  {paidReceipt.tip > 0 && (
-                    <div><span>Propina voluntaria (10%):</span> <span>{formatCOP(paidReceipt.tip)}</span></div>
-                  )}
-                  <div className="receipt-grand-total">
-                    <strong>TOTAL PAGADO:</strong>
-                    <strong>{formatCOP(paidReceipt.total)}</strong>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 14 }}>
+                <div><span style={{ color: 'var(--sd-text-muted)' }}>Mesa:</span> <strong>{paidReceipt.mesa}</strong></div>
+                <div><span style={{ color: 'var(--sd-text-muted)' }}>Comensal:</span> {paidReceipt.comensal}</div>
+                <div><span style={{ color: 'var(--sd-text-muted)' }}>Método:</span> {paidReceipt.metodo_pago.toUpperCase()}</div>
+                <div><span style={{ color: 'var(--sd-text-muted)' }}>Hora:</span> {paidReceipt.hora}</div>
+                {paidReceipt.pedidos?.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--sd-text-muted)' }}>Pedidos:</span> {paidReceipt.pedidos.join(', ')}</div>
+                )}
+                {paidReceipt.voucher && (
+                  <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--sd-text-muted)' }}>Voucher:</span> {paidReceipt.voucher}</div>
+                )}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <span style={{ color: 'var(--sd-text-muted)' }}>Saldo de la mesa:</span>{' '}
+                  <strong>{paidReceipt.mesaLiberada ? 'PAGADA · mesa liberada' : formatCOP(paidReceipt.saldoRestante)}</strong>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--sd-border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Subtotal:</span>
+                  <span>{formatCOP(paidReceipt.subtotal)}</span>
+                </div>
+                {paidReceipt.tip > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Propina (10%):</span>
+                    <span>{formatCOP(paidReceipt.tip)}</span>
                   </div>
-                  {paidReceipt.cashGiven && (
-                    <>
-                      <div><span>Efectivo recibido:</span> <span>{formatCOP(paidReceipt.cashGiven)}</span></div>
-                      <div><span>Cambio entregado:</span> <span>{formatCOP(paidReceipt.changeDue)}</span></div>
-                    </>
-                  )}
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--sd-font-heading)', fontSize: 20, fontWeight: 800, borderTop: '1px solid var(--sd-border)', paddingTop: 6 }}>
+                  <span>TOTAL:</span>
+                  <span>{formatCOP(paidReceipt.total)}</span>
                 </div>
-
-                <div className="receipt-footer">
-                  <p>¡Gracias por su visita!</p>
-                  <small>Generado digitalmente por SmartDining POS</small>
-                </div>
+                {paidReceipt.cashGiven && (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--sd-text-muted)' }}>
+                      <span>Efectivo:</span>
+                      <span>{formatCOP(paidReceipt.cashGiven)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--sd-text-muted)' }}>
+                      <span>Cambio:</span>
+                      <span>{formatCOP(paidReceipt.changeDue)}</span>
+                    </div>
+                  </>
+                )}
               </div>
+            </div>
 
-              <div className="receipt-modal-actions">
-                <button
-                  type="button"
-                  className="primary-button small"
-                  onClick={() => window.print()}
-                >
-                  <Printer size={16} />
-                  <span>Imprimir Recibo</span>
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button small"
-                  onClick={() => setPaidReceipt(null)}
-                >
-                  Cerrar
-                </button>
-              </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                type="button"
+                className="sd-btn sd-btn-primary"
+                style={{ flex: 1, minHeight: 44, fontSize: 15 }}
+                onClick={() => window.print()}
+              >
+                <Printer size={16} />
+                <span>IMPRIMIR RECIBO</span>
+              </button>
+              <button
+                type="button"
+                className="sd-btn sd-btn-secondary"
+                style={{ minHeight: 44, fontSize: 15 }}
+                onClick={() => setPaidReceipt(null)}
+              >
+                CERRAR
+              </button>
             </div>
           </div>
         </div>
       )}
-    </main>
+    </div>
   )
 }
+

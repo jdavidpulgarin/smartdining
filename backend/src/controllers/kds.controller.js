@@ -1,5 +1,6 @@
 const kdsService = require('../services/kds.service');
 const socketNotifier = require('../services/socket.notifier');
+const avisosMesa = require('../services/avisos-mesa');
 
 // Desde el KDS, el cocinero solo puede mover una comanda entre estos dos
 // estados (marcar "en preparación" o "listo"). Cancelar o cobrar se hace
@@ -41,7 +42,20 @@ async function cambiarEstado(req, res, next) {
     // (No existe un evento order:item_ready en socket-server/EVENTS.md: el
     // avance de la comanda se comunica con order:status.)
     socketNotifier.notificarCambioEstado(pedido);
-    if (pedido.mesaLiberada) socketNotifier.notificarMesaLiberada(pedido.id_mesa);
+
+    // Hoy esta rama es inalcanzable: desde el KDS solo se puede pasar a
+    // 'en_preparacion' o 'listo' (ESTADOS_PERMITIDOS_KDS) y ninguno de los dos
+    // cierra un pedido ni libera la mesa. Se deja con el motivo derivado, como
+    // los demás caminos, para que si algún día el KDS puede cerrar un pedido no
+    // reaparezca H-22 justo aquí.
+    if (pedido.mesaLiberada) {
+      socketNotifier.notificarMesaLiberada(
+        pedido.id_mesa,
+        socketNotifier.motivoPorEstadoFinal(pedido.estado)
+      );
+      // T12: igual que los demás caminos que liberan la mesa.
+      avisosMesa.encolarMesaActualizada(pedido.id_mesa, socketNotifier.MOTIVOS_MESA_ACTUALIZADA.liberada);
+    }
 
     return res.json(pedido);
   } catch (err) {

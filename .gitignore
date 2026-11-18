@@ -7,10 +7,14 @@ pnpm-debug.log*
 
 # Variables de entorno y secretos
 .env
+.env.test
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+# Variables del VPS por entorno (infra/.env.staging). Las plantillas sí se versionan.
+.env.staging
+.env.produccion
 
 # Compilación y builds
 dist/
@@ -34,8 +38,14 @@ Thumbs.db
 *.sqlite
 *.sql.backup
 *.dump
+# Respaldo del volumen de imágenes: solo los nombres que genera
+# infra/scripts/respaldo.sh, no cualquier .tar.gz del repo.
+diario-*.tar.gz
+predeploy-*.tar.gz
 
 # Monorepo: ignorar carpetas autogeneradas en cualquier subdirectorio
 **/dev-dist/
 **/dist/
 **/node_modules/
+**/playwright-report/
+**/test-results/

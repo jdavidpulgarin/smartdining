@@ -2,6 +2,11 @@ const { z } = require('zod');
 const transaccionesService = require('../services/transacciones.service');
 const { ESTADO_COBRADO } = transaccionesService;
 const socketNotifier = require('../services/socket.notifier');
+// T12: tras liberar la mesa por el cobro, mesa-actualizada 'liberada' al panel.
+const avisosMesa = require('../services/avisos-mesa');
+
+const MOTIVO_MESA_LIBERADA = socketNotifier.MOTIVOS_MESA_ACTUALIZADA.liberada;
+const { MOTIVO_PAGADA } = socketNotifier;
 const { esComensal } = require('../middleware/auth.middleware');
 const aliasComensal = require('../services/alias-comensal');
 
@@ -69,32 +74,76 @@ async function crear(req, res, next) {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
 
   try {
-    const { transaccion, pedidoCerrado, mesaLiberada, id_mesa } =
-      await transaccionesService.registrarPago({
-        ...parsed.data,
-        comensal: aliasDelComensal(req, parsed.data),
-        id_usuario: req.user.id_usuario,
-      });
+    const {
+      transaccion, pedidoCerrado, mesaLiberada, id_mesa, saldoMesaCentavos, estadoTransaccion,
+    } = await transaccionesService.registrarPago({
+      ...parsed.data,
+      comensal: aliasDelComensal(req, parsed.data),
+      id_usuario: req.user.id_usuario,
+    });
 
-    // Solo si el pedido pasó a 'pagado'. Con la cuenta cubierta pero la comida
-    // sin entregar el pedido sigue en cocina: el cambio se anunciará cuando el
-    // mesero lo marque entregado.
-    if (pedidoCerrado) {
-      socketNotifier.notificarCambioEstado({
-        id_pedido: transaccion.id_pedido,
-        id_mesa,
-        estado_anterior: 'entregado',
-        estado: 'pagado',
-      });
+    // AVISOS AL TIEMPO REAL. Todos van DESPUÉS del COMMIT y en una cadena
+    // secuencial que esta respuesta NO espera: el 201 sale de inmediato porque
+    // el cobro ya está guardado y el tiempo real es un extra. Se encadenan en
+    // vez de lanzarse sueltos porque su ORDEN importa (ver el aviso 1).
+    const avisos = [];
+
+    // (1) El cobro en sí. Va PRIMERO, antes de mesa-liberada: mesa-liberada
+    // desconecta a los comensales de la mesa y, si saliera antes, la mesa
+    // nunca llegaría a ver el pago que acaba de hacer (EVENTS.md §8.6).
+    //
+    // Solo si el dinero entró de verdad: un pago 'pendiente', 'fallido' o
+    // 'reembolsado' no es un cobro y no se anuncia como tal. El pago EN LÍNEA
+    // tampoco pasa por aquí —va por crearInterno— y allí el aviso lo emite el
+    // propio socket-server desde su webhook: avisar también desde el backend
+    // anunciaría el mismo pago dos veces.
+    if (estadoTransaccion === ESTADO_COBRADO) {
+      avisos.push(() =>
+        socketNotifier.notificarPagoConfirmado({
+          id_mesa,
+          // Centavos enteros: el contrato no acepta decimales y sumar abonos
+          // en coma flotante desajustaría el saldo.
+          monto_centavos: Math.round(Number(transaccion.monto) * 100),
+          // Saldo de la MESA (no el del pedido), calculado dentro de la
+          // transacción con la fila de la mesa todavía bloqueada.
+          saldo_restante_centavos: saldoMesaCentavos,
+          comensal: transaccion.comensal ?? null,
+          referencia_externa: transaccion.referencia_externa ?? null,
+          id_transaccion: transaccion.id_transaccion ?? null,
+        })
+      );
     }
 
-    // La mesa se liberó en la transacción del cobro solo si no le quedaban
+    // (2) Solo si el pedido pasó a 'pagado'. Con la cuenta cubierta pero la
+    // comida sin entregar el pedido sigue en cocina: el cambio se anunciará
+    // cuando el mesero lo marque entregado.
+    if (pedidoCerrado) {
+      avisos.push(() =>
+        socketNotifier.notificarCambioEstado({
+          id_pedido: transaccion.id_pedido,
+          id_mesa,
+          estado_anterior: 'entregado',
+          estado: 'pagado',
+        })
+      );
+    }
+
+    // (3) La mesa se liberó en la transacción del cobro solo si no le quedaban
     // pedidos abiertos. Se avisa para que el socket-server cierre esa sesión:
     // aislado, porque la liberación ya está hecha y no se revierte.
+    // H-22: el motivo es 'pagada', no el 'liberada' por omisión. La mesa se
+    // liberó porque el grupo pagó en caja, igual que si hubiera pagado en
+    // línea; las pantallas distinguen las dos cosas.
     if (mesaLiberada) {
-      socketNotifier.notificarMesaLiberada(id_mesa);
-      aliasComensal.olvidarMesa(id_mesa);
+      avisos.push(() => socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA));
+      avisos.push(() => avisosMesa.avisarMesaActualizada(id_mesa, MOTIVO_MESA_LIBERADA));
     }
+
+    socketNotifier.encadenarAvisos(avisos);
+
+    // Esto no es un aviso al socket-server sino estado en memoria de este
+    // proceso, así que no entra en la cadena: se olvida ya mismo.
+    if (mesaLiberada) aliasComensal.olvidarMesa(id_mesa);
 
     return res.status(201).json(transaccion);
   } catch (err) {
@@ -105,9 +154,6 @@ async function crear(req, res, next) {
 // Moneda del contrato con Wompi: cualquier otra se rechaza antes de tocar la
 // base, porque mezclarlas haria que los centavos no signifiquen lo mismo.
 const MONEDA = 'COP';
-
-// Motivo con el que se avisa la liberacion por pago en linea (EVENTS.md §8.3).
-const MOTIVO_PAGADA = 'pagada';
 
 /**
  * Cuerpo que manda el socket-server tras verificar el pago con Wompi
@@ -127,6 +173,17 @@ const pagoInternoSchema = z.object({
   monto_centavos: z.number().int().positive(),
   moneda: z.literal(MONEDA),
   metodo_pago: z.enum(METODOS_PAGO).default('online'),
+  // T4 (§8.4): cuándo se creó la intención, para saber de qué visita es.
+  // Opcional por compatibilidad con un socket-server que todavía no lo manda.
+  intencion_creada_en: z.string().datetime({ offset: true, message: 'intencion_creada_en debe ser una fecha ISO 8601' }).nullish(),
+});
+
+/** Los campos del resultado del registro que viajan en la respuesta (§8.4). */
+const camposDelRegistro = (r) => ({
+  aplicado_centavos: r.aplicado_centavos,
+  excedente_centavos: r.excedente_centavos,
+  motivo_excedente: r.motivo_excedente,
+  id_transaccion: r.id_transaccion,
 });
 
 /**
@@ -136,41 +193,44 @@ const pagoInternoSchema = z.object({
  * mesa, asi que el reparto entre pedidos y la liberacion de la mesa ocurren en
  * una sola transaccion en el service; aqui solo se traduce el resultado a HTTP
  * y se avisa al tiempo real DESPUES del commit.
+ *
+ * T4 (§8.7): un pago aprobado NUNCA se rechaza. Ya no hay 409 por exceder el
+ * saldo ni por mesa sin cuenta: lo que sobra queda en excedentes_pago_en_linea
+ * y la respuesta dice cuánto se aplicó y cuánto sobró. Solo 400 (cuerpo) y 404
+ * (mesa inexistente).
  */
 async function crearInterno(req, res, next) {
   const parsed = pagoInternoSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0].message });
 
-  const { referencia_externa, id_mesa, comensal, monto_centavos, metodo_pago } = parsed.data;
+  const {
+    referencia_externa, id_transaccion_pasarela, id_mesa, comensal, modo, monto_centavos, metodo_pago,
+    intencion_creada_en,
+  } = parsed.data;
 
   try {
     const r = await transaccionesService.registrarPagoInterno({
       referencia_externa,
+      id_transaccion_pasarela,
       id_mesa,
       comensal: comensal ?? null,
+      modo,
       monto_centavos,
       metodo_pago,
+      intencion_creada_en: intencion_creada_en ?? null,
     });
 
     if (r.noExiste) return res.status(404).json({ error: 'Mesa no encontrada' });
-    if (r.sinCuenta) {
-      return res.status(409).json({ error: 'La mesa no tiene una cuenta abierta por pagar' });
-    }
-    if (r.excede) {
-      return res.status(409).json({
-        error: 'El pago excede el saldo de la mesa',
-        saldo_centavos: r.saldo_centavos,
-      });
-    }
 
-    // Un reintento de Wompi no vuelve a cobrar ni a avisar: el aviso de
-    // payment:confirmed ya salio con el primer registro.
+    // Un reintento de Wompi no vuelve a cobrar ni a avisar: responde el MISMO
+    // resultado del primer registro (también si todo fue excedente).
     if (r.duplicado) {
       return res.status(200).json({
         ok: true,
         duplicado: true,
         saldo_restante_centavos: r.saldo_restante_centavos,
         mesa_liberada: false,
+        ...camposDelRegistro(r),
       });
     }
 
@@ -184,13 +244,241 @@ async function crearInterno(req, res, next) {
         estado: 'pagado',
       });
     }
-    if (r.mesa_liberada) socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA);
+    if (r.mesa_liberada) {
+      socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA);
+      avisosMesa.encolarMesaActualizada(id_mesa, MOTIVO_MESA_LIBERADA);
+    }
 
     return res.status(201).json({
       ok: true,
       duplicado: false,
       saldo_restante_centavos: r.saldo_restante_centavos,
       mesa_liberada: r.mesa_liberada,
+      ...camposDelRegistro(r),
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /transacciones/mesa — cobro de MESA en caja (pedido de Jarrison tras la
+// prueba de punta a punta: la Caja cobraba siempre al primer pedido).
+// ---------------------------------------------------------------------------
+
+/** Métodos de la caja: los de la tabla menos 'online', que es solo de Wompi. */
+const METODOS_CAJA = METODOS_PAGO.filter((m) => m !== 'online');
+
+/** Tope de DECIMAL(10,2) en centavos: 99.999.999,99 pesos. */
+const MAX_CENTAVOS = 9999999999;
+
+const MOTIVO_CUERPO_INVALIDO = 'cuerpo_invalido';
+const MOTIVO_MESA_INEXISTENTE = 'mesa_inexistente';
+const MOTIVO_SIN_CUENTA = 'sin_cuenta';
+const MOTIVO_EXCEDE = 'excede';
+const MOTIVO_EXCEDE_SALDO_COMENSAL = 'excede_saldo_comensal';
+const MOTIVO_ID_COBRO_EN_USO = 'id_cobro_en_uso';
+const MOTIVO_VOUCHER_INVALIDO = 'voucher_invalido';
+const MOTIVO_VOUCHER_NO_APLICA = 'voucher_no_aplica';
+
+/** Métodos con datáfono: los únicos que pueden llevar voucher (script 35). */
+const METODOS_CON_VOUCHER = ['tarjeta_debito', 'tarjeta_credito'];
+
+/** Formato del voucher ya normalizado: el mismo del CHECK ck_transacciones_voucher. */
+const FORMATO_VOUCHER = /^[A-Z0-9-]{1,40}$/;
+
+/**
+ * Voucher del datáfono en el cobro de mesa (script 35), normalizado en el
+ * servidor. Devuelve `{ voucher }` (null si no hay) o `{ error, motivo }`.
+ *
+ * ORDEN de las comprobaciones (el primero que falla manda):
+ *   1. TIPO: ausente o null -> sin voucher; un string se normaliza; cualquier
+ *      otra cosa (número, objeto...) -> 400 voucher_invalido.
+ *   2. NORMALIZACIÓN: trim() de los extremos (también quita los espacios
+ *      Unicode, como U+00A0) y toUpperCase(). Vacío tras recortar -> null.
+ *   3. MÉTODO: con contenido y un método sin datáfono (efectivo, transferencia)
+ *      -> 400 voucher_no_aplica. Antes que el formato: decirle a la caja que el
+ *      voucher sobra es más útil que corregirle un voucher que no va.
+ *   4. FORMATO: ^[A-Z0-9-]{1,40}$ -> si no, 400 voucher_invalido.
+ *
+ * Con efectivo o transferencia NUNCA llega un voucher a la base: o es null, o
+ * ya se rechazó en el paso 3.
+ */
+function normalizarVoucher(valor, metodoPago) {
+  if (valor === undefined || valor === null) return { voucher: null };
+  if (typeof valor !== 'string') {
+    return { error: 'voucher debe ser texto', motivo: MOTIVO_VOUCHER_INVALIDO };
+  }
+  const voucher = valor.trim().toUpperCase();
+  if (voucher === '') return { voucher: null };
+  if (!METODOS_CON_VOUCHER.includes(metodoPago)) {
+    return {
+      error: 'El voucher solo aplica a pagos con tarjeta (débito o crédito)',
+      motivo: MOTIVO_VOUCHER_NO_APLICA,
+    };
+  }
+  if (!FORMATO_VOUCHER.test(voucher)) {
+    return {
+      error: 'El voucher solo admite letras, números y guiones, hasta 40 caracteres',
+      motivo: MOTIVO_VOUCHER_INVALIDO,
+    };
+  }
+  return { voucher };
+}
+
+/**
+ * Pesos con como mucho 2 decimales -> centavos ENTEROS, sin coma flotante.
+ *
+ * `Math.round(monto * 100)` falla en casos reales: 1.15 * 100 es
+ * 114.99999999999999 en coma flotante. Aquí se trabaja sobre el TEXTO del
+ * número: la parte entera por 100 más los decimales rellenados a dos cifras.
+ * Devuelve null si tiene más de 2 decimales, exponente, o no cabe en
+ * DECIMAL(10,2).
+ */
+function montoACentavos(monto) {
+  if (typeof monto !== 'number' || !Number.isFinite(monto) || monto <= 0) return null;
+  const m = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(monto));
+  if (!m) return null; // más de 2 decimales, o notación con exponente
+  const centavos = Number(m[1]) * 100 + Number((m[2] || '').padEnd(2, '0'));
+  if (!Number.isSafeInteger(centavos) || centavos < 1 || centavos > MAX_CENTAVOS) return null;
+  return centavos;
+}
+
+/** Centavos enteros -> pesos como número (12500050 -> 125000.5). */
+const aPesos = (centavos) => Number(centavos) / 100;
+
+const cobroMesaSchema = z
+  .object({
+    id_mesa: z.number().int().positive(),
+    monto: z
+      .number()
+      .positive()
+      .refine((v) => montoACentavos(v) !== null, {
+        message: 'monto debe tener como mucho 2 decimales y caber en 99.999.999,99',
+      }),
+    metodo_pago: z.enum(METODOS_CAJA, {
+      errorMap: () => ({ message: `metodo_pago debe ser uno de: ${METODOS_CAJA.join(', ')}` }),
+    }),
+    // Las mismas reglas que el comensal de POST /transacciones.
+    comensal: z.string().min(1).max(40).nullish(),
+    id_cobro: z.string().uuid({ message: 'id_cobro debe ser un UUID' }),
+    // Script 35. Se acepta cualquier valor aquí y lo valida normalizarVoucher,
+    // con su propio orden y sus motivos (voucher_invalido, voucher_no_aplica).
+    voucher: z.unknown().optional(),
+  })
+  .strict();
+
+/**
+ * POST /transacciones/mesa — la caja cobra un monto A LA MESA y la base lo
+ * reparte entre sus pedidos con saldo, del más viejo al más nuevo (el mismo
+ * núcleo que el pago en línea). `id_cobro` hace el reintento seguro: con el
+ * mismo id_cobro no se cobra dos veces.
+ *
+ * Con `comensal` («pagar lo mío»), el monto tampoco puede superar el saldo
+ * PROPIO de esa persona en la visita: 409 excede_saldo_comensal con su saldo.
+ */
+async function cobrarMesa(req, res, next) {
+  const parsed = cobroMesaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0].message, motivo: MOTIVO_CUERPO_INVALIDO });
+  }
+  const { id_mesa, monto, metodo_pago, id_cobro } = parsed.data;
+  const monto_centavos = montoACentavos(monto);
+  const comensal = aliasDelComensal(req, parsed.data);
+  const voucher = normalizarVoucher(parsed.data.voucher, metodo_pago);
+  if (voucher.error) return res.status(400).json({ error: voucher.error, motivo: voucher.motivo });
+
+  try {
+    const r = await transaccionesService.cobrarMesaEnCaja({
+      id_mesa,
+      monto_centavos,
+      metodo_pago,
+      comensal,
+      id_cobro,
+      id_usuario: req.user.id_usuario,
+      voucher: voucher.voucher,
+    });
+
+    if (r.noExiste) {
+      return res.status(404).json({ error: 'Mesa no encontrada', motivo: MOTIVO_MESA_INEXISTENTE });
+    }
+    if (r.sinCuenta) {
+      return res.status(409).json({
+        error: 'La mesa no tiene una cuenta abierta por pagar',
+        motivo: MOTIVO_SIN_CUENTA,
+      });
+    }
+    if (r.excedeComensal) {
+      return res.status(409).json({
+        error: 'El pago excede lo que debe ese comensal',
+        motivo: MOTIVO_EXCEDE_SALDO_COMENSAL,
+        saldo: aPesos(r.saldo_centavos),
+      });
+    }
+    if (r.excede) {
+      return res.status(409).json({
+        error: 'El pago excede el saldo de la mesa',
+        motivo: MOTIVO_EXCEDE,
+        saldo: aPesos(r.saldo_centavos),
+      });
+    }
+    // Un id_cobro que ya se usó en OTRA mesa: no es un reintento de este cobro,
+    // y contestar "duplicado" haría creer a la caja que cobró. No se escribe nada.
+    if (r.idCobroEnUso) {
+      return res.status(409).json({
+        error: 'Ese id_cobro ya se usó en otra mesa; genera uno nuevo',
+        motivo: MOTIVO_ID_COBRO_EN_USO,
+      });
+    }
+    // El reintento con el mismo id_cobro no cobra ni avisa otra vez: los avisos
+    // ya salieron con el primero.
+    if (r.duplicado) {
+      return res.status(200).json({ duplicado: true, saldo_restante: aPesos(r.saldo_restante_centavos) });
+    }
+
+    // Los mismos avisos que el cobro en caja de POST /transacciones, en orden y
+    // después del COMMIT (el notifier nunca lanza): primero el pago, luego cada
+    // pedido que quedó pagado y al final la mesa liberada.
+    const avisos = [
+      () => socketNotifier.notificarPagoConfirmado({
+        id_mesa,
+        monto_centavos,
+        saldo_restante_centavos: r.saldo_restante_centavos,
+        comensal,
+        referencia_externa: transaccionesService.PREFIJO_REFERENCIA_CAJA + id_cobro,
+        // La primera fila del reparto: es la guardia de idempotencia del
+        // socket-server para este cobro.
+        id_transaccion: r.transacciones[0] ? r.transacciones[0].id_transaccion : null,
+        // El voucher NO viaja al socket-server (script 35): es un dato de la
+        // caja, se queda en transacciones y en GET /transacciones.
+      }),
+      ...r.pagados.map((p) => () => socketNotifier.notificarCambioEstado({
+        id_pedido: p.id_pedido,
+        id_mesa,
+        estado_anterior: p.estado_anterior,
+        estado: 'pagado',
+      })),
+    ];
+    if (r.mesa_liberada) {
+      avisos.push(() => socketNotifier.notificarMesaLiberada(id_mesa, MOTIVO_PAGADA));
+      avisos.push(() => avisosMesa.avisarMesaActualizada(id_mesa, MOTIVO_MESA_LIBERADA));
+    }
+    socketNotifier.encadenarAvisos(avisos);
+
+    if (r.mesa_liberada) aliasComensal.olvidarMesa(id_mesa);
+
+    return res.status(201).json({
+      duplicado: false,
+      saldo_restante: aPesos(r.saldo_restante_centavos),
+      mesa_liberada: r.mesa_liberada,
+      pagados: r.pagados.map((p) => p.id_pedido),
+      transacciones: r.transacciones.map((t) => ({
+        id_transaccion: t.id_transaccion,
+        id_pedido: t.id_pedido,
+        monto: aPesos(t.monto_centavos),
+        comensal: t.comensal,
+        voucher: t.voucher,
+      })),
     });
   } catch (err) {
     return next(err);
@@ -206,13 +494,107 @@ async function obtenerPorPedido(req, res, next) {
   }
 }
 
+/** Motivo del 400 cuando la query de GET /transacciones no es la esperada. */
+const MOTIVO_CONSULTA_INVALIDA = 'consulta_invalida';
+
+/** Forma de una fecha de calendario en la query: AAAA-MM-DD, nada más. */
+const FORMATO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * ¿Existe esa fecha en el calendario? (2026-02-30 y 2026-13-01 no.)
+ *
+ * Se construye con `Date.UTC` y se comprueba que año, mes y día no se
+ * "desbordaron" (JavaScript convierte el 30 de febrero en el 2 de marzo sin
+ * avisar). Todo en UTC, así que el resultado no depende de la zona del
+ * servidor: aquí no se pregunta qué día es hoy, solo si la fecha existe.
+ */
+function fechaExiste(texto) {
+  const [anio, mes, dia] = texto.split('-').map(Number);
+  const f = new Date(Date.UTC(anio, mes - 1, dia));
+  return f.getUTCFullYear() === anio && f.getUTCMonth() === mes - 1 && f.getUTCDate() === dia;
+}
+
+/**
+ * Query de GET /transacciones (cierre de caja, propuesta de Roberto).
+ *
+ * `desde` es `hoy` o una fecha `AAAA-MM-DD` que exista; `.strict()` rechaza
+ * cualquier otro parámetro. Si la fecha es futura o demasiado antigua NO se
+ * decide aquí sino en la base, con el mismo "hoy de Bogotá" que usa la
+ * consulta (ver transaccionesService.listarDelDia).
+ */
+const transaccionesDelDiaSchema = z
+  .object({
+    desde: z
+      .string({ required_error: 'desde es obligatorio: "hoy" o una fecha AAAA-MM-DD' })
+      .superRefine((valor, ctx) => {
+        if (valor === transaccionesService.DESDE_HOY) return;
+        if (!FORMATO_FECHA.test(valor)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'desde debe ser "hoy" o una fecha AAAA-MM-DD',
+          });
+        } else if (!fechaExiste(valor)) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `La fecha ${valor} no existe` });
+        }
+      }),
+  })
+  .strict();
+
+/** Mensajes de los límites que decide la base. */
+const MENSAJES_RANGO = {
+  futura: (r) => `desde no puede ser posterior a hoy (${r.hoy}, hora de Bogotá)`,
+  antigua: (r) =>
+    `desde admite como mucho ${transaccionesService.DIAS_ATRAS_MAXIMOS} días atrás: `
+    + `la fecha más antigua permitida hoy es ${r.minimo}`,
+};
+
+/**
+ * GET /transacciones?desde=hoy|AAAA-MM-DD — las transacciones completadas
+ * desde ese día hasta el final de hoy, para el cierre de caja. Los días son de
+ * Bogotá; los calcula la base, ver transaccionesService.listarDelDia.
+ */
+async function listarDelDia(req, res, next) {
+  const parsed = transaccionesDelDiaSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: parsed.error.errors[0].message,
+      motivo: MOTIVO_CONSULTA_INVALIDA,
+    });
+  }
+
+  try {
+    const resumen = await transaccionesService.listarDelDia({ desde: parsed.data.desde });
+    if (resumen.invalido) {
+      return res.status(400).json({
+        error: MENSAJES_RANGO[resumen.invalido](resumen),
+        motivo: MOTIVO_CONSULTA_INVALIDA,
+      });
+    }
+    return res.json(resumen);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   crear,
   crearInterno,
   aliasDelComensal,
   obtenerPorPedido,
+  listarDelDia,
+  cobrarMesa,
+  montoACentavos,
+  METODOS_CAJA,
+  MOTIVO_CUERPO_INVALIDO,
+  MOTIVO_SIN_CUENTA,
+  MOTIVO_EXCEDE,
+  MOTIVO_ID_COBRO_EN_USO,
   METODOS_PAGO,
   ESTADOS_TRANSACCION,
   MONEDA,
-  MOTIVO_PAGADA,
+  MOTIVO_CONSULTA_INVALIDA,
+  fechaExiste,
+  normalizarVoucher,
+  MOTIVO_VOUCHER_INVALIDO,
+  MOTIVO_VOUCHER_NO_APLICA,
 };

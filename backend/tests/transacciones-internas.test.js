@@ -41,6 +41,11 @@ function responderPagos(opciones = {}) {
     saldoFinal = null,
     chocaIndice = false,
     mesaExiste = true,
+    otraVisita = false,
+    // Consumo y pagos por comensal (saldo propio, modo 'propio'), en centavos.
+    cuentaPorComensal = [],
+    // Lo ya registrado con esa referencia cuando todo fue excedente.
+    excedenteRegistrado = null,
   } = opciones;
 
   // Saldo que se devuelve al final: si no se fija, el que quede de restar el
@@ -48,13 +53,23 @@ function responderPagos(opciones = {}) {
   const saldoInicial = pedidos.reduce((s, p) => s + p.saldo_centavos, 0);
 
   let yaPago = false;
+  let registrado = yaRegistrada;
+  let siguienteId = 900;
 
   return (sql) => {
-    if (sql.includes('SELECT id_mesa FROM mesas WHERE id_mesa = $1 FOR UPDATE')) {
-      return mesaExiste ? { rows: [{ id_mesa: ID_MESA }] } : { rows: [] };
+    // T4: el bloqueo de la mesa dice además si la intención es de otra visita.
+    if (sql.includes('FROM mesas WHERE id_mesa = $1::int FOR UPDATE')) {
+      return mesaExiste ? { rows: [{ id_mesa: ID_MESA, otra_visita: otraVisita }] } : { rows: [] };
     }
-    if (sql.includes('SELECT 1 FROM transacciones WHERE referencia_externa')) {
-      return yaRegistrada ? { rows: [{ '?column?': 1 }] } : { rows: [] };
+    // T4: lo ya registrado con esa referencia (transacciones y excedentes).
+    if (sql.includes('LEFT JOIN excedentes_pago_en_linea')) {
+      if (excedenteRegistrado) return { rows: [excedenteRegistrado] };
+      return registrado
+        ? { rows: [{ aplicado: String(PAGO.monto_centavos), id_primera: 900, excedente_centavos: null, motivo: null, id_del_excedente: null }] }
+        : { rows: [{ aplicado: '0', id_primera: null, excedente_centavos: null, motivo: null, id_del_excedente: null }] };
+    }
+    if (sql.includes("'consumo'::text AS tipo")) {
+      return { rows: cuentaPorComensal.map((f) => ({ ...f, centavos: String(f.centavos) })) };
     }
     // El saldo de la mesa (con SUM) va antes que el listado de pedidos: las dos
     // consultas mencionan obtener_saldo_pendiente.
@@ -74,6 +89,8 @@ function responderPagos(opciones = {}) {
     }
     if (sql.includes('INSERT INTO transacciones')) {
       if (chocaIndice) {
+        // La otra petición ya registró el pago: después del choque se ve.
+        registrado = true;
         const err = new Error(
           'duplicate key value violates unique constraint "uq_transacciones_referencia_externa"'
         );
@@ -81,11 +98,20 @@ function responderPagos(opciones = {}) {
         throw err;
       }
       yaPago = true;
-      return { rows: [] };
+      siguienteId += 1;
+      return { rows: [{ id_transaccion: siguienteId }] };
     }
     return { rows: [] };
   };
 }
+
+/** Los campos del registro (§8.4) cuando todo se aplicó y no sobró nada. */
+const SIN_EXCEDENTE = (aplicado = PAGO.monto_centavos, idTransaccion = 901) => ({
+  aplicado_centavos: aplicado,
+  excedente_centavos: 0,
+  motivo_excedente: null,
+  id_transaccion: idTransaccion,
+});
 
 // ---------------------------------------------------------------------------
 // Pago total de un pedido entregado
@@ -103,7 +129,9 @@ test('un pago que liquida un pedido entregado lo marca pagado y libera la mesa',
       duplicado: false,
       saldo_restante_centavos: 0,
       mesa_liberada: true,
+      ...SIN_EXCEDENTE(),
     });
+    assert.strictEqual(db.buscar('INSERT INTO excedentes_pago_en_linea'), undefined, 'no sobró nada');
 
     const insert = db.buscar('INSERT INTO transacciones');
     assert.ok(insert);
@@ -412,6 +440,8 @@ test('la misma referencia_externa responde 200 duplicado sin registrar nada', as
       duplicado: true,
       saldo_restante_centavos: 6000000,
       mesa_liberada: false,
+      // T4: el MISMO resultado del primer registro.
+      ...SIN_EXCEDENTE(PAGO.monto_centavos, 900),
     });
     assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined, 'no se cobra dos veces');
     assert.ok(db.buscar('ROLLBACK'));
@@ -442,7 +472,7 @@ test('si el INSERT choca con el indice unico (23505) cuenta como duplicado', asy
 // Rechazos
 // ---------------------------------------------------------------------------
 
-test('un pago que excede el saldo de la mesa responde 409 y no registra nada', async () => {
+test('T4: un pago que excede el saldo de la mesa NO se rechaza: aplica el saldo y el resto es excedente', async () => {
   const socket = instalarFakeSocket();
   const db = instalarFakeDb(
     responderPagos({ pedidos: [{ id_pedido: 87, estado: 'entregado', saldo_centavos: 1000000 }] })
@@ -450,11 +480,20 @@ test('un pago que excede el saldo de la mesa responde 409 y no registra nada', a
   try {
     const res = await enviar();
 
-    assert.strictEqual(res.status, 409);
-    assert.match(res.body.error, /excede el saldo/);
-    assert.strictEqual(res.body.saldo_centavos, 1000000, 'se dice cual es el saldo real');
-    assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined);
-    assert.ok(db.buscar('ROLLBACK'));
+    assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+    assert.strictEqual(res.body.aplicado_centavos, 1000000);
+    assert.strictEqual(res.body.excedente_centavos, 2000000);
+    assert.strictEqual(res.body.motivo_excedente, 'excede_saldo_mesa', "modo 'igual': el tope es la mesa");
+    assert.strictEqual(res.body.id_transaccion, 901);
+    assert.strictEqual(db.buscar('INSERT INTO transacciones').params[2], 1000000, 'solo se aplica el saldo');
+    const exc = db.buscar('INSERT INTO excedentes_pago_en_linea');
+    assert.ok(exc, 'el excedente se guarda');
+    assert.deepStrictEqual(exc.params, [
+      ID_MESA, 'Ana', PAGO.referencia_externa, PAGO.id_transaccion_pasarela, 901,
+      3000000, 1000000, 2000000, 'excede_saldo_mesa',
+    ]);
+    const sqls = db.ejecutadas.map((q) => q.sql);
+    assert.ok(sqls.indexOf(exc.sql) < sqls.indexOf('COMMIT'), 'en la MISMA transacción');
   } finally {
     db.restaurar();
     socket.restaurar();
@@ -475,15 +514,20 @@ test('una mesa inexistente responde 404', async () => {
   }
 });
 
-test('una mesa sin cuenta abierta responde 409', async () => {
+test('T4: una mesa sin cuenta abierta NO se rechaza: todo el pago es excedente (sin_cuenta)', async () => {
   const socket = instalarFakeSocket();
   const db = instalarFakeDb(responderPagos({ pedidos: [], saldoFinal: 0 }));
   try {
     const res = await enviar();
 
-    assert.strictEqual(res.status, 409);
-    assert.match(res.body.error, /no tiene una cuenta abierta/);
+    assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+    assert.deepStrictEqual(res.body, {
+      ok: true, duplicado: false, saldo_restante_centavos: 0, mesa_liberada: false,
+      aplicado_centavos: 0, excedente_centavos: 3000000, motivo_excedente: 'sin_cuenta', id_transaccion: null,
+    });
     assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined);
+    assert.strictEqual(db.buscar('INSERT INTO excedentes_pago_en_linea').params[4], null, 'sin transacción aplicada');
+    assert.ok(db.buscar('COMMIT'));
   } finally {
     db.restaurar();
     socket.restaurar();
@@ -600,6 +644,148 @@ test('metodo_pago por omision es online', async () => {
 
     assert.strictEqual(res.status, 201);
     assert.strictEqual(db.buscar('INSERT INTO transacciones').params[1], 'online');
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// T4 (§8.4 y §8.7): un pago aprobado nunca se rechaza; el excedente se guarda
+// ---------------------------------------------------------------------------
+
+const PROPIO = { ...PAGO, modo: 'propio', comensal: 'Ana' };
+
+test('T4 propio: Ana debe 1.000.000 (con el alias normalizado) y paga 3.000.000 -> aplica lo suyo, excede_saldo_comensal', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderPagos({
+    cuentaPorComensal: [
+      { tipo: 'consumo', comensal: ' ána ', centavos: 1000000 },
+      { tipo: 'consumo', comensal: 'Beto', centavos: 2000000 },
+    ],
+  }));
+  try {
+    const res = await enviar(PROPIO);
+    assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+    assert.strictEqual(res.body.aplicado_centavos, 1000000, 'solo el saldo propio de Ana');
+    assert.strictEqual(res.body.excedente_centavos, 2000000);
+    assert.strictEqual(res.body.motivo_excedente, 'excede_saldo_comensal');
+    assert.strictEqual(db.buscar('INSERT INTO excedentes_pago_en_linea').params[8], 'excede_saldo_comensal');
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test("T4 propio: Ana sin saldo propio (le cancelaron el plato) -> todo es excedente aunque la mesa deba", async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderPagos({ cuentaPorComensal: [{ tipo: 'consumo', comensal: 'Beto', centavos: 3000000 }] }));
+  try {
+    const res = await enviar(PROPIO);
+    assert.strictEqual(res.status, 201);
+    assert.deepStrictEqual(
+      [res.body.aplicado_centavos, res.body.excedente_centavos, res.body.motivo_excedente, res.body.id_transaccion],
+      [0, 3000000, 'excede_saldo_comensal', null]
+    );
+    assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined, 'no cubre lo de Beto');
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test("T4 total: el tope es el saldo de la mesa, no el de una persona", async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderPagos({ cuentaPorComensal: [{ tipo: 'consumo', comensal: 'Ana', centavos: 1 }] }));
+  try {
+    const res = await enviar({ ...PAGO, modo: 'total' });
+    assert.strictEqual(res.status, 201);
+    assert.deepStrictEqual([res.body.aplicado_centavos, res.body.excedente_centavos], [3000000, 0]);
+    assert.strictEqual(db.buscar("'consumo'::text AS tipo"), undefined, 'no mira la cuenta por persona');
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('T4 otra_visita: la intención es de un grupo anterior -> no cubre nada del grupo nuevo; todo es excedente', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderPagos({ otraVisita: true }));
+  try {
+    const res = await enviar({ ...PAGO, intencion_creada_en: '2026-11-14T20:10:00.000Z' });
+    assert.strictEqual(res.status, 201);
+    assert.deepStrictEqual(
+      [res.body.aplicado_centavos, res.body.excedente_centavos, res.body.motivo_excedente],
+      [0, 3000000, 'otra_visita']
+    );
+    assert.strictEqual(db.buscar('INSERT INTO transacciones'), undefined);
+    assert.strictEqual(db.buscar('ORDER BY p.creado_en ASC, p.id_pedido ASC'), undefined, 'ni lee los pedidos del grupo nuevo para repartir');
+    const mesa = db.buscar('FROM mesas WHERE id_mesa = $1::int FOR UPDATE');
+    assert.deepStrictEqual(mesa.params, [ID_MESA, '2026-11-14T20:10:00.000Z'], 'la visita se decide en la base');
+    assert.match(mesa.sql, /\$2::timestamptz < sesion_iniciada_en/);
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('T4: sin intencion_creada_en (socket-server anterior) sigue funcionando: la visita no se decide por ahí', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderPagos());
+  try {
+    assert.strictEqual((await enviar()).status, 201);
+    assert.deepStrictEqual(db.buscar('FROM mesas WHERE id_mesa = $1::int FOR UPDATE').params, [ID_MESA, null]);
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('T4: intencion_creada_en que no es una fecha ISO -> 400', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderPagos());
+  try {
+    const res = await enviar({ ...PAGO, intencion_creada_en: 'ayer' });
+    assert.strictEqual(res.status, 400);
+    assert.match(res.body.error, /intencion_creada_en/);
+    assert.strictEqual(db.buscar('BEGIN'), undefined);
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('T4 duplicado: un pago que fue TODO excedente responde el mismo resultado (200) sin registrar nada', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderPagos({
+    saldoFinal: 0,
+    excedenteRegistrado: { aplicado: '0', id_primera: null, excedente_centavos: '3000000', motivo: 'sin_cuenta', id_del_excedente: null },
+  }));
+  try {
+    const res = await enviar();
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body, {
+      ok: true, duplicado: true, saldo_restante_centavos: 0, mesa_liberada: false,
+      aplicado_centavos: 0, excedente_centavos: 3000000, motivo_excedente: 'sin_cuenta', id_transaccion: null,
+    });
+    assert.strictEqual(db.buscar('INSERT INTO excedentes_pago_en_linea'), undefined);
+    assert.ok(db.buscar('ROLLBACK'));
+  } finally {
+    db.restaurar();
+    socket.restaurar();
+  }
+});
+
+test('T4: un pago con excedente que libera la mesa sigue avisando mesa-liberada (pagada) como hoy', async () => {
+  const socket = instalarFakeSocket();
+  const db = instalarFakeDb(responderPagos({ pedidos: [{ id_pedido: 87, estado: 'entregado', saldo_centavos: 1000000 }] }));
+  try {
+    const res = await enviar();
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.mesa_liberada, true);
+    assert.strictEqual(res.body.excedente_centavos, 2000000);
+    await require('../src/services/socket.notifier').esperarAvisos();
+    assert.deepStrictEqual(socket.buscar('/internal/mesa-liberada').cuerpo, { id_mesa: ID_MESA, motivo: 'pagada' });
   } finally {
     db.restaurar();
     socket.restaurar();

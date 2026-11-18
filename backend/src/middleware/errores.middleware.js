@@ -3,6 +3,9 @@
  * y el mensaje que sale al cliente: los controllers solo hacen next(err).
  */
 
+const { traducirErrorInventario } = require('./inventario-errores');
+const { esRutaConMotivo, caminoDe } = require('../config/rutas-clientes');
+
 // SQLSTATE que PostgreSQL asigna a un RAISE EXCEPTION sin código propio, o sea
 // a las reglas de negocio que viven en los triggers de Jarrison.
 const PG_RAISE_EXCEPTION = 'P0001';
@@ -66,8 +69,60 @@ function esErrorDeConcurrencia(codigo) {
 }
 
 /**
+ * SQLSTATE que hasta ahora caían en el 500 genérico aunque NO son fallos del
+ * servidor. Un 500 los vuelve indistinguibles de una caída: el cliente no sabe
+ * si corregir algo, reintentar o avisar al equipo.
+ *
+ * - 23505 unique_violation: ya existe una fila con esos datos -> 409.
+ * - 23503 foreign_key_violation: la operación choca con otra fila relacionada
+ *   -> 409. Cubre los dos sentidos de una FK (la fila referenciada no existe, o
+ *   sigue referenciada y por eso no se puede borrar) con un mensaje que no dice
+ *   cuál: distinguirlos obligaría a mirar el nombre del constraint, que es justo
+ *   lo que no debe salir. Donde importa de verdad —el constructor— ya se traduce
+ *   antes, con mensaje propio.
+ * - 23514 check_violation: el cuerpo pasó el esquema pero el valor no cumple una
+ *   regla de la base -> 422, el mismo caso que la clase 22 y con su mismo
+ *   mensaje. No se abre un segundo significado para el 422.
+ * - 57014 query_canceled: PostgreSQL abortó la consulta al vencer
+ *   statement_timeout (ver src/config/db.js) -> 503. No se escribió nada y el
+ *   problema es de carga, no de la petición: reintentar más tarde sirve.
+ *
+ * Es una lista explícita, NO la clase 23 completa: 23502 (NOT NULL) y 23P01
+ * (violación de exclusión) significan otra cosa y siguen dando 500.
+ */
+const MENSAJE_REGISTRO_DUPLICADO = 'Ya existe un registro con esos datos';
+const MENSAJE_REFERENCIA_RELACIONADA = 'La operación choca con otro registro relacionado';
+const MENSAJE_CONSULTA_CANCELADA =
+  'La operación tardó demasiado y se canceló, vuelve a intentarlo en un momento';
+
+/**
+ * Un Map y no un objeto literal: con un objeto, un `código` como
+ * 'constructor' o '__proto__' encontraría algo heredado del prototipo.
+ *
+ * `rotulo` es solo para el log del servidor; al cliente va `mensaje`.
+ */
+const TRADUCCION_POR_SQLSTATE = new Map([
+  ['23505', { status: 409, mensaje: MENSAJE_REGISTRO_DUPLICADO, rotulo: 'Violación de unicidad' }],
+  ['23503', { status: 409, mensaje: MENSAJE_REFERENCIA_RELACIONADA, rotulo: 'Violación de clave ajena' }],
+  ['23514', { status: 422, mensaje: MENSAJE_DATOS_FUERA_DE_RANGO, rotulo: 'Violación de CHECK' }],
+  ['57014', { status: 503, mensaje: MENSAJE_CONSULTA_CANCELADA, rotulo: 'Consulta cancelada por timeout' }],
+]);
+
+/**
+ * Devuelve la traducción de un SQLSTATE, o null si no está en la lista.
+ * Exportada para poder probar la tabla sin pasar por una ruta.
+ */
+function traduccionDeSqlstate(codigo) {
+  if (typeof codigo !== 'string') return null;
+  return TRADUCCION_POR_SQLSTATE.get(codigo) || null;
+}
+
+/**
  * Reglas:
  * - Error de negocio del backend ({ status, message }) -> ese status.
+ * - Inventario (D-17): SD001 -> 409 `sin_stock` con los faltantes, SD002 -> 400
+ *   `movimiento_invalido` con el stock actual, y el "ingrediente agotado" del
+ *   interruptor manual -> 409 `ingrediente_agotado` (ver inventario-errores.js).
  * - RAISE EXCEPTION de un trigger (P0001) -> 409 con el mensaje del trigger,
  *   que está redactado para que lo lea el usuario ("El plato X no se encuentra
  *   disponible", "Transición de estado no autorizada: de A hacia B").
@@ -76,48 +131,133 @@ function esErrorDeConcurrencia(codigo) {
  * - Choque de concurrencia (40P01 deadlock, 40001 fallo de serialización) ->
  *   409 con un mensaje genérico que invita a reintentar, que es el único caso
  *   en el que reintentar sirve de algo. El detalle va al log.
- * - Cualquier otro error, incluidos los demás de PostgreSQL (CHECK 23514,
- *   FK 23503, unique 23505, etc.) -> 500 genérico. El mensaje interno se
- *   registra en el servidor y nunca se expone al cliente.
+ * - Integridad y cancelación (23505, 23503 -> 409; 23514 -> 422; 57014 -> 503)
+ *   con mensajes genéricos. El detalle técnico va al log, no al cliente.
+ * - Cualquier otro error, incluidos los demás de PostgreSQL (23502 NOT NULL,
+ *   23P01 exclusión, etc.) -> 500 genérico. El mensaje interno se registra en
+ *   el servidor y nunca se expone al cliente.
+ *
+ * El orden importa: la primera rama es la del error de negocio ({ status,
+ * message }), así que lo que un service ya tradujo por su cuenta —p. ej.
+ * constructor.service.js, que convierte 23505/23503/23514 en 409 con un mensaje
+ * que nombra QUÉ choca— sale por ahí y nunca llega a la tabla genérica.
  */
 function manejadorErrores(err, req, res, next) {
   if (res.headersSent) return next(err);
 
+  // D-19: en las rutas de clientes TODO error lleva `motivo` (el genérico de su
+  // status si no trae uno propio) y el log no lleva datos: ni el mensaje de
+  // PostgreSQL ni su `detail` (que puede repetir un email o una dirección), solo
+  // el código, el método y el camino.
+  // D-20a: también despacho, zonas del admin y repartidores (rutas-clientes.js).
+  const deClientes = esRutaConMotivo(req.originalUrl);
+  const enviar = (status, cuerpo) =>
+    res
+      .status(status)
+      .json(deClientes && !cuerpo.motivo ? { ...cuerpo, motivo: motivoPorStatus(status) } : cuerpo);
+  const registrar = (rotulo, ...detalle) => {
+    if (deClientes) {
+      console.error(`${rotulo} (${err && err.code}) en ${req.method} ${caminoDe(req.originalUrl)}`);
+    } else {
+      console.error(`${rotulo} (${err && err.code}) en ${req.method} ${req.originalUrl}:`, ...detalle);
+    }
+  };
+
   if (err && typeof err.status === 'number') {
-    return res.status(err.status).json({ error: err.message });
+    // `motivo` es el codigo estable que el cliente puede comparar, al lado del
+    // `error` que es texto para leer: es la convencion de los 409 de mesas y de
+    // pedidos ({ error, motivo }). Solo viaja si el service lo puso, asi que
+    // ningun error de negocio anterior cambia de forma.
+    //
+    // Los errores de express.json() (JSON mal formado, cuerpo demasiado grande)
+    // llegan por aqui con `type`. Su mensaje cita un trozo del cuerpo: en las
+    // rutas de clientes se cambia por uno generico.
+    const mensaje = deClientes && err.type ? MENSAJE_CUERPO_INVALIDO : err.message;
+    const cuerpo = { error: mensaje };
+    if (typeof err.motivo === 'string' && err.motivo) cuerpo.motivo = err.motivo;
+    // D-20a: un error de negocio puede traer datos para quien llama (p. ej. el
+    // barrio con el que choca una zona) en `extra`. Nunca pisan error ni motivo.
+    if (err.extra && typeof err.extra === 'object' && !Array.isArray(err.extra)) {
+      for (const [k, v] of Object.entries(err.extra)) if (!(k in cuerpo)) cuerpo[k] = v;
+    }
+    return enviar(err.status, cuerpo);
+  }
+
+  // Inventario (D-17, P-19): SD001, SD002 y el "ingrediente agotado" del
+  // interruptor manual. Va ANTES de la rama de P0001 porque ese último ES un
+  // P0001 y aquí gana el `motivo`, que es lo que el cliente compara. SD001 y
+  // SD002 caían en el 500 genérico. La traducción vive en su propio módulo para
+  // que el PR 2 (movimientos de inventario) use exactamente la misma.
+  const inventario = traducirErrorInventario(err);
+  if (inventario) {
+    // Los campos de bodega (insumo, necesita, hay) van SOLO aquí: la respuesta
+    // lleva únicamente qué quitar del carrito.
+    console.error(
+      `Inventario (${err.code}) en ${req.method} ${req.originalUrl}: ${inventario.log}`
+    );
+    return res.status(inventario.status).json(inventario.cuerpo);
   }
 
   if (err && err.code === PG_RAISE_EXCEPTION) {
-    return res.status(409).json({ error: err.message });
+    return enviar(409, { error: err.message });
   }
 
   if (err && esErrorDeDatos(err.code)) {
     // El detalle completo (código, detail y where de PostgreSQL) se registra
     // para poder arreglar la causa; al cliente solo le llega el mensaje seguro.
-    console.error(
-      `Error de datos de PostgreSQL (${err.code}) en ${req.method} ${req.originalUrl}:`,
-      err.message,
-      err.detail || '',
-      err.where || ''
-    );
-    return res.status(422).json({ error: MENSAJE_DATOS_FUERA_DE_RANGO });
+    registrar('Error de datos de PostgreSQL', err.message, err.detail || '', err.where || '');
+    return enviar(422, { error: MENSAJE_DATOS_FUERA_DE_RANGO });
   }
 
   if (err && esErrorDeConcurrencia(err.code)) {
     // Mismo criterio que la clase 22: el detalle completo al log del servidor
     // (es lo que permite encontrar el par de transacciones que chocó) y al
     // cliente solo el mensaje seguro.
-    console.error(
-      `Choque de concurrencia en PostgreSQL (${err.code}) en ${req.method} ${req.originalUrl}:`,
-      err.message,
-      err.detail || '',
-      err.where || ''
-    );
-    return res.status(409).json({ error: MENSAJE_CONCURRENCIA });
+    registrar('Choque de concurrencia en PostgreSQL', err.message, err.detail || '', err.where || '');
+    return enviar(409, { error: MENSAJE_CONCURRENCIA });
   }
 
-  console.error('Error no controlado:', err);
-  return res.status(500).json({ error: 'Error interno del servidor' });
+  const traduccion = traduccionDeSqlstate(err && err.code);
+  if (traduccion) {
+    // Mismo criterio que las clases 22 y 40: el detalle completo al log del
+    // servidor (el nombre del constraint es lo que permite arreglar la causa) y
+    // al cliente solo el mensaje genérico.
+    registrar(`${traduccion.rotulo} en PostgreSQL`, err.message, err.detail || '', err.where || '');
+    return enviar(traduccion.status, { error: traduccion.mensaje });
+  }
+
+  if (deClientes) {
+    // Ni el mensaje ni la pila: un error de una ruta de clientes puede citar
+    // datos del cuerpo. El nombre y el código bastan para buscar la causa.
+    console.error(
+      `Error no controlado (${(err && err.name) || 'Error'}, ${(err && err.code) || 'sin código'}) en ${req.method} ${caminoDe(req.originalUrl)}`
+    );
+  } else {
+    console.error('Error no controlado:', err);
+  }
+  // `motivo` se agregó en la D-19: el `error` de siempre no cambia.
+  return res.status(500).json({ error: 'Error interno del servidor', motivo: MOTIVO_ERROR_INTERNO });
+}
+
+const MOTIVO_ERROR_INTERNO = 'error_interno';
+const MENSAJE_CUERPO_INVALIDO = 'El cuerpo de la petición no es válido';
+
+/**
+ * El motivo genérico de un status, para los errores de las rutas de clientes
+ * que no traen uno propio (D-19: "todo error responde { error, motivo }").
+ */
+function motivoPorStatus(status) {
+  if (status === 400) return 'cuerpo_invalido';
+  if (status === 401) return 'no_autenticado';
+  if (status === 403) return 'prohibido';
+  if (status === 404) return 'no_encontrado';
+  if (status === 409) return 'conflicto';
+  if (status === 413) return 'cuerpo_demasiado_grande';
+  if (status === 422) return 'dato_invalido';
+  if (status === 429) return 'demasiadas_peticiones';
+  if (status === 503) return 'servicio_no_disponible';
+  if (status >= 500) return MOTIVO_ERROR_INTERNO;
+  return 'error';
 }
 
 module.exports = {
@@ -129,4 +269,15 @@ module.exports = {
   CODIGOS_CONCURRENCIA_POSTGRES,
   MENSAJE_CONCURRENCIA,
   esErrorDeConcurrencia,
+  MENSAJE_REGISTRO_DUPLICADO,
+  MENSAJE_REFERENCIA_RELACIONADA,
+  MENSAJE_CONSULTA_CANCELADA,
+  TRADUCCION_POR_SQLSTATE,
+  traduccionDeSqlstate,
+  MOTIVO_ERROR_INTERNO,
+  MENSAJE_CUERPO_INVALIDO,
+  motivoPorStatus,
+  // Reexportada para que quien prueba el manejador no tenga que importar los
+  // dos módulos, y para que el PR 2 encuentre la traducción desde aquí.
+  traducirErrorInventario,
 };

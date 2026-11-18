@@ -1,6 +1,15 @@
 import { useEffect, useId, useMemo, useReducer, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { obtenerPlatoArmable } from '../services/menuService';
+import {
+  actualizarDisponibilidadEnCache,
+  actualizarDisponibilidadPlatoEnCache,
+  adaptarPlatoArmable,
+  obtenerPlatoArmable,
+  recargarMenu,
+  refrescarMenu,
+  suscribirCambiosMenu,
+} from '../services/menuService';
+import { useMesaSocketContext } from '../context/MesaSocketContext';
 import {
   constructorReducer,
   estadoInicial,
@@ -11,6 +20,7 @@ import BottomBar from '../components/ui/BottomBar';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import Imagen from '../components/ui/Imagen';
 import { useCarrito } from '../context/CarritoContext';
 import { obtenerApodo } from '../utils/apodo';
 import { generarIdLinea } from '../utils/id';
@@ -20,6 +30,7 @@ import {
   validarPaso,
 } from '../utils/calcularPlato';
 import { ALERGENOS_MAP } from '../constants/dieta';
+import { urlImagen } from '../utils/imagenes';
 
 const ETIQUETA_PORCION = {
   ligera: 'Ligera',
@@ -32,14 +43,17 @@ function Constructor() {
   const navigate = useNavigate();
   const notasId = useId();
   const { agregarLinea } = useCarrito();
+  const { on: socketOn } = useMesaSocketContext();
 
   const [estadoCarga, setEstadoCarga] = useState({
     idCargado: null,
     plato: null,
   });
+  const [error, setError] = useState(null);
+  const [reintentando, setReintentando] = useState(false);
   const [estado, despachador] = useReducer(constructorReducer, estadoInicial);
 
-  const cargando = estadoCarga.idCargado !== idPlato;
+  const cargando = reintentando || estadoCarga.idCargado !== idPlato;
   const plato = cargando ? null : estadoCarga.plato;
 
   useEffect(() => {
@@ -48,14 +62,18 @@ function Constructor() {
 
     async function cargarPlato() {
       try {
+        // Siempre la carta vigente al abrir (red de seguridad de menu:actualizado).
+        refrescarMenu().catch(() => {});
         const resultado = await obtenerPlatoArmable(idPlato);
         if (activo) {
           setEstadoCarga({ idCargado: idPlato, plato: resultado });
+          setError(null);
         }
-      } catch (error) {
-        console.error('Error al cargar plato armable:', error);
+      } catch (err) {
+        console.error('Error al cargar plato armable:', err);
         if (activo) {
           setEstadoCarga({ idCargado: idPlato, plato: null });
+          setError(err);
         }
       }
     }
@@ -66,6 +84,85 @@ function Constructor() {
       activo = false;
     };
   }, [idPlato]);
+
+  // La carta cambió (menu:actualizado, o el menú se volvió a pedir): el plato
+  // se repinta con su nombre, precio y opciones nuevos sin salir del
+  // Constructor, y se sueltan las elecciones que ya no existen.
+  useEffect(() => {
+    return suscribirCambiosMenu((nuevoMenu) => {
+      if (!nuevoMenu) return;
+      const platoNuevo = adaptarPlatoArmable(nuevoMenu, idPlato);
+      setEstadoCarga((prev) => (prev.idCargado === idPlato ? { idCargado: idPlato, plato: platoNuevo } : prev));
+      if (platoNuevo) despachador({ type: 'PODAR_SELECCIONES', plato: platoNuevo });
+    });
+  }, [idPlato]);
+
+  useEffect(() => {
+    if (!socketOn) return undefined;
+    const bajaIng = socketOn('ingrediente:disponibilidad', (data) => {
+      const idIng = Number(data?.id_ingrediente ?? data?.idIngrediente);
+      const disponible = Boolean(data?.disponible);
+      if (!idIng) return;
+
+      actualizarDisponibilidadEnCache(idIng, disponible);
+
+      if (!disponible) {
+        despachador({ type: 'QUITAR_NO_DISPONIBLE', id_ingrediente: idIng });
+      }
+
+      setEstadoCarga((prev) => {
+        if (!prev.plato || !Array.isArray(prev.plato.pasos)) return prev;
+        const nuevosPasos = prev.plato.pasos.map((paso) => ({
+          ...paso,
+          ingredientes: (paso.ingredientes || []).map((ing) =>
+            Number(ing.id_ingrediente) === idIng
+              ? { ...ing, disponible }
+              : ing
+          ),
+        }));
+        return {
+          ...prev,
+          plato: { ...prev.plato, pasos: nuevosPasos },
+        };
+      });
+    });
+
+    const bajaPlato = socketOn('plato:disponibilidad', (data) => {
+      const idPlatoEv = Number(data?.id_plato ?? data?.idPlato);
+      const disponible = Boolean(data?.disponible);
+      if (!idPlatoEv) return;
+
+      actualizarDisponibilidadPlatoEnCache(idPlatoEv, disponible);
+
+      setEstadoCarga((prev) => {
+        if (!prev.plato || Number(prev.plato.id_plato) !== idPlatoEv) return prev;
+        return {
+          ...prev,
+          plato: { ...prev.plato, disponible },
+        };
+      });
+    });
+
+    return () => {
+      bajaIng?.();
+      bajaPlato?.();
+    };
+  }, [socketOn]);
+
+  const manejarReintentar = async () => {
+    recargarMenu();
+    setReintentando(true);
+    setError(null);
+    try {
+      const resultado = await obtenerPlatoArmable(idPlato);
+      setEstadoCarga({ idCargado: idPlato, plato: resultado });
+    } catch (err) {
+      console.error('Error al reintentar plato armable:', err);
+      setError(err);
+    } finally {
+      setReintentando(false);
+    }
+  };
 
   const calculo = useMemo(
     () => calcularPlato(plato, estado.selecciones),
@@ -79,21 +176,43 @@ function Constructor() {
 
   if (cargando) {
     return (
-      <div className="flex flex-col items-center justify-center py-16">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent mb-3" />
-        <p className="text-gray-600 text-sm font-medium">
-          Cargando constructor...
-        </p>
+      <div className="space-y-6 pb-24" aria-busy="true" aria-label="Cargando constructor">
+        <div className="animate-pulse space-y-3">
+          <div className="h-6 w-48 bg-superficie-2 rounded" />
+          <div className="h-4 w-64 bg-superficie-2 rounded" />
+          <div className="h-2 w-full bg-superficie-2 rounded-full" />
+        </div>
+        <div className="space-y-3">
+          <div className="h-28 bg-superficie-2 rounded-2xl animate-pulse" />
+          <div className="h-28 bg-superficie-2 rounded-2xl animate-pulse" />
+          <div className="h-28 bg-superficie-2 rounded-2xl animate-pulse" />
+        </div>
       </div>
     );
   }
 
-  if (!plato) {
+  if (error) {
+    return (
+      <div role="alert" className="text-center py-12 px-4 space-y-4">
+        <h1 className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto">
+          No pudimos cargar el plato
+        </h1>
+        <p className="text-primario-texto font-medium">
+          {error.mensaje || error.message || 'Ocurrió un problema inesperado.'}
+        </p>
+        <Button variante="secundario" onClick={manejarReintentar}>
+          Reintentar
+        </Button>
+      </div>
+    );
+  }
+
+  if (!plato || plato.disponible === false) {
     return (
       <Card className="text-center space-y-4 py-8">
-        <p className="text-cafe font-semibold text-base">
-          Este plato no está disponible
-        </p>
+        <h1 className="text-texto font-semibold text-base">
+          Este plato ya no está disponible
+        </h1>
         <Button variante="secundario" onClick={() => navigate('/menu')}>
           Volver al menú
         </Button>
@@ -126,7 +245,7 @@ function Constructor() {
   };
 
   const manejarAgregarAMesa = () => {
-    if (pendientes.length > 0) return;
+    if (!plato || plato.disponible === false || pendientes.length > 0) return;
 
     const notasLimpias = estado.notas.trim();
     const linea = {
@@ -148,16 +267,44 @@ function Constructor() {
     navigate('/carrito');
   };
 
+  const portadaUrl = urlImagen(plato.url_imagen);
+
   return (
     <div className="space-y-4 pb-32">
-      <header className="space-y-1">
-        <h1 className="font-titulo text-2xl font-bold text-cafe">
-          {plato.nombre}
-        </h1>
-        {plato.descripcion && (
-          <p className="text-sm text-gray-600">{plato.descripcion}</p>
-        )}
-      </header>
+      {/* Portada / Hero del plato */}
+      <div className="-mx-4 -mt-4 mb-2 relative overflow-hidden rounded-b-3xl bg-superficie min-h-[160px]">
+        <div className="h-48 sm:h-56 w-full relative">
+          <Imagen
+            src={portadaUrl}
+            alt={plato.nombre}
+            width={800}
+            height={533}
+            fetchPriority="high"
+            loading="eager"
+            aspecto="auto"
+            className="w-full h-full"
+            imgClassName="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20 pointer-events-none" />
+        </div>
+        <div className="absolute bottom-0 inset-x-0 p-4">
+          <button
+            type="button"
+            onClick={() => navigate('/menu')}
+            className="min-h-11 text-xs font-semibold text-primario-texto hover:underline inline-flex items-center gap-1 mb-1 cursor-pointer"
+          >
+            ← Volver al menú
+          </button>
+          <h1 className="font-titulo text-4xl sm:text-5xl uppercase tracking-wider text-primario leading-none">
+            {plato.nombre}
+          </h1>
+          {plato.descripcion && (
+            <p className="text-xs sm:text-sm text-texto-suave mt-1 line-clamp-2">
+              {plato.descripcion}
+            </p>
+          )}
+        </div>
+      </div>
 
       <ProgressBar
         pasoActual={estado.enResumen ? totalPasos : estado.pasoActual + 1}
@@ -172,7 +319,7 @@ function Constructor() {
       {estado.enResumen ? (
         <Card className="space-y-4">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="font-titulo text-xl font-bold text-cafe">
+            <h2 className="font-titulo text-2xl tracking-wide uppercase text-texto">
               Tu plato
             </h2>
             <Button variante="secundario" onClick={manejarAnterior}>
@@ -180,18 +327,18 @@ function Constructor() {
             </Button>
           </div>
 
-          <div className="space-y-3 divide-y divide-gray-100">
+          <div className="space-y-3 divide-y divide-borde">
             {pasos.map((paso) => {
               const itemsPaso = calculo.detalle.filter(
                 (d) => d.paso === paso.nombre
               );
               return (
                 <div key={paso.id_paso} className="pt-2.5 first:pt-0">
-                  <h3 className="text-xs font-bold uppercase tracking-wide text-gray-600">
+                  <h3 className="text-xs font-etiqueta font-bold uppercase tracking-wider text-texto-suave">
                     {paso.nombre}
                   </h3>
                   {itemsPaso.length === 0 ? (
-                    <p className="text-sm text-gray-500 italic mt-0.5">
+                    <p className="text-sm text-texto-tenue italic mt-0.5">
                       Sin selección
                     </p>
                   ) : (
@@ -199,10 +346,10 @@ function Constructor() {
                       {itemsPaso.map((item, idx) => (
                         <li
                           key={`${paso.id_paso}-${idx}`}
-                          className="text-sm font-medium text-cafe"
+                          className="text-sm font-medium text-texto"
                         >
                           {item.nombre} ·{' '}
-                          <span className="font-semibold text-primary">
+                          <span className="font-bold font-etiqueta uppercase text-primario-texto">
                             {ETIQUETA_PORCION[item.porcion] || item.porcion}
                           </span>
                         </li>
@@ -214,12 +361,12 @@ function Constructor() {
             })}
           </div>
 
-          <div className="space-y-1.5 pt-2 border-t border-gray-100">
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-600">
+          <div className="space-y-1.5 pt-2 border-t border-borde">
+            <p className="text-xs font-etiqueta font-bold uppercase tracking-wider text-texto-suave">
               Alérgenos
             </p>
             {calculo.alergenos.length === 0 ? (
-              <p className="text-xs text-gray-600">Sin alérgenos declarados</p>
+              <p className="text-xs text-texto-suave">Sin alérgenos declarados</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {calculo.alergenos.map((alergeno) => (
@@ -231,15 +378,15 @@ function Constructor() {
             )}
           </div>
 
-          <div className="space-y-1.5 pt-2 border-t border-gray-100">
+          <div className="space-y-1.5 pt-2 border-t border-borde">
             <div className="flex items-center justify-between">
               <label
                 htmlFor={notasId}
-                className="text-sm font-semibold text-cafe"
+                className="text-sm font-semibold text-texto"
               >
                 Notas para cocina (opcional)
               </label>
-              <span className="text-xs text-gray-600">
+              <span className="text-xs text-texto-suave">
                 {estado.notas.length}/200
               </span>
             </div>
@@ -252,12 +399,12 @@ function Constructor() {
                 despachador({ type: 'CAMBIAR_NOTAS', notas: e.target.value })
               }
               placeholder="Ej: Salsa aparte, bien cocido..."
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-cafe focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="w-full rounded-xl border border-borde bg-superficie-2 px-3 py-2 text-sm text-texto placeholder:text-texto-tenue focus:outline-none focus-visible:ring-2 focus-visible:ring-primario"
             />
           </div>
 
           {pendientes.length > 0 && (
-            <p role="alert" className="text-xs font-semibold text-primary">
+            <p role="alert" className="text-xs font-semibold text-primario-texto">
               Falta completar: {pendientes.join(', ')}
             </p>
           )}
@@ -273,28 +420,25 @@ function Constructor() {
           {!cumpleMinimoPaso && (
             <p
               role="status"
-              className="text-xs font-semibold text-primary text-right"
+              className="text-xs font-semibold text-primario-texto text-right"
             >
               Elige al menos {minSelActual}
             </p>
           )}
-
-          <div className="flex items-center justify-between gap-3 pt-2">
-            <Button variante="secundario" onClick={manejarAnterior}>
-              Anterior
-            </Button>
-          </div>
         </>
       )}
 
       <BottomBar precioTotal={calculo.precio} calorias={calculo.calorias}>
+        <Button variante="secundario" onClick={manejarAnterior}>
+          Anterior
+        </Button>
         {estado.enResumen ? (
           <Button
             variante="primario"
             disabled={pendientes.length > 0}
             onClick={manejarAgregarAMesa}
           >
-            Agregar a la mesa
+            Añadir a la mesa
           </Button>
         ) : (
           <Button

@@ -89,8 +89,22 @@ async function estaActivo(idUsuario, { env = process.env } = {}) {
   return activo;
 }
 
-/** Olvida lo que se sepa de un usuario (al desactivarlo, por ejemplo). */
-async function olvidar(idUsuario) {
+/**
+ * Olvida lo que se sepa de un usuario (al desactivarlo, por ejemplo).
+ *
+ * La llama la administracion de usuarios (D-16) tras desactivar a alguien,
+ * cambiarle el rol o cambiarle la clave: sin esto el cambio tardaria hasta el
+ * TTL (60 s) en surtir efecto, porque `estaActivo` contesta desde Redis.
+ *
+ * Misma guarda que leerCache y guardarCache: dentro de las pruebas la cache
+ * esta apagada, asi que aqui no hay nada que invalidar. Y sin la guarda, cada
+ * llamada abriria un cliente de Redis que nadie cierra y `npm test` no
+ * terminaria (es lo que explica tests/helpers/entorno-pruebas.js).
+ *
+ * @returns {Promise<boolean>} true si se borro la llave de verdad.
+ */
+async function olvidar(idUsuario, { env = process.env } = {}) {
+  if (!cacheActiva(env)) return false;
   try {
     const cliente = await redis.connectRedis();
     await cliente.del(llave(idUsuario));

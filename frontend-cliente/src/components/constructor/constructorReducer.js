@@ -138,6 +138,63 @@ export function constructorReducer(estado, accion) {
       };
     }
 
+    case 'QUITAR_NO_DISPONIBLE': {
+      const idIngrediente = Number(
+        accion.id_ingrediente ?? accion.idIngrediente
+      );
+      if (!idIngrediente) return estado;
+
+      let huboCambio = false;
+      const nuevasSelecciones = {};
+
+      for (const [idPaso, ingsDelPaso] of Object.entries(estado.selecciones)) {
+        if (Object.prototype.hasOwnProperty.call(ingsDelPaso, idIngrediente)) {
+          huboCambio = true;
+          const copiaPaso = { ...ingsDelPaso };
+          delete copiaPaso[idIngrediente];
+          nuevasSelecciones[idPaso] = copiaPaso;
+        } else {
+          nuevasSelecciones[idPaso] = ingsDelPaso;
+        }
+      }
+
+      if (!huboCambio) return estado;
+
+      return {
+        ...estado,
+        selecciones: nuevasSelecciones,
+      };
+    }
+
+    case 'PODAR_SELECCIONES': {
+      // La carta cambió (menu:actualizado): se sueltan las elecciones cuyo paso
+      // u opción ya no existe o quedó agotada. El resto se conserva.
+      const pasos = Array.isArray(accion.plato?.pasos) ? accion.plato.pasos : [];
+      const validas = new Map(
+        pasos.map((p) => [
+          String(p.id_paso),
+          new Set((p.ingredientes || []).filter((i) => i.disponible !== false).map((i) => String(i.id_ingrediente))),
+        ])
+      );
+      let huboCambio = false;
+      const nuevasSelecciones = {};
+      for (const [idPaso, ingsDelPaso] of Object.entries(estado.selecciones)) {
+        const permitidas = validas.get(String(idPaso));
+        if (!permitidas) {
+          if (Object.keys(ingsDelPaso || {}).length > 0) huboCambio = true;
+          continue;
+        }
+        const copia = {};
+        for (const [idIng, porcion] of Object.entries(ingsDelPaso || {})) {
+          if (permitidas.has(String(idIng))) copia[idIng] = porcion;
+          else huboCambio = true;
+        }
+        nuevasSelecciones[idPaso] = copia;
+      }
+      if (!huboCambio) return estado;
+      return { ...estado, selecciones: nuevasSelecciones };
+    }
+
     default:
       return estado;
   }

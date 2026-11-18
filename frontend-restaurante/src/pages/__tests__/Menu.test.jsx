@@ -1,7 +1,87 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Menu } from '../Menu'
+import { AuthContext } from '../../context/authContextDef'
+
+// T8: desactivar un plato se confirma. Por defecto se acepta; las pruebas de T8
+// cambian la respuesta.
+let respuestaConfirmar = true
+const preguntas = []
+window.confirm = (texto) => { preguntas.push(texto); return respuestaConfirmar }
+
+const json = (body, status = 200) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  headers: new Headers({ 'content-type': 'application/json' }),
+  json: async () => body,
+})
+
+/**
+ * Backend simulado por URL. El panel arma la carta de administración con
+ * GET /categorias y GET /platos (no con GET /menu, que oculta los agotados).
+ * `escrituras` decide qué pasa con cualquier PATCH/PUT/POST/DELETE.
+ */
+function simularBackend({ categorias, platos, pasos = [], escrituras }) {
+  return vi.spyOn(global, 'fetch').mockImplementation(async (url, config = {}) => {
+    const metodo = config.method || 'GET'
+    if (metodo !== 'GET') return escrituras(url, config)
+    if (url.includes('/pasos')) return json(pasos)
+    if (url.includes('/categorias')) return json({ categorias })
+    if (url.includes('/platos')) return json({ platos })
+    return json({})
+  })
+}
+
+const sinConexion = () => {
+  throw new TypeError('Failed to fetch')
+}
+
+const categoriasBase = [
+  { id_categoria: 1, nombre: 'Hamburguesas', descripcion: 'Artesanales a la parrilla' },
+  { id_categoria: 2, nombre: 'Bebidas', descripcion: 'Refrescantes' },
+]
+
+const platosBase = [
+  {
+    id_plato: 101,
+    id_categoria: 1,
+    nombre: 'Hamburguesa Doble Queso',
+    precio: 28000,
+    descripcion: 'Carne angus con doble cheddar',
+    tiempo_preparacion_estimado: 15,
+    disponible: true,
+  },
+  {
+    id_plato: 201,
+    id_categoria: 2,
+    nombre: 'Limonada de Coco',
+    precio: 12000,
+    descripcion: 'Leche de coco y limón fresco',
+    tiempo_preparacion_estimado: 5,
+    disponible: false,
+  },
+]
+
+// Por defecto, admin: la gestión del Menú es suya. Con otro rol, solo consulta.
+function montar(rol = 'admin') {
+  render(
+    <AuthContext.Provider value={{ user: { id_usuario: 1, nombre: 'Prueba', rol } }}>
+      <MemoryRouter>
+        <Menu />
+      </MemoryRouter>
+    </AuthContext.Provider>
+  )
+}
+
+function tarjetaDe(nombre) {
+  // Sube desde el nombre hasta la tarjeta que tiene el interruptor.
+  let nodo = screen.getByText(nombre)
+  while (nodo && !within(nodo).queryByTitle('Alternar disponibilidad para comensales')) {
+    nodo = nodo.parentElement
+  }
+  return nodo
+}
 
 describe('Flujo de Menú en frontend-restaurante', () => {
   beforeEach(() => {
@@ -9,154 +89,367 @@ describe('Flujo de Menú en frontend-restaurante', () => {
     sessionStorage.setItem('smartdining_token', 'test-token')
   })
 
-  it('debe listar los platos y categorías devueltos por la API real', async () => {
-    const mockMenu = {
-      categorias: [
-        {
-          id_categoria: 1,
-          nombre: 'Hamburguesas',
-          descripcion: 'Artesanales a la parrilla',
-          platos: [
-            {
-              id_plato: 101,
-              nombre: 'Hamburguesa Doble Queso',
-              precio: 28000,
-              descripcion: 'Carne angus con doble cheddar',
-              tiempo_preparacion_estimado: 15,
-              disponible: true,
-            },
-          ],
-        },
-        {
-          id_categoria: 2,
-          nombre: 'Bebidas',
-          descripcion: 'Refrescantes',
-          platos: [
-            {
-              id_plato: 201,
-              nombre: 'Limonada de Coco',
-              precio: 12000,
-              descripcion: 'Leche de coco y limón fresco',
-              tiempo_preparacion_estimado: 5,
-              disponible: true,
-            },
-          ],
-        },
-      ],
-    }
-
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => mockMenu,
-    })
-
-    render(
-      <MemoryRouter>
-        <Menu />
-      </MemoryRouter>
-    )
+  it('lista categorías y TODOS los platos, también los agotados', async () => {
+    simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => json({}) })
+    montar()
 
     await waitFor(() => {
       expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument()
+      // Agotado: con GET /menu no aparecería y no habría cómo reponerlo.
       expect(screen.getByText('Limonada de Coco')).toBeInTheDocument()
     })
-
     expect(screen.getByText('$28.000')).toBeInTheDocument()
-    expect(screen.getByText('$12.000')).toBeInTheDocument()
+    expect(within(tarjetaDe('Limonada de Coco')).getByText('NO DISPONIBLE')).toBeInTheDocument()
   })
 
-  it('debe filtrar los platos al buscar por nombre en el buscador', async () => {
-    const mockMenu = {
-      categorias: [
-        {
-          id_categoria: 1,
-          nombre: 'Hamburguesas',
-          platos: [
-            { id_plato: 101, nombre: 'Burger Clásica', precio: 22000, disponible: true },
-            { id_plato: 102, nombre: 'Costillas BBQ', precio: 38000, disponible: true },
-          ],
-        },
+  it('filtra los platos al buscar por nombre', async () => {
+    simularBackend({
+      categorias: [{ id_categoria: 1, nombre: 'Hamburguesas' }],
+      platos: [
+        { id_plato: 101, id_categoria: 1, nombre: 'Burger Clásica', precio: 22000, disponible: true },
+        { id_plato: 102, id_categoria: 1, nombre: 'Costillas BBQ', precio: 38000, disponible: true },
       ],
-    }
-
-    vi.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => mockMenu,
+      escrituras: () => json({}),
     })
+    montar()
 
-    render(
-      <MemoryRouter>
-        <Menu />
-      </MemoryRouter>
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('Burger Clásica')).toBeInTheDocument()
-      expect(screen.getByText('Costillas BBQ')).toBeInTheDocument()
-    })
-
-    const searchInput = screen.getByPlaceholderText(/buscar plato por nombre/i)
-    fireEvent.change(searchInput, { target: { value: 'Costillas' } })
+    await waitFor(() => expect(screen.getByText('Costillas BBQ')).toBeInTheDocument())
+    fireEvent.change(screen.getByPlaceholderText(/buscar plato por nombre/i), { target: { value: 'Costillas' } })
 
     expect(screen.getByText('Costillas BBQ')).toBeInTheDocument()
     expect(screen.queryByText('Burger Clásica')).not.toBeInTheDocument()
   })
 
-  it('debe mostrar badge de Arma tu plato cuando el plato es personalizable y permitir abrir el EditorPasos', async () => {
-    const mockMenu = {
-      categorias: [
-        {
-          id_categoria: 100,
-          nombre: 'Arma tu plato',
-          platos: [
-            {
-              id_plato: 1001,
-              nombre: 'Bowl Personalizado',
-              precio: 20000,
-              disponible: true,
-              personalizable: true,
-              calorias: 450,
-            },
-          ],
-        },
+  it('muestra el badge de Arma tu plato y abre el EditorPasos', async () => {
+    simularBackend({
+      categorias: [{ id_categoria: 100, nombre: 'Arma tu plato' }],
+      platos: [
+        { id_plato: 1001, id_categoria: 100, nombre: 'Bowl Personalizado', precio: 20000, disponible: true, personalizable: true, calorias: 450 },
       ],
-    }
-
-    vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
-      if (url.includes('/pasos')) {
-        return {
-          ok: true,
-          json: async () => [
-            { id_paso: 1, nombre: 'Elige tu Base', orden: 1, min_sel: 1, max_sel: 1, obligatorio: true, ingredientes: [] },
-          ],
-        }
-      }
-      return {
-        ok: true,
-        json: async () => mockMenu,
-      }
+      pasos: [{ id_paso: 1, nombre: 'Elige tu Base', orden: 1, min_sel: 1, max_sel: 1, obligatorio: true, ingredientes: [] }],
+      escrituras: () => json({}),
     })
+    montar()
 
-    render(
-      <MemoryRouter>
-        <Menu />
-      </MemoryRouter>
-    )
-
-    await waitFor(() => {
-      expect(screen.getByText('Bowl Personalizado')).toBeInTheDocument()
-    })
-
+    await waitFor(() => expect(screen.getByText('Bowl Personalizado')).toBeInTheDocument())
     expect(screen.getAllByText(/Arma tu plato/i).length).toBeGreaterThanOrEqual(1)
 
-    // Abrir EditorPasos con el botón de constructor
-    const btnConstructor = screen.getByTitle('Configurar Pasos e Ingredientes del Constructor')
-    fireEvent.click(btnConstructor)
-
+    fireEvent.click(screen.getByTitle('Configurar Pasos e Ingredientes del Constructor'))
     await waitFor(() => {
       expect(screen.getByText('Constructor de Plato')).toBeInTheDocument()
-      expect(screen.getByText(/Configuración de pasos, selecciones e ingredientes/i)).toBeInTheDocument()
+    })
+  })
+
+  describe('P-13: con el backend apagado nada queda en pantalla como guardado', () => {
+    it('agotar sin conexión revierte el interruptor y dice "Sin conexión, no se guardó"', async () => {
+      simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: sinConexion })
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+
+      fireEvent.click(within(tarjetaDe('Hamburguesa Doble Queso')).getByTitle('Alternar disponibilidad para comensales'))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Sin conexión, no se guardó')
+      expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('DISPONIBLE')).toBeInTheDocument()
+      expect(screen.queryByText(/pendiente en backend/i)).not.toBeInTheDocument()
+    })
+
+    it('si el servidor rechaza el cambio, revierte y muestra su error real', async () => {
+      simularBackend({
+        categorias: categoriasBase,
+        platos: platosBase,
+        escrituras: () => json({ error: 'No tienes permiso para esta acción' }, 403),
+      })
+      montar()
+      await waitFor(() => expect(screen.getByText('Limonada de Coco')).toBeInTheDocument())
+
+      fireEvent.click(within(tarjetaDe('Limonada de Coco')).getByTitle('Alternar disponibilidad para comensales'))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('No se guardó: No tienes permiso para esta acción')
+      expect(within(tarjetaDe('Limonada de Coco')).getByText('NO DISPONIBLE')).toBeInTheDocument()
+    })
+
+    it('agotar con el backend arriba deja el estado que devuelve el servidor', async () => {
+      simularBackend({
+        categorias: categoriasBase,
+        platos: platosBase,
+        escrituras: () => json({ id_plato: 101, disponible: false }),
+      })
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+
+      fireEvent.click(within(tarjetaDe('Hamburguesa Doble Queso')).getByTitle('Alternar disponibilidad para comensales'))
+
+      await waitFor(() =>
+        expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('NO DISPONIBLE')).toBeInTheDocument()
+      )
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('crear un plato sin conexión no lo agrega a la lista y deja el formulario abierto', async () => {
+      simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: sinConexion })
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+
+      fireEvent.click(screen.getByText('NUEVO PLATO'))
+      fireEvent.change(screen.getByPlaceholderText(/Ej. Bowl Personalizado/i), { target: { value: 'Plato Fantasma' } })
+      fireEvent.change(screen.getByPlaceholderText('25000'), { target: { value: '15000' } })
+      fireEvent.click(screen.getByText('CREAR PLATO'))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Sin conexión, no se guardó')
+      // Sigue en el formulario con lo escrito, y no hay tarjeta inventada:
+      // siguen siendo las 2 tarjetas que trajo el servidor.
+      expect(screen.getByDisplayValue('Plato Fantasma')).toBeInTheDocument()
+      expect(screen.getAllByTitle('Alternar disponibilidad para comensales')).toHaveLength(2)
+    })
+
+    it('borrar un plato sin conexión lo deja en la lista', async () => {
+      simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: sinConexion })
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+
+      fireEvent.click(within(tarjetaDe('Hamburguesa Doble Queso')).getByTitle('Eliminar plato'))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Sin conexión, no se guardó')
+      expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument()
+    })
+  })
+describe('agotado por stock al cargar (stock_suficiente de GET /platos)', () => {
+    const platosStock = [
+      { id_plato: 301, id_categoria: 1, nombre: 'Hamburguesa Smart Angus', precio: 34000, disponible: true, stock_suficiente: false },
+      { id_plato: 302, id_categoria: 1, nombre: 'Burger Apagada', precio: 20000, disponible: false, stock_suficiente: false },
+      { id_plato: 303, id_categoria: 1, nombre: 'Burger Normal', precio: 22000, disponible: true, stock_suficiente: true },
+      // Una respuesta sin el campo (backend anterior al 27) se trata como con stock.
+      { id_plato: 304, id_categoria: 1, nombre: 'Burger Vieja', precio: 21000, disponible: true },
+    ]
+
+    it('encendido a mano pero sin stock sale "AGOTADO · SIN STOCK"; apagado a mano, "NO DISPONIBLE" (T8)', async () => {
+      simularBackend({ categorias: categoriasBase, platos: platosStock, escrituras: () => json({}) })
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument())
+
+      expect(within(tarjetaDe('Hamburguesa Smart Angus')).getByText('AGOTADO · SIN STOCK')).toBeInTheDocument()
+      expect(within(tarjetaDe('Burger Apagada')).getByText('NO DISPONIBLE')).toBeInTheDocument()
+      expect(within(tarjetaDe('Burger Apagada')).queryByText('AGOTADO · SIN STOCK')).not.toBeInTheDocument()
+      expect(within(tarjetaDe('Burger Normal')).getByText('DISPONIBLE')).toBeInTheDocument()
+      expect(within(tarjetaDe('Burger Vieja')).getByText('DISPONIBLE')).toBeInTheDocument()
+    })
+
+    it('"Solo disponibles" esconde también los agotados por stock', async () => {
+      simularBackend({ categorias: categoriasBase, platos: platosStock, escrituras: () => json({}) })
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument())
+
+      fireEvent.click(screen.getByLabelText('SOLO DISPONIBLES'))
+      expect(screen.queryByText('Hamburguesa Smart Angus')).not.toBeInTheDocument()
+      expect(screen.queryByText('Burger Apagada')).not.toBeInTheDocument()
+      expect(screen.getByText('Burger Normal')).toBeInTheDocument()
+    })
+
+    it('el botón sigue siendo el interruptor MANUAL: en un plato sin stock, el clic lo apaga a mano', async () => {
+      const spy = simularBackend({
+        categorias: categoriasBase,
+        platos: platosStock,
+        escrituras: () => json({ id_plato: 301, disponible: false, stock_suficiente: false }),
+      })
+      montar()
+      await waitFor(() => expect(screen.getByText('Hamburguesa Smart Angus')).toBeInTheDocument())
+
+      fireEvent.click(within(tarjetaDe('Hamburguesa Smart Angus')).getByTitle('Alternar disponibilidad para comensales'))
+
+      await waitFor(() =>
+        expect(within(tarjetaDe('Hamburguesa Smart Angus')).queryByText('AGOTADO · SIN STOCK')).not.toBeInTheDocument()
+      )
+      expect(within(tarjetaDe('Hamburguesa Smart Angus')).getByText('NO DISPONIBLE')).toBeInTheDocument()
+      const patch = spy.mock.calls.find(([, c]) => c?.method === 'PATCH')
+      expect(patch[0]).toMatch(/\/platos\/301\/disponible$/)
+      expect(JSON.parse(patch[1].body)).toEqual({ disponible: false })
     })
   })
 })
 
+describe('Menú de solo consulta para mesero y cajero (el backend les niega la gestión)', () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it.each(['mesero', 'cajero'])('%s: sin NUEVO PLATO, CATEGORÍAS, pasos, editar ni eliminar; la disponibilidad es solo una etiqueta', async (rol) => {
+    simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => { throw new Error('no debería escribir') } })
+    montar(rol)
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+    expect(screen.queryByText('NUEVO PLATO')).toBeNull()
+    expect(screen.queryByText(/^CATEGORÍAS/)).toBeNull()
+    expect(screen.queryByTitle('Editar plato')).toBeNull()
+    expect(screen.queryByTitle('Eliminar plato')).toBeNull()
+    expect(screen.queryByTitle('Configurar Pasos e Ingredientes del Constructor')).toBeNull()
+    expect(screen.queryByTitle('Alternar disponibilidad para comensales')).toBeNull()
+    const estado = screen.getByTestId('disponibilidad-101')
+    expect(estado.tagName).toBe('SPAN')
+    expect(estado).toHaveTextContent('DISPONIBLE')
+    expect(screen.getByTestId('disponibilidad-201')).toHaveTextContent('NO DISPONIBLE')
+    expect(screen.getByText(/solo consulta/)).toBeInTheDocument()
+  })
+
+  it('admin sí ve la gestión completa y el interruptor', async () => {
+    simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => json({}) })
+    montar('admin')
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+    expect(screen.getByText('NUEVO PLATO')).toBeInTheDocument()
+    expect(screen.getAllByTitle('Editar plato')).toHaveLength(2)
+    expect(screen.getAllByTitle('Alternar disponibilidad para comensales')[0].tagName).toBe('BUTTON')
+  })
+})
+
+describe('Foto de respaldo: solo para pintar, nunca se guarda (revisión de Roberto)', () => {
+  const RESPALDO = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80'
+  const platosFotos = [
+    { id_plato: 401, id_categoria: 1, nombre: 'Sin Foto Burger', precio: 20000, descripcion: '', tiempo_preparacion_estimado: 10, disponible: true, url_imagen: null },
+    { id_plato: 402, id_categoria: 1, nombre: 'Arepa Rellena', precio: 15000, descripcion: '', tiempo_preparacion_estimado: 10, disponible: true, url_imagen: null },
+    { id_plato: 403, id_categoria: 1, nombre: 'Con Foto Burger', precio: 22000, descripcion: '', tiempo_preparacion_estimado: 10, disponible: true, url_imagen: 'https://images.unsplash.com/photo-propia?w=600' },
+  ]
+
+  function backendQueGuarda() {
+    const escritas = []
+    simularBackend({
+      categorias: categoriasBase,
+      platos: platosFotos,
+      escrituras: (url, config) => {
+        escritas.push({ url, metodo: config.method, body: JSON.parse(config.body || '{}') })
+        return json({ plato: { id_plato: 999 } }, config.method === 'POST' ? 201 : 200)
+      },
+    })
+    return escritas
+  }
+
+  const editar = (nombre) => fireEvent.click(within(tarjetaDe(nombre)).getByTitle('Editar plato'))
+
+  beforeEach(() => vi.restoreAllMocks())
+
+  it('la tarjeta de un plato sin foto PINTA la de respaldo; la arepa, su foto local', async () => {
+    backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Sin Foto Burger')).toBeInTheDocument())
+    expect(screen.getByAltText('Sin Foto Burger')).toHaveAttribute('src', RESPALDO)
+    expect(screen.getByAltText('Arepa Rellena')).toHaveAttribute('src', '/img/arepa-rellena.png')
+  })
+
+  it('crear con el campo de imagen vacío NO manda url_imagen', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Sin Foto Burger')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('NUEVO PLATO'))
+    fireEvent.change(screen.getByPlaceholderText(/Ej. Bowl Personalizado/i), { target: { value: 'Plato Nuevo' } })
+    fireEvent.change(screen.getByPlaceholderText('25000'), { target: { value: '15000' } })
+    fireEvent.click(screen.getByText('CREAR PLATO'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'POST')).toBe(true))
+    expect(escritas.find((e) => e.metodo === 'POST').body).not.toHaveProperty('url_imagen')
+  })
+
+  it('crear con foto la manda recortada', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Sin Foto Burger')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('NUEVO PLATO'))
+    fireEvent.change(screen.getByPlaceholderText(/Ej. Bowl Personalizado/i), { target: { value: 'Plato Con Foto' } })
+    fireEvent.change(screen.getByPlaceholderText('25000'), { target: { value: '15000' } })
+    fireEvent.change(screen.getByPlaceholderText('https://… o /imagenes/<código>.webp'), { target: { value: '  https://fotos.co/p.jpg  ' } })
+    fireEvent.click(screen.getByText('CREAR PLATO'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'POST')).toBe(true))
+    expect(escritas.find((e) => e.metodo === 'POST').body.url_imagen).toBe('https://fotos.co/p.jpg')
+  })
+
+  it('editar un plato sin foto: el campo sale vacío (no con la de respaldo) y no se manda url_imagen', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Sin Foto Burger')).toBeInTheDocument())
+    editar('Sin Foto Burger')
+    expect(screen.getByPlaceholderText('https://… o /imagenes/<código>.webp')).toHaveValue('')
+    fireEvent.click(screen.getByText('GUARDAR CAMBIOS'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'PUT' || e.metodo === 'PATCH')).toBe(true))
+    const guardado = escritas.find((e) => e.metodo === 'PUT' || e.metodo === 'PATCH')
+    expect(guardado.url).toMatch(/\/platos\/401$/)
+    expect(guardado.body).not.toHaveProperty('url_imagen')
+  })
+
+  it('editar la Arepa rellena no manda /img/arepa-rellena.png (la foto local es solo para pintar)', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Arepa Rellena')).toBeInTheDocument())
+    editar('Arepa Rellena')
+    expect(screen.getByPlaceholderText('https://… o /imagenes/<código>.webp')).toHaveValue('')
+    fireEvent.click(screen.getByText('GUARDAR CAMBIOS'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'PUT' || e.metodo === 'PATCH')).toBe(true))
+    expect(escritas.find((e) => e.metodo === 'PUT' || e.metodo === 'PATCH').body).not.toHaveProperty('url_imagen')
+  })
+
+  it('editar un plato con foto conserva su url_imagen real', async () => {
+    const escritas = backendQueGuarda()
+    montar()
+    await waitFor(() => expect(screen.getByText('Con Foto Burger')).toBeInTheDocument())
+    editar('Con Foto Burger')
+    expect(screen.getByPlaceholderText('https://… o /imagenes/<código>.webp')).toHaveValue('https://images.unsplash.com/photo-propia?w=600')
+    fireEvent.click(screen.getByText('GUARDAR CAMBIOS'))
+    await waitFor(() => expect(escritas.some((e) => e.metodo === 'PUT' || e.metodo === 'PATCH')).toBe(true))
+    expect(escritas.find((e) => e.metodo === 'PUT' || e.metodo === 'PATCH').body.url_imagen).toBe('https://images.unsplash.com/photo-propia?w=600')
+  })
+})
+
+describe('T8: interruptor «Disponible» del plato (solo admin)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    sessionStorage.setItem('smartdining_token', 'test-token')
+    respuestaConfirmar = true
+    preguntas.length = 0
+  })
+
+  const interruptor = (nombre) => screen.getByRole('button', { name: `Disponible: ${nombre}` })
+
+  it('desactivar pide confirmación con el nombre; si se cancela, no se manda nada', async () => {
+    const spy = simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => json({ id_plato: 101, disponible: false }) })
+    montar('admin')
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+    respuestaConfirmar = false
+
+    fireEvent.click(interruptor('Hamburguesa Doble Queso'))
+
+    expect(preguntas).toHaveLength(1)
+    expect(preguntas[0]).toMatch(/«Hamburguesa Doble Queso» como NO DISPONIBLE/)
+    expect(spy.mock.calls.some(([, c]) => c?.method === 'PATCH')).toBe(false)
+    expect(interruptor('Hamburguesa Doble Queso')).toHaveAttribute('aria-pressed', 'true')
+    expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('DISPONIBLE')).toBeInTheDocument()
+  })
+
+  it('al confirmar: PATCH disponible false, etiqueta «NO DISPONIBLE», interruptor apagado y tarjeta atenuada', async () => {
+    const spy = simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => json({ id_plato: 101, disponible: false }) })
+    montar('admin')
+    await waitFor(() => expect(screen.getByText('Hamburguesa Doble Queso')).toBeInTheDocument())
+
+    fireEvent.click(interruptor('Hamburguesa Doble Queso'))
+
+    await waitFor(() => expect(within(tarjetaDe('Hamburguesa Doble Queso')).getByText('NO DISPONIBLE')).toBeInTheDocument())
+    const patch = spy.mock.calls.find(([, c]) => c?.method === 'PATCH')
+    expect(patch[0]).toMatch(/\/platos\/101\/disponible$/)
+    expect(JSON.parse(patch[1].body)).toEqual({ disponible: false })
+    expect(interruptor('Hamburguesa Doble Queso')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByText('Hamburguesa Doble Queso').closest('.sd-card').style.opacity).toBe('0.65')
+  })
+
+  it('activar no pide confirmación', async () => {
+    const spy = simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => json({ id_plato: 201, disponible: true }) })
+    montar('admin')
+    await waitFor(() => expect(screen.getByText('Limonada de Coco')).toBeInTheDocument())
+    expect(interruptor('Limonada de Coco')).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(interruptor('Limonada de Coco'))
+
+    await waitFor(() => expect(within(tarjetaDe('Limonada de Coco')).getByText('DISPONIBLE')).toBeInTheDocument())
+    expect(preguntas).toHaveLength(0)
+    expect(JSON.parse(spy.mock.calls.find(([, c]) => c?.method === 'PATCH')[1].body)).toEqual({ disponible: true })
+  })
+
+  it.each(['mesero', 'cajero'])('%s no ve el interruptor (solo la etiqueta)', async (rol) => {
+    simularBackend({ categorias: categoriasBase, platos: platosBase, escrituras: () => { throw new Error('no debería escribir') } })
+    montar(rol)
+    await waitFor(() => expect(screen.getByText('Limonada de Coco')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /^Disponible:/ })).toBeNull()
+    expect(screen.getByTestId('disponibilidad-201')).toHaveTextContent('NO DISPONIBLE')
+  })
+})

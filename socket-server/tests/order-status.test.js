@@ -78,3 +78,75 @@ test('HTTP interno del backend: exige clave y difunde', async () => {
   assert.strictEqual((await llega).estado, 'listo');
   await s.cerrar();
 });
+
+// --- origen en POST /internal/order-status (EVENTS.md §6.3) ----------------
+
+const postEstado = (s, cuerpo) => fetch(`${s.url}/internal/order-status`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json', 'x-internal-key': CLAVE }, body: JSON.stringify(cuerpo),
+});
+const cancelado = (extra = {}) => cambio({ estado_anterior: 'recibido', estado: 'cancelado', ...extra });
+
+test('origen comensal y personal: se reenvían tal cual en order:status a KDS, Admin y la mesa', async () => {
+  const { s, cocina, admin, mesa5 } = await escenario();
+  for (const origen of ['comensal', 'personal']) {
+    const esperas = [esperar(cocina, 'order:status'), esperar(admin, 'order:status'), esperar(mesa5, 'order:status')];
+    const r = await postEstado(s, cancelado({ origen }));
+    assert.deepStrictEqual([r.status, (await r.json()).ok], [200, true], origen);
+    for (const ev of await Promise.all(esperas)) {
+      assert.ok(ev, `${origen}: debe llegar`);
+      assert.strictEqual(ev.origen, origen);
+      assert.strictEqual(ev.estado, 'cancelado');
+    }
+  }
+  await s.cerrar();
+});
+
+test('origen ausente: el evento NO lleva la clave origen (quien recibe asume personal)', async () => {
+  const { s, mesa5 } = await escenario();
+  const llega = esperar(mesa5, 'order:status');
+  assert.strictEqual((await postEstado(s, cancelado())).status, 200);
+  const ev = await llega;
+  assert.ok(ev);
+  assert.strictEqual('origen' in ev, false);
+  assert.deepStrictEqual(Object.keys(ev).sort(), ['codigo_pedido', 'emitidoEn', 'estado', 'estado_anterior', 'eventId', 'id_mesa', 'id_pedido']);
+  await s.cerrar();
+});
+
+test('origen inválido o null: 400 PAYLOAD_INVALIDO, no emite y no consume el eventId', async () => {
+  const { s, mesa5 } = await escenario();
+  for (const origen of [null, '', 'Comensal', 'cocina', 'sistema', 5, true, { quien: 'comensal' }]) {
+    const cuerpo = cancelado({ origen });
+    const nada = esperar(mesa5, 'order:status', 250);
+    const r = await postEstado(s, cuerpo);
+    const b = await r.json();
+    assert.strictEqual(r.status, 400, JSON.stringify(origen));
+    assert.strictEqual(b.codigo, 'PAYLOAD_INVALIDO');
+    assert.match(b.mensaje, /origen/);
+    assert.strictEqual(await nada, null, `${JSON.stringify(origen)}: no debe emitir`);
+    // El mismo eventId, ya corregido, sí sale: el 400 no lo consumió.
+    const llega = esperar(mesa5, 'order:status');
+    const ok = await postEstado(s, { ...cuerpo, origen: 'comensal' });
+    assert.deepStrictEqual(await ok.json(), { ok: true, eventId: cuerpo.eventId, duplicado: false });
+    assert.strictEqual((await llega).origen, 'comensal');
+  }
+  await s.cerrar();
+});
+
+test('origen con un estado distinto de cancelado: se acepta y se reenvía igual', async () => {
+  const { s, mesa5 } = await escenario();
+  const llega = esperar(mesa5, 'order:status');
+  const r = await postEstado(s, cambio({ estado_anterior: 'recibido', estado: 'en_preparacion', origen: 'personal' }));
+  assert.strictEqual(r.status, 200);
+  const ev = await llega;
+  assert.deepStrictEqual([ev.estado, ev.origen], ['en_preparacion', 'personal']);
+  await s.cerrar();
+});
+
+test('por el socket del personal, origen en el payload NO se reenvía (solo el HTTP interno lo pasa)', async () => {
+  const { s, mesero, mesa5 } = await escenario();
+  const llega = esperar(mesa5, 'order:status');
+  const ack = await emitir(mesero, 'order:status', cancelado({ origen: 'comensal' }));
+  assert.strictEqual(ack.ok, true);
+  assert.strictEqual('origen' in (await llega), false);
+  await s.cerrar();
+});

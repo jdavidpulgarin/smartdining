@@ -1,0 +1,374 @@
+const test = require('node:test');
+const assert = require('node:assert');
+const request = require('supertest');
+const { instalarFakeDb, tokenStaff, tokenComensal } = require('./helpers/fake-db');
+const app = require('../server');
+const autorInexistente = require('../src/services/autor-inexistente');
+
+// ---------------------------------------------------------------------------
+// El 23503 del AUTOR en los pedidos: "tu usuario ya no existe".
+//
+// Un mesero crea un pedido o lo mueve de estado con un token todavia valido,
+// pero su usuario ya se borro. El backend escribe historial_estados.id_usuario
+// con el id del JWT y la columna tiene su fk_historial_usuario contra usuarios,
+// asi que PostgreSQL devuelve 23503. Sin traducir eso salia como el 409
+// generico de clave ajena -"La operacion choca con otro registro
+// relacionado", sin motivo-, que no dice que el problema sea la propia sesion.
+//
+// La FK se confirmo contra PostgreSQL (pg_constraint sobre usuarios) y las
+// rutas se sondearon una por una con un id_usuario inexistente. Lo que se
+// comprueba aqui es la traduccion por la ruta; el comportamiento contra la base
+// de verdad esta en tests/integracion/pedidos-sql.test.js.
+// ---------------------------------------------------------------------------
+
+/** El 23503 que manda PostgreSQL cuando el autor del historial no existe. */
+function errorDeAutor() {
+  const err = new Error(
+    'inserción o actualización en la tabla «historial_estados» viola la llave foránea «fk_historial_usuario»'
+  );
+  err.code = '23503';
+  err.constraint = 'fk_historial_usuario';
+  return err;
+}
+
+/** Un 23503 de otra cosa: tiene que seguir su propio camino. */
+function errorDeOtraFk() {
+  const err = new Error('viola la llave foránea «fk_detalles_pedido_plato»');
+  err.code = '23503';
+  err.constraint = 'fk_detalles_pedido_plato';
+  return err;
+}
+
+const PEDIDO = {
+  id_pedido: 91,
+  id_mesa: 5,
+  codigo_pedido: 'SD-0091',
+  estado: 'recibido',
+  total: 28000,
+};
+
+const mesero = () => tokenStaff(7, 'mesero');
+
+/**
+ * Doble de la base para POST /pedidos. Por omision el pedido se crea bien; con
+ * `error` + `fallaEn` el doble lo lanza en esa sentencia.
+ */
+function fakeCrear({ error = null, fallaEn = 'INSERT INTO historial_estados' } = {}) {
+  return instalarFakeDb((sql) => {
+    if (error && sql.includes(fallaEn)) throw error;
+    // Los items van SIN apodo a proposito: asi no entra la resolucion de
+    // alias (D-18b) y la prueba se queda en lo suyo. La mesa igual tiene que
+    // existir para el resto de comprobaciones.
+    if (sql.includes('SELECT 1 FROM mesas')) return { rows: [{ existe: 1 }] };
+    if (sql.includes('obtener_cuenta_mesa_json')) {
+      return { rows: [{ cuenta: { id_mesa: PEDIDO.id_mesa, comensales: [] } }] };
+    }
+    if (sql.includes('INSERT INTO pedidos')) return { rows: [PEDIDO] };
+    if (sql.includes('INSERT INTO detalles_pedido')) return { rows: [{ id_detalle: 1 }] };
+    if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) return { rows: [PEDIDO] };
+    if (sql.includes('FROM detalles_pedido')) return { rows: [] };
+    return { rows: [] };
+  });
+}
+
+const crear = (db, token = mesero()) => request(app)
+  .post('/api/pedidos')
+  .set('Authorization', `Bearer ${token}`)
+  .send({ id_mesa: PEDIDO.id_mesa, items: [{ id_plato: 3, cantidad: 1 }] });
+
+// ---------------------------------------------------------------------------
+// POST /pedidos
+// ---------------------------------------------------------------------------
+
+test('POST /pedidos: el autor borrado da 409 autor_inexistente', async () => {
+  const db = fakeCrear({ error: errorDeAutor() });
+  try {
+    const res = await crear(db);
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+    // La convencion del repo: { error, motivo }, nunca "codigo".
+    assert.strictEqual(res.body.codigo, undefined);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /pedidos: y el mensaje no filtra la tabla ni el constraint', async () => {
+  const db = fakeCrear({ error: errorDeAutor() });
+  try {
+    const res = await crear(db);
+
+    const cuerpo = JSON.stringify(res.body);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.match(res.body.error, /vuelve a iniciar sesión/i, 'dice que hacer');
+    assert.ok(!/historial_estados|fk_historial|23503/i.test(cuerpo), cuerpo);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /pedidos: el ROLLBACK se hace y la transaccion no queda abierta', async () => {
+  const db = fakeCrear({ error: errorDeAutor() });
+  try {
+    await crear(db);
+
+    assert.ok(db.buscar('BEGIN'), 'abrio la transaccion');
+    assert.ok(db.buscar('ROLLBACK'), 'y la deshizo');
+    assert.strictEqual(db.todas('COMMIT').length, 0, 'no hubo COMMIT');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /pedidos: un 23503 de OTRA clave ajena sigue dando el 409 generico', async () => {
+  const db = fakeCrear({ error: errorDeOtraFk(), fallaEn: 'INSERT INTO detalles_pedido' });
+  try {
+    const res = await crear(db);
+
+    assert.strictEqual(res.status, 409);
+    assert.notStrictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.motivo, undefined, 'el 409 generico no lleva motivo');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /pedidos: el 503 reintentar del deadlock no se pierde', async () => {
+  // La traduccion del autor mira el nombre del constraint, asi que un 40P01
+  // -que no trae ninguno- sigue llegando al controller con su err.code y
+  // sale como 503 reintentar (D-17). Es la comprobacion de que una traduccion
+  // no se come la otra.
+  const deadlock = new Error('se ha detectado un bloqueo mutuo');
+  deadlock.code = '40P01';
+  const db = fakeCrear({ error: deadlock });
+  try {
+    const res = await crear(db);
+
+    assert.strictEqual(res.status, 503);
+    assert.strictEqual(res.body.motivo, 'reintentar');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /pedidos: el 23505 del codigo_pedido se sigue reintentando', async () => {
+  // El reintento del codigo vive ANTES, dentro del SAVEPOINT, y la traduccion
+  // del autor esta en el catch de toda la transaccion: no se cruzan.
+  let intentos = 0;
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('INSERT INTO pedidos')) {
+      intentos += 1;
+      if (intentos === 1) {
+        const err = new Error('llave duplicada');
+        err.code = '23505';
+        err.constraint = 'pedidos_codigo_pedido_key';
+        throw err;
+      }
+      return { rows: [PEDIDO] };
+    }
+    if (sql.includes('INSERT INTO detalles_pedido')) return { rows: [{ id_detalle: 1 }] };
+    if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) return { rows: [PEDIDO] };
+    return { rows: [] };
+  });
+  try {
+    const res = await crear(db);
+
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(intentos, 2, 'lo reintento con otro codigo');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /pedidos de un comensal: no hay autor que pueda faltar', async () => {
+  // El pedido de un comensal va con id_usuario en NULL -no existe en usuarios-
+  // y un NULL no viola la clave ajena. Asi que por esta ruta el caso no existe.
+  const db = fakeCrear({});
+  try {
+    const res = await request(app)
+      .post('/api/pedidos')
+      .set('Authorization', `Bearer ${tokenComensal(PEDIDO.id_mesa)}`)
+      .send({ items: [{ id_plato: 3, cantidad: 1 }] });
+
+    assert.strictEqual(res.status, 201);
+    const historial = db.buscar('INSERT INTO historial_estados');
+    assert.ok(historial, 'escribe el historial');
+    assert.strictEqual(historial.params[1], null, 'con el autor en NULL');
+  } finally {
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /pedidos/:id/estado y el tablero del KDS
+//
+// Cada cambio de estado deja su linea en historial_estados con el id del JWT,
+// asi que es el mismo caso y la misma clave ajena. El KDS no tiene codigo
+// propio para esto: kdsService.cambiarEstado llama a pedidosService
+// .actualizarEstado, de modo que la traduccion le llega por ahi.
+// ---------------------------------------------------------------------------
+
+/**
+ * Doble para los cambios de estado. El pedido existe y esta en `estadoActual`;
+ * con `error` el doble lo lanza en el INSERT del historial, que es donde
+ * PostgreSQL lo lanza de verdad.
+ */
+function fakeEstado({ error = null, estadoActual = 'recibido' } = {}) {
+  return instalarFakeDb((sql, params) => {
+    if (error && sql.includes('INSERT INTO historial_estados')) throw error;
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: estadoActual }] };
+    if (sql.includes('UPDATE pedidos SET estado')) {
+      return { rows: [{ ...PEDIDO, estado: params[0] }] };
+    }
+    if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) {
+      return { rows: [{ ...PEDIDO, estado: estadoActual }] };
+    }
+    return { rows: [] };
+  });
+}
+
+test('PATCH /pedidos/:id/estado: el autor borrado da 409 autor_inexistente', async () => {
+  const db = fakeEstado({ error: errorDeAutor() });
+  try {
+    const res = await request(app)
+      .patch(`/api/pedidos/${PEDIDO.id_pedido}/estado`)
+      .set('Authorization', `Bearer ${mesero()}`)
+      .send({ estado: 'en_preparacion' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('PATCH /kds/comandas/:id/estado: la cocina ve el mismo 409', async () => {
+  const db = fakeEstado({ error: errorDeAutor() });
+  try {
+    const res = await request(app)
+      .patch(`/api/kds/comandas/${PEDIDO.id_pedido}/estado`)
+      .set('Authorization', `Bearer ${tokenStaff(2, 'cocina')}`)
+      .send({ estado: 'en_preparacion' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('Un cambio de estado: el P0001 del trigger de transiciones no se disfraza', async () => {
+  // La transicion ilegal la rechaza tr_validar_transicion_estado con su propio
+  // mensaje, y eso tiene que seguir llegando tal cual: no es un problema de
+  // sesion, es que de ahi no se puede ir alla.
+  const mensaje = 'Transición de estado no autorizada: de "recibido" hacia "pagado"';
+  const trigger = new Error(mensaje);
+  trigger.code = 'P0001';
+  const db = instalarFakeDb((sql) => {
+    if (sql.includes('SELECT estado FROM pedidos')) return { rows: [{ estado: 'recibido' }] };
+    if (sql.includes('UPDATE pedidos SET estado')) throw trigger;
+    return { rows: [] };
+  });
+  try {
+    const res = await request(app)
+      .patch(`/api/pedidos/${PEDIDO.id_pedido}/estado`)
+      .set('Authorization', `Bearer ${mesero()}`)
+      .send({ estado: 'pagado' });
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.error, mensaje);
+    assert.notStrictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+  } finally {
+    db.restaurar();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /transacciones: el cobro que liquida la cuenta
+//
+// La misma clave ajena por un tercer camino. Un cobro solo escribe
+// historial_estados cuando liquida la cuenta de un pedido YA ENTREGADO: es la
+// unica transicion legal hacia 'pagado' (tr_validar_transicion_estado). Un
+// abono parcial, o un cobro con la comida aun en cocina, no pasan por ahi, y
+// por eso el caso no se veia en una prueba de cobro cualquiera.
+// ---------------------------------------------------------------------------
+
+const TOTAL_COBRO = 24000;
+
+/** Doble de un cobro que liquida un pedido entregado. */
+function fakeCobro({ error = null } = {}) {
+  return instalarFakeDb((sql) => {
+    if (error && sql.includes('INSERT INTO historial_estados')) throw error;
+    if (sql.includes('SELECT * FROM pedidos WHERE id_pedido')) {
+      return {
+        rows: [{
+          id_pedido: PEDIDO.id_pedido,
+          id_mesa: PEDIDO.id_mesa,
+          estado: 'entregado',
+          total: String(TOTAL_COBRO),
+        }],
+      };
+    }
+    if (sql.includes('INSERT INTO transacciones')) {
+      return {
+        rows: [{
+          id_transaccion: 1,
+          id_pedido: PEDIDO.id_pedido,
+          monto: String(TOTAL_COBRO),
+          estado_transaccion: 'completada',
+        }],
+      };
+    }
+    if (sql.includes('obtener_saldo_pendiente($1) <= 0')) return { rows: [{ liquidado: true }] };
+    if (sql.includes("UPDATE pedidos SET estado = 'pagado'")) {
+      return { rows: [{ id_pedido: PEDIDO.id_pedido, estado: 'pagado' }] };
+    }
+    return { rows: [] };
+  });
+}
+
+const cobrar = () => request(app)
+  .post('/api/transacciones')
+  .set('Authorization', `Bearer ${tokenStaff(4, 'cajero')}`)
+  .send({ id_pedido: PEDIDO.id_pedido, monto: TOTAL_COBRO, metodo_pago: 'efectivo' });
+
+test('POST /transacciones: el cajero borrado tambien recibe 409 autor_inexistente', async () => {
+  const db = fakeCobro({ error: errorDeAutor() });
+  try {
+    const res = await cobrar();
+
+    assert.strictEqual(res.status, 409);
+    assert.strictEqual(res.body.motivo, autorInexistente.MOTIVO_AUTOR_INEXISTENTE);
+    assert.strictEqual(res.body.error, autorInexistente.MENSAJE_AUTOR_INEXISTENTE);
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /transacciones: el pago no queda a medias, se deshace con el resto', async () => {
+  const db = fakeCobro({ error: errorDeAutor() });
+  try {
+    await cobrar();
+
+    assert.ok(db.buscar('INSERT INTO transacciones'), 'se intento registrar');
+    assert.ok(db.buscar('ROLLBACK'), 'y se deshizo entero');
+    assert.strictEqual(db.todas('COMMIT').length, 0, 'sin COMMIT: no entro el pago a medias');
+  } finally {
+    db.restaurar();
+  }
+});
+
+test('POST /transacciones: un cobro normal no se ve afectado', async () => {
+  const db = fakeCobro({});
+  try {
+    const res = await cobrar();
+
+    assert.strictEqual(res.status, 201);
+    assert.ok(db.buscar('COMMIT'), 'el pago entra como siempre');
+  } finally {
+    db.restaurar();
+  }
+});

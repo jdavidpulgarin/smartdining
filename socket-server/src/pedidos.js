@@ -4,6 +4,7 @@ const { esEventIdValido } = require('./idempotencia');
 const { salaMesa, SALA_KDS, SALA_ADMIN, esIdValido } = require('./salas');
 const { notificarCambioEstado } = require('./suscripciones');
 const { enviarAck, leerCuerpoCrudo, parsearJson, exigirClaveInterna } = require('./http');
+const { ORIGENES } = require('./item-cancelado');
 
 // Mismos valores que el CHECK del backend. Solo se usan para rechazar basura;
 // la validez de la TRANSICIÓN la decide el trigger de la base de datos.
@@ -23,6 +24,16 @@ function validarPedidoCreado(p) {
 /**
  * Lógica única de order:created, compartida por el socket (personal) y por el
  * HTTP interno (backend). Así ambas vías validan, deduplican y difunden igual.
+ *
+ * Orden "primero confirmar, después avisar" (EVENTS.md §4, order:created):
+ *   1. quitar las líneas de quien pidió (atómico e idempotente por pedido);
+ *   2. guardar los dueños (SET con el mismo valor: idempotente);
+ *   3. reservar el aviso por id_pedido (un solo SET NX) y emitir order:created;
+ *   4. marcar el eventId (secundaria: si falla, solo log).
+ * Los pasos 1 y 2 corren también en un reintento. Si fallan, la excepción sube
+ * (500 / ERROR_INTERNO) SIN haber reservado nada, así que el reintento rehace
+ * lo que faltó. Tras la reserva del paso 3 no hay nada que pueda fallar antes
+ * de emitir: la comanda sale una sola vez.
  */
 async function difundirPedidoCreado(ctx, p) {
   const { io, carritos, registro } = ctx;
@@ -31,51 +42,81 @@ async function difundirPedidoCreado(ctx, p) {
   if (errorPayload) return fallo('PAYLOAD_INVALIDO', errorPayload, { eventId: p.eventId });
 
   const { pedido } = p;
-  // Doble guardia: por eventId (reintento exacto) y por id_pedido (por si el
-  // emisor reintenta con un eventId nuevo). Sin esto, la cocina vería la
-  // misma comanda dos veces.
   const claveEvento = `order:created:${p.eventId}`;
   const clavePedido = `order:created:pedido:${pedido.id_pedido}`;
-  // reservar es atómico (SET NX en Redis): dos envíos simultáneos del mismo
-  // pedido no pueden pasar ambos el chequeo. Se reservan las dos claves; si
-  // cualquiera ya existía, es un duplicado.
-  const nuevoEvento = await registro.reservar(claveEvento);
-  const nuevoPedido = await registro.reservar(clavePedido);
-  if (!nuevoEvento || !nuevoPedido) {
-    return exito({ eventId: p.eventId, duplicado: true });
-  }
+  const duplicado = { eventId: p.eventId, duplicado: true };
 
-  // Encadenar .to() envía UNA sola vez a un socket que esté en varias de estas
-  // salas (p. ej. un admin, que está en KDS y en Admin).
-  io.to(SALA_KDS).to(SALA_ADMIN).to(salaMesa(pedido.id_mesa)).emit('order:created', {
-    eventId: p.eventId,
-    pedido,
-    emitidoEn: new Date().toISOString(),
-  });
+  // Reintento exacto ya completado: la marca del eventId solo se escribe al
+  // final (paso 4), así que si existe no queda nada pendiente. Es una lectura:
+  // no reserva nada que pueda quedar a medias.
+  if (await registro.obtener(claveEvento) !== undefined) return exito(duplicado);
 
-  // Dueños del pedido para el push "¡Tu plato está listo!": el comensal de
-  // cada ítem si el backend lo envía y, además, los de las líneas del carrito
-  // que se están convirtiendo en este pedido (el backend hoy guarda el apodo
-  // dentro de notas_especiales, no en un campo propio).
-  const carrito = await carritos.snapshot(pedido.id_mesa);
-  const duenos = new Set(carrito.items.map((i) => i.comensal).filter(Boolean));
-  for (const item of Array.isArray(pedido.items) ? pedido.items : []) {
-    if (item && typeof item.comensal === 'string' && item.comensal.trim() && item.comensal.length <= 40) {
-      duenos.add(item.comensal.trim());
+  // Quiénes pidieron: el backend pone en cada ítem el alias del JWT de quien
+  // envió el pedido. Sin alias (pedido del personal) no se toca el carrito:
+  // no hay forma de saber qué líneas se convirtieron en este pedido.
+  const alias = aliasDelPedido(pedido);
+  if (alias.size > 0) {
+    // 1. Cada comensal envía solo SUS platos: se quitan sus líneas y las de los
+    // demás siguen en el carrito. Una sola operación atómica del almacén (la
+    // marca de idempotencia va en la misma transacción), así que un
+    // cart:update simultáneo no se pierde y un reintento no quita dos veces.
+    // La clave es por PEDIDO, no por eventId: un reintento con eventId nuevo
+    // tampoco debe llevarse la segunda ronda del comensal.
+    const r = await carritos.aplicarUnaVez(
+      pedido.id_mesa,
+      { accion: 'remove_de', comensales: [...alias] },
+      `sistema:cart:${pedido.id_mesa}:pedido:${pedido.id_pedido}`,
+    );
+    if (!r.error && !r.duplicado && !r.sinCambios) {
+      io.to(salaMesa(pedido.id_mesa)).emit('cart:updated', {
+        eventId: p.eventId,
+        origen: 'sistema',
+        carrito: r.snapshot,
+      });
     }
-  }
-  if (duenos.size > 0 && ctx.duenosPedidos) await ctx.duenosPedidos.guardar(pedido.id_pedido, duenos);
 
-  // Lo que estaba en el carrito acaba de convertirse en pedido: se vacía para
-  // que la mesa no pueda volver a ordenar lo mismo por accidente.
-  if (carrito.items.length > 0) {
-    io.to(salaMesa(pedido.id_mesa)).emit('cart:updated', {
+    // 2. Dueños para el push "¡Tu plato está listo!": solo quienes pidieron,
+    // no todos los que tienen algo en el carrito de la mesa.
+    if (ctx.duenosPedidos) await ctx.duenosPedidos.guardar(pedido.id_pedido, alias);
+  }
+
+  // 3. reservar es atómico (SET NX en Redis): dos envíos del mismo pedido no
+  // pueden pasar ambos. Una sola clave, para que no quede una reservada y la
+  // otra no. Si ya existía, el aviso ya salió: duplicado.
+  const nuevo = await registro.reservar(clavePedido);
+  if (nuevo) {
+    // Encadenar .to() envía UNA sola vez a un socket que esté en varias de
+    // estas salas (p. ej. un admin, que está en KDS y en Admin).
+    io.to(SALA_KDS).to(SALA_ADMIN).to(salaMesa(pedido.id_mesa)).emit('order:created', {
       eventId: p.eventId,
-      origen: 'sistema',
-      carrito: await carritos.vaciar(pedido.id_mesa),
+      pedido,
+      emitidoEn: new Date().toISOString(),
     });
   }
-  return exito({ eventId: p.eventId, duplicado: false });
+
+  // 4. Marca del eventId para responder rápido al próximo reintento exacto.
+  // Es secundaria (la reserva por pedido ya protege el aviso): si falla, todo
+  // lo importante está hecho y no se devuelve un error.
+  try {
+    await registro.guardar(claveEvento, true);
+  } catch (err) {
+    log.error('order:created: no se pudo marcar el eventId', { eventId: p.eventId, id_pedido: pedido.id_pedido, error: err });
+  }
+  return exito(nuevo ? { eventId: p.eventId, duplicado: false } : duplicado);
+}
+
+const MAX_ALIAS = 40; // igual que MAX_APODO del carrito
+
+/** Alias únicos y no vacíos de pedido.items[].comensal. */
+function aliasDelPedido(pedido) {
+  const alias = new Set();
+  for (const item of Array.isArray(pedido.items) ? pedido.items : []) {
+    if (item && typeof item.comensal === 'string') {
+      const a = item.comensal.trim();
+      if (a && a.length <= MAX_ALIAS) alias.add(a);
+    }
+  }
+  return alias;
 }
 
 const ROLES_EMITEN_ESTADO = ['cocina', 'mesero', 'cajero', 'admin'];
@@ -100,11 +141,29 @@ function validarCambioEstado(p) {
 }
 
 /**
+ * `origen` de POST /internal/order-status (EVENTS.md §6.3): quién causó el
+ * cambio, 'comensal' o 'personal'. Opcional: si no viene, el evento no lleva
+ * la clave y quien lo recibe asume 'personal' (el único origen de los cambios
+ * de estado antes de J-14). Solo tiene sentido con estado 'cancelado' (el
+ * comensal quitó su última línea, #180), pero no se rechaza con otro estado:
+ * se reenvía igual. Devuelve mensaje de error o null.
+ */
+function validarOrigen(p) {
+  if (p && typeof p === 'object' && p.origen !== undefined && !ORIGENES.includes(p.origen)) {
+    return `origen debe ser uno de: ${ORIGENES.join(', ')} (o no venir)`;
+  }
+  return null;
+}
+
+/**
  * Lógica única de order:status (socket y HTTP interno). Reenvía solo los
  * campos conocidos, no el objeto entero: así un emisor no puede colar datos
  * arbitrarios hacia las pantallas de cocina y de los comensales.
+ *
+ * `origen` solo lo pasa el HTTP interno, ya validado: por el socket no se
+ * reenvía aunque venga en el payload (ahí siempre es el personal).
  */
-async function difundirCambioEstado(ctx, p) {
+async function difundirCambioEstado(ctx, p, { origen } = {}) {
   const { io, registro } = ctx;
   if (!esEventIdValido(p.eventId)) return fallo('PAYLOAD_INVALIDO', 'eventId debe ser un UUID');
   const errorPayload = validarCambioEstado(p);
@@ -122,6 +181,8 @@ async function difundirCambioEstado(ctx, p) {
     codigo_pedido: p.codigo_pedido ?? null,
     estado_anterior: p.estado_anterior ?? null,
     estado: p.estado,
+    // Solo si vino: sin la clave, quien recibe asume 'personal'.
+    ...(origen !== undefined ? { origen } : {}),
     emitidoEn: new Date().toISOString(),
   };
   io.to(SALA_KDS).to(SALA_ADMIN).to(salaMesa(p.id_mesa)).emit('order:status', cambio);
@@ -166,7 +227,11 @@ const rutasPedidos = {
   'POST /internal/order-status': async (req, res, ctx) => {
     exigirClaveInterna(req, ctx.config);
     const cuerpo = parsearJson(await leerCuerpoCrudo(req));
-    enviarAck(res, await difundirCambioEstado(ctx, cuerpo));
+    // origen se valida ANTES de difundir (que es quien reserva el eventId):
+    // un 400 no consume el eventId y el reintento corregido sí sale.
+    const errorOrigen = validarOrigen(cuerpo);
+    if (errorOrigen) return enviarAck(res, fallo('PAYLOAD_INVALIDO', errorOrigen, { eventId: cuerpo.eventId }));
+    return enviarAck(res, await difundirCambioEstado(ctx, cuerpo, { origen: cuerpo && cuerpo.origen }));
   },
 };
 

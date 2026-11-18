@@ -1,6 +1,7 @@
 import IngredientCard from '../ui/IngredientCard';
 import Badge from '../ui/Badge';
 import SelectorPorcion from './SelectorPorcion';
+import { urlImagen } from '../../utils/imagenes';
 
 function obtenerTextoRegla(paso) {
   const min = Number(paso.min_sel) || 0;
@@ -41,15 +42,15 @@ function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) {
         <div>
           <h2
             id={`paso-titulo-${paso.id_paso}`}
-            className="font-titulo text-xl font-bold text-cafe"
+            className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto"
           >
             {paso.nombre}
           </h2>
-          <p className="text-xs text-gray-600 font-medium mt-0.5">
+          <p className="text-xs text-texto-suave font-medium mt-0.5">
             {obtenerTextoRegla(paso)}
           </p>
           {maxAlcanzado && (
-            <p className="text-xs text-primary font-medium mt-0.5">
+            <p className="text-xs text-primario-texto font-medium mt-0.5">
               Máximo alcanzado: quita uno para cambiarlo
             </p>
           )}
@@ -75,7 +76,7 @@ function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) {
             <div key={idIng} className="space-y-1.5">
               <IngredientCard
                 nombre={ingrediente.nombre}
-                imagen={ingrediente.url_imagen}
+                imagen={urlImagen(ingrediente.url_imagen)}
                 precioExtra={ingrediente.precio_extra}
                 calorias={ingrediente.calorias}
                 seleccionado={seleccionado}

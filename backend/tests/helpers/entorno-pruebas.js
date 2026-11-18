@@ -11,3 +11,12 @@
 // comportan igual que en el CI (sin .env). Las que necesitan Redis usan
 // tests/helpers/fake-redis.js, que fija su propia REDIS_URL falsa.
 process.env.REDIS_URL = '';
+// Igual con NODE_ENV: este archivo se carga ANTES de que server.js llame a
+// dotenv.config(), y dotenv no sobrescribe lo que ya existe, así que fijarlo
+// aquí gana sobre el .env de quien corra la suite. Hace falta desde que hay
+// comportamiento que depende de NODE_ENV === 'development' (el modo red local):
+// sin esto, la suite se comportaría de una forma en una máquina con
+// NODE_ENV=development en su .env y de otra en el CI, que no tiene .env. Las
+// pruebas que quieren el modo desarrollo lo inyectan ellas, por parámetro.
+process.env.NODE_ENV = 'test';
+

@@ -97,8 +97,16 @@ function crearRotadorQr({
 
   return {
     habilitado,
-    /** La mesa abrió sesión con este token: empieza a contar. */
-    abrir(idMesa, tokenActual = null) {
+    /**
+     * La mesa abrió sesión con este token: empieza a contar.
+     *
+     * `tokenActual` NUNCA es null: siempre es el token firmado que acaba de
+     * devolver /qr/generar (src/qr.js), el mismo que el backend guarda al abrir
+     * o rotar a mano. Es el `token_anterior` del primer compare-and-swap, y el
+     * backend responde 409 token_anterior_distinto a un null (no hay cambio a
+     * ciegas): con null la mesa dejaría de rotar en el primer ciclo.
+     */
+    abrir(idMesa, tokenActual) {
       if (!habilitado) return;
       detener(idMesa);
       mesas.set(idMesa, { temporizador: null, tokenActual });

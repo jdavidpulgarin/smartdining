@@ -73,12 +73,40 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Define INTERNAL_API_KEY en infra/.env}
       SOCKET_URL: http://socket-server:4001
       FRONTEND_CLIENTE_URL: https://app.${DOMINIO}
-      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO}
+      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO},https://${DOMINIO}
       # Solo de nginx (IP fija abajo) se cree X-Forwarded-For; de cualquier otro contenedor no (backend/server.js).
       TRUST_PROXY: 172.31.250.10
+      # Límites por IP (backend/src/middleware/limites.middleware.js). Un local
+      # o una feria comparten UNA IP pública (el Wi-Fi), así que el cupo es de
+      # todos a la vez. Los valores por defecto van aquí para que funcionen sin
+      # tocar los .env; se cambian en infra/.env (ver docs/despliegue.md,
+      # "Límites de peticiones") y se aplican con `up -d backend`.
+      #   QR: apertura de sesión por QR (150/min por IP; en la feria, 10 a 15
+      #       mesas y ~10 celulares a la vez caben con mucho margen).
+      #   LOGIN: login del personal, 5 intentos FALLIDOS/min por IP + email.
+      #   GLOBAL: techo de toda la API por IP.
+      RATE_LIMIT_QR_MAX: ${RATE_LIMIT_QR_MAX:-150}
+      RATE_LIMIT_QR_VENTANA_MS: ${RATE_LIMIT_QR_VENTANA_MS:-60000}
+      RATE_LIMIT_LOGIN_MAX: ${RATE_LIMIT_LOGIN_MAX:-5}
+      RATE_LIMIT_LOGIN_VENTANA_MS: ${RATE_LIMIT_LOGIN_VENTANA_MS:-60000}
+      RATE_LIMIT_GLOBAL_MAX: ${RATE_LIMIT_GLOBAL_MAX:-4000}
+      RATE_LIMIT_GLOBAL_VENTANA_MS: ${RATE_LIMIT_GLOBAL_VENTANA_MS:-60000}
+      # Imágenes de los platos (D-23): el backend las re-codifica a .webp y las
+      # escribe aquí; nginx las sirve en api.${DOMINIO}/imagenes/<uuid>.webp.
+      IMAGENES_DIR: /app/uploads/imagenes
+    # Volumen con nombre: sobrevive a `up -d --build` y a `down` (NUNCA `down -v`:
+    # borra las imágenes; docs/despliegue.md). Docker le antepone el proyecto:
+    # smartdining_imagenes y smartdining-staging_imagenes no se mezclan.
+    volumes:
+      - imagenes:/app/uploads/imagenes
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    # Margen para el cierre ordenado (backend/server.js): tras SIGTERM fuerza la
+    # salida a los APAGADO_TIMEOUT_MS (10 s por defecto). Debe ser MAYOR que eso:
+    # con los 10 s por defecto de Docker, el SIGKILL llegaría a la vez. Si subes
+    # APAGADO_TIMEOUT_MS, sube también este valor.
+    stop_grace_period: 15s
     networks: [datos, web]
 
   socket-server:
@@ -89,7 +117,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: "4001"
-      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO}
+      CORS_ORIGINS: https://app.${DOMINIO},https://staff.${DOMINIO},https://cocina.${DOMINIO},https://${DOMINIO}
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       QR_SECRET: ${QR_SECRET:?Define QR_SECRET en infra/.env}
@@ -104,14 +132,18 @@ services:
       WOMPI_EVENTS_SECRET: ${WOMPI_EVENTS_SECRET:-}
       WOMPI_API_URL: ${WOMPI_API_URL:-}
       LOG_NIVEL: ${LOG_NIVEL:-info}
+      # Gracia de presencia de un comensal que pierde la red (EVENTS.md §5.2).
+      PRESENCIA_GRACIA_MS: ${PRESENCIA_GRACIA_MS:-60000}
       # Solo de nginx (IP fija abajo) se cree X-Real-IP; de cualquier otro
       # contenedor de la red web, no (socket-server/src/ip-cliente.js).
       TRUST_PROXY: 172.31.250.10
     depends_on:
       redis: { condition: service_healthy }
       backend: { condition: service_started }
-    # Margen para el cierre ordenado (espera hasta 10 s los acks en curso).
-    stop_grace_period: 15s
+    # Margen para el cierre ordenado: espera hasta 10 s los acks en curso
+    # (src/cierre.js) y fuerza la salida a los 15 s (server.js). Debe ser MAYOR
+    # que esos 15 s para que el SIGKILL de Docker no llegue antes.
+    stop_grace_period: 20s
     networks: [datos, web]
 
   nginx:
@@ -123,12 +155,29 @@ services:
         DOMINIO: ${DOMINIO:?Define DOMINIO en infra/.env}
     environment:
       DOMINIO: ${DOMINIO}
+      # Proyecto de compose del entorno: "smartdining" en producción (name: de
+      # arriba) y "smartdining-staging" en staging (COMPOSE_PROJECT_NAME del
+      # .env.staging, lo exige deploy-staging.yml). La plantilla lo usa para que
+      # SOLO el raíz de producción sea indexable (map $sd_robots). Lleva el
+      # prefijo NGINX_ para que validar-nginx.sh lo pase al nginx -t.
+      NGINX_PROYECTO: ${COMPOSE_PROJECT_NAME:-smartdining}
+      # Zonas limit_req de nginx (infra/nginx/templates/smartdining.conf.template),
+      # por IP. Se ajustan en infra/.env (docs/despliegue.md, "Límites de
+      # peticiones"). Un valor mal escrito impide arrancar nginx: valídalo antes.
+      NGINX_LIMITE_LOGIN: ${NGINX_LIMITE_LOGIN:-30r/m}
+      NGINX_RAFAGA_LOGIN: ${NGINX_RAFAGA_LOGIN:-20}
+      NGINX_LIMITE_PAGOS: ${NGINX_LIMITE_PAGOS:-120r/m}
+      NGINX_RAFAGA_PAGOS: ${NGINX_RAFAGA_PAGOS:-60}
+      NGINX_LIMITE_WEBHOOK: ${NGINX_LIMITE_WEBHOOK:-300r/m}
+      NGINX_RAFAGA_WEBHOOK: ${NGINX_RAFAGA_WEBHOOK:-100}
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - certificados:/etc/letsencrypt:ro
       - acme:/var/www/certbot:ro
+      # Solo lectura: nginx sirve las imágenes, solo el backend escribe.
+      - imagenes:/usr/share/nginx/imagenes:ro
     depends_on:
       backend: { condition: service_healthy }
       socket-server: { condition: service_healthy }
@@ -161,3 +210,5 @@ volumes:
   redisdata:
   certificados:
   acme:
+  # Imágenes de los platos (D-23). La respalda respaldo.sh (tar.gz junto al dump).
+  imagenes:

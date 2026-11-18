@@ -3,7 +3,10 @@ const pedidosService = require('../services/pedidos.service');
 const mesasService = require('../services/mesas.service');
 const { esComensal } = require('../middleware/auth.middleware');
 const socketNotifier = require('../services/socket.notifier');
+const avisosMesa = require('../services/avisos-mesa');
 const aliasComensal = require('../services/alias-comensal');
+const aliasEnCuenta = require('../services/alias-en-cuenta');
+const { esErrorDeConcurrencia } = require('../middleware/errores.middleware');
 
 // El trigger tr_validar_disponibilidad_plato de Jarrison deja comandar un plato
 // agotado si notas_especiales contiene 'OVERRIDE_ADMIN' (bypass administrativo).
@@ -135,15 +138,215 @@ const crearPedidoSchema = z.object({
  *
  * Para mesero y admin el body sigue valiendo: ellos piden de parte de alguien y
  * su JWT no lleva alias, sino `id_usuario`.
+ *
+ * D-18b: para el personal ya no se guarda el texto del body tal cual, sino el
+ * alias CANÓNICO que resolvió `resolverAliasCanonicos` para esa clave, para que
+ * la cuenta no acabe con «Abuela» y «abuela» en dos filas. `porClave` llega
+ * vacío cuando el pedido no trae ningún alias.
  */
-function aliasDelComensal(req, item) {
+function aliasDelComensal(req, item, porClave = new Map()) {
   const firmado = req.user?.comensal;
   if (typeof firmado === 'string' && firmado.trim()) return firmado.trim();
 
   // Un comensal sin alias firmado se queda sin alias: el body no es autoridad.
   if (esComensal(req)) return null;
 
-  return item.comensal ?? item.apodo ?? null;
+  const bruto = item.comensal ?? item.apodo;
+  if (typeof bruto !== 'string' || !bruto.trim()) return null;
+
+  const normalizado = aliasComensal.normalizarAlias(bruto);
+  // El cajón de los platos sin dueño no es dueño de nada: si llegara hasta aquí
+  // (no llega: `resolverAliasCanonicos` ya devolvió su 409), el ítem se queda
+  // SIN alias, que es justo donde la cuenta lo pondría.
+  if (normalizado.reservada) return null;
+  // Si no se pudo normalizar, `resolverAliasCanonicos` ya respondió 400; este
+  // respaldo solo existe para no devolver undefined si alguien llama suelto.
+  if (normalizado.error) return bruto.trim();
+
+  return porClave.get(normalizado.clave) ?? normalizado.alias;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Alias canónico del comensal cuando pide el PERSONAL (D-18b)
+ *
+ * El problema: la cuenta por persona agrupa por el TEXTO EXACTO del alias
+ * (`btrim(dp.comensal)` en obtener_cuenta_mesa), mientras que la unicidad de los
+ * alias se mide por CLAVE (sin tildes, minúsculas, sin separadores). Así que si
+ * la abuela se registra como «Abuela» y el mesero escribe «abuela» al tomarle el
+ * pedido, la cuenta muestra DOS filas, el desglose no cuadra y el cajero no sabe
+ * a quién cobrarle qué.
+ *
+ * La regla: cuando pide el personal, el alias que se guarda no es el texto que
+ * llegó, sino el CANÓNICO de esa persona en la mesa. Se busca en dos sitios, en
+ * este orden:
+ *   1. las reservas de alias de la mesa (`sd:mesa:{id}:alias`), que es la fuente
+ *      de verdad de quién está sentado, venga de un QR o del alta del personal;
+ *   2. la cuenta de la mesa, para cubrir a quien ya tiene platos pero cuya
+ *      reserva venció (24 h para un sin celular, 3 h para una sesión de QR).
+ * Si no está en ninguno, es un nombre que nadie registró: 409.
+ *
+ * Esto NO toca al comensal: su alias sale firmado del JWT (H-05) y nunca del
+ * cuerpo. Y un ítem sin alias sigue cayendo en «General», como siempre.
+ * -------------------------------------------------------------------------- */
+
+/** Motivo del 409 cuando el nombre no corresponde a nadie de la mesa. */
+const MOTIVO_NO_REGISTRADO = 'comensal_no_registrado';
+
+const MENSAJE_NO_REGISTRADO =
+  'Esa persona no está registrada en la mesa: agrégala primero '
+  + '(POST /api/mesas/:id/comensales) o usa el nombre con el que ya aparece en la cuenta';
+
+/**
+ * El 503 de un deadlock al crear el pedido (D-17).
+ *
+ * `reintentar` es el motivo estable: el pedido NO se guardó y hay que volver a
+ * mandarlo. Lo repite el cliente y no el backend, porque `POST /api/pedidos` no
+ * acepta clave de idempotencia y un reintento nuestro podría duplicar la
+ * comanda (ver el catch de `crear`).
+ */
+const MOTIVO_REINTENTAR = 'reintentar';
+const MENSAJE_REINTENTAR = 'intenta de nuevo';
+
+/**
+ * Los alias en bruto que trae el pedido, sin repetir.
+ *
+ * `comensal` manda sobre `apodo`, igual que en `aliasDelComensal`. Un ítem sin
+ * alias no aporta nada aquí: su `null` se resuelve solo.
+ */
+function aliasEnBruto(items) {
+  const vistos = new Set();
+  for (const item of items) {
+    const bruto = item.comensal ?? item.apodo;
+    if (typeof bruto === 'string' && bruto.trim()) vistos.add(bruto);
+  }
+  return [...vistos];
+}
+
+
+/**
+ * Resuelve el alias canónico de cada clave distinta del pedido.
+ *
+ * UNA resolución por alias distinto, no una por ítem: un pedido con ocho platos
+ * de la abuela hace una sola lectura de la reserva, y la cuenta se consulta como
+ * mucho UNA vez para todo el pedido (y solo si alguna reserva no apareció).
+ * Todo esto pasa ANTES de abrir la transacción del pedido.
+ *
+ * DEGRADACIÓN SIN REDIS: si no se puede leer la reserva, el pedido NO se
+ * bloquea. Se intenta igual con la cuenta (que vive en PostgreSQL) y, si
+ * tampoco, se guarda el texto recortado, que es exactamente lo que hacía el
+ * backend antes de D-18b. Un servicio de caché caído no puede impedir que una
+ * mesa coma; lo único que se pierde es la canonicalización.
+ *
+ * @returns {Promise<{porClave: Map<string, string>}|{error: {status: number, body: object}}>}
+ */
+async function resolverAliasCanonicos(idMesa, items) {
+  const brutos = aliasEnBruto(items);
+  if (brutos.length === 0) return { porClave: new Map() };
+
+  // D-18c: que la mesa EXISTA se comprueba antes de resolver alias. Si no
+  // existe, no hay nadie sentado a quien resolver, y sin esto la respuesta era
+  // un 409 comensal_no_registrado —`cuentaPorComensal` devuelve null— que
+  // culpaba al nombre del comensal de un id de mesa equivocado.
+  //
+  // Va aquí y no en `crear` a propósito: solo cuesta una consulta cuando el
+  // pedido trae alias. Un pedido SIN alias no toca esta función y sigue
+  // fallando como antes (la FK de la mesa), sin una consulta de más.
+  //
+  // `mesasService.existe` es el mismo `SELECT 1 FROM mesas` que ya hacían las
+  // dos cuentas, ahora en un solo sitio: no es una consulta nueva de este
+  // controlador.
+  if (!(await mesasService.existe(idMesa))) {
+    return { error: { status: 404, body: { error: 'Mesa no encontrada' } } };
+  }
+
+  // 1. Validación: la MISMA regla que las rutas de alias (R-18). Un nombre que
+  //    no pasa aquí no se puede registrar ni comparar, así que es un 400.
+  const claves = new Map();
+  for (const bruto of brutos) {
+    const normalizado = aliasComensal.normalizarAlias(bruto);
+    // «General» (D-18c) es la excepción: no es un nombre mal escrito, es el
+    // cajón de los platos sin dueño, así que no corresponde a NADIE registrado.
+    // Sale el mismo 409 comensal_no_registrado que daba antes de que
+    // `normalizarAlias` lo rechazara, y sin mirar Redis: un ítem a nombre del
+    // cajón no se guarda ni cuando no se puede verificar quién está sentado.
+    if (normalizado.reservada) {
+      return {
+        error: {
+          status: 409,
+          body: {
+            error: MENSAJE_NO_REGISTRADO,
+            motivo: MOTIVO_NO_REGISTRADO,
+            alias: normalizado.alias,
+          },
+        },
+      };
+    }
+    if (normalizado.error) {
+      return { error: { status: 400, body: { error: normalizado.error, campo: 'comensal' } } };
+    }
+    if (!claves.has(normalizado.clave)) claves.set(normalizado.clave, normalizado.alias);
+  }
+
+  const porClave = new Map();
+  const sinReserva = [];
+  let redisCaido = false;
+
+  // 2. Las reservas de la mesa: la fuente de verdad de quién está sentado.
+  for (const [clave, normalizado] of claves) {
+    const reservado = await aliasComensal.aliasReservado(idMesa, clave);
+    if (reservado.alias) {
+      porClave.set(clave, reservado.alias);
+    } else {
+      if (reservado.noDisponible) redisCaido = true;
+      sinReserva.push([clave, normalizado]);
+    }
+  }
+
+  if (sinReserva.length === 0) return { porClave };
+
+  // 3. La cuenta, una sola vez: cubre a quien ya tiene platos y cuya reserva
+  //    venció. Si la base falla, el error sube como cualquier otro del pedido.
+  const cuentaMesa = await mesasService.cuentaPorComensal(idMesa);
+
+  for (const [clave, normalizado] of sinReserva) {
+    // La búsqueda vive en services/alias-en-cuenta.js: la misma pregunta se
+    // hace al dar de alta a alguien y al quitarlo, y tres copias acabarían
+    // contestando cosas distintas. Devuelve el texto TAL COMO está en la
+    // cuenta, que es el valor por el que la base agrupa.
+    const enLaCuenta = aliasEnCuenta.aliasConPlatos(cuentaMesa, clave);
+    if (enLaCuenta) {
+      porClave.set(clave, enLaCuenta);
+      continue;
+    }
+
+    if (redisCaido) {
+      // Sin Redis no se puede afirmar que no esté registrada: se sigue con el
+      // texto normalizado, como antes de D-18b. El log no lleva el alias: es un
+      // dato de la mesa y estos avisos acaban en archivos y en consolas ajenas.
+      console.error(
+        `[pedidos] no se pudo verificar el comensal de la mesa ${idMesa}: se guarda el alias tal como llegó`
+      );
+      porClave.set(clave, normalizado);
+      continue;
+    }
+
+    // El 409 dice CUÁL de los alias no se pudo resolver: con un pedido de
+    // varias personas, "no está registrada" sin decir quién obliga a adivinar.
+    // Va el PRIMERO que falla en el orden de los ítems, y solo ese: el texto lo
+    // mandó quien llama, así que no se le devuelve nada de nadie más.
+    return {
+      error: {
+        status: 409,
+        body: {
+          error: MENSAJE_NO_REGISTRADO,
+          motivo: MOTIVO_NO_REGISTRADO,
+          alias: normalizado,
+        },
+      },
+    };
+  }
+
+  return { porClave };
 }
 
 /**
@@ -170,12 +373,23 @@ async function crear(req, res, next) {
   }
 
   try {
+    // D-18b: el alias canónico de cada persona del pedido se resuelve ANTES de
+    // abrir la transacción y una sola vez por alias distinto. Solo para el
+    // personal: el alias de un comensal sale de su JWT y no hay nada que
+    // resolver.
+    let porClave = new Map();
+    if (!comensal) {
+      const resuelto = await resolverAliasCanonicos(id_mesa, parsed.data.items);
+      if (resuelto.error) return res.status(resuelto.error.status).json(resuelto.error.body);
+      porClave = resuelto.porClave;
+    }
+
     // El alias se resuelve aquí (es una decisión sobre quién pide, propia del
     // controller) y el service recibe los ítems ya normalizados.
     const items = parsed.data.items.map((item) => ({
       id_plato: item.id_plato,
       cantidad: item.cantidad,
-      comensal: aliasDelComensal(req, item),
+      comensal: aliasDelComensal(req, item, porClave),
       notas: item.notas ?? null,
       ingredientes: (item.ingredientes ?? []).map((i) => ({
         id_ingrediente: i.id_ingrediente,
@@ -202,10 +416,37 @@ async function crear(req, res, next) {
       total: pedido.total,
     });
   } catch (err) {
+    // D-17: un deadlock al crear el pedido NO se reintenta aquí.
+    //
+    // La reserva de inventario (`tr_reservar_inventario`) bloquea los insumos
+    // del pedido en orden de id_insumo justo para no cruzarse con otra, pero
+    // sigue compartiendo filas con las demás transacciones del salón, así que un
+    // 40P01 es posible. Reintentar por nuestra cuenta exigiría poder repetir la
+    // petición sin crear dos pedidos, y `POST /api/pedidos` **no acepta ninguna
+    // clave de idempotencia**: el reintento podría dejar la comanda duplicada.
+    //
+    // Así que se responde 503 `reintentar`, que es lo que de verdad hace falta:
+    // decirle al cliente que esta no se guardó y que la vuelva a mandar él. El
+    // 409 genérico de concurrencia del manejador central no distingue esto de
+    // una guarda de negocio que el cliente tiene que atender.
+    if (esErrorDeConcurrencia(err && err.code)) {
+      console.error(
+        `[pedidos] deadlock al crear el pedido de la mesa ${id_mesa} (${err.code}): ${err.message}`
+      );
+      return res.status(503).json({ error: MENSAJE_REINTENTAR, motivo: MOTIVO_REINTENTAR });
+    }
     return next(err);
   }
 }
 
+/**
+ * GET /api/pedidos/activos — panel del restaurante (admin, cajero, mesero).
+ *
+ * Devuelve `{ pedidos }` con cada pedido en el mismo formato que
+ * GET /pedidos/:id: sus `detalles`, cada uno con el nombre del plato y los
+ * ingredientes elegidos, más `mesa_numero`. El servicio decide qué estados
+ * cuentan como activos y agrupa los detalles.
+ */
 async function listarActivos(req, res, next) {
   try {
     const pedidos = await pedidosService.listarActivos();
@@ -270,14 +511,30 @@ async function actualizarEstado(req, res, next) {
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
     // actualizarEstado devuelve el pedido ya con estado_anterior, que es lo que
-    // espera el payload de order:status.
-    socketNotifier.notificarCambioEstado(pedido);
+    // espera el payload de order:status. `origen` solo si se llegó por
+    // POST /:id/cancelar del personal y el pedido quedó cancelado; un
+    // PATCH /:id/estado normal (mesero, caja) no lo lleva.
+    const origen = res.locals.origenCancelacion;
+    socketNotifier.notificarCambioEstado(
+      origen && pedido.estado === 'cancelado' ? { ...pedido, origen } : pedido
+    );
 
     // El cierre del pedido pudo liberar la mesa (ya ocurrió en la transacción):
     // se avisa para que el socket-server cierre la sesión de esa mesa.
+    //
+    // H-22: el motivo sale del estado en el que quedó el pedido. Marcarlo
+    // 'entregado' cuando ya estaba pagado, o 'pagado' a mano, libera la mesa
+    // por un PAGO ('pagada'); cancelarlo la libera sin cobrar ('liberada').
+    // Aquí NO se avisa payment-confirmed: no entró dinero nuevo, el pago ya se
+    // había registrado antes y anunciarlo otra vez sería un pago fantasma.
     if (pedido.mesaLiberada) {
-      socketNotifier.notificarMesaLiberada(pedido.id_mesa);
+      socketNotifier.notificarMesaLiberada(
+        pedido.id_mesa,
+        socketNotifier.motivoPorEstadoFinal(pedido.estado)
+      );
       aliasComensal.olvidarMesa(pedido.id_mesa);
+      // T12: el panel ve la mesa libre (estado y sesión), no solo el fin de la sesión.
+      avisosMesa.encolarMesaActualizada(pedido.id_mesa, socketNotifier.MOTIVOS_MESA_ACTUALIZADA.liberada);
     }
 
     return res.json(pedido);
@@ -287,15 +544,236 @@ async function actualizarEstado(req, res, next) {
 }
 
 /**
- * Atajo de PATCH /:id/estado con estado = 'cancelado'. Cancelar solo es legal
- * desde 'recibido' o 'en_preparacion' (transiciones_validas); desde 'listo' o
- * 'entregado' el trigger responde 409, así que hay que propagar next para que
- * ese error llegue al manejador central.
+ * Atajo de PATCH /:id/estado con estado = 'cancelado'. Cancelar es legal desde
+ * 'recibido', 'en_preparacion' o 'listo' (transiciones_validas, script 31); desde
+ * 'entregado' o 'pagado' el trigger responde 409, así que hay que propagar next
+ * para que ese error llegue al manejador central.
  */
 async function cancelar(req, res, next) {
+  // D-12: una sesión de COMENSAL va por su propio camino (abajo). El del
+  // personal sigue siendo exactamente el de siempre.
+  if (esComensal(req)) return cancelarPedidoComensal(req, res, next);
   req.body = { ...req.body, estado: 'cancelado' };
+  // El order-status de esta cancelación lleva origen 'personal'.
+  res.locals.origenCancelacion = 'personal';
   return actualizarEstado(req, res, next);
 }
+
+const MENSAJES_CANCELAR_PEDIDO = {
+  pedido_ya_cancelado: 'Ese pedido ya estaba cancelado',
+  pedido_compartido: 'Ese pedido tiene platos de otras personas: quita solo los tuyos, o pídeselo al mesero',
+  no_cancelable: 'Ese pedido ya se está preparando: pídeselo al mesero',
+  pago_registrado: 'Ese pedido ya tiene un pago registrado: pídeselo al mesero',
+  // D-20a
+  entrega_en_camino: pedidosService.MENSAJE_ENTREGA_EN_CAMINO,
+};
+
+/**
+ * POST /api/pedidos/:id/cancelar con sesión de COMENSAL — D-12 (contrato
+ * aprobado por Juan): el comensal cancela su pedido completo. Sin cuerpo; la
+ * mesa y el alias salen del JWT. Reglas en pedidosService.cancelarPedidoComensal.
+ * NO libera la mesa. Después del COMMIT, solo el order-status (cancelado): no
+ * un item-cancelado por línea.
+ */
+async function cancelarPedidoComensal(req, res, next) {
+  const params = z.object({ id: idDeUrl }).strict().safeParse(req.params);
+  if (!params.success) {
+    const issue = params.error.errors[0];
+    return res.status(400).json({ error: `${issue.path.join('.')}: ${issue.message}`, motivo: 'parametro_invalido' });
+  }
+  if (!cuerpoVacioSchema.safeParse(req.body ?? {}).success) {
+    return res.status(400).json({ error: 'Esta ruta no lleva cuerpo', motivo: 'cuerpo_invalido' });
+  }
+
+  try {
+    const r = await pedidosService.cancelarPedidoComensal(params.data.id, {
+      idMesa: req.user.id_mesa,
+      comensal: req.user.comensal,
+    });
+    if (r.noExiste) return res.status(404).json({ error: 'Pedido no encontrado', motivo: 'no_encontrado' });
+    if (r.noEsTuyo) {
+      return res.status(403).json({
+        error: 'Ese pedido no es de tu mesa',
+        motivo: pedidosService.MOTIVOS_CANCELAR_PEDIDO.noEsTuyo,
+      });
+    }
+    if (r.conflicto) {
+      // T4: pago_en_curso trae su mensaje, y `detalle: 'sin_verificar'` si el
+      // socket-server no pudo contestar.
+      const cuerpo = { error: r.mensaje || MENSAJES_CANCELAR_PEDIDO[r.conflicto], motivo: r.conflicto };
+      if (r.detalle) cuerpo.detalle = r.detalle;
+      return res.status(409).json(cuerpo);
+    }
+
+    const { pedido, estadoAnterior } = r;
+    socketNotifier.encadenarAvisos([
+      () => socketNotifier.notificarCambioEstado({ ...pedido, estado_anterior: estadoAnterior, origen: 'comensal' }),
+    ]);
+
+    return res.json({
+      pedido: {
+        id_pedido: pedido.id_pedido,
+        codigo_pedido: pedido.codigo_pedido,
+        estado: pedido.estado,
+        total: Number(pedido.total),
+        items: pedido.items,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/** Un id de la URL: entero > 0 que cabe en un INTEGER de PostgreSQL. */
+const idDeUrl = z
+  .string()
+  .regex(/^[1-9]\d{0,9}$/, 'debe ser un entero mayor que 0')
+  .transform(Number)
+  .refine((n) => n <= 2147483647, 'fuera de rango');
+
+const paramsQuitarItemSchema = z.object({ id: idDeUrl, id_detalle: idDeUrl }).strict();
+
+/** Sin cuerpo: `{}` o nada. Un campo cualquiera es un 400. (Comensal.) */
+const cuerpoVacioSchema = z.object({}).strict();
+
+/**
+ * Cuerpo del PERSONAL: `motivo` OBLIGATORIO (revisión de Jarrison), para el
+ * historial. Un problema con el motivo (falta, vacío, más de 200, no es texto)
+ * es 400 `motivo_requerido`; un campo de más o un cuerpo que no es un objeto,
+ * el `cuerpo_invalido` de siempre.
+ */
+const cuerpoPersonalSchema = z
+  .object({
+    motivo: z
+      .string({ required_error: 'motivo es obligatorio', invalid_type_error: 'motivo debe ser texto' })
+      .trim()
+      .min(1, 'motivo no puede estar vacío')
+      .max(200, 'motivo no puede pasar de 200 caracteres'),
+  })
+  .strict();
+
+const MOTIVO_REQUERIDO = 'motivo_requerido';
+
+/**
+ * POST /api/pedidos/:id/items/:id_detalle/cancelar — D-13: quitar UNA línea de
+ * un pedido, entera. Dos caminos, y decide el TIPO DE SESIÓN del JWT (el rol ya
+ * lo filtró requireRole: comensal, admin o mesero; cajero y cocina no entran):
+ *   - comensal (J-14): sin cuerpo; la mesa y el alias salen del JWT, nunca del
+ *     cuerpo. Reglas en pedidosService.cancelarItemComensal.
+ *   - personal: cuerpo opcional `{ motivo }`; el autor sale del JWT. Reglas en
+ *     pedidosService.cancelarItemPersonal. El motivo va al historial, NO al aviso.
+ *
+ * Los avisos salen DESPUÉS del commit y sin esperarlos: primero
+ * /internal/item-cancelado (pendiente de Roberto), con `origen` según el camino,
+ * y, si el pedido quedó cancelado, el order:status de siempre.
+ */
+async function cancelarItem(req, res, next) {
+  const params = paramsQuitarItemSchema.safeParse(req.params);
+  if (!params.success) {
+    const issue = params.error.errors[0];
+    return res.status(400).json({ error: `${issue.path.join('.')}: ${issue.message}`, motivo: 'parametro_invalido' });
+  }
+
+  const delComensal = esComensal(req);
+  let r;
+  try {
+    if (delComensal) {
+      if (!cuerpoVacioSchema.safeParse(req.body ?? {}).success) {
+        return res.status(400).json({ error: 'Esta ruta no lleva cuerpo', motivo: 'cuerpo_invalido' });
+      }
+      r = await pedidosService.cancelarItemComensal(params.data.id, params.data.id_detalle, {
+        idMesa: req.user.id_mesa,
+        comensal: req.user.comensal,
+      });
+    } else {
+      const cuerpo = cuerpoPersonalSchema.safeParse(req.body ?? {});
+      if (!cuerpo.success) {
+        const issue = cuerpo.error.errors[0];
+        const delMotivo = issue.path[0] === 'motivo';
+        return res.status(400).json({ error: issue.message, motivo: delMotivo ? MOTIVO_REQUERIDO : 'cuerpo_invalido' });
+      }
+      r = await pedidosService.cancelarItemPersonal(params.data.id, params.data.id_detalle, {
+        idUsuario: req.user.id_usuario,
+        motivo: cuerpo.data.motivo,
+      });
+    }
+  } catch (err) {
+    return next(err);
+  }
+
+  try {
+    if (r.noExiste) {
+      return res.status(404).json({ error: 'Ese plato no está en ese pedido', motivo: 'no_encontrado' });
+    }
+    if (r.noEsTuyo) {
+      return res.status(403).json({
+        error: 'Solo puedes quitar tus propios platos de un pedido de tu mesa',
+        motivo: pedidosService.MOTIVOS_QUITAR_ITEM.noEsTuyo,
+      });
+    }
+    if (r.conflicto) {
+      // T4: el servicio puede traer un mensaje más preciso para el mismo motivo
+      // (pago_registrado porque el dueño de la línea ya pagó), y en
+      // pago_en_curso un `detalle` ('sin_verificar') cuando el socket-server no
+      // pudo contestar. Sin `detalle` si no lo trae.
+      const mensajes = delComensal ? MENSAJES_QUITAR_ITEM : MENSAJES_QUITAR_ITEM_PERSONAL;
+      const cuerpo = { error: r.mensaje || mensajes[r.conflicto], motivo: r.conflicto };
+      if (r.detalle) cuerpo.detalle = r.detalle;
+      return res.status(409).json(cuerpo);
+    }
+
+    const { pedido, linea, pedidoCancelado, estadoAnterior } = r;
+    const pasos = [() => socketNotifier.notificarItemCancelado({
+      id_pedido: pedido.id_pedido,
+      id_mesa: pedido.id_mesa,
+      codigo_pedido: pedido.codigo_pedido,
+      id_detalle: linea.id_detalle,
+      id_plato: linea.id_plato,
+      nombre: linea.nombre,
+      comensal: linea.comensal,
+      total: pedido.total,
+      estado_pedido: pedido.estado,
+      // Quién lo quitó. El motivo del personal NO viaja: es del historial.
+      origen: delComensal ? 'comensal' : 'personal',
+    })];
+    if (pedidoCancelado) {
+      pasos.push(() => socketNotifier.notificarCambioEstado({
+        ...pedido,
+        estado_anterior: estadoAnterior,
+        origen: delComensal ? 'comensal' : 'personal',
+      }));
+    }
+    socketNotifier.encadenarAvisos(pasos);
+
+    return res.json({
+      pedido: {
+        id_pedido: pedido.id_pedido,
+        codigo_pedido: pedido.codigo_pedido,
+        estado: pedido.estado,
+        total: Number(pedido.total),
+        items: pedido.items,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+const MENSAJES_QUITAR_ITEM = {
+  item_ya_cancelado: 'Ese plato ya estaba quitado del pedido',
+  item_en_preparacion: 'Ese plato ya se está preparando: pídeselo al mesero',
+  pago_registrado: 'El pedido ya tiene un pago registrado: pídeselo al mesero',
+  entrega_en_camino: pedidosService.MENSAJE_ENTREGA_EN_CAMINO,
+};
+
+const MENSAJES_QUITAR_ITEM_PERSONAL = {
+  item_ya_cancelado: 'Esa línea ya estaba cancelada',
+  item_no_cancelable: 'Esa línea ya no se puede cancelar: ya se sirvió, o el pedido está entregado, pagado o '
+    + 'cancelado, o es la última línea de un pedido que no puede pasar a cancelado desde su estado',
+  pago_registrado: 'Lo ya pagado supera el total que quedaría sin esa línea: hay que reembolsar antes de cancelarla',
+  // D-20a: con la entrega a domicilio en camino no se toca ninguna línea.
+  entrega_en_camino: pedidosService.MENSAJE_ENTREGA_EN_CAMINO,
+};
 
 /**
  * GET /api/pedidos/mesa — pedidos de la mesa de la sesión del comensal.
@@ -333,11 +811,16 @@ async function cuentaDeMiMesa(req, res, next) {
 }
 
 module.exports = {
+  MOTIVO_NO_REGISTRADO,
+  MENSAJE_NO_REGISTRADO,
+  MOTIVO_REINTENTAR,
+  MENSAJE_REINTENTAR,
   crear,
   listarActivos,
   obtener,
   actualizarEstado,
   cancelar,
+  cancelarItem,
   listarPorMesa,
   cuentaDeMiMesa,
 };
