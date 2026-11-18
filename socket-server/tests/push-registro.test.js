@@ -209,9 +209,17 @@ test('«listo» solo a quien lo pidió: el resumen cuenta a los destinatarios fi
   assert.deepStrictEqual([resumen.destinatarios, resumen.enviados, resumen.servicios], [1, 1, { 'fcm.googleapis.com': 1 }]);
 });
 
-test('un estado sin aviso (recibido, en preparación, cancelado, entregado) no envía ni deja resumen', async (t) => {
+test('cancelado usa el mismo filtro de dueños que listo: solo Ana, no Beto', async (t) => {
   const log = capturarLog(t);
-  for (const estado of ['recibido', 'en_preparacion', 'cancelado', 'entregado', 'pagado']) {
+  const subs = [suscripcion('fcm.googleapis.com', { comensal: 'Ana' }), suscripcion('web.push.apple.com', { comensal: 'Beto' })];
+  await notificarCambioEstado(ctxDe(subs, () => ({ statusCode: 201 }), { duenos: ['Ana'] }), cambio('cancelado'));
+  const [resumen] = log.de('push: resumen del envío');
+  assert.deepStrictEqual([resumen.estado, resumen.destinatarios, resumen.servicios], ['cancelado', 1, { 'fcm.googleapis.com': 1 }]);
+});
+
+test('un estado sin aviso (recibido, en preparación, entregado) no envía ni deja resumen', async (t) => {
+  const log = capturarLog(t);
+  for (const estado of ['recibido', 'en_preparacion', 'entregado', 'pagado']) {
     await notificarCambioEstado(ctxDe([suscripcion('fcm.googleapis.com')], () => ({ statusCode: 201 })), cambio(estado));
   }
   assert.deepStrictEqual(log.lineas, []);

@@ -70,9 +70,32 @@ test('si no se sabe de quién es el pedido, el push de listo no le llega a nadie
   assert.strictEqual(push.enviados.length, 0);
 });
 
-test('en preparación, cancelado y entregado ya no mandan push (solo listo y el pago)', async (t) => {
+test('"Tu pedido fue cancelado" llega SOLO al dueño: otro comensal de la mesa no lo recibe', async (t) => {
+  const { s, push, ana, beto } = await escenario(t);
+  await emitir(ana, 'cart:update', linea('Ana'));
+  await emitir(beto, 'cart:update', linea('Beto'));
+  await interno(s, '/internal/order-created', {
+    eventId: randomUUID(), pedido: { id_pedido: 87, id_mesa: 5, estado: 'recibido', items: [{ id_plato: 3, comensal: 'Ana' }] },
+  });
+  await interno(s, '/internal/order-status', listo({ estado: 'cancelado' }));
+  await pausa();
+  assert.deepStrictEqual(push.enviados.map((e) => e.endpoint), [sub(1).endpoint]);
+  assert.strictEqual(push.enviados[0].payload.titulo, 'Tu pedido fue cancelado');
+});
+
+test('cancelado de un pedido sin dueño conocido: nadie (mismo mecanismo que listo)', async (t) => {
   const { s, push } = await escenario(t);
-  for (const estado of ['recibido', 'en_preparacion', 'cancelado', 'entregado']) {
+  await interno(s, '/internal/order-status', listo({ id_pedido: 999, estado: 'cancelado' }));
+  await pausa();
+  assert.strictEqual(push.enviados.length, 0);
+});
+
+test('en preparación (y recibido, entregado) no mandan push a nadie, ni al dueño', async (t) => {
+  const { s, push } = await escenario(t);
+  await interno(s, '/internal/order-created', {
+    eventId: randomUUID(), pedido: { id_pedido: 87, id_mesa: 5, estado: 'recibido', items: [{ id_plato: 3, comensal: 'Ana' }] },
+  });
+  for (const estado of ['recibido', 'en_preparacion', 'entregado']) {
     await interno(s, '/internal/order-status', listo({ estado }));
   }
   await pausa();

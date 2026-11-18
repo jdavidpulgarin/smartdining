@@ -160,19 +160,29 @@ const rutasSuscripciones = {
   },
 };
 
-// Texto que ve el comensal por cada estado. Solo se avisa por push de lo que
-// lo hace levantar la vista: que su plato está listo. "en_preparacion" y
-// "cancelado" ya no (los ve en vivo en la PWA con order:status): con un aviso
-// por cada paso, Chrome en Android marcaba las notificaciones como «Posible
-// spam». El otro push que queda es el del pago confirmado (más abajo).
+// Push SOLO en: pedido "listo" y "cancelado" (al dueño del pedido) y pago
+// confirmado (a quien pagó, más abajo). "en_preparacion" y los demás estados
+// no (se ven en vivo en la PWA con order:status): con un aviso por cada paso,
+// Chrome en Android marcaba las notificaciones como «Posible spam».
 const MENSAJES_ESTADO = {
   listo: '¡Tu plato está listo!',
+  cancelado: 'Tu pedido fue cancelado',
 };
 // Al tocar la notificación, la PWA abre el seguimiento del pedido.
 const URL_SEGUIMIENTO = '/seguimiento';
 // Y, en la del pago, la pantalla de pago.
 const URL_PAGO = '/pago';
 const TITULO_PAGO = 'Tu pago está confirmado';
+
+/**
+ * Las suscripciones de quien pidió el pedido (sus dueños). Mismo mecanismo
+ * para "listo" y "cancelado": si no se sabe quién lo pidió, nadie (la sala
+ * igual recibe order:status en vivo). Otro comensal de la mesa no lo recibe.
+ */
+async function soloDuenosDelPedido(ctx, idPedido, suscripciones) {
+  const duenos = ctx.duenosPedidos ? await ctx.duenosPedidos.obtener(idPedido) : [];
+  return suscripciones.filter((s) => s.comensal && duenos.includes(s.comensal));
+}
 
 /**
  * Envía la notificación push a las suscripciones de la mesa y elimina las
@@ -191,13 +201,7 @@ async function notificarCambioEstado(ctx, cambio) {
     estado: cambio.estado,
     url: URL_SEGUIMIENTO,
   };
-  let destinatarios = await ctx.suscripciones.listar(cambio.id_mesa);
-  if (cambio.estado === 'listo') {
-    // "¡Tu plato está listo!" solo a quien lo pidió. Si no se sabe quién fue,
-    // no se avisa a nadie por push (la sala igual recibe order:status en vivo).
-    const duenos = ctx.duenosPedidos ? await ctx.duenosPedidos.obtener(cambio.id_pedido) : [];
-    destinatarios = destinatarios.filter((s) => s.comensal && duenos.includes(s.comensal));
-  }
+  const destinatarios = await soloDuenosDelPedido(ctx, cambio.id_pedido, await ctx.suscripciones.listar(cambio.id_mesa));
   const resultados = await Promise.all(destinatarios.map(async (s) => {
     const r = await ctx.push.enviar(s, payload);
     if (r.caducada) await ctx.suscripciones.quitar(cambio.id_mesa, s.endpoint);
@@ -252,5 +256,5 @@ function resumirEnvio(estado, resultados) {
 }
 
 module.exports = {
-  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, URL_SEGUIMIENTO, URL_PAGO, rutasSuscripciones, notificarCambioEstado, notificarPagoConfirmado, resumirEnvio, validarSuscripcion,
+  crearAlmacenSuscripciones, registrarSuscripcionesSocket, MAX_SUSCRIPCIONES_POR_MESA, URL_SEGUIMIENTO, URL_PAGO, rutasSuscripciones, notificarCambioEstado, notificarPagoConfirmado, soloDuenosDelPedido, resumirEnvio, validarSuscripcion,
 };

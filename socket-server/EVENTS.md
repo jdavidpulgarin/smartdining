@@ -1413,12 +1413,16 @@ Qué se envía:
 | Evento | A quién | Título |
 |---|---|---|
 | `order:status` con `listo` | **Solo a los dueños del pedido** | ¡Tu plato está listo! |
-| `payment:confirmed` (Wompi o caja) | **Solo a quien pagó** (su alias, con `claveAlias`) | Tu pago está confirmado |
+| `order:status` con `cancelado` | **Solo a los dueños del pedido** (mismo filtro que `listo`) | Tu pedido fue cancelado |
+| `payment:confirmed` (Wompi o caja) | **Solo a quien pagó** (su alias, con `claveAlias`), una vez por pago | Tu pago está confirmado |
 
-Nada más manda push: `en_preparacion`, `cancelado` y los demás estados se ven en vivo en
-la PWA con `order:status`. Con un aviso por cada paso, Chrome en Android marcaba las
-notificaciones como «Posible spam». El del pago no se manda si el cobro no trae alias
-(la caja cobró la mesa entera) ni si es de un grupo que ya se fue; su payload es
+Nada más manda push: `en_preparacion` y los demás estados se ven en vivo en la PWA con
+`order:status`. Con un aviso por cada paso, Chrome en Android marcaba las notificaciones
+como «Posible spam». Si no se sabe quién pidió el pedido, `listo` y `cancelado` no le
+llegan a nadie. El del pago sale solo con la intención ya en `pagada` (nunca en
+`en_revision`), una vez por referencia (marca `push:pago:<referencia>`, 7 días), y no se
+manda si el cobro no trae alias (la caja cobró la mesa entera) ni si es de un grupo que ya
+se fue. Si el push falla, el pago se confirma igual. Su payload es
 `{ titulo, cuerpo, url: "/pago" }`, sin `estado`, sin montos ni nombres.
 
 Los dueños se anotan al crear el pedido: **solo** los alias de `items[].comensal` de
