@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import restauranteDefault from './datos/restaurante.js';
 import { obtenerMenuPublico } from './services/menuService.js';
-import { combinarMenu } from './utils/combinarMenu.js';
-import { iniciarRefresco } from './utils/refrescoCarta.js';
+import { efectoCarta } from './utils/efectoCarta.js';
 import Encabezado from './componentes/Encabezado.jsx';
 import Inicio from './secciones/Inicio.jsx';
 import Nosotros from './secciones/Nosotros.jsx';
@@ -55,51 +54,16 @@ export function App({
   const [error, setError] = useState(() => errorInicial);
   const [platoSeleccionado, setPlatoSeleccionado] = useState(null);
 
-  useEffect(() => {
-    let cancelado = false;
-
-    async function cargarInicial() {
-      try {
-        const datos = await obtenerMenuPublico();
-        if (!cancelado) {
-          setMenu(datos);
-          setError(false);
-        }
-      } catch (err) {
-        console.error('Error al cargar el menú público:', err);
-        if (!cancelado) {
-          setError(true);
-        }
-      } finally {
-        if (!cancelado) {
-          setCargando(false);
-        }
-      }
-    }
-
-    if (!menuInicial) {
-      cargarInicial();
-    }
-
-    const { detener } = iniciarRefresco({
-      cargar: async () => {
-        try {
-          const nuevo = await obtenerMenuPublico();
-          if (!cancelado) {
-            setMenu((prev) => combinarMenu(prev, nuevo));
-          }
-        } catch {
-          // Si falla en background, conservar estado previo
-        }
-      },
-      intervaloMs: 15000,
-    });
-
-    return () => {
-      cancelado = true;
-      detener();
-    };
-  }, [menuInicial]);
+  useEffect(
+    () =>
+      efectoCarta({
+        menuInicial,
+        setMenu,
+        setError,
+        setCargando,
+      }),
+    [menuInicial]
+  );
 
   const manejarReintentar = async () => {
     setCargando(true);
