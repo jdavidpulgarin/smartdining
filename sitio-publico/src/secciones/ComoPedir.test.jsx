@@ -30,12 +30,12 @@ describe('Sección ComoPedir', () => {
     expect(html).not.toContain('Capturas reales');
   });
 
-  it('presenta los 3 títulos en orden', () => {
+  it('presenta los 3 pasos con sus títulos en orden', () => {
     const html = renderToStaticMarkup(<ComoPedir />);
 
     const pos1 = html.indexOf('Escanea el QR de tu mesa');
     const pos2 = html.indexOf('Arma tu pedido desde el celular');
-    const pos3 = html.indexOf('Paga desde la mesa y sigue tu pedido en vivo');
+    const pos3 = html.indexOf('Paga y sigue tu pedido en vivo');
 
     expect(pos1).toBeGreaterThanOrEqual(0);
     expect(pos2).toBeGreaterThan(pos1);
