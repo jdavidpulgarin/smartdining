@@ -128,19 +128,6 @@ function PlatoDetalleModal({ plato, abierto, onCerrar }) {
                   Sin imagen
                 </div>
               )}
-
-              {/* Insignia de Video IA sobre el video si aplica */}
-              {videoInfo && (
-                <div className="absolute top-3 left-3 right-3 z-10 flex items-start">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[10px] sm:text-[11px] font-etiqueta font-semibold tracking-wider text-texto border border-white/10 uppercase max-w-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-acento animate-pulse shrink-0" />
-                    <span>
-                      Video generado con IA
-                      {videoInfo.credito ? ` · ${videoInfo.credito}` : ''}
-                    </span>
-                  </span>
-                </div>
-              )}
             </div>
 
             {/* Columna Derecha: Información del plato */}

@@ -204,7 +204,7 @@ describe('App y Sitio Público Completo', () => {
     expect(elegirFuentePortada({ anchoPantalla: 1280, prefs: {} })).toBe('/videos/portada.mp4');
   });
 
-  it('videos dentro de los armables: Arepa Rellena, Bowl Personalizado y Wrap Personalizado tienen su <video> con los atributos requeridos e insignia "Video generado con IA"', async () => {
+  it('videos dentro de los armables: Arepa Rellena, Bowl Personalizado y Wrap Personalizado tienen su <video> con los atributos requeridos (muted, loop, playsinline, preload="none", poster) y ya no tienen etiquetas de IA', async () => {
     const menu = await obtenerMenuPublico();
     const html = renderToStaticMarkup(<App menuInicial={menu} datosRestaurante={restaurante} />);
 
@@ -229,16 +229,19 @@ describe('App y Sitio Público Completo', () => {
       expect(tag).toContain('aria-hidden="true"');
     }
 
-    // Insignia de IA en los armables
-    const matchesIA = html.match(/Video generado con IA/g) || [];
-    expect(matchesIA.length).toBeGreaterThanOrEqual(3);
+    // Inicio y las tarjetas de armables ya no contienen "Video generado con IA" ni "Imagen base: Freepik"
+    const inicioFin = html.indexOf('id="nosotros"');
+    const seccionInicio = html.slice(0, inicioFin);
+    expect(seccionInicio).not.toContain('Video generado con IA');
 
-    // Crédito e insignia juntos en un solo elemento en Bowl Personalizado
-    expect(html).toContain('Video generado con IA · Imagen base: Freepik');
-    expect(html).toMatch(/<span[^>]*>[^<]*Video generado con IA · Imagen base: Freepik[^<]*<\/span>/);
+    const cartaInicio = html.indexOf('id="carta"');
+    const cartaFin = html.indexOf('id="como-pedir"');
+    const seccionCarta = html.slice(cartaInicio, cartaFin);
+    expect(seccionCarta).not.toContain('Video generado con IA');
+    expect(seccionCarta).not.toContain('Imagen base: Freepik');
   });
 
-  it('la tarjeta del Bowl Personalizado tiene el texto "Video generado con IA · Imagen base: Freepik" en un solo elemento', () => {
+  it('la tarjeta del Bowl Personalizado ya no contiene "Video generado con IA" ni "Imagen base: Freepik"', () => {
     const bowl = {
       id_plato: 202,
       nombre: 'Bowl Personalizado',
@@ -250,8 +253,8 @@ describe('App y Sitio Público Completo', () => {
       pasos: [],
     };
     const html = renderToStaticMarkup(<TarjetaPlatoArmablePublico plato={bowl} />);
-    expect(html).toContain('Video generado con IA · Imagen base: Freepik');
-    expect(html).toMatch(/<span[^>]*>[^<]*Video generado con IA · Imagen base: Freepik[^<]*<\/span>/);
+    expect(html).not.toContain('Video generado con IA');
+    expect(html).not.toContain('Imagen base: Freepik');
   });
 
   it('el iframe tiene title y loading="lazy" al estar visible; la fachada muestra "Ver mapa"; WhatsApp usa https://wa.me/573046654848; las redes tienen rel="noopener noreferrer"', async () => {
@@ -307,11 +310,13 @@ describe('App y Sitio Público Completo', () => {
     expect(html).toContain('Proyecto académico · UPC');
   });
 
-  it('Pie renderizado contiene pb-28 y md:pb-12 en el footer', () => {
+  it('Pie renderizado contiene pb-28 y md:pb-12 en el footer, créditos de IA y atribución de Freepik', () => {
     const html = renderToStaticMarkup(<Pie />);
     expect(html).toContain('pb-28');
     expect(html).toContain('md:pb-12');
     expect(html).toMatch(/<footer[^>]*class="[^"]*pb-28[^"]*md:pb-12[^"]*"/);
+    expect(html).toContain('Imágenes y videos ilustrativos generados con IA');
+    expect(html).toContain('Imagen base del bowl: Freepik');
   });
 
   it('con origen "fija" aparece "Carta de referencia"; con "vivo" no aparece', async () => {

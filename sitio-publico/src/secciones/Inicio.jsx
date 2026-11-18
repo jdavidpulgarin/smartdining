@@ -76,13 +76,9 @@ function Inicio({ datosRestaurante = {} }) {
         className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/80 to-fondo/45"
       />
 
-      {/* Control WCAG 2.2.2 para pausar/reanudar movimiento de video y etiqueta de IA */}
+      {/* Control WCAG 2.2.2 para pausar/reanudar movimiento de video */}
       {videoSrc && (
-        <div className="absolute bottom-4 right-4 z-20 flex flex-wrap items-center justify-end gap-2">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/75 backdrop-blur-md text-[10px] sm:text-[11px] font-etiqueta font-semibold tracking-wider text-texto border border-white/10 uppercase">
-            <span className="w-1.5 h-1.5 rounded-full bg-acento motion-safe:animate-pulse shrink-0" />
-            <span>Video generado con IA</span>
-          </span>
+        <div className="absolute bottom-4 right-4 z-20 flex items-center justify-end">
           <button
             type="button"
             onClick={alternarReproduccion}
