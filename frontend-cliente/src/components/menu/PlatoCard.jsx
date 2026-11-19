@@ -72,7 +72,7 @@ function PlatoCard({ plato, onSeleccionar }) {
             {etiquetas.map((tag) => {
               const conf = ETIQUETAS_MAP[tag] || {
                 label: tag.replace('_', ' '),
-                style: 'bg-carbon/10 text-carbon border border-carbon/20 font-etiqueta text-[10px] uppercase font-semibold',
+                style: 'bg-carbon/10 text-carbon border border-carbon/20 font-titulo text-[11px] uppercase font-semibold',
               };
               return (
                 <span

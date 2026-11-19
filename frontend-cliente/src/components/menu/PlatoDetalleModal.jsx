@@ -116,7 +116,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
 
           {/* 3. Precio formateado */}
           <div>
-            <span className="font-etiqueta font-bold text-granate text-3xl tracking-wide">
+            <span className="font-titulo font-bold text-granate text-3xl tracking-wide">
               {formatearPrecio(plato.precio)}
             </span>
           </div>
@@ -127,12 +127,12 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
               {plato.etiquetas.map((tag) => {
                 const conf = ETIQUETAS_MAP[tag] || {
                   label: tag.replace('_', ' '),
-                  style: 'bg-carbon/5 text-carbon border border-papel-linea font-etiqueta text-[10px] uppercase font-semibold',
+                  style: 'bg-carbon/5 text-carbon border border-papel-linea font-titulo text-[11px] uppercase font-semibold',
                 };
                 return (
                   <span
                     key={tag}
-                    className={`px-2 py-0.5 rounded-full font-etiqueta text-[10px] uppercase tracking-wider font-semibold border ${
+                    className={`px-2 py-0.5 rounded-full font-titulo text-[11px] uppercase tracking-wider font-semibold border ${
                       conf.style.includes('bg-') ? conf.style : 'bg-carbon/5 text-carbon border-papel-linea'
                     }`}
                   >
@@ -152,7 +152,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
 
           {/* 6. Sección de Alérgenos */}
           <div>
-            <h3 className="text-xs font-etiqueta uppercase tracking-wider text-papel-suave mb-2 font-bold">
+            <h3 className="text-sm font-titulo uppercase tracking-wider text-papel-suave mb-2 font-bold">
               Alérgenos
             </h3>
             {plato.alergenos && plato.alergenos.length > 0 ? (
@@ -176,7 +176,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
           {/* 7. Sección Personaliza tu plato */}
           {plato.personalizaciones && plato.personalizaciones.length > 0 && (
             <div className="border-t border-dashed border-papel-linea pt-4 space-y-4">
-              <h3 className="text-sm font-etiqueta uppercase tracking-wider font-bold text-carbon">
+              <h3 className="text-base font-titulo uppercase tracking-wider font-bold text-carbon">
                 Personaliza tu plato
               </h3>
               <div className="space-y-4">
@@ -197,7 +197,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
           <div className="border-t border-dashed border-papel-linea pt-4 space-y-2">
             <label
               htmlFor={notasId}
-              className="block text-xs font-etiqueta uppercase tracking-wider font-bold text-carbon"
+              className="block text-sm font-titulo uppercase tracking-wider font-bold text-carbon"
             >
               Notas para la cocina
             </label>
@@ -231,7 +231,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
             </button>
             <span
               aria-live="polite"
-              className="min-w-8 text-center font-etiqueta font-bold text-carbon text-xl"
+              className="min-w-8 text-center font-titulo font-bold text-carbon text-2xl"
             >
               {cantidad}
             </span>
@@ -251,7 +251,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
             variante="primario"
             onClick={manejarAgregar}
             disabled={!puedeAgregar}
-            className="flex-1 !bg-carbon !text-ambar !border-2 !border-carbon !shadow-[3px_3px_0_#120C0C] hover:!bg-carbon/90 font-etiqueta uppercase tracking-wider text-base"
+            className="flex-1 !bg-carbon !text-ambar !border-2 !border-carbon !shadow-[3px_3px_0_#120C0C] hover:!bg-carbon/90 font-titulo uppercase tracking-wider text-xl"
           >
             {textoBoton}
           </Button>

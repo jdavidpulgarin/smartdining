@@ -15,7 +15,10 @@ import { crearDeduplicador } from '../../utils/deduplicador';
 function Layout({ children }) {
   const location = useLocation();
   const rutaActual = location?.pathname || '';
-  const esMenu = rutaActual === '/menu';
+  const esComanda =
+    rutaActual === '/menu' ||
+    rutaActual === '/carrito' ||
+    rutaActual.startsWith('/armar/');
   const { mesa, comensal, valida, cargando, motivoCierre } = useMesaSession();
   const { totalUnidades, avisosMenu = [], descartarAvisosMenu } = useCarrito();
   const { on: socketOn } = useMesaSocketContext();
@@ -116,7 +119,7 @@ function Layout({ children }) {
   }
 
   return (
-    <div className={`min-h-screen flex flex-col relative ${esMenu ? 'fondo-comanda text-tinta' : 'bg-fondo text-texto'}`}>
+    <div className={`min-h-screen flex flex-col relative ${esComanda ? 'fondo-comanda text-tinta' : 'bg-fondo text-texto'}`}>
       <a
         href="#contenido-principal"
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:px-4 focus:py-2 focus:rounded-xl focus:bg-primario focus:text-white focus:font-etiqueta focus:font-bold focus:text-sm"
@@ -190,7 +193,7 @@ function Layout({ children }) {
         </div>
       )}
 
-      <main id="contenido-principal" tabIndex={-1} className={`flex-1 w-full max-w-[480px] mx-auto focus:outline-none ${esMenu ? 'pb-28' : 'px-4 pb-8'}`}>{children}</main>
+      <main id="contenido-principal" tabIndex={-1} className={`flex-1 w-full max-w-[480px] mx-auto focus:outline-none ${esComanda ? 'pb-28' : 'px-4 pb-8'}`}>{children}</main>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { formatearPrecio } from '../../utils/formato';
 
 /**
- * Barra inferior fija con resumen de precio total, calorías y slot para botones de acción (tema oscuro).
+ * Barra inferior fija con resumen de precio total, calorías y slot para botones de acción (estilo comanda).
  *
  * Props:
  * - precioTotal: monto total en COP
@@ -23,17 +23,17 @@ function BottomBar({
 
   return (
     <div
-      className={`fixed bottom-0 inset-x-0 z-40 bg-fondo/95 backdrop-blur-md border-t border-borde pb-[env(safe-area-inset-bottom)] ${className}`.trim()}
+      className={`fixed bottom-0 inset-x-0 z-40 bg-carbon text-ambar shadow-2xl border-t-2 border-carbon/80 pb-[env(safe-area-inset-bottom)] ${className}`.trim()}
     >
-      <div className="max-w-md mx-auto px-4 py-3.5 flex items-center justify-between gap-3">
+      <div className="max-w-md mx-auto px-4 py-3 flex items-center justify-between gap-3">
         <div className="min-w-0">
           {textoCalorias && (
-            <p className="text-xs text-texto-suave font-cuerpo leading-tight truncate">
+            <p className="text-xs text-ambar/75 font-cuerpo leading-tight truncate">
               {textoCalorias}
             </p>
           )}
           <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-3xl font-bold font-etiqueta text-texto tracking-wide leading-none">
+            <span className="text-3xl sm:text-4xl font-titulo text-ambar tracking-wide leading-none">
               {formatearPrecio(precioTotal)}
             </span>
           </div>

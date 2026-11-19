@@ -20,7 +20,7 @@ function SelectorPersonalizacion({
 
   return (
     <fieldset className="space-y-2">
-      <legend className="w-full text-sm font-etiqueta uppercase tracking-wide font-bold text-carbon mb-1">
+      <legend className="w-full text-base font-titulo uppercase tracking-wide font-bold text-carbon mb-1">
         <span className="flex items-center justify-between gap-2">
           <span>{grupo.nombre}</span>
           <span className="flex items-center gap-1.5 text-xs font-normal font-cuerpo">
@@ -30,11 +30,11 @@ function SelectorPersonalizacion({
               </span>
             )}
             {grupo.obligatorio ? (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-etiqueta uppercase font-bold tracking-wider bg-brasa text-white">
+              <span className="px-1.5 py-0.5 rounded text-[11px] font-titulo uppercase font-bold tracking-wider bg-brasa text-white">
                 OBLIGATORIO
               </span>
             ) : (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-etiqueta uppercase font-semibold tracking-wider bg-carbon/5 text-papel-suave border border-papel-linea">
+              <span className="px-1.5 py-0.5 rounded text-[11px] font-titulo uppercase font-semibold tracking-wider bg-carbon/5 text-papel-suave border border-papel-linea">
                 OPCIONAL
               </span>
             )}
@@ -82,7 +82,7 @@ function SelectorPersonalizacion({
                   className="w-4 h-4 accent-carbon shrink-0 cursor-pointer disabled:cursor-not-allowed"
                 />
                 <span className="block min-w-0 flex-1">
-                  <span className="text-sm font-etiqueta uppercase tracking-wide font-semibold text-carbon block">
+                  <span className="text-base font-titulo uppercase tracking-wide font-semibold text-carbon block">
                     {opcion.nombre}
                   </span>
                   {opcion.alergenos && opcion.alergenos.length > 0 && (
@@ -97,7 +97,7 @@ function SelectorPersonalizacion({
               </span>
 
               {opcion.precioExtra > 0 && (
-                <span className="text-xs font-bold text-granate shrink-0 ml-3">
+                <span className="text-sm font-bold font-titulo text-granate shrink-0 ml-3">
                   + {formatearPrecio(opcion.precioExtra)}
                 </span>
               )}

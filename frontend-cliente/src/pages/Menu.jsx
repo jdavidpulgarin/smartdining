@@ -41,6 +41,7 @@ function Menu({
   const [idPlatoSeleccionado, setIdPlatoSeleccionado] = useState(null);
   const [cargando, setCargando] = useState(cargandoInicial);
   const [errorMenu, setErrorMenu] = useState(null);
+  const [errorHero, setErrorHero] = useState(false);
   const [toastMensaje, setToastMensaje] = useState(null);
   const toastTimeoutRef = useRef(null);
 
@@ -286,7 +287,7 @@ function Menu({
           !
         </div>
         <div>
-          <h1 className="font-etiqueta text-2xl font-bold uppercase tracking-wider text-carbon">
+          <h1 className="font-titulo text-2xl font-bold uppercase tracking-wider text-carbon">
             No pudimos cargar el menú
           </h1>
           <p className="text-sm text-papel-suave mt-1.5 font-cuerpo">{errorMenu}</p>
@@ -307,19 +308,27 @@ function Menu({
   }
 
   return (
-    <div className="space-y-6 pb-28">
+    <div className="w-full max-w-full overflow-x-hidden space-y-6 pb-28">
       {/* Portada Hero del Menú */}
-      <section className="pt-6 pb-2 px-4">
+      <section className="pt-6 pb-2 px-4 overflow-hidden">
         <div className="relative bg-papel p-2.5 rounded-2xl -rotate-2 shadow-[0_20px_30px_-16px_rgba(0,0,0,0.6)]">
-          <img
-            src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=75&auto=format"
-            alt="Comida fresca de SmartDining"
-            width={800}
-            height={533}
-            fetchPriority="high"
-            decoding="async"
-            className="w-full h-38 sm:h-44 object-cover rounded-lg block"
-          />
+          {!errorHero ? (
+            <img
+              src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=75&auto=format"
+              alt=""
+              width={800}
+              height={533}
+              fetchPriority="high"
+              decoding="async"
+              onError={() => setErrorHero(true)}
+              className="w-full h-38 sm:h-44 object-cover rounded-lg block"
+            />
+          ) : (
+            <div
+              className="w-full h-38 sm:h-44 rounded-lg bg-gradient-to-br from-carbon via-[#2A1D1B] to-carbon"
+              aria-hidden="true"
+            />
+          )}
           <img
             src="/img/mascota-chef.webp"
             alt=""
@@ -328,11 +337,11 @@ function Menu({
           />
         </div>
 
-        <p className="mt-7 font-etiqueta text-lg tracking-[0.3em] uppercase text-carbon">
+        <p className="mt-7 font-titulo text-lg tracking-[0.3em] uppercase text-carbon">
           EXPERIENCIA SMARTDINING
         </p>
         <h1
-          className="font-etiqueta text-6xl sm:text-7xl uppercase text-carbon leading-[0.88] mt-1 mb-3"
+          className="font-titulo text-6xl sm:text-7xl uppercase text-carbon leading-[0.88] mt-1 mb-3"
           style={{ textShadow: '5px 5px 0 #E5212E' }}
         >
           NUESTRO MENÚ
@@ -348,7 +357,7 @@ function Menu({
           <div className="flex items-baseline justify-between gap-2 px-4">
             <h2
               id="titulo-arma-tu-plato"
-              className="font-etiqueta text-3xl font-bold uppercase tracking-wide text-carbon leading-none"
+              className="font-titulo text-3xl font-bold uppercase tracking-wide text-carbon leading-none"
             >
               ARMA TU PLATO
             </h2>
@@ -374,13 +383,13 @@ function Menu({
                       className="w-full h-42 object-cover rounded-xl"
                     />
                     {plato.disponible === false && (
-                      <span className="absolute inset-2.5 bg-black/75 backdrop-blur-[1px] flex items-center justify-center text-ambar text-sm font-etiqueta font-bold uppercase tracking-wider text-center rounded-xl">
+                      <span className="absolute inset-2.5 bg-black/75 backdrop-blur-[1px] flex items-center justify-center text-ambar text-sm font-titulo font-bold uppercase tracking-wider text-center rounded-xl">
                         AGOTADO
                       </span>
                     )}
                   </div>
                   <div className="p-3.5 pt-3 pb-2">
-                    <h3 className="font-etiqueta text-2xl font-bold uppercase tracking-wide text-carbon leading-tight">
+                    <h3 className="font-titulo text-2xl font-bold uppercase tracking-wide text-carbon leading-tight">
                       {plato.nombre}
                     </h3>
                     {plato.descripcion && (
@@ -399,7 +408,7 @@ function Menu({
                         <span className="text-xs font-semibold text-papel-suave font-cuerpo">
                           Desde
                         </span>
-                        <b className="font-etiqueta text-2xl text-brasa leading-none">
+                        <b className="font-titulo text-2xl text-brasa leading-none">
                           {formatearPrecio(plato.precio)}
                         </b>
                       </div>
@@ -455,7 +464,7 @@ function Menu({
             <div className="w-12 h-12 bg-carbon/5 text-carbon rounded-full flex items-center justify-center mx-auto text-2xl">
               🍽️
             </div>
-            <p className="text-carbon font-etiqueta uppercase font-bold text-xl">
+            <p className="text-carbon font-titulo uppercase font-bold text-xl">
               No hay platos en esta categoría
             </p>
             <p className="text-papel-suave text-xs mt-1 font-cuerpo">
@@ -495,7 +504,7 @@ function Menu({
           className="fixed left-1/2 bottom-[max(14px,env(safe-area-inset-bottom))] -translate-x-1/2 w-[min(440px,calc(100%-28px))] z-30 flex items-center justify-between gap-3 bg-carbon text-ambar rounded-2xl p-3 pl-5 shadow-2xl transition-transform duration-300 hover:scale-[1.02] active:scale-[0.98] border-2 border-carbon"
         >
           <div>
-            <b className="block font-etiqueta text-2xl tracking-wide uppercase leading-tight">
+            <b className="block font-titulo text-2xl tracking-wide uppercase leading-tight">
               {totalUnidades} {totalUnidades === 1 ? 'PLATO' : 'PLATOS'}
             </b>
             <small className="block font-semibold text-xs text-[#E9C98A]">

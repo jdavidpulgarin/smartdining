@@ -4,6 +4,27 @@ import { MemoryRouter } from 'react-router-dom';
 import Inicio from './Inicio';
 import Header from '../components/layout/Header';
 import Menu from './Menu';
+import Carrito from './Carrito';
+import LineaCarrito from '../components/carrito/LineaCarrito';
+import IngredientCard from '../components/ui/IngredientCard';
+import SelectorPorcion from '../components/constructor/SelectorPorcion';
+import Modal from '../components/ui/Modal';
+
+if (typeof document === 'undefined') {
+  global.document = {
+    body: { style: {} },
+    activeElement: null,
+  };
+}
+
+// Mock de createPortal para permitir renderToStaticMarkup de Modal en entorno Node
+vi.mock('react-dom', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    createPortal: (node) => node,
+  };
+});
 
 // Mocks para pruebas de Inicio
 vi.mock('../context/SesionContext', () => ({
@@ -52,11 +73,25 @@ vi.mock('../context/CarritoContext', () => ({
   useCarrito: () => ({
     modo: 'individual',
     lineas: [],
-    misLineas: [],
+    misLineas: [
+      {
+        id_linea: 'linea-mock-1',
+        nombre: 'Bowl de Pollo',
+        cantidad: 1,
+        precioUnitario: 30000,
+        subtotal: 30000,
+      },
+    ],
+    otros: [],
     total: 30000,
     totalMio: 30000,
+    totalMesa: 30000,
     totalUnidades: 1,
     agregarLinea: vi.fn(),
+    actualizarCantidad: vi.fn(),
+    eliminarLinea: vi.fn(),
+    vaciarCarrito: vi.fn(),
+    marcarFaltantesEnMenu: vi.fn(),
   }),
 }));
 
@@ -124,5 +159,91 @@ describe('Rediseño Comanda - Verificaciones visuales y accesibilidad', () => {
     expect(htmlInicio).toContain('/img/mascota-chef.webp');
     // Debe tener alt="" y aria-hidden="true"
     expect(htmlInicio).toMatch(/<img[^>]*src="\/img\/mascota-chef\.webp"[^>]*alt=""[^>]*aria-hidden="true"/);
+  });
+
+  // PARTE 2: Tests de Carrito y Armar plato estilo comanda
+  it('Carrito muestra la sección comanda "LO TUYO", subtotal y botón de enviar a cocina', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <Carrito />
+      </MemoryRouter>
+    );
+
+    expect(html).toContain('LO TUYO');
+    expect(html).toContain('SUBTOTAL LO TUYO');
+    expect(html).toContain('CUENTA');
+    expect(html).toContain('Enviar mi pedido a cocina');
+    expect(html).toContain('Seguir pidiendo');
+  });
+
+  it('Modal de confirmación de pedido comanda renderiza botones de acción', () => {
+    const html = renderToStaticMarkup(
+      <Modal abierto={true} onCerrar={() => {}} titulo="¿ENVIAR A COCINA?">
+        <div>
+          <button type="button">Confirmar y enviar</button>
+          <button type="button">Revisar platos</button>
+        </div>
+      </Modal>
+    );
+
+    expect(html).toContain('¿ENVIAR A COCINA?');
+    expect(html).toContain('Confirmar y enviar');
+    expect(html).toContain('Revisar platos');
+  });
+
+  it('LineaCarrito renderiza el contador − / + con aria-labels y el precio en COP', () => {
+    const linea = {
+      id_linea: 'linea-test-1',
+      nombre: 'Tacos Al Pastor',
+      cantidad: 2,
+      precioUnitario: 15000,
+      subtotal: 30000,
+      detalle: ['Tortilla de maíz', 'Carne al pastor'],
+    };
+
+    const html = renderToStaticMarkup(
+      <LineaCarrito
+        linea={linea}
+        onActualizarCantidad={() => {}}
+        onEliminar={() => {}}
+      />
+    );
+
+    expect(html).toContain('Tacos Al Pastor');
+    expect(html).toContain('aria-label="Disminuir cantidad de Tacos Al Pastor"');
+    expect(html).toContain('aria-label="Aumentar cantidad de Tacos Al Pastor"');
+    expect(html).toContain('30.000');
+  });
+
+  it('IngredientCard agotado tiene aria-disabled="true" e insignia AGOTADO', () => {
+    const html = renderToStaticMarkup(
+      <IngredientCard
+        nombre="Aguacate Extra"
+        agotado={true}
+        disabled={true}
+        precioExtra={5000}
+      />
+    );
+
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain('AGOTADO');
+    expect(html).toContain('opacity-40');
+  });
+
+  it('SelectorPorcion tiene radiogroup y las opciones Ligera, Normal y Extra', () => {
+    const html = renderToStaticMarkup(
+      <SelectorPorcion
+        nombreIngrediente="Queso costeño"
+        porcionActual="normal"
+        precioExtra={4000}
+        onCambiar={() => {}}
+      />
+    );
+
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('Ligera');
+    expect(html).toContain('Normal');
+    expect(html).toContain('Extra');
+    expect(html).toContain('4.000');
   });
 });
