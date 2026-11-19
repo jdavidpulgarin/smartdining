@@ -1,6 +1,6 @@
 /**
  * Pie de página institucional estilo póster de restaurante.
- * Conserva atribuciones académicas, créditos de imágenes con IA, enlaces
+ * Conserva créditos de imágenes con IA, enlaces
  * y el espaciado inferior para convivir con el botón flotante de WhatsApp.
  */
 function Pie({ datosRestaurante = {}, secciones = [] }) {
@@ -13,9 +13,6 @@ function Pie({ datosRestaurante = {}, secciones = [] }) {
         <div className="text-center md:text-left space-y-1.5">
           <p className="font-titulo text-2xl sm:text-3xl tracking-wider uppercase text-papel m-0">
             {nombre}
-          </p>
-          <p className="text-xs text-papel/70 font-cuerpo-poster m-0">
-            Proyecto académico · UPC
           </p>
           <p className="text-xs text-papel/50 font-cuerpo-poster m-0">
             Imágenes y videos ilustrativos generados con IA · Imagen base del bowl: Freepik

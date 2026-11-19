@@ -47,6 +47,11 @@ function PlatoCard({ plato, onSeleccionar, soloLectura = true }) {
           />
         ) : null}
 
+        {/* Precio arriba a la derecha sobre la foto en etiqueta ámbar con zigzag */}
+        <span className="absolute top-0 right-3 z-10 etiqueta-precio bg-ambar text-tinta font-titulo text-lg sm:text-xl tracking-wide shadow-md">
+          {formatearPrecio(precio)}
+        </span>
+
         {!disponible && (
           <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px] flex items-center justify-center">
             <span className="font-titulo text-lg tracking-wider uppercase text-primario-texto bg-fondo/80 border border-primario/30 px-3 py-1 rounded">
@@ -71,16 +76,13 @@ function PlatoCard({ plato, onSeleccionar, soloLectura = true }) {
           </p>
         )}
 
-        <div className="mt-auto pt-3 flex items-center justify-between gap-2 border-t border-papel/10">
-          <span className="font-titulo text-2xl text-ambar tracking-wide">
-            {formatearPrecio(precio)}
-          </span>
-          {soloLectura && (
+        {soloLectura && (
+          <div className="mt-auto pt-3 flex items-center justify-end border-t border-papel/10">
             <span className="text-xs font-etiqueta uppercase tracking-wider text-papel/60 group-hover:text-papel transition-colors">
               Ver detalle →
             </span>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </button>
   );

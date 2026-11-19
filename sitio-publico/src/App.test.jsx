@@ -294,7 +294,7 @@ describe('App y Sitio Público Completo', () => {
     }
   });
 
-  it('Próximamente no contiene <a> ni <button>; el pie contiene "Proyecto académico · UPC"', async () => {
+  it('Próximamente no contiene <a> ni <button>; el pie ya no contiene "Proyecto académico" y conserva el crédito exacto de IA y Freepik', async () => {
     const menu = await obtenerMenuPublico();
     const html = renderToStaticMarkup(<App menuInicial={menu} />);
 
@@ -306,16 +306,21 @@ describe('App y Sitio Público Completo', () => {
     expect(seccionProximamente).not.toMatch(/<a[\s>]/);
     expect(seccionProximamente).not.toMatch(/<button[\s>]/);
 
-    // Pie contiene información académica
-    expect(html).toContain('Proyecto académico · UPC');
+    // Pie ya no contiene proyecto académico
+    expect(html).not.toContain('Proyecto académico');
+    expect(html).toContain(
+      'Imágenes y videos ilustrativos generados con IA · Imagen base del bowl: Freepik'
+    );
   });
 
-  it('Pie renderizado contiene pb-28 en el footer, créditos de IA y atribución de Freepik', () => {
+  it('Pie renderizado contiene pb-28 en el footer, créditos exactos de IA y Freepik, sin "Proyecto académico"', () => {
     const html = renderToStaticMarkup(<Pie />);
     expect(html).toContain('pb-28');
     expect(html).toMatch(/<footer[^>]*class="[^"]*pb-28[^"]*"/);
-    expect(html).toContain('Imágenes y videos ilustrativos generados con IA');
-    expect(html).toContain('Imagen base del bowl: Freepik');
+    expect(html).not.toContain('Proyecto académico');
+    expect(html).toContain(
+      'Imágenes y videos ilustrativos generados con IA · Imagen base del bowl: Freepik'
+    );
   });
 
   it('con origen "fija" aparece "Carta de referencia"; con "vivo" no aparece', async () => {

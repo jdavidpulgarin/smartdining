@@ -138,8 +138,8 @@ export function TarjetaPlatoArmablePublico({
           Personalizable
         </span>
 
-        {/* Precio Desde en etiqueta ámbar girada */}
-        <span className="absolute right-[-0.25rem] bottom-4 z-10 etiqueta-girada font-titulo text-xl sm:text-2xl tracking-wide px-3.5 py-1.5 shadow-xl rotate-[-3deg]">
+        {/* Precio Desde en etiqueta ámbar con corte zigzag */}
+        <span className="absolute top-0 right-3 z-10 etiqueta-precio bg-ambar text-tinta font-titulo text-lg sm:text-xl tracking-wide shadow-md">
           Desde {formatearPrecio(plato.precio)}
         </span>
       </div>
@@ -204,7 +204,7 @@ function TarjetaPlatoDestacado({ plato, onSeleccionarPlato }) {
         className="absolute inset-0 bg-gradient-to-t from-[#0c0707]/95 via-[#0c0707]/35 to-transparent pointer-events-none"
       />
 
-      <span className="absolute top-4 -right-1 z-10 etiqueta-girada font-titulo text-2xl tracking-wide px-3.5 py-1.5 shadow-xl rotate-[3deg]">
+      <span className="absolute top-0 right-3 z-10 etiqueta-precio bg-ambar text-tinta font-titulo text-xl sm:text-2xl tracking-wide shadow-xl">
         {formatearPrecio(plato.precio)}
       </span>
 
@@ -313,22 +313,6 @@ function CartaSeccion({
     });
   }, [platos, categoriaActiva, esVistaTodas]);
 
-  // Agrupar platos por categoría en el orden de categorias para "Toda la carta"
-  const gruposCategorias = useMemo(() => {
-    return categorias
-      .map((cat) => {
-        const platosDeCat = platos.filter((p) => {
-          const cId = p.categoriaId ?? p.categoria_id ?? p.id_categoria;
-          return cId === cat.id;
-        });
-        return {
-          categoria: cat,
-          platos: platosDeCat,
-        };
-      })
-      .filter((g) => g.platos.length > 0);
-  }, [categorias, platos]);
-
   return (
     <section
       id="carta"
@@ -425,32 +409,23 @@ function CartaSeccion({
                   </div>
                 )}
 
-                <div className="space-y-8 sm:space-y-10">
+                <div className="space-y-6 sm:space-y-8">
                   <h3 className="font-titulo text-3xl sm:text-4xl uppercase tracking-wider text-papel m-0">
                     Toda la carta
                   </h3>
-                  {gruposCategorias.length === 0 ? (
+                  {platos.length === 0 ? (
                     <p className="text-center text-papel/60 py-8 font-cuerpo-poster">
                       No hay platos en esta vista.
                     </p>
                   ) : (
-                    <div className="space-y-10">
-                      {gruposCategorias.map((grupo) => (
-                        <div key={grupo.categoria.id} className="space-y-4">
-                          <h4 className="font-titulo text-2xl sm:text-3xl uppercase tracking-wide text-ambar m-0">
-                            {grupo.categoria.nombre}
-                          </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {grupo.platos.map((plato) => (
-                              <PlatoCard
-                                key={plato.id}
-                                plato={plato}
-                                onSeleccionar={onSeleccionarPlato}
-                                soloLectura
-                              />
-                            ))}
-                          </div>
-                        </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {platos.map((plato) => (
+                        <PlatoCard
+                          key={plato.id}
+                          plato={plato}
+                          onSeleccionar={onSeleccionarPlato}
+                          soloLectura
+                        />
                       ))}
                     </div>
                   )}
