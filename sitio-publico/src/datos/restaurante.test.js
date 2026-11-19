@@ -65,7 +65,7 @@ describe('restaurante.js - datos informativos', () => {
     }
   });
 
-  it('valida que videosPlatos sea un objeto con la estructura requerida (archivo, poster, ia y credito)', () => {
+  it('valida que videosPlatos sea un objeto con la estructura requerida (solo archivo y poster, sin ia ni credito)', () => {
     expect(restaurante.videosPlatos).toBeDefined();
     expect(typeof restaurante.videosPlatos).toBe('object');
     const nombres = Object.keys(restaurante.videosPlatos);
@@ -77,8 +77,8 @@ describe('restaurante.js - datos informativos', () => {
       const vid = restaurante.videosPlatos[nombre];
       expect(typeof vid.archivo).toBe('string');
       expect(typeof vid.poster).toBe('string');
-      expect(typeof vid.ia).toBe('boolean');
-      expect(typeof vid.credito).toBe('string');
+      expect(vid.ia).toBeUndefined();
+      expect(vid.credito).toBeUndefined();
     }
   });
 });

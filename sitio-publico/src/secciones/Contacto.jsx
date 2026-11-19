@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import TituloSeccion from '../componentes/TituloSeccion.jsx';
 import Button from '../components/ui/Button.jsx';
+import IconoRed from '../componentes/IconoRed.jsx';
 import restauranteDefault from '../datos/restaurante.js';
 import { estadoHorario } from '../utils/horario.js';
 
@@ -326,9 +327,10 @@ function Contacto({ datosRestaurante = restauranteDefault, mapaVisibleInicial = 
                       href={red.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="min-h-10 px-4 py-1.5 rounded-full border border-papel/20 text-papel hover:border-ambar hover:bg-ambar/10 font-titulo text-base uppercase tracking-wider transition-colors inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
+                      className="min-h-10 px-4 py-1.5 rounded-full border border-papel/20 text-papel hover:border-ambar hover:bg-ambar/10 font-titulo text-base uppercase tracking-wider transition-colors inline-flex items-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto"
                     >
-                      {red.nombre}
+                      <IconoRed red={red.nombre} />
+                      <span>{red.nombre}</span>
                     </a>
                   ))}
                 </div>

@@ -22,12 +22,20 @@ describe('Sección Inicio (Hero Póster)', () => {
     expect(html).toMatch(/fetchpriority="high"/i);
   });
 
-  it('contiene el anillo circular SVG aria-hidden con textPath exacto (textLength y lengthAdjust="spacing")', () => {
+  it('contiene el anillo circular SVG aria-hidden con textPath exacto y clase motion-safe', () => {
     const html = renderToStaticMarkup(<Inicio datosRestaurante={restaurante} />);
 
     expect(html).toMatch(/<svg[^>]*aria-hidden="true"[^>]*>[\s\S]*<textPath[^>]*>[\s\S]*SABOR VALLENATO[\s\S]*<\/textPath>[\s\S]*<\/svg>/);
     expect(html).toContain('textLength="785.4"');
     expect(html).toContain('lengthAdjust="spacing"');
+    expect(html).toContain('motion-safe:animate-[spin_40s_linear_infinite]');
+  });
+
+  it('no contiene botones de pausar o reproducir animación', () => {
+    const html = renderToStaticMarkup(<Inicio datosRestaurante={restaurante} />);
+
+    expect(html).not.toContain('Pausar animación');
+    expect(html).not.toContain('Reproducir animación');
   });
 
   it('renderiza la cinta estática con <ul>, justify-center, flex-wrap y los 4 textos de llamado a la acción', () => {

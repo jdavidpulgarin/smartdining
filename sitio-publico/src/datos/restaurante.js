@@ -40,20 +40,14 @@ const restaurante = {
     'Arepa Rellena': {
       archivo: '/videos/arepa.mp4',
       poster: '/videos/arepa-poster.webp',
-      ia: true,
-      credito: '',
     },
     'Bowl Personalizado': {
       archivo: '/videos/bowl.mp4',
       poster: '/videos/bowl-poster.webp',
-      ia: true,
-      credito: 'Imagen base: Freepik',
     },
     'Wrap Personalizado': {
       archivo: '/videos/wrap.mp4',
       poster: '/videos/wrap-poster.webp',
-      ia: true,
-      credito: '',
     },
   },
 };
