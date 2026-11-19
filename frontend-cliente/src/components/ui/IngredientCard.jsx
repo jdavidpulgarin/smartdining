@@ -2,7 +2,7 @@ import { formatearPrecio } from '../../utils/formato';
 import Imagen from './Imagen';
 
 /**
- * Tarjeta interactiva para seleccionar un ingrediente en el constructor de platos (tema oscuro).
+ * Tarjeta interactiva para seleccionar un ingrediente en el constructor de platos (estilo comanda).
  *
  * Props:
  * - nombre: nombre del ingrediente
@@ -53,12 +53,12 @@ function IngredientCard({
       tabIndex={disabled ? -1 : 0}
       onClick={manejarAccion}
       onKeyDown={manejarTeclado}
-      className={`relative flex items-center gap-3.5 p-3 rounded-xl border bg-superficie transition-all select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto focus-visible:ring-offset-2 focus-visible:ring-offset-fondo ${
+      className={`relative flex items-center gap-3.5 p-3 rounded-xl border-2 bg-papel text-tinta transition-all select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-brasa focus-visible:ring-offset-2 ${
         disabled
-          ? 'border-borde opacity-40 cursor-not-allowed'
+          ? 'border-carbon/25 opacity-40 cursor-not-allowed bg-papel/60'
           : seleccionado
-            ? 'border-2 border-primario cursor-pointer'
-            : 'border-borde hover:border-primario/60 cursor-pointer'
+            ? 'border-brasa ring-2 ring-brasa/20 cursor-pointer shadow-sm'
+            : 'border-carbon hover:border-brasa/80 cursor-pointer shadow-sm'
       } ${className}`.trim()}
     >
       {/* Foto circular 56px */}
@@ -66,7 +66,7 @@ function IngredientCard({
         src={imagen}
         alt={nombre || 'Ingrediente'}
         aspecto="1/1"
-        className={`w-14 h-14 rounded-full shrink-0 border border-borde ${
+        className={`w-14 h-14 rounded-full shrink-0 border border-papel-linea object-cover ${
           disabled ? 'grayscale' : ''
         }`.trim()}
       />
@@ -74,28 +74,28 @@ function IngredientCard({
       {/* Información del ingrediente */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <h3 className="text-base font-etiqueta font-semibold text-texto uppercase tracking-wide truncate">
+          <h3 className="text-xl font-titulo font-bold text-carbon uppercase tracking-wide truncate leading-tight">
             {nombre}
           </h3>
           {agotado && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-etiqueta font-bold uppercase tracking-wider bg-primario/20 text-primario-texto border border-primario/30">
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-titulo font-bold uppercase tracking-wider bg-brasa/15 text-rojo-tinta border border-brasa/30">
               AGOTADO
             </span>
           )}
         </div>
 
-        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-texto-suave flex-wrap font-cuerpo">
+        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-papel-suave flex-wrap font-cuerpo">
           {precioExtra > 0 ? (
-            <span className="font-semibold text-primario-texto">
+            <span className="font-bold text-rojo-tinta font-titulo text-sm tracking-wide">
               Extra +{formatearPrecio(precioExtra)}
             </span>
           ) : (
-            <span>Incluido</span>
+            <span className="font-medium text-papel-suave">Incluido</span>
           )}
           {calorias !== undefined && calorias !== null && (
             <>
-              <span aria-hidden="true" className="text-texto-tenue">·</span>
-              <span>{calorias} kcal</span>
+              <span aria-hidden="true" className="text-papel-linea">·</span>
+              <span className="text-papel-suave">{calorias} kcal</span>
             </>
           )}
         </div>
@@ -106,8 +106,8 @@ function IngredientCard({
         aria-hidden="true"
         className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-colors ${
           seleccionado && !disabled
-            ? 'bg-primario text-white'
-            : 'border-2 border-borde bg-transparent text-transparent'
+            ? 'bg-carbon text-ambar border-2 border-carbon'
+            : 'border-2 border-carbon/40 bg-transparent text-transparent'
         }`}
       >
         <svg

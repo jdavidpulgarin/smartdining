@@ -357,8 +357,8 @@ function Pago({ errorPagoInicial = null } = {}) {
   if (cargando && !cuenta) {
     return (
       <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
-        <div className="w-10 h-10 border-4 border-borde border-t-primario rounded-full animate-spin mb-4" />
-        <p className="text-texto-suave font-etiqueta text-base tracking-wider uppercase">
+        <div className="w-10 h-10 border-4 border-carbon/20 border-t-granate rounded-full animate-spin mb-4" />
+        <p className="text-carbon/70 font-titulo text-xl tracking-wider uppercase">
           Cargando la cuenta de la mesa...
         </p>
       </div>
@@ -370,18 +370,18 @@ function Pago({ errorPagoInicial = null } = {}) {
       <div className="py-12 px-4 max-w-md mx-auto text-center space-y-4">
         <div
           role="alert"
-          className="bg-superficie border border-borde rounded-2xl p-6 space-y-3"
+          className="ticket-comanda p-6 space-y-3"
         >
-          <h1 className="font-titulo text-2xl text-primario uppercase tracking-wide">
+          <h1 className="font-titulo text-3xl text-granate uppercase tracking-wide">
             No pudimos cargar la cuenta
           </h1>
-          <p className="text-sm text-texto-suave">
+          <p className="text-sm text-tinta/80">
             {error.mensaje || error.message || 'Ocurrió un error al consultar los pedidos de la mesa.'}
           </p>
           <button
             type="button"
             onClick={recargar}
-            className="min-h-[44px] px-6 py-2 rounded-xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-sm tracking-wider uppercase transition-colors"
+            className="min-h-[44px] px-6 py-2 rounded-xl bg-carbon hover:bg-carbon/90 text-papel font-titulo text-lg tracking-wider uppercase transition-colors cursor-pointer"
           >
             Reintentar
           </button>
@@ -581,27 +581,27 @@ function Pago({ errorPagoInicial = null } = {}) {
   };
 
   return (
-    <div className="flex flex-col gap-3.5 pb-8">
+    <div className="w-full max-w-full overflow-x-hidden flex flex-col gap-3.5 pb-8">
       {/* Aviso toast local */}
       {avisoMesero && (
         <div
           role="status"
           aria-live="polite"
-          className={`bg-superficie border ${
+          className={`bg-papel border-2 ${
             avisoMesero?.tipo === 'advertencia'
-              ? 'border-[#2A2A2A] text-[#969696]'
+              ? 'border-ambar text-carbon'
               : avisoMesero?.tipo === 'error'
-              ? 'border-primario text-white'
-              : 'border-exito text-white'
-          } px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg toast-entra`}
+              ? 'border-granate text-granate'
+              : 'border-[#15803D] text-[#15803D]'
+          } px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg toast-entra font-sans`}
         >
           <span
             className={`w-2 h-2 rounded-full shrink-0 ${
               avisoMesero?.tipo === 'advertencia'
-                ? 'bg-[#969696]'
+                ? 'bg-ambar'
                 : avisoMesero?.tipo === 'error'
-                ? 'bg-primario'
-                : 'bg-exito'
+                ? 'bg-granate'
+                : 'bg-[#15803D]'
             }`}
           />
           <span>{avisoMesero?.mensaje || avisoMesero}</span>
@@ -612,9 +612,9 @@ function Pago({ errorPagoInicial = null } = {}) {
       {errorPago && (
         <div
           role="alert"
-          className="bg-superficie border border-primario text-white px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg toast-entra"
+          className="bg-papel border-2 border-granate text-granate px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg toast-entra font-sans"
         >
-          <span className="w-2 h-2 rounded-full bg-primario shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-granate shrink-0" />
           <span>{textoErrorPago}</span>
         </div>
       )}
@@ -622,47 +622,63 @@ function Pago({ errorPagoInicial = null } = {}) {
       {/* ──────────────── PANTALLA 1: LA CUENTA ──────────────── */}
       {pantalla === 'cuenta' && (
         <div className="entra flex flex-col gap-3.5">
-          {/* Tarjeta principal con saldo personal y barra de progreso */}
-          <section className="bg-superficie border border-borde rounded-3xl p-5 flex flex-col gap-4">
-            <div className="flex justify-between items-center">
-              <h1 className="m-0 font-titulo text-[40px] tracking-wider leading-none text-white">
+          {/* Encabezado visual estilo comanda */}
+          <div className="flex justify-between items-end px-1 pt-1">
+            <div>
+              <span className="font-manuscrita text-granate text-xl block leading-none -rotate-2">
+                Resumen del consumo
+              </span>
+              <h1 className="m-0 font-titulo text-4xl sm:text-5xl tracking-wider leading-none text-carbon drop-shadow-[0_2px_0_rgba(255,255,255,0.4)]">
                 LA CUENTA
               </h1>
-              {(mesaNumero || ubicacion) && (
-                <span className="text-xs text-texto-suave">
-                  {[mesaNumero ? `Mesa ${mesaNumero}` : null, ubicacion].filter(Boolean).join(' · ')}
-                </span>
-              )}
+            </div>
+            {(mesaNumero || ubicacion) && (
+              <span className="font-titulo text-sm sm:text-base tracking-wider bg-carbon text-papel px-3 py-1 rounded-full shadow-sm">
+                {[mesaNumero ? `Mesa ${mesaNumero}` : null, ubicacion].filter(Boolean).join(' · ')}
+              </span>
+            )}
+          </div>
+
+          {/* Tarjeta principal con saldo personal y barra de progreso */}
+          <section className="ticket-comanda p-5 flex flex-col gap-4">
+            <div className="border-b-2 border-dashed border-tinta/15 pb-2.5 flex justify-between items-center">
+              <span className="font-titulo text-xs tracking-widest text-carbon/70 uppercase">
+                SMARTDINING · COMANDA DE PAGO
+              </span>
+              <span className="font-manuscrita text-granate text-base">
+                mesa #{mesaNumero || '—'}
+              </span>
             </div>
 
-            <div className="flex flex-col gap-1">
-              <span className="font-etiqueta font-bold text-sm tracking-widest text-texto-suave uppercase">
+            <div className="flex flex-col gap-0.5">
+              <span className="font-titulo text-sm tracking-widest text-carbon/70 uppercase">
                 TU PARTE
               </span>
               <span
-                className="font-titulo text-[64px] tracking-wider leading-[0.95]"
-                style={{ color: tuParte.color }}
+                className={`font-titulo text-5xl sm:text-6xl tracking-wider leading-[0.95] ${
+                  tuParte.esVerde ? 'text-[#15803D]' : tuParteMonto > 0 ? 'text-rojo-tinta' : 'text-carbon'
+                }`}
               >
                 {formatoPesos(tuParteMonto)}
               </span>
-              <span className="text-xs text-texto-suave">
+              <span className="text-xs text-carbon/70 font-sans">
                 {tuParte.mensaje}
               </span>
             </div>
 
             {/* Barra de progreso */}
-            <div className="flex flex-col gap-2 pt-1">
-              <div className="h-2.5 rounded-full bg-[#2A2A2A] overflow-hidden">
+            <div className="flex flex-col gap-2 pt-1 border-t border-dashed border-tinta/15">
+              <div className="h-3 rounded-full bg-carbon/10 p-0.5 overflow-hidden border border-carbon/15">
                 <div
-                  className="barra h-full rounded-full bg-exito"
+                  className="barra h-full rounded-full bg-[#15803D]"
                   style={{ width: `${progreso}%` }}
                 />
               </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-exito font-semibold">
+              <div className="flex justify-between text-xs font-sans">
+                <span className="text-[#15803D] font-bold">
                   Pagado {formatoPesos(pagado)}
                 </span>
-                <span className="text-texto-suave">
+                <span className="text-carbon/70 font-medium">
                   Falta {formatoPesos(saldo)} de {formatoPesos(total)}
                 </span>
               </div>
@@ -670,11 +686,16 @@ function Pago({ errorPagoInicial = null } = {}) {
           </section>
 
           {/* Tarjeta QUIÉN DEBE QUÉ */}
-          <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-1">
-            <h2 className="m-0 mb-2 font-etiqueta font-bold text-sm tracking-wider text-white uppercase">
-              QUIÉN DEBE QUÉ
-            </h2>
-            <div className="flex flex-col divide-y divide-[#222222]">
+          <section className="ticket-comanda p-4 flex flex-col gap-1">
+            <div className="flex items-center justify-between pb-2 mb-1 border-b border-dashed border-tinta/15">
+              <h2 className="m-0 font-titulo text-lg tracking-wider text-carbon uppercase">
+                QUIÉN DEBE QUÉ
+              </h2>
+              <span className="text-xs text-carbon/60 font-sans">
+                {comensales.length} {comensales.length === 1 ? 'persona' : 'personas'}
+              </span>
+            </div>
+            <div className="flex flex-col divide-y divide-dashed divide-tinta/15">
               {comensales.map((c, idx) => {
                 const deb = Math.max(0, c.saldo);
                 const yaPago = c.esMio ? yaPague : (c.pagado > 0 && deb === 0);
@@ -683,34 +704,34 @@ function Pago({ errorPagoInicial = null } = {}) {
                 return (
                   <div
                     key={c.nombre || idx}
-                    className="flex items-center justify-between gap-2.5 py-2.5 first:pt-0 last:pb-0"
+                    className="flex items-center justify-between gap-2.5 py-2.5 first:pt-1 last:pb-1"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <span
-                        className={`w-9 h-9 rounded-full flex items-center justify-center font-etiqueta font-bold text-base shrink-0 text-white ${
-                          c.esMio ? 'bg-primario' : 'bg-[#2A2A2A]'
+                        className={`w-9 h-9 rounded-full flex items-center justify-center font-titulo text-lg shrink-0 ${
+                          c.esMio ? 'bg-granate text-papel shadow-sm' : 'bg-carbon/10 text-carbon border border-carbon/20'
                         }`}
                       >
                         {inicial}
                       </span>
                       <div className="flex flex-col min-w-0">
-                        <span className="text-[15px] font-semibold text-white truncate">
+                        <span className="text-[15px] font-bold text-carbon truncate">
                           {c.esMio ? `${c.nombre} (tú)` : c.nombre}
                         </span>
-                        <span className="text-xs text-texto-tenue">
+                        <span className="text-xs text-carbon/65 font-sans">
                           Consumió {formatoPesos(c.subtotal)}
                         </span>
                       </div>
                     </div>
 
                     {yaPago ? (
-                      <span className="flex items-center gap-1.5 font-etiqueta font-bold text-xs tracking-wider text-[#0B0B0B] bg-exito px-2.5 py-1 rounded-lg shrink-0">
+                      <span className="flex items-center gap-1.5 font-titulo text-sm tracking-wider text-papel bg-[#15803D] px-2.5 py-1 rounded-lg shrink-0 shadow-sm rotate-[-2deg]">
                         <svg
                           width="12"
                           height="12"
                           viewBox="0 0 24 24"
                           fill="none"
-                          stroke="#0B0B0B"
+                          stroke="currentColor"
                           strokeWidth="3.5"
                           strokeLinecap="round"
                           strokeLinejoin="round"
@@ -722,8 +743,8 @@ function Pago({ errorPagoInicial = null } = {}) {
                       </span>
                     ) : (
                       <span
-                        className={`font-titulo text-[22px] tracking-wide shrink-0 ${
-                          c.esMio ? 'text-white' : 'text-texto-suave'
+                        className={`font-titulo text-2xl tracking-wide shrink-0 ${
+                          c.esMio ? 'text-granate font-bold' : 'text-carbon/75'
                         }`}
                       >
                         {formatoPesos(deb)}
@@ -737,19 +758,22 @@ function Pago({ errorPagoInicial = null } = {}) {
 
           {/* Opciones y acciones de pago si hay saldo pendiente */}
           {mostrarSeccionPago && (
-            <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-3">
+            <section className="ticket-comanda p-4 flex flex-col gap-3">
               {modoPrueba && <AvisoModoDemostracion />}
 
               {mostrarSelector && (
                 <>
-                  <h2 className="m-0 font-etiqueta font-bold text-sm tracking-wider text-white uppercase">
-                    ¿CÓMO QUIERES PAGAR?
-                  </h2>
+                  <div className="flex items-center justify-between">
+                    <h2 className="m-0 font-titulo text-lg tracking-wider text-carbon uppercase">
+                      ¿CÓMO QUIERES PAGAR?
+                    </h2>
+                    <span className="font-manuscrita text-granate text-sm">elige tu modo</span>
+                  </div>
 
                   <div
                     role="radiogroup"
                     aria-label="Modo de pago"
-                    className="grid grid-cols-2 gap-1.5 bg-[#0B0B0B] border border-borde rounded-xl p-1"
+                    className="grid grid-cols-2 gap-2 bg-papel-linea/40 border-2 border-carbon/15 rounded-xl p-1.5"
                   >
                     {MODOS_PAGO.map((k) => {
                       const activo = modo === k;
@@ -765,16 +789,16 @@ function Pago({ errorPagoInicial = null } = {}) {
                               setErrorPago(null);
                             }
                           }}
-                          className={`min-h-[48px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors ${
+                          className={`min-h-[52px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
                             activo
-                              ? 'bg-primario text-white shadow-sm cursor-pointer'
-                              : 'bg-transparent text-texto-suave hover:text-white cursor-pointer'
+                              ? 'bg-carbon text-papel shadow-md scale-[1.01]'
+                              : 'bg-transparent text-carbon/70 hover:text-carbon hover:bg-carbon/5'
                           }`}
                         >
-                          <span className="font-etiqueta font-bold text-sm tracking-wider uppercase">
+                          <span className="font-titulo text-base tracking-wider uppercase">
                             {TITULOS_MODO[k]}
                           </span>
-                          <span className="text-[11px]">
+                          <span className={`text-xs ${activo ? 'text-ambar font-semibold' : 'text-carbon/60'}`}>
                             {formatoPesos(montos[k])}
                           </span>
                         </button>
@@ -782,12 +806,12 @@ function Pago({ errorPagoInicial = null } = {}) {
                     })}
                   </div>
 
-                  <p className="m-0 text-xs text-texto-suave">
+                  <p className="m-0 text-xs text-carbon/70 font-sans">
                     {ayudas[modo]}
                   </p>
 
                   {mostrarSinCelular && (
-                    <p className="m-0 text-xs text-texto-tenue">
+                    <p className="m-0 text-xs text-carbon/60 italic font-sans">
                       {TEXTO_SUGERENCIA_SIN_CELULAR}
                     </p>
                   )}
@@ -798,7 +822,7 @@ function Pago({ errorPagoInicial = null } = {}) {
               {avisoGrupal && (
                 <div
                   role="note"
-                  className="min-h-[44px] bg-[#1F1F1F] border border-[#2A2A2A] rounded-xl p-3 flex flex-col gap-2.5 text-[#FFFFFF]"
+                  className="min-h-[44px] bg-papel border border-ambar/50 rounded-xl p-3 flex flex-col gap-2.5 text-carbon"
                 >
                   <div className="flex items-start gap-2.5">
                     <svg
@@ -806,8 +830,8 @@ function Pago({ errorPagoInicial = null } = {}) {
                       height="18"
                       viewBox="0 0 24 24"
                       fill="none"
-                      stroke="#F2B705"
-                      strokeWidth="2"
+                      stroke="#B45309"
+                      strokeWidth="2.5"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       className="shrink-0 mt-0.5"
@@ -817,12 +841,12 @@ function Pago({ errorPagoInicial = null } = {}) {
                       <line x1="12" y1="8" x2="12" y2="12" />
                       <line x1="12" y1="16" x2="12.01" y2="16" />
                     </svg>
-                    <p className="m-0 text-xs text-[#FFFFFF] leading-relaxed">
+                    <p className="m-0 text-xs text-carbon leading-relaxed font-sans">
                       {avisoGrupal.mensaje}
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 pt-1 border-t border-[#2A2A2A]">
+                  <div className="flex items-center gap-2 pt-1 border-t border-carbon/10">
                     <button
                       type="button"
                       onClick={() => {
@@ -831,7 +855,7 @@ function Pago({ errorPagoInicial = null } = {}) {
                           setErrorPago(null);
                         }
                       }}
-                      className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#2A2A2A] hover:bg-[#333333] active:bg-[#3a3a3a] text-white font-etiqueta font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer border border-[#3A3A3A] flex items-center justify-center"
+                      className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-carbon hover:bg-carbon/90 active:bg-carbon/80 text-papel font-titulo text-sm tracking-wider uppercase transition-colors cursor-pointer flex items-center justify-center shadow-sm"
                     >
                       Pagar toda la cuenta
                     </button>
@@ -843,9 +867,9 @@ function Pago({ errorPagoInicial = null } = {}) {
               {errorPago && (
                 <div
                   role="alert"
-                  className="bg-superficie border border-primario text-white px-4 py-3 rounded-xl flex items-center gap-2.5 text-xs font-semibold shadow-md toast-entra"
+                  className="bg-papel border-2 border-granate text-granate px-4 py-3 rounded-xl flex items-center gap-2.5 text-xs font-semibold shadow-sm toast-entra font-sans"
                 >
-                  <span className="w-2 h-2 rounded-full bg-primario shrink-0" />
+                  <span className="w-2 h-2 rounded-full bg-granate shrink-0" />
                   <span>{textoErrorPago}</span>
                 </div>
               )}
@@ -855,21 +879,21 @@ function Pago({ errorPagoInicial = null } = {}) {
                 type="button"
                 onClick={handlePagarWompi}
                 disabled={iniciandoPago || montoModo <= 0 || esErrorEnRevision}
-                className={`min-h-[56px] rounded-2xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-[19px] tracking-wider flex items-center justify-center gap-2.5 transition-colors shadow-sm ${
+                className={`min-h-[56px] rounded-2xl bg-carbon hover:bg-carbon/90 text-papel font-titulo text-2xl tracking-wider flex items-center justify-center gap-2.5 transition-colors shadow-lg ${
                   iniciandoPago || montoModo <= 0 || esErrorEnRevision
-                    ? 'opacity-70 cursor-not-allowed'
-                    : 'cursor-pointer'
+                    ? 'opacity-60 cursor-not-allowed'
+                    : 'cursor-pointer active:translate-y-0.5'
                 }`}
               >
                 {iniciandoPago ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <div className="w-5 h-5 border-2 border-papel border-t-transparent rounded-full animate-spin" />
                 ) : (
                   <svg
                     width="20"
                     height="20"
                     viewBox="0 0 24 24"
                     fill="none"
-                    stroke="#FFFFFF"
+                    stroke="currentColor"
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -892,8 +916,8 @@ function Pago({ errorPagoInicial = null } = {}) {
                 type="button"
                 onClick={handlePagarCaja}
                 disabled={montoModo <= 0}
-                className={`min-h-[52px] rounded-xl border border-borde bg-superficie-2 text-white font-etiqueta font-bold text-base tracking-wider flex items-center justify-center gap-2 transition-colors ${
-                  montoModo <= 0 ? 'opacity-70 cursor-not-allowed' : 'hover:bg-[#252525] cursor-pointer'
+                className={`min-h-[52px] rounded-xl border-2 border-carbon bg-transparent text-carbon hover:bg-carbon/5 font-titulo text-xl tracking-wider flex items-center justify-center gap-2 transition-colors ${
+                  montoModo <= 0 ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
                 }`}
               >
                 <svg
@@ -901,7 +925,7 @@ function Pago({ errorPagoInicial = null } = {}) {
                   height="18"
                   viewBox="0 0 24 24"
                   fill="none"
-                  stroke="#F2B705"
+                  stroke="currentColor"
                   strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -914,7 +938,7 @@ function Pago({ errorPagoInicial = null } = {}) {
                 PAGAR EN CAJA (EFECTIVO)
               </button>
 
-              <span className="text-[12px] text-texto-tenue text-center pt-0.5">
+              <span className="text-[12px] text-carbon/60 text-center pt-0.5 font-sans">
                 Pago seguro con Wompi · tarjeta, PSE o Nequi
               </span>
             </section>
@@ -922,14 +946,14 @@ function Pago({ errorPagoInicial = null } = {}) {
 
           {/* Tarjeta YA PAGASTE TU PARTE */}
           {yaPague && (
-            <section className="bg-superficie border border-exito rounded-2xl p-4 flex items-center gap-3">
-              <span className="w-10 h-10 rounded-full bg-exito flex items-center justify-center shrink-0">
+            <section className="ticket-comanda p-4 flex items-center gap-3 border-2 border-[#15803D]/40">
+              <span className="w-10 h-10 rounded-full bg-[#15803D] text-papel flex items-center justify-center shrink-0 shadow-sm">
                 <svg
                   width="20"
                   height="20"
                   viewBox="0 0 24 24"
                   fill="none"
-                  stroke="#0B0B0B"
+                  stroke="currentColor"
                   strokeWidth="3"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -939,10 +963,10 @@ function Pago({ errorPagoInicial = null } = {}) {
                 </svg>
               </span>
               <div className="flex flex-col gap-0.5">
-                <span className="font-etiqueta font-bold text-base tracking-wider text-white uppercase">
+                <span className="font-titulo text-xl tracking-wider text-carbon uppercase">
                   YA PAGASTE TU PARTE
                 </span>
-                <span className="text-xs text-texto-suave">
+                <span className="text-xs text-carbon/70 font-sans">
                   Cuando la mesa termine de pagar, la cerramos sola.
                 </span>
               </div>
@@ -954,14 +978,14 @@ function Pago({ errorPagoInicial = null } = {}) {
             type="button"
             onClick={handlePedirCuenta}
             disabled={avisoCuenta.deshabilitado}
-            className={`min-h-[48px] rounded-xl border border-dashed text-sm flex items-center justify-center gap-2 transition-colors ${
+            className={`min-h-[48px] rounded-xl border-2 border-dashed text-sm font-sans flex items-center justify-center gap-2 transition-colors ${
               avisoCuenta.estado === 'error'
-                ? 'border-primario text-primario hover:bg-primario/10 cursor-pointer'
+                ? 'border-granate text-granate hover:bg-granate/10 cursor-pointer'
                 : avisoCuenta.estado === 'rate_limit'
-                ? 'border-[#3A3A3A] bg-[#1A1A1A] text-[#969696] cursor-not-allowed'
+                ? 'border-carbon/30 bg-carbon/5 text-carbon/50 cursor-not-allowed'
                 : avisoCuenta.deshabilitado
-                ? 'border-[#3A3A3A] bg-transparent text-texto-suave cursor-not-allowed'
-                : 'border-[#3A3A3A] bg-transparent text-texto-suave hover:border-texto-suave hover:text-white cursor-pointer'
+                ? 'border-carbon/25 bg-transparent text-carbon/50 cursor-not-allowed'
+                : 'border-carbon/40 bg-papel text-carbon hover:border-carbon hover:bg-papel-linea/30 cursor-pointer shadow-sm'
             }`}
           >
             <svg
@@ -969,13 +993,7 @@ function Pago({ errorPagoInicial = null } = {}) {
               height="16"
               viewBox="0 0 24 24"
               fill="none"
-              stroke={
-                avisoCuenta.estado === 'error'
-                  ? '#E3242B'
-                  : avisoCuenta.estado === 'rate_limit'
-                  ? '#969696'
-                  : '#B5B5B5'
-              }
+              stroke="currentColor"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -984,7 +1002,7 @@ function Pago({ errorPagoInicial = null } = {}) {
               <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
               <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
             </svg>
-            <span>{avisoCuenta.mensaje}</span>
+            <span className="font-medium">{avisoCuenta.mensaje}</span>
           </button>
         </div>
       )}
@@ -992,40 +1010,65 @@ function Pago({ errorPagoInicial = null } = {}) {
       {/* ──────────────── PANTALLA 2: CONFIRMANDO TU PAGO ──────────────── */}
       {pantalla === 'espera' && (
         <section
-          className="entra bg-superficie border border-borde rounded-3xl p-6 flex flex-col items-center gap-4 text-center"
+          className="entra ticket-comanda p-6 flex flex-col items-center gap-4 text-center"
           aria-live="polite"
         >
-          {/* Ilustración de ondas, tarjeta flotante y anillo giratorio */}
-          <svg className="ilu" width="220" height="180" viewBox="0 0 220 180" aria-hidden="true">
-            <circle className="onda" cx="110" cy="90" r="60" fill="none" stroke="#F2B705" strokeWidth="3" />
-            <circle className="onda o2" cx="110" cy="90" r="60" fill="none" stroke="#F2B705" strokeWidth="3" />
-            <circle className="onda o3" cx="110" cy="90" r="60" fill="none" stroke="#F2B705" strokeWidth="3" />
-            <g className="tarjeta-flota">
-              <rect x="62" y="62" width="96" height="60" rx="8" fill="#1F1F1F" stroke="#3A3A3A" strokeWidth="2" />
-              <rect x="62" y="76" width="96" height="10" fill="#2A2A2A" />
-              <rect x="72" y="96" width="22" height="14" rx="3" fill="#F2B705" />
-              <rect x="100" y="104" width="44" height="5" rx="2" fill="#6B6B6B" />
-            </g>
-            <circle
-              className="gira"
-              cx="110"
-              cy="90"
-              r="78"
-              fill="none"
-              stroke="#E3242B"
-              strokeWidth="4"
-              strokeLinecap="round"
-              strokeDasharray="80 410"
-            />
-          </svg>
+          {/* Banda superior de la comanda */}
+          <div className="w-full bg-carbon text-papel py-1.5 px-4 rounded-lg font-titulo tracking-widest text-sm flex items-center justify-between">
+            <span>PAGO EN CURSO</span>
+            <span className="font-manuscrita text-ambar text-base">wompi</span>
+          </div>
 
-          <h1 className="m-0 font-titulo text-[46px] leading-[0.95] tracking-wider text-acento">
+          {/* Disco crema con anillo punteado giratorio e ilustración */}
+          <div className="relative w-44 h-44 rounded-full bg-papel-linea/40 border-4 border-carbon/15 flex items-center justify-center shadow-inner">
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none motion-safe:animate-spin"
+              style={{ animationDuration: '10s' }}
+              viewBox="0 0 176 176"
+              aria-hidden="true"
+            >
+              <circle
+                cx="88"
+                cy="88"
+                r="80"
+                fill="none"
+                stroke="#B45309"
+                strokeWidth="3"
+                strokeDasharray="8 8"
+                opacity="0.6"
+              />
+            </svg>
+            <svg className="ilu" width="160" height="130" viewBox="0 0 220 180" aria-hidden="true">
+              <circle className="onda" cx="110" cy="90" r="60" fill="none" stroke="#D97706" strokeWidth="3" />
+              <circle className="onda o2" cx="110" cy="90" r="60" fill="none" stroke="#D97706" strokeWidth="3" />
+              <circle className="onda o3" cx="110" cy="90" r="60" fill="none" stroke="#D97706" strokeWidth="3" />
+              <g className="tarjeta-flota">
+                <rect x="62" y="62" width="96" height="60" rx="8" fill="#1C1917" stroke="#44403C" strokeWidth="2" />
+                <rect x="62" y="76" width="96" height="10" fill="#292524" />
+                <rect x="72" y="96" width="22" height="14" rx="3" fill="#D97706" />
+                <rect x="100" y="104" width="44" height="5" rx="2" fill="#78716C" />
+              </g>
+              <circle
+                className="gira"
+                cx="110"
+                cy="90"
+                r="78"
+                fill="none"
+                stroke="#8B1E13"
+                strokeWidth="4"
+                strokeLinecap="round"
+                strokeDasharray="80 410"
+              />
+            </svg>
+          </div>
+
+          <h1 className="m-0 font-titulo text-4xl sm:text-5xl leading-[0.95] tracking-wider text-carbon drop-shadow-[0_2px_0_rgba(255,255,255,0.4)]">
             CONFIRMANDO TU PAGO
           </h1>
 
-          <p className="m-0 text-[15px] text-white">
+          <p className="m-0 text-[15px] text-carbon/90 font-sans">
             Termina el pago de{' '}
-            <strong>
+            <strong className="font-bold text-granate">
               {formatoPesos(
                 intencionActual?.monto_en_centavos
                   ? intencionActual.monto_en_centavos / 100
@@ -1035,21 +1078,22 @@ function Pago({ errorPagoInicial = null } = {}) {
             en la ventana de Wompi.
           </p>
 
-          <p className="m-0 text-xs text-texto-suave">
+          <p className="m-0 text-xs text-carbon/70 font-sans">
             Te avisamos apenas el banco lo confirme. No cierres esta pantalla.
           </p>
 
           {/* Bloque de referencia y expiración */}
-          <div className="w-full box-border flex items-center gap-2.5 bg-superficie-2 border border-borde rounded-xl p-3 text-xs text-texto-suave text-left">
+          <div className="w-full box-border flex items-center gap-2.5 bg-papel-linea/40 border border-carbon/15 rounded-xl p-3 text-xs text-carbon/75 text-left font-sans">
             <svg
               width="18"
               height="18"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#A3A3A3"
+              stroke="currentColor"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
+              className="shrink-0 text-carbon/60"
               aria-hidden="true"
             >
               <rect x="4" y="10" width="16" height="11" rx="2" />
@@ -1063,7 +1107,7 @@ function Pago({ errorPagoInicial = null } = {}) {
           <button
             type="button"
             onClick={handleVolverCuenta}
-            className="min-h-[44px] border-none bg-transparent text-primario-texto hover:text-primario text-sm font-semibold cursor-pointer transition-colors"
+            className="min-h-[44px] border-none bg-transparent text-granate hover:text-granate/80 text-sm font-titulo tracking-wider cursor-pointer transition-colors"
           >
             Volver a la cuenta
           </button>
@@ -1073,64 +1117,80 @@ function Pago({ errorPagoInicial = null } = {}) {
       {/* ──────────────── PANTALLA 3: ¡PAGO CONFIRMADO! ──────────────── */}
       {pantalla === 'confirmado' && (
         <section
-          className="entra bg-superficie border border-borde rounded-3xl p-6 flex flex-col items-center gap-3.5 text-center"
+          className="entra ticket-comanda p-6 flex flex-col items-center gap-3.5 text-center relative overflow-hidden"
           aria-live="polite"
         >
-          {/* Ilustración de check verde con rebote y chispitas */}
-          <svg className="ilu" width="220" height="170" viewBox="0 0 220 170" aria-hidden="true">
-            <circle className="circulo-ok" cx="110" cy="85" r="56" fill="#2FA35A" />
-            <path
-              className="check"
-              d="M84 86 l18 18 l36 -38"
-              fill="none"
-              stroke="#0B0B0B"
-              strokeWidth="10"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path className="chispa" d="M36 40 l4 10 l10 4 l-10 4 l-4 10 l-4 -10 l-10 -4 l10 -4 Z" fill="#F2B705" />
-            <path className="chispa c2" d="M184 34 l3 8 l8 3 l-8 3 l-3 8 l-3 -8 l-8 -3 l8 -3 Z" fill="#2FA35A" />
-            <path className="chispa c3" d="M180 120 l3 7 l7 3 l-7 3 l-3 7 l-3 -7 l-7 -3 l7 -3 Z" fill="#FF5A5F" />
-            <path className="chispa c4" d="M42 124 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 l6 -2 Z" fill="#F2B705" />
-          </svg>
+          {/* Banda superior de la comanda */}
+          <div className="w-full bg-carbon text-papel py-1.5 px-4 rounded-lg font-titulo tracking-widest text-sm flex items-center justify-between">
+            <span>CUENTA</span>
+            <span className="font-manuscrita text-ambar text-base">comprobante</span>
+          </div>
 
-          <h1 className="m-0 font-titulo text-[50px] leading-[0.95] tracking-wider text-exito">
+          {/* Sello de PAGADO */}
+          <div
+            className="absolute top-12 right-6 border-4 border-[#15803D] text-[#15803D] font-titulo text-2xl tracking-widest px-3 py-1 rounded-lg uppercase rotate-[-12deg] pointer-events-none opacity-85 shadow-sm"
+            aria-hidden="true"
+          >
+            PAGADO
+          </div>
+
+          {/* Ilustración de check verde con rebote y chispitas */}
+          <div className="relative w-40 h-40 rounded-full bg-papel-linea/40 border-4 border-carbon/15 flex items-center justify-center shadow-inner my-1">
+            <svg className="ilu" width="180" height="140" viewBox="0 0 220 170" aria-hidden="true">
+              <circle className="circulo-ok" cx="110" cy="85" r="56" fill="#15803D" />
+              <path
+                className="check"
+                d="M84 86 l18 18 l36 -38"
+                fill="none"
+                stroke="#FAF7F0"
+                strokeWidth="10"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path className="chispa" d="M36 40 l4 10 l10 4 l-10 4 l-4 10 l-4 -10 l-10 -4 l10 -4 Z" fill="#D97706" />
+              <path className="chispa c2" d="M184 34 l3 8 l8 3 l-8 3 l-3 8 l-3 -8 l-8 -3 l8 -3 Z" fill="#15803D" />
+              <path className="chispa c3" d="M180 120 l3 7 l7 3 l-7 3 l-3 7 l-3 -7 l-7 -3 l7 -3 Z" fill="#8B1E13" />
+              <path className="chispa c4" d="M42 124 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 l6 -2 Z" fill="#D97706" />
+            </svg>
+          </div>
+
+          <h1 className="m-0 font-titulo text-4xl sm:text-5xl leading-[0.95] tracking-wider text-carbon drop-shadow-[0_2px_0_rgba(255,255,255,0.4)]">
             ¡PAGO CONFIRMADO!
           </h1>
 
           {tipoConfirmado === 'propio' ? (
-            <div className="flex flex-col gap-1">
-              <p className="m-0 text-[15px] text-white">
+            <div className="flex flex-col gap-1 font-sans">
+              <p className="m-0 text-[15px] text-carbon/90">
                 Pagaste <strong>{formatoPesos(ultimoPago || montoModo)}</strong>. Te llegará el comprobante de Wompi.
               </p>
               {avisoExcedente && (
-                <p className="m-0 text-sm text-acento font-semibold">
+                <p className="m-0 text-sm text-granate font-semibold">
                   {avisoExcedente}
                 </p>
               )}
             </div>
           ) : (
-            <div className="flex flex-col gap-1">
-              <p className="m-0 text-[15px] text-white">
+            <div className="flex flex-col gap-1 font-sans">
+              <p className="m-0 text-[15px] text-carbon/90">
                 La mesa quedó pagada.
               </p>
               {avisoExcedente && (
-                <p className="m-0 text-sm text-acento font-semibold">
+                <p className="m-0 text-sm text-granate font-semibold">
                   {avisoExcedente}
                 </p>
               )}
             </div>
           )}
 
-          <div className="w-full box-border bg-superficie-2 border border-borde rounded-xl p-3 flex justify-between items-center text-sm">
-            <span className="text-texto-suave">Le falta a la mesa</span>
-            <span className="font-semibold text-white">{formatoPesos(saldo)}</span>
+          <div className="w-full box-border bg-papel-linea/40 border border-carbon/15 rounded-xl p-3.5 flex justify-between items-center text-sm font-sans">
+            <span className="text-carbon/70">Le falta a la mesa</span>
+            <span className="font-titulo text-xl tracking-wider text-carbon">{formatoPesos(saldo)}</span>
           </div>
 
           <button
             type="button"
             onClick={handleVolverCuenta}
-            className="w-full min-h-[52px] rounded-xl border border-borde bg-superficie-2 hover:bg-[#252525] text-white font-etiqueta font-bold text-base tracking-wider cursor-pointer transition-colors"
+            className="w-full min-h-[52px] rounded-xl bg-carbon hover:bg-carbon/90 active:bg-carbon/80 text-papel font-titulo text-xl tracking-wider cursor-pointer transition-colors shadow-sm"
           >
             VER LA CUENTA
           </button>
@@ -1140,36 +1200,44 @@ function Pago({ errorPagoInicial = null } = {}) {
       {/* ──────────────── PANTALLA 4: PAGA EN LA CAJA ──────────────── */}
       {pantalla === 'caja' && (
         <section
-          className="entra bg-superficie border border-borde rounded-3xl p-6 flex flex-col items-center gap-3.5 text-center"
+          className="entra ticket-comanda p-6 flex flex-col items-center gap-3.5 text-center"
           aria-live="polite"
         >
-          {/* Ilustración de caja registradora con recibo animado */}
-          <svg className="ilu" width="200" height="170" viewBox="0 0 200 170" aria-hidden="true">
-            <rect x="40" y="70" width="120" height="70" rx="10" fill="#1F1F1F" stroke="#3A3A3A" strokeWidth="2" />
-            <rect x="54" y="82" width="56" height="22" rx="4" fill="#0B0B0B" />
-            <text x="82" y="98" textAnchor="middle" fontFamily="Bebas Neue, sans-serif" fontSize="16" fill="#2FA35A">
-              {formatoPesos(montoModo)}
-            </text>
-            <rect x="120" y="84" width="10" height="8" rx="2" fill="#3A3A3A" />
-            <rect x="134" y="84" width="10" height="8" rx="2" fill="#3A3A3A" />
-            <rect x="120" y="96" width="10" height="8" rx="2" fill="#3A3A3A" />
-            <rect x="134" y="96" width="10" height="8" rx="2" fill="#F2B705" />
-            <rect x="30" y="140" width="140" height="10" rx="4" fill="#2A2A2A" />
-            <g className="recibo">
-              <rect x="74" y="22" width="52" height="48" fill="#F4F1EA" />
-              <rect x="82" y="32" width="36" height="4" rx="2" fill="#BDBDBD" />
-              <rect x="82" y="42" width="28" height="4" rx="2" fill="#BDBDBD" />
-              <rect x="82" y="52" width="32" height="4" rx="2" fill="#E3242B" />
-            </g>
-          </svg>
+          {/* Banda superior de la comanda */}
+          <div className="w-full bg-carbon text-papel py-1.5 px-4 rounded-lg font-titulo tracking-widest text-sm flex items-center justify-between">
+            <span>CAJA</span>
+            <span className="font-manuscrita text-ambar text-base">efectivo</span>
+          </div>
 
-          <h1 className="m-0 font-titulo text-[48px] leading-[0.95] tracking-wider text-acento">
+          {/* Ilustración de caja registradora con recibo animado adaptada */}
+          <div className="relative w-40 h-40 rounded-full bg-papel-linea/40 border-4 border-carbon/15 flex items-center justify-center shadow-inner my-1">
+            <svg className="ilu" width="180" height="140" viewBox="0 0 200 170" aria-hidden="true">
+              <rect x="40" y="70" width="120" height="70" rx="10" fill="#1C1917" stroke="#44403C" strokeWidth="2" />
+              <rect x="54" y="82" width="56" height="22" rx="4" fill="#0C0A09" />
+              <text x="82" y="98" textAnchor="middle" fontFamily="Bebas Neue, sans-serif" fontSize="16" fill="#15803D">
+                {formatoPesos(montoModo)}
+              </text>
+              <rect x="120" y="84" width="10" height="8" rx="2" fill="#44403C" />
+              <rect x="134" y="84" width="10" height="8" rx="2" fill="#44403C" />
+              <rect x="120" y="96" width="10" height="8" rx="2" fill="#44403C" />
+              <rect x="134" y="96" width="10" height="8" rx="2" fill="#D97706" />
+              <rect x="30" y="140" width="140" height="10" rx="4" fill="#292524" />
+              <g className="recibo">
+                <rect x="74" y="22" width="52" height="48" fill="#FAF7F0" stroke="#E7E0D3" strokeWidth="1" />
+                <rect x="82" y="32" width="36" height="4" rx="2" fill="#A8A29E" />
+                <rect x="82" y="42" width="28" height="4" rx="2" fill="#A8A29E" />
+                <rect x="82" y="52" width="32" height="4" rx="2" fill="#8B1E13" />
+              </g>
+            </svg>
+          </div>
+
+          <h1 className="m-0 font-titulo text-4xl sm:text-5xl leading-[0.95] tracking-wider text-carbon drop-shadow-[0_2px_0_rgba(255,255,255,0.4)]">
             PAGA EN LA CAJA
           </h1>
 
           <p
-            className={`m-0 text-[15px] ${
-              avisoCuenta.estado === 'error' ? 'text-primario-texto font-semibold' : 'text-white'
+            className={`m-0 text-[15px] font-sans ${
+              avisoCuenta.estado === 'error' ? 'text-granate font-semibold' : 'text-carbon/90'
             }`}
             role={avisoCuenta.estado === 'error' ? 'alert' : undefined}
           >
@@ -1179,32 +1247,32 @@ function Pago({ errorPagoInicial = null } = {}) {
             <button
               type="button"
               onClick={handlePedirCuenta}
-              className="min-h-[44px] px-3 rounded-lg border border-primario bg-transparent text-primario-texto text-xs font-semibold hover:bg-primario/10 cursor-pointer transition-colors"
+              className="min-h-[44px] px-3 rounded-lg border-2 border-granate bg-transparent text-granate text-xs font-semibold hover:bg-granate/10 cursor-pointer transition-colors"
             >
               Reintentar aviso al mesero
             </button>
           )}
 
-          <div className="w-full box-border bg-[#0B0B0B] border border-dashed border-acento rounded-2xl p-3.5 flex flex-col gap-1 text-center">
-            <span className="font-etiqueta font-bold text-xs tracking-widest text-texto-suave uppercase">
+          <div className="w-full box-border bg-papel-linea/40 border-2 border-dashed border-carbon/25 rounded-2xl p-3.5 flex flex-col gap-1 text-center">
+            <span className="font-titulo text-xs tracking-widest text-carbon/60 uppercase">
               DILE AL CAJERO
             </span>
-            <span className="font-titulo text-[34px] tracking-wider text-white">
+            <span className="font-titulo text-3xl tracking-wider text-carbon">
               {mesaNumero ? `MESA ${mesaNumero}` : 'MESA'} · {(comensal || 'MESA').toUpperCase()}
             </span>
-            <span className="text-[15px] text-acento font-semibold">
+            <span className="font-titulo text-2xl tracking-wide text-granate font-bold">
               {formatoPesos(montoModo)}
             </span>
           </div>
 
-          <p className="m-0 text-xs text-texto-tenue">
+          <p className="m-0 text-xs text-carbon/70 font-sans">
             Cuando el cajero registre tu pago, esta pantalla se actualiza sola.
           </p>
 
           <button
             type="button"
             onClick={handleVolverCuenta}
-            className="min-h-[44px] border-none bg-transparent text-primario-texto hover:text-primario text-sm font-semibold cursor-pointer transition-colors"
+            className="min-h-[44px] border-none bg-transparent text-granate hover:text-granate/80 text-sm font-titulo tracking-wider cursor-pointer transition-colors"
           >
             Prefiero pagar con Wompi
           </button>

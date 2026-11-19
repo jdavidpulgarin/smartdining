@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   obtenerCategorias,
   obtenerPlatos,
@@ -18,7 +18,6 @@ import {
 import CategoriaFiltro from '../components/menu/CategoriaFiltro';
 import PlatoCard from '../components/menu/PlatoCard';
 import PlatoDetalleModal from '../components/menu/PlatoDetalleModal';
-import Card from '../components/ui/Card';
 import Imagen from '../components/ui/Imagen';
 import Button from '../components/ui/Button';
 import { useCarrito } from '../context/CarritoContext';
@@ -28,19 +27,25 @@ import { generarIdLinea } from '../utils/id';
 import { formatearPrecio } from '../utils/formato';
 import { urlImagen } from '../utils/imagenes';
 
-function Menu() {
+function Menu({
+  cargandoInicial = true,
+  platosArmablesInicial = [],
+  categoriasInicial = [],
+  platosInicial = [],
+} = {}) {
   const navigate = useNavigate();
-  const [categorias, setCategorias] = useState([]);
-  const [platos, setPlatos] = useState([]);
-  const [platosArmables, setPlatosArmables] = useState([]);
+  const [categorias, setCategorias] = useState(categoriasInicial);
+  const [platos, setPlatos] = useState(platosInicial);
+  const [platosArmables, setPlatosArmables] = useState(platosArmablesInicial);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState(null);
   const [idPlatoSeleccionado, setIdPlatoSeleccionado] = useState(null);
-  const [cargando, setCargando] = useState(true);
+  const [cargando, setCargando] = useState(cargandoInicial);
   const [errorMenu, setErrorMenu] = useState(null);
+  const [errorHero, setErrorHero] = useState(false);
   const [toastMensaje, setToastMensaje] = useState(null);
   const toastTimeoutRef = useRef(null);
 
-  const { agregarLinea } = useCarrito();
+  const { agregarLinea, totalUnidades, total } = useCarrito();
   const { on: socketOn, estado: estadoSocket } = useMesaSocket();
 
   const platoSeleccionado = useMemo(
@@ -205,47 +210,59 @@ function Menu() {
 
   if (cargando) {
     return (
-      <div className="space-y-4 pb-6 animate-pulse" aria-label="Cargando menú">
+      <div className="space-y-6 pb-24 animate-pulse pt-2 px-4" aria-label="Cargando menú">
         {/* Hero esqueleto */}
-        <div className="-mx-4 -mt-4 mb-4 h-56 bg-superficie-2 rounded-b-3xl" />
+        <div className="bg-papel rounded-2xl p-2.5 shadow-md -rotate-1 mx-1">
+          <div className="h-40 bg-papel-linea/40 rounded-xl" />
+        </div>
+        <div className="space-y-2 px-1">
+          <div className="h-6 bg-carbon/10 rounded w-48" />
+          <div className="h-14 bg-carbon/15 rounded w-3/4" />
+        </div>
 
         {/* Arma tu plato esqueleto */}
-        <div className="space-y-2.5">
-          <div className="h-6 bg-superficie-2 rounded w-36" />
-          <div className="flex gap-3 overflow-x-auto pb-2">
+        <div className="space-y-3 px-1">
+          <div className="flex justify-between items-center">
+            <div className="h-7 bg-carbon/15 rounded w-36" />
+            <div className="h-6 bg-granate/20 rounded w-28" />
+          </div>
+          <div className="flex gap-4 overflow-x-auto pb-4">
             {[1, 2, 3].map((item) => (
-              <Card key={item} className="w-64 shrink-0 space-y-3 bg-superficie border border-borde">
-                <div className="w-full aspect-4/3 rounded-xl bg-superficie-2" />
-                <div className="h-4 bg-superficie-2 rounded w-3/4" />
-                <div className="h-3 bg-superficie-2 rounded w-full" />
-                <div className="h-10 bg-superficie-2 rounded-xl w-full" />
-              </Card>
+              <div
+                key={item}
+                className="w-[260px] shrink-0 bg-papel rounded-t-2xl p-3 space-y-3 shadow-md"
+              >
+                <div className="w-full h-36 rounded-xl bg-papel-linea/40" />
+                <div className="h-5 bg-carbon/15 rounded w-3/4" />
+                <div className="h-4 bg-carbon/10 rounded w-full" />
+                <div className="h-10 bg-carbon/20 rounded-xl w-full" />
+              </div>
             ))}
           </div>
         </div>
 
         {/* Categorías esqueleto */}
-        <div className="flex gap-2 overflow-x-auto py-1">
+        <div className="flex gap-2.5 overflow-x-auto px-1 py-1">
           {[1, 2, 3, 4].map((item) => (
             <div
               key={item}
-              className="h-9 w-24 bg-superficie-2 rounded-full shrink-0"
+              className="h-10 w-24 bg-papel border-2 border-carbon rounded-full shrink-0 opacity-60"
             />
           ))}
         </div>
 
         {/* Platos normales esqueleto */}
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-1 gap-4 px-1">
           {[1, 2, 3, 4].map((item) => (
             <div
               key={item}
-              className="bg-superficie rounded-2xl border border-borde flex gap-3 p-3"
+              className="bg-papel rounded-2xl p-3 flex gap-3.5 shadow-md"
             >
-              <div className="w-24 h-24 shrink-0 rounded-xl bg-superficie-2" />
+              <div className="w-[104px] h-[104px] shrink-0 rounded-xl bg-papel-linea/40" />
               <div className="flex flex-col justify-between flex-1 py-1 space-y-2">
-                <div className="h-4 bg-superficie-2 rounded w-2/3" />
-                <div className="h-3 bg-superficie-2 rounded w-full" />
-                <div className="h-4 bg-superficie-2 rounded w-1/4" />
+                <div className="h-5 bg-carbon/15 rounded w-2/3" />
+                <div className="h-4 bg-carbon/10 rounded w-full" />
+                <div className="h-6 bg-brasa/20 rounded w-1/3" />
               </div>
             </div>
           ))}
@@ -258,22 +275,27 @@ function Menu() {
     return (
       <div
         role="alert"
-        className="bg-superficie rounded-2xl border border-borde p-8 text-center space-y-4 my-8"
+        className="ticket-comanda bg-papel text-tinta rounded-t-2xl shadow-2xl p-6 sm:p-8 text-center space-y-4 my-8 mx-4 max-w-md"
       >
+        <div className="banda-comanda -mx-6 sm:-mx-8 -mt-6 sm:-mt-8 rounded-t-2xl py-2 mb-4">
+          AVISO
+        </div>
         <div
           aria-hidden="true"
-          className="w-12 h-12 bg-primario/15 text-primario rounded-full flex items-center justify-center mx-auto text-xl font-bold"
+          className="w-14 h-14 bg-brasa/10 text-brasa border-2 border-brasa rounded-full flex items-center justify-center mx-auto text-2xl font-bold"
         >
           !
         </div>
         <div>
-          <h1 className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto">
+          <h1 className="font-titulo text-2xl font-bold uppercase tracking-wider text-carbon">
             No pudimos cargar el menú
           </h1>
-          <p className="text-sm text-texto-suave mt-1">{errorMenu}</p>
+          <p className="text-sm text-papel-suave mt-1.5 font-cuerpo">{errorMenu}</p>
         </div>
+        <div className="corte-comanda -mx-6 sm:-mx-8 my-4" />
         <Button
           variante="primario"
+          className="btn-comanda w-full cursor-pointer"
           onClick={() => {
             recargarMenu();
             cargarDatos();
@@ -286,104 +308,143 @@ function Menu() {
   }
 
   return (
-    <div className="space-y-5 pb-6">
+    <div className="w-full max-w-full overflow-x-hidden space-y-6 pb-28">
       {/* Portada Hero del Menú */}
-      <div className="-mx-4 -mt-4 mb-2 relative h-56 sm:h-64 overflow-hidden rounded-b-3xl bg-superficie">
-        <img
-          src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=75&auto=format"
-          alt="Comida fresca de SmartDining"
-          width={800}
-          height={533}
-          fetchPriority="high"
-          decoding="async"
-          className="w-full h-full object-cover"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-fondo via-fondo/75 to-fondo/20" />
-        <div className="absolute bottom-0 inset-x-0 p-4">
-          <p className="text-xs font-etiqueta font-semibold uppercase tracking-widest text-primario-texto mb-1">
-            Experiencia SmartDining
-          </p>
-          <h1 className="font-titulo text-5xl sm:text-6xl text-primario tracking-wider leading-none uppercase">
-            NUESTRO MENÚ
-          </h1>
-          <p className="text-xs sm:text-sm text-texto-suave mt-1">
-            Elige tus platos favoritos o ármalos a tu gusto.
-          </p>
+      <section className="pt-6 pb-2 -mx-4 px-4 overflow-hidden">
+        <div className="relative bg-papel p-2.5 rounded-2xl -rotate-2 shadow-[0_20px_30px_-16px_rgba(0,0,0,0.6)]">
+          {!errorHero ? (
+            <img
+              src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=75&auto=format"
+              alt=""
+              width={800}
+              height={533}
+              fetchPriority="high"
+              decoding="async"
+              onError={() => setErrorHero(true)}
+              className="w-full h-38 sm:h-44 object-cover rounded-lg block"
+            />
+          ) : (
+            <div
+              className="w-full h-38 sm:h-44 rounded-lg bg-gradient-to-br from-carbon via-[#2A1D1B] to-carbon"
+              aria-hidden="true"
+            />
+          )}
+          <img
+            src="/img/mascota-chef.webp"
+            alt=""
+            aria-hidden="true"
+            className="absolute -right-2 -top-10 w-20 rotate-10 drop-shadow-[0_8px_8px_rgba(0,0,0,0.35)] pointer-events-none animate-flotar"
+          />
         </div>
-      </div>
+
+        <p className="mt-7 font-titulo text-lg tracking-[0.3em] uppercase text-carbon">
+          EXPERIENCIA SMARTDINING
+        </p>
+        <h1
+          className="font-titulo text-6xl sm:text-7xl uppercase text-carbon leading-[0.88] mt-1 mb-3"
+          style={{ textShadow: '5px 5px 0 #E5212E' }}
+        >
+          NUESTRO MENÚ
+        </h1>
+        <p className="text-base sm:text-lg text-tinta font-medium leading-relaxed max-w-[30ch]">
+          Elige tus platos favoritos o ármalos a tu gusto.
+        </p>
+      </section>
 
       {/* Sección Arma tu plato */}
       {platosArmables.length > 0 && (
-        <section aria-labelledby="titulo-arma-tu-plato" className="space-y-2.5">
+        <section aria-labelledby="titulo-arma-tu-plato" className="space-y-3 pt-2">
           <div className="flex items-baseline justify-between gap-2">
             <h2
               id="titulo-arma-tu-plato"
-              className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto"
+              className="font-titulo text-3xl font-bold uppercase tracking-wide text-carbon leading-none"
             >
-              Arma tu plato
+              ARMA TU PLATO
             </h2>
-            <span className="text-xs text-texto-suave">Paso a paso a tu gusto</span>
+            <span className="font-manuscrita text-2xl font-bold text-granate">
+              Paso a paso a tu gusto
+            </span>
           </div>
 
-          <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none">
+          <div className="flex gap-4 overflow-x-auto pb-6 snap-x snap-mandatory scrollbar-none -mx-4 px-4">
             {platosArmables.map((plato) => (
-              <Card
+              <article
                 key={plato.id_plato}
-                className={`w-64 shrink-0 snap-start flex flex-col justify-between gap-3 bg-superficie border border-borde rounded-2xl p-3 transition-all ${
-                  plato.disponible === false ? 'opacity-40 grayscale-[25%]' : ''
+                className={`ticket-comanda flex-none w-[min(80%,300px)] snap-start bg-papel rounded-t-2xl shadow-xl flex flex-col justify-between transition-all ${
+                  plato.disponible === false ? 'opacity-50 grayscale-[30%]' : ''
                 }`}
               >
-                <div className="space-y-2">
-                  <div className="relative">
+                <div>
+                  <div className="p-2.5 pb-0 relative">
                     <Imagen
                       src={urlImagen(plato.url_imagen)}
                       alt={plato.nombre}
                       aspecto="4/3"
-                      className="w-full rounded-xl"
+                      className="w-full h-42 object-cover rounded-xl"
                     />
                     {plato.disponible === false && (
-                      <span className="absolute inset-0 bg-black/70 backdrop-blur-[1px] flex items-center justify-center text-primario-texto text-xs font-etiqueta font-bold uppercase tracking-wider text-center px-1 rounded-xl">
+                      <span className="absolute inset-2.5 bg-black/75 backdrop-blur-[1px] flex items-center justify-center text-ambar text-sm font-titulo font-bold uppercase tracking-wider text-center rounded-xl">
                         AGOTADO
                       </span>
                     )}
                   </div>
-                  <div>
-                    <h3 className="font-etiqueta text-base font-bold uppercase tracking-wide text-texto leading-snug">
+                  <div className="p-3.5 pt-3 pb-2">
+                    <h3 className="font-titulo text-2xl font-bold uppercase tracking-wide text-carbon leading-tight">
                       {plato.nombre}
                     </h3>
                     {plato.descripcion && (
-                      <p className="text-xs text-texto-suave mt-1 line-clamp-2 leading-relaxed">
+                      <p className="mt-1 text-xs text-papel-suave leading-relaxed line-clamp-2 font-cuerpo">
                         {plato.descripcion}
                       </p>
                     )}
                   </div>
                 </div>
 
-                <div className="space-y-2.5 pt-2 border-t border-borde">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold font-etiqueta text-sm text-white">
-                      Desde {formatearPrecio(plato.precio)}
-                    </span>
-                    {plato.calorias != null && (
-                      <span className="text-texto-suave font-medium">
-                        ≈ {plato.calorias} kcal
-                      </span>
-                    )}
+                <div>
+                  <div className="corte-comanda my-0" />
+                  <div className="p-3.5 pt-3 pb-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-xs font-semibold text-papel-suave font-cuerpo">
+                          Desde
+                        </span>
+                        <b className="font-titulo text-2xl text-brasa leading-none">
+                          {formatearPrecio(plato.precio)}
+                        </b>
+                      </div>
+                      {plato.calorias != null && (
+                        <span className="text-xs font-bold font-cuerpo bg-carbon text-ambar px-2.5 py-0.5 rounded-full">
+                          ≈ {plato.calorias} kcal
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={plato.disponible === false}
+                      onClick={() => {
+                        if (plato.disponible !== false) {
+                          navigate(`/armar/${plato.id_plato}`);
+                        }
+                      }}
+                      className="btn-comanda w-full h-13 text-xl py-2 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <span>{plato.disponible === false ? 'Agotado' : 'Armar mi plato'}</span>
+                      {plato.disponible !== false && (
+                        <svg
+                          className="w-5 h-5 shrink-0"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2.5}
+                          aria-hidden="true"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                        </svg>
+                      )}
+                    </button>
                   </div>
-                  <Button
-                    variante="primario"
-                    className="w-full"
-                    disabled={plato.disponible === false}
-                    onClick={() => {
-                      if (plato.disponible !== false) {
-                        navigate(`/armar/${plato.id_plato}`);
-                      }
-                    }}
-                  >
-                    {plato.disponible === false ? 'Agotado' : 'Armar mi plato'}
-                  </Button>
                 </div>
-              </Card>
+              </article>
             ))}
           </div>
         </section>
@@ -397,29 +458,34 @@ function Menu() {
       />
 
       {/* Grid de platos o mensaje de estado vacío */}
-      {platosFiltrados.length === 0 ? (
-        <div className="bg-superficie rounded-2xl border border-borde p-8 text-center space-y-2">
-          <div className="w-12 h-12 bg-superficie-2 text-texto-suave rounded-full flex items-center justify-center mx-auto text-xl">
-            🍽️
+      <section>
+        {platosFiltrados.length === 0 ? (
+          <div className="ticket-comanda bg-papel rounded-t-2xl shadow-xl p-8 text-center space-y-2 my-4">
+            <div className="w-12 h-12 bg-carbon/5 text-carbon rounded-full flex items-center justify-center mx-auto text-2xl">
+              🍽️
+            </div>
+            <p className="text-carbon font-titulo uppercase font-bold text-xl">
+              No hay platos en esta categoría
+            </p>
+            <p className="text-papel-suave text-xs mt-1 font-cuerpo">
+              Prueba seleccionando otra categoría o la opción &ldquo;Todas&rdquo;.
+            </p>
+            <div className="pt-2 font-manuscrita text-2xl text-granate font-bold">
+              Pronto habrá más platos aquí
+            </div>
           </div>
-          <p className="text-texto font-etiqueta uppercase font-bold text-base">
-            No hay platos en esta categoría
-          </p>
-          <p className="text-texto-suave text-xs mt-1">
-            Prueba seleccionando otra categoría o la opción &ldquo;Todas&rdquo;.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-3">
-          {platosFiltrados.map((plato) => (
-            <PlatoCard
-              key={plato.id}
-              plato={plato}
-              onSeleccionar={(p) => setIdPlatoSeleccionado(p.id)}
-            />
-          ))}
-        </div>
-      )}
+        ) : (
+          <div className="grid grid-cols-1 gap-4 pt-1">
+            {platosFiltrados.map((plato) => (
+              <PlatoCard
+                key={plato.id}
+                plato={plato}
+                onSeleccionar={(p) => setIdPlatoSeleccionado(p.id)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Modal de detalle del plato */}
       <PlatoDetalleModal
@@ -430,14 +496,48 @@ function Menu() {
         onAgregar={manejarAgregar}
       />
 
+      {/* Barra de pedido flotante cuando hay unidades en el carrito */}
+      {totalUnidades > 0 && (
+        <Link
+          to="/carrito"
+          aria-label="Ver mi pedido"
+          className="fixed left-1/2 bottom-[max(14px,env(safe-area-inset-bottom))] -translate-x-1/2 w-[min(440px,calc(100%-28px))] z-30 flex items-center justify-between gap-3 bg-carbon text-ambar rounded-2xl p-3 pl-5 shadow-2xl transition-transform duration-300 hover:scale-[1.02] active:scale-[0.98] border-2 border-carbon"
+        >
+          <div>
+            <b className="block font-titulo text-2xl tracking-wide uppercase leading-tight">
+              {totalUnidades} {totalUnidades === 1 ? 'PLATO' : 'PLATOS'}
+            </b>
+            <small className="block font-semibold text-xs text-[#E9C98A]">
+              Ver mi pedido · {formatearPrecio(total)}
+            </small>
+          </div>
+          <i
+            aria-hidden="true"
+            className="not-italic grid place-items-center w-11 h-11 rounded-xl bg-ambar text-carbon shrink-0 font-bold"
+          >
+            <svg
+              className="w-6 h-6"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={3}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M5 12h14M13 5l7 7-7 7" />
+            </svg>
+          </i>
+        </Link>
+      )}
+
       {/* Feedback visual accesible (toast temporal) */}
       {toastMensaje && (
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-exito text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2 max-w-[90vw]"
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-carbon text-ambar border-2 border-ambar text-sm font-semibold px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 max-w-[90vw]"
         >
-          <span className="text-white font-bold" aria-hidden="true">
+          <span className="text-brasa font-bold" aria-hidden="true">
             ✓
           </span>
           <span className="truncate">{toastMensaje}</span>

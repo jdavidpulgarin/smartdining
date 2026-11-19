@@ -19,8 +19,8 @@ function leerPermisoInicial() {
 }
 
 /**
- * Tarjeta discreta en seguimiento que solicita permiso para avisos push tras el
- * primer pedido confirmado (o muestra las instrucciones en iPhone sin instalar).
+ * Tarjeta discreta en seguimiento que solicita permiso para avisos push
+ * adaptada al estilo comanda.
  */
 function TarjetaPermisoPush({ tienePedidoConfirmado = false }) {
   const [soporte] = useState(() => soportePush());
@@ -82,16 +82,16 @@ function TarjetaPermisoPush({ tienePedidoConfirmado = false }) {
     return (
       <aside
         aria-label="Aviso de notificaciones en iPhone"
-        className="bg-superficie-2 border border-borde rounded-2xl p-4 flex flex-col gap-3 shadow-sm"
+        className="ticket-comanda mt-6 p-4 flex flex-col gap-3 shadow-sm anim-sube"
       >
         <div className="flex items-start gap-3">
           <span
             aria-hidden="true"
-            className="w-9 h-9 rounded-xl bg-acento/15 border border-acento/30 text-acento flex items-center justify-center shrink-0"
+            className="w-10 h-10 rounded-xl bg-carbon text-ambar flex items-center justify-center shrink-0"
           >
             <svg
-              width="18"
-              height="18"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -103,7 +103,7 @@ function TarjetaPermisoPush({ tienePedidoConfirmado = false }) {
               <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
             </svg>
           </span>
-          <p className="text-xs sm:text-sm text-texto leading-relaxed">
+          <p className="text-xs sm:text-sm text-carbon leading-relaxed">
             En iPhone, para recibir avisos agrega SmartDining a tu pantalla de
             inicio (Compartir → Agregar a inicio).
           </p>
@@ -112,7 +112,7 @@ function TarjetaPermisoPush({ tienePedidoConfirmado = false }) {
           <button
             type="button"
             onClick={manejarDescartar}
-            className="min-h-11 px-4 py-2 rounded-xl border border-borde bg-superficie hover:bg-superficie-2 text-texto font-etiqueta font-bold text-sm uppercase tracking-wider transition-colors cursor-pointer"
+            className="min-h-11 px-4 py-2 rounded-xl border-2 border-carbon bg-papel hover:bg-carbon hover:text-ambar text-carbon font-titulo text-base uppercase tracking-wider transition-colors cursor-pointer"
           >
             Entendido
           </button>
@@ -124,16 +124,16 @@ function TarjetaPermisoPush({ tienePedidoConfirmado = false }) {
   return (
     <aside
       aria-label="Activar notificaciones"
-      className="bg-superficie-2 border border-borde rounded-2xl p-4 flex flex-col gap-3 shadow-sm"
+      className="ticket-comanda mt-6 p-4 flex flex-col gap-3 shadow-sm anim-sube"
     >
       <div className="flex items-start gap-3">
         <span
           aria-hidden="true"
-          className="w-9 h-9 rounded-xl bg-acento/15 border border-acento/30 text-acento flex items-center justify-center shrink-0"
+          className="w-10 h-10 rounded-xl bg-carbon text-ambar flex items-center justify-center shrink-0"
         >
           <svg
-            width="18"
-            height="18"
+            width="20"
+            height="20"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -145,17 +145,17 @@ function TarjetaPermisoPush({ tienePedidoConfirmado = false }) {
             <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
           </svg>
         </span>
-        <p className="text-sm font-medium text-texto leading-snug pt-1">
+        <p className="text-sm font-semibold text-carbon leading-snug pt-1">
           ¿Te avisamos cuando tu plato esté listo?
         </p>
       </div>
 
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-end gap-2.5">
         <button
           type="button"
           onClick={manejarDescartar}
           disabled={solicitando}
-          className="min-h-11 px-4 py-2 rounded-xl border border-borde bg-superficie hover:bg-superficie-2 text-texto-suave hover:text-texto font-etiqueta font-bold text-sm uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+          className="min-h-11 px-4 py-2 rounded-xl border border-carbon/30 bg-papel hover:bg-carbon/10 text-[#5B4A46] font-titulo text-base uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
         >
           Ahora no
         </button>
@@ -163,7 +163,7 @@ function TarjetaPermisoPush({ tienePedidoConfirmado = false }) {
           type="button"
           onClick={manejarAceptar}
           disabled={solicitando}
-          className="min-h-11 px-4 py-2 rounded-xl bg-acento hover:bg-acento/90 text-fondo font-etiqueta font-bold text-sm uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+          className="min-h-11 px-5 py-2 rounded-xl bg-carbon hover:bg-carbon/90 text-ambar font-titulo text-base uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
         >
           {solicitando ? 'Activando…' : 'Sí, avísame'}
         </button>

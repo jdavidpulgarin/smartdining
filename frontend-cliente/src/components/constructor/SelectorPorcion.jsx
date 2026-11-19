@@ -18,7 +18,7 @@ function SelectorPorcion({
     <div
       role="radiogroup"
       aria-label={`Porción de ${nombreIngrediente}`}
-      className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-superficie-2 border border-borde"
+      className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-papel border-2 border-dashed border-papel-linea"
     >
       {OPCIONES_PORCION.map((opcion) => {
         const activa = porcionActual === opcion.valor;
@@ -31,17 +31,17 @@ function SelectorPorcion({
             role="radio"
             aria-checked={activa}
             onClick={() => onCambiar && onCambiar(opcion.valor)}
-            className={`min-h-11 px-2 py-1.5 rounded-lg text-xs font-etiqueta uppercase tracking-wider font-bold flex flex-col items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario ${
+            className={`min-h-11 min-w-11 px-2 py-1.5 rounded-lg text-sm font-titulo uppercase tracking-wider font-bold flex flex-col items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-brasa ${
               activa
-                ? 'bg-primario text-white shadow-sm'
-                : 'bg-transparent text-texto-suave hover:text-texto hover:bg-superficie'
+                ? 'bg-carbon text-ambar shadow-sm'
+                : 'bg-transparent text-papel-suave hover:text-carbon hover:bg-carbon/5'
             }`}
           >
             <span>{opcion.etiqueta}</span>
             {mostrarExtra && (
               <span
-                className={`text-[11px] font-bold leading-tight ${
-                  activa ? 'text-white/95' : 'text-primario-texto'
+                className={`text-xs font-bold leading-tight font-titulo ${
+                  activa ? 'text-ambar' : 'text-rojo-tinta'
                 }`}
               >
                 +{formatearPrecio(extraNum)}

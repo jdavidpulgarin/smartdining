@@ -42,21 +42,27 @@ function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) {
         <div>
           <h2
             id={`paso-titulo-${paso.id_paso}`}
-            className="font-etiqueta text-xl font-bold uppercase tracking-wider text-texto"
+            className="font-titulo text-2xl font-bold uppercase tracking-wide text-carbon leading-tight"
           >
             {paso.nombre}
           </h2>
-          <p className="text-xs text-texto-suave font-medium mt-0.5">
+          <p className="text-xs text-papel-suave font-semibold font-cuerpo mt-0.5">
             {obtenerTextoRegla(paso)}
           </p>
           {maxAlcanzado && (
-            <p className="text-xs text-primario-texto font-medium mt-0.5">
+            <p className="text-xs text-rojo-tinta font-semibold font-cuerpo mt-0.5">
               Máximo alcanzado: quita uno para cambiarlo
             </p>
           )}
         </div>
 
-        <Badge variante={esObligatorio ? 'alerta' : 'neutro'}>
+        <Badge
+          className={
+            esObligatorio
+              ? 'bg-brasa text-papel font-titulo text-xs uppercase px-2.5 py-0.5 rounded-full'
+              : 'bg-carbon/10 text-carbon border border-carbon/30 font-titulo text-xs uppercase px-2.5 py-0.5 rounded-full'
+          }
+        >
           {esObligatorio ? 'Obligatorio' : 'Opcional'}
         </Badge>
       </div>

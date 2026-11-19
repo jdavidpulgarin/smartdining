@@ -1,29 +1,38 @@
 import { infoEstado, haceCuanto } from '../../utils/seguimiento';
 
+function obtenerIniciales(nombre) {
+  if (!nombre || typeof nombre !== 'string') return 'M';
+  const partes = nombre.trim().split(/\s+/);
+  if (partes.length >= 2) {
+    return (partes[0][0] + partes[1][0]).toUpperCase();
+  }
+  return nombre.slice(0, 2).toUpperCase();
+}
+
 /**
- * Sección compacta para listar otros pedidos realizados en la misma mesa (J-07).
+ * Sección para listar otros pedidos de la mesa al estilo comanda (J-07).
  *
- * Muestra una fila por pedido con:
- * - Comensal e ítems resumidos (ej. "Ana · 1 × Alitas BBQ x8")
- * - Código y tiempo transcurrido (ej. "#PED-K3F9 · hace 6 min")
- * - Pill con el color y nombre del estado
- *
- * Si no hay otros pedidos, no se renderiza nada.
- *
- * @param {object} props
- * @param {Array<object>} props.pedidos - Lista de pedidos normalizados de otros comensales
+ * Recuadro crema translúcido con borde punteado carbón e iniciales del comensal.
  */
 export default function OtrosPedidos({ pedidos = [] }) {
   if (!Array.isArray(pedidos) || pedidos.length === 0) {
     return null;
   }
 
+  const cantComensales = pedidos.length;
+
   return (
-    <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-3">
-      <h2 className="m-0 font-etiqueta font-bold text-[15px] tracking-wider text-texto-suave uppercase">
-        OTROS PEDIDOS DE LA MESA
-      </h2>
-      <div className="flex flex-col gap-3 divide-y divide-borde">
+    <section className="mt-6 border-[3px] border-dashed border-carbon rounded-[18px] p-4 bg-papel/65 anim-sube">
+      <div className="flex justify-between items-center mb-3">
+        <h2 className="m-0 font-titulo text-xl tracking-[0.08em] text-carbon uppercase">
+          OTROS PEDIDOS DE LA MESA
+        </h2>
+        <small className="font-cuerpo font-bold text-xs text-[#5B4A46] uppercase">
+          {cantComensales} {cantComensales === 1 ? 'COMENSAL' : 'COMENSALES'}
+        </small>
+      </div>
+
+      <div className="flex flex-col gap-2.5">
         {pedidos.map((pedido, idx) => {
           const info = infoEstado(pedido.estado);
           const comensal =
@@ -47,27 +56,34 @@ export default function OtrosPedidos({ pedidos = [] }) {
               : `#${codigoRaw}`
             : '';
           const tiempo = haceCuanto(pedido.creado_en);
+          const iniciales = obtenerIniciales(comensal);
 
           return (
             <div
               key={pedido.id_pedido ?? idx}
-              className="pt-3 first:pt-0 flex items-center justify-between gap-2.5"
+              className="flex items-center justify-between gap-3 bg-papel p-3 rounded-xl shadow-sm border border-[#E6D6C4]"
             >
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <span className="text-[15px] text-white truncate">
-                  {comensal} · {resumenItems}
+              <div className="flex items-center gap-3 min-w-0">
+                <span
+                  className="w-9 h-9 rounded-full bg-carbon text-ambar flex items-center justify-center font-bold text-sm shrink-0"
+                  aria-hidden="true"
+                >
+                  {iniciales}
                 </span>
-                <span className="text-xs text-texto-tenue">
-                  {codigo}
-                  {tiempo ? ` · ${tiempo}` : ''}
-                </span>
+                <div className="min-w-0">
+                  <b className="block text-sm text-carbon font-bold truncate">
+                    {comensal}
+                  </b>
+                  <div className="text-xs text-[#5B4A46] truncate">
+                    {resumenItems} · {codigo}
+                    {tiempo ? ` · ${tiempo}` : ''}
+                  </div>
+                </div>
               </div>
+
               <span
-                className="font-etiqueta font-bold text-xs tracking-wider px-2.5 py-1 rounded-lg shrink-0 whitespace-nowrap uppercase"
-                style={{
-                  backgroundColor: info.pillBg,
-                  color: info.pillTexto,
-                }}
+                className="font-titulo text-base tracking-[0.08em] shrink-0 uppercase"
+                style={{ color: info.color }}
               >
                 {info.pill}
               </span>
