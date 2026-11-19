@@ -20,6 +20,7 @@ function Layout({ children }) {
     rutaActual === '/menu' ||
     rutaActual === '/carrito' ||
     rutaActual === '/seguimiento' ||
+    rutaActual === '/pago' ||
     rutaActual.startsWith('/armar/');
   const { mesa, comensal, valida, cargando, motivoCierre } = useMesaSession();
   const { misPedidos } = useSeguimientoMesa();
