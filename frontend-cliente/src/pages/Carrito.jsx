@@ -563,10 +563,10 @@ function Carrito({ faltantesIniciales = [], errorPedidoInicial = null } = {}) {
           Se envía todo lo tuyo a la cocina. Cada quien paga lo suyo al final.
         </p>
 
-        <div>
+        <div className="text-center">
           <Link
             to="/menu"
-            className="font-manuscrita text-2xl text-carbon hover:text-brasa border-b-2 border-carbon hover:border-brasa inline-block mx-auto text-center transition-colors"
+            className="min-h-11 inline-flex items-center font-manuscrita text-2xl text-carbon hover:text-brasa border-b-2 border-carbon hover:border-brasa transition-colors"
           >
             ← Seguir pidiendo
           </Link>

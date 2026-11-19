@@ -225,7 +225,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
               onClick={() => setCantidad((c) => Math.max(CANTIDAD_MIN, c - 1))}
               disabled={plato.disponible === false || cantidad === CANTIDAD_MIN}
               aria-label="Disminuir cantidad"
-              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-xl border-2 border-carbon bg-white text-carbon text-lg font-bold hover:bg-amber-100 active:bg-amber-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="w-12 h-12 min-w-11 min-h-11 flex items-center justify-center rounded-xl border-2 border-carbon bg-white text-carbon text-lg font-bold hover:bg-amber-100 active:bg-amber-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               −
             </button>
@@ -240,7 +240,7 @@ function PlatoDetalleModal({ plato, abierto, onCerrar, onAgregar }) {
               onClick={() => setCantidad((c) => Math.min(CANTIDAD_MAX, c + 1))}
               disabled={plato.disponible === false || cantidad === CANTIDAD_MAX}
               aria-label="Aumentar cantidad"
-              className="w-12 h-12 min-h-12 flex items-center justify-center rounded-xl border-2 border-carbon bg-white text-carbon text-lg font-bold hover:bg-amber-100 active:bg-amber-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="w-12 h-12 min-w-11 min-h-11 flex items-center justify-center rounded-xl border-2 border-carbon bg-white text-carbon text-lg font-bold hover:bg-amber-100 active:bg-amber-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               +
             </button>

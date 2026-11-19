@@ -95,7 +95,7 @@ function Despedida() {
               </h1>
 
               {nombreComensal && (
-                <div className="font-manuscrita text-3xl sm:text-4xl text-rojo font-bold mt-1 mb-2">
+                <div className="font-manuscrita text-3xl sm:text-4xl text-rojo-tinta font-bold mt-1 mb-2">
                   {nombreComensal}
                 </div>
               )}

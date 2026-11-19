@@ -1,9 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
+import fs from 'node:fs';
+import path from 'node:path';
 import Inicio from './Inicio';
 import Header from '../components/layout/Header';
 import Menu from './Menu';
+import PlatoCard from '../components/menu/PlatoCard';
 import Carrito from './Carrito';
 import LineaCarrito from '../components/carrito/LineaCarrito';
 import IngredientCard from '../components/ui/IngredientCard';
@@ -287,5 +290,48 @@ describe('Rediseño Comanda - Verificaciones visuales y accesibilidad', () => {
     expect(html).toContain('btn-despedida-inicio');
     expect(html).toContain('Volver al inicio');
     expect(html).toContain('/img/mascota-chef.webp');
+  });
+
+  it('PlatoCard renderiza botón AGREGAR sin estado ¡LISTO! y sin <button> anidado en role="button"', () => {
+    const plato = {
+      id_plato: 1,
+      nombre: 'Hamburguesa Especial',
+      descripcion: 'Carne artesanal',
+      precio: 25000,
+      disponible: true,
+      etiquetas: ['destacado'],
+    };
+
+    const html = renderToStaticMarkup(<PlatoCard plato={plato} onSeleccionar={() => {}} />);
+
+    expect(html).toContain('role="button"');
+    expect(html).toContain('AGREGAR');
+    expect(html).not.toContain('¡LISTO!');
+    // No debe contener un elemento <button> dentro del role="button"
+    expect(html).not.toMatch(/<button/);
+  });
+
+  it('no quedan clases text-rojo, border-rojo o bg-rojo sin "-tinta" en los archivos fuente', () => {
+    const srcDir = path.resolve(__dirname, '..');
+    const regexRojoInexistente = /\b(text|border|bg)-rojo(?!-tinta)\b/;
+
+    function buscarEnDirectorio(dir) {
+      const entradas = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entrada of entradas) {
+        const rutaCompleta = path.join(dir, entrada.name);
+        if (entrada.isDirectory()) {
+          buscarEnDirectorio(rutaCompleta);
+        } else if (
+          (entrada.name.endsWith('.jsx') || entrada.name.endsWith('.js') || entrada.name.endsWith('.css')) &&
+          !entrada.name.includes('.test.')
+        ) {
+          const contenido = fs.readFileSync(rutaCompleta, 'utf-8');
+          const coincide = contenido.match(regexRojoInexistente);
+          expect(coincide, `Clase roja inexistente encontrada en ${entrada.name}: ${coincide?.[0]}`).toBeNull();
+        }
+      }
+    }
+
+    buscarEnDirectorio(srcDir);
   });
 });

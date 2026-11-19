@@ -1,25 +1,15 @@
-import { useState } from 'react';
 import { formatearPrecio } from '../../utils/formato';
 import { ETIQUETAS_MAP } from '../../constants/dieta';
 import Imagen from '../ui/Imagen';
 
 function PlatoCard({ plato, onSeleccionar }) {
   const { nombre, descripcion, precio, imagen, etiquetas, disponible = true } = plato;
-  const [listo, setListo] = useState(false);
 
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onSeleccionar?.(plato);
     }
-  };
-
-  const manejarAgregarClick = (e) => {
-    e.stopPropagation();
-    if (!disponible) return;
-    setListo(true);
-    setTimeout(() => setListo(false), 900);
-    onSeleccionar?.(plato);
   };
 
   return (
@@ -92,22 +82,15 @@ function PlatoCard({ plato, onSeleccionar }) {
         <b className="font-titulo text-[32px] leading-none text-rojo-tinta tracking-[0.02em]">
           {formatearPrecio(precio)}
         </b>
-        <button
-          type="button"
-          disabled={!disponible}
-          onClick={manejarAgregarClick}
-          aria-label={`Agregar ${nombre}`}
-          className={`flex items-center gap-2 h-11 px-4 rounded-full font-titulo text-[21px] tracking-[0.08em] transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-brasa active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${
-            listo ? 'bg-brasa text-papel' : 'bg-carbon text-ambar hover:bg-carbon/90'
-          }`}
+        <span
+          aria-hidden="true"
+          className="flex items-center gap-2 min-h-11 min-w-11 px-4 rounded-full font-titulo text-[21px] tracking-[0.08em] bg-carbon text-ambar select-none pointer-events-none"
         >
-          {!listo && (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" className="w-5 h-5" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          )}
-          <span>{listo ? '¡LISTO!' : 'AGREGAR'}</span>
-        </button>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" className="w-5 h-5" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span>AGREGAR</span>
+        </span>
       </div>
     </div>
   );

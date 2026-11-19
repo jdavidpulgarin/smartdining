@@ -121,7 +121,7 @@ function LineaCarrito({
                 }
                 disabled={linea.cantidad <= 1}
                 aria-label={`Disminuir cantidad de ${linea.nombre}`}
-                className="w-10 h-8 min-h-8 flex items-center justify-center font-bold text-base text-carbon hover:bg-amber-100 active:bg-amber-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                className="w-11 h-11 min-w-11 min-h-11 flex items-center justify-center font-bold text-base text-carbon hover:bg-amber-100 active:bg-amber-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
                 −
               </button>
@@ -138,7 +138,7 @@ function LineaCarrito({
                 }
                 disabled={linea.cantidad >= 20 || tieneFaltante}
                 aria-label={`Aumentar cantidad de ${linea.nombre}`}
-                className="w-10 h-8 min-h-8 flex items-center justify-center font-bold text-base text-carbon hover:bg-amber-100 active:bg-amber-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                className="w-11 h-11 min-w-11 min-h-11 flex items-center justify-center font-bold text-base text-carbon hover:bg-amber-100 active:bg-amber-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
                 +
               </button>
@@ -162,7 +162,7 @@ function LineaCarrito({
               type="button"
               onClick={() => onEliminar(linea.id_linea)}
               aria-label={`Eliminar ${linea.nombre} del carrito`}
-              className="w-10 h-10 min-w-10 min-h-10 rounded-xl bg-[#F3E3D1] hover:bg-brasa/15 text-rojo-tinta flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              className="w-11 h-11 min-w-11 min-h-11 rounded-xl bg-[#F3E3D1] hover:bg-brasa/15 text-rojo-tinta flex items-center justify-center transition-colors cursor-pointer shrink-0"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"

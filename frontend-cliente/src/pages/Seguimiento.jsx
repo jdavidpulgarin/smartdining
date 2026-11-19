@@ -336,7 +336,7 @@ function Seguimiento() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span
                         className={`text-[15px] sm:text-base font-semibold leading-snug ${
-                          esCancelado ? 'line-through text-texto-tenue' : 'text-carbon'
+                          esCancelado ? 'line-through text-papel-suave' : 'text-carbon'
                         }`}
                       >
                         {detalle.cantidad} × {nombrePlato}
@@ -345,8 +345,8 @@ function Seguimiento() {
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-md border font-titulo text-xs uppercase tracking-wider shrink-0 ${
                             detalle.origen_cancelacion === 'personal'
-                              ? 'border-brasa text-brasa bg-brasa/10'
-                              : 'border-carbon/30 text-[#5B4A46]'
+                              ? 'border-rojo-tinta text-rojo-tinta bg-brasa/10'
+                              : 'border-papel-suave text-papel-suave bg-papel-suave/10'
                           }`}
                         >
                           {etiquetaCancelado}
@@ -358,7 +358,7 @@ function Seguimiento() {
                   <div className="flex items-center gap-2.5 shrink-0">
                     <span
                       className={`font-titulo text-[22px] sm:text-[23px] tracking-wide ${
-                        esCancelado ? 'line-through text-texto-tenue' : 'text-rojo'
+                        esCancelado ? 'line-through text-papel-suave' : 'text-rojo-tinta'
                       }`}
                     >
                       {formatearPrecio(detalle.subtotal)}
@@ -369,7 +369,7 @@ function Seguimiento() {
                         onClick={() => abrirConfirmacion(detalle, pedidoActivo.id_pedido)}
                         disabled={quitando}
                         aria-label={`Quitar ${nombrePlato}`}
-                        className="min-h-9 px-3.5 rounded-full border-2 border-rojo bg-transparent hover:bg-rojo hover:text-white text-rojo font-titulo text-base uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+                        className="min-h-11 min-w-11 px-3.5 inline-flex items-center justify-center rounded-full border-2 border-rojo-tinta bg-transparent hover:bg-rojo-tinta hover:text-papel active:bg-granate active:text-papel text-rojo-tinta font-titulo text-base uppercase tracking-wider transition-colors cursor-pointer disabled:border-rojo-tinta/50 disabled:text-rojo-tinta disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-rojo-tinta"
                       >
                         Quitar
                       </button>
@@ -386,7 +386,7 @@ function Seguimiento() {
             <span className="font-titulo text-[20px] sm:text-[22px] tracking-wider text-carbon">
               TOTAL DE TU ORDEN
             </span>
-            <span className="font-titulo text-[36px] sm:text-[42px] leading-none text-rojo">
+            <span className="font-titulo text-[36px] sm:text-[42px] leading-none text-rojo-tinta">
               {formatearPrecio(pedidoActivo.total)}
             </span>
           </div>
