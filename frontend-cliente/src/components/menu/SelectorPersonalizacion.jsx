@@ -20,21 +20,21 @@ function SelectorPersonalizacion({
 
   return (
     <fieldset className="space-y-2">
-      <legend className="w-full text-sm font-etiqueta uppercase tracking-wide font-bold text-texto mb-1">
+      <legend className="w-full text-sm font-etiqueta uppercase tracking-wide font-bold text-carbon mb-1">
         <span className="flex items-center justify-between gap-2">
           <span>{grupo.nombre}</span>
           <span className="flex items-center gap-1.5 text-xs font-normal font-cuerpo">
             {!esUnica && grupo.max && (
-              <span className="text-texto-suave">
+              <span className="text-papel-suave">
                 Elige hasta {grupo.max}
               </span>
             )}
             {grupo.obligatorio ? (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-etiqueta uppercase font-bold tracking-wider bg-primario text-white">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-etiqueta uppercase font-bold tracking-wider bg-brasa text-white">
                 OBLIGATORIO
               </span>
             ) : (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-etiqueta uppercase font-semibold tracking-wider bg-superficie-2 text-texto-suave border border-borde">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-etiqueta uppercase font-semibold tracking-wider bg-carbon/5 text-papel-suave border border-papel-linea">
                 OPCIONAL
               </span>
             )}
@@ -53,8 +53,8 @@ function SelectorPersonalizacion({
               key={opcion.id}
               className={`flex items-center justify-between w-full min-h-12 px-3 py-2 rounded-xl border transition-colors ${
                 estaSeleccionada
-                  ? 'border-2 border-primario bg-superficie-2'
-                  : 'border-borde hover:border-primario/40 bg-superficie-2'
+                  ? 'border-2 border-carbon bg-amber-50/80 shadow-xs'
+                  : 'border border-papel-linea hover:border-carbon/40 bg-white/80'
               } ${
                 opcionDeshabilitada
                   ? 'opacity-40 cursor-not-allowed'
@@ -79,14 +79,14 @@ function SelectorPersonalizacion({
                       }
                     }
                   }}
-                  className="w-4 h-4 accent-primario shrink-0 cursor-pointer disabled:cursor-not-allowed"
+                  className="w-4 h-4 accent-carbon shrink-0 cursor-pointer disabled:cursor-not-allowed"
                 />
                 <span className="block min-w-0 flex-1">
-                  <span className="text-sm font-etiqueta uppercase tracking-wide font-semibold text-texto block">
+                  <span className="text-sm font-etiqueta uppercase tracking-wide font-semibold text-carbon block">
                     {opcion.nombre}
                   </span>
                   {opcion.alergenos && opcion.alergenos.length > 0 && (
-                    <span className="text-xs text-texto-suave block mt-0.5 font-cuerpo">
+                    <span className="text-xs text-papel-suave block mt-0.5 font-cuerpo">
                       Contiene:{' '}
                       {opcion.alergenos
                         .map((a) => ALERGENOS_MAP[a] ?? a)
@@ -97,7 +97,7 @@ function SelectorPersonalizacion({
               </span>
 
               {opcion.precioExtra > 0 && (
-                <span className="text-xs font-semibold text-primario-texto shrink-0 ml-3">
+                <span className="text-xs font-bold text-granate shrink-0 ml-3">
                   + {formatearPrecio(opcion.precioExtra)}
                 </span>
               )}
