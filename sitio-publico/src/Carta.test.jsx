@@ -122,7 +122,7 @@ describe('Carta (sitio público)', () => {
     expect(html).toMatch(/<h2[^>]*id="carta-titulo"[^>]*>[\s\S]*Nuestra[\s\S]*Carta[\s\S]*<\/h2>/);
   });
 
-  it('con la carta fija aparece "Los más pedidos" con los 3 destacados y estos no se repiten en "Toda la carta"', async () => {
+  it('con la carta fija aparecen en "Todas" TODOS los platos no personalizables (incluidos los destacados en "Toda la carta" y adicionales) con <img> y subtítulos de categoría, sin repetir armables', async () => {
     vi.spyOn(apiModule, 'pedirJson').mockImplementation(async () => {
       throw new apiModule.ErrorApi({ status: 500, mensaje: 'Error' });
     });
@@ -131,17 +131,39 @@ describe('Carta (sitio público)', () => {
     const html = renderToStaticMarkup(<CartaSeccion menu={menu} datosRestaurante={restaurante} />);
 
     expect(html).toContain('Los más pedidos');
-    expect(html).toContain('Nachos Supremos');
-    expect(html).toContain('Costillas BBQ St. Louis');
-    expect(html).toContain('Hamburguesa Smart Angus');
     expect(html).toContain('Toda la carta');
 
-    // En "Toda la carta" no se repiten los destacados
     const todaLaCartaPos = html.indexOf('Toda la carta');
     const bloqueTodaLaCarta = html.slice(todaLaCartaPos);
-    expect(bloqueTodaLaCarta).not.toContain('Nachos Supremos');
-    expect(bloqueTodaLaCarta).not.toContain('Costillas BBQ St. Louis');
-    expect(bloqueTodaLaCarta).not.toContain('Hamburguesa Smart Angus');
+
+    // Subtítulos de categoría presentes
+    expect(bloqueTodaLaCarta).toContain('Entradas');
+    expect(bloqueTodaLaCarta).toContain('Hamburguesas &amp; Fuertes');
+    expect(bloqueTodaLaCarta).toContain('Bebidas &amp; Cocteles');
+    expect(bloqueTodaLaCarta).toContain('Postres');
+    expect(bloqueTodaLaCarta).toContain('Adicionales');
+
+    // Platos incluidos en "Toda la carta", incluidos destacados y adicionales
+    expect(bloqueTodaLaCarta).toContain('Nachos Supremos');
+    expect(bloqueTodaLaCarta).toContain('Costillas BBQ St. Louis');
+    expect(bloqueTodaLaCarta).toContain('Hamburguesa Smart Angus');
+    expect(bloqueTodaLaCarta).toContain('Aguacate Extra');
+    expect(bloqueTodaLaCarta).toContain('Alitas BBQ x8');
+    expect(bloqueTodaLaCarta).toContain('Cerveza Artesanal IPA');
+
+    // Todos los platos no personalizables aparecen con su tarjeta
+    for (const plato of menu.platos) {
+      expect(bloqueTodaLaCarta).toContain(plato.nombre);
+    }
+    const imgsEnTodaLaCarta = (bloqueTodaLaCarta.match(/<img[^>]+>/g) || []).length;
+    expect(imgsEnTodaLaCarta).toBeGreaterThanOrEqual(menu.platos.length);
+
+    // Los armables no se repiten en "Toda la carta"
+    const armaTuPlatoPos = html.indexOf('id="arma-tu-plato"');
+    const soloTodaLaCarta = html.slice(todaLaCartaPos, armaTuPlatoPos);
+    for (const armable of menu.armables) {
+      expect(soloTodaLaCarta).not.toContain(armable.nombre);
+    }
   });
 
   it('los nombres de los platos llevan line-clamp-2 y title', async () => {
@@ -151,7 +173,7 @@ describe('Carta (sitio público)', () => {
     expect(html).toMatch(/<h3[^>]*title="Empanadas de Carne"[^>]*class="[^"]*line-clamp-2[^"]*"[^>]*>/);
   });
 
-  it('en la categoría adicionales se muestra la lista tipo menú con puntos guía', () => {
+  it('en la categoría adicionales se muestran las tarjetas con foto en cuadrícula y la nota', () => {
     const menuConAdicionales = {
       categorias: [{ id: 99, nombre: 'Adicionales', orden: 9 }],
       platos: [
@@ -162,6 +184,7 @@ describe('Carta (sitio público)', () => {
           descripcion: 'Porción fresca de aguacate hass',
           precio: 4000,
           disponible: true,
+          url_imagen: 'https://images.unsplash.com/aguacate.jpg',
         },
       ],
       armables: [],
@@ -177,6 +200,7 @@ describe('Carta (sitio público)', () => {
     expect(html).toContain('Aguacate Extra');
     expect(html).toContain('4.000');
     expect(html).toContain('Pídelos junto a cualquiera de tus platos.');
+    expect(html).toMatch(/<img[^>]*src="https:\/\/images\.unsplash\.com\/aguacate\.jpg"/);
   });
 
   it('tarjeta armable y simulador de "Arma tu plato": tarjeta contiene "Personalizable", "Desde" y "Ver ingredientes", y el diálogo renderiza pasos e ingredientes', () => {

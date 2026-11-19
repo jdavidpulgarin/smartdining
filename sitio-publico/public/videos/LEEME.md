@@ -21,8 +21,8 @@ Los videos de los platos armables se configuran en el objeto `videosPlatos` dent
 - **Póster de respaldo**: Formato WebP.
 
 ## Créditos y generación con Inteligencia Artificial
-- Los cuatro videos (`portada.mp4`, `arepa.mp4`, `bowl.mp4` y `wrap.mp4`) son generados con IA (Gemini) y se marcan en la interfaz con la etiqueta **"Video generado con IA"**.
-- El video del bowl lleva además el crédito de atribución **"Imagen base: Freepik"**, mostrándose conjuntamente como **"Video generado con IA · Imagen base: Freepik"**.
+- Los cuatro videos (`portada.mp4`, `arepa.mp4`, `bowl.mp4` y `wrap.mp4`) son generados con IA (Gemini).
+- Ya no hay etiquetas "Video generado con IA" en la interfaz; el crédito va en una línea del pie: "Imágenes y videos ilustrativos generados con IA · Imagen base del bowl: Freepik" (la licencia de Freepik exige el crédito).
 
 ## Comportamiento de respaldo, rendimiento y accesibilidad
 - Si un video aún no se encuentra disponible o falla al cargar, la página muestra de forma automática la imagen de respaldo (`poster`) en formato WebP.

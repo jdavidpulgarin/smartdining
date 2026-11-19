@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import restauranteDefault from '../datos/restaurante.js';
 import Button from '../components/ui/Button.jsx';
 import { leerPreferenciasVideoNavegador } from '../utils/sitioPublico.js';
@@ -9,16 +9,14 @@ import { estadoHorario } from '../utils/horario.js';
  * Sección de portada (Hero) al estilo póster de restaurante.
  * - Póster LCP siempre en HTML inicial con fetchPriority="high".
  * - Video de fondo montado únicamente en cliente según preferencias y ancho.
+ * - Con prefers-reduced-motion el video no se monta y el anillo no gira (motion-safe).
  * - Título tipográfico contorneado/relleno de gran formato accesible.
- * - Emblema circular con anillo SVG giratorio pausable.
+ * - Emblema circular con anillo SVG giratorio.
  * - Ticket de horario con estado "ABIERTO"/"CERRADO".
- * - Cinta ámbar estática inclinada al pie.
+ * - Cinta ámbar estática inclinada al pie visible completa.
  */
 function Inicio({ datosRestaurante = {} }) {
   const [videoSrc, setVideoSrc] = useState(null);
-  const [reproduciendo, setReproduciendo] = useState(true);
-  const [montado, setMontado] = useState(false);
-  const videoRef = useRef(null);
 
   const nombre = datosRestaurante.nombre || 'SmartDining Restaurante';
   const eslogan = datosRestaurante.eslogan || restauranteDefault.eslogan;
@@ -27,7 +25,6 @@ function Inicio({ datosRestaurante = {} }) {
   const [estado, setEstado] = useState(() => estadoHorario(new Date(), horario));
 
   useEffect(() => {
-    setMontado(true);
     const ancho = typeof window !== 'undefined' ? window.innerWidth : 1024;
     const prefs = leerPreferenciasVideoNavegador();
     const fuente = elegirFuentePortada({ anchoPantalla: ancho, prefs });
@@ -44,23 +41,11 @@ function Inicio({ datosRestaurante = {} }) {
     return () => clearInterval(timer);
   }, [horario]);
 
-  const alternarReproduccion = () => {
-    const nuevoEstado = !reproduciendo;
-    setReproduciendo(nuevoEstado);
-    if (videoRef.current) {
-      if (nuevoEstado) {
-        videoRef.current.play();
-      } else {
-        videoRef.current.pause();
-      }
-    }
-  };
-
   return (
     <section
       id="inicio"
       aria-labelledby="titulo-inicio"
-      className="relative min-h-[90vh] flex flex-col justify-between border-b border-papel/10 overflow-hidden scroll-mt-16 pt-12 sm:pt-16 pb-0"
+      className="relative min-h-[90vh] flex flex-col justify-between border-b border-papel/10 overflow-hidden scroll-mt-16 pt-10 sm:pt-14 pb-4 sm:pb-6"
     >
       {/* Fondo base: Imagen LCP estática siempre en el HTML inicial */}
       <img
@@ -76,7 +61,6 @@ function Inicio({ datosRestaurante = {} }) {
       {/* Video montado únicamente en cliente si las preferencias lo permiten */}
       {videoSrc && (
         <video
-          ref={videoRef}
           src={videoSrc}
           autoPlay
           muted
@@ -100,27 +84,8 @@ function Inicio({ datosRestaurante = {} }) {
         className="absolute inset-0 bg-[radial-gradient(circle_at_75%_35%,rgba(163,20,28,0.22),transparent_65%)] bg-gradient-to-t from-fondo via-transparent to-transparent pointer-events-none"
       />
 
-      {/* Control accesible WCAG 2.2.2 para pausar/reanudar movimiento de video y animación (en escritorio) */}
-      {montado && (
-        <div className="hidden sm:flex absolute bottom-24 right-8 z-20 items-center justify-end">
-          <button
-            type="button"
-            onClick={alternarReproduccion}
-            aria-pressed={!reproduciendo}
-            aria-label={
-              reproduciendo
-                ? 'Pausar video y animación de la portada'
-                : 'Reproducir video y animación de la portada'
-            }
-            className="px-3.5 py-1.5 rounded-xl bg-superficie/85 hover:bg-superficie text-texto text-xs font-etiqueta font-bold uppercase tracking-wider border border-borde backdrop-blur-sm cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto shadow-lg"
-          >
-            {reproduciendo ? 'Pausar animación' : 'Reproducir animación'}
-          </button>
-        </div>
-      )}
-
       {/* Contenido principal de la portada: 2 columnas en escritorio */}
-      <div className="relative z-10 max-w-6xl mx-auto w-full px-4 sm:px-6 my-auto grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-8 items-center py-8">
+      <div className="relative z-10 max-w-6xl mx-auto w-full px-4 sm:px-6 my-auto grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-8 items-center py-6 sm:py-8">
         {/* Columna izquierda: antetítulo, títulos SMART DINING, eslogan y botones */}
         <div className="lg:col-span-7 space-y-6">
           <span className="font-titulo text-base sm:text-lg tracking-[0.35em] text-ambar uppercase block">
@@ -181,14 +146,11 @@ function Inicio({ datosRestaurante = {} }) {
               />
             </div>
 
-            {/* Anillo de texto circular SVG que gira muy lento */}
+            {/* Anillo de texto circular SVG que gira muy lento (motion-safe) */}
             <svg
               viewBox="0 0 320 320"
               aria-hidden="true"
-              className={`absolute inset-0 w-full h-full pointer-events-none ${
-                reproduciendo ? 'motion-safe:animate-[spin_40s_linear_infinite]' : ''
-              }`}
-              style={{ animationPlayState: reproduciendo ? 'running' : 'paused' }}
+              className="absolute inset-0 w-full h-full pointer-events-none motion-safe:animate-[spin_40s_linear_infinite]"
             >
               <defs>
                 <path
@@ -229,31 +191,12 @@ function Inicio({ datosRestaurante = {} }) {
               </p>
             </div>
           </div>
-
-          {/* En celular: botón debajo del emblema para no tapar el ticket de horario */}
-          {montado && (
-            <div className="mt-6 flex sm:hidden justify-center z-20">
-              <button
-                type="button"
-                onClick={alternarReproduccion}
-                aria-pressed={!reproduciendo}
-                aria-label={
-                  reproduciendo
-                    ? 'Pausar video y animación de la portada'
-                    : 'Reproducir video y animación de la portada'
-                }
-                className="px-3.5 py-1.5 rounded-xl bg-superficie/85 hover:bg-superficie text-texto text-xs font-etiqueta font-bold uppercase tracking-wider border border-borde backdrop-blur-sm cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto shadow-lg"
-              >
-                {reproduciendo ? 'Pausar animación' : 'Reproducir animación'}
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Cinta ámbar inclinada al pie (-rotate-2, sin scroll horizontal, centrada y adaptable en celular) */}
-      <div className="relative z-10 w-full overflow-hidden mt-8 sm:mt-12 -mb-2 sm:-mb-3">
-        <div className="w-[120%] -ml-[10%] bg-ambar text-tinta py-2.5 sm:py-3.5 -rotate-2 shadow-2xl select-none flex justify-center">
+      {/* Cinta ámbar inclinada al pie (-rotate-2, sin scroll horizontal, centrada y adaptable) */}
+      <div className="relative z-10 w-full overflow-hidden py-4 sm:py-6 lg:py-8 mt-2 sm:mt-4">
+        <div className="w-[120%] -ml-[10%] bg-ambar text-tinta py-3 sm:py-3.5 -rotate-2 shadow-2xl select-none flex justify-center">
           <ul className="flex flex-wrap items-center justify-center gap-x-3 sm:gap-x-6 gap-y-1 font-titulo text-xs sm:text-base md:text-lg tracking-wider uppercase text-center px-4 max-w-5xl mx-auto list-none m-0">
             <li>PIDE DESDE TU MESA</li>
             <li aria-hidden="true" className="text-primario text-xs sm:text-sm">✦</li>

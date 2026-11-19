@@ -229,8 +229,9 @@ function TarjetaPlatoDestacado({ plato, onSeleccionarPlato }) {
  * Sección 'Carta' al estilo póster de restaurante.
  * - Título con dos líneas contorno + relleno.
  * - Filtros por pestañas horizontales.
- * - En "Todas": "Los más pedidos" con 3 destacados, luego "Toda la carta" sin duplicados ni adicionales.
- * - Categoría Adicionales presentada como lista de menú de 2 columnas con puntos guía.
+ * - En "Todas": "Los más pedidos" con 3 destacados, luego "Toda la carta" con TODOS los platos
+ *   reales con su foto, agrupados por categoría con subtítulo por categoría.
+ * - Categoría Adicionales con tarjetas con foto (PlatoCard) en cuadrícula.
  * - Subsección 'Arma tu plato' con videos, etiquetas y simulador interactivo.
  */
 function CartaSeccion({
@@ -277,12 +278,6 @@ function CartaSeccion({
     return categorias.find((c) => normalizar(c.nombre) === 'adicionales');
   }, [categorias]);
 
-  const esAdicional = (plato) => {
-    if (!catAdicionales) return false;
-    const cId = plato.categoriaId ?? plato.categoria_id ?? plato.id_categoria;
-    return cId === catAdicionales.id;
-  };
-
   // Buscar destacados por nombre
   const nombresDestacados = useMemo(() => {
     const lista =
@@ -299,15 +294,6 @@ function CartaSeccion({
       .filter(Boolean);
   }, [platos, nombresDestacados]);
 
-  const idsDestacados = useMemo(() => {
-    return new Set(platosDestacados.map((p) => p.id));
-  }, [platosDestacados]);
-
-  // Platos en "Todas" excluyendo los destacados y los adicionales
-  const demasPlatosTodas = useMemo(() => {
-    return platos.filter((p) => !idsDestacados.has(p.id) && !esAdicional(p));
-  }, [platos, idsDestacados, catAdicionales]);
-
   // Platos filtrados según categoría seleccionada
   const esVistaTodas =
     categoriaActiva === null ||
@@ -319,13 +305,29 @@ function CartaSeccion({
 
   const platosFiltrados = useMemo(() => {
     if (esVistaTodas) {
-      return demasPlatosTodas;
+      return platos;
     }
     return platos.filter((p) => {
       const cId = p.categoriaId ?? p.categoria_id ?? p.id_categoria;
       return cId === categoriaActiva;
     });
-  }, [platos, categoriaActiva, esVistaTodas, demasPlatosTodas]);
+  }, [platos, categoriaActiva, esVistaTodas]);
+
+  // Agrupar platos por categoría en el orden de categorias para "Toda la carta"
+  const gruposCategorias = useMemo(() => {
+    return categorias
+      .map((cat) => {
+        const platosDeCat = platos.filter((p) => {
+          const cId = p.categoriaId ?? p.categoria_id ?? p.id_categoria;
+          return cId === cat.id;
+        });
+        return {
+          categoria: cat,
+          platos: platosDeCat,
+        };
+      })
+      .filter((g) => g.platos.length > 0);
+  }, [categorias, platos]);
 
   return (
     <section
@@ -403,7 +405,7 @@ function CartaSeccion({
               onSeleccionar={setCategoriaActiva}
             />
 
-            {/* Vista 'Todas': Bloque de más pedidos + Toda la carta */}
+            {/* Vista 'Todas': Bloque de más pedidos + Toda la carta con todos los platos agrupados por categoría */}
             {esVistaTodas && (
               <div className="space-y-12">
                 {platosDestacados.length > 0 && (
@@ -423,25 +425,32 @@ function CartaSeccion({
                   </div>
                 )}
 
-                <div className="space-y-6">
-                  {platosDestacados.length > 0 && (
-                    <h3 className="font-titulo text-3xl sm:text-4xl uppercase tracking-wider text-papel m-0">
-                      Toda la carta
-                    </h3>
-                  )}
-                  {demasPlatosTodas.length === 0 ? (
+                <div className="space-y-8 sm:space-y-10">
+                  <h3 className="font-titulo text-3xl sm:text-4xl uppercase tracking-wider text-papel m-0">
+                    Toda la carta
+                  </h3>
+                  {gruposCategorias.length === 0 ? (
                     <p className="text-center text-papel/60 py-8 font-cuerpo-poster">
                       No hay platos en esta vista.
                     </p>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {demasPlatosTodas.map((plato) => (
-                        <PlatoCard
-                          key={plato.id}
-                          plato={plato}
-                          onSeleccionar={onSeleccionarPlato}
-                          soloLectura
-                        />
+                    <div className="space-y-10">
+                      {gruposCategorias.map((grupo) => (
+                        <div key={grupo.categoria.id} className="space-y-4">
+                          <h4 className="font-titulo text-2xl sm:text-3xl uppercase tracking-wide text-ambar m-0">
+                            {grupo.categoria.nombre}
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {grupo.platos.map((plato) => (
+                              <PlatoCard
+                                key={plato.id}
+                                plato={plato}
+                                onSeleccionar={onSeleccionarPlato}
+                                soloLectura
+                              />
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -449,7 +458,7 @@ function CartaSeccion({
               </div>
             )}
 
-            {/* Vista 'Adicionales': lista tipo menú en 2 columnas */}
+            {/* Vista 'Adicionales': cuadrícula de tarjetas con foto */}
             {!esVistaTodas && esVistaAdicionales && (
               <div className="space-y-6">
                 <p className="font-cuerpo-poster text-base text-papel/75 m-0">
@@ -460,38 +469,16 @@ function CartaSeccion({
                     No hay adicionales disponibles por ahora.
                   </p>
                 ) : (
-                  <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2 list-none p-0 m-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     {platosFiltrados.map((plato) => (
-                      <li key={plato.id}>
-                        <button
-                          type="button"
-                          onClick={() => onSeleccionarPlato?.(plato)}
-                          className="group w-full py-4 text-left bg-transparent border-0 border-b border-dashed border-papel/20 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto block transition-colors"
-                        >
-                          <div className="flex items-baseline gap-3">
-                            <h3
-                              title={plato.nombre}
-                              className="font-titulo text-2xl uppercase tracking-wide text-papel group-hover:text-ambar transition-colors m-0 line-clamp-1"
-                            >
-                              {plato.nombre}
-                            </h3>
-                            <span
-                              aria-hidden="true"
-                              className="flex-1 border-b-2 border-dotted border-papel/30 translate-y-[-4px]"
-                            />
-                            <span className="font-titulo text-2xl text-ambar tracking-wide shrink-0">
-                              {formatearPrecio(plato.precio)}
-                            </span>
-                          </div>
-                          {plato.descripcion && (
-                            <p className="font-cuerpo-poster text-sm text-papel/70 line-clamp-2 mt-1 m-0">
-                              {plato.descripcion}
-                            </p>
-                          )}
-                        </button>
-                      </li>
+                      <PlatoCard
+                        key={plato.id}
+                        plato={plato}
+                        onSeleccionar={onSeleccionarPlato}
+                        soloLectura
+                      />
                     ))}
-                  </ul>
+                  </div>
                 )}
               </div>
             )}

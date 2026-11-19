@@ -21,7 +21,7 @@ describe('Contacto (fachada de mapa, horario y enlaces estilo póster)', () => {
     expect(html).toContain(`https://wa.me/${restaurante.whatsapp}`);
   });
 
-  it('muestra las 3 redes sociales con sus URLs reales y atributos seguros', () => {
+  it('muestra las 3 redes sociales con sus URLs reales, cada una con su SVG aria-hidden="true", su texto y atributos seguros', () => {
     const html = renderToStaticMarkup(<Contacto datosRestaurante={restaurante} />);
 
     expect(restaurante.redes.length).toBeGreaterThanOrEqual(3);
@@ -31,6 +31,12 @@ describe('Contacto (fachada de mapa, horario y enlaces estilo póster)', () => {
     }
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
+
+    // Cada red tiene su SVG en línea decorativo con aria-hidden="true"
+    for (const red of restaurante.redes) {
+      const regexRed = new RegExp(`<a[^>]*href="${red.url}"[^>]*>[\\s\\S]*?<svg[^>]*aria-hidden="true"[^>]*>[\\s\\S]*?<\\/svg>[\\s\\S]*?<span>${red.nombre}<\\/span>[\\s\\S]*?<\\/a>`);
+      expect(html).toMatch(regexRed);
+    }
   });
 
   it('renderiza la comanda con los 7 días y exactamente uno con aria-current="date"', () => {

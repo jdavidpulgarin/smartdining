@@ -6,6 +6,7 @@ import TituloSeccion from '../componentes/TituloSeccion.jsx';
  * - Texto a la izquierda con título de 2 líneas (contorno + sólido), párrafos y separador ámbar.
  * - A la derecha fotografía real con marco rojo desplazado, etiqueta 'Desde 2016' girada y nota de IA.
  * - Comanda de papel crema con borde zigzag inferior y revelado una sola vez con IntersectionObserver.
+ *   En escritorio (lg+) se hace compacta (máx 16rem) y sobresale abajo y a la derecha de la foto.
  */
 function Nosotros() {
   const [animar, setAnimar] = useState(false);
@@ -80,7 +81,7 @@ function Nosotros() {
         {/* Columna visual: Foto con marco desplazado y comanda */}
         <div
           ref={visualRef}
-          className="lg:col-span-6 relative pb-12 lg:pb-16 max-w-md mx-auto w-full"
+          className="lg:col-span-6 relative pb-12 lg:pb-28 max-w-md mx-auto w-full"
         >
           <figure className="relative m-0">
             {/* Marco rojo desplazado detrás */}
@@ -111,9 +112,9 @@ function Nosotros() {
           </figure>
 
           {/* Comanda de papel crema con borde inferior en zigzag */}
-          <div className="relative mt-[-4.5rem] ml-auto mr-0 w-[min(21rem,92%)] sm:w-[min(21rem,85%)] lg:absolute lg:right-[-2.5rem] lg:bottom-0 lg:mt-0 rotate-[2.5deg] drop-shadow-2xl z-20">
+          <div className="relative mt-[-4.5rem] ml-auto mr-0 w-[min(21rem,92%)] sm:w-[min(21rem,85%)] lg:w-64 lg:max-w-[16rem] lg:absolute lg:-right-6 lg:-bottom-6 lg:mt-0 rotate-[2.5deg] drop-shadow-2xl z-20">
             <div
-              className="comanda p-6 pb-8"
+              className="comanda p-6 pb-8 lg:p-4 lg:pb-6"
               style={
                 animar
                   ? {
@@ -123,58 +124,58 @@ function Nosotros() {
                   : undefined
               }
             >
-              <div className="flex justify-between items-baseline pb-3 border-b-2 border-dashed border-tinta/35">
-                <strong className="font-titulo text-2xl tracking-wider uppercase">
+              <div className="flex justify-between items-baseline pb-3 lg:pb-2 border-b-2 border-dashed border-tinta/35">
+                <strong className="font-titulo text-2xl lg:text-xl tracking-wider uppercase">
                   COMANDA
                 </strong>
-                <span className="text-xs font-cuerpo-poster font-medium text-tinta/70">
+                <span className="text-xs lg:text-[11px] font-cuerpo-poster font-medium text-tinta/70">
                   · Valledupar, Cesar
                 </span>
               </div>
 
               <ul className="list-none m-0 p-0">
-                <li className="py-3.5 border-b border-dashed border-tinta/30">
-                  <h3 className="m-0 mb-1 font-titulo text-lg tracking-wide flex items-center gap-2">
+                <li className="py-3.5 lg:py-2.5 border-b border-dashed border-tinta/30">
+                  <h3 className="m-0 mb-1 font-titulo text-lg lg:text-base tracking-wide flex items-center gap-2">
                     <span
                       aria-hidden="true"
-                      className="w-2.5 h-2.5 bg-primario shrink-0"
+                      className="w-2.5 h-2.5 lg:w-2 lg:h-2 bg-primario shrink-0"
                     />
                     <span>Recetas de la casa</span>
                   </h3>
-                  <p className="m-0 text-sm font-cuerpo-poster leading-snug text-tinta/80">
+                  <p className="m-0 text-sm lg:text-xs font-cuerpo-poster leading-snug text-tinta/80">
                     Los sabores de siempre del Cesar, con un toque moderno.
                   </p>
                 </li>
 
-                <li className="py-3.5 border-b border-dashed border-tinta/30">
-                  <h3 className="m-0 mb-1 font-titulo text-lg tracking-wide flex items-center gap-2">
+                <li className="py-3.5 lg:py-2.5 border-b border-dashed border-tinta/30">
+                  <h3 className="m-0 mb-1 font-titulo text-lg lg:text-base tracking-wide flex items-center gap-2">
                     <span
                       aria-hidden="true"
-                      className="w-2.5 h-2.5 bg-primario shrink-0"
+                      className="w-2.5 h-2.5 lg:w-2 lg:h-2 bg-primario shrink-0"
                     />
                     <span>Productos de la región</span>
                   </h3>
-                  <p className="m-0 text-sm font-cuerpo-poster leading-snug text-tinta/80">
+                  <p className="m-0 text-sm lg:text-xs font-cuerpo-poster leading-snug text-tinta/80">
                     Ingredientes locales para mantener viva la sazón de nuestra
                     tierra.
                   </p>
                 </li>
 
-                <li className="py-3.5 pb-1">
-                  <h3 className="m-0 mb-1 font-titulo text-lg tracking-wide flex items-center gap-2">
+                <li className="py-3.5 lg:py-2.5 pb-1 lg:pb-1">
+                  <h3 className="m-0 mb-1 font-titulo text-lg lg:text-base tracking-wide flex items-center gap-2">
                     <span
                       aria-hidden="true"
-                      className="w-2.5 h-2.5 bg-primario shrink-0"
+                      className="w-2.5 h-2.5 lg:w-2 lg:h-2 bg-primario shrink-0"
                     />
                     <span>Pide y paga desde tu mesa</span>
                   </h3>
-                  <p className="m-0 text-sm font-cuerpo-poster leading-snug text-tinta/80">
+                  <p className="m-0 text-sm lg:text-xs font-cuerpo-poster leading-snug text-tinta/80">
                     Escanea el QR de tu mesa y listo: sin filas ni esperas.
                   </p>
                 </li>
               </ul>
 
-              <p className="mt-4 text-xs font-cuerpo-poster font-semibold text-center text-tinta/90">
+              <p className="mt-4 lg:mt-3 text-xs lg:text-[11px] font-cuerpo-poster font-semibold text-center text-tinta/90">
                 Gracias por sentarte a nuestra mesa.
               </p>
             </div>
