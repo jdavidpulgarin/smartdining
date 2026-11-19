@@ -72,7 +72,7 @@ function AvisoModoDemostracion({ onContinuar, onCancelar }) {
       aria-describedby={tieneAccion ? descripcionId : undefined}
       tabIndex={tieneAccion ? -1 : undefined}
       onKeyDown={(e) => manejarTeclaAviso(e, { onCancelar })}
-      className="bg-papel text-tinta border-2 border-carbon/20 rounded-2xl p-4 flex flex-col gap-3 shadow-comanda"
+      className="bg-papel text-tinta border-2 border-carbon/20 rounded-2xl p-4 flex flex-col gap-3 shadow-lg"
     >
       <div className="flex items-start gap-3">
         <span className="w-8 h-8 rounded-full bg-ambar/30 border border-ambar flex items-center justify-center shrink-0 mt-0.5">
@@ -125,7 +125,7 @@ function AvisoModoDemostracion({ onContinuar, onCancelar }) {
             variante="primario"
             onClick={handleContinuar}
             disabled={continuando}
-            className="w-full sm:flex-1 text-base font-titulo tracking-wider !bg-carbon !text-crema hover:!bg-carbon/90 active:!bg-carbon/80"
+            className="w-full sm:flex-1 text-base font-titulo tracking-wider !bg-carbon !text-papel hover:!bg-carbon/90 active:!bg-carbon/80"
           >
             Entendido, continuar al pago
           </Button>

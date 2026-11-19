@@ -381,7 +381,7 @@ function Pago({ errorPagoInicial = null } = {}) {
           <button
             type="button"
             onClick={recargar}
-            className="min-h-[44px] px-6 py-2 rounded-xl bg-carbon hover:bg-carbon/90 text-crema font-titulo text-lg tracking-wider uppercase transition-colors cursor-pointer"
+            className="min-h-[44px] px-6 py-2 rounded-xl bg-carbon hover:bg-carbon/90 text-papel font-titulo text-lg tracking-wider uppercase transition-colors cursor-pointer"
           >
             Reintentar
           </button>
@@ -593,7 +593,7 @@ function Pago({ errorPagoInicial = null } = {}) {
               : avisoMesero?.tipo === 'error'
               ? 'border-granate text-granate'
               : 'border-[#15803D] text-[#15803D]'
-          } px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-comanda toast-entra font-sans`}
+          } px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg toast-entra font-sans`}
         >
           <span
             className={`w-2 h-2 rounded-full shrink-0 ${
@@ -612,7 +612,7 @@ function Pago({ errorPagoInicial = null } = {}) {
       {errorPago && (
         <div
           role="alert"
-          className="bg-papel border-2 border-granate text-granate px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-comanda toast-entra font-sans"
+          className="bg-papel border-2 border-granate text-granate px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg toast-entra font-sans"
         >
           <span className="w-2 h-2 rounded-full bg-granate shrink-0" />
           <span>{textoErrorPago}</span>
@@ -633,7 +633,7 @@ function Pago({ errorPagoInicial = null } = {}) {
               </h1>
             </div>
             {(mesaNumero || ubicacion) && (
-              <span className="font-titulo text-sm sm:text-base tracking-wider bg-carbon text-crema px-3 py-1 rounded-full shadow-sm">
+              <span className="font-titulo text-sm sm:text-base tracking-wider bg-carbon text-papel px-3 py-1 rounded-full shadow-sm">
                 {[mesaNumero ? `Mesa ${mesaNumero}` : null, ubicacion].filter(Boolean).join(' · ')}
               </span>
             )}
@@ -655,8 +655,9 @@ function Pago({ errorPagoInicial = null } = {}) {
                 TU PARTE
               </span>
               <span
-                className="font-titulo text-5xl sm:text-6xl tracking-wider leading-[0.95]"
-                style={{ color: tuParte.color || '#8B1E13' }}
+                className={`font-titulo text-5xl sm:text-6xl tracking-wider leading-[0.95] ${
+                  tuParte.esVerde ? 'text-[#15803D]' : tuParteMonto > 0 ? 'text-rojo-tinta' : 'text-carbon'
+                }`}
               >
                 {formatoPesos(tuParteMonto)}
               </span>
@@ -708,7 +709,7 @@ function Pago({ errorPagoInicial = null } = {}) {
                     <div className="flex items-center gap-2.5 min-w-0">
                       <span
                         className={`w-9 h-9 rounded-full flex items-center justify-center font-titulo text-lg shrink-0 ${
-                          c.esMio ? 'bg-granate text-crema shadow-sm' : 'bg-carbon/10 text-carbon border border-carbon/20'
+                          c.esMio ? 'bg-granate text-papel shadow-sm' : 'bg-carbon/10 text-carbon border border-carbon/20'
                         }`}
                       >
                         {inicial}
@@ -724,7 +725,7 @@ function Pago({ errorPagoInicial = null } = {}) {
                     </div>
 
                     {yaPago ? (
-                      <span className="flex items-center gap-1.5 font-titulo text-sm tracking-wider text-crema bg-[#15803D] px-2.5 py-1 rounded-lg shrink-0 shadow-sm rotate-[-2deg]">
+                      <span className="flex items-center gap-1.5 font-titulo text-sm tracking-wider text-papel bg-[#15803D] px-2.5 py-1 rounded-lg shrink-0 shadow-sm rotate-[-2deg]">
                         <svg
                           width="12"
                           height="12"
@@ -772,7 +773,7 @@ function Pago({ errorPagoInicial = null } = {}) {
                   <div
                     role="radiogroup"
                     aria-label="Modo de pago"
-                    className="grid grid-cols-2 gap-2 bg-crema-oscura/60 border-2 border-carbon/15 rounded-xl p-1.5"
+                    className="grid grid-cols-2 gap-2 bg-papel-linea/40 border-2 border-carbon/15 rounded-xl p-1.5"
                   >
                     {MODOS_PAGO.map((k) => {
                       const activo = modo === k;
@@ -790,7 +791,7 @@ function Pago({ errorPagoInicial = null } = {}) {
                           }}
                           className={`min-h-[52px] rounded-lg flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
                             activo
-                              ? 'bg-carbon text-crema shadow-md scale-[1.01]'
+                              ? 'bg-carbon text-papel shadow-md scale-[1.01]'
                               : 'bg-transparent text-carbon/70 hover:text-carbon hover:bg-carbon/5'
                           }`}
                         >
@@ -821,7 +822,7 @@ function Pago({ errorPagoInicial = null } = {}) {
               {avisoGrupal && (
                 <div
                   role="note"
-                  className="min-h-[44px] bg-crema border border-ambar/50 rounded-xl p-3 flex flex-col gap-2.5 text-carbon"
+                  className="min-h-[44px] bg-papel border border-ambar/50 rounded-xl p-3 flex flex-col gap-2.5 text-carbon"
                 >
                   <div className="flex items-start gap-2.5">
                     <svg
@@ -854,7 +855,7 @@ function Pago({ errorPagoInicial = null } = {}) {
                           setErrorPago(null);
                         }
                       }}
-                      className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-carbon hover:bg-carbon/90 active:bg-carbon/80 text-crema font-titulo text-sm tracking-wider uppercase transition-colors cursor-pointer flex items-center justify-center shadow-sm"
+                      className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-carbon hover:bg-carbon/90 active:bg-carbon/80 text-papel font-titulo text-sm tracking-wider uppercase transition-colors cursor-pointer flex items-center justify-center shadow-sm"
                     >
                       Pagar toda la cuenta
                     </button>
@@ -866,7 +867,7 @@ function Pago({ errorPagoInicial = null } = {}) {
               {errorPago && (
                 <div
                   role="alert"
-                  className="bg-crema border-2 border-granate text-granate px-4 py-3 rounded-xl flex items-center gap-2.5 text-xs font-semibold shadow-sm toast-entra font-sans"
+                  className="bg-papel border-2 border-granate text-granate px-4 py-3 rounded-xl flex items-center gap-2.5 text-xs font-semibold shadow-sm toast-entra font-sans"
                 >
                   <span className="w-2 h-2 rounded-full bg-granate shrink-0" />
                   <span>{textoErrorPago}</span>
@@ -878,14 +879,14 @@ function Pago({ errorPagoInicial = null } = {}) {
                 type="button"
                 onClick={handlePagarWompi}
                 disabled={iniciandoPago || montoModo <= 0 || esErrorEnRevision}
-                className={`min-h-[56px] rounded-2xl bg-carbon hover:bg-carbon/90 text-crema font-titulo text-2xl tracking-wider flex items-center justify-center gap-2.5 transition-colors shadow-comanda ${
+                className={`min-h-[56px] rounded-2xl bg-carbon hover:bg-carbon/90 text-papel font-titulo text-2xl tracking-wider flex items-center justify-center gap-2.5 transition-colors shadow-lg ${
                   iniciandoPago || montoModo <= 0 || esErrorEnRevision
                     ? 'opacity-60 cursor-not-allowed'
                     : 'cursor-pointer active:translate-y-0.5'
                 }`}
               >
                 {iniciandoPago ? (
-                  <div className="w-5 h-5 border-2 border-crema border-t-transparent rounded-full animate-spin" />
+                  <div className="w-5 h-5 border-2 border-papel border-t-transparent rounded-full animate-spin" />
                 ) : (
                   <svg
                     width="20"
@@ -946,7 +947,7 @@ function Pago({ errorPagoInicial = null } = {}) {
           {/* Tarjeta YA PAGASTE TU PARTE */}
           {yaPague && (
             <section className="ticket-comanda p-4 flex items-center gap-3 border-2 border-[#15803D]/40">
-              <span className="w-10 h-10 rounded-full bg-[#15803D] text-crema flex items-center justify-center shrink-0 shadow-sm">
+              <span className="w-10 h-10 rounded-full bg-[#15803D] text-papel flex items-center justify-center shrink-0 shadow-sm">
                 <svg
                   width="20"
                   height="20"
@@ -984,7 +985,7 @@ function Pago({ errorPagoInicial = null } = {}) {
                 ? 'border-carbon/30 bg-carbon/5 text-carbon/50 cursor-not-allowed'
                 : avisoCuenta.deshabilitado
                 ? 'border-carbon/25 bg-transparent text-carbon/50 cursor-not-allowed'
-                : 'border-carbon/40 bg-papel text-carbon hover:border-carbon hover:bg-papel-oscuro cursor-pointer shadow-sm'
+                : 'border-carbon/40 bg-papel text-carbon hover:border-carbon hover:bg-papel-linea/30 cursor-pointer shadow-sm'
             }`}
           >
             <svg
@@ -1013,13 +1014,13 @@ function Pago({ errorPagoInicial = null } = {}) {
           aria-live="polite"
         >
           {/* Banda superior de la comanda */}
-          <div className="w-full bg-carbon text-crema py-1.5 px-4 rounded-lg font-titulo tracking-widest text-sm flex items-center justify-between">
+          <div className="w-full bg-carbon text-papel py-1.5 px-4 rounded-lg font-titulo tracking-widest text-sm flex items-center justify-between">
             <span>PAGO EN CURSO</span>
             <span className="font-manuscrita text-ambar text-base">wompi</span>
           </div>
 
           {/* Disco crema con anillo punteado giratorio e ilustración */}
-          <div className="relative w-44 h-44 rounded-full bg-crema-oscura/40 border-4 border-carbon/15 flex items-center justify-center shadow-inner">
+          <div className="relative w-44 h-44 rounded-full bg-papel-linea/40 border-4 border-carbon/15 flex items-center justify-center shadow-inner">
             <svg
               className="absolute inset-0 w-full h-full pointer-events-none motion-safe:animate-spin"
               style={{ animationDuration: '10s' }}
@@ -1082,7 +1083,7 @@ function Pago({ errorPagoInicial = null } = {}) {
           </p>
 
           {/* Bloque de referencia y expiración */}
-          <div className="w-full box-border flex items-center gap-2.5 bg-crema-oscura/50 border border-carbon/15 rounded-xl p-3 text-xs text-carbon/75 text-left font-sans">
+          <div className="w-full box-border flex items-center gap-2.5 bg-papel-linea/40 border border-carbon/15 rounded-xl p-3 text-xs text-carbon/75 text-left font-sans">
             <svg
               width="18"
               height="18"
@@ -1120,7 +1121,7 @@ function Pago({ errorPagoInicial = null } = {}) {
           aria-live="polite"
         >
           {/* Banda superior de la comanda */}
-          <div className="w-full bg-carbon text-crema py-1.5 px-4 rounded-lg font-titulo tracking-widest text-sm flex items-center justify-between">
+          <div className="w-full bg-carbon text-papel py-1.5 px-4 rounded-lg font-titulo tracking-widest text-sm flex items-center justify-between">
             <span>CUENTA</span>
             <span className="font-manuscrita text-ambar text-base">comprobante</span>
           </div>
@@ -1134,7 +1135,7 @@ function Pago({ errorPagoInicial = null } = {}) {
           </div>
 
           {/* Ilustración de check verde con rebote y chispitas */}
-          <div className="relative w-40 h-40 rounded-full bg-crema-oscura/40 border-4 border-carbon/15 flex items-center justify-center shadow-inner my-1">
+          <div className="relative w-40 h-40 rounded-full bg-papel-linea/40 border-4 border-carbon/15 flex items-center justify-center shadow-inner my-1">
             <svg className="ilu" width="180" height="140" viewBox="0 0 220 170" aria-hidden="true">
               <circle className="circulo-ok" cx="110" cy="85" r="56" fill="#15803D" />
               <path
@@ -1181,7 +1182,7 @@ function Pago({ errorPagoInicial = null } = {}) {
             </div>
           )}
 
-          <div className="w-full box-border bg-crema-oscura/50 border border-carbon/15 rounded-xl p-3.5 flex justify-between items-center text-sm font-sans">
+          <div className="w-full box-border bg-papel-linea/40 border border-carbon/15 rounded-xl p-3.5 flex justify-between items-center text-sm font-sans">
             <span className="text-carbon/70">Le falta a la mesa</span>
             <span className="font-titulo text-xl tracking-wider text-carbon">{formatoPesos(saldo)}</span>
           </div>
@@ -1189,7 +1190,7 @@ function Pago({ errorPagoInicial = null } = {}) {
           <button
             type="button"
             onClick={handleVolverCuenta}
-            className="w-full min-h-[52px] rounded-xl bg-carbon hover:bg-carbon/90 active:bg-carbon/80 text-crema font-titulo text-xl tracking-wider cursor-pointer transition-colors shadow-sm"
+            className="w-full min-h-[52px] rounded-xl bg-carbon hover:bg-carbon/90 active:bg-carbon/80 text-papel font-titulo text-xl tracking-wider cursor-pointer transition-colors shadow-sm"
           >
             VER LA CUENTA
           </button>
@@ -1203,13 +1204,13 @@ function Pago({ errorPagoInicial = null } = {}) {
           aria-live="polite"
         >
           {/* Banda superior de la comanda */}
-          <div className="w-full bg-carbon text-crema py-1.5 px-4 rounded-lg font-titulo tracking-widest text-sm flex items-center justify-between">
+          <div className="w-full bg-carbon text-papel py-1.5 px-4 rounded-lg font-titulo tracking-widest text-sm flex items-center justify-between">
             <span>CAJA</span>
             <span className="font-manuscrita text-ambar text-base">efectivo</span>
           </div>
 
           {/* Ilustración de caja registradora con recibo animado adaptada */}
-          <div className="relative w-40 h-40 rounded-full bg-crema-oscura/40 border-4 border-carbon/15 flex items-center justify-center shadow-inner my-1">
+          <div className="relative w-40 h-40 rounded-full bg-papel-linea/40 border-4 border-carbon/15 flex items-center justify-center shadow-inner my-1">
             <svg className="ilu" width="180" height="140" viewBox="0 0 200 170" aria-hidden="true">
               <rect x="40" y="70" width="120" height="70" rx="10" fill="#1C1917" stroke="#44403C" strokeWidth="2" />
               <rect x="54" y="82" width="56" height="22" rx="4" fill="#0C0A09" />
@@ -1252,7 +1253,7 @@ function Pago({ errorPagoInicial = null } = {}) {
             </button>
           )}
 
-          <div className="w-full box-border bg-crema-oscura/60 border-2 border-dashed border-carbon/25 rounded-2xl p-3.5 flex flex-col gap-1 text-center">
+          <div className="w-full box-border bg-papel-linea/40 border-2 border-dashed border-carbon/25 rounded-2xl p-3.5 flex flex-col gap-1 text-center">
             <span className="font-titulo text-xs tracking-widest text-carbon/60 uppercase">
               DILE AL CAJERO
             </span>
