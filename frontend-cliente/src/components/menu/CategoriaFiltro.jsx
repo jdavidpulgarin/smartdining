@@ -7,7 +7,7 @@ function CategoriaFiltro({
     categoriaSeleccionada === null || categoriaSeleccionada === 'todas';
 
   return (
-    <div className="sticky top-[79px] z-20 flex gap-2.5 overflow-x-auto px-5 py-3.5 bg-ambar border-b-[3px] border-carbon scrollbar-none">
+    <div className="sticky top-[79px] z-20 flex gap-2.5 overflow-x-auto -mx-4 px-4 py-3.5 bg-ambar border-b-[3px] border-carbon scrollbar-none">
       {/* Chip Todas */}
       <button
         type="button"

@@ -310,7 +310,7 @@ function Menu({
   return (
     <div className="w-full max-w-full overflow-x-hidden space-y-6 pb-28">
       {/* Portada Hero del Menú */}
-      <section className="pt-6 pb-2 px-4 overflow-hidden">
+      <section className="pt-6 pb-2 -mx-4 px-4 overflow-hidden">
         <div className="relative bg-papel p-2.5 rounded-2xl -rotate-2 shadow-[0_20px_30px_-16px_rgba(0,0,0,0.6)]">
           {!errorHero ? (
             <img
@@ -354,7 +354,7 @@ function Menu({
       {/* Sección Arma tu plato */}
       {platosArmables.length > 0 && (
         <section aria-labelledby="titulo-arma-tu-plato" className="space-y-3 pt-2">
-          <div className="flex items-baseline justify-between gap-2 px-4">
+          <div className="flex items-baseline justify-between gap-2">
             <h2
               id="titulo-arma-tu-plato"
               className="font-titulo text-3xl font-bold uppercase tracking-wide text-carbon leading-none"
@@ -366,7 +366,7 @@ function Menu({
             </span>
           </div>
 
-          <div className="flex gap-4 overflow-x-auto pb-6 snap-x snap-mandatory scrollbar-none px-4">
+          <div className="flex gap-4 overflow-x-auto pb-6 snap-x snap-mandatory scrollbar-none -mx-4 px-4">
             {platosArmables.map((plato) => (
               <article
                 key={plato.id_plato}
@@ -458,7 +458,7 @@ function Menu({
       />
 
       {/* Grid de platos o mensaje de estado vacío */}
-      <section className="px-4">
+      <section>
         {platosFiltrados.length === 0 ? (
           <div className="ticket-comanda bg-papel rounded-t-2xl shadow-xl p-8 text-center space-y-2 my-4">
             <div className="w-12 h-12 bg-carbon/5 text-carbon rounded-full flex items-center justify-center mx-auto text-2xl">

@@ -128,7 +128,7 @@ function Layout({ children }) {
 
   return (
     <div
-      className={`min-h-screen flex flex-col relative transition-colors duration-500 ${
+      className={`min-h-screen flex flex-col relative transition-colors duration-500 w-full max-w-full overflow-x-hidden ${
         esComanda
           ? esRojoSeguimiento
             ? 'fondo-comanda-rojo text-tinta'
@@ -214,7 +214,7 @@ function Layout({ children }) {
         </div>
       )}
 
-      <main id="contenido-principal" tabIndex={-1} className={`flex-1 w-full max-w-[480px] mx-auto focus:outline-none ${esComanda ? 'pb-28' : 'px-4 pb-8'}`}>{children}</main>
+      <main id="contenido-principal" tabIndex={-1} className={`flex-1 w-full max-w-[480px] mx-auto px-4 focus:outline-none ${esComanda ? 'pb-28' : 'pb-8'}`}>{children}</main>
     </div>
   );
 }

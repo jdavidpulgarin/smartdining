@@ -265,7 +265,7 @@ function Constructor() {
   const portadaUrl = urlImagen(plato.url_imagen);
 
   return (
-    <div className="space-y-4 pb-32 max-w-md mx-auto px-4 w-full max-w-full overflow-x-hidden">
+    <div className="space-y-4 pb-32 max-w-md mx-auto w-full max-w-full overflow-x-hidden">
       {/* Portada / Hero del plato */}
       <div className="-mx-4 -mt-4 mb-3 relative overflow-hidden rounded-b-3xl bg-carbon min-h-[160px] border-b-2 border-carbon">
         <div className="h-48 sm:h-56 w-full relative">

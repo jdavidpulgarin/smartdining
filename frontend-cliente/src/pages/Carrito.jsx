@@ -228,7 +228,7 @@ function Carrito({ faltantesIniciales = [], errorPedidoInicial = null } = {}) {
   }
 
   return (
-    <div className="space-y-4 pb-8 max-w-md mx-auto">
+    <div className="space-y-4 pb-8 max-w-md mx-auto w-full max-w-full overflow-x-hidden">
       {/* Portada Hero Carrito */}
       <section className="relative px-1 pt-2 pb-2 mb-2 overflow-hidden">
         <div className="flex flex-col relative z-10 pr-24">

@@ -201,7 +201,7 @@ function Seguimiento() {
 
   return (
     <div
-      className="flex flex-col gap-4 pb-8 transition-colors duration-500"
+      className="flex flex-col gap-4 pb-8 transition-colors duration-500 w-full max-w-full overflow-x-hidden"
       style={{ '--fondo-pagina': esRojo ? '#E5212E' : '#FFB02E' }}
     >
       {/* Confeti decorativo cuando el pedido está entregado */}
@@ -247,7 +247,7 @@ function Seguimiento() {
         <div
           role="tablist"
           aria-label="Mis pedidos"
-          className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar"
+          className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar -mx-4 px-4"
         >
           {misPedidos.map((p) => {
             const esActivo =
