@@ -33,6 +33,13 @@ vi.mock('../context/MesaSocketContext', () => ({
   }),
 }));
 
+vi.mock('../context/SesionContext', () => ({
+  useSesion: () => ({
+    sesion: { numeroMesa: 2, comensal: 'Ana' },
+    estado: 'activa',
+  }),
+}));
+
 // Solo se fija el apodo; lo demás de apodo.js (claveAlias, que usa utils/cuenta
 // desde el #245) sigue siendo el real.
 vi.mock('../utils/apodo', async (importOriginal) => ({

@@ -2,13 +2,14 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import Header from './Header';
 import { useMesaSession } from '../../hooks/useMesaSession';
+import useSeguimientoMesa from '../../hooks/useSeguimientoMesa';
 import { useCarrito } from '../../context/CarritoContext';
 import { useMesaSocketContext } from '../../context/MesaSocketContext';
 import {
   formatearMensajePedidoCreado,
   formatearMensajeItemCancelado,
 } from '../../utils/notificacionesMesa';
-import { esPedidoMio } from '../../utils/seguimiento';
+import { esPedidoMio, resumenPedidosActivos } from '../../utils/seguimiento';
 import { textoPagoConfirmado } from '../../utils/cuenta';
 import { crearDeduplicador } from '../../utils/deduplicador';
 
@@ -18,8 +19,15 @@ function Layout({ children }) {
   const esComanda =
     rutaActual === '/menu' ||
     rutaActual === '/carrito' ||
+    rutaActual === '/seguimiento' ||
     rutaActual.startsWith('/armar/');
   const { mesa, comensal, valida, cargando, motivoCierre } = useMesaSession();
+  const { misPedidos } = useSeguimientoMesa();
+  const resumen = resumenPedidosActivos(misPedidos);
+  const estadoPrincipal = resumen?.estadoPrincipal;
+  const esRojoSeguimiento =
+    rutaActual === '/seguimiento' &&
+    (estadoPrincipal === 'en_preparacion' || estadoPrincipal === 'entregado');
   const { totalUnidades, avisosMenu = [], descartarAvisosMenu } = useCarrito();
   const { on: socketOn } = useMesaSocketContext();
 
@@ -119,7 +127,20 @@ function Layout({ children }) {
   }
 
   return (
-    <div className={`min-h-screen flex flex-col relative ${esComanda ? 'fondo-comanda text-tinta' : 'bg-fondo text-texto'}`}>
+    <div
+      className={`min-h-screen flex flex-col relative transition-colors duration-500 ${
+        esComanda
+          ? esRojoSeguimiento
+            ? 'fondo-comanda-rojo text-tinta'
+            : 'fondo-comanda text-tinta'
+          : 'bg-fondo text-texto'
+      }`}
+      style={
+        esComanda
+          ? { '--fondo-pagina': esRojoSeguimiento ? '#E5212E' : '#FFB02E' }
+          : undefined
+      }
+    >
       <a
         href="#contenido-principal"
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:px-4 focus:py-2 focus:rounded-xl focus:bg-primario focus:text-white focus:font-etiqueta focus:font-bold focus:text-sm"

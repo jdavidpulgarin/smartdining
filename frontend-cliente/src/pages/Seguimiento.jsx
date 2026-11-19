@@ -18,7 +18,7 @@ import {
 import { formatearPrecio } from '../utils/formato';
 
 /**
- * Pantalla principal de seguimiento de pedidos en mesa (J-07, J-14).
+ * Pantalla principal de seguimiento de pedidos en mesa al estilo comanda (J-07, J-14).
  */
 function Seguimiento() {
   const location = useLocation();
@@ -147,42 +147,45 @@ function Seguimiento() {
 
   if (!pedidoActivo) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-        <div
-          aria-hidden="true"
-          className="w-20 h-20 rounded-full bg-superficie border border-borde text-texto-suave flex items-center justify-center mb-4"
-        >
-          <svg
-            width="36"
-            height="36"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+      <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+        <div className="ticket-comanda w-full max-w-sm p-6 flex flex-col items-center gap-4 text-center">
+          <div
             aria-hidden="true"
+            className="w-20 h-20 rounded-full bg-carbon text-ambar flex items-center justify-center shadow-md"
           >
-            <rect x="8" y="2" width="8" height="4" rx="1" />
-            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-            <path d="M12 11h4" />
-            <path d="M12 16h4" />
-            <path d="M8 11h.01" />
-            <path d="M8 16h.01" />
-          </svg>
+            <svg
+              width="36"
+              height="36"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="8" y="2" width="8" height="4" rx="1" />
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+              <path d="M12 11h4" />
+              <path d="M12 16h4" />
+              <path d="M8 11h.01" />
+              <path d="M8 16h.01" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-titulo uppercase tracking-wider text-carbon m-0">
+            No tienes pedidos activos en esta mesa
+          </h1>
+          <p className="text-sm text-[#5B4A46] max-w-xs m-0">
+            Cuando confirmes un pedido desde el carrito, podrás ver su estado y avance aquí.
+          </p>
+          <div className="corte-comanda w-full my-2" />
+          <Link
+            to="/menu"
+            className="btn-comanda no-underline"
+          >
+            Ver menú
+          </Link>
         </div>
-        <h1 className="text-2xl font-titulo uppercase tracking-wider text-texto mb-2">
-          No tienes pedidos activos en esta mesa
-        </h1>
-        <p className="text-sm text-texto-suave max-w-xs mb-6">
-          Cuando confirmes un pedido desde el carrito, podrás ver su estado y avance aquí.
-        </p>
-        <Link
-          to="/menu"
-          className="min-h-12 inline-flex items-center justify-center px-6 py-3 bg-primario hover:bg-primario-hover text-white font-etiqueta uppercase tracking-wider font-bold text-sm rounded-xl transition-colors shadow-sm"
-        >
-          Ver menú
-        </Link>
       </div>
     );
   }
@@ -193,9 +196,25 @@ function Seguimiento() {
   );
 
   const detalles = pedidoActivo.detalles || [];
+  const normEstado = String(pedidoActivo.estado || '').toLowerCase();
+  const esRojo = normEstado === 'en_preparacion' || normEstado === 'entregado';
 
   return (
-    <div className="flex flex-col gap-3.5 pb-8">
+    <div
+      className="flex flex-col gap-4 pb-8 transition-colors duration-500"
+      style={{ '--fondo-pagina': esRojo ? '#E5212E' : '#FFB02E' }}
+    >
+      {/* Confeti decorativo cuando el pedido está entregado */}
+      {normEstado === 'entregado' && (
+        <div className="fixed inset-0 pointer-events-none overflow-hidden z-0" aria-hidden="true">
+          <i className="absolute top-0 left-[10%] w-2 h-3 rounded-xs bg-[#E5212E] anim-cae" />
+          <i className="absolute top-0 left-[25%] w-2 h-3 rounded-xs bg-[#FFB02E] anim-cae [animation-delay:0.7s]" />
+          <i className="absolute top-0 left-[50%] w-2 h-3 rounded-xs bg-[#1FA65A] anim-cae [animation-delay:1.4s]" />
+          <i className="absolute top-0 left-[75%] w-2 h-3 rounded-xs bg-[#FFF4E6] anim-cae [animation-delay:0.3s]" />
+          <i className="absolute top-0 left-[90%] w-2 h-3 rounded-xs bg-[#E5212E] anim-cae [animation-delay:1.1s]" />
+        </div>
+      )}
+
       {/* Aviso temporal de llamada al mesero */}
       {avisoMesero && (() => {
         const mensaje =
@@ -211,13 +230,11 @@ function Seguimiento() {
           <div
             role="status"
             aria-live="polite"
-            className={`bg-superficie-2 px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg border ${
-              esLimite ? 'border-[#969696]' : 'border-acento'
-            } text-texto`}
+            className="bg-carbon text-ambar px-4 py-3 rounded-2xl flex items-center gap-2.5 text-xs font-semibold shadow-lg border-2 border-carbon"
           >
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
-                esLimite ? 'bg-[#969696]' : 'bg-acento'
+                esLimite ? 'bg-[#969696]' : 'bg-ambar'
               }`}
             />
             <span>{mensaje}</span>
@@ -252,15 +269,14 @@ function Seguimiento() {
                   setErrorQuitar(null);
                   setPedidoActivo(p.id_pedido);
                 }}
-                className={`min-h-[44px] px-3.5 py-1.5 rounded-xl border font-etiqueta font-bold text-xs tracking-wider uppercase whitespace-nowrap transition-all cursor-pointer flex items-center gap-2 ${
+                className={`min-h-[44px] px-4 py-2 rounded-xl font-titulo text-sm tracking-wider uppercase whitespace-nowrap transition-all cursor-pointer flex items-center gap-2 border-2 ${
                   esActivo
-                    ? 'bg-superficie-2 text-white shadow-sm'
-                    : 'bg-superficie text-texto-suave border-borde hover:text-white'
+                    ? 'bg-carbon text-ambar border-carbon shadow-md'
+                    : 'bg-papel text-carbon border-carbon/40 hover:border-carbon'
                 }`}
-                style={esActivo ? { borderColor: info.color } : {}}
               >
                 <span
-                  className="w-2 h-2 rounded-full shrink-0"
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
                   style={{ backgroundColor: info.color }}
                 />
                 <span>
@@ -272,7 +288,7 @@ function Seguimiento() {
         </div>
       )}
 
-      {/* Tarjeta principal con halo y animación */}
+      {/* Tarjeta principal con ilustración vectorial animada y título */}
       <TarjetaEstado pedido={pedidoActivo} numeroMesa={mesa} />
 
       {/* Solicitud discreta de notificaciones push tras confirmar pedido */}
@@ -283,21 +299,24 @@ function Seguimiento() {
 
       {/* TU ORDEN (si el pedido activo es mío y tiene ítems) */}
       {detalles.length > 0 && pedidoActivo.esMio && (
-        <section className="bg-superficie border border-borde rounded-2xl p-4 flex flex-col gap-2.5">
-          <h2 className="m-0 font-etiqueta font-bold text-[15px] tracking-wider text-texto-suave uppercase">
-            TU ORDEN
-          </h2>
+        <section className="ticket-comanda mt-6 anim-sube anim-sube-d2">
+          <div className="banda-comanda flex justify-between items-center px-5 py-3">
+            <span>TU ORDEN</span>
+            <small className="font-cuerpo font-semibold text-xs tracking-normal text-[#E9C98A]">
+              {detalles.length} {detalles.length === 1 ? 'PLATO' : 'PLATOS'}
+            </small>
+          </div>
 
           {errorQuitar && (
             <div
               role="alert"
-              className="p-3 rounded-xl border border-primario bg-superficie-2 text-primario-texto text-xs font-medium"
+              className="m-4 p-3 rounded-xl border-2 border-brasa bg-brasa/10 text-brasa text-xs font-bold"
             >
               {errorQuitar}
             </div>
           )}
 
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col">
             {detalles.map((detalle, idx) => {
               const nombrePlato = detalle.plato_nombre || detalle.nombre || 'Plato';
               const esCancelado =
@@ -311,33 +330,35 @@ function Seguimiento() {
               return (
                 <div
                   key={detalle.id_detalle ?? idx}
-                  className="flex items-center justify-between gap-2 text-[15px]"
+                  className="flex items-center justify-between gap-3 p-4 sm:px-5 border-b-2 border-dashed border-[#E6D6C4] last:border-b-0"
                 >
-                  <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                    <span
-                      className={`truncate ${
-                        esCancelado ? 'line-through text-texto-tenue' : 'text-white'
-                      }`}
-                    >
-                      {detalle.cantidad} × {nombrePlato}
-                    </span>
-                    {etiquetaCancelado && (
+                  <div className="min-w-0 flex flex-col gap-0.5">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-md bg-superficie-2 border font-etiqueta font-bold text-[11px] uppercase tracking-wider shrink-0 ${
-                          detalle.origen_cancelacion === 'personal'
-                            ? 'border-primario/50 text-primario-texto'
-                            : 'border-borde text-texto-suave'
+                        className={`text-[15px] sm:text-base font-semibold leading-snug ${
+                          esCancelado ? 'line-through text-texto-tenue' : 'text-carbon'
                         }`}
                       >
-                        {etiquetaCancelado}
+                        {detalle.cantidad} × {nombrePlato}
                       </span>
-                    )}
+                      {etiquetaCancelado && (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-md border font-titulo text-xs uppercase tracking-wider shrink-0 ${
+                            detalle.origen_cancelacion === 'personal'
+                              ? 'border-brasa text-brasa bg-brasa/10'
+                              : 'border-carbon/30 text-[#5B4A46]'
+                          }`}
+                        >
+                          {etiquetaCancelado}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2.5 shrink-0">
                     <span
-                      className={`font-medium ${
-                        esCancelado ? 'line-through text-texto-tenue' : 'text-texto-suave'
+                      className={`font-titulo text-[22px] sm:text-[23px] tracking-wide ${
+                        esCancelado ? 'line-through text-texto-tenue' : 'text-rojo'
                       }`}
                     >
                       {formatearPrecio(detalle.subtotal)}
@@ -348,7 +369,7 @@ function Seguimiento() {
                         onClick={() => abrirConfirmacion(detalle, pedidoActivo.id_pedido)}
                         disabled={quitando}
                         aria-label={`Quitar ${nombrePlato}`}
-                        className="min-h-[44px] min-w-[44px] px-3 py-1.5 rounded-xl border border-borde bg-superficie-2 hover:border-primario hover:text-white text-primario-texto font-etiqueta font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="min-h-9 px-3.5 rounded-full border-2 border-rojo bg-transparent hover:bg-rojo hover:text-white text-rojo font-titulo text-base uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
                       >
                         Quitar
                       </button>
@@ -358,28 +379,37 @@ function Seguimiento() {
               );
             })}
           </div>
-          <div className="h-px bg-borde my-1" />
-          <div className="flex justify-between items-baseline">
-            <span className="text-sm text-texto-suave">Total de tu orden</span>
-            <span className="font-titulo text-[28px] tracking-wider text-white">
+
+          <div className="corte-comanda my-2" />
+
+          <div className="flex justify-between items-baseline px-5 py-3">
+            <span className="font-titulo text-[20px] sm:text-[22px] tracking-wider text-carbon">
+              TOTAL DE TU ORDEN
+            </span>
+            <span className="font-titulo text-[36px] sm:text-[42px] leading-none text-rojo">
               {formatearPrecio(pedidoActivo.total)}
             </span>
           </div>
 
-          {puedeCancelarPedido(pedidoActivo, { yo: comensal }) && (
-            <div className="pt-2">
-              <Button
+          {puedeCancelarPedido(pedidoActivo, { yo: comensal }) ? (
+            <div className="px-5 pb-5 pt-1">
+              <button
                 type="button"
-                variante="secundario"
                 onClick={() => abrirConfirmarCancelar(pedidoActivo.id_pedido)}
                 disabled={cancelando || quitando}
-                className="w-full text-primario-texto border-primario/40 hover:border-primario hover:bg-primario/10 active:bg-primario/20 min-h-11 py-2 text-sm"
+                className="w-full min-h-[52px] rounded-xl border-3 border-carbon bg-transparent hover:bg-carbon hover:text-papel text-carbon font-titulo text-xl tracking-wider transition-colors cursor-pointer disabled:opacity-50"
               >
                 {cancelando && idPedidoACancelar === pedidoActivo.id_pedido
                   ? 'Cancelando...'
                   : 'Cancelar pedido'}
-              </Button>
+              </button>
             </div>
+          ) : (
+            normEstado !== 'recibido' && (
+              <p className="text-center text-xs text-[#5B4A46] pb-4 px-5 m-0 leading-relaxed">
+                Este pedido ya no se puede modificar desde aquí. Habla con tu mesero si necesitas cambios.
+              </p>
+            )
           )}
         </section>
       )}
@@ -390,8 +420,8 @@ function Seguimiento() {
         onCerrar={cerrarConfirmarCancelar}
         titulo="¿Cancelar todo el pedido?"
       >
-        <div className="p-4 space-y-4">
-          <p className="text-xs text-texto-suave">
+        <div className="p-4 space-y-4 text-center">
+          <p className="text-sm text-carbon font-medium m-0">
             Se cancelarán todos tus platos de este pedido. Esta acción no se puede deshacer.
           </p>
 
@@ -401,7 +431,7 @@ function Seguimiento() {
               variante="primario"
               onClick={confirmarCancelarPedido}
               disabled={cancelando}
-              className="flex-1 min-h-11 py-2.5 text-sm"
+              className="flex-1 min-h-11 py-2.5 text-sm font-titulo tracking-wider uppercase"
             >
               {cancelando ? 'Cancelando...' : 'Sí, cancelar'}
             </Button>
@@ -410,7 +440,7 @@ function Seguimiento() {
               variante="secundario"
               onClick={cerrarConfirmarCancelar}
               disabled={cancelando}
-              className="flex-1 min-h-11 py-2.5 text-sm"
+              className="flex-1 min-h-11 py-2.5 text-sm font-titulo tracking-wider uppercase"
             >
               Volver
             </Button>
@@ -434,19 +464,19 @@ function Seguimiento() {
             setItemAConfirmar(null);
           }
         }}
-        className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-borde bg-superficie p-5 text-texto shadow-2xl"
+        className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-2xl border-3 border-carbon bg-papel p-5 text-carbon shadow-2xl"
       >
         {itemAConfirmar && (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 text-center">
             <div className="flex flex-col gap-1.5">
               <h2
                 id={tituloConfirmarId}
-                className="m-0 font-etiqueta font-bold text-xl tracking-wide text-white"
+                className="m-0 font-titulo text-2xl tracking-wide text-carbon uppercase"
               >
                 ¿Quitar {itemAConfirmar.plato_nombre || itemAConfirmar.nombre || 'este plato'} de tu pedido?
               </h2>
               {Number(itemAConfirmar.cantidad) > 1 && (
-                <p className="m-0 text-xs text-texto-suave">
+                <p className="m-0 text-xs text-[#5B4A46]">
                   Se quitará la línea completa ({itemAConfirmar.cantidad} unidades) de tu orden.
                 </p>
               )}
@@ -457,7 +487,7 @@ function Seguimiento() {
                 type="button"
                 onClick={confirmarQuitar}
                 disabled={quitando}
-                className="min-h-[44px] flex-1 px-4 py-2.5 rounded-xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-sm uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                className="min-h-[44px] flex-1 px-4 py-2.5 rounded-xl bg-brasa hover:bg-brasa/90 text-white font-titulo text-lg uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {quitando ? 'Quitando...' : 'Sí, quitar'}
               </button>
@@ -466,7 +496,7 @@ function Seguimiento() {
                 autoFocus
                 onClick={cerrarConfirmacion}
                 disabled={quitando}
-                className="min-h-[44px] flex-1 px-4 py-2.5 rounded-xl border border-borde bg-superficie-2 hover:bg-superficie text-texto font-etiqueta font-bold text-sm uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                className="min-h-[44px] flex-1 px-4 py-2.5 rounded-xl border-2 border-carbon bg-papel hover:bg-carbon/10 text-carbon font-titulo text-lg uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Cancelar
               </button>
@@ -479,31 +509,31 @@ function Seguimiento() {
       <OtrosPedidos pedidos={otrosAMostrar} />
 
       {/* Botones de acción */}
-      <div className="flex flex-col gap-2.5 pt-1">
+      <div className="flex flex-col gap-3 pt-2">
         <Link
           to="/menu"
-          className="flex items-center justify-center min-h-[56px] rounded-2xl bg-primario hover:bg-primario-hover text-white font-etiqueta font-bold text-[19px] tracking-wider transition-colors no-underline"
+          className="btn-comanda no-underline"
         >
           PEDIR MÁS PLATOS
         </Link>
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
             onClick={llamarMesero}
             disabled={cooldownMesero > 0}
-            className={`min-h-[52px] rounded-xl border border-borde bg-superficie hover:bg-superficie-2 text-white font-etiqueta font-bold text-[15px] tracking-wider flex items-center justify-center gap-2 transition-colors ${
+            className={`min-h-[54px] rounded-xl border-2 border-carbon bg-papel hover:bg-carbon hover:text-ambar text-carbon font-titulo text-[18px] sm:text-[20px] tracking-wider flex items-center justify-center gap-2 transition-colors shadow-sm ${
               cooldownMesero > 0
                 ? 'opacity-60 cursor-not-allowed'
                 : 'cursor-pointer'
             }`}
           >
             <svg
-              width="18"
-              height="18"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#F2B705"
-              strokeWidth="2"
+              stroke="currentColor"
+              strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
               aria-hidden="true"
@@ -512,20 +542,20 @@ function Seguimiento() {
               <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" />
             </svg>
             {cooldownMesero > 0
-              ? `LLAMAR AL MESERO (${cooldownMesero}s)`
+              ? `LLAMAR (${cooldownMesero}s)`
               : 'LLAMAR AL MESERO'}
           </button>
           <Link
             to="/pago"
-            className="min-h-[52px] rounded-xl border border-borde bg-superficie hover:bg-superficie-2 text-white font-etiqueta font-bold text-[15px] tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer no-underline"
+            className="min-h-[54px] rounded-xl border-2 border-carbon bg-papel hover:bg-carbon hover:text-ambar text-carbon font-titulo text-[18px] sm:text-[20px] tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer no-underline shadow-sm"
           >
             <svg
-              width="18"
-              height="18"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#E3242B"
-              strokeWidth="2"
+              stroke="currentColor"
+              strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
               aria-hidden="true"

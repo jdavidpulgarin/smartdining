@@ -242,6 +242,122 @@
   .anim-cae {
     animation: comandaCae 5.5s linear infinite;
   }
+
+  /* Animaciones específicas de Seguimiento y Despedida comanda */
+  .seg-tk {
+    animation: seg-clava 2.8s cubic-bezier(0.4, 1.4, 0.5, 1) infinite;
+  }
+
+  .seg-ck {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: seg-ck 2.8s infinite;
+  }
+
+  .seg-llama {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: seg-llama 0.5s ease-in-out infinite alternate;
+  }
+
+  .seg-llama-b {
+    animation-delay: 0.15s;
+  }
+
+  .seg-llama-c {
+    animation-delay: 0.3s;
+  }
+
+  .seg-sarten {
+    transform-box: fill-box;
+    transform-origin: 20% 50%;
+    animation: seg-sacude 1.4s ease-in-out infinite;
+  }
+
+  .seg-salta {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: seg-salta 1.4s cubic-bezier(0.3, 0, 0.6, 1) infinite;
+  }
+
+  .seg-salta-b {
+    animation-delay: 0.15s;
+  }
+
+  .seg-salta-c {
+    animation-delay: 0.3s;
+  }
+
+  .seg-salta-d {
+    animation-delay: 0.08s;
+  }
+
+  .seg-vapor {
+    animation: seg-vapor 2.4s ease-out infinite;
+    opacity: 0;
+  }
+
+  .seg-vapor-v2 {
+    animation-delay: 0.8s;
+  }
+
+  .seg-vapor-v3 {
+    animation-delay: 1.6s;
+  }
+
+  .seg-campana {
+    transform-box: fill-box;
+    transform-origin: 50% 0;
+    animation: seg-tilin 1.6s ease-in-out infinite;
+  }
+
+  .seg-ding {
+    animation: seg-ding 1.6s infinite;
+    opacity: 0;
+  }
+
+  .seg-tapa {
+    transform-box: fill-box;
+    transform-origin: 85% 100%;
+    animation: seg-espia 3s ease-in-out infinite;
+  }
+
+  .seg-brillo {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: seg-brilla 1.8s ease-in-out infinite;
+  }
+
+  .seg-brillo-b2 {
+    animation-delay: 0.6s;
+  }
+
+  .seg-brillo-b3 {
+    animation-delay: 1.2s;
+  }
+
+  .seg-plato {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: seg-aterriza 0.8s cubic-bezier(0.3, 1.5, 0.5, 1) backwards;
+  }
+
+  .seg-chao {
+    animation: seg-chao 2.4s ease-in-out infinite;
+  }
+
+  .seg-late {
+    animation: seg-late 1.1s ease-in-out infinite;
+    transform-origin: center;
+  }
+
+  .seg-gira {
+    animation: seg-gira 30s linear infinite;
+  }
+
+  .seg-sello {
+    animation: seg-sello 0.45s 0.2s cubic-bezier(0.3, 1.4, 0.5, 1) forwards;
+  }
 }
 
 @keyframes comandaSube {
@@ -317,6 +433,91 @@
     opacity: 0;
     transform: translateY(620px) rotate(520deg);
   }
+}
+
+@keyframes seg-clava {
+  0%, 12% { transform: translateY(-70px); opacity: 0; }
+  30%, 88% { transform: none; opacity: 1; }
+  100% { transform: translateY(-6px); opacity: 0; }
+}
+
+@keyframes seg-ck {
+  0%, 32% { transform: scale(0); }
+  40% { transform: scale(1.25); }
+  46%, 88% { transform: scale(1); }
+  100% { transform: scale(0); }
+}
+
+@keyframes seg-llama {
+  to { transform: scaleY(1.28) scaleX(0.9); }
+}
+
+@keyframes seg-sacude {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(-5deg); }
+  40% { transform: rotate(2deg); }
+}
+
+@keyframes seg-salta {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  45% { transform: translateY(-46px) rotate(200deg); }
+}
+
+@keyframes seg-vapor {
+  0% { opacity: 0; transform: translateY(8px); }
+  30% { opacity: 0.8; }
+  100% { opacity: 0; transform: translateY(-26px); }
+}
+
+@keyframes seg-tilin {
+  0%, 40%, 100% { transform: rotate(0); }
+  5% { transform: rotate(-22deg); }
+  12% { transform: rotate(18deg); }
+  19% { transform: rotate(-12deg); }
+  26% { transform: rotate(6deg); }
+}
+
+@keyframes seg-ding {
+  0% { opacity: 0; }
+  6% { opacity: 1; }
+  30% { opacity: 0; }
+}
+
+@keyframes seg-espia {
+  0%, 30%, 100% { transform: none; }
+  45%, 70% { transform: translateY(-14px) rotate(-12deg); }
+}
+
+@keyframes seg-brilla {
+  0%, 100% { transform: scale(0.4); opacity: 0.3; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
+@keyframes seg-aterriza {
+  from { transform: translateY(-30px) scale(0.9); opacity: 0; }
+}
+
+@keyframes seg-chao {
+  0%, 100% { rotate: 0deg; }
+  20% { rotate: -6deg; }
+  40% { rotate: 5deg; }
+  60% { rotate: -3deg; }
+}
+
+@keyframes seg-late {
+  0%, 100% { transform: scale(1); }
+  15% { transform: scale(1.18); }
+  30% { transform: scale(0.96); }
+  45% { transform: scale(1.1); }
+}
+
+@keyframes seg-gira {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes seg-sello {
+  from { opacity: 0; transform: rotate(-10deg) scale(2.2); }
+  to { opacity: 0.95; transform: rotate(-10deg) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {

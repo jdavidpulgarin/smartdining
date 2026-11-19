@@ -71,7 +71,7 @@ function Header({ numeroMesa, comensal, cantidadCarrito = 0 }) {
   }
 
   return (
-    <header className="sticky top-0 z-50 bg-ambar border-b-[3px] border-carbon">
+    <header className="sticky top-0 z-50 bg-[var(--fondo-pagina,#FFB02E)] border-b-[3px] border-carbon transition-colors duration-500">
       <div className="max-w-[480px] mx-auto px-5 h-[82px] flex items-center justify-between gap-3">
         {/* Identidad: SD carbón + Nombre / Mesa */}
         <div className="flex items-center gap-3 min-w-0">

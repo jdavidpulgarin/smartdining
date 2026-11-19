@@ -19,7 +19,9 @@ function BottomBar({
 }) {
   const textoCalorias =
     etiquetaPrecio ||
-    (calorias !== undefined && calorias !== null ? `${calorias} kcal aprox.` : null);
+    (calorias !== undefined && calorias !== null && Number(calorias) > 0
+      ? `${calorias} kcal aprox.`
+      : null);
 
   return (
     <div

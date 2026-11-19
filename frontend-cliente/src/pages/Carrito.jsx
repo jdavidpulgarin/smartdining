@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCarrito } from '../context/CarritoContext';
 import { useMesaSocket } from '../context/MesaSocketContext';
-import { leerSesionAlmacenada } from '../utils/sesion';
+import { useSesion } from '../context/SesionContext';
 import { formatearPrecio } from '../utils/formato';
 import { obtenerApodo } from '../utils/apodo';
 import { pluralizar } from '../utils/pluralizar';
@@ -27,7 +27,7 @@ import {
 
 function Carrito({ faltantesIniciales = [], errorPedidoInicial = null } = {}) {
   const navigate = useNavigate();
-  const sesion = useMemo(() => leerSesionAlmacenada(), []);
+  const { sesion } = useSesion();
   const mesa = sesion?.numeroMesa ?? null;
   const {
     modo,
@@ -346,7 +346,7 @@ function Carrito({ faltantesIniciales = [], errorPedidoInicial = null } = {}) {
       </div>
 
       {/* Sección LO TUYO como ticket-comanda con banda carbón */}
-      <section className="ticket-comanda bg-papel text-tinta">
+      <section className="ticket-comanda bg-papel text-tinta mb-6">
         <div className="banda-comanda flex justify-between items-center">
           <span>LO TUYO{miNombre ? ` · ${miNombre.toUpperCase()}` : ''}</span>
           <span className="text-sm font-titulo tracking-wider text-ambar">
@@ -460,7 +460,7 @@ function Carrito({ faltantesIniciales = [], errorPedidoInicial = null } = {}) {
       )}
 
       {/* Notas generales para la cocina */}
-      <div className="ticket-comanda bg-papel">
+      <div className="ticket-comanda bg-papel mb-6">
         <div className="banda-comanda flex justify-between items-center">
           <span>NOTAS PARA LA COCINA</span>
           <span className="font-cuerpo text-[11px] text-ambar font-medium tracking-normal">(OPCIONAL)</span>
@@ -486,7 +486,7 @@ function Carrito({ faltantesIniciales = [], errorPedidoInicial = null } = {}) {
       </div>
 
       {/* Resumen del pedido / CUENTA */}
-      <div className="ticket-comanda bg-papel">
+      <div className="ticket-comanda bg-papel mb-6">
         <div className="banda-comanda">
           <span>CUENTA</span>
         </div>

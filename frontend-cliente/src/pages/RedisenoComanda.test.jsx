@@ -9,6 +9,9 @@ import LineaCarrito from '../components/carrito/LineaCarrito';
 import IngredientCard from '../components/ui/IngredientCard';
 import SelectorPorcion from '../components/constructor/SelectorPorcion';
 import Modal from '../components/ui/Modal';
+import LineaTiempo from '../components/seguimiento/LineaTiempo';
+import IlustracionEstado from '../components/seguimiento/IlustracionEstado';
+import Despedida from './Despedida';
 
 if (typeof document === 'undefined') {
   global.document = {
@@ -245,5 +248,44 @@ describe('Rediseño Comanda - Verificaciones visuales y accesibilidad', () => {
     expect(html).toContain('Normal');
     expect(html).toContain('Extra');
     expect(html).toContain('4.000');
+  });
+
+  // PARTE 3: Tests de Seguimiento y Despedida estilo comanda
+  it('LineaTiempo muestra los 4 pasos comanda preservando sus etiquetas', () => {
+    const html = renderToStaticMarkup(<LineaTiempo estado="en_preparacion" />);
+
+    expect(html).toContain('SEGUIMIENTO');
+    expect(html).toContain('4 PASOS');
+    expect(html).toContain('RECIBIDO');
+    expect(html).toContain('EN PREPARACIÓN');
+    expect(html).toContain('LISTO');
+    expect(html).toContain('EN TU MESA');
+    expect(html).toContain('aria-current="step"');
+  });
+
+  it('IlustracionEstado renderiza la escena vectorial con aria-hidden="true"', () => {
+    const html = renderToStaticMarkup(<IlustracionEstado estado="recibido" />);
+
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain('seg-gira');
+    expect(html).toContain('seg-tk');
+    expect(html).toContain('seg-ck');
+  });
+
+  it('Despedida muestra el ticket CUENTA PAGADA, sello verde y botón Volver al inicio', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[{ pathname: '/despedida', state: { motivo: 'pagada', numeroMesa: 3, comensal: 'Carlos' } }]}>
+        <Despedida />
+      </MemoryRouter>
+    );
+
+    expect(html).toContain('fondo-comanda-rojo');
+    expect(html).toContain('CUENTA PAGADA');
+    expect(html).toContain('PAGADO');
+    expect(html).toContain('¡GRACIAS POR VENIR!');
+    expect(html).toContain('MESA 3');
+    expect(html).toContain('btn-despedida-inicio');
+    expect(html).toContain('Volver al inicio');
+    expect(html).toContain('/img/mascota-chef.webp');
   });
 });
