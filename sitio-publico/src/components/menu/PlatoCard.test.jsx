@@ -19,6 +19,7 @@ describe('PlatoCard (soloLectura)', () => {
 
     expect(html).toContain('Ceviche Mixto');
     expect(html).toContain('28.000');
+    expect(html).toContain('etiqueta-precio');
     expect(html).toContain('Ver detalle →');
     expect(html).not.toContain('Añadir');
     expect(html).not.toContain('Agregar');

@@ -4,30 +4,43 @@ import React from 'react';
 import ComoPedir from './ComoPedir.jsx';
 
 describe('Sección ComoPedir', () => {
-  it('contiene 3 <img> con src de los .svg, width="320", height="220", alt="" y loading="lazy"; ya no contiene ".webp" ni "Capturas reales"', () => {
+  it('contiene 3 <svg aria-hidden="true"> decorativos con focusable="false" y ningún <img> de /img/como-pedir/', () => {
     const html = renderToStaticMarkup(<ComoPedir />);
 
-    // Paso 1
-    expect(html).toContain('src="/img/como-pedir/paso-1-escanear.svg"');
-    // Paso 2
-    expect(html).toContain('src="/img/como-pedir/paso-2-pedir.svg"');
-    // Paso 3
-    expect(html).toContain('src="/img/como-pedir/paso-3-pagar.svg"');
-
-    // Todas las imágenes deben tener width="320", height="220", alt="" y loading="lazy"
-    const imgs = html.match(/<img[^>]*>/g) || [];
-    expect(imgs).toHaveLength(3);
-    for (const img of imgs) {
-      expect(img).toContain('width="320"');
-      expect(img).toContain('height="220"');
-      expect(img).toContain('alt=""');
-      expect(img).toContain('loading="lazy"');
-      expect(img).toContain('decoding="async"');
+    // 3 <svg aria-hidden="true">
+    const svgs = html.match(/<svg[^>]*aria-hidden="true"[^>]*>/g) || [];
+    expect(svgs).toHaveLength(3);
+    for (const svg of svgs) {
+      expect(svg).toContain('focusable="false"');
+      expect(svg).not.toContain('role="img"');
     }
 
-    // Ya no contiene .webp ni "Capturas reales"
-    expect(html).not.toContain('.webp');
-    expect(html).not.toContain('Capturas reales');
+    // Ningún <img> de /img/como-pedir/
+    expect(html).not.toContain('/img/como-pedir/');
+    expect(html).not.toMatch(/<img[^>]*como-pedir/);
+  });
+
+  it('contiene las clases pedir- presentes para ilustraciones y animaciones sincronizadas', () => {
+    const html = renderToStaticMarkup(<ComoPedir />);
+
+    expect(html).toContain('pedir-pasos');
+    expect(html).toContain('pedir-card');
+    expect(html).toContain('pedir-ilus');
+    expect(html).toContain('pedir-tel');
+    expect(html).toContain('pedir-laser');
+    expect(html).toContain('pedir-flash');
+    expect(html).toContain('pedir-ok');
+    expect(html).toContain('pedir-esq');
+    expect(html).toContain('pedir-ticket');
+    expect(html).toContain('pedir-capa-0');
+    expect(html).toContain('pedir-onda');
+    expect(html).toContain('pedir-mas');
+    expect(html).toContain('pedir-bill');
+    expect(html).toContain('pedir-tarj');
+    expect(html).toContain('pedir-vivo');
+    expect(html).toContain('pedir-relleno');
+    expect(html).toContain('pedir-nodo-1');
+    expect(html).toContain('pedir-campana');
   });
 
   it('presenta los 3 pasos con sus títulos en orden', () => {

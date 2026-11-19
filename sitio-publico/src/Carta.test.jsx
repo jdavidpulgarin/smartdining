@@ -122,7 +122,7 @@ describe('Carta (sitio público)', () => {
     expect(html).toMatch(/<h2[^>]*id="carta-titulo"[^>]*>[\s\S]*Nuestra[\s\S]*Carta[\s\S]*<\/h2>/);
   });
 
-  it('con la carta fija aparecen en "Todas" TODOS los platos no personalizables (incluidos los destacados en "Toda la carta" y adicionales) con <img> y subtítulos de categoría, sin repetir armables', async () => {
+  it('con la carta fija aparecen en "Todas" TODOS los platos no personalizables en UNA sola cuadrícula sin subtítulos de categoría dentro de "Toda la carta", sin repetir armables', async () => {
     vi.spyOn(apiModule, 'pedirJson').mockImplementation(async () => {
       throw new apiModule.ErrorApi({ status: 500, mensaje: 'Error' });
     });
@@ -134,36 +134,36 @@ describe('Carta (sitio público)', () => {
     expect(html).toContain('Toda la carta');
 
     const todaLaCartaPos = html.indexOf('Toda la carta');
-    const bloqueTodaLaCarta = html.slice(todaLaCartaPos);
+    const armaTuPlatoPos = html.indexOf('id="arma-tu-plato"');
+    const soloTodaLaCarta = html.slice(todaLaCartaPos, armaTuPlatoPos);
 
-    // Subtítulos de categoría presentes
-    expect(bloqueTodaLaCarta).toContain('Entradas');
-    expect(bloqueTodaLaCarta).toContain('Hamburguesas &amp; Fuertes');
-    expect(bloqueTodaLaCarta).toContain('Bebidas &amp; Cocteles');
-    expect(bloqueTodaLaCarta).toContain('Postres');
-    expect(bloqueTodaLaCarta).toContain('Adicionales');
+    // En "Todas" ya no hay subtítulos de categoría dentro de "Toda la carta"
+    expect(soloTodaLaCarta).not.toMatch(/<h4[^>]*>/);
+    expect(soloTodaLaCarta).not.toContain('Hamburguesas &amp; Fuertes');
+    expect(soloTodaLaCarta).not.toContain('Bebidas &amp; Cocteles');
 
     // Platos incluidos en "Toda la carta", incluidos destacados y adicionales
-    expect(bloqueTodaLaCarta).toContain('Nachos Supremos');
-    expect(bloqueTodaLaCarta).toContain('Costillas BBQ St. Louis');
-    expect(bloqueTodaLaCarta).toContain('Hamburguesa Smart Angus');
-    expect(bloqueTodaLaCarta).toContain('Aguacate Extra');
-    expect(bloqueTodaLaCarta).toContain('Alitas BBQ x8');
-    expect(bloqueTodaLaCarta).toContain('Cerveza Artesanal IPA');
+    expect(soloTodaLaCarta).toContain('Nachos Supremos');
+    expect(soloTodaLaCarta).toContain('Costillas BBQ St. Louis');
+    expect(soloTodaLaCarta).toContain('Hamburguesa Smart Angus');
+    expect(soloTodaLaCarta).toContain('Aguacate Extra');
+    expect(soloTodaLaCarta).toContain('Alitas BBQ x8');
+    expect(soloTodaLaCarta).toContain('Cerveza Artesanal IPA');
 
-    // Todos los platos no personalizables aparecen con su tarjeta
+    // Todos los platos no personalizables aparecen con su tarjeta y su <img>
     for (const plato of menu.platos) {
-      expect(bloqueTodaLaCarta).toContain(plato.nombre);
+      expect(soloTodaLaCarta).toContain(plato.nombre);
     }
-    const imgsEnTodaLaCarta = (bloqueTodaLaCarta.match(/<img[^>]+>/g) || []).length;
+    const imgsEnTodaLaCarta = (soloTodaLaCarta.match(/<img[^>]+>/g) || []).length;
     expect(imgsEnTodaLaCarta).toBeGreaterThanOrEqual(menu.platos.length);
 
     // Los armables no se repiten en "Toda la carta"
-    const armaTuPlatoPos = html.indexOf('id="arma-tu-plato"');
-    const soloTodaLaCarta = html.slice(todaLaCartaPos, armaTuPlatoPos);
     for (const armable of menu.armables) {
       expect(soloTodaLaCarta).not.toContain(armable.nombre);
     }
+
+    // Las tarjetas muestran el precio con la clase etiqueta-precio
+    expect(html).toContain('etiqueta-precio');
   });
 
   it('los nombres de los platos llevan line-clamp-2 y title', async () => {
@@ -218,6 +218,7 @@ describe('Carta (sitio público)', () => {
     expect(htmlCarta).toContain('Bowl Parrillero');
     expect(htmlCarta).toContain('Personalizable');
     expect(htmlCarta).toContain('Desde');
+    expect(htmlCarta).toContain('etiqueta-precio');
     expect(htmlCarta).toContain('Ver ingredientes');
     expect(htmlCarta).toContain('Base, Proteína');
 
