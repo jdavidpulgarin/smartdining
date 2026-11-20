@@ -2089,14 +2089,19 @@
     grid-template-columns: 1fr;
     gap: 24px;
   }
+
+  .tema-comanda .sd-mesas-layout {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .tema-comanda .sd-alertas-panel {
+    position: static;
+    top: auto;
+  }
 }
 
 @media (max-width: 1023px) {
-  .tema-comanda .sd-mesas-layout {
-    grid-template-columns: 1fr;
-    gap: 20px;
-  }
-
   .tema-comanda .sd-tables-grid {
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
     gap: 12px;
