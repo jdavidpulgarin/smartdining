@@ -178,8 +178,7 @@ export default function Tablero() {
   // Solo-icono: en la cabecera del mockup lo unico que lleva texto es SALIR,
   // que es el boton del que mas conviene no dudar. El resto se explica con el
   // title y con aria-label, que ademas es lo que lee un lector de pantalla.
-  const botonBarra =
-    'grid h-12 w-12 place-items-center rounded-xl border border-[color:var(--color-borde)] text-[color:var(--color-texto)]'
+  const botonBarra = 'tc-boton-barra'
 
   // El reloj de pared se cuelga del mismo latido de un segundo que los
   // cronometros de las tarjetas: ni un timer mas.
@@ -193,9 +192,10 @@ export default function Tablero() {
   const aviso = avisoDelTablero({ conectado, error: estado.error })
 
   return (
-    <div className="fondo-tablero flex h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--color-borde)] bg-[color:var(--color-panel)] px-5 py-3">
-        <div className="flex flex-wrap items-center gap-4">
+    // .tema-cocina encierra la piel nueva (tema-cocina.css) en esta pantalla.
+    <div className="fondo-tablero tema-cocina flex h-full flex-col">
+      <header className="tc-barra">
+        <div className="tc-barra-grupo tc-barra-izquierda">
           <Logo
             texto="Cocina"
             titulo={
@@ -205,8 +205,8 @@ export default function Tablero() {
           <IndicadorConexion conectado={conectado} />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="display mr-2 text-3xl font-bold tabular-nums" aria-label="Hora">
+        <div className="tc-barra-grupo tc-barra-derecha">
+          <p className="display tc-hora" aria-label="Hora">
             {horaDePared}
           </p>
 
@@ -218,7 +218,7 @@ export default function Tablero() {
             ref={botonAgotados}
             type="button"
             onClick={() => setPanelAbierto(true)}
-            className={`relative ${botonBarra}`}
+            className={botonBarra}
             aria-label={
               totalAgotados > 0 ? `Agotados: ${totalAgotados}` : 'Ingredientes y platos agotados'
             }
@@ -230,10 +230,7 @@ export default function Tablero() {
                 nada, que es justo lo que se quiere: el panel no estorba al
                 tablero por no haber podido leer la carta. */}
             {totalAgotados > 0 && (
-              <span
-                aria-hidden="true"
-                className="absolute -right-1 -top-1 grid h-6 min-w-6 place-items-center rounded-full bg-[color:var(--color-alerta)] px-1 text-xs font-bold text-white"
-              >
+              <span aria-hidden="true" className="tc-insignia">
                 {totalAgotados}
               </span>
             )}
@@ -303,7 +300,7 @@ export default function Tablero() {
               cerrarSonido()
               cerrarSesion()
             }}
-            className="display flex h-12 items-center gap-2 rounded-xl border border-[color:var(--color-borde)] px-4 text-xl font-semibold"
+            className={`${botonBarra} tc-boton-salir`}
           >
             <LogOut size={22} aria-hidden="true" />
             Salir
@@ -319,14 +316,14 @@ export default function Tablero() {
           por eso no depende de estado.error — un socket caido no deja ningun
           error de API detras. */}
       {aviso === 'desconexion' && (
-        <div className="flex flex-wrap items-center justify-between gap-4 bg-[color:var(--color-alerta)] px-5 py-3 text-white">
+        <div className="tc-aviso tc-aviso-desconexion">
           <p className="flex items-start gap-3">
             <AlertCircle size={28} className="mt-0.5 shrink-0" aria-hidden="true" />
             <span>
-              <span className="display block text-2xl font-bold leading-none">
+              <span className="display tc-aviso-titulo block leading-none">
                 Sin conexión con el servidor
               </span>
-              <span className="mt-1 block text-base">
+              <span className="tc-aviso-texto mt-1 block">
                 Reintentando solo… Las comandas nuevas no están llegando: avisa al mesero o al
                 administrador.
               </span>
@@ -335,7 +332,7 @@ export default function Tablero() {
           <button
             type="button"
             onClick={recargar}
-            className="display h-12 rounded-lg bg-white px-5 text-xl font-bold text-[color:var(--color-alerta)]"
+            className="display tc-aviso-boton"
           >
             Recargar ahora
           </button>
@@ -345,22 +342,22 @@ export default function Tablero() {
       {/* Un fallo de la API con el socket vivo es otra cosa: ahi si hay un
           mensaje del servidor que vale la pena leer tal cual. */}
       {aviso === 'error' && (
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-[color:var(--color-alerta)]/15 px-5 py-3">
-          <p className="flex items-center gap-2 text-lg text-[color:var(--color-alerta)]">
+        <div className="tc-aviso tc-aviso-error">
+          <p className="tc-aviso-mensaje">
             <AlertCircle size={20} aria-hidden="true" />
             {estado.error}
           </p>
           <button
             type="button"
             onClick={recargar}
-            className="display h-12 rounded-lg bg-[color:var(--color-alerta)] px-4 text-lg font-bold text-white"
+            className="display tc-aviso-boton"
           >
             Reintentar
           </button>
         </div>
       )}
 
-      <main className="flex min-h-0 flex-1 gap-3 p-3">
+      <main className="tc-columnas">
         {COLUMNAS.map((columna) => (
           <Columna
             key={columna.estado}

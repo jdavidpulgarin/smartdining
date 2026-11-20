@@ -9,19 +9,21 @@
  */
 export default function Logo({ texto, titulo, nota }) {
   return (
-    <div className="flex items-center gap-3" title={titulo || undefined}>
+    // Las clases tc-* son solo enganches para el tema del tablero
+    // (tema-cocina.css); fuera de .tema-cocina no hacen nada.
+    <div className="tc-logo flex items-center gap-3" title={titulo || undefined}>
       <span
-        className="display grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[color:var(--color-marca)] text-xl font-bold text-white"
+        className="tc-logo-marca display grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[color:var(--color-marca)] text-xl font-bold text-white"
         aria-hidden="true"
       >
         SD
       </span>
       <div className="leading-none">
-        <p className="display text-3xl font-bold leading-none text-[color:var(--color-marca)]">
+        <p className="tc-logo-texto display text-3xl font-bold leading-none text-[color:var(--color-marca)]">
           {texto}
         </p>
         {nota && (
-          <p className="display mt-1 text-sm font-semibold leading-none text-[color:var(--color-texto-suave)]">
+          <p className="tc-logo-nota display mt-1 text-sm font-semibold leading-none text-[color:var(--color-texto-suave)]">
             {nota}
           </p>
         )}

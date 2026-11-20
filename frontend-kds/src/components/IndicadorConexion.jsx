@@ -7,19 +7,10 @@
  * las comandas nuevas no estan entrando.
  */
 export default function IndicadorConexion({ conectado }) {
-  const color = conectado ? 'var(--color-texto)' : 'var(--color-alerta)'
-
+  // El color sale de `conectado`, igual que antes; ahora lo pone la clase.
   return (
-    <p
-      className="display flex items-center gap-2 rounded-full border px-4 py-1 text-base font-semibold"
-      style={{ borderColor: color, color }}
-      role="status"
-    >
-      <span
-        className="h-2.5 w-2.5 shrink-0 rounded-full"
-        style={{ backgroundColor: color }}
-        aria-hidden="true"
-      />
+    <p className={conectado ? 'tc-conexion' : 'tc-conexion es-desconectado'} role="status">
+      <span className="tc-conexion-punto shrink-0" aria-hidden="true" />
       {conectado ? 'En vivo' : 'Desconectado'}
     </p>
   )

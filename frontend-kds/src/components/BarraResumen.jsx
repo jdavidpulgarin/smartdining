@@ -31,16 +31,16 @@ const NIVELES = [
 
 export default function BarraResumen({ activas }) {
   return (
-    <div className="display flex flex-wrap items-center justify-center gap-x-8 gap-y-2 bg-[color:var(--color-marca)] px-5 py-2 text-base font-semibold text-white">
-      <p>
+    <div className="tc-resumen">
+      <p className="tc-resumen-total">
         {activas} {activas === 1 ? 'comanda activa' : 'comandas activas'}
       </p>
 
-      <ul className="flex flex-wrap items-center gap-x-6 gap-y-2">
+      <ul className="tc-leyenda">
         {NIVELES.map((nivel) => (
-          <li key={nivel.texto} className="flex items-center gap-2">
+          <li key={nivel.texto} className="tc-leyenda-item">
             <span
-              className="h-3 w-3 shrink-0 rounded-sm border border-white/40"
+              className="tc-leyenda-muestra shrink-0"
               style={{ backgroundColor: nivel.color }}
               aria-hidden="true"
             />

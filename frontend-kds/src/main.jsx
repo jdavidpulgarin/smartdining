@@ -11,6 +11,8 @@ import '@fontsource/barlow-condensed/600.css'
 import '@fontsource/barlow-condensed/700.css'
 
 import './index.css'
+// Piel del tablero: todo va bajo .tema-cocina, así que el login no la recoge.
+import './tema-cocina.css'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

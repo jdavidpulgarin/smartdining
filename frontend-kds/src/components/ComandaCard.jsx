@@ -31,20 +31,12 @@ import {
 const PORCIONES = {
   extra: {
     texto: 'EXTRA',
-    clase: 'bg-[color:var(--color-preparacion)] text-[color:var(--color-fondo)] font-bold',
+    clase: 'tc-marca-extra',
   },
   ligera: {
     texto: 'LIGERA',
-    clase:
-      'border border-[color:var(--color-borde)] text-[color:var(--color-texto-suave)] font-semibold',
+    clase: 'tc-marca-ligera',
   },
-}
-
-const COLOR_ESPERA = {
-  normal: 'var(--color-texto-suave)',
-  ambar: 'var(--color-preparacion)',
-  rojo: 'var(--color-alerta)',
-  neutro: 'var(--color-texto-suave)',
 }
 
 /**
@@ -52,10 +44,20 @@ const COLOR_ESPERA = {
  * atrasada tiene que encontrarse barriendo la pantalla con la vista, sin leer.
  */
 const CHIP_ESPERA = {
-  normal: 'bg-[color:var(--color-panel)] text-[color:var(--color-texto)]',
-  neutro: 'bg-[color:var(--color-panel)] text-[color:var(--color-texto-suave)]',
-  ambar: 'border-2 border-[color:var(--color-preparacion)] text-[color:var(--color-preparacion)]',
-  rojo: 'bg-[color:var(--color-alerta)] text-white',
+  normal: 'tc-chip-normal',
+  neutro: 'tc-chip-neutro',
+  ambar: 'tc-chip-ambar',
+  rojo: 'tc-chip-rojo',
+}
+
+/**
+ * La marca del pedido en ámbar o rojo (barra a la izquierda en el ticket).
+ * Antes era el color del borde, con la misma condición: hay semáforo y el
+ * nivel no es 'normal'.
+ */
+const MARCA_ESPERA = {
+  ambar: 'tc-pedido-ambar',
+  rojo: 'tc-pedido-rojo',
 }
 
 function Ingredientes({ item }) {
@@ -63,18 +65,18 @@ function Ingredientes({ item }) {
   if (grupos.length === 0) return null
 
   return (
-    <ul className="mt-2 space-y-1 border-l-2 border-[color:var(--color-borde)] pl-3">
+    <ul className="tc-mods">
       {grupos.map((grupo) => (
-        <li key={grupo.paso} className="text-base leading-snug">
-          <span className="text-[color:var(--color-texto-suave)]">{grupo.paso}: </span>
+        <li key={grupo.paso} className="tc-mod">
+          <span className="tc-mod-paso">{grupo.paso}: </span>
           {grupo.ingredientes.map((ing, indice) => {
             const marca = PORCIONES[ing.porcion]
             return (
               <span key={ing.id_ingrediente ?? `${grupo.paso}-${indice}`}>
-                {indice > 0 && <span className="text-[color:var(--color-texto-suave)]"> · </span>}
+                {indice > 0 && <span className="tc-mod-sep"> · </span>}
                 <span>{ing.nombre}</span>
                 {marca && (
-                  <span className={`display ml-1 rounded px-1.5 py-0.5 text-sm ${marca.clase}`}>
+                  <span className={`display tc-marca ${marca.clase}`}>
                     {marca.texto}
                   </span>
                 )}
@@ -120,7 +122,6 @@ export default function ComandaCard({
   const minutos = minutosDesdeCreacion(comanda, ahora)
   // En Listas la señal es neutra: la comanda ya salió de la cocina.
   const espera = senalDeEsperaDeComanda(comanda.estado, minutos)
-  const colorEspera = COLOR_ESPERA[espera.nivel]
   const conSemaforo = espera.nivel !== 'neutro'
 
   // En el pase se cuenta otro reloj: cuanto lleva HECHA sin que la recojan, y
@@ -164,27 +165,23 @@ export default function ComandaCard({
     <article
       // Atenuada, no escondida: una comanda olvidada tiene que seguir viendose,
       // solo deja de competir por la atencion con las que acaban de salir.
-      className={`rounded-xl border-2 ${
-        enBloque ? 'bg-[color:var(--color-panel)] p-3' : 'bg-[color:var(--color-panel-alto)] p-4 shadow-lg'
-      }${olvidada ? ' opacity-60' : ''}`}
-      style={{
-        borderColor:
-          conSemaforo && espera.nivel !== 'normal' ? colorEspera : 'var(--color-borde)',
-      }}
+      className={`tc-pedido${enBloque ? '' : ' tc-pedido-suelto'}${
+        conSemaforo && espera.nivel !== 'normal' ? ` ${MARCA_ESPERA[espera.nivel] || ''}` : ''
+      }${olvidada ? ' es-olvidada' : ''}`}
     >
-      <header className="flex items-start justify-between gap-3">
+      <header className="tc-pedido-cabecera">
         {enBloque ? (
           // Dentro del bloque: quién pidió (el alias, que es con lo que se canta
           // el pase), el código y en qué estado va ESTE pedido.
           <div>
-            <p className="display text-2xl font-bold leading-tight">
+            <p className="display tc-pedido-quien">
               {comensales.length > 0 ? comensales.join(', ') : 'Pedido'}
             </p>
-            <p className="mt-1 flex flex-wrap items-center gap-2 text-base leading-none text-[color:var(--color-texto-suave)]">
+            <p className="tc-pedido-meta">
               {comanda.codigo_pedido && <span>{comanda.codigo_pedido}</span>}
               {etiquetaEstado && (
                 <span
-                  className="display rounded px-1.5 py-0.5 text-sm font-bold uppercase tracking-wide"
+                  className="display tc-etiqueta-estado"
                   style={{ border: `2px solid ${etiquetaEstado.color}`, color: etiquetaEstado.color }}
                 >
                   {etiquetaEstado.texto}
@@ -194,9 +191,9 @@ export default function ComandaCard({
           </div>
         ) : (
           <div>
-            <p className="display text-4xl font-bold leading-none">Mesa {mesa}</p>
+            <p className="display tc-ticket-mesa">Mesa {mesa}</p>
             {(comanda.codigo_pedido || comensales.length > 0) && (
-              <p className="mt-1.5 text-base leading-none text-[color:var(--color-texto-suave)]">
+              <p className="tc-pedido-meta">
                 {[comanda.codigo_pedido, comensales.join(', ')].filter(Boolean).join(' · ')}
               </p>
             )}
@@ -208,13 +205,13 @@ export default function ComandaCard({
             monitor mal calibrado o quien no distingue rojo de ámbar se quedaría
             sin la única pista. */}
         <p
-          className={`display flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1 text-2xl font-bold tabular-nums ${CHIP_ESPERA[espera.nivel]}`}
+          className={`display tc-chip ${CHIP_ESPERA[espera.nivel]}`}
           title={tituloDelReloj}
         >
           <Clock size={20} aria-hidden="true" />
           {textoDeEspera(reloj.minutos)}
           {/* En el pase el reloj cuenta otra cosa, así que lo dice. */}
-          {reloj.enPase && <span className="text-lg font-semibold">en pase</span>}
+          {reloj.enPase && <span className="tc-chip-nota">en pase</span>}
           <span className="sr-only">{tituloDelReloj}</span>
         </p>
       </header>
@@ -222,18 +219,20 @@ export default function ComandaCard({
       {/* Los avisos van en ancho completo bajo la cabecera: es lo primero que
           se lee después del número de mesa, y es lo que decide qué se hace. */}
       {espera.nivel === 'rojo' && (
-        <p className="display mt-3 rounded-lg bg-[color:var(--color-alerta)] px-3 py-1.5 text-lg font-bold text-white">
+        <p className="display tc-banda tc-banda-rojo">
           {espera.etiqueta} · prioridad
         </p>
       )}
 
       {olvidada && (
-        <p className="display mt-3 rounded-lg border-2 border-[color:var(--color-alerta)] px-3 py-1.5 text-lg font-bold text-[color:var(--color-alerta)]">
+        // Mismo rojo sólido que "· prioridad", y fuera de la atenuación de la
+        // comanda olvidada (ver .es-olvidada en tema-cocina.css).
+        <p className="display tc-banda tc-banda-rojo tc-aviso-olvidada">
           {avisoSinRecoger(enPase, reloj.minutos)} · avisar al mesero
         </p>
       )}
 
-      <ul className="mt-3 space-y-3 border-t border-[color:var(--color-borde)] pt-3">
+      <ul className="tc-items">
         {comanda.items.map((item, indice) => {
           // Una linea cancelada (D-13 / #180) se ve TACHADA, igual en vivo que al
           // recargar (ver lineaCancelada). Sin ingredientes ni notas: ya no hay
@@ -242,40 +241,34 @@ export default function ComandaCard({
           return (
             <li
               key={item.id_detalle ?? `${comanda.id_pedido}-${indice}`}
-              className={cancelada ? 'opacity-60' : undefined}
+              className={cancelada ? 'tc-item es-cancelada' : 'tc-item'}
             >
-              <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-                <div className={`flex flex-wrap items-baseline gap-2 ${cancelada ? 'line-through' : ''}`}>
+              <div className="tc-item-fila">
+                <div className={`tc-item-plato${cancelada ? ' es-tachado' : ''}`}>
                   <span
-                    className={`display text-2xl font-bold tabular-nums ${
-                      cancelada ? 'text-[color:var(--color-texto-suave)]' : 'text-[color:var(--color-marca)]'
-                    }`}
+                    className={`display tc-item-cantidad${cancelada ? ' es-cancelada' : ''}`}
                   >
                     {item.cantidad}×
                   </span>
-                  <span className="display text-2xl font-bold leading-tight">
+                  <span className="display tc-item-nombre">
                     {item.plato_nombre || 'Plato sin nombre'}
                   </span>
                 </div>
                 {cancelada ? (
-                  <span className="flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-[color:var(--color-alerta)]">
+                  <span className="tc-item-cancelado">
                     <Ban size={14} aria-hidden="true" />
                     Cancelado
                   </span>
                 ) : (
-                  item.comensal && (
-                    <span className="text-base text-[color:var(--color-texto-suave)]">
-                      {item.comensal}
-                    </span>
-                  )
+                  item.comensal && <span className="tc-item-quien">{item.comensal}</span>
                 )}
               </div>
 
               {!cancelada && <Ingredientes item={item} />}
 
               {!cancelada && item.notas_especiales && (
-                <p className="mt-2 flex items-start gap-2 rounded-lg border border-[color:var(--color-preparacion)] p-2 text-base font-semibold text-[color:var(--color-preparacion)]">
-                  <FileText size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <p className="tc-nota">
+                  <FileText size={18} className="tc-nota-icono" aria-hidden="true" />
                   <span>{item.notas_especiales}</span>
                 </p>
               )}
@@ -285,7 +278,7 @@ export default function ComandaCard({
       </ul>
 
       {comanda.items.length === 0 && (
-        <p className="mt-3 text-base text-[color:var(--color-texto-suave)]">
+        <p className="tc-pedido-vacio">
           Esta comanda llegó sin ítems
         </p>
       )}
@@ -293,19 +286,15 @@ export default function ComandaCard({
       {/* La nota de la mesa va DEBAJO de los platos y pegada al botón: es lo
           último que hay que leer antes de darle, no un encabezado. */}
       {comanda.notas_generales && (
-        <p className="mt-3 flex items-start gap-2 rounded-lg border border-[color:var(--color-preparacion)] p-2.5 text-base">
-          <FileText
-            size={18}
-            className="mt-0.5 shrink-0 text-[color:var(--color-preparacion)]"
-            aria-hidden="true"
-          />
+        <p className="tc-nota tc-nota-general">
+          <FileText size={18} className="tc-nota-icono" aria-hidden="true" />
           <span>{comanda.notas_generales}</span>
         </p>
       )}
 
       {error && (
         <p
-          className="mt-3 rounded-lg bg-[color:var(--color-alerta)]/20 p-2 text-base text-[color:var(--color-alerta)]"
+          className="tc-error"
           role="alert"
         >
           {error}
@@ -316,7 +305,7 @@ export default function ComandaCard({
         // El PATCH no llego al servidor y el tiempo real tampoco esta: tocar
         // otra vez solo repetiria el mismo fallo. En cuanto vuelva la conexion
         // este bloque se va solo y el boton vuelve.
-        <p className="display mt-4 flex h-16 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[color:var(--color-borde)] text-xl font-bold text-[color:var(--color-texto-suave)]">
+        <p className="display tc-accion tc-accion-esperando">
           <LoaderCircle size={22} className="animate-spin" aria-hidden="true" />
           Esperando conexión…
         </p>
@@ -328,12 +317,11 @@ export default function ComandaCard({
           onClick={alTocar}
           disabled={enVuelo || bloqueado}
           // 64 px de alto: objetivo tactil holgado para una pantalla de cocina.
-          className="display mt-4 flex h-16 w-full items-center justify-center gap-2 rounded-xl text-2xl font-bold disabled:opacity-60"
-          style={
-            paso.estado === 'en_preparacion'
-              ? { backgroundColor: 'var(--color-marca)', color: '#ffffff' }
-              : { backgroundColor: 'var(--color-listas)', color: 'var(--color-fondo)' }
-          }
+          // Misma condición que antes elegía el color en línea: EMPEZAR va con
+          // contorno y MARCAR LISTO relleno de tinta.
+          className={`display tc-accion ${
+            paso.estado === 'en_preparacion' ? 'tc-accion-empezar' : 'tc-accion-listo'
+          }`}
         >
           {enVuelo && <LoaderCircle size={26} className="animate-spin" aria-hidden="true" />}
           {enVuelo ? 'Enviando…' : paso.etiqueta}
