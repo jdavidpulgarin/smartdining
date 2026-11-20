@@ -38,12 +38,12 @@
   --color-contador-texto: #141417;
 
   /*
-   * Barlow Condensed para lo que se lee de lejos (títulos, cifras, botones) y
-   * Barlow para el detalle. La condensada permite "EN PREPARACIÓN" o "MARCAR
-   * LISTO" en grande sin partir la línea en una columna estrecha.
+   * Bebas Neue para lo que se lee de lejos (títulos, cifras, botones) e Inter
+   * para el detalle. La condensada permite "EN PREPARACIÓN" o "MARCAR LISTO" en
+   * grande sin partir la línea en una columna estrecha.
    */
-  --font-display: 'Barlow Condensed', 'Barlow', system-ui, sans-serif;
-  --font-sans: 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Bebas Neue', 'Arial Narrow', Impact, sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
 /*
@@ -244,6 +244,9 @@ button {
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  /* Bebas Neue solo tiene un peso: sin esto, font-bold la engordaría con una
+     negrita falsa y borrosa. Así se queda la de verdad, ya gruesa de serie. */
+  font-synthesis: none;
 }
 
 /*
