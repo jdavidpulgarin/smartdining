@@ -42,7 +42,7 @@ export function TableCard({
     <div
       role="button"
       tabIndex={0}
-      className={`table-card sd-table-card ms-table-card sd-table-${estadoVisual} ms-table-${estadoVisual} ${isActive ? 'active' : ''}`}
+      className={`sd-table-card ms-table-card sd-table-${estadoVisual} ms-table-${estadoVisual} ${isActive ? 'active' : ''}`}
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {

@@ -1376,16 +1376,14 @@
 }
 
 .tema-comanda .ms-chip.active,
-.tema-comanda .ms-chip[aria-pressed="true"],
-.tema-comanda .chip[aria-pressed="true"] {
+.tema-comanda .chip.active {
   background: var(--ambar);
   color: var(--carbon);
   border-color: var(--ambar);
 }
 
 .tema-comanda .ms-chip.active span,
-.tema-comanda .ms-chip[aria-pressed="true"] span,
-.tema-comanda .chip[aria-pressed="true"] span {
+.tema-comanda .chip.active span {
   background: var(--carbon);
   color: var(--ambar);
 }
@@ -1452,7 +1450,6 @@
 }
 
 /* Tarjeta individual de Mesa (TableCard) */
-.tema-comanda .table-card,
 .tema-comanda .sd-table-card,
 .tema-comanda .ms-table-card {
   position: relative;
@@ -1470,14 +1467,12 @@
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.tema-comanda .table-card:hover,
 .tema-comanda .sd-table-card:hover,
 .tema-comanda .ms-table-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
-.tema-comanda .table-card.active,
 .tema-comanda .sd-table-card.active,
 .tema-comanda .ms-table-card.active {
   box-shadow: 0 0 0 3px var(--ambar), 0 0 0 6px var(--carbon);
@@ -1507,8 +1502,8 @@
 }
 
 /* Etiqueta de estado dentro de la tarjeta */
-.tema-comanda .table-card .status,
-.tema-comanda .table-card .sd-badge,
+.tema-comanda .ms-table-card .status,
+.tema-comanda .ms-table-card .sd-badge,
 .tema-comanda .sd-table-card .status,
 .tema-comanda .sd-table-card .sd-badge {
   display: inline-flex;
@@ -1525,7 +1520,8 @@
   text-transform: uppercase;
 }
 
-.tema-comanda .table-card .sd-table-card-meta {
+.tema-comanda .ms-table-card .sd-table-card-meta,
+.tema-comanda .sd-table-card .sd-table-card-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -1535,26 +1531,30 @@
   margin-bottom: 8px;
 }
 
-.tema-comanda .table-card .sd-table-card-title {
+.tema-comanda .ms-table-card .sd-table-card-title,
+.tema-comanda .sd-table-card .sd-table-card-title {
   font: 400 18px var(--f-titulo);
   color: var(--carbon);
   letter-spacing: 0.04em;
   line-height: 1.1;
 }
 
-.tema-comanda .table-card .sd-table-card-detail {
+.tema-comanda .ms-table-card .sd-table-card-detail,
+.tema-comanda .sd-table-card .sd-table-card-detail {
   font-size: 12px;
   color: var(--suave);
   margin-top: 2px;
 }
 
-.tema-comanda .table-card .sd-table-card-bottom {
+.tema-comanda .ms-table-card .sd-table-card-bottom,
+.tema-comanda .sd-table-card .sd-table-card-bottom {
   margin-top: auto;
   padding-bottom: 8px;
 }
 
 /* Botones de acción dentro de la tarjeta */
-.tema-comanda .table-card .sd-table-card-actions {
+.tema-comanda .ms-table-card .sd-table-card-actions,
+.tema-comanda .sd-table-card .sd-table-card-actions {
   display: flex;
   gap: 6px;
   margin-top: auto;
@@ -1562,7 +1562,8 @@
   border-top: 1px dashed #dcc8b2;
 }
 
-.tema-comanda .table-card .sd-table-btn {
+.tema-comanda .ms-table-card .sd-table-btn,
+.tema-comanda .sd-table-card .sd-table-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1580,17 +1581,20 @@
   text-transform: uppercase;
 }
 
-.tema-comanda .table-card .sd-table-btn:hover {
+.tema-comanda .ms-table-card .sd-table-btn:hover,
+.tema-comanda .sd-table-card .sd-table-btn:hover {
   background: #2a201e;
 }
 
-.tema-comanda .table-card .sd-table-btn-free {
+.tema-comanda .ms-table-card .sd-table-btn-free,
+.tema-comanda .sd-table-card .sd-table-btn-free {
   background: none;
   border-color: var(--granate);
   color: var(--brasa);
 }
 
-.tema-comanda .table-card .sd-table-btn-free:hover {
+.tema-comanda .ms-table-card .sd-table-btn-free:hover,
+.tema-comanda .sd-table-card .sd-table-btn-free:hover {
   background: var(--granate);
   color: #ffffff;
 }
