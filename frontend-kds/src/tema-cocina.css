@@ -431,7 +431,7 @@
 
 .tema-cocina .tc-vacio {
   width: 100%;
-  max-width: 360px;
+  max-width: 340px;
   margin-top: 10px;
   padding: 36px 20px;
   border: 2px dashed var(--tc-linea);
@@ -472,7 +472,7 @@
   position: relative;
   flex: none;
   width: 100%;
-  max-width: 360px;
+  max-width: 340px;
   border: 0;
   border-radius: 0;
   box-shadow: 0 10px 16px -10px rgb(0 0 0 / 0.8);
@@ -547,8 +547,10 @@
   border-bottom-color: #7f1515;
 }
 
+/* "N pedidos" en blanco puro sobre rojo y verde: con el tinte claro de antes
+   el verde se quedaba por debajo de 4,5:1. */
 .tema-cocina .tc-nivel-rojo > .tc-ticket-cabecera .tc-ticket-meta {
-  color: #ffe3e3;
+  color: #fff;
 }
 
 /* neutro = el bloque ya está entero en el pase. */
@@ -559,7 +561,7 @@
 }
 
 .tema-cocina .tc-nivel-neutro > .tc-ticket-cabecera .tc-ticket-meta {
-  color: #e3f2e4;
+  color: #fff;
 }
 
 /* Reloj. Base: el chip de cada pedido. */
@@ -839,7 +841,9 @@
   padding: 6px 0;
 }
 
-.tema-cocina .tc-item.es-cancelada {
+/* Línea cancelada: atenuada como antes, pero solo el plato. «CANCELADO» va
+   fuera de la atenuación para leerse con contraste pleno sobre el papel. */
+.tema-cocina .tc-item.es-cancelada .tc-item-plato {
   opacity: 0.55;
 }
 
@@ -893,23 +897,25 @@
   align-items: center;
   gap: 4px;
   color: var(--tc-rojo-tinta);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
+/* Ingredientes y modificadores: 18 px como mínimo, se leen de lejos. */
 .tema-cocina .tc-mods {
   margin: 4px 0 0;
-  padding: 0 0 0 42px;
+  padding: 0 0 0 34px;
   list-style: none;
 }
 
 .tema-cocina .tc-mod {
-  padding: 1px 0;
-  font-size: 14px;
+  padding: 2px 0;
+  font-size: 18px;
   font-weight: 600;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .tema-cocina .tc-mod-paso,
@@ -922,7 +928,7 @@
   margin-left: 4px;
   padding: 0 5px;
   border-radius: 0;
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.06em;
 }
@@ -942,14 +948,16 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  margin: 6px 0 0 42px;
+  margin: 6px 0 0 34px;
   padding: 4px 8px;
   border: 2px solid var(--tc-tinta);
   border-radius: 0;
   color: var(--tc-tinta);
-  font-size: 14px;
+  /* Notas: 18 px como mínimo y en negrita, dentro de su recuadro de tinta. */
+  font-size: 18px;
   font-weight: 700;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .tema-cocina .tc-nota-general {
