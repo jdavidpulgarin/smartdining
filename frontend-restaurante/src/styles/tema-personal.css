@@ -108,10 +108,10 @@
   gap: 0 !important;
 }
 
-.tema-comanda .top .fila,
-.tema-comanda .sd-topbar .fila,
 .tema-comanda.top .fila,
-.tema-comanda.sd-topbar .fila {
+.tema-comanda.sd-topbar .fila,
+.tema-comanda .top .fila,
+.tema-comanda .sd-topbar .fila {
   display: flex;
   align-items: center;
   gap: 18px;
@@ -355,6 +355,8 @@
 
 /* Responsive de la barra superior */
 @media (max-width: 1023px) {
+  .tema-comanda.top .fila,
+  .tema-comanda.sd-topbar .fila,
   .tema-comanda .top .fila,
   .tema-comanda .sd-topbar .fila {
     flex-wrap: wrap;
@@ -379,10 +381,13 @@
   .tema-comanda nav,
   .tema-comanda .sd-topbar-nav {
     order: 3;
+    flex: 0 0 100% !important;
     width: 100%;
-    min-width: 100%;
+    max-width: 100%;
+    min-width: 0;
     height: 44px;
     overflow-x: auto;
+    justify-content: flex-start;
   }
 }
 
