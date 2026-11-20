@@ -1920,7 +1920,7 @@
   justify-content: space-between;
   align-items: flex-end;
   padding: 14px 16px;
-  background: var(--papel2);
+  background: var(--papel2) !important;
   border-radius: 8px;
   margin-bottom: 12px;
 }
@@ -1937,7 +1937,8 @@
 .tema-comanda .ms-total-value,
 .tema-comanda .total-value-glow {
   font: 400 38px / 0.9 var(--f-titulo);
-  color: var(--carbon);
+  color: var(--tinta) !important;
+  text-shadow: none !important;
 }
 
 .tema-comanda .ms-total-box .tax-hint,
