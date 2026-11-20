@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
@@ -65,6 +65,14 @@ beforeEach(() => {
   localStorage.clear()
   estadoMesa = 'ocupada'
   servidor()
+})
+
+afterEach(() => {
+  window.history.replaceState(null, '', '/')
+  vi.useRealTimers()
+  vi.clearAllMocks()
+  sockets.length = 0
+  localStorage.clear()
 })
 
 describe('PantallaMesa: tablet lanzada desde el panel (credencial y QR en el #)', () => {
