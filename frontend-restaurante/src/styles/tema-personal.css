@@ -4,7 +4,8 @@
    Limitado exclusivamente a contenedores con clase .tema-comanda.
    ============================================================================== */
 
-:root {
+/* 1) Contenedor del tema */
+.tema-comanda {
   /* Paleta oficial SmartDining */
   --carbon: #120c0c;
   --carbon2: #2a201e;
@@ -25,10 +26,7 @@
   --f-texto: 'Inter', system-ui, sans-serif;
   --f-mano: 'Caveat', cursive;
   --f-mono: 'IBM Plex Mono', monospace;
-}
 
-/* 1) Contenedor del tema */
-.tema-comanda {
   /* Reasignación de tokens anteriores a la paleta nueva */
   --sd-bg: var(--carbon);
   --sd-surface: var(--carbon2);
@@ -1177,5 +1175,794 @@
     padding: 14px 20px;
     flex-direction: column;
     gap: 4px;
+  }
+}
+
+/* ==============================================================================
+   MESAS (Pantalla de Mesas / Plano de Sala)
+   ============================================================================== */
+
+/* Layout general de la página de mesas */
+.tema-comanda.ms-main,
+.tema-comanda .ms-main {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 24px 60px;
+  min-height: calc(100vh - 72px);
+  background: var(--carbon);
+  color: var(--papel);
+}
+
+.tema-comanda .ms-wrap {
+  width: 100%;
+}
+
+.tema-comanda .ms-container {
+  padding: 0;
+  max-width: none;
+}
+
+/* Encabezado editorial */
+.tema-comanda .ms-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.tema-comanda .ms-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tema-comanda .ms-title {
+  font: 400 clamp(44px, 5vw, 64px) / 0.88 var(--f-titulo);
+  color: var(--papel);
+  text-shadow: 4px 4px 0 var(--rojo);
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+
+.tema-comanda .ms-subtitle {
+  font: 700 24px var(--f-mano);
+  color: var(--ambar);
+  margin: 0;
+}
+
+.tema-comanda .ms-counters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 15px var(--f-titulo);
+  letter-spacing: 0.12em;
+  color: #cbbcb2;
+}
+
+.tema-comanda .ms-counters .sd-counter-alert {
+  color: var(--brasa);
+  font-weight: 700;
+}
+
+/* Resumen superior en franja oscura continua (StatsSection / StatCard) */
+.tema-comanda .ms-resumen,
+.tema-comanda .stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  background: var(--carbon2);
+  color: var(--papel);
+  border-radius: 14px;
+  margin-bottom: 20px;
+  overflow: hidden;
+  border: 1px solid #3a2b28;
+}
+
+.tema-comanda .ms-stat-card,
+.tema-comanda .stats-grid .stat-card {
+  flex: 1;
+  min-width: 180px;
+  padding: 14px 20px;
+  border-right: 2px dashed #4a3a36;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.tema-comanda .ms-stat-card:last-child,
+.tema-comanda .stats-grid .stat-card:last-child {
+  border-right: 0;
+}
+
+.tema-comanda .stat-icon-wrap,
+.tema-comanda .stat-card-sparkline {
+  display: none;
+}
+
+.tema-comanda .ms-stat-card .stat-label,
+.tema-comanda .stats-grid .stat-label {
+  display: block;
+  font: 400 14px var(--f-titulo);
+  letter-spacing: 0.16em;
+  color: #bfae9f;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.tema-comanda .ms-stat-card .stat-value,
+.tema-comanda .stats-grid .stat-value {
+  font: 400 34px / 1 var(--f-titulo);
+  color: var(--ambar);
+  display: block;
+}
+
+.tema-comanda .ms-stat-card .stat-trend-tag,
+.tema-comanda .stats-grid .stat-trend-tag {
+  display: block;
+  font: 500 12px var(--f-texto);
+  color: #8f7f79;
+  margin-top: 4px;
+  background: none;
+  padding: 0;
+}
+
+.tema-comanda .ms-stat-card .stat-trend-tag svg,
+.tema-comanda .stats-grid .stat-trend-tag svg {
+  display: none;
+}
+
+/* Franja de filtros y buscador */
+.tema-comanda .ms-filters-band,
+.tema-comanda .sd-red-band {
+  background: none;
+  padding: 0;
+  margin-bottom: 20px;
+}
+
+.tema-comanda .ms-filters-content,
+.tema-comanda .sd-red-band-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 0;
+  max-width: none;
+}
+
+.tema-comanda .ms-chips,
+.tema-comanda .sd-red-band-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tema-comanda .ms-chip,
+.tema-comanda .chip {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 2px solid var(--carbon2);
+  border-radius: 999px;
+  background: var(--papel);
+  color: var(--tinta);
+  font: 400 16px var(--f-titulo);
+  letter-spacing: 0.08em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.15s ease;
+}
+
+.tema-comanda .ms-chip span,
+.tema-comanda .chip span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 700 11px var(--f-texto);
+  line-height: 18px;
+}
+
+.tema-comanda .ms-chip.active,
+.tema-comanda .ms-chip[aria-pressed="true"],
+.tema-comanda .chip[aria-pressed="true"] {
+  background: var(--ambar);
+  color: var(--carbon);
+  border-color: var(--ambar);
+}
+
+.tema-comanda .ms-chip.active span,
+.tema-comanda .ms-chip[aria-pressed="true"] span,
+.tema-comanda .chip[aria-pressed="true"] span {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+/* Buscador de mesas */
+.tema-comanda .ms-search,
+.tema-comanda .sd-band-search-box {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+  max-width: 380px;
+  display: flex;
+  align-items: center;
+}
+
+.tema-comanda .ms-search svg,
+.tema-comanda .sd-band-search-box svg {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: var(--suave);
+  pointer-events: none;
+}
+
+.tema-comanda .ms-search-input,
+.tema-comanda .sd-band-search-input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px 0 36px;
+  border: 2px solid #3a2b28;
+  border-radius: 8px;
+  background: #fffaf3;
+  color: var(--tinta);
+  font: 500 14px var(--f-texto);
+}
+
+.tema-comanda .ms-search-input:focus,
+.tema-comanda .sd-band-search-input:focus {
+  outline: 3px solid var(--ambar);
+  outline-offset: 1px;
+}
+
+/* Grilla de mesas y layout central */
+.tema-comanda .sd-mesas-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+
+.tema-comanda .sd-mesas-col-main {
+  min-width: 0;
+}
+
+.tema-comanda .sd-mesas-col-side {
+  min-width: 0;
+}
+
+.tema-comanda .sd-tables-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+/* Tarjeta individual de Mesa (TableCard) */
+.tema-comanda .table-card,
+.tema-comanda .sd-table-card,
+.tema-comanda .ms-table-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 2px solid var(--carbon2);
+  border-left-width: 8px;
+  background: var(--papel);
+  color: var(--carbon);
+  cursor: pointer;
+  box-shadow: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tema-comanda .table-card:hover,
+.tema-comanda .sd-table-card:hover,
+.tema-comanda .ms-table-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
+.tema-comanda .table-card.active,
+.tema-comanda .sd-table-card.active,
+.tema-comanda .ms-table-card.active {
+  box-shadow: 0 0 0 3px var(--ambar), 0 0 0 6px var(--carbon);
+}
+
+.tema-comanda .ms-card-top,
+.tema-comanda .sd-table-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tema-comanda .ms-card-num,
+.tema-comanda .sd-table-card-number {
+  font: 400 38px / 0.9 var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .ms-card-num small,
+.tema-comanda .sd-table-card-number small {
+  font: 400 16px var(--f-titulo);
+  letter-spacing: 0.1em;
+  color: var(--suave);
+  margin-right: 3px;
+}
+
+/* Etiqueta de estado dentro de la tarjeta */
+.tema-comanda .table-card .status,
+.tema-comanda .table-card .sd-badge,
+.tema-comanda .sd-table-card .status,
+.tema-comanda .sd-table-card .sd-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 400 13px var(--f-titulo);
+  letter-spacing: 0.1em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 2px solid var(--carbon);
+  background: var(--papel);
+  color: var(--carbon);
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.tema-comanda .table-card .sd-table-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--suave);
+  margin-bottom: 8px;
+}
+
+.tema-comanda .table-card .sd-table-card-title {
+  font: 400 18px var(--f-titulo);
+  color: var(--carbon);
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+}
+
+.tema-comanda .table-card .sd-table-card-detail {
+  font-size: 12px;
+  color: var(--suave);
+  margin-top: 2px;
+}
+
+.tema-comanda .table-card .sd-table-card-bottom {
+  margin-top: auto;
+  padding-bottom: 8px;
+}
+
+/* Botones de acción dentro de la tarjeta */
+.tema-comanda .table-card .sd-table-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px dashed #dcc8b2;
+}
+
+.tema-comanda .table-card .sd-table-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--carbon);
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 400 15px var(--f-titulo);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  flex: 1;
+  text-transform: uppercase;
+}
+
+.tema-comanda .table-card .sd-table-btn:hover {
+  background: #2a201e;
+}
+
+.tema-comanda .table-card .sd-table-btn-free {
+  background: none;
+  border-color: var(--granate);
+  color: var(--brasa);
+}
+
+.tema-comanda .table-card .sd-table-btn-free:hover {
+  background: var(--granate);
+  color: #ffffff;
+}
+
+/* Variantes de estado de las tarjetas */
+/* Ocupada: papel claro */
+.tema-comanda .sd-table-ocupada,
+.tema-comanda .ms-table-ocupada {
+  background: var(--papel);
+  border-color: var(--carbon);
+  border-left-color: var(--carbon);
+  color: var(--tinta);
+}
+
+.tema-comanda .sd-table-ocupada .status,
+.tema-comanda .ms-table-ocupada .status {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+/* Disponible: carbón con borde punteado */
+.tema-comanda .sd-table-disponible,
+.tema-comanda .ms-table-disponible {
+  background: var(--carbon2);
+  color: var(--papel);
+  border: 2px dashed #4a3a36;
+  border-left-width: 2px;
+}
+
+.tema-comanda .sd-table-disponible .ms-card-num,
+.tema-comanda .sd-table-disponible .sd-table-card-number,
+.tema-comanda .sd-table-disponible .sd-table-card-title {
+  color: #cbbcb2;
+}
+
+.tema-comanda .sd-table-disponible .status,
+.tema-comanda .ms-table-disponible .status {
+  background: transparent;
+  border-color: #4a3a36;
+  color: #a8968c;
+}
+
+.tema-comanda .sd-table-disponible .sd-table-card-actions {
+  border-top-color: #3a2b28;
+}
+
+.tema-comanda .sd-table-disponible .sd-table-btn {
+  background: var(--carbon);
+  border-color: #4a3a36;
+  color: var(--ambar);
+}
+
+/* Reservada: papel con borde punteado */
+.tema-comanda .sd-table-reservada,
+.tema-comanda .ms-table-reservada {
+  background: var(--papel);
+  border: 2px dashed var(--suave);
+  border-left-style: solid;
+  border-left-color: var(--suave);
+  border-left-width: 8px;
+}
+
+/* Mantenimiento: carbón atenuado */
+.tema-comanda .sd-table-mantenimiento,
+.tema-comanda .ms-table-mantenimiento {
+  background: var(--carbon3);
+  border-color: #3a2b28;
+  border-left-color: #3a2b28;
+  opacity: 0.6;
+}
+
+/* Con alerta (llamado / cuenta): banda/borde rojo brasa */
+.tema-comanda .sd-table-llamado,
+.tema-comanda .ms-table-llamado,
+.tema-comanda .sd-table-cuenta,
+.tema-comanda .ms-table-cuenta {
+  border-left-color: var(--brasa);
+  border-left-width: 8px;
+  animation: ms-pulso-alerta 1.8s infinite;
+}
+
+@keyframes ms-pulso-alerta {
+  50% {
+    box-shadow: 0 0 0 4px rgba(229, 33, 46, 0.3);
+  }
+}
+
+.tema-comanda .sd-table-llamado .status,
+.tema-comanda .ms-table-llamado .status,
+.tema-comanda .sd-table-cuenta .status,
+.tema-comanda .ms-table-cuenta .status {
+  background: var(--brasa);
+  border-color: var(--brasa);
+  color: #ffffff;
+}
+
+/* Listo: borde y etiqueta verde */
+.tema-comanda .sd-table-listo,
+.tema-comanda .ms-table-listo {
+  border-left-color: var(--ok);
+}
+
+.tema-comanda .sd-table-listo .status,
+.tema-comanda .ms-table-listo .status {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* Panel Lateral: Comanda en Curso / Comanda Activa (OrderPanel) */
+.tema-comanda .ms-order-ticket,
+.tema-comanda .panel.order-panel {
+  position: relative;
+  background: var(--papel);
+  color: var(--tinta);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 16px 24px -16px rgba(0, 0, 0, 0.5);
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+}
+
+.tema-comanda .ms-order-band,
+.tema-comanda .panel.order-panel .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: var(--carbon);
+  color: var(--ambar);
+  padding: 10px 16px;
+  font: 400 18px var(--f-titulo);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.tema-comanda .ms-order-band h2,
+.tema-comanda .panel.order-panel .panel-header h2 {
+  font: 400 18px var(--f-titulo);
+  color: var(--ambar);
+  letter-spacing: 0.16em;
+  margin: 0;
+}
+
+.tema-comanda .ms-order-band .order-id-badge {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  color: #d9c3a5;
+  background: none;
+  padding: 0;
+}
+
+.tema-comanda .ms-order-body {
+  padding: 14px 16px 18px;
+}
+
+.tema-comanda .ms-mesa-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 10px;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+.tema-comanda .ms-order-label {
+  display: block;
+  font: 400 14px var(--f-titulo);
+  letter-spacing: 0.12em;
+  color: var(--suave);
+}
+
+.tema-comanda .ms-table-name {
+  font: 400 44px / 0.9 var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .ms-meta-row {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--suave);
+  margin-bottom: 12px;
+}
+
+.tema-comanda .ms-corte {
+  border-top: 2px dashed #ecdcc8;
+  margin: 12px 0;
+}
+
+.tema-comanda .ms-items-title {
+  display: block;
+  font: 400 15px var(--f-titulo);
+  letter-spacing: 0.1em;
+  color: var(--suave);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.tema-comanda .ms-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 14px;
+  font-weight: 600;
+  border-top: 1px dashed #ecdcc8;
+}
+
+.tema-comanda .ms-item-row:first-child {
+  border-top: 0;
+}
+
+.tema-comanda .ms-qty {
+  font-family: var(--f-mono);
+  color: var(--suave);
+  font-size: 13px;
+  margin-right: 6px;
+}
+
+.tema-comanda .ms-item-title {
+  color: var(--carbon);
+}
+
+.tema-comanda .ms-item-price {
+  font: 400 18px var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .ms-total-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 12px 0 16px;
+}
+
+.tema-comanda .ms-total-label {
+  display: block;
+  font: 400 16px var(--f-titulo);
+  letter-spacing: 0.1em;
+  color: var(--suave);
+}
+
+.tema-comanda .ms-total-value {
+  font: 400 38px / 0.9 var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .ms-order-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tema-comanda .ms-empty-prompt {
+  padding: 30px 16px;
+  text-align: center;
+}
+
+.tema-comanda .ms-empty-prompt h3 {
+  font: 700 24px var(--f-mano);
+  color: var(--carbon);
+  margin: 12px 0 6px;
+}
+
+.tema-comanda .ms-empty-prompt p {
+  font-size: 13px;
+  color: var(--suave);
+  margin-bottom: 16px;
+}
+
+/* BandejaAlertas y MenuSection dentro del tema */
+.tema-comanda .sd-alertas-panel {
+  background: var(--papel);
+  color: var(--tinta);
+  border-radius: 12px;
+  border: 2px solid var(--carbon);
+}
+
+.tema-comanda .sd-alertas-panel .banda {
+  background: var(--carbon);
+  color: var(--ambar);
+  border-radius: 10px 10px 0 0;
+}
+
+.tema-comanda .ms-bottom-panel,
+.tema-comanda .panel.bottom-panel {
+  background: var(--carbon2);
+  color: var(--papel);
+  border: 1px solid #3a2b28;
+  border-radius: 14px;
+  padding: 18px 24px;
+  margin-top: 24px;
+}
+
+.tema-comanda .ms-bottom-panel .menu-section-title {
+  font: 400 26px var(--f-titulo);
+  letter-spacing: 0.08em;
+  color: var(--papel);
+}
+
+.tema-comanda .ms-bottom-panel .carta-activa-badge {
+  background: var(--ambar);
+  color: var(--carbon);
+  font: 700 11px var(--f-texto);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+/* Responsive de la pantalla de Mesas */
+@media (max-width: 1023px) {
+  .tema-comanda .content-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .tema-comanda .sd-mesas-layout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .tema-comanda .sd-tables-grid {
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 12px;
+  }
+
+  .tema-comanda .ms-resumen,
+  .tema-comanda .stats-grid {
+    border-radius: 10px;
+  }
+
+  .tema-comanda .ms-stat-card,
+  .tema-comanda .stats-grid .stat-card {
+    min-width: 140px;
+    padding: 10px 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .tema-comanda.ms-main,
+  .tema-comanda .ms-main {
+    padding: 14px 14px 40px;
+  }
+
+  .tema-comanda .sd-tables-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+  }
+
+  .tema-comanda .ms-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .tema-comanda .ms-counters {
+    flex-wrap: wrap;
+    font-size: 13px;
+  }
+
+  .tema-comanda .ms-stat-card,
+  .tema-comanda .stats-grid .stat-card {
+    min-width: 100%;
+    border-right: 0;
+    border-bottom: 1px dashed #4a3a36;
+  }
+
+  .tema-comanda .ms-stat-card:last-child,
+  .tema-comanda .stats-grid .stat-card:last-child {
+    border-bottom: 0;
   }
 }

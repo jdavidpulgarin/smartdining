@@ -2,7 +2,7 @@ import { StatCard } from './StatCard'
 
 export function StatsSection({ stats }) {
   return (
-    <section className="stats-grid">
+    <section className="stats-grid resumen ms-resumen">
       {stats.map((item) => (
         <StatCard
           key={item.label}
