@@ -383,6 +383,14 @@
 }
 
 @media (max-width: 479px) {
+  .tema-comanda.top .fila,
+  .tema-comanda.sd-topbar .fila,
+  .tema-comanda .top .fila,
+  .tema-comanda .sd-topbar .fila {
+    padding: 8px 12px 0;
+    gap: 8px 10px;
+  }
+
   .tema-comanda .sd-brand-text {
     display: none;
   }
@@ -392,6 +400,63 @@
     width: 34px;
     height: 34px;
     font-size: 18px;
+    flex: none;
+  }
+
+  .tema-comanda .sd-topbar-actions {
+    min-width: 0;
+    gap: 8px;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .tema-comanda .usuario,
+  .tema-comanda .sd-user-info-pill {
+    min-width: 0;
+    gap: 8px;
+    flex: 0 1 auto;
+  }
+
+  .tema-comanda .usuario div,
+  .tema-comanda .sd-user-info-pill div {
+    min-width: 0;
+    max-width: 110px;
+    text-align: right;
+  }
+
+  .tema-comanda .usuario b,
+  .tema-comanda .sd-user-name {
+    display: block;
+    font-size: 14px;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tema-comanda .rol,
+  .tema-comanda .sd-user-role {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    padding: 0 4px;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tema-comanda .campana,
+  .tema-comanda .sd-topbar-bell-btn {
+    width: 34px;
+    height: 34px;
+    flex: none;
+  }
+
+  .tema-comanda .salir,
+  .tema-comanda .sd-topbar-icon-btn {
+    width: 34px;
+    height: 34px;
+    flex: none;
   }
 
   .tema-comanda .sd-topbar-nav .sd-nav-link,
@@ -399,29 +464,6 @@
     font-size: 16px;
     padding: 0 8px;
     letter-spacing: 0.04em;
-  }
-
-  .tema-comanda .usuario b,
-  .tema-comanda .sd-user-name {
-    font-size: 14px;
-  }
-
-  .tema-comanda .rol,
-  .tema-comanda .sd-user-role {
-    font-size: 11px;
-    padding: 0 4px;
-  }
-
-  .tema-comanda .campana,
-  .tema-comanda .sd-topbar-bell-btn {
-    width: 34px;
-    height: 34px;
-  }
-
-  .tema-comanda .salir,
-  .tema-comanda .sd-topbar-icon-btn {
-    width: 34px;
-    height: 34px;
   }
 }
 
