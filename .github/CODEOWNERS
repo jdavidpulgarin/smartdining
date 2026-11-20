@@ -14,12 +14,12 @@
 /docker-compose*.yml     @rcarlosbuelvas
 
 # Base de datos y panel del restaurante
-/database/               @jdavidpulgarin
-/frontend-restaurante/   @jdavidpulgarin
+/database/               @jdavidpulgarin @rcarlosbuelvas
+/frontend-restaurante/   @jdavidpulgarin @rcarlosbuelvas
 
 # API REST y pantalla de cocina
-/backend/                @carlosdospino
-/frontend-kds/           @carlosdospino
+/backend/                @carlosdospino @rcarlosbuelvas
+/frontend-kds/           @carlosdospino @rcarlosbuelvas
 
 # PWA del comensal
 /frontend-cliente/       @juandbuelvas
