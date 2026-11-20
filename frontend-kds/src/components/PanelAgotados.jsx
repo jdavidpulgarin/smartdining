@@ -150,20 +150,20 @@ export default function PanelAgotados({
         aria-modal="true"
         aria-label="Ingredientes y platos agotados"
         className={[
-          'relative flex h-full w-full max-w-md flex-col border-l border-[color:var(--color-borde)]',
-          // bg opaco, no translucido: detras puede haber la foto de fondo de la
-          // cocina y un panel semitransparente volveria el texto ilegible.
-          'bg-[color:var(--color-panel)] shadow-2xl',
+          'relative flex h-full w-full max-w-md flex-col',
+          // Fondo opaco (papel, en tema-cocina.css), no translucido: un panel
+          // semitransparente sobre el tablero volveria el texto ilegible.
+          'tc-cajon',
           'motion-safe:animate-[entrar-cajon_180ms_ease-out] motion-reduce:animate-none',
         ].join(' ')}
       >
-        <header className="flex items-center justify-between gap-3 border-b border-[color:var(--color-borde)] px-4 py-3">
-          <h2 className="display text-2xl font-bold text-[color:var(--color-texto)]">Agotados</h2>
+        <header className="tc-cajon-cabecera">
+          <h2 className="display tc-cajon-titulo">Agotados</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onRecargar}
-              className="grid h-12 w-12 place-items-center rounded-xl border border-[color:var(--color-borde)] text-[color:var(--color-texto)]"
+              className="tc-boton-cuadro"
               aria-label="Actualizar las listas"
               title="Actualizar las listas"
             >
@@ -180,7 +180,7 @@ export default function PanelAgotados({
             <button
               type="button"
               onClick={onCerrar}
-              className="grid h-12 w-12 place-items-center rounded-xl border border-[color:var(--color-borde)] text-[color:var(--color-texto)]"
+              className="tc-boton-cuadro"
               aria-label="Cerrar"
               title="Cerrar"
             >
@@ -193,7 +193,7 @@ export default function PanelAgotados({
         <div
           role="tablist"
           aria-label="Qué se agota"
-          className="flex gap-2 border-b border-[color:var(--color-borde)] px-4 py-3"
+          className="tc-pestanas"
         >
           {SECCIONES.map(({ id, rotulo }) => (
             <button
@@ -202,18 +202,15 @@ export default function PanelAgotados({
               role="tab"
               aria-selected={seccion === id}
               onClick={() => setSeccion(id)}
-              className={[
-                'min-h-12 flex-1 rounded-xl border px-3 text-base font-bold uppercase tracking-wide',
-                seccion === id
-                  ? 'border-[color:var(--color-texto)] bg-[color:var(--color-panel-alto)] text-[color:var(--color-texto)]'
-                  : 'border-[color:var(--color-borde)] text-[color:var(--color-texto-suave)]',
-              ].join(' ')}
+              // La pestaña elegida se pinta por su aria-selected (seccion === id),
+              // el mismo valor que antes elegía la clase.
+              className="tc-pestana"
             >
               {rotulo}
               {/* Solo en Platos y solo si hay alguno agotado: asi el cocinero ve
                   que hay algo que atender en la otra seccion sin entrar. */}
               {id === 'platos' && platosAgotados > 0 && (
-                <span className="ml-2 rounded-full bg-[color:var(--color-alerta)] px-2 text-sm text-white">
+                <span className="tc-pestana-cuenta">
                   {platosAgotados}
                 </span>
               )}
@@ -224,18 +221,18 @@ export default function PanelAgotados({
         {/* Sin socket el PATCH sigue funcionando (va por HTTP): lo que se pierde
             es ver lo que cambien OTRAS pantallas. Se dice sin alarmar. */}
         {!conectado && (
-          <p className="flex items-start gap-2 border-b border-[color:var(--color-borde)] bg-[color:var(--color-panel-alto)] px-4 py-2 text-sm text-[color:var(--color-texto-suave)]">
+          <p className="tc-cajon-nota">
             <WifiOff size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
             Sin conexión en vivo: los cambios de otras pantallas no se verán hasta reconectar.
           </p>
         )}
 
-        <div className="flex flex-col gap-2 border-b border-[color:var(--color-borde)] px-4 py-3">
+        <div className="tc-cajon-filtros">
           <label className="relative block">
             <span className="sr-only">{enPlatos ? 'Buscar plato' : 'Buscar ingrediente'}</span>
             <Search
               size={18}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--color-texto-suave)]"
+              className="tc-buscador-icono pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
               aria-hidden="true"
             />
             <input
@@ -244,7 +241,7 @@ export default function PanelAgotados({
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
               placeholder={enPlatos ? 'Buscar plato' : 'Buscar ingrediente'}
-              className="min-h-12 w-full rounded-xl border border-[color:var(--color-borde)] bg-[color:var(--color-panel-alto)] pl-10 pr-3 text-lg text-[color:var(--color-texto)] placeholder:text-[color:var(--color-texto-suave)]"
+              className="tc-buscador"
             />
           </label>
 
@@ -252,18 +249,14 @@ export default function PanelAgotados({
             type="button"
             onClick={() => setSoloAgotados((v) => !v)}
             aria-pressed={soloAgotados}
-            className={[
-              'min-h-12 rounded-xl border px-4 text-base font-bold uppercase tracking-wide',
-              soloAgotados
-                ? 'border-[color:var(--color-alerta)] bg-[color:var(--color-alerta)] text-white'
-                : 'border-[color:var(--color-borde)] text-[color:var(--color-texto)]',
-            ].join(' ')}
+            // Encendido se pinta por aria-pressed (soloAgotados), el mismo valor.
+            className="tc-interruptor"
           >
             Solo agotados
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-3">
+        <div className="tc-cajon-lista">
           {aviso === 'cargando' && (
             <ul
               className="flex flex-col gap-2"
@@ -273,29 +266,29 @@ export default function PanelAgotados({
               {[0, 1, 2, 3, 4].map((i) => (
                 <li
                   key={i}
-                  className="min-h-14 animate-pulse rounded-xl bg-[color:var(--color-panel-alto)] motion-reduce:animate-none"
+                  className="tc-esqueleto animate-pulse motion-reduce:animate-none"
                 />
               ))}
             </ul>
           )}
 
           {aviso === 'prohibido' && (
-            <p className="flex items-start gap-2 rounded-xl border border-[color:var(--color-alerta)] px-4 py-3 text-[color:var(--color-alerta)]">
+            <p className="tc-cajon-alerta flex items-start gap-2">
               <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
               Tu usuario no puede cambiar la disponibilidad. Avisa al administrador.
             </p>
           )}
 
           {aviso === 'error' && (
-            <div className="rounded-xl border border-[color:var(--color-alerta)] px-4 py-3">
-              <p className="flex items-start gap-2 text-[color:var(--color-alerta)]">
+            <div className="tc-cajon-alerta">
+              <p className="flex items-start gap-2">
                 <AlertCircle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
                 {errorDeLaSeccion}
               </p>
               <button
                 type="button"
                 onClick={onRecargar}
-                className="mt-3 min-h-12 w-full rounded-xl bg-[color:var(--color-alerta)] px-4 font-bold uppercase tracking-wide text-white"
+                className="display tc-accion tc-accion-peligro mt-3"
               >
                 Reintentar
               </button>
@@ -303,7 +296,7 @@ export default function PanelAgotados({
           )}
 
           {!aviso && motivoVacio && (
-            <div className="py-6 text-center text-[color:var(--color-texto-suave)]">
+            <div className="tc-cajon-vacio">
               <p>
                 {motivoVacio === 'sin-resultados'
                   ? mensajes['sin-resultados'](texto)
@@ -317,7 +310,7 @@ export default function PanelAgotados({
                     setSoloAgotados(false)
                     buscador.current?.focus()
                   }}
-                  className="mt-3 min-h-12 rounded-xl border border-[color:var(--color-borde)] px-4 font-bold text-[color:var(--color-texto)]"
+                  className="tc-boton-borde"
                 >
                   Limpiar la búsqueda
                 </button>
@@ -326,7 +319,7 @@ export default function PanelAgotados({
           )}
 
           {!aviso && !motivoVacio && enPlatos && (
-            <ul className="flex flex-col gap-2">
+            <ul className="tc-filas">
               {platos.map((plato) => (
                 <FilaPlato
                   // Por id_plato, nunca por nombre.
@@ -345,15 +338,15 @@ export default function PanelAgotados({
             <div className="flex flex-col gap-5">
               {grupos.map((grupo) => (
                 <section key={grupo.id_plato}>
-                  <h3 className="display text-xl font-bold text-[color:var(--color-texto)]">
+                  <h3 className="display tc-grupo-plato">
                     {grupo.plato}
                   </h3>
                   {grupo.pasos.map((paso) => (
                     <div key={paso.id_paso} className="mt-2">
-                      <h4 className="mb-1 text-sm font-bold uppercase tracking-wide text-[color:var(--color-texto-suave)]">
+                      <h4 className="tc-grupo-paso">
                         {paso.paso}
                       </h4>
-                      <ul className="flex flex-col gap-2">
+                      <ul className="tc-filas">
                         {paso.ingredientes.map((ing) => (
                           <FilaIngrediente
                             // Por id_ingrediente, nunca por nombre: en la carta

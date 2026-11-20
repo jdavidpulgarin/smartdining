@@ -34,41 +34,31 @@ export default function Columna({
   const color = COLOR[estado] || 'var(--color-texto-suave)'
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col">
-      <header
-        className="flex items-center justify-between gap-2 rounded-xl border-t-4 bg-[color:var(--color-panel)] px-4 py-3"
-        style={{ borderColor: color }}
-      >
+    <section className="tc-columna">
+      <header className="tc-columna-cabecera" style={{ borderColor: color }}>
         {/* El titulo va en blanco y no en el color de la columna: tres titulos
             de colores distintos compiten entre si, y el color ya lo lleva la
             regla de arriba, que es donde se distingue sin leer. */}
-        <h2 className="display text-3xl font-bold">{titulo}</h2>
+        <h2 className="display tc-columna-titulo">{titulo}</h2>
         <span
-          className="display min-w-11 rounded-lg bg-[color:var(--color-contador)] px-3 py-1 text-center text-2xl font-bold tabular-nums text-[color:var(--color-contador-texto)]"
+          className="tc-contador"
           aria-label={`${bloques.length} ${bloques.length === 1 ? 'tarjeta' : 'tarjetas'}`}
         >
           {bloques.length}
         </span>
       </header>
 
-      <div className="flex-1 space-y-3 overflow-y-auto pt-3">
+      <div className="tc-pila">
         {bloques.length === 0 ? (
           // Caja punteada, no un parrafo suelto: deja claro que el hueco es el
           // sitio donde van a aparecer las comandas, y no un fallo de carga.
           //
-          // Lleva fondo solido porque es el unico texto del tablero que caeria
-          // sobre la foto: ahi el texto suave se queda en 1,6:1 (oscuro) y
-          // 2,5:1 (claro); sobre el panel sube a 6,6:1.
-          <div className="rounded-xl border-2 border-dashed border-[color:var(--color-borde)] bg-[color:var(--color-panel)] px-5 py-10 text-center">
-            <ChefHat
-              size={34}
-              className="mx-auto mb-3 text-[color:var(--color-texto-suave)]"
-              aria-hidden="true"
-            />
-            <p className="display text-xl font-bold">{vacio?.titulo || 'Sin comandas'}</p>
-            {vacio?.nota && (
-              <p className="mt-2 text-base text-[color:var(--color-texto-suave)]">{vacio.nota}</p>
-            )}
+          // Con .tema-cocina el tablero tiene fondo opaco (ya no cae sobre la
+          // foto), así que el texto suave se lee directamente sobre el carbón.
+          <div className="tc-vacio">
+            <ChefHat size={34} className="tc-vacio-icono" aria-hidden="true" />
+            <p className="display tc-vacio-titulo">{vacio?.titulo || 'Sin comandas'}</p>
+            {vacio?.nota && <p className="tc-vacio-nota">{vacio.nota}</p>}
           </div>
         ) : (
           bloques.map((bloque) => (

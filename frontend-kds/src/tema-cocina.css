@@ -1,0 +1,1307 @@
+/*
+ * Tema "cocina": carbón oscuro y comandas de papel térmico.
+ *
+ * TODO va colgado de .tema-cocina, que solo lleva el div raíz del Tablero: el
+ * login sigue con index.css tal cual. El panel de agotados se renderiza dentro
+ * de ese div, así que también lo recoge.
+ *
+ * Estas reglas no van en ninguna @layer, así que ganan a las utilidades de
+ * Tailwind (que sí van en @layer utilities) sin necesidad de !important.
+ *
+ * Además de las clases tc-*, aquí se redefinen los --color-* de index.css para
+ * este subárbol: los colores que los componentes siguen poniendo en línea (la
+ * regla de cada columna, la etiqueta de estado, la leyenda) salen así en la
+ * paleta nueva sin tocar el valor que los decide.
+ */
+
+.tema-cocina {
+  --tc-ambar: #f5a623;
+  --tc-rojo: #d32f2f;
+  --tc-verde: #2e7d32;
+  --tc-verde-regla: #43a047;
+  --tc-papel: #f3f0e8;
+  --tc-papel-sombra: #e7e1d4;
+  --tc-papel-linea: #cfc8b8;
+  --tc-tinta: #16130f;
+  --tc-gris: #6d665c;
+  /* Rojo para TEXTO sobre papel: el de fondo se queda en 4,5:1 y este da 5,9:1. */
+  --tc-rojo-tinta: #b71c1c;
+  /* Ámbar para TEXTO sobre papel: el de fondo no llega a 2:1 ahí. */
+  --tc-ambar-tinta: #7a4f00;
+
+  /* La barra superior es oscura en los dos temas, como en la maqueta. */
+  --tc-barra: #0f1011;
+  --tc-barra-linea: #26282b;
+  --tc-barra-texto: #e9e6df;
+  --tc-barra-suave: #a8a39a;
+
+  --tc-fondo: #17181a;
+  --tc-linea: #2b2d30;
+  --tc-txt: #e9e6df;
+  --tc-txt2: #8b877f;
+  --tc-regla-nuevas: var(--tc-papel);
+
+  --tc-mono: ui-monospace, Consolas, 'Cascadia Mono', 'SFMono-Regular', Menlo, monospace;
+  --tc-cond: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+
+  --color-fondo: var(--tc-fondo);
+  --color-panel: var(--tc-barra);
+  --color-panel-alto: var(--tc-barra);
+  --color-borde: var(--tc-linea);
+  --color-texto: var(--tc-txt);
+  --color-texto-suave: var(--tc-txt2);
+  --color-marca: var(--tc-ambar);
+  --color-nuevas: var(--tc-regla-nuevas);
+  --color-preparacion: var(--tc-ambar);
+  --color-listas: var(--tc-verde-regla);
+  --color-alerta: var(--tc-rojo);
+
+  /* Fondo opaco: tapa la foto de body (y el velo de .fondo-tablero) solo aquí. */
+  background-color: var(--tc-fondo);
+  color: var(--tc-txt);
+  font-family: var(--tc-mono);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+:root[data-tema='claro'] .tema-cocina {
+  --tc-barra: #16130f;
+  --tc-barra-linea: #2e2a24;
+  --tc-fondo: #dcd8d0;
+  --tc-linea: #c4beb3;
+  --tc-txt: #16130f;
+  --tc-txt2: #5f594f;
+  /* Una regla color papel no se ve sobre el fondo claro. */
+  --tc-regla-nuevas: var(--tc-tinta);
+}
+
+/*
+ * Contextos de papel: dentro del ticket y del cajón, "texto" es tinta y
+ * "suave" es gris de impresora, en los dos temas.
+ */
+.tema-cocina .tc-ticket,
+.tema-cocina .tc-pedido-suelto,
+.tema-cocina .tc-cajon {
+  --color-texto: var(--tc-tinta);
+  --color-texto-suave: var(--tc-gris);
+  --color-borde: var(--tc-papel-linea);
+  --color-panel: var(--tc-papel);
+  --color-panel-alto: var(--tc-papel);
+  --color-nuevas: var(--tc-tinta);
+  --color-preparacion: var(--tc-ambar-tinta);
+  --color-listas: var(--tc-verde);
+  --color-alerta: var(--tc-rojo-tinta);
+  background-color: var(--tc-papel);
+  color: var(--tc-tinta);
+}
+
+.tema-cocina :focus-visible {
+  outline: 3px solid var(--tc-ambar);
+  outline-offset: 2px;
+}
+
+.tema-cocina .tc-ticket :focus-visible,
+.tema-cocina .tc-pedido-suelto :focus-visible,
+.tema-cocina .tc-cajon :focus-visible {
+  outline-color: var(--tc-tinta);
+}
+
+/* ------------------------------------------------------------------ Barra */
+
+.tema-cocina .tc-barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: space-between;
+  min-height: 56px;
+  background: var(--tc-barra);
+  color: var(--tc-barra-texto);
+  border-bottom: 1px solid #000;
+}
+
+.tema-cocina .tc-barra-grupo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.tema-cocina .tc-barra-grupo > * {
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+  margin: 0;
+  padding: 0 16px;
+}
+
+.tema-cocina .tc-barra-izquierda > * {
+  border-right: 1px solid var(--tc-barra-linea);
+}
+
+.tema-cocina .tc-barra-derecha > * {
+  border-left: 1px solid var(--tc-barra-linea);
+}
+
+/* Logo: mismas piezas que en el login, otra piel. */
+.tema-cocina .tc-logo {
+  gap: 10px;
+}
+
+.tema-cocina .tc-logo-marca {
+  width: 30px;
+  height: 30px;
+  border-radius: 0;
+  background: var(--tc-ambar);
+  color: var(--tc-tinta);
+  font-size: 15px;
+}
+
+.tema-cocina .tc-logo-texto {
+  color: var(--tc-barra-texto);
+  font-size: 26px;
+  letter-spacing: 0.08em;
+}
+
+.tema-cocina .tc-conexion {
+  gap: 8px;
+  font-family: var(--tc-mono);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: lowercase;
+  color: var(--tc-barra-suave);
+}
+
+.tema-cocina .tc-conexion-punto {
+  width: 9px;
+  height: 9px;
+  background: #66bb6a;
+}
+
+.tema-cocina .tc-conexion.es-desconectado {
+  color: #ff8a80;
+}
+
+.tema-cocina .tc-conexion.es-desconectado .tc-conexion-punto {
+  background: #ff8a80;
+}
+
+.tema-cocina .tc-hora {
+  font-family: var(--tc-cond);
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+.tema-cocina .tc-boton-barra {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 56px;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  background: none;
+  color: #cfc9bf;
+  cursor: pointer;
+}
+
+.tema-cocina .tc-boton-barra:hover {
+  background: #1d1f21;
+  color: #fff;
+}
+
+.tema-cocina .tc-boton-barra[aria-pressed='true'] {
+  color: var(--tc-ambar);
+}
+
+.tema-cocina .tc-boton-barra:focus-visible {
+  outline-offset: -3px;
+}
+
+.tema-cocina .tc-boton-salir {
+  padding: 0 18px;
+  font-family: var(--tc-cond);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.tema-cocina .tc-insignia {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  min-width: 20px;
+  padding: 0 5px;
+  background: var(--tc-rojo);
+  color: #fff;
+  font-family: var(--tc-mono);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* Franja de resumen: sigue a la barra, en el mismo carbón. */
+.tema-cocina .tc-resumen {
+  /* La franja es oscura en los dos temas: la leyenda (colores en línea con
+     --color-*) usa aquí los tonos claros, también con el tema claro. */
+  --color-texto: var(--tc-barra-texto);
+  --color-preparacion: var(--tc-ambar);
+  --color-alerta: var(--tc-rojo);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 28px;
+  padding: 8px 16px;
+  background: #131416;
+  border-bottom: 1px solid var(--tc-barra-linea);
+  color: var(--tc-barra-suave);
+  font-family: var(--tc-mono);
+  font-size: 14px;
+}
+
+.tema-cocina .tc-resumen-total {
+  margin: 0;
+  color: var(--tc-barra-texto);
+  font-weight: 700;
+}
+
+.tema-cocina .tc-leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tema-cocina .tc-leyenda-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tema-cocina .tc-leyenda-muestra {
+  /* El color lo sigue poniendo BarraResumen en línea, con sus --color-*. */
+  width: 14px;
+  height: 10px;
+  border: 1px solid rgb(255 255 255 / 0.35);
+}
+
+/* ----------------------------------------------------------------- Avisos */
+
+.tema-cocina .tc-aviso {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 12px 16px;
+}
+
+.tema-cocina .tc-aviso-desconexion {
+  background: var(--tc-rojo);
+  color: #fff;
+}
+
+.tema-cocina .tc-aviso-titulo {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.tema-cocina .tc-aviso-texto {
+  font-family: var(--tc-mono);
+  font-size: 15px;
+}
+
+.tema-cocina .tc-aviso-error {
+  background: var(--tc-papel);
+  color: var(--tc-tinta);
+  border-left: 8px solid var(--tc-rojo);
+}
+
+.tema-cocina .tc-aviso-mensaje {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--tc-rojo-tinta);
+  font-weight: 700;
+}
+
+.tema-cocina .tc-aviso-boton {
+  min-height: 48px;
+  padding: 0 20px;
+  border: 2px solid currentColor;
+  border-radius: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.tema-cocina .tc-aviso-desconexion .tc-aviso-boton {
+  background: #fff;
+  border-color: #fff;
+  color: var(--tc-rojo-tinta);
+}
+
+.tema-cocina .tc-aviso-error .tc-aviso-boton {
+  background: var(--tc-rojo);
+  border-color: var(--tc-rojo);
+  color: #fff;
+}
+
+/* --------------------------------------------------------------- Columnas */
+
+.tema-cocina .tc-columnas {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: 0;
+}
+
+.tema-cocina .tc-columna {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--tc-linea);
+}
+
+.tema-cocina .tc-columna:last-child {
+  border-right: 0;
+}
+
+.tema-cocina .tc-columna-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 18px;
+  /* El color de la regla lo pone Columna en línea (borderColor), y ese color
+     se aplica a los cuatro lados: la línea de abajo va como sombra interior
+     para no heredarlo. */
+  border-width: 4px 0 0;
+  border-style: solid;
+  border-radius: 0;
+  box-shadow: inset 0 -1px 0 var(--tc-linea);
+  background: color-mix(in srgb, var(--tc-fondo) 85%, #000);
+}
+
+.tema-cocina .tc-columna-titulo {
+  margin: 0;
+  color: var(--tc-txt);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.tema-cocina .tc-contador {
+  min-width: 36px;
+  padding: 2px 8px;
+  border: 1px solid var(--tc-linea);
+  border-radius: 0;
+  background: none;
+  color: var(--tc-txt2);
+  font-family: var(--tc-mono);
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.tema-cocina .tc-pila {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+  min-height: 0;
+  padding: 28px 16px 40px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.tema-cocina .tc-vacio {
+  width: 100%;
+  max-width: 340px;
+  margin-top: 10px;
+  padding: 36px 20px;
+  border: 2px dashed var(--tc-linea);
+  text-align: center;
+  color: var(--tc-txt2);
+}
+
+.tema-cocina .tc-vacio-icono {
+  margin: 0 auto 10px;
+  color: var(--tc-txt2);
+}
+
+.tema-cocina .tc-vacio-titulo {
+  margin: 0;
+  color: var(--tc-txt);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.tema-cocina .tc-vacio-nota {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+/* En pantallas angostas las tres columnas se deslizan, no se recortan. */
+@media (max-width: 1100px) {
+  .tema-cocina .tc-columnas {
+    grid-template-columns: repeat(3, minmax(300px, 1fr));
+    overflow-x: auto;
+  }
+}
+
+/* ----------------------------------------------------------------- Ticket */
+
+.tema-cocina .tc-ticket,
+.tema-cocina .tc-pedido-suelto {
+  position: relative;
+  flex: none;
+  width: 100%;
+  max-width: 340px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: 0 10px 16px -10px rgb(0 0 0 / 0.8);
+}
+
+/* La cinta que lo sujeta al riel. */
+.tema-cocina .tc-ticket::before,
+.tema-cocina .tc-pedido-suelto::before {
+  content: '';
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  width: 46px;
+  height: 20px;
+  translate: -50% 0;
+  background: #c9cbcd;
+  border: 1px solid #8d9094;
+  box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.18);
+}
+
+/* El corte dentado del papel. */
+.tema-cocina .tc-ticket::after,
+.tema-cocina .tc-pedido-suelto::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 8px;
+  background:
+    linear-gradient(-45deg, transparent 4px, var(--tc-papel) 0) 0 0 / 8px 8px,
+    linear-gradient(45deg, transparent 4px, var(--tc-papel) 0) 0 0 / 8px 8px;
+}
+
+.tema-cocina .tc-ticket-cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 14px 10px;
+  border-bottom: 2px solid var(--tc-tinta);
+}
+
+.tema-cocina .tc-ticket-mesa {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+.tema-cocina .tc-ticket-meta {
+  margin: 6px 0 0;
+  color: var(--tc-gris);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+/* La cabecera entera dice el nivel, como en la maqueta (BloqueMesa pone la
+   clase con espera.nivel, el mismo valor que antes elegía el borde). */
+.tema-cocina .tc-nivel-ambar > .tc-ticket-cabecera {
+  background: var(--tc-ambar);
+}
+
+.tema-cocina .tc-nivel-ambar > .tc-ticket-cabecera .tc-ticket-meta {
+  color: #4a3a14;
+}
+
+.tema-cocina .tc-nivel-rojo > .tc-ticket-cabecera {
+  background: var(--tc-rojo);
+  color: #fff;
+  border-bottom-color: #7f1515;
+}
+
+/* "N pedidos" en blanco puro sobre rojo y verde: con el tinte claro de antes
+   el verde se quedaba por debajo de 4,5:1. */
+.tema-cocina .tc-nivel-rojo > .tc-ticket-cabecera .tc-ticket-meta {
+  color: #fff;
+}
+
+/* neutro = el bloque ya está entero en el pase. */
+.tema-cocina .tc-nivel-neutro > .tc-ticket-cabecera {
+  background: var(--tc-verde);
+  color: #fff;
+  border-bottom-color: #1b5e20;
+}
+
+.tema-cocina .tc-nivel-neutro > .tc-ticket-cabecera .tc-ticket-meta {
+  color: #fff;
+}
+
+/* Reloj. Base: el chip de cada pedido. */
+.tema-cocina .tc-chip {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 2px 8px;
+  border: 2px solid transparent;
+  border-radius: 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tema-cocina .tc-chip-normal {
+  color: var(--tc-tinta);
+}
+
+.tema-cocina .tc-chip-neutro {
+  color: var(--tc-gris);
+}
+
+.tema-cocina .tc-chip-ambar {
+  background: var(--tc-ambar);
+  color: var(--tc-tinta);
+}
+
+.tema-cocina .tc-chip-rojo {
+  background: var(--tc-rojo);
+  color: #fff;
+}
+
+.tema-cocina .tc-chip-nota {
+  font-family: var(--tc-mono);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+/* En la cabecera del ticket el color ya lo pone la cabecera: el reloj solo es
+   la cifra grande. */
+.tema-cocina .tc-ticket-cabecera .tc-chip {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 36px;
+}
+
+/* --------------------------------------------------------------- Acciones */
+
+.tema-cocina .tc-accion {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 64px;
+  border: 2px solid var(--tc-tinta);
+  border-radius: 0;
+  background: var(--tc-tinta);
+  color: var(--tc-papel);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+
+.tema-cocina .tc-accion:active:not(:disabled) {
+  transform: translateY(2px);
+}
+
+.tema-cocina .tc-accion:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* EMPEZAR va con contorno y LISTO relleno, como en la maqueta. */
+.tema-cocina .tc-accion-empezar,
+.tema-cocina .tc-accion-secundaria {
+  background: transparent;
+  color: var(--tc-tinta);
+}
+
+.tema-cocina .tc-accion-peligro {
+  min-height: 48px;
+  border-color: var(--tc-rojo);
+  background: var(--tc-rojo);
+  color: #fff;
+  font-size: 20px;
+}
+
+.tema-cocina .tc-accion-esperando {
+  border: 2px dashed var(--tc-papel-linea);
+  background: transparent;
+  color: var(--tc-gris);
+  font-size: 20px;
+  cursor: default;
+}
+
+/* "Todo listo" y su confirmación, entre la cabecera y los pedidos. */
+.tema-cocina .tc-ticket > .tc-accion,
+.tema-cocina .tc-ticket > .tc-confirmar,
+.tema-cocina .tc-ticket > .tc-alerta {
+  width: calc(100% - 28px);
+  margin: 12px 14px 0;
+}
+
+.tema-cocina .tc-confirmar {
+  padding: 12px;
+  border: 2px solid var(--tc-tinta);
+  background: var(--tc-papel-sombra);
+}
+
+.tema-cocina .tc-confirmar-pregunta {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.tema-cocina .tc-confirmar-botones {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tema-cocina .tc-confirmar-botones .tc-accion {
+  flex: 1;
+  min-height: 56px;
+  padding: 0 8px;
+  font-size: 19px;
+  letter-spacing: 0.05em;
+}
+
+.tema-cocina .tc-alerta {
+  padding: 10px 12px;
+  border: 2px solid var(--tc-rojo-tinta);
+  background: #fbe9e7;
+  color: var(--tc-rojo-tinta);
+}
+
+.tema-cocina .tc-alerta-titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.tema-cocina .tc-alerta-cerrar {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--tc-rojo-tinta);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tema-cocina .tc-alerta-lista {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.tema-cocina .tc-alerta-lista > li + li {
+  margin-top: 4px;
+}
+
+/* ---------------------------------------------------------------- Pedidos */
+
+.tema-cocina .tc-pedido {
+  padding: 12px 14px 16px;
+  border: 0;
+  border-radius: 0;
+}
+
+.tema-cocina .tc-ticket-pedidos > .tc-pedido + .tc-pedido {
+  border-top: 2px dashed var(--tc-papel-linea);
+}
+
+/* Un pedido de la mesa en ámbar o rojo: barra a la izquierda (misma condición
+   que antes pintaba el borde). */
+.tema-cocina .tc-pedido-ambar {
+  box-shadow: inset 5px 0 0 var(--tc-ambar);
+}
+
+.tema-cocina .tc-pedido-rojo {
+  box-shadow: inset 5px 0 0 var(--tc-rojo);
+}
+
+.tema-cocina .tc-pedido-suelto.tc-pedido-ambar {
+  box-shadow:
+    inset 5px 0 0 var(--tc-ambar),
+    0 10px 16px -10px rgb(0 0 0 / 0.8);
+}
+
+.tema-cocina .tc-pedido-suelto.tc-pedido-rojo {
+  box-shadow:
+    inset 5px 0 0 var(--tc-rojo),
+    0 10px 16px -10px rgb(0 0 0 / 0.8);
+}
+
+/* Comanda olvidada en el pase: atenuada como antes (opacity 0.6), pero la
+   atenuación va en los hijos y no en el artículo, para que el aviso "sin
+   recoger" quede fuera y se lea con contraste pleno. */
+.tema-cocina .tc-pedido.es-olvidada > :not(.tc-aviso-olvidada) {
+  opacity: 0.6;
+}
+
+.tema-cocina .tc-pedido-cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tema-cocina .tc-pedido-quien {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.tema-cocina .tc-pedido-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 4px 0 0;
+  color: var(--tc-gris);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.tema-cocina .tc-etiqueta-estado {
+  /* El color del borde y del texto los pone ComandaCard en línea. */
+  padding: 1px 6px;
+  border-radius: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.tema-cocina .tc-banda {
+  margin: 10px 0 0;
+  padding: 4px 10px;
+  border-radius: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.tema-cocina .tc-banda-rojo {
+  background: var(--tc-rojo);
+  color: #fff;
+}
+
+.tema-cocina .tc-items {
+  margin: 10px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px dashed var(--tc-papel-linea);
+  list-style: none;
+}
+
+.tema-cocina .tc-item {
+  padding: 6px 0;
+}
+
+/* Línea cancelada: atenuada como antes, pero solo el plato. «CANCELADO» va
+   fuera de la atenuación para leerse con contraste pleno sobre el papel. */
+.tema-cocina .tc-item.es-cancelada .tc-item-plato {
+  opacity: 0.55;
+}
+
+.tema-cocina .tc-item-fila {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 8px;
+}
+
+.tema-cocina .tc-item-plato {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tema-cocina .tc-item-plato.es-tachado {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.tema-cocina .tc-item-cantidad {
+  min-width: 34px;
+  color: var(--tc-tinta);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tema-cocina .tc-item-cantidad.es-cancelada {
+  color: var(--tc-gris);
+}
+
+.tema-cocina .tc-item-nombre {
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+}
+
+.tema-cocina .tc-item-quien {
+  color: var(--tc-gris);
+  font-size: 13px;
+}
+
+.tema-cocina .tc-item-cancelado {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--tc-rojo-tinta);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Ingredientes y modificadores: 18 px como mínimo, se leen de lejos. */
+.tema-cocina .tc-mods {
+  margin: 4px 0 0;
+  padding: 0 0 0 24px;
+  list-style: none;
+}
+
+.tema-cocina .tc-mod {
+  padding: 2px 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* Cada ingrediente (el span que ya envuelve separador, nombre y marca) va de
+   una pieza: si no cabe en la línea pasa entero a la siguiente. Solo si él
+   solo es más ancho que el ticket se parte por dentro, para no desbordar. */
+.tema-cocina .tc-mod > span:not(.tc-mod-paso) {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.tema-cocina .tc-mod-paso,
+.tema-cocina .tc-mod-sep {
+  color: var(--tc-gris);
+  font-weight: 500;
+}
+
+.tema-cocina .tc-marca {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.tema-cocina .tc-marca-extra {
+  background: var(--tc-ambar);
+  color: var(--tc-tinta);
+}
+
+.tema-cocina .tc-marca-ligera {
+  border: 1px solid var(--tc-gris);
+  color: var(--tc-gris);
+}
+
+/* Notas: recuadro de tinta, en mayúsculas (solo con CSS, el texto no cambia). */
+.tema-cocina .tc-nota {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 0 0 24px;
+  padding: 4px 8px;
+  border: 2px solid var(--tc-tinta);
+  border-radius: 0;
+  color: var(--tc-tinta);
+  /* Notas: 18 px como mínimo y en negrita, dentro de su recuadro de tinta. */
+  font-size: 18px;
+  font-weight: 700;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.tema-cocina .tc-nota-general {
+  margin: 12px 0 0;
+  padding: 6px 10px;
+  border-style: double;
+  border-width: 4px;
+}
+
+.tema-cocina .tc-nota-icono {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.tema-cocina .tc-pedido-vacio {
+  margin: 10px 0 0;
+  color: var(--tc-gris);
+  font-size: 14px;
+}
+
+.tema-cocina .tc-error {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-left: 4px solid var(--tc-rojo);
+  border-radius: 0;
+  background: #fbe9e7;
+  color: var(--tc-rojo-tinta);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tema-cocina .tc-pedido > .tc-accion {
+  margin-top: 14px;
+}
+
+/* --------------------------------------------------------- Cajón agotados */
+
+.tema-cocina .tc-cajon {
+  border-left: 0;
+  box-shadow: -12px 0 24px -12px rgb(0 0 0 / 0.7);
+}
+
+.tema-cocina .tc-cajon-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 2px solid var(--tc-tinta);
+}
+
+.tema-cocina .tc-cajon-titulo {
+  margin: 0;
+  color: var(--tc-tinta);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.tema-cocina .tc-boton-cuadro {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 2px solid var(--tc-tinta);
+  border-radius: 0;
+  background: none;
+  color: var(--tc-tinta);
+  cursor: pointer;
+}
+
+.tema-cocina .tc-pestanas {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 2px solid var(--tc-tinta);
+}
+
+.tema-cocina .tc-pestana {
+  min-height: 52px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--tc-gris);
+  font-family: var(--tc-cond);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tema-cocina .tc-pestana[aria-selected='true'] {
+  background: var(--tc-tinta);
+  color: var(--tc-papel);
+}
+
+.tema-cocina .tc-pestana-cuenta {
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 0;
+  background: var(--tc-rojo);
+  color: #fff;
+  font-family: var(--tc-mono);
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.tema-cocina .tc-cajon-nota {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 18px;
+  border-bottom: 1px dashed var(--tc-papel-linea);
+  background: var(--tc-papel-sombra);
+  color: var(--tc-gris);
+  font-size: 13px;
+}
+
+.tema-cocina .tc-cajon-filtros {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px dashed var(--tc-papel-linea);
+}
+
+.tema-cocina .tc-buscador {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px 0 40px;
+  border: 2px solid var(--tc-tinta);
+  border-radius: 0;
+  background: #fff;
+  color: var(--tc-tinta);
+  font-family: var(--tc-mono);
+  font-size: 16px;
+}
+
+.tema-cocina .tc-buscador::placeholder {
+  color: var(--tc-gris);
+}
+
+.tema-cocina .tc-buscador-icono {
+  color: var(--tc-gris);
+}
+
+.tema-cocina .tc-interruptor {
+  min-height: 48px;
+  padding: 0 16px;
+  border: 2px solid var(--tc-tinta);
+  border-radius: 0;
+  background: none;
+  color: var(--tc-tinta);
+  font-family: var(--tc-cond);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tema-cocina .tc-interruptor[aria-pressed='true'] {
+  border-color: var(--tc-rojo);
+  background: var(--tc-rojo);
+  color: #fff;
+}
+
+.tema-cocina .tc-cajon-lista {
+  flex: 1;
+  padding: 6px 18px 18px;
+  overflow-y: auto;
+}
+
+.tema-cocina .tc-esqueleto {
+  min-height: 56px;
+  border-radius: 0;
+  background: var(--tc-papel-sombra);
+}
+
+.tema-cocina .tc-cajon-alerta {
+  padding: 12px 14px;
+  border: 2px solid var(--tc-rojo-tinta);
+  border-radius: 0;
+  color: var(--tc-rojo-tinta);
+  font-weight: 600;
+}
+
+.tema-cocina .tc-cajon-vacio {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--tc-gris);
+}
+
+.tema-cocina .tc-boton-borde {
+  min-height: 48px;
+  margin-top: 12px;
+  padding: 0 16px;
+  border: 2px solid var(--tc-tinta);
+  border-radius: 0;
+  background: none;
+  color: var(--tc-tinta);
+  font-family: var(--tc-cond);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tema-cocina .tc-grupo-plato {
+  margin: 0;
+  padding-top: 6px;
+  color: var(--tc-tinta);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.tema-cocina .tc-grupo-paso {
+  margin: 0 0 2px;
+  color: var(--tc-gris);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tema-cocina .tc-filas {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tema-cocina .tc-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px dashed var(--tc-papel-linea);
+  border-radius: 0;
+  background: none;
+  color: var(--tc-tinta);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tema-cocina .tc-fila:disabled {
+  opacity: 0.6;
+}
+
+.tema-cocina .tc-fila-nombre {
+  overflow: hidden;
+  color: var(--tc-tinta);
+  font-family: var(--tc-cond);
+  font-size: 21px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.tema-cocina .tc-fila.es-agotado .tc-fila-nombre {
+  color: var(--tc-gris);
+  text-decoration: line-through;
+}
+
+.tema-cocina .tc-fila-motivo {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  color: var(--tc-rojo-tinta);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tema-cocina .tc-fila-rotulo {
+  color: var(--tc-gris);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tema-cocina .tc-fila.es-agotado .tc-fila-rotulo {
+  color: var(--tc-rojo-tinta);
+}
+
+.tema-cocina .tc-fila-interruptor {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--tc-tinta);
+  border-radius: 0;
+  color: var(--tc-tinta);
+}
+
+.tema-cocina .tc-fila.es-agotado .tc-fila-interruptor {
+  border-color: var(--tc-rojo);
+  background: var(--tc-rojo);
+  color: #fff;
+}
+
+.tema-cocina .tc-fila-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 6px;
+  padding: 8px 10px;
+  border-left: 4px solid var(--tc-rojo);
+  border-radius: 0;
+  background: #fbe9e7;
+  color: var(--tc-rojo-tinta);
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------- Movimiento */
+
+/* No se añade ninguna animación nueva; las que ya había (los giros de carga y
+   el esqueleto) se paran si el sistema pide menos movimiento. */
+@media (prefers-reduced-motion: reduce) {
+  .tema-cocina .animate-spin,
+  .tema-cocina .animate-pulse {
+    animation: none;
+  }
+
+  .tema-cocina .tc-accion:active:not(:disabled) {
+    transform: none;
+  }
+}

@@ -19,15 +19,22 @@ import ComandaCard from './ComandaCard'
  */
 
 const CHIP_ESPERA = {
-  normal: 'bg-[color:var(--color-panel)] text-[color:var(--color-texto)]',
-  neutro: 'bg-[color:var(--color-panel)] text-[color:var(--color-texto-suave)]',
-  ambar: 'border-2 border-[color:var(--color-preparacion)] text-[color:var(--color-preparacion)]',
-  rojo: 'bg-[color:var(--color-alerta)] text-white',
+  normal: 'tc-chip-normal',
+  neutro: 'tc-chip-neutro',
+  ambar: 'tc-chip-ambar',
+  rojo: 'tc-chip-rojo',
 }
 
-const BORDE_ESPERA = {
-  ambar: 'var(--color-preparacion)',
-  rojo: 'var(--color-alerta)',
+/**
+ * El nivel ya no pinta el borde de la tarjeta sino la cabecera entera del
+ * ticket (tema-cocina.css). La clase sale del mismo espera.nivel que antes
+ * elegía el borde; 'neutro' es el bloque que ya está entero en el pase.
+ */
+const NIVEL_TICKET = {
+  normal: 'tc-nivel-normal',
+  neutro: 'tc-nivel-neutro',
+  ambar: 'tc-nivel-ambar',
+  rojo: 'tc-nivel-rojo',
 }
 
 export default function BloqueMesa({
@@ -60,21 +67,20 @@ export default function BloqueMesa({
 
   return (
     <article
-      className="rounded-xl border-2 bg-[color:var(--color-panel-alto)] p-3 shadow-lg"
-      style={{ borderColor: BORDE_ESPERA[espera.nivel] || 'var(--color-borde)' }}
+      className={`tc-ticket ${NIVEL_TICKET[espera.nivel] || ''}`}
       aria-label={bloque.titulo}
     >
-      <header className="flex items-start justify-between gap-3 px-1 pb-3">
+      <header className="tc-ticket-cabecera">
         <div>
-          <h3 className="display text-5xl font-bold leading-none">{bloque.titulo}</h3>
+          <h3 className="display tc-ticket-mesa">{bloque.titulo}</h3>
           {bloque.conMesa && (
-            <p className="mt-1.5 text-base leading-none text-[color:var(--color-texto-suave)]">
+            <p className="tc-ticket-meta">
               {bloque.comandas.length} {bloque.comandas.length === 1 ? 'pedido' : 'pedidos'}
             </p>
           )}
         </div>
         <p
-          className={`display flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1 text-3xl font-bold tabular-nums ${CHIP_ESPERA[espera.nivel]}`}
+          className={`display tc-chip ${CHIP_ESPERA[espera.nivel]}`}
           title={tituloReloj}
         >
           <Clock size={24} aria-hidden="true" />
@@ -88,8 +94,7 @@ export default function BloqueMesa({
           type="button"
           onClick={() => setConfirmando(true)}
           disabled={corriendo}
-          className="display mb-3 flex h-16 w-full items-center justify-center gap-2 rounded-xl text-2xl font-bold disabled:opacity-60"
-          style={{ backgroundColor: 'var(--color-listas)', color: 'var(--color-fondo)' }}
+          className="display tc-accion tc-accion-listo"
         >
           {corriendo ? (
             <LoaderCircle size={26} className="animate-spin" aria-hidden="true" />
@@ -107,22 +112,21 @@ export default function BloqueMesa({
         <div
           role="alertdialog"
           aria-label="Confirmar todo listo"
-          className="mb-3 rounded-xl border-2 border-[color:var(--color-listas)] p-3"
+          className="tc-confirmar"
         >
-          <p className="display text-2xl font-bold leading-tight">{preguntaTodoListo(bloque)}</p>
-          <div className="mt-3 flex gap-3">
+          <p className="display tc-confirmar-pregunta">{preguntaTodoListo(bloque)}</p>
+          <div className="tc-confirmar-botones">
             <button
               type="button"
               onClick={confirmar}
-              className="display h-14 flex-1 rounded-xl text-xl font-bold"
-              style={{ backgroundColor: 'var(--color-listas)', color: 'var(--color-fondo)' }}
+              className="display tc-accion tc-accion-listo"
             >
               Sí, marcar listos
             </button>
             <button
               type="button"
               onClick={() => setConfirmando(false)}
-              className="display h-14 flex-1 rounded-xl border-2 border-[color:var(--color-borde)] text-xl font-bold"
+              className="display tc-accion tc-accion-secundaria"
             >
               Cancelar
             </button>
@@ -133,10 +137,10 @@ export default function BloqueMesa({
       {fallidos.length > 0 && (
         <div
           role="alert"
-          className="mb-3 rounded-lg bg-[color:var(--color-alerta)]/20 p-3 text-[color:var(--color-alerta)]"
+          className="tc-alerta"
         >
           <div className="flex items-start justify-between gap-2">
-            <p className="flex items-center gap-2 text-lg font-bold">
+            <p className="tc-alerta-titulo">
               <AlertCircle size={20} aria-hidden="true" />
               {fallidos.length === 1
                 ? 'Un pedido no se pudo marcar listo'
@@ -145,13 +149,13 @@ export default function BloqueMesa({
             <button
               type="button"
               onClick={() => onDescartarFallos?.(bloque.clave)}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg"
+              className="tc-alerta-cerrar"
               aria-label="Cerrar aviso"
             >
               <X size={20} aria-hidden="true" />
             </button>
           </div>
-          <ul className="mt-1 space-y-1 text-base">
+          <ul className="tc-alerta-lista">
             {fallidos.map((f) => (
               <li key={f.id_pedido}>
                 <span className="font-bold">{f.codigo_pedido || `Pedido ${f.id_pedido}`}</span>: {f.mensaje}
@@ -161,7 +165,7 @@ export default function BloqueMesa({
         </div>
       )}
 
-      <div className="space-y-3">
+      <div className="tc-ticket-pedidos">
         {bloque.comandas.map((comanda) => (
           <ComandaCard
             key={comanda.id_pedido}

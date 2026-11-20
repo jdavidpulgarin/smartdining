@@ -38,30 +38,18 @@ export default function FilaPlato({ plato, enVuelo, error, onConmutar, onDescart
         aria-label={`${nombre}: ${rotulo}${motivo === 'stock' ? ' por falta de inventario' : ''}. Toca para marcar como ${
           manual ? 'agotado' : 'disponible'
         }`}
-        className={[
-          'flex min-h-14 w-full items-center justify-between gap-3 rounded-xl border px-4 py-2 text-left',
-          'border-[color:var(--color-borde)] bg-[color:var(--color-panel-alto)]',
-          'transition-colors disabled:opacity-60',
-          disponible ? '' : 'border-[color:var(--color-alerta)]',
-        ].join(' ')}
+        // Agotado o no sale de `disponible`, igual que antes: la clase
+        // es-agotado pinta nombre, rotulo e interruptor (tema-cocina.css).
+        className={disponible ? 'tc-fila' : 'tc-fila es-agotado'}
       >
         <span className="flex min-w-0 flex-col">
-          <span
-            className={[
-              'truncate text-lg font-semibold',
-              disponible
-                ? 'text-[color:var(--color-texto)]'
-                : 'text-[color:var(--color-texto-suave)] line-through',
-            ].join(' ')}
-          >
-            {nombre}
-          </span>
+          <span className="tc-fila-nombre truncate">{nombre}</span>
 
           {/* El motivo del agotado, cuando el backend lo mande. Va debajo del
               nombre y no sustituye al rotulo: "Agotado" sigue siendo lo que hay
               que leer de un golpe, y el motivo es el detalle. */}
           {motivo === 'stock' && (
-            <span className="mt-0.5 flex items-center gap-1 text-sm font-bold uppercase tracking-wide text-[color:var(--color-alerta)]">
+            <span className="tc-fila-motivo">
               <PackageX size={14} aria-hidden="true" />
               Agotado por stock
             </span>
@@ -69,27 +57,10 @@ export default function FilaPlato({ plato, enVuelo, error, onConmutar, onDescart
         </span>
 
         <span className="flex shrink-0 items-center gap-2">
-          <span
-            className={[
-              'text-sm font-bold uppercase tracking-wide',
-              disponible
-                ? 'text-[color:var(--color-texto-suave)]'
-                : 'text-[color:var(--color-alerta)]',
-            ].join(' ')}
-          >
-            {rotulo}
-          </span>
+          <span className="tc-fila-rotulo">{rotulo}</span>
 
           {/* aria-hidden: el estado ya lo dice aria-pressed del boton. */}
-          <span
-            aria-hidden="true"
-            className={[
-              'grid h-10 w-10 place-items-center rounded-lg border',
-              disponible
-                ? 'border-[color:var(--color-borde)] text-[color:var(--color-texto)]'
-                : 'border-[color:var(--color-alerta)] text-[color:var(--color-alerta)]',
-            ].join(' ')}
-          >
+          <span aria-hidden="true" className="tc-fila-interruptor">
             {enVuelo ? (
               <Loader2 size={20} className="animate-spin motion-reduce:animate-none" />
             ) : disponible ? (
@@ -105,7 +76,7 @@ export default function FilaPlato({ plato, enVuelo, error, onConmutar, onDescart
       {error && (
         <p
           role="status"
-          className="mt-1 flex items-start gap-2 rounded-lg bg-[color:var(--color-alerta)]/15 px-3 py-2 text-sm text-[color:var(--color-alerta)]"
+          className="tc-fila-error"
         >
           <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
           <span className="flex-1">{error}</span>
