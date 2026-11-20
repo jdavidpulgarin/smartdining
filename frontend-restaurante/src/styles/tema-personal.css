@@ -383,6 +383,15 @@
 }
 
 @media (max-width: 479px) {
+  .tema-comanda.sd-topbar {
+    min-width: 0;
+    max-width: 100vw;
+  }
+
+  .tema-comanda.sd-topbar .fila {
+    min-width: 0;
+  }
+
   .tema-comanda.top .fila,
   .tema-comanda.sd-topbar .fila,
   .tema-comanda .top .fila,
