@@ -42,7 +42,7 @@ export function TableCard({
     <div
       role="button"
       tabIndex={0}
-      className={`sd-table-card sd-table-${estadoVisual} ${isActive ? 'active' : ''}`}
+      className={`sd-table-card ms-table-card sd-table-${estadoVisual} ms-table-${estadoVisual} ${isActive ? 'active' : ''}`}
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -53,8 +53,8 @@ export function TableCard({
       aria-label={`Mesa ${tableId}, estado ${estadoLabel}`}
     >
       {/* Cabecera de la mesa */}
-      <div className="sd-table-card-top">
-        <span className="sd-table-card-number">#{tableId}</span>
+      <div className="sd-table-card-top ms-card-top">
+        <span className="sd-table-card-number ms-card-num">#{tableId}</span>
         <StatusBadge status={table?.status || status || estadoLabel} />
       </div>
 

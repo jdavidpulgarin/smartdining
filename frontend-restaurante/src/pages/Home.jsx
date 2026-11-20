@@ -123,7 +123,7 @@ export function Home() {
   }
 
   return (
-    <main className="main-panel">
+    <main className="main-panel tema-comanda ms-main">
       <StatsSection stats={stats} />
 
       <section className="content-grid">

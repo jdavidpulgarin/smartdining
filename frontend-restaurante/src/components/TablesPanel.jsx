@@ -142,55 +142,74 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
   }, [tablesList, filter, mesasConAlertaIds, searchQuery])
 
   return (
-    <div className="sd-mesas-page-wrap">
-      {/* Franja roja con los filtros */}
-      <div className="sd-red-band">
-        <div className="sd-red-band-content">
-          <div className="sd-red-band-filters">
+    <div className="sd-mesas-page-wrap ms-wrap">
+      {/* Encabezado con título editorial y contadores */}
+      <header className="sd-mesas-header ms-header">
+        <div className="ms-title-block">
+          <h1 className="sd-page-title ms-title">MESAS</h1>
+          <p className="ms-subtitle">El salón en vivo</p>
+        </div>
+        <div className="sd-tables-counters ms-counters">
+          <span>{totalOcupadas} OCUPADAS</span>
+          <span className="sd-counter-sep">·</span>
+          <span>{totalDisponibles} DISPONIBLES</span>
+          <span className="sd-counter-sep">·</span>
+          <span className="sd-counter-alert">{totalConAlerta} CON ALERTA</span>
+        </div>
+      </header>
+
+      {/* Franja de filtros */}
+      <div className="sd-red-band ms-filters-band">
+        <div className="sd-red-band-content ms-filters-content">
+          <div className="sd-red-band-filters ms-chips">
             <button
               type="button"
-              className={`sd-red-band-btn ${filter === 'TODAS' ? 'active' : ''}`}
+              className={`sd-red-band-btn chip ms-chip ${filter === 'TODAS' ? 'active' : ''}`}
+              aria-pressed={filter === 'TODAS'}
               onClick={() => setFilter('TODAS')}
             >
               TODAS <span>{tablesList.length}</span>
             </button>
             <button
               type="button"
-              className={`sd-red-band-btn ${filter === 'DISPONIBLES' ? 'active' : ''}`}
+              className={`sd-red-band-btn chip ms-chip ${filter === 'DISPONIBLES' ? 'active' : ''}`}
+              aria-pressed={filter === 'DISPONIBLES'}
               onClick={() => setFilter('DISPONIBLES')}
             >
               DISPONIBLES <span>{totalDisponibles}</span>
             </button>
             <button
               type="button"
-              className={`sd-red-band-btn ${filter === 'OCUPADAS' ? 'active' : ''}`}
+              className={`sd-red-band-btn chip ms-chip ${filter === 'OCUPADAS' ? 'active' : ''}`}
+              aria-pressed={filter === 'OCUPADAS'}
               onClick={() => setFilter('OCUPADAS')}
             >
               OCUPADAS <span>{totalOcupadas}</span>
             </button>
             <button
               type="button"
-              className={`sd-red-band-btn ${filter === 'CON ALERTA' ? 'active' : ''}`}
+              className={`sd-red-band-btn chip ms-chip ${filter === 'CON ALERTA' ? 'active' : ''}`}
+              aria-pressed={filter === 'CON ALERTA'}
               onClick={() => setFilter('CON ALERTA')}
             >
               CON ALERTA <span>{totalConAlerta}</span>
             </button>
           </div>
 
-          <div className="sd-band-search-box">
+          <div className="sd-band-search-box ms-search">
             <Search size={15} />
             <input
               type="text"
               placeholder="Buscar mesa..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="sd-band-search-input"
+              className="sd-band-search-input ms-search-input"
             />
           </div>
         </div>
       </div>
 
-      <div className="sd-page-container sd-mesas-container">
+      <div className="sd-page-container sd-mesas-container ms-container">
         {/* Toast de notificación rápida */}
         {notification && (
           <div className={`table-toast-banner ${notification.tipo || 'info'}`} style={{ marginBottom: 20 }}>
@@ -202,21 +221,6 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
             <span>{notification.mensaje}</span>
           </div>
         )}
-
-        {/* Encabezado con título editorial y contadores */}
-        <header className="sd-mesas-header">
-          <h1 className="sd-page-title">
-            MESAS<br />
-            EN VIVO
-          </h1>
-          <div className="sd-tables-counters">
-            <span>{totalOcupadas} OCUPADAS</span>
-            <span className="sd-counter-sep">·</span>
-            <span>{totalDisponibles} DISPONIBLES</span>
-            <span className="sd-counter-sep">·</span>
-            <span className="sd-counter-alert">{totalConAlerta} CON ALERTA</span>
-          </div>
-        </header>
 
         {/* Layout 2 columnas: Grilla de mesas + Tarjeta ALERTAS */}
         <div className="sd-mesas-layout">

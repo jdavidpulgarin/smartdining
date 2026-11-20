@@ -10,15 +10,15 @@ export function OrderPanel({ order, onDeliver }) {
   const rol = useContext(AuthContext)?.user?.rol
   if (!order) {
     return (
-      <div className="panel order-panel empty-selection">
-        <div className="panel-header">
+      <div className="panel order-panel empty-selection t plano ms-order-ticket">
+        <div className="panel-header banda ms-order-band">
           <h2>Comanda Activa</h2>
         </div>
-        <div className="order-empty-prompt">
+        <div className="order-empty-prompt ms-empty-prompt">
           <Utensils size={42} className="text-muted" />
           <h3>Sin comanda seleccionada</h3>
           <p>Selecciona una mesa ocupada en el plano para monitorear sus platos en cocina o gestionar su consumo.</p>
-          <Link to="/mesas" className="btn-mapa-mesas">
+          <Link to="/mesas" className="btn-mapa-mesas btn claro ms-btn">
             <span>Ver Mapa de Mesas</span>
             <ArrowRight size={16} />
           </Link>
@@ -30,8 +30,8 @@ export function OrderPanel({ order, onDeliver }) {
   const isListo = order.state?.toLowerCase() === 'listo'
 
   return (
-    <div className="panel order-panel">
-      <div className="panel-header">
+    <div className="panel order-panel t plano ms-order-ticket">
+      <div className="panel-header banda ms-order-band">
         <div className="panel-title-with-badge">
           <h2>Comanda en Curso</h2>
           <span className="live-pulse-badge">En Vivo</span>
@@ -39,66 +39,69 @@ export function OrderPanel({ order, onDeliver }) {
         <span className="order-id-badge font-mono">{order.id}</span>
       </div>
 
-      <div className="order-focus">
+      <div className="order-focus ms-order-body">
         {/* Mesa & Estado */}
-        <div className="order-header-card">
+        <div className="order-header-card ms-mesa-card">
           <div className="order-mesa-block">
-            <span className="order-label">Mesa Seleccionada</span>
-            <strong className="order-table-name">{order.table}</strong>
+            <span className="order-label ms-order-label">Mesa Seleccionada</span>
+            <strong className="order-table-name ms-table-name">{order.table}</strong>
           </div>
           <StateBadge state={order.state} />
         </div>
 
         {/* Cliente & Hora */}
-        <div className="order-client-row">
-          <div className="client-chip">
+        <div className="order-client-row ms-meta-row">
+          <div className="client-chip ms-client-chip">
             <User size={13} className="text-muted" />
             <span>{order.client}</span>
           </div>
-          <div className="time-chip">
+          <div className="time-chip ms-time-chip">
             <Clock size={13} className="text-muted" />
             <span>{order.time || '12:45'}</span>
           </div>
         </div>
 
+        <div className="corte ms-corte" />
+
         {/* Lista de Platos */}
-        <div className="order-items-wrapper">
-          <span className="items-section-title">Ítems ordenados ({order.items?.length || 0})</span>
-          <div className="items-list">
+        <div className="order-items-wrapper ms-items-wrapper">
+          <span className="items-section-title ms-items-title">Ítems ordenados ({order.items?.length || 0})</span>
+          <div className="items-list ms-items-list">
             {(order.items || []).map((item, idx) => (
-              <div key={`${order.id}-${item.name}-${idx}`} className="item-row">
-                <div className="item-name-block">
-                  <span className="item-qty-tag">x{item.qty}</span>
+              <div key={`${order.id}-${item.name}-${idx}`} className="item-row ms-item-row">
+                <div className="item-name-block ms-item-name">
+                  <span className="item-qty-tag ms-qty">x{item.qty}</span>
                   <div>
-                    <span className="item-title-text">{item.name}</span>
+                    <span className="item-title-text ms-item-title">{item.name}</span>
                     {item.notes && (
-                      <span className="item-sub-note">{item.notes}</span>
+                      <span className="item-sub-note ms-item-note">{item.notes}</span>
                     )}
                   </div>
                 </div>
-                <strong className="item-price-tag">{item.subtotal}</strong>
+                <strong className="item-price-tag ms-item-price">{item.subtotal}</strong>
               </div>
             ))}
           </div>
         </div>
 
+        <div className="corte ms-corte" />
+
         {/* Total a Pagar */}
-        <div className="total-box">
+        <div className="total-box ms-total-box">
           <div>
-            <span className="total-label-dim">Consumo Acumulado</span>
-            <strong className="total-value-glow">{order.total}</strong>
+            <span className="total-label-dim ms-total-label">Consumo Acumulado</span>
+            <strong className="total-value-glow ms-total-value">{order.total}</strong>
           </div>
-          <span className="tax-hint">IVA incluido</span>
+          <span className="tax-hint ms-tax-hint">IVA incluido</span>
         </div>
 
         {/* Acciones Rápidas */}
-        <div className="order-actions">
+        <div className="order-actions ms-order-actions">
           {isListo && onDeliver && (
             <button
               type="button"
-              className="primary-button small flex-1 text-center btn-entregar-order"
+              className="primary-button small flex-1 text-center btn-entregar-order btn urg ms-btn-urg"
               onClick={() => onDeliver(order.id_pedido || order.id)}
-              style={{ backgroundColor: '#EE1C25', color: '#fff' }}
             >
               <CheckCircle2 size={15} />
               <span>Marcar Entregado</span>
@@ -106,11 +109,11 @@ export function OrderPanel({ order, onDeliver }) {
           )}
 
           {puedeUsarCaja(rol) && (
-            <Link to="/caja" className="ghost-button small flex-1 text-center">
+            <Link to="/caja" className="ghost-button small flex-1 text-center btn claro ms-btn-caja">
               <span>Cobrar en Caja</span>
             </Link>
           )}
-          <Link to="/pedidos" className="ghost-button small text-center">
+          <Link to="/pedidos" className="ghost-button small text-center btn claro ms-btn-kds">
             <Flame size={15} />
             <span>KDS Cocina</span>
           </Link>

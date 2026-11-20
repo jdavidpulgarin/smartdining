@@ -4,8 +4,8 @@ import { MenuItem } from './MenuItem'
 
 export function MenuSection({ menu = [] }) {
   return (
-    <section className="panel bottom-panel">
-      <div className="panel-header">
+    <section className="panel bottom-panel ms-bottom-panel">
+      <div className="panel-header ms-menu-header">
         <div className="panel-title-with-badge">
           <UtensilsCrossed size={18} className="menu-header-icon" />
           <h2 className="menu-section-title">Destacados del Menú de Hoy</h2>

@@ -20,8 +20,8 @@ export function StatCard({ label, value, detail }) {
   const Icon = ICON_MAP[normalized] || TrendingUp
 
   return (
-    <article className="stat-card">
-      <div className="stat-card-header">
+    <article className="stat-card ms-stat-card">
+      <div className="stat-card-header ms-stat-header">
         <span className="stat-label">{label}</span>
         <div className="stat-icon-wrap">
           <Icon size={16} className="stat-icon" />
