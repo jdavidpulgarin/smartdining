@@ -173,15 +173,15 @@ export function Login() {
         </div>
 
         {/* Columna Derecha: Tarjeta de Login */}
-        <div className="sd-card sd-login-card">
-          <h2 className="sd-card-title">INICIAR SESIÓN</h2>
+        <div className="sd-card sd-login-card t plano">
+          <h2 className="sd-card-title d">INICIAR SESIÓN</h2>
           <p style={{ color: 'var(--sd-text-muted)', fontSize: 14, marginTop: -8, marginBottom: 20 }}>
             Portal de Acceso para Personal de Sala y Gerencia
           </p>
 
           {/* Mensaje de sesión inválida / cuenta desactivada (401) */}
           {authNotice && (
-            <div className="sd-login-banner sd-banner-warning" role="alert">
+            <div className="sd-login-banner sd-banner-warning login-warning-banner" role="alert">
               <ShieldAlert size={16} />
               <span>{authNotice}</span>
             </div>
@@ -189,7 +189,7 @@ export function Login() {
 
           {/* Mensaje de rate limit con cuenta regresiva (429) */}
           {countdown > 0 && (
-            <div className="sd-login-banner sd-banner-warning" role="alert">
+            <div className="sd-login-banner sd-banner-warning login-warning-banner" role="alert">
               <Clock size={16} />
               <span>
                 {rateLimitMessage || MENSAJE_DEMASIADOS_INTENTOS} ({countdown}s)
@@ -199,15 +199,15 @@ export function Login() {
 
           {/* Error regular de validación o credenciales */}
           {error && countdown === 0 && (
-            <div className="sd-login-banner sd-banner-error" role="alert">
+            <div className="sd-login-banner sd-banner-error login-error-banner" role="alert">
               <span>{error}</span>
             </div>
           )}
 
           {/* Formulario */}
           <form onSubmit={handleSubmit} className="sd-login-form">
-            <div className="sd-input-group">
-              <label htmlFor="login-email" className="sd-input-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="sd-input-group campo">
+              <label htmlFor="login-email" className="sd-input-label lbl" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Mail size={14} style={{ color: 'var(--sd-red-text)' }} />
                 <span>CORREO ELECTRÓNICO</span>
               </label>
@@ -222,12 +222,12 @@ export function Login() {
                 }}
                 disabled={loading || countdown > 0}
                 required
-                className={`sd-input ${error ? 'error' : ''}`}
+                className={`sd-input inp ${error ? 'error' : ''}`}
               />
             </div>
 
-            <div className="sd-input-group">
-              <label htmlFor="login-password" className="sd-input-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="sd-input-group campo">
+              <label htmlFor="login-password" className="sd-input-label lbl" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Lock size={14} style={{ color: 'var(--sd-red-text)' }} />
                 <span>CONTRASEÑA</span>
               </label>
@@ -239,13 +239,13 @@ export function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading || countdown > 0}
                 required
-                className={`sd-input ${error ? 'error' : ''}`}
+                className={`sd-input inp ${error ? 'error' : ''}`}
               />
             </div>
 
             <button
               type="submit"
-              className="sd-btn sd-btn-primary sd-btn-block"
+              className="sd-btn sd-btn-primary sd-btn-block btn"
               disabled={loading || countdown > 0}
               aria-label="Ingresar al Sistema"
               style={{ width: '100%', justifyContent: 'center', padding: '14px 20px', marginTop: 8 }}
