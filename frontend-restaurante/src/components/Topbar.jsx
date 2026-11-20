@@ -33,6 +33,11 @@ export function Topbar() {
     return () => clearInterval(timer)
   }, [])
 
+  useEffect(() => {
+    const el = document.querySelector('.sd-topbar-nav [aria-current="page"]')
+    el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [location.pathname])
+
   const pendientesCount = (alertas || []).filter((a) => !a.atendida).length
 
   const handleLogout = () => {

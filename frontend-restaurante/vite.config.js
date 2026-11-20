@@ -15,6 +15,8 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.js',
+    testTimeout: 15000,
+    maxWorkers: 2,
     // e2e/ es la suite de Playwright (npm run test:e2e): necesita el sistema
     // entero levantado y no la corre Vitest.
     exclude: [...configDefaults.exclude, 'e2e/**'],

@@ -106,10 +106,10 @@
   gap: 0 !important;
 }
 
-.tema-comanda .top .fila,
-.tema-comanda .sd-topbar .fila,
 .tema-comanda.top .fila,
-.tema-comanda.sd-topbar .fila {
+.tema-comanda.sd-topbar .fila,
+.tema-comanda .top .fila,
+.tema-comanda .sd-topbar .fila {
   display: flex;
   align-items: center;
   gap: 18px;
@@ -155,7 +155,6 @@
 }
 
 /* Navegación */
-.tema-comanda nav,
 .tema-comanda .sd-topbar-nav {
   display: flex;
   justify-content: flex-start !important;
@@ -167,13 +166,11 @@
   align-items: center;
 }
 
-.tema-comanda nav::-webkit-scrollbar,
 .tema-comanda .sd-topbar-nav::-webkit-scrollbar {
   display: none;
 }
 
-.tema-comanda nav a,
-.tema-comanda nav button,
+.tema-comanda .sd-topbar-nav .sd-nav-link,
 .tema-comanda .sd-nav-link {
   position: relative;
   height: 100%;
@@ -191,22 +188,17 @@
   transition: color 0.15s ease;
 }
 
-.tema-comanda nav a:hover,
-.tema-comanda nav button:hover,
+.tema-comanda .sd-topbar-nav .sd-nav-link:hover,
 .tema-comanda .sd-nav-link:hover {
   color: var(--papel);
 }
 
-.tema-comanda nav a[aria-current="page"],
-.tema-comanda nav a.active,
 .tema-comanda .sd-nav-link.active,
 .tema-comanda .sd-nav-link[aria-current="page"] {
   color: var(--ambar);
   background: none;
 }
 
-.tema-comanda nav a[aria-current="page"]::after,
-.tema-comanda nav a.active::after,
 .tema-comanda .sd-nav-link.active::after,
 .tema-comanda .sd-nav-link[aria-current="page"]::after {
   content: "";
@@ -353,6 +345,8 @@
 
 /* Responsive de la barra superior */
 @media (max-width: 1023px) {
+  .tema-comanda.top .fila,
+  .tema-comanda.sd-topbar .fila,
   .tema-comanda .top .fila,
   .tema-comanda .sd-topbar .fila {
     flex-wrap: wrap;
@@ -374,17 +368,36 @@
     flex: none;
   }
 
-  .tema-comanda nav,
   .tema-comanda .sd-topbar-nav {
     order: 3;
+    flex: 0 0 100% !important;
     width: 100%;
-    min-width: 100%;
+    max-width: 100%;
+    min-width: 0;
     height: 44px;
     overflow-x: auto;
+    justify-content: flex-start;
   }
 }
 
 @media (max-width: 479px) {
+  .tema-comanda.sd-topbar {
+    min-width: 0;
+    max-width: 100vw;
+  }
+
+  .tema-comanda.sd-topbar .fila {
+    min-width: 0;
+  }
+
+  .tema-comanda.top .fila,
+  .tema-comanda.sd-topbar .fila,
+  .tema-comanda .top .fila,
+  .tema-comanda .sd-topbar .fila {
+    padding: 8px 12px 0;
+    gap: 8px 10px;
+  }
+
   .tema-comanda .sd-brand-text {
     display: none;
   }
@@ -394,37 +407,70 @@
     width: 34px;
     height: 34px;
     font-size: 18px;
+    flex: none;
   }
 
-  .tema-comanda nav a,
-  .tema-comanda nav button,
-  .tema-comanda .sd-nav-link {
-    font-size: 16px;
-    padding: 0 8px;
-    letter-spacing: 0.04em;
+  .tema-comanda .sd-topbar-actions {
+    min-width: 0;
+    gap: 8px;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .tema-comanda .usuario,
+  .tema-comanda .sd-user-info-pill {
+    min-width: 0;
+    gap: 8px;
+    flex: 0 1 auto;
+  }
+
+  .tema-comanda .usuario div,
+  .tema-comanda .sd-user-info-pill div {
+    min-width: 0;
+    max-width: 110px;
+    text-align: right;
   }
 
   .tema-comanda .usuario b,
   .tema-comanda .sd-user-name {
+    display: block;
     font-size: 14px;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tema-comanda .rol,
   .tema-comanda .sd-user-role {
-    font-size: 11px;
+    font-size: 10px;
+    letter-spacing: 0.1em;
     padding: 0 4px;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tema-comanda .campana,
   .tema-comanda .sd-topbar-bell-btn {
     width: 34px;
     height: 34px;
+    flex: none;
   }
 
   .tema-comanda .salir,
   .tema-comanda .sd-topbar-icon-btn {
     width: 34px;
     height: 34px;
+    flex: none;
+  }
+
+  .tema-comanda .sd-topbar-nav .sd-nav-link,
+  .tema-comanda .sd-nav-link {
+    font-size: 16px;
+    padding: 0 8px;
+    letter-spacing: 0.04em;
   }
 }
 
