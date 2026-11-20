@@ -174,14 +174,14 @@ export function Login() {
 
         {/* Columna Derecha: Tarjeta de Login */}
         <div className="sd-card sd-login-card t plano">
-          <h2 className="sd-card-title d">INICIAR SESIÓN</h2>
+          <h2 className="sd-card-title">INICIAR SESIÓN</h2>
           <p style={{ color: 'var(--sd-text-muted)', fontSize: 14, marginTop: -8, marginBottom: 20 }}>
             Portal de Acceso para Personal de Sala y Gerencia
           </p>
 
           {/* Mensaje de sesión inválida / cuenta desactivada (401) */}
           {authNotice && (
-            <div className="sd-login-banner sd-banner-warning login-warning-banner" role="alert">
+            <div className="sd-login-banner sd-banner-warning" role="alert">
               <ShieldAlert size={16} />
               <span>{authNotice}</span>
             </div>
@@ -189,7 +189,7 @@ export function Login() {
 
           {/* Mensaje de rate limit con cuenta regresiva (429) */}
           {countdown > 0 && (
-            <div className="sd-login-banner sd-banner-warning login-warning-banner" role="alert">
+            <div className="sd-login-banner sd-banner-warning" role="alert">
               <Clock size={16} />
               <span>
                 {rateLimitMessage || MENSAJE_DEMASIADOS_INTENTOS} ({countdown}s)
@@ -199,7 +199,7 @@ export function Login() {
 
           {/* Error regular de validación o credenciales */}
           {error && countdown === 0 && (
-            <div className="sd-login-banner sd-banner-error login-error-banner" role="alert">
+            <div className="sd-login-banner sd-banner-error" role="alert">
               <span>{error}</span>
             </div>
           )}
