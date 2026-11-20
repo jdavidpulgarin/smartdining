@@ -906,7 +906,7 @@
 /* Ingredientes y modificadores: 18 px como mínimo, se leen de lejos. */
 .tema-cocina .tc-mods {
   margin: 4px 0 0;
-  padding: 0 0 0 34px;
+  padding: 0 0 0 24px;
   list-style: none;
 }
 
@@ -918,6 +918,15 @@
   overflow-wrap: anywhere;
 }
 
+/* Cada ingrediente (el span que ya envuelve separador, nombre y marca) va de
+   una pieza: si no cabe en la línea pasa entero a la siguiente. Solo si él
+   solo es más ancho que el ticket se parte por dentro, para no desbordar. */
+.tema-cocina .tc-mod > span:not(.tc-mod-paso) {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .tema-cocina .tc-mod-paso,
 .tema-cocina .tc-mod-sep {
   color: var(--tc-gris);
@@ -926,11 +935,11 @@
 
 .tema-cocina .tc-marca {
   margin-left: 4px;
-  padding: 0 5px;
+  padding: 0 4px;
   border-radius: 0;
   font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 
 .tema-cocina .tc-marca-extra {
@@ -948,7 +957,7 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  margin: 6px 0 0 34px;
+  margin: 6px 0 0 24px;
   padding: 4px 8px;
   border: 2px solid var(--tc-tinta);
   border-radius: 0;
