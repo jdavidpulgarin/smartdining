@@ -1539,13 +1539,6 @@
   color: var(--carbon);
 }
 
-.tema-comanda .ms-card-num small,
-.tema-comanda .sd-table-card-number small {
-  font: 400 16px var(--f-titulo);
-  letter-spacing: 0.1em;
-  color: var(--suave);
-  margin-right: 3px;
-}
 
 /* Etiqueta de estado dentro de la tarjeta */
 .tema-comanda .ms-table-card .status,

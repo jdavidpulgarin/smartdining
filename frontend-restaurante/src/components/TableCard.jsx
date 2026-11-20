@@ -54,7 +54,7 @@ export function TableCard({
     >
       {/* Cabecera de la mesa */}
       <div className="sd-table-card-top ms-card-top">
-        <span className="sd-table-card-number ms-card-num"><small>#</small>{tableId}</span>
+        <span className="sd-table-card-number ms-card-num">#{tableId}</span>
         <StatusBadge status={table?.status || status || estadoLabel} />
       </div>
 
