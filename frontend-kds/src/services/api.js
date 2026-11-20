@@ -5,7 +5,9 @@
  * navegador, asi que no se usa ni se lee.
  */
 
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
+// `?.` solo para que este modulo se pueda importar en las pruebas de Node, donde
+// import.meta.env no existe. En la app, Vite sustituye el valor igual que antes.
+export const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:4000/api'
 
 /** Evento global con el que la app cierra sesion al ver un 401. */
 export const EVENTO_NO_AUTORIZADO = 'kds:auth:no-autorizado'
@@ -18,6 +20,25 @@ export class ErrorApi extends Error {
     this.status = status
     this.retryAfter = retryAfter
   }
+}
+
+/** Lo que ve el cocinero cuando la peticion no llega al servidor. */
+export const MENSAJE_SIN_CONEXION = 'Sin conexión con el servidor. Intenta de nuevo.'
+
+/**
+ * Un fallo de red (fetch sin respuesta, o la conexion cortada mientras llega el
+ * cuerpo) lo lanza el navegador como TypeError, con su propio texto en ingles
+ * ("Failed to fetch", "NetworkError…", "Load failed"). Se cambia por un
+ * ErrorApi con mensaje en espanol y status null: SIN status, como antes, que es
+ * lo que la logica usa para saber que no hubo respuesta (sinRespuesta en
+ * useTablero, el aviso 'error' y no 'prohibido' en agotados). El original queda
+ * en `cause` para depurar. Cualquier otro error sale tal cual.
+ */
+function errorDeRed(error) {
+  if (!(error instanceof TypeError)) return error
+  const convertido = new ErrorApi(MENSAJE_SIN_CONEXION, null)
+  convertido.cause = error
+  return convertido
 }
 
 export function avisarNoAutorizado(mensaje = null) {
@@ -34,14 +55,19 @@ export function avisarNoAutorizado(mensaje = null) {
 async function pedir(ruta, { token, ...opciones } = {}) {
   const url = `${API_URL}${ruta.startsWith('/') ? '' : '/'}${ruta}`
 
-  const respuesta = await fetch(url, {
-    ...opciones,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...opciones.headers,
-    },
-  })
+  let respuesta
+  try {
+    respuesta = await fetch(url, {
+      ...opciones,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...opciones.headers,
+      },
+    })
+  } catch (error) {
+    throw errorDeRed(error)
+  }
 
   const retryHeader = respuesta.headers?.get
     ? (respuesta.headers.get('retry-after') || respuesta.headers.get('Retry-After'))
@@ -54,7 +80,14 @@ async function pedir(ruta, { token, ...opciones } = {}) {
         ? 60
         : null
 
-  const texto = await respuesta.text()
+  let texto
+  try {
+    texto = await respuesta.text()
+  } catch (error) {
+    // La conexion se corto a mitad del cuerpo: para el cocinero es lo mismo
+    // que no haber tenido red.
+    throw errorDeRed(error)
+  }
   let datos = null
   try {
     datos = texto ? JSON.parse(texto) : null
