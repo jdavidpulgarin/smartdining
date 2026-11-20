@@ -1766,14 +1766,15 @@
 
 /* Panel Lateral: Comanda en Curso / Comanda Activa (OrderPanel) */
 .tema-comanda .ms-order-ticket,
-.tema-comanda .panel.order-panel {
+.tema-comanda .panel.order-panel,
+.tema-comanda .order-panel {
   position: relative;
-  background: var(--papel);
-  color: var(--tinta);
-  border-radius: 14px 14px 0 0;
+  background: var(--papel) !important;
+  color: var(--tinta) !important;
+  border-radius: 12px;
   box-shadow: 0 16px 24px -16px rgba(0, 0, 0, 0.5);
   padding: 0;
-  border: 0;
+  border: 2px solid var(--carbon) !important;
   overflow: hidden;
 }
 
@@ -1807,7 +1808,10 @@
   padding: 0;
 }
 
-.tema-comanda .ms-order-body {
+.tema-comanda .ms-order-body,
+.tema-comanda .order-focus {
+  background: var(--papel) !important;
+  color: var(--tinta) !important;
   padding: 14px 16px 18px;
 }
 
@@ -1856,7 +1860,8 @@
   text-transform: uppercase;
 }
 
-.tema-comanda .ms-item-row {
+.tema-comanda .ms-item-row,
+.tema-comanda .order-items-wrapper .item-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1864,11 +1869,15 @@
   padding: 6px 0;
   font-size: 14px;
   font-weight: 600;
-  border-top: 1px dashed #ecdcc8;
+  background: transparent !important;
+  border: 0 !important;
+  border-top: 1px dashed #ecdcc8 !important;
+  border-radius: 0 !important;
 }
 
-.tema-comanda .ms-item-row:first-child {
-  border-top: 0;
+.tema-comanda .ms-item-row:first-child,
+.tema-comanda .order-items-wrapper .item-row:first-child {
+  border-top: 0 !important;
 }
 
 .tema-comanda .ms-qty {
@@ -1913,21 +1922,70 @@
   margin-top: 12px;
 }
 
-.tema-comanda .ms-empty-prompt {
-  padding: 30px 16px;
+.tema-comanda .ms-empty-prompt,
+.tema-comanda .order-empty-prompt {
+  background: var(--papel) !important;
+  color: var(--tinta) !important;
+  padding: 30px 16px !important;
   text-align: center;
 }
 
-.tema-comanda .ms-empty-prompt h3 {
-  font: 700 24px var(--f-mano);
-  color: var(--carbon);
-  margin: 12px 0 6px;
+.tema-comanda .ms-empty-prompt svg,
+.tema-comanda .order-empty-prompt svg,
+.tema-comanda .order-empty-prompt .text-muted {
+  color: var(--suave) !important;
 }
 
-.tema-comanda .ms-empty-prompt p {
-  font-size: 13px;
-  color: var(--suave);
-  margin-bottom: 16px;
+.tema-comanda .ms-empty-prompt h3,
+.tema-comanda .order-empty-prompt h3 {
+  font: 700 24px var(--f-mano) !important;
+  color: var(--carbon) !important;
+  margin: 12px 0 6px !important;
+}
+
+.tema-comanda .ms-empty-prompt p,
+.tema-comanda .order-empty-prompt p {
+  font: 500 13px var(--f-texto) !important;
+  color: var(--suave) !important;
+  margin-bottom: 16px !important;
+  line-height: 1.4 !important;
+}
+
+/* Botón "Ver Mapa de Mesas" */
+.tema-comanda .btn-mapa-mesas,
+.tema-comanda .order-empty-prompt .btn-mapa-mesas,
+.tema-comanda .ms-empty-prompt .btn-mapa-mesas {
+  background-color: var(--carbon) !important;
+  color: var(--ambar) !important;
+  border: 1px solid var(--carbon) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 0 20px !important;
+  min-height: 42px !important;
+  border-radius: 6px !important;
+  font: 700 14px var(--f-titulo) !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  text-decoration: none !important;
+  cursor: pointer;
+}
+
+.tema-comanda .btn-mapa-mesas:hover,
+.tema-comanda .order-empty-prompt .btn-mapa-mesas:hover,
+.tema-comanda .ms-empty-prompt .btn-mapa-mesas:hover {
+  background-color: var(--carbon2) !important;
+  color: var(--ambar) !important;
+  border-color: var(--carbon2) !important;
+  opacity: 1 !important;
+}
+
+.tema-comanda .btn-mapa-mesas svg,
+.tema-comanda .order-empty-prompt .btn-mapa-mesas svg,
+.tema-comanda .ms-empty-prompt .btn-mapa-mesas svg {
+  color: var(--ambar) !important;
+  stroke: var(--ambar) !important;
 }
 
 /* BandejaAlertas y MenuSection dentro del tema */
@@ -1938,10 +1996,67 @@
   border: 2px solid var(--carbon);
 }
 
-.tema-comanda .sd-alertas-panel .banda {
+.tema-comanda .sd-alertas-panel .banda,
+.tema-comanda .sd-alertas-header.banda {
   background: var(--carbon);
   color: var(--ambar);
   border-radius: 10px 10px 0 0;
+}
+
+.tema-comanda .sd-alertas-panel .banda .sd-card-title,
+.tema-comanda .sd-alertas-panel .banda h2,
+.tema-comanda .sd-alertas-panel .banda h3,
+.tema-comanda .sd-alertas-header .sd-card-title,
+.tema-comanda .sd-alertas-header h2,
+.tema-comanda .sd-alertas-header h3 {
+  color: var(--ambar) !important;
+}
+
+.tema-comanda .sd-alertas-panel .sd-sound-toggle-btn {
+  color: var(--papel);
+  border-color: #4a3a36;
+}
+
+.tema-comanda .sd-alertas-panel .sd-sound-toggle-btn:hover {
+  color: var(--ambar);
+  border-color: var(--ambar);
+}
+
+.tema-comanda .sd-alertas-panel .sd-alertas-list {
+  background: var(--papel);
+  padding: 12px;
+}
+
+.tema-comanda .sd-alertas-panel .sd-alerta-item {
+  background: var(--papel2);
+  border: 1px solid var(--linea);
+  color: var(--tinta);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.tema-comanda .sd-alertas-panel .sd-alerta-item-title {
+  color: var(--tinta);
+  font: 700 15px var(--f-titulo);
+  letter-spacing: 0.04em;
+}
+
+.tema-comanda .sd-alertas-panel .sd-alerta-detail {
+  color: var(--suave);
+  font-size: 13px;
+}
+
+.tema-comanda .sd-alertas-panel .sd-alertas-empty {
+  color: var(--suave);
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.tema-comanda .sd-alertas-panel .sd-alertas-empty p {
+  color: var(--suave);
+  font: 700 14px var(--f-titulo);
+  letter-spacing: 0.08em;
 }
 
 .tema-comanda .ms-bottom-panel,
