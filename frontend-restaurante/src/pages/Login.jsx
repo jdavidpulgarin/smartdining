@@ -189,7 +189,7 @@ export function Login() {
 
             {/* Error regular de validación o credenciales */}
             {error && countdown === 0 && (
-              <div className="ingreso-alerta ingreso-alerta-error" role="alert">
+              <div id="ingreso-error" className="ingreso-alerta ingreso-alerta-error" role="alert">
                 <ShieldAlert size={18} className="ingreso-alerta-ico" />
                 <span>{error}</span>
               </div>
@@ -215,6 +215,8 @@ export function Login() {
                     }}
                     disabled={loading || countdown > 0}
                     required
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error && countdown === 0 ? 'ingreso-error' : undefined}
                     className="ingreso-input"
                   />
                 </div>
@@ -235,6 +237,8 @@ export function Login() {
                     onChange={(e) => setPassword(e.target.value)}
                     disabled={loading || countdown > 0}
                     required
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error && countdown === 0 ? 'ingreso-error' : undefined}
                     className="ingreso-input"
                   />
                 </div>
