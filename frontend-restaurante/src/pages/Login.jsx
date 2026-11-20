@@ -117,7 +117,7 @@ export function Login() {
   if (avisoCocina) return <SoloCocina />
 
   return (
-    <div className="ingreso-pagina">
+    <div className="ingreso-pagina tema-comanda">
       {/* Franja rayada arriba */}
       <div className="franja" aria-hidden="true"></div>
 

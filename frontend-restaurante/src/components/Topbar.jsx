@@ -41,7 +41,7 @@ export function Topbar() {
   }
 
   return (
-    <header className="sd-topbar top">
+    <header className="sd-topbar top tema-comanda">
       <div className="fila">
         {/* 1. Logo y Marca a la izquierda */}
         <Link to="/mesas" className="sd-topbar-brand marca" aria-label="Ir a Mesas SmartDining">
