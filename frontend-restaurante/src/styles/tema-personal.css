@@ -344,6 +344,92 @@
   background: repeating-linear-gradient(115deg, var(--ambar) 0 14px, var(--carbon) 14px 18px);
 }
 
+/* Acciones de la barra superior */
+.tema-comanda .sd-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: none;
+  margin-left: auto;
+}
+
+/* Responsive de la barra superior */
+@media (max-width: 1023px) {
+  .tema-comanda .top .fila,
+  .tema-comanda .sd-topbar .fila {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 66px;
+    padding: 8px 16px 0;
+    gap: 8px 16px;
+  }
+
+  .tema-comanda .marca,
+  .tema-comanda .sd-topbar-brand {
+    order: 1;
+    flex: none;
+  }
+
+  .tema-comanda .sd-topbar-actions {
+    order: 2;
+    margin-left: auto;
+    flex: none;
+  }
+
+  .tema-comanda nav,
+  .tema-comanda .sd-topbar-nav {
+    order: 3;
+    width: 100%;
+    min-width: 100%;
+    height: 44px;
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 479px) {
+  .tema-comanda .sd-brand-text {
+    display: none;
+  }
+
+  .tema-comanda .sd,
+  .tema-comanda .sd-brand-badge {
+    width: 34px;
+    height: 34px;
+    font-size: 18px;
+  }
+
+  .tema-comanda nav a,
+  .tema-comanda nav button,
+  .tema-comanda .sd-nav-link {
+    font-size: 16px;
+    padding: 0 8px;
+    letter-spacing: 0.04em;
+  }
+
+  .tema-comanda .usuario b,
+  .tema-comanda .sd-user-name {
+    font-size: 14px;
+  }
+
+  .tema-comanda .rol,
+  .tema-comanda .sd-user-role {
+    font-size: 11px;
+    padding: 0 4px;
+  }
+
+  .tema-comanda .campana,
+  .tema-comanda .sd-topbar-bell-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .tema-comanda .salir,
+  .tema-comanda .sd-topbar-icon-btn {
+    width: 34px;
+    height: 34px;
+  }
+}
+
 /* 3) Componentes atómicos */
 
 /* Botones */
