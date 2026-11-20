@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { SoloCocina } from './SoloCocina'
-import { ShieldCheck, ShieldAlert, Mail, Lock, LogIn, Clock } from 'lucide-react'
+import { ShieldAlert, Mail, Lock, Clock } from 'lucide-react'
 import { useAuth } from '../hooks'
 import {
   getStoredAuthMessage,
@@ -117,80 +117,62 @@ export function Login() {
   if (avisoCocina) return <SoloCocina />
 
   return (
-    <div className="sd-login-page">
-      {/* Fondo fotográfico con opacidad y capa oscura */}
-      <img
-        src="/img/fondo.webp"
-        alt=""
-        aria-hidden="true"
-        className="sd-bg-photo sd-bg-photo-login"
-        onError={(e) => {
-          e.currentTarget.style.display = 'none'
-        }}
-      />
+    <div className="ingreso-pagina">
+      {/* Franja rayada arriba */}
+      <div className="franja" aria-hidden="true"></div>
 
-      {/* Encabezado sin Topbar con branding oficial SD */}
-      <header className="sd-login-topbar">
-        <div className="sd-brand-badge" aria-hidden="true">
-          <span>SD</span>
-        </div>
-        <div className="sd-login-brand-meta">
-          <span className="sd-brand-text">SMARTDINING</span>
-          <span className="sd-login-badge-sub">PANEL DEL RESTAURANTE</span>
-          <span
-            style={{
-              fontFamily: 'var(--sd-font-heading)',
-              fontWeight: 700,
-              fontSize: 14,
-              color: 'var(--sd-red-text)',
-              letterSpacing: '0.08em',
-              padding: '2px 8px',
-              borderRadius: 4,
-              background: 'rgba(238,28,37,0.15)',
-            }}
-          >
-            SmartDining POS
-          </span>
-        </div>
-      </header>
+      <main className="ingreso-principal">
+        {/* Lado izquierdo */}
+        <section className="ingreso-lado">
+          <div className="ingreso-marca">
+            <div className="sd" aria-hidden="true">
+              <span>SD</span>
+            </div>
+            <b>SMARTDINING</b>
+          </div>
 
-      {/* Franja roja exclusiva de personal */}
-      <div className="sd-red-band sd-login-strip">
-        <span>SOLO PARA EL PERSONAL · MESEROS, CAJA Y ADMINISTRACIÓN</span>
-      </div>
-
-      <main className="sd-login-container">
-        {/* Columna Izquierda: Título editorial */}
-        <div className="sd-login-hero">
-          <h1 className="sd-page-title sd-login-title">
-            EMPIEZA<br />
-            TU<br />
-            TURNO
+          <h1 className="ingreso-titulo">
+            ABRE TU<br />
+            <em>TURNO.</em>
           </h1>
-          <p className="sd-login-desc">
-            Mesas, pedidos y pagos de todo el salón en una sola pantalla, actualizados en tiempo real.
-          </p>
-        </div>
 
-        {/* Columna Derecha: Tarjeta de Login */}
-        <div className="sd-card sd-login-card t plano">
-          <h2 className="sd-card-title">INICIAR SESIÓN</h2>
-          <p style={{ color: 'var(--sd-text-muted)', fontSize: 14, marginTop: -8, marginBottom: 20 }}>
-            Portal de Acceso para Personal de Sala y Gerencia
+          <p className="ingreso-desc">
+            Mesas, pedidos, cocina y caja en un solo lugar. Entra con tu cuenta y SmartDining te lleva directo a tu pantalla.
           </p>
+
+          <ul className="ingreso-roles" aria-label="Roles con acceso">
+            <li><b>01</b> Administrador</li>
+            <li><b>02</b> Caja</li>
+            <li><b>03</b> Cocina</li>
+            <li><b>04</b> Mesero</li>
+          </ul>
+        </section>
+
+        {/* Lado derecho: Ticket */}
+        <section className="ingreso-ticket" aria-labelledby="ingreso-ticket-titulo">
+          <div className="ingreso-ticket-cab">
+            <h2 id="ingreso-ticket-titulo" className="ingreso-ticket-h2">
+              INICIAR<br />SESIÓN
+            </h2>
+            <span className="ingreso-ticket-pos">SmartDining POS</span>
+          </div>
+
+          <div className="ingreso-ticket-sub">
+            Acceso solo para el personal del restaurante.
+          </div>
 
           {/* Mensaje de sesión inválida / cuenta desactivada (401) */}
           {authNotice && (
-            <div className="sd-login-banner sd-banner-warning" role="alert">
-              <ShieldAlert size={16} />
+            <div className="ingreso-alerta ingreso-alerta-aviso" role="alert">
+              <ShieldAlert size={18} className="ingreso-alerta-ico" />
               <span>{authNotice}</span>
             </div>
           )}
 
           {/* Mensaje de rate limit con cuenta regresiva (429) */}
           {countdown > 0 && (
-            <div className="sd-login-banner sd-banner-warning" role="alert">
-              <Clock size={16} />
+            <div className="ingreso-alerta ingreso-alerta-aviso" role="alert">
+              <Clock size={18} className="ingreso-alerta-ico" />
               <span>
                 {rateLimitMessage || MENSAJE_DEMASIADOS_INTENTOS} ({countdown}s)
               </span>
@@ -199,59 +181,68 @@ export function Login() {
 
           {/* Error regular de validación o credenciales */}
           {error && countdown === 0 && (
-            <div className="sd-login-banner sd-banner-error" role="alert">
+            <div className="ingreso-alerta ingreso-alerta-error" role="alert">
+              <ShieldAlert size={18} className="ingreso-alerta-ico" />
               <span>{error}</span>
             </div>
           )}
 
           {/* Formulario */}
-          <form onSubmit={handleSubmit} className="sd-login-form">
-            <div className="sd-input-group campo">
-              <label htmlFor="login-email" className="sd-input-label lbl" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Mail size={14} style={{ color: 'var(--sd-red-text)' }} />
-                <span>CORREO ELECTRÓNICO</span>
+          <form onSubmit={handleSubmit} className="ingreso-form" noValidate>
+            <div className={`ingreso-campo ${error ? 'ingreso-campo-mal' : ''}`}>
+              <label htmlFor="login-email" className="ingreso-lbl">
+                Correo
               </label>
-              <input
-                id="login-email"
-                type="email"
-                placeholder="admin@smartdining.com"
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value)
-                  setError('')
-                }}
-                disabled={loading || countdown > 0}
-                required
-                className={`sd-input inp ${error ? 'error' : ''}`}
-              />
+              <div className="ingreso-caja">
+                <Mail size={18} className="ingreso-ico" />
+                <input
+                  id="login-email"
+                  type="email"
+                  autoComplete="username"
+                  placeholder="admin@smartdining.com"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value)
+                    setError('')
+                  }}
+                  disabled={loading || countdown > 0}
+                  required
+                  className="ingreso-input"
+                />
+              </div>
             </div>
 
-            <div className="sd-input-group campo">
-              <label htmlFor="login-password" className="sd-input-label lbl" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Lock size={14} style={{ color: 'var(--sd-red-text)' }} />
-                <span>CONTRASEÑA</span>
+            <div className={`ingreso-campo ${error ? 'ingreso-campo-mal' : ''}`}>
+              <label htmlFor="login-password" className="ingreso-lbl">
+                Contraseña
               </label>
-              <input
-                id="login-password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={loading || countdown > 0}
-                required
-                className={`sd-input inp ${error ? 'error' : ''}`}
-              />
+              <div className="ingreso-caja">
+                <Lock size={18} className="ingreso-ico" />
+                <input
+                  id="login-password"
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading || countdown > 0}
+                  required
+                  className="ingreso-input"
+                />
+              </div>
             </div>
 
             <button
               type="submit"
-              className="sd-btn sd-btn-primary sd-btn-block btn"
+              className="ingreso-btn"
               disabled={loading || countdown > 0}
               aria-label="Ingresar al Sistema"
-              style={{ width: '100%', justifyContent: 'center', padding: '14px 20px', marginTop: 8 }}
             >
               {loading ? (
-                <span>VERIFICANDO CREDENCIALES...</span>
+                <>
+                  <span>ENTRAR</span>
+                  <i className="ingreso-giro" aria-hidden="true"></i>
+                </>
               ) : countdown > 0 ? (
                 <>
                   <Clock size={18} />
@@ -259,32 +250,33 @@ export function Login() {
                 </>
               ) : (
                 <>
-                  <LogIn size={18} />
-                  <span>INGRESAR AL SISTEMA</span>
+                  <span>ENTRAR</span>
+                  <svg
+                    className="ingreso-flecha"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M5 12h14M13 6l6 6-6 6" />
+                  </svg>
                 </>
               )}
             </button>
           </form>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              marginTop: 24,
-              paddingTop: 16,
-              borderTop: '1px solid var(--sd-border)',
-              color: 'var(--sd-text-muted)',
-              fontSize: 13,
-              fontFamily: 'var(--sd-font-body)',
-            }}
-          >
-            <ShieldCheck size={14} style={{ color: 'var(--sd-white)' }} />
-            <span>Acceso autenticado con PostgreSQL y JWT</span>
+          <div className="ingreso-ticket-pie">
+            <span>Conexión segura</span>
           </div>
-        </div>
+        </section>
       </main>
+
+      <footer className="ingreso-footer">
+        <span>© SmartDining · Valledupar</span>
+      </footer>
     </div>
   )
 }
