@@ -165,6 +165,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
             <button
               type="button"
               className={`sd-red-band-btn chip ms-chip ${filter === 'TODAS' ? 'active' : ''}`}
+              aria-pressed={filter === 'TODAS'}
               onClick={() => setFilter('TODAS')}
             >
               TODAS <span>{tablesList.length}</span>
@@ -172,6 +173,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
             <button
               type="button"
               className={`sd-red-band-btn chip ms-chip ${filter === 'DISPONIBLES' ? 'active' : ''}`}
+              aria-pressed={filter === 'DISPONIBLES'}
               onClick={() => setFilter('DISPONIBLES')}
             >
               DISPONIBLES <span>{totalDisponibles}</span>
@@ -179,6 +181,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
             <button
               type="button"
               className={`sd-red-band-btn chip ms-chip ${filter === 'OCUPADAS' ? 'active' : ''}`}
+              aria-pressed={filter === 'OCUPADAS'}
               onClick={() => setFilter('OCUPADAS')}
             >
               OCUPADAS <span>{totalOcupadas}</span>
@@ -186,6 +189,7 @@ export function TablesPanel({ tables: propTables, onSelectTable, selectedTableId
             <button
               type="button"
               className={`sd-red-band-btn chip ms-chip ${filter === 'CON ALERTA' ? 'active' : ''}`}
+              aria-pressed={filter === 'CON ALERTA'}
               onClick={() => setFilter('CON ALERTA')}
             >
               CON ALERTA <span>{totalConAlerta}</span>

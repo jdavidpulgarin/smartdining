@@ -1433,14 +1433,18 @@
 }
 
 .tema-comanda .ms-chip.active,
-.tema-comanda .chip.active {
+.tema-comanda .chip.active,
+.tema-comanda .ms-chip[aria-pressed="true"],
+.tema-comanda .sd-red-band-btn.active {
   background-color: var(--ambar) !important;
   color: var(--carbon) !important;
-  border-color: var(--ambar) !important;
+  border: 2px solid var(--carbon) !important;
+  font-weight: 700 !important;
 }
 
 .tema-comanda .ms-chip.active span,
-.tema-comanda .chip.active span {
+.tema-comanda .chip.active span,
+.tema-comanda .ms-chip[aria-pressed="true"] span {
   background: var(--carbon);
   color: var(--ambar);
 }
@@ -1617,7 +1621,9 @@
 .tema-comanda .ms-table-card .sd-table-card-actions,
 .tema-comanda .sd-table-card .sd-table-card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
   margin-top: auto;
   padding-top: 8px;
   border-top: 1px dashed #dcc8b2;
@@ -1638,7 +1644,9 @@
   font: 400 15px var(--f-titulo);
   letter-spacing: 0.06em;
   cursor: pointer;
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
   text-transform: uppercase;
 }
 
@@ -1891,35 +1899,76 @@
   color: var(--carbon);
 }
 
+.tema-comanda .ms-item-note,
+.tema-comanda .item-sub-note {
+  font-size: 16px;
+  color: var(--tinta);
+  font-weight: 600;
+  font-style: normal;
+  display: block;
+  margin-top: 2px;
+}
+
 .tema-comanda .ms-item-price {
   font: 400 18px var(--f-titulo);
   color: var(--carbon);
 }
 
-.tema-comanda .ms-total-box {
+.tema-comanda .ms-total-box,
+.tema-comanda .total-box {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  padding: 12px 0 16px;
+  padding: 14px 16px;
+  background: var(--papel2);
+  border-radius: 8px;
+  margin-bottom: 12px;
 }
 
-.tema-comanda .ms-total-label {
+.tema-comanda .ms-total-label,
+.tema-comanda .total-label-dim {
   display: block;
-  font: 400 16px var(--f-titulo);
-  letter-spacing: 0.1em;
-  color: var(--suave);
+  font: 700 13px var(--f-texto);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tinta);
 }
 
-.tema-comanda .ms-total-value {
+.tema-comanda .ms-total-value,
+.tema-comanda .total-value-glow {
   font: 400 38px / 0.9 var(--f-titulo);
   color: var(--carbon);
 }
 
-.tema-comanda .ms-order-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.tema-comanda .ms-total-box .tax-hint,
+.tema-comanda .ms-total-box .ms-tax-hint,
+.tema-comanda .total-box .tax-hint {
+  font: 600 12px var(--f-texto);
+  color: var(--tinta);
+  opacity: 0.85;
+}
+
+.tema-comanda .ms-order-actions,
+.tema-comanda .order-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
   margin-top: 12px;
+}
+
+.tema-comanda .ms-order-actions > *,
+.tema-comanda .order-actions > *,
+.tema-comanda .ms-order-actions .btn,
+.tema-comanda .order-actions .btn,
+.tema-comanda .ms-btn-caja,
+.tema-comanda .ms-btn-kds,
+.tema-comanda .ms-btn-urg {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: 15px;
+  padding: 0 12px;
 }
 
 .tema-comanda .ms-empty-prompt,
@@ -2105,6 +2154,25 @@
   .tema-comanda .sd-tables-grid {
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
     gap: 12px;
+  }
+
+  .tema-comanda .ms-table-card .sd-table-card-actions,
+  .tema-comanda .sd-table-card .sd-table-card-actions {
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .tema-comanda .ms-table-card .sd-table-btn,
+  .tema-comanda .sd-table-card .sd-table-btn {
+    font-size: 13px;
+    padding: 0 6px;
+    min-height: 30px;
+    letter-spacing: 0.04em;
+    gap: 4px;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .tema-comanda .ms-resumen,
