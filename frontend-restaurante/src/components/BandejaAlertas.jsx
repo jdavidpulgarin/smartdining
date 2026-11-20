@@ -110,7 +110,7 @@ export function BandejaAlertas({
             />
 
             <div
-              className="sd-card sd-alertas-panel"
+              className="sd-card sd-alertas-panel bandeja t plano on"
               style={{
                 position: 'absolute',
                 top: '56px',
@@ -121,7 +121,7 @@ export function BandejaAlertas({
                 boxShadow: '0 24px 48px rgba(0, 0, 0, 0.8)',
               }}
             >
-              <div className="sd-alertas-header">
+              <div className="sd-alertas-header banda">
                 <div className="sd-alertas-title-group">
                   <h3 className="sd-card-title" style={{ margin: 0, fontSize: 22 }}>ALERTAS</h3>
                   {countPendientes > 0 && (
@@ -188,9 +188,9 @@ export function BandejaAlertas({
 
   // Modo Tarjeta Lateral Fija (Diseño Oficial de Mesas)
   return (
-    <aside className="sd-card sd-alertas-panel" aria-label="Bandeja de alertas activas">
+    <aside className="sd-card sd-alertas-panel t plano" aria-label="Bandeja de alertas activas">
       {/* Cabecera de Alertas */}
-      <div className="sd-alertas-header">
+      <div className="sd-alertas-header banda">
         <div className="sd-alertas-title-group">
           <h2 className="sd-card-title" style={{ margin: 0 }}>ALERTAS</h2>
           {countPendientes > 0 && (

@@ -1,0 +1,1092 @@
+/* ==============================================================================
+   SMARTDINING — TEMA EDITORIAL PERSONAL (tema-personal.css)
+   Fase 1: Tema negro carbón, barra superior y componentes atómicos.
+   Limitado exclusivamente a contenedores con clase .tema-comanda.
+   ============================================================================== */
+
+:root {
+  /* Paleta oficial SmartDining */
+  --carbon: #120c0c;
+  --carbon2: #2a201e;
+  --carbon3: #1b1413;
+  --ambar: #ffb02e;
+  --papel: #fff4e6;
+  --papel2: #f6e7d4;
+  --tinta: #2a1d1b;
+  --suave: #6b5a55;
+  --linea: #dcc8b2;
+  --brasa: #e5212e;
+  --rojo: #b3121c;
+  --granate: #8d0b14;
+  --ok: #15803d;
+
+  /* Tipografías editoriales */
+  --f-titulo: 'Bebas Neue', Impact, sans-serif;
+  --f-texto: 'Inter', system-ui, sans-serif;
+  --f-mano: 'Caveat', cursive;
+  --f-mono: 'IBM Plex Mono', monospace;
+}
+
+/* 1) Contenedor del tema */
+.tema-comanda {
+  /* Reasignación de tokens anteriores a la paleta nueva */
+  --sd-bg: var(--carbon);
+  --sd-surface: var(--carbon2);
+  --sd-surface-2: var(--carbon2);
+  --sd-border: #3a2b28;
+  --sd-border-strong: #4a3a36;
+  --sd-text: var(--papel);
+  --sd-text-muted: #cbbcb2;
+  --sd-red: var(--brasa);
+  --sd-red-band: var(--rojo);
+  --sd-red-text: #ff6b75;
+  --sd-gold: var(--ambar);
+  --sd-gold-text: var(--carbon);
+  --sd-white: #ffffff;
+  --sd-font-heading: var(--f-titulo);
+  --sd-font-body: var(--f-texto);
+
+  /* Mapeo de tokens heredados */
+  --bg-base: var(--carbon);
+  --bg-surface: var(--carbon2);
+  --bg-card: var(--carbon2);
+  --bg-card-hover: #352a28;
+  --border-subtle: #3a2b28;
+  --border-hover: #4a3a36;
+  --emerald-neon: var(--ambar);
+  --emerald-glow: transparent;
+  --amber-neon: var(--ambar);
+  --crimson-neon: var(--granate);
+  --indigo-neon: var(--granate);
+  --text-main: var(--papel);
+  --text-muted: #cbbcb2;
+  --text-dim: #a8968c;
+  --shadow-lg: 0 10px 24px -10px rgba(0, 0, 0, 0.7);
+  --radius-panel: 4px;
+  --radius-card: 4px;
+
+  background: var(--carbon);
+  color: var(--papel);
+  font-family: var(--f-texto);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tipografía en mayúsculas para títulos */
+.tema-comanda h1,
+.tema-comanda h2,
+.tema-comanda h3,
+.tema-comanda h4,
+.tema-comanda h5,
+.tema-comanda h6,
+.tema-comanda .d,
+.tema-comanda .sd-heading {
+  font-family: var(--f-titulo);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+
+.tema-comanda .mano {
+  font-family: var(--f-mano);
+  font-weight: 700;
+}
+
+/* 2) Barra superior (.top / .sd-topbar) */
+.tema-comanda.top,
+.tema-comanda.sd-topbar,
+.tema-comanda .top,
+.tema-comanda .sd-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--carbon);
+  color: var(--papel);
+  border-bottom: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding: 0;
+}
+
+.tema-comanda .top .fila,
+.tema-comanda .sd-topbar .fila,
+.tema-comanda.top .fila,
+.tema-comanda.sd-topbar .fila {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 66px;
+  padding: 0 24px;
+  max-width: 1440px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Marca / Logo */
+.tema-comanda .marca,
+.tema-comanda .sd-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+  flex: none;
+}
+
+.tema-comanda .sd,
+.tema-comanda .sd-brand-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  background: var(--ambar);
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  font: 400 22px var(--f-titulo);
+  box-shadow: none;
+  border: 0;
+  line-height: 1;
+}
+
+.tema-comanda .marca b,
+.tema-comanda .sd-brand-text {
+  font: 400 23px var(--f-titulo);
+  letter-spacing: 0.14em;
+  color: var(--papel);
+  display: block;
+  line-height: 1;
+}
+
+/* Navegación */
+.tema-comanda nav,
+.tema-comanda .sd-topbar-nav {
+  display: flex;
+  gap: 2px;
+  height: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  align-items: center;
+}
+
+.tema-comanda nav::-webkit-scrollbar,
+.tema-comanda .sd-topbar-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.tema-comanda nav a,
+.tema-comanda nav button,
+.tema-comanda .sd-nav-link {
+  position: relative;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 0;
+  background: none;
+  color: #cbbcb2;
+  font: 400 19px var(--f-titulo);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.tema-comanda nav a:hover,
+.tema-comanda nav button:hover,
+.tema-comanda .sd-nav-link:hover {
+  color: var(--papel);
+}
+
+.tema-comanda nav a[aria-current="page"],
+.tema-comanda nav a.active,
+.tema-comanda .sd-nav-link.active,
+.tema-comanda .sd-nav-link[aria-current="page"] {
+  color: var(--ambar);
+  background: none;
+}
+
+.tema-comanda nav a[aria-current="page"]::after,
+.tema-comanda nav a.active::after,
+.tema-comanda .sd-nav-link.active::after,
+.tema-comanda .sd-nav-link[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 4px;
+  border-radius: 2px 2px 0 0;
+  background: var(--ambar);
+}
+
+.tema-comanda .esp {
+  flex: 1;
+}
+
+/* Campana */
+.tema-comanda .campana,
+.tema-comanda .sd-topbar-bell-btn {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 2px solid #4a3a36;
+  background: none;
+  display: grid;
+  place-items: center;
+  color: var(--papel);
+  flex: none;
+  text-decoration: none;
+  box-shadow: none;
+}
+
+.tema-comanda .campana:hover,
+.tema-comanda .sd-topbar-bell-btn:hover {
+  border-color: var(--ambar);
+  color: var(--ambar);
+}
+
+.tema-comanda .campana svg,
+.tema-comanda .sd-topbar-bell-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.tema-comanda .campana b,
+.tema-comanda .sd-topbar-bell-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--brasa);
+  color: #ffffff;
+  font: 700 11px/20px var(--f-texto);
+  text-align: center;
+  border: 0;
+  box-shadow: none;
+}
+
+/* Usuario */
+.tema-comanda .usuario,
+.tema-comanda .sd-user-info-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.tema-comanda .usuario div {
+  text-align: right;
+  line-height: 1.15;
+}
+
+.tema-comanda .usuario b,
+.tema-comanda .sd-user-name {
+  display: block;
+  font: 400 18px var(--f-titulo);
+  letter-spacing: 0.08em;
+  color: var(--papel);
+}
+
+.tema-comanda .rol,
+.tema-comanda .sd-user-role {
+  display: inline-block;
+  font: 400 13px var(--f-titulo);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--carbon);
+  background: var(--ambar);
+  border-radius: 3px;
+  padding: 1px 7px;
+  line-height: 1.3;
+}
+
+.tema-comanda .salir,
+.tema-comanda .sd-topbar-icon-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 4px;
+  border: 0;
+  background: var(--carbon2);
+  color: #cbbcb2;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.tema-comanda .salir:hover,
+.tema-comanda .sd-topbar-icon-btn:hover {
+  color: var(--papel);
+  background: #382c29;
+}
+
+.tema-comanda .salir svg,
+.tema-comanda .sd-topbar-icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Franja rayada bajo la barra */
+.tema-comanda .franja,
+.tema-comanda.franja {
+  height: 6px;
+  width: 100%;
+  background: repeating-linear-gradient(115deg, var(--ambar) 0 14px, var(--carbon) 14px 18px);
+}
+
+/* 3) Componentes atómicos */
+
+/* Botones */
+.tema-comanda .btn,
+.tema-comanda .primary-button,
+.tema-comanda .sd-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 400 19px var(--f-titulo);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  cursor: pointer;
+  text-transform: uppercase;
+  text-decoration: none;
+  box-shadow: none;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.tema-comanda .btn:hover,
+.tema-comanda .primary-button:hover,
+.tema-comanda .sd-btn-primary:hover {
+  background: var(--carbon2);
+  color: var(--ambar);
+}
+
+.tema-comanda .btn.claro,
+.tema-comanda .ghost-button,
+.tema-comanda .sd-btn-ghost {
+  background: var(--papel);
+  color: var(--carbon);
+  box-shadow: inset 0 0 0 2px var(--carbon);
+}
+
+.tema-comanda .btn.claro:hover,
+.tema-comanda .ghost-button:hover,
+.tema-comanda .sd-btn-ghost:hover {
+  background: var(--papel2);
+}
+
+.tema-comanda .btn.urg,
+.tema-comanda .sd-btn-danger {
+  background: var(--granate);
+  color: #ffffff;
+}
+
+.tema-comanda .btn.urg:hover,
+.tema-comanda .sd-btn-danger:hover {
+  background: var(--brasa);
+}
+
+.tema-comanda .btn.mini {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 16px;
+  border-radius: 4px;
+}
+
+.tema-comanda .btn:disabled,
+.tema-comanda .primary-button:disabled,
+.tema-comanda .ghost-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Chips */
+.tema-comanda .chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tema-comanda .chip,
+.tema-comanda .filter-chip {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 2px solid var(--carbon);
+  border-radius: 999px;
+  background: var(--papel);
+  color: var(--carbon);
+  font: 400 16px var(--f-titulo);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.tema-comanda .chip[aria-pressed="true"],
+.tema-comanda .chip.active,
+.tema-comanda .filter-chip.active {
+  background: var(--carbon);
+  color: var(--ambar);
+  border-color: var(--carbon);
+}
+
+/* Etiquetas de estado (.est) */
+.tema-comanda .est,
+.tema-comanda .status,
+.tema-comanda .order-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 14px var(--f-titulo);
+  letter-spacing: 0.12em;
+  padding: 2px 9px;
+  border-radius: 4px;
+  border: 2px solid var(--carbon);
+  background: var(--papel);
+  color: var(--tinta);
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.tema-comanda .est i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--carbon);
+  display: inline-block;
+}
+
+.tema-comanda .est.osc {
+  background: var(--carbon);
+  color: var(--ambar);
+  border-color: var(--carbon);
+}
+
+.tema-comanda .est.osc i {
+  background: var(--ambar);
+}
+
+.tema-comanda .est.urg {
+  background: var(--brasa);
+  border-color: var(--brasa);
+  color: #ffffff;
+}
+
+.tema-comanda .est.urg i {
+  background: #ffffff;
+}
+
+.tema-comanda .est.ok {
+  border-color: var(--ok);
+}
+
+.tema-comanda .est.ok i {
+  background: var(--ok);
+}
+
+.tema-comanda .est.apag {
+  border-color: var(--linea);
+  color: var(--suave);
+}
+
+.tema-comanda .est.apag i {
+  background: var(--linea);
+}
+
+/* Inputs y formularios (.campo / .inp) */
+.tema-comanda .campo,
+.tema-comanda .sd-input-group {
+  display: grid;
+  gap: 5px;
+}
+
+.tema-comanda .campo label,
+.tema-comanda .lbl,
+.tema-comanda .sd-input-label {
+  font: 400 15px var(--f-titulo);
+  letter-spacing: 0.14em;
+  color: #cdb8a6;
+  text-transform: uppercase;
+}
+
+.tema-comanda .inp,
+.tema-comanda .sd-input {
+  min-height: 44px;
+  width: 100%;
+  padding: 0 12px;
+  border: 2px solid var(--carbon);
+  border-radius: 4px;
+  background: #fffaf3;
+  color: var(--tinta);
+  font-family: var(--f-texto);
+  font-size: 15px;
+}
+
+.tema-comanda textarea.inp {
+  min-height: 80px;
+  padding: 10px 12px;
+}
+
+.tema-comanda .inp:focus,
+.tema-comanda .sd-input:focus {
+  outline: 3px solid var(--ambar);
+  outline-offset: 1px;
+}
+
+/* Tarjeta comanda papel (.t) */
+.tema-comanda .t {
+  position: relative;
+  background: var(--papel);
+  color: var(--tinta);
+  --sd-text: var(--tinta);
+  --sd-text-muted: var(--suave);
+  --text-main: var(--tinta);
+  --text-muted: var(--suave);
+  --text-dim: var(--suave);
+  --sd-red-text: var(--rojo);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 0 16px 24px -16px rgba(0, 0, 0, 0.5);
+  margin-bottom: 14px;
+}
+
+.tema-comanda .t::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% - 1px);
+  height: 11px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 12'%3E%3Cpath d='M0 0h24L12 12z' fill='%23fff4e6'/%3E%3C/svg%3E") repeat-x;
+  background-size: 20px 11px;
+}
+
+.tema-comanda .t.plano {
+  border-radius: 4px;
+  margin-bottom: 0;
+}
+
+.tema-comanda .t.plano::after {
+  display: none;
+}
+
+.tema-comanda .banda {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: var(--carbon);
+  color: var(--ambar);
+  border-radius: 4px 4px 0 0;
+  padding: 9px 16px;
+  font: 400 18px var(--f-titulo);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.tema-comanda .banda small {
+  font: 600 12px var(--f-texto);
+  letter-spacing: 0;
+  color: #d9c3a5;
+  text-transform: none;
+}
+
+.tema-comanda .cp {
+  padding: 14px 16px;
+}
+
+.tema-comanda .corte {
+  border-top: 2px dashed var(--linea);
+  margin: 0 16px;
+}
+
+.tema-comanda .t .campo label,
+.tema-comanda .t .lbl {
+  color: var(--suave);
+}
+
+.tema-comanda .t .btn {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+.tema-comanda .t .btn.claro {
+  background: var(--papel);
+  color: var(--carbon);
+  box-shadow: inset 0 0 0 2px var(--carbon);
+}
+
+.tema-comanda .t .chip {
+  border-color: var(--carbon);
+  color: var(--tinta);
+}
+
+.tema-comanda .t .chip[aria-pressed="true"],
+.tema-comanda .t .chip.active {
+  background: var(--carbon);
+  color: var(--ambar);
+  border-color: var(--carbon);
+}
+
+/* Bandeja de alertas */
+.tema-comanda .bandeja {
+  position: absolute;
+  right: 24px;
+  top: 72px;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  z-index: 130;
+  display: none;
+}
+
+.tema-comanda .bandeja.on,
+.tema-comanda .bandeja.open {
+  display: block;
+}
+
+.tema-comanda .alerta {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 14px;
+  border-top: 2px dashed #ecdcc8;
+  color: var(--tinta);
+}
+
+.tema-comanda .alerta:first-of-type {
+  border-top: 0;
+}
+
+.tema-comanda .alerta .ic {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  background: var(--carbon);
+  color: var(--ambar);
+  display: grid;
+  place-items: center;
+}
+
+.tema-comanda .alerta.urg .ic {
+  background: var(--brasa);
+  color: #ffffff;
+}
+
+.tema-comanda .alerta .ic svg {
+  width: 18px;
+  height: 18px;
+}
+
+.tema-comanda .alerta b {
+  display: block;
+  font: 400 18px/1.05 var(--f-titulo);
+  letter-spacing: 0.04em;
+  color: var(--carbon);
+}
+
+.tema-comanda .alerta span {
+  font-size: 12.5px;
+  color: var(--suave);
+}
+
+.tema-comanda .alerta.hecha {
+  opacity: 0.45;
+}
+
+/* 4) Login */
+.tema-comanda.ingreso-pagina,
+.tema-comanda .ingreso-pagina {
+  font-family: var(--f-texto);
+  background: var(--carbon);
+  color: var(--papel);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.tema-comanda .ingreso-pagina .franja,
+.tema-comanda.ingreso-pagina .franja {
+  height: 6px;
+  flex: none;
+  background: repeating-linear-gradient(115deg, var(--ambar) 0 14px, var(--carbon) 14px 18px);
+}
+
+.tema-comanda .ingreso-principal {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  max-width: 1240px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 40px 48px;
+  gap: 56px;
+  align-items: center;
+}
+
+/* Lado izquierdo */
+.tema-comanda .ingreso-lado {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.tema-comanda .ingreso-marca {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.tema-comanda .ingreso-marca .sd {
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  background: var(--ambar);
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  font: 400 24px var(--f-titulo);
+}
+
+.tema-comanda .ingreso-marca b {
+  font: 400 26px var(--f-titulo);
+  letter-spacing: .14em;
+  color: var(--papel);
+}
+
+.tema-comanda .ingreso-titulo {
+  font: 400 clamp(64px, 8.4vw, 118px) / .86 var(--f-titulo);
+  letter-spacing: .01em;
+  color: var(--papel);
+  text-shadow: 4px 4px 0 var(--rojo);
+  margin: 0;
+}
+
+.tema-comanda .ingreso-titulo em {
+  font-style: normal;
+  color: var(--ambar);
+}
+
+.tema-comanda .ingreso-desc {
+  max-width: 430px;
+  color: #c9b8a8;
+  font-size: 16px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.tema-comanda .ingreso-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tema-comanda .ingreso-roles li {
+  font: 500 12px var(--f-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #a8968c;
+  border: 1px solid #3a2e2b;
+  padding: 7px 11px;
+  border-radius: 999px;
+}
+
+.tema-comanda .ingreso-roles li b {
+  color: var(--ambar);
+  font-weight: 600;
+}
+
+/* Ticket del formulario */
+.tema-comanda .ingreso-ticket {
+  position: relative;
+  background: var(--papel);
+  color: var(--tinta);
+  border-radius: 4px 4px 0 0;
+  padding: 34px 34px 30px;
+  width: 100%;
+  max-width: 440px;
+  justify-self: end;
+  box-shadow: 0 30px 60px -20px rgba(0, 0, 0, .7);
+}
+
+.tema-comanda .ingreso-ticket::before {
+  content: "";
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  width: 74px;
+  height: 24px;
+  transform: translateX(-50%) rotate(-2deg);
+  background: rgba(220, 210, 190, .8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+}
+
+.tema-comanda .ingreso-ticket::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 10px;
+  background: linear-gradient(-45deg, transparent 5px, var(--papel) 0) 0 0 / 10px 10px,
+              linear-gradient(45deg, transparent 5px, var(--papel) 0) 0 0 / 10px 10px;
+}
+
+.tema-comanda .ingreso-ticket-cab {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--tinta);
+}
+
+.tema-comanda .ingreso-ticket-h2 {
+  font: 400 40px / .9 var(--f-titulo);
+  letter-spacing: .03em;
+  color: var(--tinta);
+  margin: 0;
+}
+
+.tema-comanda .ingreso-ticket-pos {
+  font: 500 11px / 1.4 var(--f-mono);
+  color: var(--suave);
+  text-align: right;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.tema-comanda .ingreso-ticket-sub {
+  font: 500 12px var(--f-mono);
+  color: var(--suave);
+  padding: 12px 0 22px;
+  border-bottom: 1px dashed var(--linea);
+  margin-bottom: 22px;
+  letter-spacing: .03em;
+}
+
+/* Alertas / Banners con paleta de maqueta */
+.tema-comanda .ingreso-alerta {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: #fdecea;
+  border-left: 5px solid var(--rojo);
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--rojo);
+  font-weight: 500;
+  line-height: 1.4;
+  margin-bottom: 18px;
+}
+
+.tema-comanda .ingreso-alerta-aviso {
+  background: #fef7ec;
+  border-left: 5px solid var(--ambar);
+  color: #8c5a14;
+}
+
+.tema-comanda .ingreso-alerta-error {
+  background: #fdecea;
+  border-left: 5px solid var(--rojo);
+  color: var(--rojo);
+}
+
+.tema-comanda .ingreso-alerta-ico {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin-top: 1px;
+}
+
+/* Formulario */
+.tema-comanda .ingreso-form {
+  display: grid;
+  gap: 18px;
+}
+
+.tema-comanda .ingreso-campo {
+  display: grid;
+  gap: 7px;
+}
+
+.tema-comanda .ingreso-lbl {
+  font: 600 12px var(--f-mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--tinta);
+}
+
+.tema-comanda .ingreso-caja {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.tema-comanda .ingreso-caja .ingreso-ico {
+  position: absolute;
+  left: 14px;
+  width: 18px;
+  height: 18px;
+  color: var(--suave);
+  pointer-events: none;
+}
+
+.tema-comanda .ingreso-input {
+  width: 100%;
+  height: 52px;
+  border: 2px solid var(--tinta);
+  border-radius: 10px;
+  background: #fffaf3;
+  padding: 0 16px 0 44px;
+  font: 500 16px var(--f-texto);
+  color: var(--tinta);
+  outline: none;
+  transition: box-shadow .15s, border-color .15s;
+}
+
+.tema-comanda .ingreso-input::placeholder {
+  color: #a8968c;
+}
+
+.tema-comanda .ingreso-input:focus {
+  box-shadow: 4px 4px 0 var(--ambar);
+}
+
+.tema-comanda .ingreso-campo-mal .ingreso-input {
+  border-color: var(--rojo);
+  box-shadow: 4px 4px 0 rgba(179, 18, 28, .25);
+}
+
+/* Botón Entrar */
+.tema-comanda .ingreso-btn {
+  margin-top: 4px;
+  height: 58px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 400 26px var(--f-titulo);
+  letter-spacing: .12em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  cursor: pointer;
+  transition: transform .08s, box-shadow .15s;
+  box-shadow: 5px 5px 0 var(--ambar);
+  width: 100%;
+}
+
+.tema-comanda .ingreso-btn:hover:not([disabled]) {
+  box-shadow: 7px 7px 0 var(--ambar);
+  transform: translate(-1px, -1px);
+}
+
+.tema-comanda .ingreso-btn:active:not([disabled]) {
+  transform: translate(3px, 3px);
+  box-shadow: 2px 2px 0 var(--ambar);
+}
+
+.tema-comanda .ingreso-btn:focus-visible {
+  outline: 3px solid var(--rojo);
+  outline-offset: 3px;
+}
+
+.tema-comanda .ingreso-btn .ingreso-flecha {
+  width: 24px;
+  height: 24px;
+}
+
+.tema-comanda .ingreso-btn[disabled] {
+  cursor: not-allowed;
+  opacity: .85;
+}
+
+.tema-comanda .ingreso-giro {
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(255, 176, 46, .3);
+  border-top-color: var(--ambar);
+  border-radius: 50%;
+  animation: ingreso-g .7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes ingreso-g {
+  to { transform: rotate(360deg); }
+}
+
+.tema-comanda .ingreso-ticket-pie {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--linea);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font: 500 11px var(--f-mono);
+  color: var(--suave);
+  letter-spacing: .04em;
+}
+
+.tema-comanda .ingreso-footer {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 48px;
+  font: 500 12px var(--f-mono);
+  color: #7d6c66;
+  max-width: 1240px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+@media (max-width: 900px) {
+  .tema-comanda .ingreso-principal {
+    grid-template-columns: 1fr;
+    padding: 28px 20px 40px;
+    gap: 36px;
+  }
+  .tema-comanda .ingreso-lado {
+    gap: 20px;
+  }
+  .tema-comanda .ingreso-titulo {
+    font-size: 64px;
+    text-shadow: 3px 3px 0 var(--rojo);
+  }
+  .tema-comanda .ingreso-desc {
+    font-size: 15px;
+  }
+  .tema-comanda .ingreso-ticket {
+    justify-self: stretch;
+    max-width: none;
+    padding: 30px 22px 26px;
+  }
+  .tema-comanda .ingreso-roles {
+    display: none;
+  }
+  .tema-comanda .ingreso-footer {
+    padding: 14px 20px;
+    flex-direction: column;
+    gap: 4px;
+  }
+}

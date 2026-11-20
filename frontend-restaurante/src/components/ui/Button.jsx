@@ -1,22 +1,22 @@
-export function PrimaryButton({ children, ...props }) {
+export function PrimaryButton({ children, className = '', ...props }) {
   return (
-    <button className="primary-button" {...props}>
+    <button className={`primary-button btn ${className}`.trim()} {...props}>
       {children}
     </button>
   )
 }
 
-export function GhostButton({ children, ...props }) {
+export function GhostButton({ children, className = '', ...props }) {
   return (
-    <button className="ghost-button" {...props}>
+    <button className={`ghost-button btn claro ${className}`.trim()} {...props}>
       {children}
     </button>
   )
 }
 
-export function LinkButton({ children, ...props }) {
+export function LinkButton({ children, className = '', ...props }) {
   return (
-    <button className="link-button" {...props}>
+    <button className={`link-button ${className}`.trim()} {...props}>
       {children}
     </button>
   )
