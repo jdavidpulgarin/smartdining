@@ -5,8 +5,12 @@
    cobros vive en src/pages/Caja.jsx y no cambia.
    ============================================================================== */
 
-/* min-width: 0 para que la cuadrícula del shell no la ensanche con su contenido */
+/* El contenedor del panel (.sd-page-wrapper) crece con el contenido de la
+   página y el shell corta lo que sobra sin scroll. contain: inline-size hace
+   que el ancho de la Caja lo ponga la pantalla, no su contenido: la tabla del
+   historial se desplaza dentro de su caja en vez de ensanchar todo. */
 .tema-comanda.caja-pagina {
+  contain: inline-size;
   min-width: 0;
   min-height: calc(100vh - 72px);
   background:
