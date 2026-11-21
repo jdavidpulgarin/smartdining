@@ -32,6 +32,7 @@
   --font-etiqueta: 'Barlow Condensed', sans-serif;
   --font-cuerpo: 'Inter', sans-serif;
   --font-cuerpo-poster: 'Barlow', 'Helvetica Neue', Arial, sans-serif;
+  --font-mano: 'Caveat', cursive;
 }
 
 @layer base {
@@ -67,6 +68,14 @@
 }
 
 /* Utilidades estilo póster */
+.ticket-papel {
+  background-color: var(--color-papel);
+  color: var(--color-tinta);
+  border-radius: 6px;
+  -webkit-mask: radial-gradient(circle 7px at 50% 100%, #0000 98%, #000) 0 0/18px 100% repeat-x;
+  mask: radial-gradient(circle 7px at 50% 100%, #0000 98%, #000) 0 0/18px 100% repeat-x;
+}
+
 .fondo-poster {
   background-color: var(--color-fondo);
   background-image:

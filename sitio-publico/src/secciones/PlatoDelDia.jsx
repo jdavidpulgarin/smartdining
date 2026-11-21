@@ -218,45 +218,54 @@ export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
             )}
           </div>
 
-          {/* Columna informativa estilo ticket */}
-          <div className="lg:col-span-5 flex flex-col items-start">
-            {/* Chip de día */}
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-ambar/10 border border-ambar/30 text-ambar text-xs sm:text-sm font-etiqueta uppercase tracking-widest mb-4">
-              <span className="w-2 h-2 rounded-full bg-primario animate-pulse" aria-hidden="true" />
-              <span>Plato del día · Hoy, {plato.diaEtiqueta || plato.dia}</span>
+          {/* Columna informativa estilo póster */}
+          <div className="lg:col-span-5 flex flex-col items-start w-full">
+            {/* 1) Chip de día: PLATO DEL DÍA · {DÍA} con punto rojo que late (apagado en prefers-reduced-motion) */}
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-ambar/10 border border-ambar/40 text-ambar text-xs sm:text-sm font-etiqueta uppercase tracking-[0.18em] mb-3">
+              <span className="w-2 h-2 rounded-full bg-primario ring-4 ring-primario/25 animate-pulse motion-reduce:animate-none" aria-hidden="true" />
+              <span>PLATO DEL DÍA · {(plato.diaEtiqueta || plato.dia || '').toUpperCase()}</span>
             </div>
 
-            {/* Nombre del plato */}
+            {/* 2) Título en dos líneas en Bebas Neue: titulo1 en papel y titulo2 en ámbar */}
             <h2
               id="titulo-plato-del-dia"
-              className="font-titulo text-4xl sm:text-5xl lg:text-6xl uppercase tracking-tight text-papel mb-4 leading-none"
+              className="font-titulo text-5xl sm:text-7xl lg:text-8xl uppercase tracking-tight leading-[0.88] mt-1 mb-1"
             >
-              {plato.nombre}
+              <span className="block text-papel">{plato.titulo1 || plato.nombre}</span>
+              {plato.titulo2 && (
+                <span className="block text-ambar">{plato.titulo2}</span>
+              )}
             </h2>
 
-            {/* Ficha / Ticket con descripción y precio */}
-            <div className="w-full bg-superficie-2/90 border border-papel/15 rounded-xl p-5 sm:p-6 mb-6 shadow-md backdrop-blur-sm">
-              <span className="block font-etiqueta uppercase tracking-widest text-xs text-primario-texto font-bold mb-2">
-                Descripción
+            {/* Lema en letra a mano Caveat (ámbar, un poco inclinado) */}
+            {plato.lema && (
+              <span className="font-mano text-2xl sm:text-3xl text-ambar block -rotate-3 origin-left mb-3">
+                {plato.lema}
               </span>
-              <p className="font-cuerpo text-texto-suave text-sm sm:text-base leading-relaxed">
-                {plato.descripcion}
-              </p>
+            )}
 
-              {precioFormateado && (
-                <div className="mt-4 pt-4 border-t border-papel/10 flex items-baseline justify-between gap-2">
-                  <span className="font-etiqueta uppercase tracking-widest text-xs text-papel/60">
-                    Precio especial
-                  </span>
-                  <span className="font-titulo text-3xl sm:text-4xl text-ambar tracking-wide">
-                    {precioFormateado}
-                  </span>
-                </div>
-              )}
-            </div>
+            {/* 3) Descripción suelta debajo del lema */}
+            <p className="font-cuerpo text-texto-suave text-sm sm:text-base leading-relaxed max-w-lg mb-6">
+              {plato.descripcion}
+            </p>
+
+            {/* 4) Ticket de papel con precio y borde inferior ondulado */}
+            {precioFormateado && (
+              <div className="ticket-papel inline-flex flex-col items-start px-5 pt-4 pb-6 mb-6 max-w-full">
+                <small className="font-cuerpo text-[11px] font-bold uppercase tracking-[0.2em] text-primario mb-1">
+                  PRECIO DE HOY
+                </small>
+                <span className="font-titulo text-4xl sm:text-5xl text-tinta leading-none">
+                  {precioFormateado}
+                </span>
+                <span className="font-cuerpo text-xs text-[#5b4a46] mt-1.5">
+                  Disponible hoy
+                </span>
+              </div>
+            )}
 
             {/* Llamado a la acción: Pídelo en tu mesa */}
-            <div className="pt-2">
+            <div className="pt-1">
               <a
                 href="#como-pedir"
                 className="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full bg-ambar text-tinta font-titulo text-lg sm:text-xl uppercase tracking-wider hover:bg-ambar/90 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto shadow-md"
