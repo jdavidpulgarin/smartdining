@@ -1400,13 +1400,21 @@
   gap: 16px;
   padding: 12px 56px;
   font: 500 12px var(--f-mono);
-  color: #7d6c66;
+  color: #a8968c;
   max-width: 1280px;
   width: 100%;
   margin: 0 auto;
 }
 
 @media (max-width: 980px) {
+  /* Apilado, el texto queda sobre la parte clara de la foto: velo parejo y más
+     oscuro para que la descripción y «Sistema de gestión» pasen de 4,5:1. */
+  .tema-comanda.ingreso-pagina::before,
+  .tema-comanda .ingreso-pagina::before {
+    background-image:
+      linear-gradient(180deg, rgba(12, 7, 7, .93) 0%, rgba(12, 7, 7, .86) 100%),
+      url('/img/login-fondo.webp');
+  }
   .tema-comanda .ingreso-principal {
     grid-template-columns: 1fr;
     padding: 26px 20px 44px;
