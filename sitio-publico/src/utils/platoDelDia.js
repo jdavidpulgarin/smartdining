@@ -81,7 +81,7 @@ function extraerPlatos(carta) {
  *
  * @param {string} [dia] - Día de la semana o undefined para usar hoy.
  * @param {object|Array} [carta] - Objeto o arreglo con la carta de platos.
- * @returns {object} Información del plato con su estado ('disponible', 'agotado', 'no-existe'), precio y datos promocionales.
+ * @returns {object} Información del plato con su estado ('disponible', 'agotado', 'no-existe', 'cargando'), precio y datos promocionales.
  */
 export function obtenerPlatoDelDia(dia, carta) {
   const claveDia = dia ? normalizar(dia) : diaDeHoy();
@@ -90,7 +90,7 @@ export function obtenerPlatoDelDia(dia, carta) {
 
   if (!carta) {
     return {
-      estado: 'no-existe',
+      estado: 'cargando',
       ...datosCalendario,
       nombre: nombreReferencia,
     };
