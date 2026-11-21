@@ -103,9 +103,20 @@ export default function PlatoDelDia({
   const plato = platoProp || obtenerPlatoDelDia(diaActual, carta);
   const tieneVideo = Boolean(plato.video && plato.poster);
 
+  // Mientras la carta está cargando, o todavía es null sin error: esqueleto sobrio del tamaño de la sección
+  const estaCargando =
+    !errorCarta &&
+    (cargandoCarta || (!platoProp && !carta) || plato.estado === 'cargando');
+
+  const mostrandoSeccion =
+    !estaCargando &&
+    !errorCarta &&
+    plato.estado !== 'agotado' &&
+    plato.estado !== 'no-existe';
+
   // IntersectionObserver para reproducir video solo cuando la sección es visible
   useEffect(() => {
-    if (!tieneVideo || soloPortada || typeof window === 'undefined') return;
+    if (!tieneVideo || soloPortada || !mostrandoSeccion || typeof window === 'undefined') return;
 
     const seccionEl = seccionRef.current;
     if (!seccionEl) return;
@@ -130,7 +141,7 @@ export default function PlatoDelDia({
     return () => {
       observador.disconnect();
     };
-  }, [tieneVideo, soloPortada, reproduciendo]);
+  }, [tieneVideo, soloPortada, reproduciendo, mostrandoSeccion]);
 
   const alternarReproduccion = () => {
     const video = videoRef.current;
@@ -144,11 +155,6 @@ export default function PlatoDelDia({
       setReproduciendo(false);
     }
   };
-
-  // Mientras la carta está cargando, o todavía es null sin error: esqueleto sobrio del tamaño de la sección
-  const estaCargando =
-    !errorCarta &&
-    (cargandoCarta || (!platoProp && !carta) || plato.estado === 'cargando');
 
   if (estaCargando) {
     return (
