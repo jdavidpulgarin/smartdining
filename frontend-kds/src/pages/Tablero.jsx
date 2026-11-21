@@ -18,7 +18,7 @@ import Logo from '../components/Logo'
 import PanelAgotados from '../components/PanelAgotados'
 import { MENSAJE_SESION_CAIDA, useAuth } from '../context/AuthContext'
 import { cerrarSonido, prepararSonido, sonarAvisoDeComanda } from '../lib/aviso-sonoro'
-import { bloquesDeColumna, marcarTodoListo } from '../lib/bloques'
+import { bloquesDeColumna, descartarFallosDelBloque, marcarTodoListo } from '../lib/bloques'
 import { COLUMNAS, avisoDelTablero, contarComandasActivas } from '../lib/comandas'
 import {
   CLAVE_SONIDO,
@@ -35,8 +35,9 @@ import { useTablero } from '../lib/useTablero'
 /**
  * Tablero de cocina: tres columnas por estado, con los botones de avance.
  *
- * T10: cada columna muestra una tarjeta por MESA (lib/bloques.js), que se
- * dibuja en la columna del pedido más atrasado de la mesa.
+ * T10: cada pedido va en la columna de su estado y, dentro de cada columna, los
+ * de la misma MESA van en una tarjeta (lib/bloques.js). Una mesa puede tener
+ * tarjeta en las tres columnas.
  *
  * Desde D-09 la columna "Listas" también viene de la API, así que sobrevive a
  * una recarga o a una reconexión.
@@ -125,26 +126,25 @@ export default function Tablero() {
   // Un solo intervalo de 1 s para todas las tarjetas.
   const ahora = useCronometro()
 
-  // T10 · "Todo listo" por bloque: { [clave]: { corriendo, fallidos } }. Vive
-  // aqui y no en el bloque porque el bloque cambia de columna (se desmonta y
-  // se vuelve a montar) a mitad de camino, y se llevaria los fallos con el.
+  // T10 · "Todo listo" por bloque: { [clave]: { corriendo, fallidos, ids } }.
+  // Vive aqui y no en el bloque porque sus pedidos se van moviendo de columna
+  // (a otros bloques de la misma mesa) a mitad de camino; con los ids, cada
+  // bloque muestra lo de los pedidos que tiene (lib/bloques.js,
+  // todoListoDelBloque).
   const [todoListo, setTodoListo] = useState({})
 
   const correrTodoListo = useCallback(
     async (bloque) => {
-      setTodoListo((previo) => ({ ...previo, [bloque.clave]: { corriendo: true, fallidos: [] } }))
+      const ids = bloque.comandas.map((c) => c.id_pedido)
+      setTodoListo((previo) => ({ ...previo, [bloque.clave]: { corriendo: true, fallidos: [], ids } }))
       const { fallidos } = await marcarTodoListo(bloque.comandas, avanzar)
-      setTodoListo((previo) => ({ ...previo, [bloque.clave]: { corriendo: false, fallidos } }))
+      setTodoListo((previo) => ({ ...previo, [bloque.clave]: { corriendo: false, fallidos, ids } }))
     },
     [avanzar]
   )
 
-  const descartarFallos = useCallback((clave) => {
-    setTodoListo((previo) => {
-      const siguiente = { ...previo }
-      delete siguiente[clave]
-      return siguiente
-    })
+  const descartarFallos = useCallback((bloque) => {
+    setTodoListo((previo) => descartarFallosDelBloque(previo, bloque))
   }, [])
 
   async function alternarSonido() {

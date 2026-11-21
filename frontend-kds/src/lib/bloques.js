@@ -3,7 +3,8 @@
  *
  * El tablero sigue guardando COMANDAS (una por pedido, con su propio estado,
  * porque cada pedido avisa a su comensal); lo que cambia es como se dibujan:
- * las comandas de la misma mesa (id_mesa) van juntas en un BLOQUE. El bloque
+ * en cada columna, las comandas de la misma mesa (id_mesa) van juntas en un
+ * BLOQUE; cada pedido va en la columna de su propio estado. El bloque
  * no se guarda en ningun sitio, se calcula en cada render a partir de
  * estado.comandas, asi que cualquier evento (order:created, order:status,
  * item:cancelado) lo recoloca solo, sin recargar y con la deduplicacion por
@@ -12,12 +13,8 @@
  * Funciones puras, con el "ahora" como argumento, como el resto de lib/.
  */
 
-import { COLUMNAS } from './comandas.js'
 import { minutosDesdeCreacion } from './espera.js'
 import { listoEnMs } from './pase.js'
-
-/** Orden de "atraso": cuanto mas a la izquierda, mas le falta a la cocina. */
-const ORDEN_ESTADOS = COLUMNAS.map((c) => c.estado)
 
 /** Estados en los que "Todo listo" todavia tiene trabajo que hacer. */
 export const ESTADOS_PENDIENTES = ['recibido', 'en_preparacion']
@@ -82,42 +79,35 @@ function tituloDelBloque(comandas) {
 }
 
 /**
- * Estado mas atrasado del bloque: decide en que columna se dibuja.
- *
- * Una mesa con un pedido en el pase y otro recien llegado sigue teniendo
- * trabajo en Nuevas, y es ahi donde la cocina tiene que verla.
- */
-export function estadoDelBloque(comandas) {
-  let indice = ORDEN_ESTADOS.length - 1
-  for (const c of comandas) {
-    const i = ORDEN_ESTADOS.indexOf(c.estado)
-    if (i >= 0 && i < indice) indice = i
-  }
-  return ORDEN_ESTADOS[indice]
-}
-
-/**
  * Agrupa las comandas en bloques.
  *
- * - Las de la misma mesa (id_mesa) van en un bloque; las sin mesa, cada una en
- *   el suyo.
+ * - Cada pedido va en la columna de SU estado. Dentro de cada columna, los de
+ *   la misma mesa (id_mesa) van en un bloque: la clave es mesa + estado, asi
+ *   que una mesa puede salir a la vez en Nuevas, En preparacion y Listas. Al
+ *   avanzar un pedido, ese pedido (y solo ese) cambia de bloque.
+ * - Los sin mesa (para llevar, domicilio), cada uno en el suyo.
  * - Dentro del bloque, por creado_en (la mas antigua arriba).
  * - Los bloques, por su comanda mas antigua: la mesa que lleva mas esperando,
  *   primero.
- * - `minutos` del bloque = los de su comanda mas antigua (el mismo calculo que
- *   el cronometro de la tarjeta).
+ * - `minutos` del bloque = los de su comanda mas antigua DE ESE BLOQUE (el
+ *   mismo calculo que el cronometro de la tarjeta).
+ * - `enOtrasColumnas` = pedidos de la misma mesa que estan en el tablero con
+ *   otro estado (siempre 0 sin mesa).
  *
  * @returns {Array<{clave: string, titulo: string, conMesa: boolean,
  *   id_mesa: number|null, comandas: object[], estado: string, minutos: number,
- *   pendientes: number}>}
+ *   pendientes: number, enOtrasColumnas: number}>}
  */
 export function agruparPorMesa(comandas, ahoraEnMs = Date.now()) {
   const grupos = new Map()
+  const porMesa = new Map()
   for (const comanda of comandas || []) {
     if (!comanda) continue
-    const clave = tieneMesa(comanda) ? `mesa:${comanda.id_mesa}` : `pedido:${comanda.id_pedido}`
+    const conMesa = tieneMesa(comanda)
+    const clave = conMesa ? `mesa:${comanda.id_mesa}:${comanda.estado}` : `pedido:${comanda.id_pedido}`
     if (!grupos.has(clave)) grupos.set(clave, [])
     grupos.get(clave).push(comanda)
+    if (conMesa) porMesa.set(comanda.id_mesa, (porMesa.get(comanda.id_mesa) || 0) + 1)
   }
 
   const orden = porAntiguedad(ahoraEnMs)
@@ -131,9 +121,10 @@ export function agruparPorMesa(comandas, ahoraEnMs = Date.now()) {
       conMesa,
       id_mesa: conMesa ? ordenadas[0].id_mesa : null,
       comandas: ordenadas,
-      estado: estadoDelBloque(ordenadas),
+      estado: ordenadas[0].estado,
       minutos: minutosDesdeCreacion(ordenadas[0], ahoraEnMs),
       pendientes: ordenadas.filter((c) => ESTADOS_PENDIENTES.includes(c.estado)).length,
+      enOtrasColumnas: conMesa ? porMesa.get(ordenadas[0].id_mesa) - ordenadas.length : 0,
     })
   }
 
@@ -151,7 +142,7 @@ function ultimoListo(bloque) {
 }
 
 /**
- * Bloques de una columna: los que tienen ahi su estado mas atrasado.
+ * Bloques de una columna: los pedidos en ese estado, agrupados por mesa.
  *
  * Nuevas y En preparacion, por antiguedad (la mesa que mas espera, primero).
  * El pase conserva su criterio de siempre (ordenarPase): arriba lo que acaba de
@@ -231,7 +222,76 @@ export async function marcarTodoListo(comandas, avanzar) {
   return { listos, fallidos }
 }
 
-/** Pregunta de confirmacion del boton. */
+/** Como se nombran los pedidos de cada columna en la pregunta de "Todo listo". */
+const NOMBRE_EN_PREGUNTA = {
+  recibido: { uno: 'el pedido nuevo', varios: (n) => `los ${n} pedidos nuevos` },
+  en_preparacion: { uno: 'el pedido en preparación', varios: (n) => `los ${n} pedidos en preparación` },
+}
+
+/**
+ * Pregunta de confirmacion del boton.
+ *
+ * Un bloque de mesa solo lleva los pedidos de su columna, asi que la pregunta
+ * dice cuales y cuantos: la misma mesa puede tener otro boton en la columna de
+ * al lado. Sin mesa (o en un estado sin boton) queda la pregunta de siempre.
+ */
 export function preguntaTodoListo(bloque) {
-  return `¿Marcar todos los pedidos de la ${bloque.titulo} como listos?`
+  const nombre = NOMBRE_EN_PREGUNTA[bloque?.estado]
+  if (!bloque?.conMesa || !nombre) {
+    return `¿Marcar todos los pedidos de la ${bloque.titulo} como listos?`
+  }
+  const n = bloque.comandas.length
+  return n === 1
+    ? `¿Marcar como listo ${nombre.uno} de la ${bloque.titulo}?`
+    : `¿Marcar como listos ${nombre.varios(n)} de la ${bloque.titulo}?`
+}
+
+/** Linea "+N pedidos de esta mesa en otras columnas"; vacia si N es 0. */
+export function textoOtrasColumnas(n) {
+  if (!(n > 0)) return ''
+  return n === 1 ? '+1 pedido de esta mesa en otras columnas' : `+${n} pedidos de esta mesa en otras columnas`
+}
+
+/**
+ * Estado de "Todo listo" que le toca a un bloque.
+ *
+ * El Tablero lo guarda por la clave del bloque desde el que se lanzo, junto con
+ * los ids de sus pedidos (`ids`). Mientras corre, esos pedidos se van moviendo
+ * a otros bloques (Nuevas -> En preparacion -> Listas); cada bloque muestra
+ * "corriendo" y los fallos de los pedidos que tiene EN ESE MOMENTO.
+ *
+ * @param {object} bloque
+ * @param {Record<string, {corriendo: boolean, fallidos: object[], ids?: number[]}>} todoListo
+ * @returns {{corriendo: boolean, fallidos: object[]} | null}
+ */
+export function todoListoDelBloque(bloque, todoListo) {
+  const ids = idsDelBloque(bloque)
+  let corriendo = false
+  const fallidos = []
+  for (const entrada of Object.values(todoListo || {})) {
+    if (!entrada) continue
+    if (entrada.corriendo && (entrada.ids || []).some((id) => ids.has(id))) corriendo = true
+    fallidos.push(...(entrada.fallidos || []).filter((f) => ids.has(f.id_pedido)))
+  }
+  if (!corriendo && fallidos.length === 0) return null
+  return { corriendo, fallidos }
+}
+
+/**
+ * Cierra el aviso de fallos de un bloque: quita los fallos de SUS pedidos y
+ * deja los de otros bloques. Las entradas que se quedan sin nada se borran.
+ */
+export function descartarFallosDelBloque(todoListo, bloque) {
+  const ids = idsDelBloque(bloque)
+  const siguiente = {}
+  for (const [clave, entrada] of Object.entries(todoListo || {})) {
+    if (!entrada) continue
+    const fallidos = (entrada.fallidos || []).filter((f) => !ids.has(f.id_pedido))
+    if (entrada.corriendo || fallidos.length > 0) siguiente[clave] = { ...entrada, fallidos }
+  }
+  return siguiente
+}
+
+function idsDelBloque(bloque) {
+  return new Set((bloque?.comandas || []).map((c) => c.id_pedido))
 }

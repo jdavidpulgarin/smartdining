@@ -1,11 +1,12 @@
 import { AlertCircle, CheckCheck, Clock, LoaderCircle, X } from 'lucide-react'
 import { useState } from 'react'
-import { preguntaTodoListo } from '../lib/bloques'
+import { preguntaTodoListo, textoOtrasColumnas } from '../lib/bloques'
 import { senalDeEsperaDeComanda, textoDeEspera } from '../lib/espera'
 import ComandaCard from './ComandaCard'
 
 /**
- * T10 · La tarjeta de una mesa: todos sus pedidos juntos.
+ * T10 · La tarjeta de una mesa: sus pedidos en el estado de esta columna. Si la
+ * mesa tiene más pedidos en otras columnas, una línea pequeña lo dice.
  *
  * Cabecera grande ("Mesa N", que se lee desde el otro lado de la cocina) con
  * el tiempo de su pedido MÁS ANTIGUO, que es lo que lleva esperando la mesa, y
@@ -13,9 +14,9 @@ import ComandaCard from './ComandaCard'
  * comensal, su código, sus líneas, su estado y SUS botones: cada pedido avisa a
  * su comensal, así que cada uno conserva su propio estado.
  *
- * "Todo listo" lleva a 'listo' todo lo pendiente del bloque. El resultado y el
- * "corriendo" viven en el Tablero (no aquí) porque el bloque puede cambiar de
- * columna a mitad de camino, y al desmontarse se llevaría los fallos.
+ * "Todo listo" lleva a 'listo' los pedidos de ESTE bloque. El resultado y el
+ * "corriendo" viven en el Tablero (no aquí) porque esos pedidos cambian de
+ * columna a mitad de camino; cada bloque recibe lo de los pedidos que tiene.
  */
 
 const CHIP_ESPERA = {
@@ -59,6 +60,7 @@ export default function BloqueMesa({
     : `El pedido más antiguo se hizo hace ${textoDeEspera(bloque.minutos)}`
 
   const conBoton = bloque.conMesa && bloque.pendientes > 0
+  const otrasColumnas = textoOtrasColumnas(bloque.enOtrasColumnas)
 
   function confirmar() {
     setConfirmando(false)
@@ -78,6 +80,7 @@ export default function BloqueMesa({
               {bloque.comandas.length} {bloque.comandas.length === 1 ? 'pedido' : 'pedidos'}
             </p>
           )}
+          {otrasColumnas && <p className="tc-ticket-meta">{otrasColumnas}</p>}
         </div>
         <p
           className={`display tc-chip ${CHIP_ESPERA[espera.nivel]}`}
@@ -148,7 +151,7 @@ export default function BloqueMesa({
             </p>
             <button
               type="button"
-              onClick={() => onDescartarFallos?.(bloque.clave)}
+              onClick={() => onDescartarFallos?.(bloque)}
               className="tc-alerta-cerrar"
               aria-label="Cerrar aviso"
             >

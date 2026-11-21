@@ -1,4 +1,5 @@
 import { ChefHat } from 'lucide-react'
+import { todoListoDelBloque } from '../lib/bloques'
 import BloqueMesa from './BloqueMesa'
 
 /**
@@ -9,8 +10,9 @@ import BloqueMesa from './BloqueMesa'
  * color le cambie el peso. Las tarjetas no se tinen de color de columna: lo
  * que las pinta es el semaforo de tiempos, y son dos cosas distintas.
  *
- * T10: la columna dibuja BLOQUES (una tarjeta por mesa, ver lib/bloques.js) y
- * el contador cuenta tarjetas, que es lo que el cocinero ve debajo.
+ * T10: la columna dibuja BLOQUES (una tarjeta por mesa con los pedidos de la
+ * mesa en ESTE estado, ver lib/bloques.js) y el contador cuenta tarjetas, que
+ * es lo que el cocinero ve debajo.
  */
 
 const COLOR = {
@@ -68,7 +70,7 @@ export default function Columna({
               ahora={ahora}
               conectado={conectado}
               onAvanzar={onAvanzar}
-              todoListo={todoListo[bloque.clave]}
+              todoListo={todoListoDelBloque(bloque, todoListo)}
               onTodoListo={onTodoListo}
               onDescartarFallos={onDescartarFallos}
             />
