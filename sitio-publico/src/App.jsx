@@ -5,6 +5,7 @@ import { efectoCarta } from './utils/efectoCarta.js';
 import Encabezado from './componentes/Encabezado.jsx';
 import WhatsAppFlotante from './componentes/WhatsAppFlotante.jsx';
 import Inicio from './secciones/Inicio.jsx';
+import PlatoDelDia from './secciones/PlatoDelDia.jsx';
 import Nosotros from './secciones/Nosotros.jsx';
 import CartaSeccion from './secciones/Carta.jsx';
 import ComoPedir from './secciones/ComoPedir.jsx';
@@ -14,17 +15,26 @@ import Pie from './secciones/Pie.jsx';
 import PlatoDetalleModal from './components/menu/PlatoDetalleModal.jsx';
 
 /**
+ * Interruptor maestro para activar/desactivar la sección promocional "Plato del día".
+ */
+export const MOSTRAR_PLATO_DEL_DIA = true;
+
+/**
  * Devuelve la lista de enlaces de secciones activos del sitio público.
  */
-export function obtenerSecciones() {
-  return [
-    { href: '#inicio', etiqueta: 'Inicio' },
+export function obtenerSecciones(mostrarPlato = MOSTRAR_PLATO_DEL_DIA) {
+  const secciones = [{ href: '#inicio', etiqueta: 'Inicio' }];
+  if (mostrarPlato) {
+    secciones.push({ href: '#hoy', etiqueta: 'Hoy' });
+  }
+  secciones.push(
     { href: '#nosotros', etiqueta: 'Nosotros' },
     { href: '#carta', etiqueta: 'Carta' },
     { href: '#como-pedir', etiqueta: '¿Cómo pedir?' },
     { href: '#proximamente', etiqueta: 'Próximamente' },
-    { href: '#contacto', etiqueta: 'Contacto' },
-  ];
+    { href: '#contacto', etiqueta: 'Contacto' }
+  );
+  return secciones;
 }
 
 /**
@@ -80,6 +90,7 @@ export function App({
       <Encabezado secciones={secciones} datosRestaurante={datosRestaurante} />
       <main id="contenido" className="flex-1">
         <Inicio datosRestaurante={datosRestaurante} />
+        {MOSTRAR_PLATO_DEL_DIA && <PlatoDelDia />}
         <Nosotros datosRestaurante={datosRestaurante} />
         <CartaSeccion
           menu={menu}
