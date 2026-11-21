@@ -248,4 +248,19 @@ describe('Sección PlatoDelDia', () => {
       contenedor.remove();
     }
   });
+
+  it('con plato disponible del sábado: muestra el texto "recién salida de la parrilla"', () => {
+    const cartaSabado = {
+      origen: 'vivo',
+      platos: [
+        { nombre: 'Carne asada con papas', precio: 38000, disponible: true },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      <PlatoDelDia dia="sabado" carta={cartaSabado} />
+    );
+
+    expect(html).toContain('recién salida de la parrilla');
+  });
 });
