@@ -8,11 +8,8 @@ import {
   Maximize2,
   Minimize2,
   ExternalLink,
-  ShieldCheck,
-  Smartphone,
   ChevronLeft,
   Sliders,
-  UtensilsCrossed,
   Info,
   RotateCw,
 } from 'lucide-react'
@@ -35,6 +32,7 @@ import {
 import { errorDeRotacion, tabletSinQr, tokenDeUrl, accionTabletAlReconectar } from '../utils/qrRotacion'
 import { buscarMesa } from '../utils/mesaActualizada'
 import { tomarFragmentoTablet, guardarTablet, olvidarTablet, urlConToken } from '../utils/enlaceTablet'
+import '../styles/pantalla-mesa.css'
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4001'
 
@@ -74,55 +72,64 @@ function ConfigurarPantalla({ numero, onConfigurar, onCerrar }) {
   }
 
   return (
-    <div className="sd-modal-backdrop" onClick={onCerrar}>
+    <div className="mesa-velo" onClick={onCerrar}>
       <form
-        className="sd-card sd-table-detail-modal"
-        style={{ maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 12 }}
+        className="mesa-panel"
         onClick={(e) => e.stopPropagation()}
         onSubmit={enviar}
         role="dialog"
         aria-modal="true"
         aria-label="Configurar pantalla"
       >
-        <h3 className="sd-card-title" style={{ margin: 0, fontSize: 20 }}>
-          Configurar pantalla{numero ? ` · Mesa ${numero}` : ''}
-        </h3>
-        <p style={{ margin: 0, fontSize: 14, color: 'var(--sd-text-muted)' }}>
-          Solo para el personal. Lo más fácil es pulsar «Lanzar Pantalla» o «Copiar URL Tablet» en el panel. Si no,
-          inicia sesión aquí una vez: la pantalla guarda su credencial y la sesión se cierra enseguida.
-        </p>
-        <input
-          type="email"
-          required
-          autoComplete="off"
-          placeholder="Correo del personal"
-          aria-label="Correo del personal"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="sd-input"
-        />
-        <input
-          type="password"
-          required
-          autoComplete="off"
-          placeholder="Contraseña"
-          aria-label="Contraseña"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="sd-input"
-        />
-        {error && (
-          <p role="alert" style={{ margin: 0, color: 'var(--sd-red-text)', fontWeight: 700 }}>
-            {error}
+        <div className="mesa-banda">
+          <span>CONFIGURAR PANTALLA</span>
+          {numero ? <small>MESA {numero}</small> : null}
+        </div>
+        <div className="mesa-panel-cuerpo">
+          <h3>SOLO PERSONAL</h3>
+          <p>
+            Solo para el personal. Lo más fácil es pulsar «Lanzar Pantalla» o «Copiar URL Tablet» en el panel. Si no,
+            inicia sesión aquí una vez: la pantalla guarda su credencial y la sesión se cierra enseguida.
           </p>
-        )}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button type="button" className="sd-btn sd-btn-secondary" onClick={onCerrar}>
-            Cancelar
-          </button>
-          <button type="submit" className="sd-btn sd-btn-primary" disabled={cargando}>
-            {cargando ? 'Configurando…' : 'Configurar'}
-          </button>
+          <div className="mesa-campo">
+            <span className="mesa-campo-lbl" aria-hidden="true">CORREO DEL PERSONAL</span>
+            <input
+              type="email"
+              required
+              autoComplete="off"
+              placeholder="Correo del personal"
+              aria-label="Correo del personal"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="mesa-inp"
+            />
+          </div>
+          <div className="mesa-campo">
+            <span className="mesa-campo-lbl" aria-hidden="true">CONTRASEÑA</span>
+            <input
+              type="password"
+              required
+              autoComplete="off"
+              placeholder="Contraseña"
+              aria-label="Contraseña"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="mesa-inp"
+            />
+          </div>
+          {error && (
+            <p role="alert" className="mesa-panel-error">
+              {error}
+            </p>
+          )}
+          <div className="mesa-fila">
+            <button type="button" className="mesa-btn mesa-btn-claro" onClick={onCerrar}>
+              Cancelar
+            </button>
+            <button type="submit" className="mesa-btn" disabled={cargando}>
+              {cargando ? 'Configurando…' : 'Configurar'}
+            </button>
+          </div>
         </div>
       </form>
     </div>
@@ -462,73 +469,37 @@ export function PantallaMesa() {
   }
 
 
+  // Hora del dispositivo, sin segundos (8:45 p. m.).
+  const hora = currentTime.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' })
+
   return (
-    <div className="sd-pantalla-page">
-      {/* Fondo con foto del plato y viñeta oscura */}
-      <img
-        src="/img/fondo.webp"
-        alt=""
-        aria-hidden="true"
-        className="sd-bg-photo"
-        style={{ opacity: 0.35, position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', zIndex: 0 }}
-        onError={(e) => {
-          e.currentTarget.style.display = 'none'
-        }}
-      />
-
+    <div className="mesa-pagina tema-comanda">
       {/* Barra superior de la tablet */}
-      <header className="sd-pantalla-topbar">
-        <button
-          type="button"
-          className="sd-pantalla-btn-icon"
-          onClick={() => navigate('/mesas')}
-          title="Volver al panel"
-        >
-          <ChevronLeft size={20} />
-          <span>SALIR</span>
-        </button>
-
-        <div className="sd-pantalla-brand">
-          <div className="sd-brand-badge" aria-hidden="true">
-            <span>SD</span>
-          </div>
-          <span className="sd-brand-text">SMARTDINING</span>
+      <header className="mesa-top">
+        <div className="mesa-top-lado">
+          <button type="button" className="mesa-ib" onClick={() => navigate('/mesas')} title="Volver al panel">
+            <ChevronLeft size={18} />
+            <span>SALIR</span>
+          </button>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* Socket status */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 12,
-              fontFamily: 'var(--sd-font-heading)',
-              fontWeight: 700,
-              padding: '4px 10px',
-              borderRadius: 4,
-              background: socketStatus === 'conectado' ? 'rgba(255,255,255,0.1)' : 'rgba(238,28,37,0.2)',
-              color: socketStatus === 'conectado' ? 'var(--sd-white)' : 'var(--sd-red-text)',
-            }}
-          >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: socketStatus === 'conectado' ? 'var(--sd-white)' : 'var(--sd-red)',
-              }}
-            />
-            <span>{socketStatus === 'conectado' ? 'EN VIVO' : 'SIN CONEXIÓN'}</span>
-          </div>
+        <div className="mesa-marca">
+          <span className="mesa-sd" aria-hidden="true">SD</span>
+          <b>SMARTDINING</b>
+        </div>
 
-          <span className="sd-pantalla-clock">
-            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        <div className="mesa-top-lado mesa-top-der">
+          {/* Estado real del socket de la pantalla */}
+          <span className={`mesa-vivo${socketStatus === 'conectado' ? '' : ' mesa-vivo-off'}`}>
+            <i aria-hidden="true"></i>
+            {socketStatus === 'conectado' ? 'EN VIVO' : 'SIN CONEXIÓN'}
           </span>
+
+          <span className="mesa-reloj">{hora}</span>
 
           <button
             type="button"
-            className="sd-pantalla-btn-icon"
+            className="mesa-ib"
             onClick={toggleFullscreen}
             title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
           >
@@ -537,7 +508,7 @@ export function PantallaMesa() {
 
           <button
             type="button"
-            className="sd-pantalla-btn-icon"
+            className="mesa-ib"
             onClick={() => setShowConfig(!showConfig)}
             title="Ajustes técnicos"
           >
@@ -545,159 +516,122 @@ export function PantallaMesa() {
           </button>
         </div>
       </header>
+      <div className="mesa-franja" aria-hidden="true"></div>
 
-      {/* Banner de Rotación o Error */}
+      {/* QR renovado (llegó qr:actualizado o se rotó a mano) */}
       {justRotated && (
-        <div
-          style={{
-            position: 'relative',
-            zIndex: 10,
-            background: 'var(--sd-red)',
-            color: '#fff',
-            padding: '8px 16px',
-            textAlign: 'center',
-            fontSize: 14,
-            fontWeight: 700,
-            fontFamily: 'var(--sd-font-heading)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-          }}
-        >
+        <div className="mesa-aviso mesa-aviso-ok">
           <Sparkles size={16} />
           <span>¡Código QR renovado automáticamente para tu mesa!</span>
         </div>
       )}
 
       {errorPantalla && (
-        <div
-          role="alert"
-          style={{
-            position: 'relative',
-            zIndex: 10,
-            background: 'rgba(238,28,37,0.9)',
-            color: '#fff',
-            padding: '8px 16px',
-            textAlign: 'center',
-            fontSize: 14,
-            fontWeight: 700,
-            fontFamily: 'var(--sd-font-heading)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-          }}
-        >
+        <div role="alert" className="mesa-aviso mesa-aviso-error">
           <Info size={16} />
           <span>{errorPantalla}</span>
         </div>
       )}
 
-      {/* Contenido Central: Número de mesa en rojo gigante y QR sobre blanco */}
-      <main className="sd-pantalla-center-container">
-        <div style={{ textAlign: 'center', marginBottom: 16 }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 12px',
-              borderRadius: 20,
-              background: 'rgba(238,28,37,0.15)',
-              color: 'var(--sd-red-text)',
-              fontSize: 13,
-              fontWeight: 700,
-              marginBottom: 8,
-            }}
-          >
-            <Sparkles size={14} />
-            <span>BIENVENIDO A TU MESA</span>
-          </div>
+      <main className="mesa-centro">
+        <section className="mesa-izq">
+          <div className="mesa-sobre">BIENVENIDO A TU MESA</div>
+          <h1 className="mesa-numero">MESA {numeroVisible ?? '—'}</h1>
+          {tableData?.location && <p className="mesa-sector">Sector: {tableData.location}</p>}
+          <p className="mesa-frase">Pide y paga desde tu celular, sin filas ni esperas.</p>
 
-          <span className="sd-pantalla-pre-title">SMARTDINING EXPERIENCIA DIGITAL</span>
+          <ol className="mesa-pasos">
+            <li className="mesa-paso">
+              <b aria-hidden="true">1</b>
+              <div>
+                <h3>ESCANEA EL QR</h3>
+                <span>Con la cámara del celular. Sin instalar apps.</span>
+              </div>
+            </li>
+            <li className="mesa-paso">
+              <b aria-hidden="true">2</b>
+              <div>
+                <h3>ARMA TU PEDIDO</h3>
+                <span>Todos en la mesa suman platos a la misma comanda.</span>
+              </div>
+            </li>
+            <li className="mesa-paso">
+              <b aria-hidden="true">3</b>
+              <div>
+                <h3>PAGA Y SIGUE TU PLATO</h3>
+                <span>Cada quien paga lo suyo y ve cuándo sale de cocina.</span>
+              </div>
+            </li>
+          </ol>
+        </section>
 
-          <h1 className="sd-page-title sd-pantalla-giant-number">
-            MESA {numeroVisible ?? '—'}
-          </h1>
-
-          {tableData?.location && (
-            <p style={{ color: 'var(--sd-text-muted)', fontSize: 14, margin: '4px 0 0 0' }}>
-              Sector: {tableData.location}
-            </p>
-          )}
-
-          <p className="sd-pantalla-subtitle">
-            {sinQr
-              ? 'Mesa disponible · pide a tu mesero que la abra'
-              : 'Escanea el código QR con la cámara de tu teléfono para ver la carta, ordenar y compartir comanda'}
-          </p>
-        </div>
-
-        {/* QR sobre blanco en el centro */}
-        <div className="sd-pantalla-qr-card">
-          {sinQr ? (
-            <div
-              role="status"
-              data-testid="tablet-mesa-disponible"
-              className="sd-pantalla-qr-white-frame"
-              style={{ width: 260, height: 260, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, textAlign: 'center', color: '#0a0f1d' }}
-            >
-              <strong style={{ fontSize: 26, lineHeight: 1.2 }}>Mesa disponible</strong>
-              <span style={{ fontSize: 16, lineHeight: 1.4 }}>Pide a tu mesero que la abra</span>
+        <section className="mesa-der">
+          <div className="mesa-ticket">
+            <span className="mesa-mascota" aria-hidden="true"></span>
+            <div className="mesa-banda">
+              <span>COMANDA</span>
+              <small>
+                MESA {numeroVisible ?? '—'}
+                {tableData?.location ? ` · ${tableData.location}` : ''}
+              </small>
             </div>
-          ) : tokenQr ? (
-            <div className="sd-pantalla-qr-white-frame">
-              <QRCodeSVG
-                value={diningUrl}
-                size={260}
-                level="M"
-                includeMargin={false}
-                fgColor="#0a0f1d"
-                bgColor="#ffffff"
-              />
-            </div>
-          ) : (
-            <div className="sd-pantalla-qr-white-frame" role="status" style={{ width: 260, height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 16, color: '#0a0f1d', fontWeight: 700 }}>
-              Esperando el código QR de la mesa. Pide al personal que abra la mesa o que configure esta pantalla.
-            </div>
-          )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: '100%' }}>
-            {!sinQr && tokenQr && (
-              <div className="sd-pantalla-sid-meta">
-                <span>Sesión activa · sid: {sid}</span>
+            {sinQr ? (
+              <div role="status" data-testid="tablet-mesa-disponible" className="mesa-libre">
+                <svg viewBox="0 0 120 120" aria-hidden="true">
+                  <circle cx="60" cy="60" r="56" fill="#f6e7d4" />
+                  <rect x="28" y="54" width="64" height="10" rx="5" fill="#120c0c" />
+                  <path d="M40 64v28M80 64v28" stroke="#120c0c" strokeWidth="8" strokeLinecap="round" />
+                  <path d="M44 54c0-12 7-20 16-20s16 8 16 20" fill="none" stroke="#ffb02e" strokeWidth="8" strokeLinecap="round" />
+                </svg>
+                <strong>Mesa disponible</strong>
+                <span>Pide a tu mesero que la abra</span>
+              </div>
+            ) : tokenQr ? (
+              <div className="mesa-qrzona">
+                <div className="mesa-qr sd-pantalla-qr-white-frame">
+                  <QRCodeSVG
+                    value={diningUrl}
+                    size={260}
+                    level="M"
+                    includeMargin={false}
+                    fgColor="#0a0f1d"
+                    bgColor="#ffffff"
+                  />
+                  <span className="mesa-scan" aria-hidden="true"></span>
+                </div>
+                <h2 className="mesa-escaneame">ESCANÉAME PARA PEDIR</h2>
+              </div>
+            ) : (
+              <div className="mesa-espera" role="status">
+                Esperando el código QR de la mesa. Pide al personal que abra la mesa o que configure esta pantalla.
               </div>
             )}
 
-            {qrApuntaALocalhost && !sinQr && tokenQr && (
-              <div
-                className="sd-localhost-warning"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '6px 12px',
-                  borderRadius: 6,
-                  background: 'rgba(238, 28, 37, 0.15)',
-                  border: '1px solid rgba(238, 28, 37, 0.4)',
-                  color: '#ff8a80',
-                  fontSize: 12,
-                  maxWidth: 320,
-                  textAlign: 'center',
-                  lineHeight: 1.3,
-                }}
-              >
-                <Info size={14} style={{ flexShrink: 0 }} />
-                <span>El QR apunta a localhost: un celular no podrá abrirlo. Configura la IP Wi-Fi en opciones.</span>
-              </div>
-            )}
+            <div className="mesa-corte" aria-hidden="true"></div>
 
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div className="mesa-talon">
+              <div className="mesa-estado">
+                {!sinQr && tokenQr && (
+                  <>
+                    <b>
+                      <i aria-hidden="true"></i>
+                      SESIÓN ACTIVA
+                    </b>
+                    <small>sid: {sid}</small>
+                    <small>
+                      {tieneComensales
+                        ? 'Con comensales: el QR queda fijo.'
+                        : 'Sin comensales: el QR se renueva solo cada 3 min.'}
+                    </small>
+                  </>
+                )}
+              </div>
+
               {conSesion ? (
                 <button
                   type="button"
-                  className="sd-pantalla-btn-rotate"
+                  className="mesa-accion"
                   onClick={handleRotarQr}
                   disabled={loadingAction}
                   title="Rotar código QR"
@@ -708,7 +642,7 @@ export function PantallaMesa() {
               ) : (
                 <button
                   type="button"
-                  className="sd-pantalla-btn-rotate"
+                  className="mesa-accion"
                   onClick={() => setConfigurando(true)}
                   title="Configurar pantalla (personal)"
                 >
@@ -717,103 +651,59 @@ export function PantallaMesa() {
                 </button>
               )}
             </div>
+
+            {qrApuntaALocalhost && !sinQr && tokenQr && (
+              <div className="mesa-localhost">
+                <Info size={14} style={{ flexShrink: 0 }} />
+                <span>El QR apunta a localhost: un celular no podrá abrirlo. Configura la IP Wi-Fi en opciones.</span>
+              </div>
+            )}
           </div>
-        </div>
+        </section>
 
         {configurando && (
           <ConfigurarPantalla numero={numeroVisible} onConfigurar={configurar} onCerrar={() => setConfigurando(false)} />
         )}
-
-        {/* Instrucciones y Beneficios de comensal */}
-        <div className="sd-pantalla-features-row" style={{ marginTop: 20 }}>
-          <div className="sd-card sd-pantalla-feature-card">
-            <Smartphone size={20} style={{ color: 'var(--sd-red-text)', marginBottom: 8 }} />
-            <strong className="sd-feature-title">SIN INSTALAR APPS</strong>
-            <p className="sd-feature-desc">Funciona directo desde la cámara o navegador de tu celular.</p>
-          </div>
-          <div className="sd-card sd-pantalla-feature-card">
-            <UtensilsCrossed size={20} style={{ color: 'var(--sd-red-text)', marginBottom: 8 }} />
-            <strong className="sd-feature-title">COMANDA COMPARTIDA</strong>
-            <p className="sd-feature-desc">Todos los comensales pueden sumar platillos a la misma cuenta.</p>
-          </div>
-          <div className="sd-card sd-pantalla-feature-card">
-            <ShieldCheck size={20} style={{ color: 'var(--sd-red-text)', marginBottom: 8 }} />
-            <strong className="sd-feature-title">SEGURIDAD GARANTIZADA</strong>
-            <p className="sd-feature-desc">
-              {tieneComensales
-                ? 'Sesión en curso: los pedidos y comensales conservan su cuenta activa.'
-                : 'Rotación periódica automática cada 3 min mientras no haya comensales.'}
-            </p>
-          </div>
-        </div>
       </main>
 
-      {/* Pie de pantalla de la tablet */}
-      <footer
-        style={{
-          position: 'relative',
-          zIndex: 5,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '12px 24px',
-          borderTop: '1px solid var(--sd-border)',
-          background: 'rgba(18, 14, 13, 0.95)',
-          fontSize: 13,
-          color: 'var(--sd-text-muted)',
-          fontFamily: 'var(--sd-font-body)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Info size={15} style={{ color: 'var(--sd-text)' }} />
-          <span>Si necesitas asistencia de nuestro equipo, avisa a cualquier mesero en salón.</span>
-        </div>
+      {/* Pie de asistencia */}
+      <footer className="mesa-pie">
+        <Info size={18} />
+        <span>Si necesitas asistencia de nuestro equipo, avisa a cualquier mesero en salón.</span>
       </footer>
 
-      {/* Cajón de Configuración para el Personal */}
+      {/* Panel lateral de ajustes para el personal */}
       {showConfig && (
-        <div
-          className="sd-modal-backdrop"
-          onClick={() => setShowConfig(false)}
-        >
+        <div className="mesa-velo" onClick={() => setShowConfig(false)}>
           <div
-            className="sd-card sd-table-detail-modal"
-            style={{ maxWidth: 540 }}
+            className="mesa-panel"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
           >
-            <div className="sd-modal-header">
-              <h3 className="sd-card-title" style={{ margin: 0, fontSize: 22 }}>
-                ⚙️ Ajustes de Pantalla de Mesa #{numeroVisible ?? idMesa}
-              </h3>
-              <button
-                type="button"
-                className="sd-topbar-icon-btn"
-                onClick={() => setShowConfig(false)}
-              >
+            <div className="mesa-banda">
+              <span>AJUSTES · MESA {numeroVisible ?? idMesa}</span>
+              <button type="button" className="mesa-panel-cerrar" onClick={() => setShowConfig(false)}>
                 ✕
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 16 }}>
-              <div>
-                <label className="sd-input-label">DESTINO DE CONEXIÓN (PARA CELULARES):</label>
-                <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <div className="mesa-panel-cuerpo">
+              <div className="mesa-campo">
+                <label className="mesa-campo-lbl">DESTINO DE CONEXIÓN (PARA CELULARES):</label>
+                <div className="mesa-fila">
                   <button
                     type="button"
-                    className={`sd-btn ${useWifiIp ? 'sd-btn-primary' : 'sd-btn-secondary'}`}
+                    className={`mesa-btn${useWifiIp ? '' : ' mesa-btn-claro'}`}
                     onClick={() => setUseWifiIp(true)}
-                    style={{ fontSize: 13, flex: 1 }}
                   >
                     <Wifi size={14} />
                     <span>IP WI-FI ({hostIp})</span>
                   </button>
                   <button
                     type="button"
-                    className={`sd-btn ${!useWifiIp ? 'sd-btn-primary' : 'sd-btn-secondary'}`}
+                    className={`mesa-btn${!useWifiIp ? '' : ' mesa-btn-claro'}`}
                     onClick={() => setUseWifiIp(false)}
-                    style={{ fontSize: 13, flex: 1 }}
                   >
                     <span>LOCALHOST</span>
                   </button>
@@ -821,31 +711,17 @@ export function PantallaMesa() {
               </div>
 
               {useWifiIp && (
-                <div>
-                  <label className="sd-input-label">IP EN LA RED LOCAL WI-FI:</label>
+                <div className="mesa-campo">
+                  <label className="mesa-campo-lbl">IP EN LA RED LOCAL WI-FI:</label>
                   <input
                     type="text"
                     value={hostIp}
                     onChange={(e) => setHostIp(e.target.value.trim())}
                     placeholder="192.168.1.X"
-                    className="sd-input"
+                    className="mesa-inp"
                   />
                   {qrApuntaALocalhost && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        marginTop: 6,
-                        padding: '6px 10px',
-                        borderRadius: 4,
-                        background: 'rgba(238, 28, 37, 0.15)',
-                        border: '1px solid rgba(238, 28, 37, 0.35)',
-                        color: 'var(--sd-red-text, #ff6b6b)',
-                        fontSize: 11,
-                        lineHeight: 1.3,
-                      }}
-                    >
+                    <div className="mesa-panel-aviso">
                       <Info size={14} style={{ flexShrink: 0 }} />
                       <span>
                         El QR apunta a localhost: un celular no podrá abrirlo. Escribe la IP de este PC en la red Wi-Fi.
@@ -855,44 +731,31 @@ export function PantallaMesa() {
                 </div>
               )}
 
-              <div>
-                <label className="sd-input-label">PUERTO DEL CLIENTE (PWA):</label>
+              <div className="mesa-campo">
+                <label className="mesa-campo-lbl">PUERTO DEL CLIENTE (PWA):</label>
                 <input
                   type="text"
                   value={clientPort}
                   onChange={(e) => setClientPort(e.target.value.trim())}
                   placeholder="5174"
-                  className="sd-input"
+                  className="mesa-inp"
                 />
               </div>
 
-              <div>
-                <label className="sd-input-label">ENLACE CODIFICADO:</label>
-                <input type="text" readOnly value={diningUrl} className="sd-input" style={{ opacity: 0.7 }} />
+              <div className="mesa-campo">
+                <label className="mesa-campo-lbl">ENLACE CODIFICADO:</label>
+                <input type="text" readOnly value={diningUrl} className="mesa-inp" />
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                <a
-                  href={diningUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="sd-btn sd-btn-primary"
-                  style={{ textDecoration: 'none', justifyContent: 'center' }}
-                >
-                  <ExternalLink size={15} />
-                  <span>PROBAR ENLACE EN NUEVA PESTAÑA</span>
-                </a>
+              <a href={diningUrl} target="_blank" rel="noreferrer" className="mesa-btn">
+                <ExternalLink size={15} />
+                <span>PROBAR ENLACE EN NUEVA PESTAÑA</span>
+              </a>
 
-                <button
-                  type="button"
-                  className="sd-btn sd-btn-secondary"
-                  onClick={() => navigate('/mesas')}
-                  style={{ justifyContent: 'center' }}
-                >
-                  <ChevronLeft size={15} />
-                  <span>REGRESAR AL PANEL DE MESEROS</span>
-                </button>
-              </div>
+              <button type="button" className="mesa-btn mesa-btn-claro" onClick={() => navigate('/mesas')}>
+                <ChevronLeft size={15} />
+                <span>REGRESAR AL PANEL DE MESEROS</span>
+              </button>
             </div>
           </div>
         </div>

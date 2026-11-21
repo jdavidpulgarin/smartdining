@@ -1,0 +1,848 @@
+/* ==============================================================================
+   Pantalla de la mesa (tablet) · versión negra
+   Diseño: referencia-diseno/roles/smartdining-pantalla-mesa-negra.html
+   Todo bajo .tema-comanda; clases con prefijo mesa-. Solo diseño: la lógica
+   vive en src/pages/PantallaMesa.jsx.
+   ============================================================================== */
+
+.tema-comanda.mesa-pagina {
+  --mesa-fondo: #120c0c;
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  background: radial-gradient(110% 80% at 20% 25%, #2a1d1b 0, var(--mesa-fondo) 60%);
+  color: var(--papel);
+  font-family: var(--f-texto);
+}
+
+/* Rayas ámbar muy suaves sobre todo el fondo */
+.tema-comanda.mesa-pagina::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(115deg, transparent 0 38px, rgba(255, 176, 46, .035) 38px 43px);
+}
+
+.tema-comanda.mesa-pagina :focus-visible {
+  outline: 3px solid var(--ambar);
+  outline-offset: 3px;
+}
+
+/* Barra superior */
+.tema-comanda .mesa-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px;
+  background: #0b0707;
+  border-bottom: 1px solid #2a1d1b;
+  color: var(--papel);
+}
+
+.tema-comanda .mesa-top-lado {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tema-comanda .mesa-top-der {
+  justify-content: flex-end;
+}
+
+.tema-comanda .mesa-marca {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tema-comanda .mesa-sd {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  background: var(--ambar);
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  font: 400 23px var(--f-titulo);
+}
+
+.tema-comanda .mesa-marca b {
+  font: 400 26px var(--f-titulo);
+  letter-spacing: .16em;
+}
+
+.tema-comanda .mesa-ib {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border: 2px solid #4a3a36;
+  border-radius: 11px;
+  background: none;
+  color: #e4d4c6;
+  font: 400 17px var(--f-titulo);
+  letter-spacing: .1em;
+  cursor: pointer;
+}
+
+.tema-comanda .mesa-ib:hover {
+  border-color: var(--ambar);
+  color: var(--ambar);
+}
+
+.tema-comanda .mesa-vivo {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 400 15px var(--f-titulo);
+  letter-spacing: .16em;
+  color: var(--ambar);
+  white-space: nowrap;
+}
+
+.tema-comanda .mesa-vivo i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #3ddc84;
+  animation: mesa-late 1.4s infinite;
+}
+
+/* Sin conexión del socket: rojo y sin parpadeo */
+.tema-comanda .mesa-vivo-off {
+  color: #ff8a80;
+}
+
+.tema-comanda .mesa-vivo-off i {
+  background: var(--brasa);
+  animation: none;
+}
+
+@keyframes mesa-late {
+  50% { opacity: .25; }
+}
+
+.tema-comanda .mesa-reloj {
+  font: 400 26px var(--f-titulo);
+  letter-spacing: .08em;
+  white-space: nowrap;
+}
+
+.tema-comanda .mesa-franja {
+  position: relative;
+  z-index: 1;
+  height: 7px;
+  background: repeating-linear-gradient(115deg, var(--ambar) 0 16px, var(--brasa) 16px 21px);
+}
+
+/* Avisos (QR renovado por qr:actualizado y errores de la tablet) */
+.tema-comanda .mesa-aviso {
+  position: relative;
+  z-index: 2;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 16px 0;
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 14px;
+  text-align: center;
+}
+
+.tema-comanda .mesa-aviso-ok {
+  background: var(--ambar);
+  color: var(--carbon);
+  animation: mesa-baja .35s cubic-bezier(.3, 1.3, .5, 1);
+}
+
+.tema-comanda .mesa-aviso-error {
+  background: #fff;
+  color: #8d0b14;
+  border: 2px solid var(--brasa);
+  border-radius: 12px;
+}
+
+@keyframes mesa-baja {
+  from { transform: translateY(-120%); opacity: 0; }
+}
+
+/* Centro */
+.tema-comanda .mesa-centro {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
+  align-items: center;
+  gap: clamp(24px, 4vw, 64px);
+  padding: clamp(12px, 2vh, 40px) clamp(22px, 5vw, 80px);
+  min-height: 0;
+}
+
+.tema-comanda .mesa-izq {
+  position: relative;
+  min-width: 0;
+}
+
+.tema-comanda .mesa-sobre {
+  font: 400 clamp(18px, 2vw, 26px) var(--f-titulo);
+  letter-spacing: .34em;
+  color: #d3bfa9;
+}
+
+.tema-comanda .mesa-numero {
+  margin: 6px 0 10px;
+  font: 400 clamp(100px, min(19vw, 27vh), 260px) / .82 var(--f-titulo);
+  letter-spacing: .01em;
+  color: var(--ambar);
+  text-shadow: 7px 7px 0 var(--rojo);
+  white-space: nowrap;
+}
+
+.tema-comanda .mesa-sector {
+  margin: 0 0 6px;
+  font: 500 13px var(--f-mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #c9b5a3;
+}
+
+.tema-comanda .mesa-frase {
+  margin: 0;
+  max-width: 22ch;
+  font: 700 clamp(26px, 2.6vw, 36px) / 1.1 var(--f-mano);
+  color: var(--papel);
+}
+
+.tema-comanda .mesa-pasos {
+  display: grid;
+  gap: clamp(8px, 1.4vh, 12px);
+  max-width: 520px;
+  margin: clamp(12px, 2.6vh, 30px) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tema-comanda .mesa-paso {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: #1f1614;
+  box-shadow: inset 0 0 0 1px #3a2b28, 0 14px 22px -14px rgba(0, 0, 0, .8);
+  animation: mesa-sube .6s cubic-bezier(.2, .8, .2, 1) backwards;
+}
+
+.tema-comanda .mesa-paso:nth-child(2) {
+  animation-delay: .1s;
+}
+
+.tema-comanda .mesa-paso:nth-child(3) {
+  animation-delay: .2s;
+}
+
+.tema-comanda .mesa-paso b {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--ambar);
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  font: 400 26px var(--f-titulo);
+}
+
+.tema-comanda .mesa-paso h3 {
+  margin: 0;
+  font: 400 clamp(20px, 1.8vw, 24px) / 1 var(--f-titulo);
+  letter-spacing: .06em;
+  color: var(--papel);
+}
+
+.tema-comanda .mesa-paso span {
+  font-size: 16px;
+  font-weight: 500;
+  color: #c9b5a3;
+}
+
+@keyframes mesa-sube {
+  from { opacity: 0; transform: translateY(14px); }
+}
+
+/* Ticket del QR */
+.tema-comanda .mesa-der {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.tema-comanda .mesa-ticket {
+  position: relative;
+  width: min(100%, 430px);
+  margin-bottom: 14px;
+  border-radius: 20px 20px 0 0;
+  background: var(--papel);
+  color: var(--carbon);
+  box-shadow: 0 30px 60px -24px rgba(0, 0, 0, .9), 0 0 0 1px rgba(255, 176, 46, .15);
+  animation: mesa-imprime .9s .15s cubic-bezier(.3, .8, .3, 1) backwards;
+}
+
+/* Borde dentado de papel */
+.tema-comanda .mesa-ticket::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% - 1px);
+  height: 14px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 12'%3E%3Cpath d='M0 0h24L12 12z' fill='%23fff4e6'/%3E%3C/svg%3E") repeat-x;
+  background-size: 26px 14px;
+  filter: drop-shadow(0 6px 4px rgba(0, 0, 0, .18));
+}
+
+@keyframes mesa-imprime {
+  from { clip-path: inset(-60px -60px 100% -60px); transform: translateY(-16px); }
+  to { clip-path: inset(-60px -60px -60px -60px); transform: none; }
+}
+
+/* Mascota (decorativa) */
+.tema-comanda .mesa-mascota {
+  position: absolute;
+  left: -44px;
+  top: -70px;
+  z-index: 2;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: url('/img/logo-smartdining.webp') center / cover no-repeat;
+  rotate: -10deg;
+  filter: drop-shadow(0 12px 14px rgba(0, 0, 0, .7));
+  animation: mesa-flota 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes mesa-flota {
+  50% { translate: 0 -7px; }
+}
+
+.tema-comanda .mesa-banda {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-radius: 20px 20px 0 0;
+  background: var(--brasa);
+  color: var(--papel);
+  font: 400 21px var(--f-titulo);
+  letter-spacing: .28em;
+}
+
+/* En el ticket, el texto de la banda empieza después de la mascota */
+.tema-comanda .mesa-ticket > .mesa-banda {
+  padding-left: 80px;
+}
+
+.tema-comanda .mesa-banda small {
+  font: 600 13px var(--f-texto);
+  letter-spacing: 0;
+  color: #ffe3c7;
+  text-align: right;
+}
+
+.tema-comanda .mesa-qrzona {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 18px 26px 12px;
+}
+
+/* Recuadro blanco del QR real (QRCodeSVG). Mínimo 296 px: el código queda en
+   260 px o más (18 px de margen blanco por lado) en las tablets; crece con
+   el alto de la pantalla para que el ticket quepa sin bajar. */
+.tema-comanda .mesa-qr {
+  position: relative;
+  width: clamp(296px, 36vh, 340px);
+  max-width: 100%;
+  aspect-ratio: 1;
+  padding: 18px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: inset 0 0 0 3px var(--carbon);
+}
+
+.tema-comanda .mesa-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Marca de escaneo: cuatro esquinas que laten POR FUERA del marco blanco.
+   Nada pasa por encima del código, para no estorbar la lectura. */
+.tema-comanda .mesa-scan {
+  position: absolute;
+  inset: -10px;
+  pointer-events: none;
+  --esq: linear-gradient(var(--brasa), var(--brasa));
+  background:
+    var(--esq) left top / 30px 4px no-repeat,
+    var(--esq) left top / 4px 30px no-repeat,
+    var(--esq) right top / 30px 4px no-repeat,
+    var(--esq) right top / 4px 30px no-repeat,
+    var(--esq) left bottom / 30px 4px no-repeat,
+    var(--esq) left bottom / 4px 30px no-repeat,
+    var(--esq) right bottom / 30px 4px no-repeat,
+    var(--esq) right bottom / 4px 30px no-repeat;
+  animation: mesa-scan 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes mesa-scan {
+  from { opacity: .35; }
+  to { opacity: 1; }
+}
+
+.tema-comanda .mesa-escaneame {
+  margin: 0;
+  font: 400 clamp(24px, 2.2vw, 30px) / 1 var(--f-titulo);
+  letter-spacing: .06em;
+  text-align: center;
+  color: var(--carbon);
+}
+
+/* Esperando el código QR */
+.tema-comanda .mesa-espera {
+  margin: clamp(16px, 2.6vh, 26px) 26px 16px;
+  padding: 22px;
+  border: 3px dashed var(--linea);
+  border-radius: 14px;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--tinta);
+}
+
+/* Mesa disponible */
+.tema-comanda .mesa-libre {
+  display: grid;
+  place-items: center;
+  gap: 14px;
+  padding: 40px 26px 30px;
+  text-align: center;
+}
+
+.tema-comanda .mesa-libre svg {
+  width: 120px;
+  height: 120px;
+}
+
+.tema-comanda .mesa-libre strong {
+  font: 400 42px / 1 var(--f-titulo);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--carbon);
+}
+
+.tema-comanda .mesa-libre span {
+  font: 700 28px var(--f-mano);
+  color: var(--suave);
+}
+
+.tema-comanda .mesa-corte {
+  position: relative;
+  margin: 0 22px;
+  border-top: 3px dashed var(--linea);
+}
+
+.tema-comanda .mesa-corte::before,
+.tema-comanda .mesa-corte::after {
+  content: "";
+  position: absolute;
+  top: -15px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--mesa-fondo, #120c0c);
+}
+
+.tema-comanda .mesa-corte::before {
+  left: -36px;
+}
+
+.tema-comanda .mesa-corte::after {
+  right: -36px;
+}
+
+/* Talón: el estado real de la sesión y la acción del personal */
+.tema-comanda .mesa-talon {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 22px 14px;
+}
+
+.tema-comanda .mesa-estado {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tema-comanda .mesa-estado b {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 18px var(--f-titulo);
+  letter-spacing: .12em;
+  color: var(--carbon);
+}
+
+.tema-comanda .mesa-estado b i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.tema-comanda .mesa-estado small {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--suave);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.tema-comanda .mesa-accion {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 400 18px var(--f-titulo);
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+
+.tema-comanda .mesa-accion[disabled] {
+  opacity: .6;
+  cursor: wait;
+}
+
+.tema-comanda .mesa-accion .spin {
+  animation: mesa-gira 1s linear infinite;
+}
+
+@keyframes mesa-gira {
+  to { transform: rotate(360deg); }
+}
+
+.tema-comanda .mesa-localhost {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0 22px 18px;
+  padding: 10px 12px;
+  border: 2px solid var(--brasa);
+  border-radius: 10px;
+  background: #fff;
+  color: #8d0b14;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* Pie de asistencia */
+.tema-comanda .mesa-pie {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  background: #0b0707;
+  border-top: 1px solid #2a1d1b;
+  color: #d9c3a5;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.tema-comanda .mesa-pie svg {
+  flex: none;
+  color: var(--ambar);
+}
+
+/* Paneles laterales del personal: «Configurar pantalla» y los ajustes */
+.tema-comanda .mesa-velo {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(18, 12, 12, .55);
+  animation: mesa-aparece .25s;
+}
+
+@keyframes mesa-aparece {
+  from { opacity: 0; }
+}
+
+.tema-comanda .mesa-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--papel);
+  color: var(--carbon);
+  box-shadow: -20px 0 40px -20px rgba(0, 0, 0, .5);
+  animation: mesa-entra .35s cubic-bezier(.3, 1, .4, 1);
+}
+
+@keyframes mesa-entra {
+  from { translate: 105% 0; }
+}
+
+.tema-comanda .mesa-panel .mesa-banda {
+  border-radius: 0;
+  letter-spacing: .14em;
+}
+
+.tema-comanda .mesa-panel-cerrar {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--papel);
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  font: 700 16px var(--f-texto);
+  cursor: pointer;
+}
+
+.tema-comanda .mesa-panel-cuerpo {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  overflow: auto;
+}
+
+.tema-comanda .mesa-panel h3 {
+  margin: 0;
+  font: 400 26px var(--f-titulo);
+  letter-spacing: .06em;
+  color: var(--carbon);
+}
+
+.tema-comanda .mesa-panel p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--suave);
+}
+
+.tema-comanda .mesa-campo {
+  display: grid;
+  gap: 5px;
+}
+
+.tema-comanda .mesa-campo-lbl {
+  font: 400 15px var(--f-titulo);
+  letter-spacing: .14em;
+  color: var(--suave);
+}
+
+.tema-comanda .mesa-inp {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 2px solid var(--carbon);
+  border-radius: 10px;
+  background: #fffaf3;
+  color: var(--carbon);
+  font: 500 15px var(--f-texto);
+}
+
+.tema-comanda .mesa-inp:focus {
+  outline: 3px solid var(--ambar);
+  outline-offset: 1px;
+}
+
+.tema-comanda .mesa-inp[readonly] {
+  opacity: .75;
+}
+
+.tema-comanda .mesa-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 50px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 400 21px var(--f-titulo);
+  letter-spacing: .08em;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tema-comanda .mesa-btn-claro {
+  background: var(--papel);
+  color: var(--carbon);
+  box-shadow: inset 0 0 0 2px var(--carbon);
+}
+
+.tema-comanda .mesa-btn[disabled] {
+  opacity: .6;
+  cursor: wait;
+}
+
+.tema-comanda .mesa-fila {
+  display: flex;
+  gap: 8px;
+}
+
+.tema-comanda .mesa-fila .mesa-btn {
+  flex: 1;
+  min-height: 46px;
+  font-size: 16px;
+}
+
+.tema-comanda .mesa-panel-error {
+  margin: 0;
+  padding: 12px;
+  border: 2px solid var(--brasa);
+  border-radius: 10px;
+  background: #fff;
+  color: #8d0b14;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.tema-comanda .mesa-panel-aviso {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 2px solid var(--brasa);
+  border-radius: 10px;
+  background: #fff;
+  color: #8d0b14;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* Vertical o menos de 900 px: una columna */
+@media (max-width: 900px), (orientation: portrait) {
+  /* Una columna con el QR arriba, a la vista sin bajar: «MESA N» y la frase,
+     luego el ticket y al final los pasos (la columna izquierda se deshace con
+     display: contents y se reordena; el HTML no cambia). */
+  .tema-comanda .mesa-centro {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    align-content: start;
+    gap: 10px;
+    text-align: center;
+  }
+  .tema-comanda .mesa-izq {
+    display: contents;
+  }
+  .tema-comanda .mesa-der {
+    order: 1;
+    width: 100%;
+  }
+  .tema-comanda .mesa-pasos {
+    order: 2;
+    width: 100%;
+  }
+  .tema-comanda .mesa-numero {
+    margin: 0;
+  }
+  .tema-comanda .mesa-frase {
+    margin: 0 auto;
+  }
+  .tema-comanda .mesa-pasos {
+    margin-inline: auto;
+    text-align: left;
+  }
+  .tema-comanda .mesa-ticket {
+    margin-top: 40px;
+  }
+  .tema-comanda .mesa-ticket > .mesa-banda {
+    padding-left: 76px;
+  }
+  .tema-comanda .mesa-talon {
+    text-align: left;
+  }
+  .tema-comanda .mesa-mascota {
+    left: -20px;
+    top: -56px;
+    width: 90px;
+    height: 90px;
+  }
+  .tema-comanda .mesa-top {
+    flex-wrap: wrap;
+    padding: 12px 14px;
+  }
+}
+
+@media (max-width: 560px) {
+  .tema-comanda .mesa-marca b {
+    display: none;
+  }
+  .tema-comanda .mesa-reloj {
+    font-size: 20px;
+  }
+  .tema-comanda .mesa-numero {
+    font-size: 96px;
+    text-shadow: 5px 5px 0 var(--rojo);
+  }
+  .tema-comanda .mesa-banda {
+    letter-spacing: .16em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tema-comanda .mesa-vivo i,
+  .tema-comanda .mesa-aviso-ok,
+  .tema-comanda .mesa-paso,
+  .tema-comanda .mesa-ticket,
+  .tema-comanda .mesa-mascota,
+  .tema-comanda .mesa-scan,
+  .tema-comanda .mesa-velo,
+  .tema-comanda .mesa-panel,
+  .tema-comanda .mesa-accion .spin {
+    animation: none;
+  }
+}
