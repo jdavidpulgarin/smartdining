@@ -5,7 +5,7 @@ import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
 import { getSocket } from '../hooks/useSocket'
 import { crearVentanaEventos } from '../utils/dedupeEventos'
-import { mesaDelAviso } from '../utils/avisos'
+import { mesaDelAviso, avisoAtendidaSoloAqui } from '../utils/avisos'
 import { detalleMesa } from '../utils/estadoMesa'
 import { aplicarMesaActualizada, fusionarCargaConAvisos, mismaMesa, numeroDeMesa } from '../utils/mesaActualizada'
 import { nuevoIdCobro } from '../utils/caja'
@@ -25,7 +25,6 @@ const CODIGOS_SIN_REINTENTO = ['NO_AUTORIZADO', 'PAYLOAD_INVALIDO']
 const ESPERA_ACK_ATENDIDA_MS = 5000
 const esIdMesa = (v) => Number.isInteger(v) && v > 0
 const seAvisaALaMesa = (a) => TIPOS_ATENDIDA.includes(a?.tipo) && a.origen !== ORIGEN_HEREDADO && esIdMesa(a.idMesa)
-export const AVISO_ATENDIDA_SOLO_AQUI = 'No se pudo avisar al cliente; la alerta se quitó solo en esta pantalla'
 export const AVISO_ATENDIDA_REINTENTAR = 'No se pudo avisar a la mesa: revisa la conexión y vuelve a pulsar «Atendida»'
 
 function normalizarMesa(backendMesa, prev = {}) {
@@ -168,7 +167,7 @@ export function TablesProvider({ children }) {
       }
       if (!err && CODIGOS_SIN_REINTENTO.includes(r?.codigo)) {
         quitarAlerta(idAlerta)
-        showNotification(AVISO_ATENDIDA_SOLO_AQUI, 'error')
+        showNotification(avisoAtendidaSoloAqui(alerta.numeroMesa), 'error')
         if (r.codigo === 'NO_AUTORIZADO') cerrarSesionInvalida()
         return
       }

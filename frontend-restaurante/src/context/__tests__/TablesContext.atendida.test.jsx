@@ -35,7 +35,8 @@ vi.mock('../../services/api', async (original) => ({
   cerrarSesionInvalida: (...args) => cerrarSesionInvalida(...args),
 }))
 
-import { TablesProvider, AVISO_ATENDIDA_SOLO_AQUI, AVISO_ATENDIDA_REINTENTAR } from '../TablesContext'
+import { TablesProvider, AVISO_ATENDIDA_REINTENTAR } from '../TablesContext'
+import { avisoAtendidaSoloAqui } from '../../utils/avisos'
 import { TablesContext } from '../tablesContextDef'
 import { BandejaAlertas } from '../../components/BandejaAlertas'
 
@@ -224,8 +225,15 @@ describe('TablesContext · ack con error', () => {
     expect(atendidas()[1].data.eventId).toBe(primero)
   })
 
-  it('el aviso de PAYLOAD_INVALIDO y NO_AUTORIZADO habla del cliente, no de la mesa', () => {
-    expect(AVISO_ATENDIDA_SOLO_AQUI).toBe('No se pudo avisar al cliente; la alerta se quitó solo en esta pantalla')
+  it('el aviso de PAYLOAD_INVALIDO y NO_AUTORIZADO nombra la Mesa N con su número', () => {
+    expect(avisoAtendidaSoloAqui(3)).toBe('No se pudo avisar a la Mesa 3; la alerta se quitó solo en esta pantalla')
+  })
+
+  it('sin numeroMesa el aviso dice «la mesa», sin número', () => {
+    const sinNumero = 'No se pudo avisar a la mesa; la alerta se quitó solo en esta pantalla'
+    expect(avisoAtendidaSoloAqui(undefined)).toBe(sinNumero)
+    expect(avisoAtendidaSoloAqui(null)).toBe(sinNumero)
+    expect(avisoAtendidaSoloAqui('')).toBe(sinNumero)
   })
 
   it('PAYLOAD_INVALIDO: se quita solo en esta pantalla, con aviso, no se reintenta y NO cierra la sesión', () => {
@@ -236,7 +244,8 @@ describe('TablesContext · ack con error', () => {
 
     expect(hay('Mesa borrada')).toBe(false)
     expect(hay('Otro de la misma mesa')).toBe(true) // solo la pulsada
-    expect(aviso()).toBe('No se pudo avisar al cliente; la alerta se quitó solo en esta pantalla')
+    // id_mesa 10 es la Mesa 3: el aviso lleva el número, no el id.
+    expect(aviso()).toBe('No se pudo avisar a la Mesa 3; la alerta se quitó solo en esta pantalla')
     expect(atendidas()).toHaveLength(1)
     expect(cerrarSesionInvalida).not.toHaveBeenCalled()
   })
@@ -246,7 +255,8 @@ describe('TablesContext · ack con error', () => {
     clic(MSG_CUENTA)
     responder(0, null, { ok: false, codigo: 'NO_AUTORIZADO' })
     expect(hay(MSG_CUENTA)).toBe(false)
-    expect(aviso()).toBe('No se pudo avisar al cliente; la alerta se quitó solo en esta pantalla')
+    // id_mesa 11 es la Mesa 4.
+    expect(aviso()).toBe('No se pudo avisar a la Mesa 4; la alerta se quitó solo en esta pantalla')
     expect(atendidas()).toHaveLength(1)
     expect(cerrarSesionInvalida).toHaveBeenCalledTimes(1)
   })
