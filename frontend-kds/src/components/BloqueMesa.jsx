@@ -62,6 +62,14 @@ export default function BloqueMesa({
   const conBoton = bloque.conMesa && bloque.pendientes > 0
   const otrasColumnas = textoOtrasColumnas(bloque.enOtrasColumnas)
 
+  // Sin mesa, el título es "Para llevar #PED-…" / "Domicilio #PED-…": el
+  // rótulo va grande junto al reloj y el código, debajo y en pequeño (estilo de
+  // la meta). Es el mismo texto y en el mismo orden, solo con el código en un
+  // <span> aparte; el título del bloque y el aria-label no cambian.
+  const corte = bloque.conMesa ? -1 : bloque.titulo.indexOf(' #')
+  const codigoAparte =
+    corte > 0 ? { rotulo: bloque.titulo.slice(0, corte), codigo: bloque.titulo.slice(corte) } : null
+
   function confirmar() {
     setConfirmando(false)
     onTodoListo?.(bloque)
@@ -74,7 +82,16 @@ export default function BloqueMesa({
     >
       <header className="tc-ticket-cabecera">
         <div>
-          <h3 className="display tc-ticket-mesa">{bloque.titulo}</h3>
+          <h3 className="display tc-ticket-mesa">
+            {codigoAparte ? (
+              <>
+                {codigoAparte.rotulo}
+                <span className="tc-ticket-meta tc-ticket-codigo">{codigoAparte.codigo}</span>
+              </>
+            ) : (
+              bloque.titulo
+            )}
+          </h3>
           {bloque.conMesa && (
             <p className="tc-ticket-meta">
               {bloque.comandas.length} {bloque.comandas.length === 1 ? 'pedido' : 'pedidos'}

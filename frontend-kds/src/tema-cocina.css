@@ -617,6 +617,21 @@
   overflow-wrap: anywhere;
 }
 
+/* Sin mesa: el código "#PED-…" va dentro del <h3>, debajo del rótulo, con la
+   letra y el color de "N pedidos" (Inter, sin mayúsculas forzadas) y entero:
+   no se parte. */
+.tema-cocina .tc-ticket-cabecera .tc-ticket-codigo {
+  display: block;
+  /* Su ancho, no el de la columna del título: debajo del rótulo pasa por
+     debajo del reloj, que solo ocupa la primera línea. */
+  width: max-content;
+  font-family: var(--tc-sans);
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
 /* En un ticket estrecho (tablero a ~760 px) "MESA N" a 44 px y el reloj a 40 px
    no caben en la misma fila y la mesa se partiría en dos. El que cede es el
    reloj, solo aquí: un poco más pequeño y con menos aire, sin tocar el título. */
@@ -633,6 +648,13 @@
      en "Reloj") va después en el archivo y si no ganaría. */
   .tema-cocina .tc-ticket .tc-ticket-cabecera > .tc-chip {
     padding-inline: 6px;
+    font-size: 32px;
+  }
+
+  /* "PARA LLEVAR" / "DOMICILIO" a 44 px no caben junto al reloj en un ticket
+     estrecho: bajan al tamaño del reloj para quedarse en una línea sin partir
+     la palabra. "MESA N" no cambia. */
+  .tema-cocina .tc-ticket-mesa:has(> .tc-ticket-codigo) {
     font-size: 32px;
   }
 }
