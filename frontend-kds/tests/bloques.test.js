@@ -8,10 +8,12 @@ import test from 'node:test'
 import {
   agruparPorMesa,
   bloquesDeColumna,
-  estadoDelBloque,
+  descartarFallosDelBloque,
   marcarTodoListo,
   pasosHastaListo,
   preguntaTodoListo,
+  textoOtrasColumnas,
+  todoListoDelBloque,
 } from '../src/lib/bloques.js'
 import {
   aplicarCreado,
@@ -99,11 +101,7 @@ test('t10: el tiempo del bloque es el de su comanda mas antigua', () => {
   assert.equal(bloque.minutos, 17)
 })
 
-test('t10: el bloque va en la columna de su pedido mas atrasado', () => {
-  assert.equal(estadoDelBloque([{ estado: 'listo' }, { estado: 'recibido' }]), 'recibido')
-  assert.equal(estadoDelBloque([{ estado: 'listo' }, { estado: 'en_preparacion' }]), 'en_preparacion')
-  assert.equal(estadoDelBloque([{ estado: 'listo' }]), 'listo')
-
+test('t10: cada pedido va en la columna de su estado; la mesa se parte por columnas', () => {
   const estado = cargarInicial(estadoInicial(), [
     comanda(1, { mesa: 1, hace: 9, estado: 'listo' }),
     comanda(2, { mesa: 1, hace: 2, estado: 'recibido' }),
@@ -111,9 +109,13 @@ test('t10: el bloque va en la columna de su pedido mas atrasado', () => {
   ])
   const nuevas = bloquesDeColumna(estado, 'recibido', AHORA)
   assert.deepEqual(nuevas.map((b) => b.titulo), ['Mesa 1'])
-  assert.deepEqual(nuevas[0].comandas.map((c) => c.id_pedido), [1, 2], 'el pedido listo va dentro de su mesa')
+  assert.deepEqual(nuevas[0].comandas.map((c) => c.id_pedido), [2], 'el pedido listo NO va en Nuevas')
+  assert.equal(nuevas[0].estado, 'recibido')
   assert.deepEqual(bloquesDeColumna(estado, 'en_preparacion', AHORA).map((b) => b.titulo), ['Mesa 2'])
-  assert.equal(bloquesDeColumna(estado, 'listo', AHORA).length, 0, 'una mesa no se parte en dos columnas')
+  const listas = bloquesDeColumna(estado, 'listo', AHORA)
+  assert.deepEqual(listas.map((b) => b.titulo), ['Mesa 1'])
+  assert.deepEqual(listas[0].comandas.map((c) => c.id_pedido), [1])
+  assert.notEqual(listas[0].clave, nuevas[0].clave, 'la clave es mesa + estado')
 })
 
 test('t10: el numero de mesa sale del pedido que lo trae aunque el primero llegara por socket', () => {
@@ -125,7 +127,7 @@ test('t10: el numero de mesa sale del pedido que lo trae aunque el primero llega
 
 test('t10: la pregunta de confirmacion nombra la mesa', () => {
   const [bloque] = agruparPorMesa([comanda(1, { mesa: 4 })], AHORA)
-  assert.equal(preguntaTodoListo(bloque), '¿Marcar todos los pedidos de la Mesa 4 como listos?')
+  assert.equal(preguntaTodoListo(bloque), '¿Marcar como listo el pedido nuevo de la Mesa 4?')
 })
 
 // ---------------------------------------------------------------------------
@@ -275,9 +277,186 @@ test('t10: un pedido entregado o cancelado sale del bloque, y el bloque vacio de
   assert.deepEqual(bloques.map((b) => b.titulo), ['Mesa 2'])
 })
 
-test('t10: un order:status mueve el bloque de columna cuando cambia su pedido mas atrasado', () => {
+test('t10: un order:status mueve el pedido a la columna de su nuevo estado', () => {
   let estado = tableroConMesa1()
   estado = aplicarEstado(estado, { eventId: 'ev-6', id_pedido: 1, estado: 'en_preparacion' })
   assert.deepEqual(bloquesDeColumna(estado, 'en_preparacion', AHORA).map((b) => b.titulo), ['Mesa 1'])
   assert.deepEqual(bloquesDeColumna(estado, 'recibido', AHORA).map((b) => b.titulo), ['Mesa 2'])
+})
+
+// ---------------------------------------------------------------------------
+// Un bloque por mesa Y estado
+// ---------------------------------------------------------------------------
+
+/** Mesa 4 con un pedido en cada estado, mas otra mesa y un para llevar. */
+function tableroTresEstados() {
+  return cargarInicial(estadoInicial(), [
+    { ...comanda(1, { mesa: 4, hace: 25, estado: 'listo' }), listo_en: new Date(AHORA - 3 * MINUTO).toISOString() },
+    comanda(2, { mesa: 4, hace: 15, estado: 'en_preparacion' }),
+    comanda(3, { mesa: 4, hace: 4, estado: 'recibido' }),
+    comanda(4, { mesa: 9, hace: 10, estado: 'recibido' }),
+    comanda(5, { canal: 'para_llevar', hace: 7, estado: 'en_preparacion' }),
+  ])
+}
+
+const titulos = (estado, columna) => bloquesDeColumna(estado, columna, AHORA).map((b) => b.titulo)
+
+test('por estado: una mesa con pedidos en los tres estados sale en las tres columnas', () => {
+  const estado = tableroTresEstados()
+  for (const columna of ['recibido', 'en_preparacion', 'listo']) {
+    const mesa4 = bloquesDeColumna(estado, columna, AHORA).filter((b) => b.id_mesa === 4)
+    assert.equal(mesa4.length, 1, `un bloque de la Mesa 4 en ${columna}`)
+    assert.equal(mesa4[0].clave, `mesa:4:${columna}`)
+    assert.equal(mesa4[0].estado, columna)
+    assert.ok(mesa4[0].comandas.every((c) => c.estado === columna), 'solo pedidos de su estado')
+    assert.equal(mesa4[0].comandas.length, 1)
+  }
+})
+
+test('por estado: el tiempo del bloque sale del pedido mas antiguo DE ESE bloque', () => {
+  const estado = tableroTresEstados()
+  const minutosMesa4 = (columna) => bloquesDeColumna(estado, columna, AHORA).find((b) => b.id_mesa === 4).minutos
+  assert.equal(minutosMesa4('recibido'), 4, 'no los 25 del pedido que ya esta listo')
+  assert.equal(minutosMesa4('en_preparacion'), 15)
+  assert.equal(minutosMesa4('listo'), 25)
+  // Y Nuevas sigue ordenada por antiguedad del bloque: Mesa 9 (10) antes que Mesa 4 (4).
+  assert.deepEqual(titulos(estado, 'recibido'), ['Mesa 9', 'Mesa 4'])
+})
+
+test('por estado: Empezar un pedido mueve SOLO ese pedido a En preparacion', () => {
+  let estado = cargarInicial(estadoInicial(), [comanda(1, { mesa: 4, hace: 12 }), comanda(2, { mesa: 4, hace: 6 })])
+  assert.deepEqual(bloquesDeColumna(estado, 'recibido', AHORA)[0].comandas.map((c) => c.id_pedido), [1, 2])
+
+  estado = aplicarEstado(estado, { eventId: 'ev-empezar', id_pedido: 1, estado: 'en_preparacion' })
+  const nuevas = bloquesDeColumna(estado, 'recibido', AHORA)
+  const prep = bloquesDeColumna(estado, 'en_preparacion', AHORA)
+  assert.deepEqual(nuevas.map((b) => b.comandas.map((c) => c.id_pedido)), [[2]], 'el otro sigue en Nuevas')
+  assert.deepEqual(prep.map((b) => b.comandas.map((c) => c.id_pedido)), [[1]])
+  assert.equal(prep[0].titulo, 'Mesa 4')
+  assert.equal(nuevas[0].minutos, 6, 'Nuevas ya no cuenta el tiempo del que se empezo')
+})
+
+test('por estado: los contadores (tarjetas por columna) cuentan cada columna', () => {
+  const estado = tableroTresEstados()
+  const contar = (columna) => bloquesDeColumna(estado, columna, AHORA).length
+  assert.equal(contar('recibido'), 2, 'Mesa 4 y Mesa 9')
+  assert.equal(contar('en_preparacion'), 2, 'Mesa 4 y el para llevar')
+  assert.equal(contar('listo'), 1, 'Mesa 4')
+
+  // Dos pedidos de la misma mesa en la misma columna siguen siendo UNA tarjeta.
+  const dos = cargarInicial(estadoInicial(), [comanda(1, { mesa: 4, hace: 5 }), comanda(2, { mesa: 4, hace: 2 })])
+  assert.equal(bloquesDeColumna(dos, 'recibido', AHORA).length, 1)
+  assert.equal(bloquesDeColumna(dos, 'en_preparacion', AHORA).length, 0)
+})
+
+test('por estado: "+N pedidos de esta mesa en otras columnas"', () => {
+  assert.equal(textoOtrasColumnas(0), '')
+  assert.equal(textoOtrasColumnas(undefined), '')
+  assert.equal(textoOtrasColumnas(1), '+1 pedido de esta mesa en otras columnas')
+  assert.equal(textoOtrasColumnas(3), '+3 pedidos de esta mesa en otras columnas')
+
+  const bloques = agruparPorMesa(
+    [
+      comanda(1, { mesa: 4, estado: 'recibido', hace: 3 }),
+      comanda(2, { mesa: 4, estado: 'recibido', hace: 2 }),
+      comanda(3, { mesa: 4, estado: 'en_preparacion', hace: 8 }),
+      comanda(4, { mesa: 9, estado: 'recibido', hace: 1 }),
+      comanda(5, { canal: 'domicilio', estado: 'recibido', hace: 1 }),
+    ],
+    AHORA
+  )
+  const otras = (clave) => bloques.find((b) => b.clave === clave).enOtrasColumnas
+  assert.equal(otras('mesa:4:recibido'), 1, 'el de En preparacion')
+  assert.equal(otras('mesa:4:en_preparacion'), 2, 'los dos de Nuevas')
+  assert.equal(otras('mesa:9:recibido'), 0, 'otra mesa no cuenta')
+  assert.equal(otras('pedido:5'), 0, 'sin mesa, nunca')
+})
+
+test('por estado: Todo listo solo toca los pedidos de su bloque', async () => {
+  const estado = tableroTresEstados()
+  const [nuevasMesa4] = bloquesDeColumna(estado, 'recibido', AHORA).filter((b) => b.id_mesa === 4)
+  const { avanzar, llamadas } = avanzarFalso()
+  const r = await marcarTodoListo(nuevasMesa4.comandas, avanzar)
+  assert.deepEqual(llamadas, ['3:en_preparacion', '3:listo'], 'ni el 2 (en preparacion) ni el 1 (listo)')
+  assert.deepEqual(r.listos, [3])
+})
+
+test('por estado: corriendo y fallos siguen a los pedidos aunque cambien de bloque', () => {
+  let estado = cargarInicial(estadoInicial(), [
+    comanda(1, { mesa: 4, hace: 9 }),
+    comanda(2, { mesa: 4, hace: 5 }),
+    comanda(3, { mesa: 4, hace: 20, estado: 'en_preparacion' }),
+  ])
+  const [origen] = bloquesDeColumna(estado, 'recibido', AHORA)
+  let todoListo = { [origen.clave]: { corriendo: true, fallidos: [], ids: [1, 2] } }
+
+  // A mitad de camino el pedido 1 ya paso a En preparacion: entra en el bloque
+  // de la Mesa 4 de esa columna, que se muestra corriendo.
+  estado = aplicarEstado(estado, { eventId: 'ev-tl-1', id_pedido: 1, estado: 'en_preparacion' })
+  const [prep] = bloquesDeColumna(estado, 'en_preparacion', AHORA)
+  assert.deepEqual(prep.comandas.map((c) => c.id_pedido), [3, 1])
+  assert.equal(todoListoDelBloque(prep, todoListo).corriendo, true)
+
+  // Termina: el 1 llega a listo y el 2 falla en Nuevas. El aviso sale en el
+  // bloque donde esta el 2, no en el de Listas ni en el de En preparacion.
+  estado = aplicarEstado(estado, { eventId: 'ev-tl-2', id_pedido: 1, estado: 'listo' })
+  const fallo = { id_pedido: 2, codigo_pedido: 'PED-261113-00002', mensaje: 'red caida' }
+  todoListo = { [origen.clave]: { corriendo: false, fallidos: [fallo], ids: [1, 2] } }
+  const [nuevas] = bloquesDeColumna(estado, 'recibido', AHORA)
+  const [listas] = bloquesDeColumna(estado, 'listo', AHORA)
+  const [prep2] = bloquesDeColumna(estado, 'en_preparacion', AHORA)
+  assert.deepEqual(todoListoDelBloque(nuevas, todoListo), { corriendo: false, fallidos: [fallo] })
+  assert.equal(todoListoDelBloque(listas, todoListo), null)
+  assert.equal(todoListoDelBloque(prep2, todoListo), null, 'el pedido 3 no estaba en el Todo listo')
+
+  // Cerrar el aviso quita solo los fallos de ese bloque.
+  const otroFallo = { id_pedido: 3, codigo_pedido: 'PED-261113-00003', mensaje: 'x' }
+  todoListo = {
+    a: { corriendo: false, fallidos: [fallo], ids: [2] },
+    b: { corriendo: false, fallidos: [otroFallo], ids: [3] },
+  }
+  assert.deepEqual(descartarFallosDelBloque(todoListo, nuevas), { b: todoListo.b })
+})
+
+test('por estado: la pregunta de Todo listo dice el estado y cuantos pedidos', () => {
+  const pregunta = (comandas, columna) =>
+    preguntaTodoListo(agruparPorMesa(comandas, AHORA).find((b) => b.estado === columna))
+  const prep = (id) => comanda(id, { mesa: 4, estado: 'en_preparacion', hace: id })
+  const nueva = (id) => comanda(id, { mesa: 4, estado: 'recibido', hace: id })
+
+  assert.equal(pregunta([prep(1), prep(2)], 'en_preparacion'), '¿Marcar como listos los 2 pedidos en preparación de la Mesa 4?')
+  assert.equal(pregunta([prep(1), nueva(2)], 'en_preparacion'), '¿Marcar como listo el pedido en preparación de la Mesa 4?')
+  assert.equal(pregunta([nueva(1), nueva(2), prep(3)], 'recibido'), '¿Marcar como listos los 2 pedidos nuevos de la Mesa 4?')
+  assert.equal(pregunta([nueva(1)], 'recibido'), '¿Marcar como listo el pedido nuevo de la Mesa 4?')
+
+  // Para llevar / domicilio: la pregunta de siempre.
+  const [llevar] = agruparPorMesa([comanda(5, { canal: 'para_llevar', estado: 'en_preparacion' })], AHORA)
+  assert.equal(preguntaTodoListo(llevar), '¿Marcar todos los pedidos de la Para llevar #PED-261113-00005 como listos?')
+})
+
+test('por estado: para llevar y domicilio siguen con un bloque por pedido, en su columna', () => {
+  const estado = cargarInicial(estadoInicial(), [
+    comanda(1, { canal: 'para_llevar', hace: 12, estado: 'recibido' }),
+    comanda(2, { canal: 'para_llevar', hace: 8, estado: 'recibido' }),
+    comanda(3, { canal: 'domicilio', hace: 6, estado: 'en_preparacion' }),
+    { ...comanda(4, { canal: 'domicilio', hace: 30, estado: 'listo' }), listo_en: new Date(AHORA - 10 * MINUTO).toISOString() },
+    { ...comanda(5, { canal: 'para_llevar', hace: 20, estado: 'listo' }), listo_en: new Date(AHORA - 1 * MINUTO).toISOString() },
+  ])
+  assert.deepEqual(titulos(estado, 'recibido'), ['Para llevar #PED-261113-00001', 'Para llevar #PED-261113-00002'])
+  assert.deepEqual(titulos(estado, 'en_preparacion'), ['Domicilio #PED-261113-00003'])
+  // Listas conserva su orden: lo que acaba de salir, arriba.
+  assert.deepEqual(titulos(estado, 'listo'), ['Para llevar #PED-261113-00005', 'Domicilio #PED-261113-00004'])
+  const todos = agruparPorMesa(estado.comandas, AHORA)
+  assert.ok(todos.every((b) => !b.conMesa && b.comandas.length === 1 && b.enOtrasColumnas === 0))
+  assert.deepEqual(todos.map((b) => b.clave).sort(), ['pedido:1', 'pedido:2', 'pedido:3', 'pedido:4', 'pedido:5'])
+  assert.equal(todos.find((b) => b.clave === 'pedido:4').minutos, 30)
+})
+
+test('por estado: Listas ordena los bloques de mesa por el ultimo que salio', () => {
+  const estado = cargarInicial(estadoInicial(), [
+    { ...comanda(1, { mesa: 1, hace: 40, estado: 'listo' }), listo_en: new Date(AHORA - 9 * MINUTO).toISOString() },
+    { ...comanda(2, { mesa: 2, hace: 30, estado: 'listo' }), listo_en: new Date(AHORA - 2 * MINUTO).toISOString() },
+    comanda(3, { mesa: 1, hace: 1, estado: 'recibido' }),
+  ])
+  assert.deepEqual(titulos(estado, 'listo'), ['Mesa 2', 'Mesa 1'])
 })
