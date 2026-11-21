@@ -285,11 +285,17 @@
   height: 190px;
   padding: 8px 0 0;
   border-bottom: 2px solid var(--carbon);
+  /* Cada barra mide al menos lo que su cifra: si no caben todas (30 días,
+     celular), la gráfica se desliza de lado en vez de cortar las cifras. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--carbon) transparent;
 }
 
 .tema-comanda .rep-barra {
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 auto;
+  min-width: 40px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -312,9 +318,6 @@
 
 .tema-comanda .rep-barra-valor,
 .tema-comanda .rep-barra-eje {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   font: 400 12px var(--f-titulo);
   letter-spacing: .02em;
