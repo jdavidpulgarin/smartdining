@@ -1,0 +1,639 @@
+/* ==============================================================================
+   Reportes · versión negra
+   Diseño: referencia-diseno/roles/smartdining-admin-negro.html (sección REPORTES)
+   Todo bajo .tema-comanda; clases con prefijo rep-. Solo diseño: la lógica vive
+   en src/pages/Reportes.jsx y src/utils/reportes.js y no cambia.
+   ============================================================================== */
+
+/* contain: inline-size: el ancho lo pone la pantalla, no el contenido (si no, el
+   contenedor del panel crece con la tabla y el shell corta lo que sobra). */
+.tema-comanda.reportes-pagina {
+  contain: inline-size;
+  min-width: 0;
+  min-height: calc(100vh - 72px);
+  background:
+    repeating-linear-gradient(115deg, transparent 0 34px, rgba(255, 176, 46, .035) 34px 38px),
+    var(--carbon);
+  color: var(--papel);
+  font-family: var(--f-texto);
+}
+
+.tema-comanda .rep-cont {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 24px 60px;
+}
+
+.tema-comanda.reportes-pagina :focus-visible {
+  outline: 3px solid var(--ambar);
+  outline-offset: 2px;
+}
+
+.tema-comanda.reportes-pagina .spin {
+  animation: rep-gira 1s linear infinite;
+}
+
+@keyframes rep-gira {
+  to { transform: rotate(360deg); }
+}
+
+/* Encabezado */
+.tema-comanda .rep-cab {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px 24px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.tema-comanda .rep-cab-izq {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tema-comanda .rep-titulo {
+  margin: 0;
+  font: 400 clamp(44px, 5vw, 64px) / .88 var(--f-titulo);
+  letter-spacing: .04em;
+  color: var(--papel);
+  text-shadow: 4px 4px 0 var(--rojo);
+}
+
+.tema-comanda .rep-rango {
+  font: 700 23px var(--f-mano);
+  color: var(--ambar);
+}
+
+.tema-comanda .rep-demo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 520px;
+  padding: 8px 12px;
+  border: 2px solid var(--ambar);
+  border-radius: 10px;
+  background: #fef7ec;
+  color: #8c5a14;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tema-comanda .rep-acciones {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tema-comanda .rep-periodo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tema-comanda .rep-periodo-lbl {
+  font: 400 15px var(--f-titulo);
+  letter-spacing: .14em;
+  color: #cdb8a6;
+}
+
+.tema-comanda .rep-chip {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 2px solid var(--papel);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--papel);
+  font: 400 16px var(--f-titulo);
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+
+.tema-comanda .rep-chip:hover {
+  border-color: var(--ambar);
+  color: var(--ambar);
+}
+
+.tema-comanda .rep-chip.activa {
+  border-color: var(--ambar);
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+.tema-comanda .rep-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--ambar);
+  color: var(--carbon);
+  font: 400 19px var(--f-titulo);
+  letter-spacing: .08em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Ticket de papel con banda negra y borde dentado */
+.tema-comanda .rep-ticket {
+  position: relative;
+  min-width: 0;
+  margin-bottom: 14px;
+  border-radius: 14px 14px 0 0;
+  background: var(--papel);
+  color: var(--tinta);
+  box-shadow: 0 16px 24px -16px rgba(0, 0, 0, .6);
+}
+
+.tema-comanda .rep-ticket::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% - 1px);
+  height: 11px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 12'%3E%3Cpath d='M0 0h24L12 12z' fill='%23fff4e6'/%3E%3C/svg%3E") repeat-x;
+  background-size: 20px 11px;
+}
+
+.tema-comanda .rep-banda {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 14px 14px 0 0;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 400 18px var(--f-titulo);
+  letter-spacing: .18em;
+}
+
+.tema-comanda .rep-banda-h {
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+.tema-comanda .rep-banda small {
+  font: 600 12px var(--f-texto);
+  letter-spacing: 0;
+  color: #d9c3a5;
+}
+
+.tema-comanda .rep-cuerpo {
+  padding: 14px 16px 18px;
+}
+
+.tema-comanda .rep-vacio {
+  margin: 6px 0;
+  font: 700 22px var(--f-mano);
+  color: var(--suave);
+}
+
+/* Cargando / error */
+.tema-comanda .rep-estado {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  border-radius: 14px;
+  text-align: center;
+  color: var(--suave);
+}
+
+.tema-comanda .rep-estado::after {
+  display: none;
+}
+
+.tema-comanda .rep-estado h3 {
+  margin: 0;
+  font: 400 26px var(--f-titulo);
+  letter-spacing: .06em;
+  color: var(--carbon);
+}
+
+.tema-comanda .rep-estado p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--suave);
+}
+
+/* Indicadores */
+.tema-comanda .rep-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.tema-comanda .rep-kpi .rep-banda {
+  display: block;
+}
+
+.tema-comanda .rep-kpi-cuerpo {
+  display: grid;
+  gap: 4px;
+  padding: 12px 16px 16px;
+}
+
+.tema-comanda .rep-kpi-valor {
+  font: 400 42px / 1 var(--f-titulo);
+  color: var(--carbon);
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .rep-kpi-ventas .rep-banda {
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+.tema-comanda .rep-kpi-sub {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--suave);
+}
+
+/* Paneles en dos columnas */
+.tema-comanda .rep-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 14px;
+  align-items: start;
+}
+
+.tema-comanda .rep-ancho {
+  grid-column: 1 / -1;
+}
+
+/* Barras de ventas por día */
+.tema-comanda .rep-barras {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 190px;
+  padding: 8px 0 0;
+  border-bottom: 2px solid var(--carbon);
+}
+
+.tema-comanda .rep-barra {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.tema-comanda .rep-barra-fill {
+  width: 100%;
+  max-width: 40px;
+  border-radius: 5px 5px 0 0;
+  background: var(--carbon);
+}
+
+.tema-comanda .rep-barra:hover .rep-barra-fill {
+  background: var(--ambar);
+  box-shadow: inset 0 0 0 2px var(--carbon);
+}
+
+.tema-comanda .rep-barra-valor,
+.tema-comanda .rep-barra-eje {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 12px var(--f-titulo);
+  letter-spacing: .02em;
+  color: var(--suave);
+}
+
+.tema-comanda .rep-barra-eje {
+  font-size: 13px;
+}
+
+/* Horas pico */
+.tema-comanda .rep-horas {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 190px;
+  padding-top: 8px;
+}
+
+.tema-comanda .rep-hora {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.tema-comanda .rep-hora-fill {
+  width: 100%;
+  max-width: 34px;
+  border-radius: 5px 5px 0 0;
+  background: #cbbcb2;
+}
+
+.tema-comanda .rep-hora-fill.alta {
+  background: var(--carbon);
+}
+
+.tema-comanda .rep-hora-fill.pico {
+  background: var(--ambar);
+  box-shadow: inset 0 0 0 2px var(--carbon);
+}
+
+.tema-comanda .rep-hora-eje {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  font: 400 13px var(--f-titulo);
+  letter-spacing: .02em;
+  color: var(--suave);
+}
+
+/* Métodos de pago (los colores vienen de utils/reportes.js; el efectivo es
+   blanco, por eso la barra y los puntos llevan borde carbón) */
+.tema-comanda .rep-reparto {
+  display: flex;
+  height: 28px;
+  margin: 2px 0 14px;
+  overflow: hidden;
+  border: 2px solid var(--carbon);
+  border-radius: 7px;
+  background: var(--papel2);
+}
+
+/* Rayas sobre el color de cada tramo: el efectivo es blanco y, solo, la barra
+   parecía vacía. */
+.tema-comanda .rep-reparto > div {
+  background-image: repeating-linear-gradient(115deg, transparent 0 6px, rgba(18, 12, 12, .22) 6px 8px);
+}
+
+.tema-comanda .rep-reparto > div + div {
+  box-shadow: inset 2px 0 0 var(--carbon);
+}
+
+.tema-comanda .rep-ley {
+  display: grid;
+  gap: 8px;
+}
+
+.tema-comanda .rep-ley-fila {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tinta);
+}
+
+.tema-comanda .rep-ley-punto {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 2px solid var(--carbon);
+  border-radius: 4px;
+}
+
+.tema-comanda .rep-ley-nombre {
+  flex: 1;
+  min-width: 0;
+}
+
+.tema-comanda .rep-ley-monto {
+  font: 400 20px var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .rep-ley-pct {
+  min-width: 52px;
+  font-size: 12.5px;
+  color: var(--suave);
+  text-align: right;
+}
+
+.tema-comanda .rep-ley-total {
+  padding-top: 8px;
+  border-top: 2px solid var(--carbon);
+}
+
+.tema-comanda .rep-ley-total .rep-ley-nombre {
+  font: 400 17px var(--f-titulo);
+  letter-spacing: .12em;
+}
+
+.tema-comanda .rep-cuadre {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--papel2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--suave);
+}
+
+.tema-comanda .rep-cuadre.no-cuadra {
+  border-left: 5px solid var(--rojo);
+  background: #fdecea;
+  color: var(--rojo);
+}
+
+/* Platos más pedidos */
+.tema-comanda .rep-rank {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tema-comanda .rep-rank li {
+  display: grid;
+  gap: 2px;
+  padding: 10px 0 10px 12px;
+  border-bottom: 2px dashed #ecdcc8;
+  border-left: 6px solid var(--linea);
+}
+
+.tema-comanda .rep-rank li:last-child {
+  border-bottom: 0;
+}
+
+.tema-comanda .rep-rank li.primero {
+  border-left-color: var(--ambar);
+}
+
+.tema-comanda .rep-rank-nombre {
+  margin: 0;
+  font: 400 22px / 1.05 var(--f-titulo);
+  letter-spacing: .04em;
+  color: var(--carbon);
+}
+
+.tema-comanda .rep-rank-meta {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--suave);
+}
+
+/* Ingredientes más pedidos */
+.tema-comanda .rep-ing {
+  display: grid;
+  gap: 10px;
+}
+
+.tema-comanda .rep-ing-fila {
+  display: grid;
+  gap: 4px;
+}
+
+.tema-comanda .rep-ing-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tinta);
+}
+
+.tema-comanda .rep-ing-plato {
+  font-weight: 500;
+  color: var(--suave);
+}
+
+.tema-comanda .rep-ing-veces {
+  flex: none;
+  font: 400 18px var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .rep-ing-riel {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--papel2);
+}
+
+.tema-comanda .rep-ing-barra {
+  height: 100%;
+  background: var(--carbon);
+}
+
+/* Tabla de tiempos de cocina */
+.tema-comanda .rep-tabla {
+  overflow-x: auto;
+}
+
+.tema-comanda .rep-tabla table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  color: var(--tinta);
+}
+
+.tema-comanda .rep-tabla th {
+  padding: 10px 16px;
+  border-bottom: 2px solid var(--carbon);
+  font: 400 15px var(--f-titulo);
+  letter-spacing: .12em;
+  text-align: left;
+  color: var(--suave);
+  white-space: nowrap;
+}
+
+.tema-comanda .rep-tabla td {
+  padding: 10px 16px;
+  border-bottom: 2px dashed #ecdcc8;
+  font-weight: 500;
+}
+
+.tema-comanda .rep-tabla tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tema-comanda .rep-tabla .centro {
+  text-align: center;
+}
+
+.tema-comanda .rep-tabla .der {
+  text-align: right;
+}
+
+.tema-comanda .rep-tabla-fecha {
+  font: 400 18px var(--f-titulo);
+  letter-spacing: .04em;
+  color: var(--carbon);
+  white-space: nowrap;
+}
+
+.tema-comanda .rep-tabla-suave,
+.tema-comanda .rep-tabla-vacia {
+  color: var(--suave);
+}
+
+.tema-comanda .rep-tabla-real {
+  font-weight: 700;
+  color: var(--carbon);
+}
+
+.tema-comanda .rep-tabla-var {
+  font: 400 19px var(--f-titulo);
+}
+
+.tema-comanda .rep-tabla-var.mas {
+  color: var(--rojo);
+}
+
+.tema-comanda .rep-tabla-var.menos {
+  color: var(--ok);
+}
+
+/* Responsive */
+@media (max-width: 1100px) {
+  .tema-comanda .rep-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tema-comanda .rep-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .tema-comanda .rep-cont {
+    padding: 18px 12px 60px;
+  }
+  .tema-comanda .rep-kpi-valor {
+    font-size: 34px;
+  }
+}
+
+@media (max-width: 480px) {
+  .tema-comanda .rep-kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tema-comanda.reportes-pagina .spin {
+    animation: none;
+  }
+}
