@@ -1,21 +1,9 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createRequire } from 'module';
 import PlatoDelDia from './PlatoDelDia.jsx';
-
-const req = createRequire(import.meta.url);
-let JSDOM;
-try {
-  JSDOM = req('jsdom').JSDOM;
-} catch {
-  try {
-    JSDOM = req('../../../frontend-restaurante/node_modules/jsdom').JSDOM;
-  } catch {
-    JSDOM = req('../../../app-movil/node_modules/jsdom').JSDOM;
-  }
-}
 
 describe('Sección PlatoDelDia', () => {
   const cartaEnVivo = {
@@ -186,67 +174,48 @@ describe('Sección PlatoDelDia', () => {
 
   it('el IntersectionObserver observa la sección real y arranca el video tras pasar del esqueleto a la carta cargada', async () => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-    const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
-      url: 'http://localhost',
-      pretendToBeVisual: true,
+    window.matchMedia = window.matchMedia || vi.fn().mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    const elementosObservados = [];
+    let callbackObservador = null;
+
+    const mockObserve = vi.fn((el) => {
+      elementosObservados.push(el);
     });
-    const oldWindow = global.window;
-    const oldDocument = global.document;
-    const oldNavigator = Object.getOwnPropertyDescriptor(global, 'navigator');
-    const oldHTMLElement = global.HTMLElement;
-    const oldHTMLMediaElement = global.HTMLMediaElement;
-    const oldIntersectionObserver = global.IntersectionObserver;
-    const oldMatchMedia = global.matchMedia;
+    const mockDisconnect = vi.fn();
+
+    class MockIntersectionObserver {
+      constructor(callback) {
+        callbackObservador = callback;
+      }
+      observe(el) {
+        mockObserve(el);
+      }
+      disconnect() {
+        mockDisconnect();
+      }
+    }
+    window.IntersectionObserver = MockIntersectionObserver;
+    globalThis.IntersectionObserver = MockIntersectionObserver;
+
+    const playMock = vi.fn().mockResolvedValue(undefined);
+    window.HTMLMediaElement.prototype.play = playMock;
+    window.HTMLMediaElement.prototype.pause = vi.fn();
+
+    const contenedor = document.createElement('div');
+    document.body.appendChild(contenedor);
+    const root = createRoot(contenedor);
 
     try {
-      global.window = dom.window;
-      global.document = dom.window.document;
-      Object.defineProperty(global, 'navigator', {
-        value: dom.window.navigator,
-        configurable: true,
-        writable: true,
-      });
-      global.HTMLElement = dom.window.HTMLElement;
-      global.HTMLMediaElement = dom.window.HTMLMediaElement;
-      global.matchMedia = vi.fn().mockImplementation((query) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      }));
-
-      const elementosObservados = [];
-      let callbackObservador = null;
-
-      const mockObserve = vi.fn((el) => {
-        elementosObservados.push(el);
-      });
-      const mockDisconnect = vi.fn();
-
-      class MockIntersectionObserver {
-        constructor(callback) {
-          callbackObservador = callback;
-        }
-        observe(el) {
-          mockObserve(el);
-        }
-        disconnect() {
-          mockDisconnect();
-        }
-      }
-      global.IntersectionObserver = MockIntersectionObserver;
-
-      const playMock = vi.fn().mockResolvedValue(undefined);
-      dom.window.HTMLMediaElement.prototype.play = playMock;
-      dom.window.HTMLMediaElement.prototype.pause = vi.fn();
-
-      const contenedor = dom.window.document.getElementById('root');
-      const root = createRoot(contenedor);
-
       // 1) Primer render con carta null: se ve el esqueleto
       await act(async () => {
         root.render(<PlatoDelDia dia="martes" carta={null} />);
@@ -271,22 +240,11 @@ describe('Sección PlatoDelDia', () => {
       });
 
       expect(playMock).toHaveBeenCalled();
-
+    } finally {
       await act(async () => {
         root.unmount();
       });
-      expect(mockDisconnect).toHaveBeenCalled();
-    } finally {
-      global.window = oldWindow;
-      global.document = oldDocument;
-      if (oldNavigator) {
-        Object.defineProperty(global, 'navigator', oldNavigator);
-      }
-      global.HTMLElement = oldHTMLElement;
-      global.HTMLMediaElement = oldHTMLMediaElement;
-      global.IntersectionObserver = oldIntersectionObserver;
-      global.matchMedia = oldMatchMedia;
-      delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+      contenedor.remove();
     }
   });
 });
