@@ -8,10 +8,25 @@ import { crearVentanaEventos } from '../utils/dedupeEventos'
 import { mesaDelAviso } from '../utils/avisos'
 import { detalleMesa } from '../utils/estadoMesa'
 import { aplicarMesaActualizada, fusionarCargaConAvisos, mismaMesa, numeroDeMesa } from '../utils/mesaActualizada'
+import { nuevoIdCobro } from '../utils/caja'
 import { TablesContext } from './tablesContextDef'
 import { AuthContext } from './authContextDef'
 
 const textoMesa = (idMesa) => (idMesa ? `Mesa ${idMesa}` : 'Una mesa sin número')
+
+// mesa:atendida (socket-server/EVENTS.md §4): solo estas alertas se avisan a la
+// mesa y a las otras pantallas del panel. El tipo de la alerta es el `tipo` del evento.
+const TIPOS_ATENDIDA = ['llamado', 'cuenta']
+// Las alertas de waiter:call y bill:requested (eventos viejos) se quitan solo
+// en esta pantalla: su mesa puede venir como número y no como id_mesa.
+const ORIGEN_HEREDADO = 'heredado'
+// Errores del ack que no se arreglan reintentando: la alerta se quita aquí.
+const CODIGOS_SIN_REINTENTO = ['NO_AUTORIZADO', 'PAYLOAD_INVALIDO']
+const ESPERA_ACK_ATENDIDA_MS = 5000
+const esIdMesa = (v) => Number.isInteger(v) && v > 0
+const seAvisaALaMesa = (a) => TIPOS_ATENDIDA.includes(a?.tipo) && a.origen !== ORIGEN_HEREDADO && esIdMesa(a.idMesa)
+export const AVISO_ATENDIDA_SOLO_AQUI = 'No se pudo avisar a la mesa; la alerta se quitó solo en esta pantalla'
+export const AVISO_ATENDIDA_REINTENTAR = 'No se pudo avisar a la mesa: revisa la conexión y vuelve a pulsar «Atendida»'
 
 function normalizarMesa(backendMesa, prev = {}) {
   const id = backendMesa.id_mesa || backendMesa.numero
@@ -91,9 +106,74 @@ export function TablesProvider({ children }) {
     ])
   }, [])
 
-  const atenderAlerta = useCallback((idAlerta) => {
+  // La alerta vigente al pulsar «Atendida» (el callback no depende de `alertas`).
+  const alertasRef = useRef(alertas)
+  useEffect(() => {
+    alertasRef.current = alertas
+  }, [alertas])
+  // Alertas con un mesa:atendida esperando su ack: un doble clic emite una vez.
+  const atendiendo = useRef(new Set())
+
+  const quitarAlerta = useCallback((idAlerta) => {
     setAlertas((prev) => prev.filter((a) => a.id !== idAlerta))
   }, [])
+
+  const cambiarAlerta = useCallback((idAlerta, cambios) => {
+    setAlertas((prev) => prev.map((a) => (a.id === idAlerta ? { ...a, ...cambios } : a)))
+  }, [])
+
+  /** Quita las alertas pendientes de esa mesa y ese tipo (no las heredadas: esas son solo locales). */
+  const quitarAtendidas = useCallback((idMesa, tipo) => {
+    setAlertas((prev) =>
+      prev.filter((a) => !(a.tipo === tipo && a.idMesa === idMesa && a.origen !== ORIGEN_HEREDADO))
+    )
+  }, [])
+
+  /**
+   * «Atendida» en la bandeja. Un llamado o una cuenta con id_mesa emite
+   * mesa:atendida { eventId, idMesa, tipo } con ack; el resto se quita solo aquí.
+   * - ack ok (también duplicado): se quitan las de esa mesa y ese tipo.
+   * - NO_AUTORIZADO / PAYLOAD_INVALIDO: no se arregla reintentando; se quita
+   *   solo en esta pantalla, con aviso.
+   * - ERROR_INTERNO, sin respuesta o sin conexión: la alerta se queda, con
+   *   aviso, y el siguiente clic reintenta con el MISMO eventId.
+   */
+  const atenderAlerta = useCallback((idAlerta) => {
+    const alerta = alertasRef.current.find((a) => a.id === idAlerta)
+    if (!alerta) return
+    if (!seAvisaALaMesa(alerta)) {
+      quitarAlerta(idAlerta)
+      return
+    }
+    if (atendiendo.current.has(idAlerta)) return
+
+    const eventId = alerta.eventIdAtendida || nuevoIdCobro()
+    const socket = getSocket()
+    // Desconectado no se emite: Socket.io lo guardaría y lo mandaría al reconectar.
+    if (!socket.connected) {
+      cambiarAlerta(idAlerta, { eventIdAtendida: eventId })
+      showNotification(AVISO_ATENDIDA_REINTENTAR, 'error')
+      return
+    }
+
+    atendiendo.current.add(idAlerta)
+    cambiarAlerta(idAlerta, { eventIdAtendida: eventId, enviando: true })
+    const cuerpo = { eventId, idMesa: alerta.idMesa, tipo: alerta.tipo }
+    socket.timeout(ESPERA_ACK_ATENDIDA_MS).emit('mesa:atendida', cuerpo, (err, r) => {
+      atendiendo.current.delete(idAlerta)
+      if (!err && r?.ok) {
+        quitarAtendidas(alerta.idMesa, alerta.tipo)
+        return
+      }
+      if (!err && CODIGOS_SIN_REINTENTO.includes(r?.codigo)) {
+        quitarAlerta(idAlerta)
+        showNotification(AVISO_ATENDIDA_SOLO_AQUI, 'error')
+        return
+      }
+      cambiarAlerta(idAlerta, { enviando: false })
+      showNotification(AVISO_ATENDIDA_REINTENTAR, 'error')
+    })
+  }, [quitarAlerta, cambiarAlerta, quitarAtendidas, showNotification])
 
   const limpiarAlertas = useCallback(() => {
     setAlertas([])
@@ -209,6 +289,7 @@ export function TablesProvider({ children }) {
   const [createdVisto] = useState(() => crearVentanaEventos())
   const [statusVisto] = useState(() => crearVentanaEventos())
   const [mesaVista] = useState(() => crearVentanaEventos())
+  const [atendidaVista] = useState(() => crearVentanaEventos())
 
   // Escuchar cuando entra un pedido nuevo (order:created)
   useSocketListener('order:created', (data) => {
@@ -308,6 +389,7 @@ export function TablesProvider({ children }) {
     if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'llamado',
+      origen: ORIGEN_HEREDADO,
       idMesa,
       mensaje: data?.motivo || `Comensal solicita asistencia en mesa`,
     })
@@ -328,11 +410,23 @@ export function TablesProvider({ children }) {
     showNotification(`🧾 ${nombreMesa(idMesa)} solicita la cuenta`, 'info')
   })
 
+  // mesa:atendida (EVENTS.md §4): alguien del personal, en esta pantalla o en
+  // otra, marcó «Atendida» un llamado o una cuenta. Se quitan sin recargar las
+  // alertas pendientes de ESA mesa y ESE tipo. Llega también a quien lo emitió:
+  // un eventId ya visto se ignora.
+  useSocketListener('mesa:atendida', (data) => {
+    if (atendidaVista(data?.eventId)) return
+    const idMesa = Number(data?.id_mesa)
+    if (!esIdMesa(idMesa) || !TIPOS_ATENDIDA.includes(data?.tipo)) return
+    quitarAtendidas(idMesa, data.tipo)
+  })
+
   useSocketListener('bill:requested', (data) => {
     const idMesa = mesaDelAviso(data)
     if (!idMesa) console.warn('[alertas] aviso sin número de mesa:', data)
     agregarAlerta({
       tipo: 'cuenta',
+      origen: ORIGEN_HEREDADO,
       idMesa,
       mensaje: `Comensales solicitan la cuenta y factura`,
     })

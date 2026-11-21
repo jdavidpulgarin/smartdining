@@ -166,6 +166,8 @@ export function BandejaAlertas({
                           className="sd-btn sd-btn-secondary"
                           style={{ minHeight: 30, fontSize: 12, padding: '3px 10px' }}
                           onClick={() => handleAtender(alerta.id)}
+                          disabled={Boolean(alerta.enviando)}
+                          aria-busy={Boolean(alerta.enviando)}
                         >
                           {getActionLabel(alerta.tipo)}
                         </button>
@@ -295,6 +297,9 @@ export function BandejaAlertas({
                   <button
                     type="button"
                     onClick={() => handleAtender(alerta.id)}
+                    // Mientras se espera el ack de mesa:atendida: un doble clic no emite dos veces.
+                    disabled={Boolean(alerta.enviando)}
+                    aria-busy={Boolean(alerta.enviando)}
                     className="sd-btn sd-btn-secondary"
                     style={{ minHeight: 32, padding: '4px 14px', fontSize: 13 }}
                     aria-label={`Atender alerta de mesa ${idMesa}`}
