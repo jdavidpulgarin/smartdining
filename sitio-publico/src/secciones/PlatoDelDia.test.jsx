@@ -119,7 +119,7 @@ describe('Sección PlatoDelDia', () => {
     expect(html).not.toContain('PÍDELO EN TU MESA');
   });
 
-  it('mientras carga la carta (cargandoCarta = true): no muestra precio ni botón', () => {
+  it('mientras carga la carta (cargandoCarta = true): se ve el esqueleto y NO "Hoy no hay plato del día"', () => {
     const html = renderToStaticMarkup(
       <PlatoDelDia
         dia="martes"
@@ -128,9 +128,30 @@ describe('Sección PlatoDelDia', () => {
       />
     );
 
-    expect(html).toContain('Plato del día');
-    expect(html).toContain('MARTES');
-    expect(html).toContain('SALCHIPAPA');
+    expect(html).toContain('id="hoy"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('Cargando el plato del día');
+    expect(html).toContain('aspect-video');
+    expect(html).not.toContain('Hoy no hay plato del día');
+    expect(html).not.toContain('ticket-papel');
+    expect(html).not.toContain('PÍDELO EN TU MESA');
+  });
+
+  it('con carta null sin error: se ve el esqueleto y NO "Hoy no hay plato del día"', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDelDia
+        dia="martes"
+        carta={null}
+        cargandoCarta={false}
+        errorCarta={false}
+      />
+    );
+
+    expect(html).toContain('id="hoy"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('Cargando el plato del día');
+    expect(html).toContain('aspect-video');
+    expect(html).not.toContain('Hoy no hay plato del día');
     expect(html).not.toContain('ticket-papel');
     expect(html).not.toContain('PÍDELO EN TU MESA');
   });
