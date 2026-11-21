@@ -64,9 +64,15 @@ export const ESTADOS_QUE_SALEN = ['entregado', 'pagado', 'cancelado']
  */
 export const MAX_EVENTOS_RECORDADOS = 500
 
-/** Estado inicial, antes de la primera carga. */
+/**
+ * Estado inicial, antes de la primera carga.
+ *
+ * `cargas`: las recargas (GET /api/kds/comandas) en curso, cada una con los
+ * avisos que llegaron mientras se esperaba la respuesta (ver cargarInicial).
+ * `cargaAplicada`: la ultima recarga cuya respuesta se aplico (0 = ninguna).
+ */
 export function estadoInicial() {
-  return { comandas: [], eventos: [], cargando: true, error: null }
+  return { comandas: [], eventos: [], cargando: true, error: null, cargas: [], cargaAplicada: 0 }
 }
 
 /**
@@ -81,25 +87,124 @@ export function estadoInicial() {
  *
  * Los eventId vistos tambien se olvidan: son de la sesion anterior del socket y
  * guardarlos solo podria hacer que se ignore un evento legitimo.
+ *
+ * Con `idCarga` (la recarga que abrio marcarCargando), la respuesta NO pisa lo
+ * que llego por el socket mientras se esperaba: puede ser mas vieja que esos
+ * avisos. Se reemplaza el tablero y despues se vuelven a aplicar, en orden, los
+ * avisos que anoto esa carga (mismo criterio que el #278 en el panel). Asi un
+ * pedido creado durante la carga que la respuesta aun no trae se queda, uno que
+ * avanzo no vuelve atras y un plato quitado no reaparece. Sin `idCarga`, solo
+ * se reemplaza, como antes.
+ *
+ * Al reaplicar, solo un order:created puede meter un pedido que la respuesta no
+ * trae; order:status, item:cancelado y el movimiento local solo tocan pedidos
+ * que ya estan, asi que no resucitan uno que se entrego o pago durante la carga.
+ *
+ * Si ya se aplico una recarga MAS NUEVA (idCarga mayor), esta respuesta no se
+ * aplica: el tablero ya tiene una respuesta posterior mas todos los avisos que
+ * llegaron desde entonces, y esta podria traer datos de antes de una caida del
+ * socket. Solo se cierra su anotacion.
  */
-export function cargarInicial(estado, comandas) {
-  return {
+export function cargarInicial(estado, comandas, idCarga) {
+  const reemplazado = {
     ...estado,
     comandas: (comandas || []).filter((c) => ESTADOS_EN_TABLERO.includes(c.estado)),
     eventos: [],
     cargando: false,
     error: null,
   }
+  if (idCarga === undefined) return reemplazado
+
+  const cargas = estado.cargas || []
+  const restantes = cargas.filter((c) => c.id !== idCarga)
+  if (idCarga < (estado.cargaAplicada ?? 0)) {
+    return { ...estado, cargando: false, error: null, cargas: restantes }
+  }
+
+  const carga = cargas.find((c) => c.id === idCarga)
+  // Los avisos se reaplican sin cargas abiertas: las otras recargas en curso ya
+  // los anotaron al llegar y no deben anotarlos dos veces.
+  let siguiente = { ...reemplazado, cargas: [] }
+  for (const aviso of carga?.avisos || []) siguiente = reaplicarAviso(siguiente, aviso)
+  return { ...siguiente, cargas: restantes, cargaAplicada: idCarga }
 }
 
-/** Marca un fallo de carga, conservando lo que ya estuviera en pantalla. */
-export function marcarError(estado, mensaje) {
-  return { ...estado, cargando: false, error: mensaje || 'No se pudo cargar las comandas' }
+/**
+ * Marca un fallo de carga, conservando lo que ya estuviera en pantalla. Con
+ * `idCarga`, ademas cierra esa recarga: sus avisos ya estan aplicados.
+ */
+export function marcarError(estado, mensaje, idCarga) {
+  const conError = { ...estado, cargando: false, error: mensaje || 'No se pudo cargar las comandas' }
+  if (idCarga === undefined) return conError
+  return { ...conError, cargas: (estado.cargas || []).filter((c) => c.id !== idCarga) }
 }
 
-/** Marca que se esta (re)cargando, sin borrar lo que ya se ve. */
-export function marcarCargando(estado) {
-  return { ...estado, cargando: true, error: null }
+/**
+ * Marca que se esta (re)cargando, sin borrar lo que ya se ve. Con `idCarga`,
+ * abre la anotacion de avisos de esa recarga (ver cargarInicial).
+ */
+export function marcarCargando(estado, idCarga) {
+  const cargando = { ...estado, cargando: true, error: null }
+  if (idCarga === undefined) return cargando
+  return { ...cargando, cargas: [...(estado.cargas || []), { id: idCarga, avisos: [] }] }
+}
+
+/**
+ * Anota un aviso en cada recarga en curso, para reaplicarlo cuando llegue su
+ * respuesta.
+ *
+ * Tope: MAX_EVENTOS_RECORDADOS avisos por carga, como los eventId, para que un
+ * GET colgado no haga crecer la lista sin limite. Si se pasa, se descartan los
+ * mas VIEJOS: esos ya se aplicaron en vivo, pero al llegar la respuesta no se
+ * reaplican y para esos pedidos manda lo que diga el GET (lo de antes de este
+ * arreglo). Con 500 avisos durante un solo GET no deberia pasar nunca.
+ */
+function anotarEnCargas(estado, tipo, datos) {
+  if (!estado.cargas?.length) return estado
+  return {
+    ...estado,
+    cargas: estado.cargas.map((c) => {
+      const avisos = [...c.avisos, { tipo, datos }]
+      return {
+        ...c,
+        avisos: avisos.length > MAX_EVENTOS_RECORDADOS ? avisos.slice(avisos.length - MAX_EVENTOS_RECORDADOS) : avisos,
+      }
+    }),
+  }
+}
+
+/**
+ * ¿Mover el pedido a `destino` lo haria retroceder en el tablero
+ * (recibido -> en_preparacion -> listo)? Un aviso anotado durante la carga
+ * puede ser mas viejo que la respuesta (el GET se armo despues): ese aviso no
+ * puede devolver a en_preparacion un pedido que la respuesta ya trae listo.
+ */
+function retrocede(estado, idPedido, destino) {
+  const actual = estado.comandas.find((c) => c.id_pedido === idPedido)
+  if (!actual) return false
+  return ESTADOS_EN_TABLERO.indexOf(destino) < ESTADOS_EN_TABLERO.indexOf(actual.estado)
+}
+
+/** Vuelve a aplicar un aviso anotado durante una recarga (ver cargarInicial). */
+function reaplicarAviso(estado, { tipo, datos }) {
+  if (tipo === 'creado') return aplicarCreado(estado, datos)
+  if (tipo === 'itemCancelado') return aplicarItemCancelado(estado, datos)
+  if (tipo === 'estado') {
+    if (esEventoRepetido(estado, datos.eventId)) return estado
+    if (ESTADOS_EN_TABLERO.includes(datos.estado) && retrocede(estado, datos.id_pedido, datos.estado)) {
+      // No se mueve, pero el eventId queda visto: si el socket lo reenvia
+      // despues, tampoco lo hara retroceder.
+      return { ...estado, eventos: recordarEvento(estado, datos.eventId) }
+    }
+    return aplicarEstado(estado, datos)
+  }
+  if (tipo === 'local') {
+    if (ESTADOS_EN_TABLERO.includes(datos.nuevoEstado) && retrocede(estado, datos.id_pedido, datos.nuevoEstado)) {
+      return estado
+    }
+    return marcarEstadoLocal(estado, datos.id_pedido, datos.nuevoEstado)
+  }
+  return estado
 }
 
 /** ¿Este eventId ya se proceso? */
@@ -175,17 +280,18 @@ export function aplicarCreado(estado, evento) {
   const pedido = evento?.pedido
   if (!pedido || pedido.id_pedido === undefined || pedido.id_pedido === null) return estado
 
+  const anotado = anotarEnCargas(estado, 'creado', evento)
   const eventos = recordarEvento(estado, evento.eventId)
   if (estado.comandas.some((c) => c.id_pedido === pedido.id_pedido)) {
-    return { ...estado, eventos }
+    return { ...anotado, eventos }
   }
 
   const nueva = comandaDesdePedido(pedido, evento.recibidoEnMs ?? Date.now())
-  if (!ESTADOS_EN_TABLERO.includes(nueva.estado)) return { ...estado, eventos }
+  if (!ESTADOS_EN_TABLERO.includes(nueva.estado)) return { ...anotado, eventos }
 
   // Las nuevas van al principio: en cocina lo que acaba de entrar es lo que hay
   // que ver primero.
-  return { ...estado, comandas: [nueva, ...estado.comandas], eventos }
+  return { ...anotado, comandas: [nueva, ...estado.comandas], eventos }
 }
 
 /**
@@ -199,20 +305,23 @@ export function aplicarEstado(estado, evento) {
   if (esEventoRepetido(estado, evento?.eventId)) return estado
   if (!evento || evento.id_pedido === undefined || evento.id_pedido === null) return estado
 
+  // Se anota aunque el pedido no este en pantalla: la respuesta de la recarga
+  // en curso puede traerlo con un estado mas viejo.
+  const anotado = anotarEnCargas(estado, 'estado', evento)
   const eventos = recordarEvento(estado, evento.eventId)
 
   if (ESTADOS_QUE_SALEN.includes(evento.estado)) {
     return {
-      ...estado,
+      ...anotado,
       comandas: estado.comandas.filter((c) => c.id_pedido !== evento.id_pedido),
       eventos,
     }
   }
 
-  if (!ESTADOS_EN_TABLERO.includes(evento.estado)) return { ...estado, eventos }
+  if (!ESTADOS_EN_TABLERO.includes(evento.estado)) return { ...anotado, eventos }
 
   return {
-    ...estado,
+    ...anotado,
     comandas: estado.comandas.map((c) =>
       c.id_pedido === evento.id_pedido ? { ...c, ...cambioDeEstado(evento) } : c
     ),
@@ -252,14 +361,15 @@ export function aplicarItemCancelado(estado, evento) {
   if (!evento || evento.id_pedido === undefined || evento.id_pedido === null) return estado
   if (evento.id_detalle === undefined || evento.id_detalle === null) return estado
 
+  const anotado = anotarEnCargas(estado, 'itemCancelado', evento)
   const eventos = recordarEvento(estado, evento.eventId)
   const comanda = estado.comandas.find((c) => c.id_pedido === evento.id_pedido)
   if (!comanda || !comanda.items.some((i) => i.id_detalle === evento.id_detalle)) {
-    return { ...estado, eventos }
+    return { ...anotado, eventos }
   }
 
   return {
-    ...estado,
+    ...anotado,
     comandas: estado.comandas.map((c) =>
       c.id_pedido === evento.id_pedido
         ? {
@@ -321,13 +431,17 @@ export function siguientePaso(estadoActual) {
  * resultado es el mismo (es idempotente).
  */
 export function marcarEstadoLocal(estado, idPedido, nuevoEstado) {
+  if (!ESTADOS_QUE_SALEN.includes(nuevoEstado) && !ESTADOS_EN_TABLERO.includes(nuevoEstado)) return estado
+  // Un GET en curso puede ser anterior a este PATCH: se anota para que su
+  // respuesta no devuelva la tarjeta a la columna de antes.
+  const anotado = anotarEnCargas(estado, 'local', { id_pedido: idPedido, nuevoEstado })
+
   if (ESTADOS_QUE_SALEN.includes(nuevoEstado)) {
-    return { ...estado, comandas: estado.comandas.filter((c) => c.id_pedido !== idPedido) }
+    return { ...anotado, comandas: estado.comandas.filter((c) => c.id_pedido !== idPedido) }
   }
-  if (!ESTADOS_EN_TABLERO.includes(nuevoEstado)) return estado
 
   return {
-    ...estado,
+    ...anotado,
     comandas: estado.comandas.map((c) =>
       c.id_pedido === idPedido
         ? {
