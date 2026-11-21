@@ -21,10 +21,14 @@ import {
  * limpiar.
  */
 
+// Si cambias esta tabla, cambia tambien su copia en
+// tests/recarga-sin-perder.test.js.
 const ACCIONES = {
-  cargando: marcarCargando,
-  cargar: cargarInicial,
-  error: marcarError,
+  // Cada recarga lleva su idCarga: los avisos que llegan mientras espera se
+  // reaplican sobre su respuesta (ver cargarInicial en lib/comandas.js).
+  cargando: (estado, { idCarga } = {}) => marcarCargando(estado, idCarga),
+  cargar: (estado, { comandas, idCarga }) => cargarInicial(estado, comandas, idCarga),
+  error: (estado, { mensaje, idCarga }) => marcarError(estado, mensaje, idCarga),
   creado: aplicarCreado,
   estado: aplicarEstado,
   // D-13 / #180: alguien quito UNA linea; se tacha en vivo.
@@ -100,18 +104,22 @@ export function useTablero({
    *
    * Se usa en la carga inicial, en cada reconexion y en el boton Reintentar:
    * mientras el socket estuvo caido pudieron pasar cosas que no llegaron, asi
-   * que mezclar dejaria comandas fantasma.
+   * que mezclar dejaria comandas fantasma. Lo que llegue por el socket MIENTRAS
+   * se espera la respuesta se reaplica encima (ver cargarInicial).
    */
+  const ultimaCarga = useRef(0)
   const recargar = useCallback(async () => {
     if (!token) return
-    despachar({ tipo: 'cargando' })
+    ultimaCarga.current += 1
+    const idCarga = ultimaCarga.current
+    despachar({ tipo: 'cargando', datos: { idCarga } })
     try {
       const comandas = await obtenerComandas(token)
-      despachar({ tipo: 'cargar', datos: comandas })
+      despachar({ tipo: 'cargar', datos: { comandas, idCarga } })
     } catch (error) {
       // Un 401 ya disparo el cierre de sesion en el servicio; aqui solo se
       // muestra el fallo para que el cocinero sepa que la pantalla no esta al dia.
-      despachar({ tipo: 'error', datos: error.message })
+      despachar({ tipo: 'error', datos: { mensaje: error.message, idCarga } })
     }
   }, [token])
 
