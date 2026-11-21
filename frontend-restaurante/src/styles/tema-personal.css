@@ -845,30 +845,53 @@
 /* 4) Login */
 .tema-comanda.ingreso-pagina,
 .tema-comanda .ingreso-pagina {
+  position: relative;
+  isolation: isolate;
+  overflow-x: hidden;
   font-family: var(--f-texto);
-  background: var(--carbon);
+  background-color: var(--carbon);
+  background-image: radial-gradient(rgba(255, 244, 230, .05) 1px, transparent 1.5px);
+  background-size: 22px 22px;
   color: var(--papel);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
+/* Foto de fondo (public/img/login-fondo.webp) bajo un velo carbón */
+.tema-comanda.ingreso-pagina::before,
+.tema-comanda .ingreso-pagina::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(12, 7, 7, .93) 0%, rgba(12, 7, 7, .72) 52%, rgba(12, 7, 7, .55) 100%),
+    url('/img/login-fondo.webp') center / cover no-repeat;
+  filter: saturate(.85);
+}
+
 .tema-comanda .ingreso-pagina .franja,
 .tema-comanda.ingreso-pagina .franja {
+  position: relative;
+  z-index: 1;
   height: 6px;
   flex: none;
   background: repeating-linear-gradient(115deg, var(--ambar) 0 14px, var(--carbon) 14px 18px);
 }
 
 .tema-comanda .ingreso-principal {
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  max-width: 1240px;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  max-width: 1280px;
   width: 100%;
   margin: 0 auto;
-  padding: 40px 48px;
-  gap: 56px;
+  padding: 36px 56px 28px;
+  gap: 48px;
   align-items: center;
 }
 
@@ -876,7 +899,7 @@
 .tema-comanda .ingreso-lado {
   display: flex;
   flex-direction: column;
-  gap: 34px;
+  gap: 30px;
 }
 
 .tema-comanda .ingreso-marca {
@@ -885,93 +908,172 @@
   gap: 16px;
 }
 
-.tema-comanda .ingreso-marca .sd {
-  width: 44px;
-  height: 44px;
-  border-radius: 11px;
-  background: var(--ambar);
-  color: var(--carbon);
+.tema-comanda .ingreso-logo {
+  width: 76px;
+  height: 76px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--papel) url('/img/logo-smartdining.webp') center / cover no-repeat;
+  box-shadow: 0 0 0 3px var(--ambar), 6px 6px 0 3px var(--rojo);
+}
+
+.tema-comanda .ingreso-marca div {
   display: grid;
-  place-items: center;
-  font: 400 24px var(--f-titulo);
+  gap: 2px;
 }
 
 .tema-comanda .ingreso-marca b {
-  font: 400 26px var(--f-titulo);
+  font: 400 30px / 1 var(--f-titulo);
   letter-spacing: .14em;
   color: var(--papel);
 }
 
+.tema-comanda .ingreso-marca small {
+  font: 500 11px var(--f-mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: #a8968c;
+}
+
 .tema-comanda .ingreso-titulo {
-  font: 400 clamp(64px, 8.4vw, 118px) / .86 var(--f-titulo);
-  letter-spacing: .01em;
+  font: 400 clamp(72px, 9vw, 132px) / .84 var(--f-titulo);
+  letter-spacing: .005em;
   color: var(--papel);
-  text-shadow: 4px 4px 0 var(--rojo);
+  text-shadow: 5px 5px 0 var(--rojo);
   margin: 0;
 }
 
 .tema-comanda .ingreso-titulo em {
   font-style: normal;
   color: var(--ambar);
+  display: inline-block;
 }
 
 .tema-comanda .ingreso-desc {
-  max-width: 430px;
+  max-width: 440px;
   color: #c9b8a8;
   font-size: 16px;
-  line-height: 1.55;
+  line-height: 1.6;
   margin: 0;
 }
 
-.tema-comanda .ingreso-roles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  list-style: none;
-  padding: 0;
-  margin: 0;
+/* Riel de comandas y tickets fantasma */
+.tema-comanda .ingreso-zona {
+  position: relative;
+  justify-self: end;
+  width: 100%;
+  max-width: 460px;
+  padding-top: 40px;
 }
 
-.tema-comanda .ingreso-roles li {
-  font: 500 12px var(--f-mono);
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: #a8968c;
-  border: 1px solid #3a2e2b;
-  padding: 7px 11px;
-  border-radius: 999px;
+.tema-comanda .ingreso-riel {
+  position: absolute;
+  top: 0;
+  left: -60px;
+  right: -60px;
+  height: 18px;
+  border-radius: 9px;
+  background: linear-gradient(#e6e1da, #9b948c 45%, #5c5650 55%, #b9b2a9);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, .55);
 }
 
-.tema-comanda .ingreso-roles li b {
-  color: var(--ambar);
-  font-weight: 600;
+.tema-comanda .ingreso-riel::before,
+.tema-comanda .ingreso-riel::after {
+  content: "";
+  position: absolute;
+  top: -6px;
+  width: 10px;
+  height: 30px;
+  border-radius: 3px;
+  background: #5c5650;
+}
+
+.tema-comanda .ingreso-riel::before {
+  left: 14px;
+}
+
+.tema-comanda .ingreso-riel::after {
+  right: 14px;
+}
+
+.tema-comanda .ingreso-fantasma {
+  position: absolute;
+  top: 30px;
+  width: 200px;
+  height: 250px;
+  padding: 20px 18px;
+  border-radius: 3px;
+  background: var(--papel2);
+  box-shadow: 0 18px 30px rgba(0, 0, 0, .5);
+  opacity: .55;
+  transform-origin: top center;
+}
+
+.tema-comanda .ingreso-fantasma::before {
+  content: "";
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  width: 46px;
+  height: 22px;
+  transform: translateX(-50%);
+  border-radius: 4px;
+  background: #8d867e;
+}
+
+.tema-comanda .ingreso-fantasma i {
+  display: block;
+  height: 9px;
+  margin: 12px 0;
+  border-radius: 2px;
+  background: #d8c6b2;
+}
+
+.tema-comanda .ingreso-fantasma i:first-child {
+  height: 22px;
+  width: 62%;
+  margin-top: 4px;
+  background: #c9b49c;
+}
+
+.tema-comanda .ingreso-fantasma-1 {
+  left: -120px;
+  transform: rotate(-7deg);
+}
+
+.tema-comanda .ingreso-fantasma-2 {
+  right: -110px;
+  transform: rotate(6deg);
+  opacity: .4;
 }
 
 /* Ticket del formulario */
 .tema-comanda .ingreso-ticket {
   position: relative;
+  z-index: 2;
   background: var(--papel);
   color: var(--tinta);
-  border-radius: 4px 4px 0 0;
-  padding: 34px 34px 30px;
-  width: 100%;
-  max-width: 440px;
-  justify-self: end;
-  box-shadow: 0 30px 60px -20px rgba(0, 0, 0, .7);
+  border-radius: 3px 3px 0 0;
+  padding: 34px 34px 26px;
+  box-shadow: 0 34px 60px -18px rgba(0, 0, 0, .8);
+  animation: ingreso-baja .7s cubic-bezier(.2, .9, .3, 1.2) both;
 }
 
+/* Pinza que cuelga el ticket del riel */
 .tema-comanda .ingreso-ticket::before {
   content: "";
   position: absolute;
-  top: -12px;
+  top: -30px;
   left: 50%;
-  width: 74px;
-  height: 24px;
-  transform: translateX(-50%) rotate(-2deg);
-  background: rgba(220, 210, 190, .8);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+  width: 58px;
+  height: 34px;
+  transform: translateX(-50%);
+  border-radius: 5px;
+  background: linear-gradient(#9b948c, #5c5650);
+  box-shadow: inset 0 -6px 0 rgba(0, 0, 0, .25);
 }
 
+/* Borde de papel rasgado */
 .tema-comanda .ingreso-ticket::after {
   content: "";
   position: absolute;
@@ -983,40 +1085,56 @@
               linear-gradient(45deg, transparent 5px, var(--papel) 0) 0 0 / 10px 10px;
 }
 
+@keyframes ingreso-baja {
+  from { transform: translateY(-26px) rotate(-1.5deg); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.tema-comanda .ingreso-sello {
+  position: absolute;
+  top: 20px;
+  right: 22px;
+  padding: 2px 14px 6px;
+  border: 4px double var(--rojo);
+  border-radius: 8px;
+  color: var(--rojo);
+  font: 700 34px / 1 var(--f-mano);
+  letter-spacing: .01em;
+  transform: rotate(-9deg);
+  opacity: .92;
+  mix-blend-mode: multiply;
+}
+
 .tema-comanda .ingreso-ticket-cab {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 12px;
   padding-bottom: 16px;
-  border-bottom: 2px solid var(--tinta);
+  border-bottom: 3px double var(--tinta);
 }
 
 .tema-comanda .ingreso-ticket-h2 {
-  font: 400 40px / .9 var(--f-titulo);
+  font: 400 48px / .88 var(--f-titulo);
   letter-spacing: .03em;
   color: var(--tinta);
   margin: 0;
 }
 
 .tema-comanda .ingreso-ticket-pos {
-  font: 500 11px / 1.4 var(--f-mono);
+  display: block;
+  margin-top: 10px;
+  font: 500 11px var(--f-mono);
   color: var(--suave);
-  text-align: right;
+  letter-spacing: .12em;
   text-transform: uppercase;
-  letter-spacing: .06em;
 }
 
 .tema-comanda .ingreso-ticket-sub {
   font: 500 12px var(--f-mono);
   color: var(--suave);
-  padding: 12px 0 22px;
+  padding: 12px 0 20px;
   border-bottom: 1px dashed var(--linea);
   margin-bottom: 22px;
-  letter-spacing: .03em;
 }
 
-/* Alertas / Banners con paleta de maqueta */
+/* Alertas (401, 429 y error de credenciales) */
 .tema-comanda .ingreso-alerta {
   display: flex;
   gap: 10px;
@@ -1029,17 +1147,24 @@
   font-weight: 500;
   line-height: 1.4;
   margin-bottom: 18px;
+  animation: ingreso-sacude .35s;
+}
+
+@keyframes ingreso-sacude {
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
 }
 
 .tema-comanda .ingreso-alerta-aviso {
   background: #fef7ec;
-  border-left: 5px solid var(--ambar);
+  border-left-color: var(--ambar);
   color: #8c5a14;
 }
 
 .tema-comanda .ingreso-alerta-error {
   background: #fdecea;
-  border-left: 5px solid var(--rojo);
+  border-left-color: var(--rojo);
   color: var(--rojo);
 }
 
@@ -1062,10 +1187,22 @@
 }
 
 .tema-comanda .ingreso-lbl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font: 600 12px var(--f-mono);
   letter-spacing: .1em;
   text-transform: uppercase;
   color: var(--tinta);
+}
+
+.tema-comanda .ingreso-num {
+  font-style: normal;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--carbon);
+  color: var(--ambar);
 }
 
 .tema-comanda .ingreso-caja {
@@ -1076,24 +1213,30 @@
 
 .tema-comanda .ingreso-caja .ingreso-ico {
   position: absolute;
-  left: 14px;
+  z-index: 1;
+  left: 15px;
   width: 18px;
   height: 18px;
   color: var(--suave);
   pointer-events: none;
+  transition: color .15s;
+}
+
+.tema-comanda .ingreso-caja:focus-within .ingreso-ico {
+  color: var(--tinta);
 }
 
 .tema-comanda .ingreso-input {
   width: 100%;
-  height: 52px;
+  height: 54px;
   border: 2px solid var(--tinta);
   border-radius: 10px;
   background: #fffaf3;
-  padding: 0 16px 0 44px;
+  padding: 0 16px 0 46px;
   font: 500 16px var(--f-texto);
   color: var(--tinta);
   outline: none;
-  transition: box-shadow .15s, border-color .15s;
+  transition: box-shadow .15s, transform .15s;
 }
 
 .tema-comanda .ingreso-input::placeholder {
@@ -1101,7 +1244,8 @@
 }
 
 .tema-comanda .ingreso-input:focus {
-  box-shadow: 4px 4px 0 var(--ambar);
+  box-shadow: 5px 5px 0 var(--ambar);
+  transform: translate(-1px, -1px);
 }
 
 .tema-comanda .ingreso-campo-mal .ingreso-input {
@@ -1111,27 +1255,32 @@
 
 /* Botón Entrar */
 .tema-comanda .ingreso-btn {
-  margin-top: 4px;
-  height: 58px;
+  margin-top: 6px;
+  height: 60px;
+  width: 100%;
   border: 0;
   border-radius: 12px;
   background: var(--carbon);
   color: var(--ambar);
-  font: 400 26px var(--f-titulo);
-  letter-spacing: .12em;
+  font: 400 28px var(--f-titulo);
+  letter-spacing: .14em;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 0 22px;
   cursor: pointer;
   transition: transform .08s, box-shadow .15s;
   box-shadow: 5px 5px 0 var(--ambar);
-  width: 100%;
 }
 
 .tema-comanda .ingreso-btn:hover:not([disabled]) {
   box-shadow: 7px 7px 0 var(--ambar);
   transform: translate(-1px, -1px);
+}
+
+.tema-comanda .ingreso-btn:hover:not([disabled]) .ingreso-flecha {
+  transform: translateX(4px);
 }
 
 .tema-comanda .ingreso-btn:active:not([disabled]) {
@@ -1145,18 +1294,26 @@
 }
 
 .tema-comanda .ingreso-btn .ingreso-flecha {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  transition: transform .15s;
 }
 
 .tema-comanda .ingreso-btn[disabled] {
-  cursor: not-allowed;
-  opacity: .85;
+  cursor: wait;
+}
+
+/* Cuenta regresiva del 429: el texto es largo, va más pequeño */
+.tema-comanda .ingreso-btn .ingreso-btn-espera {
+  font-size: 20px;
+  letter-spacing: .06em;
 }
 
 .tema-comanda .ingreso-giro {
   width: 22px;
   height: 22px;
+  flex: none;
   border: 3px solid rgba(255, 176, 46, .3);
   border-top-color: var(--ambar);
   border-radius: 50%;
@@ -1174,53 +1331,146 @@
   border-top: 1px dashed var(--linea);
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.tema-comanda .ingreso-seguro {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font: 500 11px var(--f-mono);
   color: var(--suave);
   letter-spacing: .04em;
 }
 
+.tema-comanda .ingreso-seguro svg {
+  width: 14px;
+  height: 14px;
+  color: var(--ok);
+}
+
+.tema-comanda .ingreso-barras {
+  height: 30px;
+  width: 130px;
+  opacity: .8;
+  background: repeating-linear-gradient(90deg, var(--tinta) 0 2px, transparent 2px 4px, var(--tinta) 4px 5px,
+              transparent 5px 8px, var(--tinta) 8px 11px, transparent 11px 13px);
+}
+
+/* Cinta inferior con las áreas del sistema */
+.tema-comanda .ingreso-cinta {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  overflow: hidden;
+  white-space: nowrap;
+  background: var(--ambar);
+  color: var(--carbon);
+  border-top: 3px solid var(--carbon);
+}
+
+.tema-comanda .ingreso-cinta-pista {
+  display: inline-flex;
+  gap: 28px;
+  padding: 10px 0;
+  font: 400 20px var(--f-titulo);
+  letter-spacing: .16em;
+  animation: ingreso-corre 38s linear infinite;
+}
+
+.tema-comanda .ingreso-cinta-pista span::after {
+  content: "●";
+  margin-left: 28px;
+  font-size: 12px;
+  vertical-align: middle;
+  color: var(--carbon);
+}
+
+@keyframes ingreso-corre {
+  to { transform: translateX(-50%); }
+}
+
 .tema-comanda .ingreso-footer {
+  position: relative;
+  z-index: 1;
   flex: none;
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 48px;
+  padding: 12px 56px;
   font: 500 12px var(--f-mono);
   color: #7d6c66;
-  max-width: 1240px;
+  max-width: 1280px;
   width: 100%;
   margin: 0 auto;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 980px) {
   .tema-comanda .ingreso-principal {
     grid-template-columns: 1fr;
-    padding: 28px 20px 40px;
-    gap: 36px;
+    padding: 26px 20px 44px;
+    gap: 34px;
   }
   .tema-comanda .ingreso-lado {
     gap: 20px;
   }
+  .tema-comanda .ingreso-logo {
+    width: 60px;
+    height: 60px;
+  }
+  .tema-comanda .ingreso-marca b {
+    font-size: 26px;
+  }
   .tema-comanda .ingreso-titulo {
-    font-size: 64px;
+    font-size: 68px;
     text-shadow: 3px 3px 0 var(--rojo);
   }
   .tema-comanda .ingreso-desc {
     font-size: 15px;
   }
-  .tema-comanda .ingreso-ticket {
+  .tema-comanda .ingreso-zona {
     justify-self: stretch;
     max-width: none;
-    padding: 30px 22px 26px;
+    padding-top: 34px;
   }
-  .tema-comanda .ingreso-roles {
+  .tema-comanda .ingreso-riel {
+    left: -12px;
+    right: -12px;
+  }
+  .tema-comanda .ingreso-fantasma {
     display: none;
   }
+  .tema-comanda .ingreso-ticket {
+    padding: 30px 22px 24px;
+  }
+  .tema-comanda .ingreso-ticket-h2 {
+    font-size: 42px;
+  }
+  .tema-comanda .ingreso-sello {
+    font-size: 28px;
+    top: 18px;
+    right: 16px;
+  }
   .tema-comanda .ingreso-footer {
-    padding: 14px 20px;
+    padding: 12px 20px;
     flex-direction: column;
     gap: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tema-comanda .ingreso-ticket,
+  .tema-comanda .ingreso-alerta,
+  .tema-comanda .ingreso-cinta-pista,
+  .tema-comanda .ingreso-giro {
+    animation: none;
+  }
+  .tema-comanda .ingreso-input,
+  .tema-comanda .ingreso-btn,
+  .tema-comanda .ingreso-btn .ingreso-flecha,
+  .tema-comanda .ingreso-caja .ingreso-ico {
+    transition: none;
   }
 }
 
