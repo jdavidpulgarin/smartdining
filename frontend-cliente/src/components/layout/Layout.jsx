@@ -12,6 +12,9 @@ import {
 import { esPedidoMio, resumenPedidosActivos } from '../../utils/seguimiento';
 import { textoPagoConfirmado } from '../../utils/cuenta';
 import { crearDeduplicador } from '../../utils/deduplicador';
+import { crearControlAvisoAtendida, posicionAvisoAtendida } from '../../utils/avisoAtendida';
+import AvisoAtendida from '../ui/AvisoAtendida';
+import ContenidoPrincipal from './ContenidoPrincipal';
 
 function Layout({ children }) {
   const location = useLocation();
@@ -22,7 +25,7 @@ function Layout({ children }) {
     rutaActual === '/seguimiento' ||
     rutaActual === '/pago' ||
     rutaActual.startsWith('/armar/');
-  const { mesa, comensal, valida, cargando, motivoCierre } = useMesaSession();
+  const { mesa, idMesa, comensal, valida, cargando, motivoCierre } = useMesaSession();
   const { misPedidos } = useSeguimientoMesa();
   const resumen = resumenPedidosActivos(misPedidos);
   const estadoPrincipal = resumen?.estadoPrincipal;
@@ -39,11 +42,19 @@ function Layout({ children }) {
     []
   );
 
+  // mesa:atendida: un solo aviso a la vez, se reemplaza y se cierra solo a los 6 s.
+  const [avisoAtendida, setAvisoAtendida] = useState(null);
+  const controlAtendida = useMemo(
+    () => crearControlAvisoAtendida({ alCambiar: setAvisoAtendida, deduplicador }),
+    [deduplicador]
+  );
+
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      controlAtendida.destruir();
     };
-  }, []);
+  }, [controlAtendida]);
 
   useEffect(() => {
     if (!socketOn) return undefined;
@@ -106,13 +117,25 @@ function Layout({ children }) {
       }
     });
 
+    // El personal marcó «Atendida» el llamado o la cuenta de ESTA mesa (EVENTS.md §4).
+    const bajaAtendida = socketOn('mesa:atendida', (data) => {
+      controlAtendida.recibir(data, idMesa);
+    });
+
     return () => {
       bajaCreated?.();
       bajaStatus?.();
       bajaPayment?.();
       bajaItemCancelado?.();
+      bajaAtendida?.();
     };
-  }, [socketOn, comensal, deduplicador]);
+  }, [socketOn, comensal, deduplicador, controlAtendida, idMesa]);
+
+  const posicionAviso = posicionAvisoAtendida({
+    ruta: rutaActual,
+    hayCarrito: totalUnidades > 0,
+    hayAvisosMenu: avisosMenu.length > 0,
+  });
 
   if (cargando) {
     return null;
@@ -215,7 +238,23 @@ function Layout({ children }) {
         </div>
       )}
 
-      <main id="contenido-principal" tabIndex={-1} className={`flex-1 w-full max-w-[480px] mx-auto px-4 focus:outline-none ${esComanda ? 'pb-28' : 'pb-8'}`}>{children}</main>
+      {/* mesa:atendida fuera de /pago: banda fija abajo, encima de lo que ya esté fijo abajo */}
+      {avisoAtendida && !posicionAviso.enLinea && (
+        <AvisoAtendida
+          aviso={avisoAtendida}
+          onCerrar={controlAtendida.cerrar}
+          bottom={posicionAviso.bottom}
+        />
+      )}
+
+      <ContenidoPrincipal
+        esComanda={esComanda}
+        avisoAtendida={avisoAtendida}
+        posicionAviso={posicionAviso}
+        onCerrarAviso={controlAtendida.cerrar}
+      >
+        {children}
+      </ContenidoPrincipal>
     </div>
   );
 }
