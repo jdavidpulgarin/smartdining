@@ -13,16 +13,18 @@ describe('Sección PlatoDelDia', () => {
     ],
   };
 
-  it('con plato disponible en carta en vivo: muestra etiqueta recta "PLATO DEL DÍA", día, título, lema, precio de la carta en ticket y botón "PÍDELO EN TU MESA"', () => {
+  it('con plato disponible en carta en vivo: muestra etiqueta de tiquete con día en mayúsculas ("MARTES") y "Plato del día", título, lema, precio y botón "PÍDELO EN TU MESA"', () => {
     const html = renderToStaticMarkup(
       <PlatoDelDia dia="martes" carta={cartaEnVivo} />
     );
 
     expect(html).toContain('id="hoy"');
 
-    // 1) Etiqueta recta: "PLATO DEL DÍA" y día "MARTES", sin animación de punto
-    expect(html).toContain('PLATO DEL DÍA');
+    // 1) Etiqueta de tiquete: día en mayúsculas, "Plato del día" y subrayado curvo en SVG
+    expect(html).toContain('etiqueta-tiquete');
     expect(html).toContain('MARTES');
+    expect(html).toContain('Plato del día');
+    expect(html).toContain('<svg');
     expect(html).not.toContain('animate-pulse');
 
     // 2) Título en dos partes y lema
@@ -69,7 +71,7 @@ describe('Sección PlatoDelDia', () => {
 
   it('con plato no existente en la carta: muestra "Hoy no hay plato del día" sin precio ni botón', () => {
     const html = renderToStaticMarkup(
-      <PlatoDelDia dia="viernes" carta={cartaEnVivo} /> // Pizza no está en cartaEnVivo
+      <PlatoDelDia dia="viernes" carta={cartaEnVivo} />
     );
 
     expect(html).toContain('Hoy no hay plato del día');
@@ -101,9 +103,10 @@ describe('Sección PlatoDelDia', () => {
       <PlatoDelDia dia="martes" carta={cartaRespaldo} />
     );
 
-    // Muestra cabecera, título, lema, descripción y video
-    expect(html).toContain('PLATO DEL DÍA');
+    // Muestra cabecera de tiquete, título, lema, descripción y video
+    expect(html).toContain('etiqueta-tiquete');
     expect(html).toContain('MARTES');
+    expect(html).toContain('Plato del día');
     expect(html).toContain('SALCHIPAPA');
     expect(html).toContain('como debe ser');
     expect(html).toContain('<video');
@@ -125,7 +128,8 @@ describe('Sección PlatoDelDia', () => {
       />
     );
 
-    expect(html).toContain('PLATO DEL DÍA');
+    expect(html).toContain('Plato del día');
+    expect(html).toContain('MARTES');
     expect(html).toContain('SALCHIPAPA');
     expect(html).not.toContain('ticket-papel');
     expect(html).not.toContain('PÍDELO EN TU MESA');

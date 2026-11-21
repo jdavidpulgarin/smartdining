@@ -252,18 +252,39 @@ export default function PlatoDelDia({
 
           {/* Columna informativa estilo póster */}
           <div className="lg:col-span-5 flex flex-col items-start w-full">
-            {/* 1) Etiqueta tipo marbete de cocina: bloque ámbar sólido + día + raya ámbar */}
+            {/* 1) Etiqueta de tiquete con día y texto a mano "Plato del día" con subrayado curvo */}
             <div
-              className="flex items-center gap-2 mb-4 select-none"
+              className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4 select-none"
               aria-label={`Plato del día, ${plato.diaEtiqueta || plato.dia}`}
             >
-              <span className="bg-ambar text-tinta font-titulo tracking-widest text-sm px-2.5 py-1 rounded-[2px] leading-none uppercase">
-                PLATO DEL DÍA
-              </span>
-              <span className="font-titulo text-papel tracking-widest text-sm leading-none uppercase">
+              {/* Tiquete ámbar con muescas laterales */}
+              <span
+                className="etiqueta-tiquete font-titulo text-base sm:text-lg tracking-widest text-tinta uppercase leading-none px-4 py-1.5 sm:px-5"
+                aria-hidden="true"
+              >
                 {(plato.diaEtiqueta || plato.dia || '').toUpperCase()}
               </span>
-              <span className="w-12 h-0.5 bg-ambar shrink-0 ml-1" aria-hidden="true" />
+
+              {/* Texto "Plato del día" en letra a mano con subrayado curvo */}
+              <div className="flex flex-col items-start relative" aria-hidden="true">
+                <span className="font-mano text-2xl sm:text-3xl text-papel leading-none">
+                  Plato del día
+                </span>
+                <svg
+                  className="w-28 sm:w-32 h-2 text-ambar mt-0.5"
+                  viewBox="0 0 120 8"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M2 5.5C35 2 85 2 118 6"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
             </div>
 
             {/* 2) Título en dos líneas en Bebas Neue: titulo1 en papel y titulo2 en ámbar */}

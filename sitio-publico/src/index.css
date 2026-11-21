@@ -76,6 +76,18 @@
   mask: radial-gradient(circle 7px at 50% 100%, #0000 98%, #000) 0 0/18px 100% repeat-x;
 }
 
+.etiqueta-tiquete {
+  background-color: var(--color-ambar);
+  color: var(--color-tinta);
+  border-radius: 2px;
+  -webkit-mask:
+    radial-gradient(circle 5px at 0% 50%, #0000 98%, #000) 0 0 / 51% 100% no-repeat,
+    radial-gradient(circle 5px at 100% 50%, #0000 98%, #000) 100% 0 / 51% 100% no-repeat;
+  mask:
+    radial-gradient(circle 5px at 0% 50%, #0000 98%, #000) 0 0 / 51% 100% no-repeat,
+    radial-gradient(circle 5px at 100% 50%, #0000 98%, #000) 100% 0 / 51% 100% no-repeat;
+}
+
 .fondo-poster {
   background-color: var(--color-fondo);
   background-image:
