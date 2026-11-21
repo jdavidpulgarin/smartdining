@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { SoloCocina } from './SoloCocina'
-import { ShieldAlert, Mail, Lock, Clock } from 'lucide-react'
+import { ShieldAlert, ShieldCheck, Mail, Lock, Clock } from 'lucide-react'
 import { useAuth } from '../hooks'
 import {
   getStoredAuthMessage,
@@ -11,6 +11,9 @@ import {
   EVENT_UNAUTHORIZED,
   MENSAJE_DEMASIADOS_INTENTOS,
 } from '../services/api'
+
+// Cinta inferior (decorativa): las áreas a las que entra el personal.
+const AREAS_CINTA = ['MESAS', 'PEDIDOS', 'COCINA', 'CAJA', 'MENÚ', 'REPORTES', 'INVENTARIO']
 
 export function Login() {
   const { login } = useAuth()
@@ -125,10 +128,12 @@ export function Login() {
         {/* Lado izquierdo */}
         <section className="ingreso-lado">
           <div className="ingreso-marca">
-            <div className="sd" aria-hidden="true">
-              <span>SD</span>
+            {/* Mascota del logo (decorativa: el nombre va al lado). La imagen sale del CSS. */}
+            <span className="ingreso-logo" aria-hidden="true"></span>
+            <div>
+              <b>SMARTDINING</b>
+              <small>Sistema de gestión</small>
             </div>
-            <b>SMARTDINING</b>
           </div>
 
           <h1 className="ingreso-titulo">
@@ -139,140 +144,157 @@ export function Login() {
           <p className="ingreso-desc">
             Mesas, pedidos, cocina y caja en un solo lugar. Entra con tu cuenta y SmartDining te lleva directo a tu pantalla.
           </p>
-
-          <ul className="ingreso-roles" aria-label="Roles con acceso">
-            <li><b>01</b> Administrador</li>
-            <li><b>02</b> Caja</li>
-            <li><b>03</b> Cocina</li>
-            <li><b>04</b> Mesero</li>
-          </ul>
         </section>
 
-        {/* Lado derecho: Ticket */}
-        <section className="ingreso-ticket" aria-labelledby="ingreso-ticket-titulo">
-          <div className="ingreso-ticket-cab">
-            <h2 id="ingreso-ticket-titulo" className="ingreso-ticket-h2">
-              INICIAR<br />SESIÓN
-            </h2>
-            <span className="ingreso-ticket-pos">SmartDining POS</span>
+        {/* Lado derecho: riel de comandas con el ticket del formulario */}
+        <div className="ingreso-zona">
+          <div className="ingreso-riel" aria-hidden="true"></div>
+          <div className="ingreso-fantasma ingreso-fantasma-1" aria-hidden="true">
+            <i></i><i></i><i style={{ width: '80%' }}></i><i style={{ width: '55%' }}></i><i></i><i style={{ width: '70%' }}></i>
+          </div>
+          <div className="ingreso-fantasma ingreso-fantasma-2" aria-hidden="true">
+            <i></i><i style={{ width: '75%' }}></i><i></i><i style={{ width: '60%' }}></i><i style={{ width: '85%' }}></i>
           </div>
 
-          <div className="ingreso-ticket-sub">
-            Acceso solo para el personal del restaurante.
-          </div>
-
-          {/* Mensaje de sesión inválida / cuenta desactivada (401) */}
-          {authNotice && (
-            <div className="ingreso-alerta ingreso-alerta-aviso" role="alert">
-              <ShieldAlert size={18} className="ingreso-alerta-ico" />
-              <span>{authNotice}</span>
+          <section className="ingreso-ticket" aria-labelledby="ingreso-ticket-titulo">
+            <span className="ingreso-sello" aria-hidden="true">Personal</span>
+            <div className="ingreso-ticket-cab">
+              <h2 id="ingreso-ticket-titulo" className="ingreso-ticket-h2">
+                INICIAR<br />SESIÓN
+              </h2>
+              <span className="ingreso-ticket-pos">SmartDining POS</span>
             </div>
-          )}
 
-          {/* Mensaje de rate limit con cuenta regresiva (429) */}
-          {countdown > 0 && (
-            <div className="ingreso-alerta ingreso-alerta-aviso" role="alert">
-              <Clock size={18} className="ingreso-alerta-ico" />
-              <span>
-                {rateLimitMessage || MENSAJE_DEMASIADOS_INTENTOS} ({countdown}s)
+            <div className="ingreso-ticket-sub">
+              Acceso solo para el personal del restaurante.
+            </div>
+
+            {/* Mensaje de sesión inválida / cuenta desactivada (401) */}
+            {authNotice && (
+              <div className="ingreso-alerta ingreso-alerta-error" role="alert">
+                <ShieldAlert size={18} className="ingreso-alerta-ico" />
+                <span>{authNotice}</span>
+              </div>
+            )}
+
+            {/* Mensaje de rate limit con cuenta regresiva (429) */}
+            {countdown > 0 && (
+              <div className="ingreso-alerta ingreso-alerta-aviso" role="alert">
+                <Clock size={18} className="ingreso-alerta-ico" />
+                <span>
+                  {rateLimitMessage || MENSAJE_DEMASIADOS_INTENTOS} ({countdown}s)
+                </span>
+              </div>
+            )}
+
+            {/* Error regular de validación o credenciales */}
+            {error && countdown === 0 && (
+              <div className="ingreso-alerta ingreso-alerta-error" role="alert">
+                <ShieldAlert size={18} className="ingreso-alerta-ico" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Formulario */}
+            <form onSubmit={handleSubmit} className="ingreso-form" noValidate>
+              <div className={`ingreso-campo ${error ? 'ingreso-campo-mal' : ''}`}>
+                <label htmlFor="login-email" className="ingreso-lbl">
+                  <i className="ingreso-num" aria-hidden="true">01</i>Correo
+                </label>
+                <div className="ingreso-caja">
+                  <Mail size={18} className="ingreso-ico" />
+                  <input
+                    id="login-email"
+                    type="email"
+                    autoComplete="username"
+                    placeholder="admin@smartdining.com"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value)
+                      setError('')
+                    }}
+                    disabled={loading || countdown > 0}
+                    required
+                    className="ingreso-input"
+                  />
+                </div>
+              </div>
+
+              <div className={`ingreso-campo ${error ? 'ingreso-campo-mal' : ''}`}>
+                <label htmlFor="login-password" className="ingreso-lbl">
+                  <i className="ingreso-num" aria-hidden="true">02</i>Contraseña
+                </label>
+                <div className="ingreso-caja">
+                  <Lock size={18} className="ingreso-ico" />
+                  <input
+                    id="login-password"
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={loading || countdown > 0}
+                    required
+                    className="ingreso-input"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="ingreso-btn"
+                disabled={loading || countdown > 0}
+                aria-label="Ingresar al Sistema"
+              >
+                {loading ? (
+                  <>
+                    <span>ENTRANDO</span>
+                    <i className="ingreso-giro" aria-hidden="true"></i>
+                  </>
+                ) : countdown > 0 ? (
+                  <>
+                    <Clock size={18} />
+                    <span className="ingreso-btn-espera">Espera {countdown}s para reintentar</span>
+                  </>
+                ) : (
+                  <>
+                    <span>ENTRAR</span>
+                    <svg
+                      className="ingreso-flecha"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M5 12h14M13 6l6 6-6 6" />
+                    </svg>
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="ingreso-ticket-pie">
+              <span className="ingreso-seguro">
+                <ShieldCheck size={14} aria-hidden="true" />
+                Conexión segura
               </span>
+              <div className="ingreso-barras" aria-hidden="true"></div>
             </div>
-          )}
-
-          {/* Error regular de validación o credenciales */}
-          {error && countdown === 0 && (
-            <div className="ingreso-alerta ingreso-alerta-error" role="alert">
-              <ShieldAlert size={18} className="ingreso-alerta-ico" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Formulario */}
-          <form onSubmit={handleSubmit} className="ingreso-form" noValidate>
-            <div className={`ingreso-campo ${error ? 'ingreso-campo-mal' : ''}`}>
-              <label htmlFor="login-email" className="ingreso-lbl">
-                Correo
-              </label>
-              <div className="ingreso-caja">
-                <Mail size={18} className="ingreso-ico" />
-                <input
-                  id="login-email"
-                  type="email"
-                  autoComplete="username"
-                  placeholder="admin@smartdining.com"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value)
-                    setError('')
-                  }}
-                  disabled={loading || countdown > 0}
-                  required
-                  className="ingreso-input"
-                />
-              </div>
-            </div>
-
-            <div className={`ingreso-campo ${error ? 'ingreso-campo-mal' : ''}`}>
-              <label htmlFor="login-password" className="ingreso-lbl">
-                Contraseña
-              </label>
-              <div className="ingreso-caja">
-                <Lock size={18} className="ingreso-ico" />
-                <input
-                  id="login-password"
-                  type="password"
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={loading || countdown > 0}
-                  required
-                  className="ingreso-input"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="ingreso-btn"
-              disabled={loading || countdown > 0}
-              aria-label="Ingresar al Sistema"
-            >
-              {loading ? (
-                <>
-                  <span>ENTRAR</span>
-                  <i className="ingreso-giro" aria-hidden="true"></i>
-                </>
-              ) : countdown > 0 ? (
-                <>
-                  <Clock size={18} />
-                  <span>Espera {countdown}s para reintentar</span>
-                </>
-              ) : (
-                <>
-                  <span>ENTRAR</span>
-                  <svg
-                    className="ingreso-flecha"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="ingreso-ticket-pie">
-            <span>Conexión segura</span>
-          </div>
-        </section>
+          </section>
+        </div>
       </main>
+
+      {/* Cinta inferior con las áreas del sistema (decorativa) */}
+      <div className="ingreso-cinta" aria-hidden="true">
+        <div className="ingreso-cinta-pista">
+          {[0, 1, 2, 3].flatMap((vuelta) =>
+            AREAS_CINTA.map((area) => <span key={`${vuelta}-${area}`}>{area}</span>)
+          )}
+        </div>
+      </div>
 
       <footer className="ingreso-footer">
         <span>© SmartDining · Valledupar</span>
