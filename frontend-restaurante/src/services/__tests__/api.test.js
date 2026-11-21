@@ -7,6 +7,8 @@ import {
   setStoredRateLimit,
   clearStoredRateLimit,
   navegarALogin,
+  cerrarSesionInvalida,
+  MENSAJE_SESION_INVALIDA,
   EVENT_UNAUTHORIZED,
   EVENT_RATE_LIMITED,
   mensajeNoGuardado,
@@ -345,6 +347,23 @@ describe('Interceptor y cliente HTTP (apiFetch)', () => {
       expect(getStoredRateLimit()).not.toBeNull()
       clearStoredRateLimit()
       expect(getStoredRateLimit()).toBeNull()
+    })
+
+    it('cerrarSesionInvalida hace lo mismo que un 401: borra la sesión, deja el mensaje, despacha el evento y va al login', () => {
+      sessionStorage.setItem('smartdining_token', 'token-antiguo')
+      sessionStorage.setItem('smartdining_staff_user', JSON.stringify({ token: 'token-antiguo' }))
+      const unauthListener = vi.fn()
+      window.addEventListener(EVENT_UNAUTHORIZED, unauthListener)
+
+      cerrarSesionInvalida()
+
+      expect(sessionStorage.getItem('smartdining_token')).toBeNull()
+      expect(sessionStorage.getItem('smartdining_staff_user')).toBeNull()
+      expect(getStoredAuthMessage()).toBe(MENSAJE_SESION_INVALIDA)
+      expect(unauthListener).toHaveBeenCalledTimes(1)
+      expect(unauthListener.mock.calls[0][0].detail.mensaje).toBe(MENSAJE_SESION_INVALIDA)
+      expect(window.location.assign).toHaveBeenCalledWith('/login')
+      window.removeEventListener(EVENT_UNAUTHORIZED, unauthListener)
     })
 
     it('navegarALogin respeta pathname ya existente en /login', () => {
