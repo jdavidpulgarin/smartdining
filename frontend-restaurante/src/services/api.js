@@ -142,6 +142,19 @@ export function triggerUnauthorized(detail = {}) {
 }
 
 /**
+ * Cierra la sesión del personal y lo manda al login: borra las credenciales,
+ * deja el mensaje para la pantalla de login, avisa a AuthContext (logout y
+ * socket) y redirige. Es lo que hace un 401 de la API; también lo usa el
+ * ack NO_AUTORIZADO de un evento de socket.
+ */
+export function cerrarSesionInvalida(mensaje = MENSAJE_SESION_INVALIDA, error) {
+  clearAuthStorage()
+  setStoredAuthMessage(mensaje)
+  triggerUnauthorized({ mensaje, error })
+  navegarALogin()
+}
+
+/**
  * Dispara el evento global de límite excedido cuando el servidor responde 429
  */
 export function triggerRateLimited(detail = {}) {
@@ -234,14 +247,11 @@ export async function apiFetch(endpoint, options = {}) {
     const isLoginEndpoint = String(endpoint).includes('/auth/login')
     // Si es /auth/login con skipAuth, es error de credenciales: no se borra ni redirige
     if (!options.skipAuth && !isLoginEndpoint) {
-      clearAuthStorage()
       const mensaje =
         typeof data === 'object' && data?.error && data.error.toLowerCase().includes('desactivad')
           ? data.error
           : MENSAJE_SESION_INVALIDA
-      setStoredAuthMessage(mensaje)
-      triggerUnauthorized({ mensaje, error: data?.error })
-      navegarALogin()
+      cerrarSesionInvalida(mensaje, data?.error)
     }
   }
 

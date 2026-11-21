@@ -27,6 +27,13 @@ const socket = {
   off() {},
 }
 vi.mock('../../hooks/useSocket', () => ({ getSocket: () => socket }))
+// El cierre de sesión de un 401 (cerrarSesionInvalida) se espía: el real
+// redirige con window.location, que jsdom no implementa.
+const cerrarSesionInvalida = vi.fn()
+vi.mock('../../services/api', async (original) => ({
+  ...(await original()),
+  cerrarSesionInvalida: (...args) => cerrarSesionInvalida(...args),
+}))
 
 import { TablesProvider, AVISO_ATENDIDA_SOLO_AQUI, AVISO_ATENDIDA_REINTENTAR } from '../TablesContext'
 import { TablesContext } from '../tablesContextDef'
@@ -71,6 +78,7 @@ const aviso = () => screen.getByTestId('aviso').textContent
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  cerrarSesionInvalida.mockClear()
   for (const e of Object.keys(oyentes)) delete oyentes[e]
   socket.connected = true
   socket.emitidos = []
@@ -216,7 +224,11 @@ describe('TablesContext · ack con error', () => {
     expect(atendidas()[1].data.eventId).toBe(primero)
   })
 
-  it('PAYLOAD_INVALIDO: se quita solo en esta pantalla, con aviso, y no se reintenta', () => {
+  it('el aviso de PAYLOAD_INVALIDO y NO_AUTORIZADO habla del cliente, no de la mesa', () => {
+    expect(AVISO_ATENDIDA_SOLO_AQUI).toBe('No se pudo avisar al cliente; la alerta se quitó solo en esta pantalla')
+  })
+
+  it('PAYLOAD_INVALIDO: se quita solo en esta pantalla, con aviso, no se reintenta y NO cierra la sesión', () => {
     llamado(10, 'Mesa borrada')
     llamado(10, 'Otro de la misma mesa')
     clic('Mesa borrada')
@@ -224,17 +236,28 @@ describe('TablesContext · ack con error', () => {
 
     expect(hay('Mesa borrada')).toBe(false)
     expect(hay('Otro de la misma mesa')).toBe(true) // solo la pulsada
-    expect(aviso()).toBe(AVISO_ATENDIDA_SOLO_AQUI)
+    expect(aviso()).toBe('No se pudo avisar al cliente; la alerta se quitó solo en esta pantalla')
     expect(atendidas()).toHaveLength(1)
+    expect(cerrarSesionInvalida).not.toHaveBeenCalled()
   })
 
-  it('NO_AUTORIZADO: igual que PAYLOAD_INVALIDO', () => {
+  it('NO_AUTORIZADO: se quita solo aquí, con aviso, y cierra la sesión como un 401 (al login)', () => {
     cuenta(11)
     clic(MSG_CUENTA)
     responder(0, null, { ok: false, codigo: 'NO_AUTORIZADO' })
     expect(hay(MSG_CUENTA)).toBe(false)
-    expect(aviso()).toBe(AVISO_ATENDIDA_SOLO_AQUI)
+    expect(aviso()).toBe('No se pudo avisar al cliente; la alerta se quitó solo en esta pantalla')
     expect(atendidas()).toHaveLength(1)
+    expect(cerrarSesionInvalida).toHaveBeenCalledTimes(1)
+  })
+
+  it('ERROR_INTERNO y sin respuesta no cierran la sesión', () => {
+    llamado(10, 'Falla')
+    clic('Falla')
+    responder(0, null, { ok: false, codigo: 'ERROR_INTERNO' })
+    clic('Falla')
+    responder(1, new Error('operation has timed out'))
+    expect(cerrarSesionInvalida).not.toHaveBeenCalled()
   })
 
   it('sin conexión: no emite, la alerta sigue con aviso y conserva su eventId para el reintento', () => {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { generarTokenQrMesa, rotarTokenQrMesa, liberarMesaRemota, decodificarTokenQr } from '../services/qrService'
-import { mesasApi, pedidosApi, getAuthToken } from '../services/api'
+import { mesasApi, pedidosApi, getAuthToken, cerrarSesionInvalida } from '../services/api'
 import { emitirSonidoAlerta } from '../utils/audio'
 import { useSocketListener } from '../hooks'
 import { getSocket } from '../hooks/useSocket'
@@ -25,7 +25,7 @@ const CODIGOS_SIN_REINTENTO = ['NO_AUTORIZADO', 'PAYLOAD_INVALIDO']
 const ESPERA_ACK_ATENDIDA_MS = 5000
 const esIdMesa = (v) => Number.isInteger(v) && v > 0
 const seAvisaALaMesa = (a) => TIPOS_ATENDIDA.includes(a?.tipo) && a.origen !== ORIGEN_HEREDADO && esIdMesa(a.idMesa)
-export const AVISO_ATENDIDA_SOLO_AQUI = 'No se pudo avisar a la mesa; la alerta se quitó solo en esta pantalla'
+export const AVISO_ATENDIDA_SOLO_AQUI = 'No se pudo avisar al cliente; la alerta se quitó solo en esta pantalla'
 export const AVISO_ATENDIDA_REINTENTAR = 'No se pudo avisar a la mesa: revisa la conexión y vuelve a pulsar «Atendida»'
 
 function normalizarMesa(backendMesa, prev = {}) {
@@ -134,7 +134,8 @@ export function TablesProvider({ children }) {
    * mesa:atendida { eventId, idMesa, tipo } con ack; el resto se quita solo aquí.
    * - ack ok (también duplicado): se quitan las de esa mesa y ese tipo.
    * - NO_AUTORIZADO / PAYLOAD_INVALIDO: no se arregla reintentando; se quita
-   *   solo en esta pantalla, con aviso.
+   *   solo en esta pantalla, con aviso. NO_AUTORIZADO además cierra la sesión
+   *   y manda al login, igual que un 401 de la API (cerrarSesionInvalida).
    * - ERROR_INTERNO, sin respuesta o sin conexión: la alerta se queda, con
    *   aviso, y el siguiente clic reintenta con el MISMO eventId.
    */
@@ -168,6 +169,7 @@ export function TablesProvider({ children }) {
       if (!err && CODIGOS_SIN_REINTENTO.includes(r?.codigo)) {
         quitarAlerta(idAlerta)
         showNotification(AVISO_ATENDIDA_SOLO_AQUI, 'error')
+        if (r.codigo === 'NO_AUTORIZADO') cerrarSesionInvalida()
         return
       }
       cambiarAlerta(idAlerta, { enviando: false })
