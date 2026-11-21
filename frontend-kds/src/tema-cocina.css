@@ -579,23 +579,72 @@
     linear-gradient(45deg, transparent 4.5px, var(--tc-papel) 0) 0 0 / 9px 9px;
 }
 
-/* Cabecera en carbón; el nivel la cambia entera de color (abajo). */
+/* Cabecera en carbón; el nivel la cambia entera de color (abajo).
+
+   Rejilla de dos columnas: arriba, el título y el reloj (siempre a la derecha,
+   a la altura de "MESA N"); debajo, "N pedidos" y "+N pedidos de esta mesa en
+   otras columnas" a lo ancho de la cabecera, partiendo línea si no caben. El
+   <div> que envuelve título y metas no pinta nada (display: contents) para
+   que sus hijos se coloquen en la rejilla. */
 .tema-cocina .tc-ticket-cabecera {
-  display: flex;
-  /* En un ticket estrecho el reloj baja a otra línea antes que partir la mesa. */
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
   padding: 13px 16px 12px;
   border-radius: 6px 6px 0 0;
   background: var(--tc-carbon);
   color: var(--tc-papel);
 }
 
+.tema-cocina .tc-ticket-cabecera > div {
+  display: contents;
+}
+
+.tema-cocina .tc-ticket-cabecera .tc-ticket-mesa {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.tema-cocina .tc-ticket-cabecera > .tc-chip {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+.tema-cocina .tc-ticket-cabecera .tc-ticket-meta {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* En un ticket estrecho (tablero a ~760 px) "MESA N" a 44 px y el reloj a 40 px
+   no caben en la misma fila y la mesa se partiría en dos. El que cede es el
+   reloj, solo aquí: un poco más pequeño y con menos aire, sin tocar el título. */
+.tema-cocina .tc-ticket {
+  container-type: inline-size;
+}
+
+@container (max-width: 320px) {
+  .tema-cocina .tc-ticket-cabecera {
+    column-gap: 8px;
+  }
+
+  /* Un nivel más de especificidad: la regla del reloj de la cabecera (abajo,
+     en "Reloj") va después en el archivo y si no ganaría. */
+  .tema-cocina .tc-ticket .tc-ticket-cabecera > .tc-chip {
+    padding-inline: 6px;
+    font-size: 32px;
+  }
+}
+
+/* "Mesa N" cabe siempre en una línea; el título de para llevar o domicilio,
+   con su código, no: parte línea por los espacios y, si una palabra tampoco
+   cabe, donde haga falta. Nunca se sale del ticket ni empuja el reloj, y el
+   tamaño es el mismo. */
 .tema-cocina .tc-ticket-mesa {
+  min-width: 0;
   margin: 0;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   font-size: 44px;
   line-height: 1;
   letter-spacing: 0.03em;
