@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import React from 'react';
-import { App, obtenerSecciones } from './App.jsx';
+import { App, obtenerSecciones, MOSTRAR_PLATO_DEL_DIA } from './App.jsx';
 import { TarjetaPlatoArmablePublico } from './secciones/Carta.jsx';
 import { obtenerMenuPublico } from './services/menuService.js';
 import * as apiModule from './services/api.js';
@@ -154,14 +154,24 @@ describe('App y Sitio Público Completo', () => {
     const menu = await obtenerMenuPublico();
     const html = renderToStaticMarkup(<App menuInicial={menu} />);
 
-    const ordenEsperado = [
-      'inicio',
-      'nosotros',
-      'carta',
-      'como-pedir',
-      'proximamente',
-      'contacto',
-    ];
+    const ordenEsperado = MOSTRAR_PLATO_DEL_DIA
+      ? [
+          'inicio',
+          'hoy',
+          'nosotros',
+          'carta',
+          'como-pedir',
+          'proximamente',
+          'contacto',
+        ]
+      : [
+          'inicio',
+          'nosotros',
+          'carta',
+          'como-pedir',
+          'proximamente',
+          'contacto',
+        ];
 
     let posicionAnterior = -1;
     for (const idSec of ordenEsperado) {
