@@ -31,6 +31,7 @@ import {
   VOUCHER_MAX,
 } from '../utils/caja'
 import { listaExcedentes, textoExcedente, yaNoPendiente, mensajeErrorDevuelto } from '../utils/excedentes'
+import '../styles/caja.css'
 
 function formatCOP(monto) {
   const num = Number(monto) || 0
@@ -480,82 +481,77 @@ function CajaRegistradora() {
   }, [cuentasMesas])
 
   return (
-    <div className="sd-caja-page-wrap">
-      {/* Franja roja con resumen financiero y pestañas */}
-      <div className="sd-red-band">
-        <div className="sd-red-band-content">
-          <div className="sd-red-band-filters">
-            <button
-              type="button"
-              className={`sd-red-band-btn ${activeTab === 'pendientes' ? 'active' : ''}`}
-              onClick={() => setActiveTab('pendientes')}
-            >
-              CUENTAS POR COBRAR <span>{cuentasMesas.length}</span>
-            </button>
-            <button
-              type="button"
-              className={`sd-red-band-btn ${activeTab === 'historial' ? 'active' : ''}`}
-              onClick={() => setActiveTab('historial')}
-            >
-              HISTORIAL DE PAGOS <span>{cobrosDelDia.length}</span>
-            </button>
+    <div className="caja-pagina tema-comanda">
+      <div className="caja-cont">
+        {/* Encabezado: título, resumen del día y acciones */}
+        <header className="caja-cab">
+          <div>
+            <h1 className="caja-titulo">CAJA REGISTRADORA</h1>
+            <p className="caja-sub">Cobros y cierres del turno</p>
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <span style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 16, textTransform: 'uppercase' }}>
+          <div className="caja-acciones">
+            <span className="caja-saldo-salon">
               SALDO SALÓN: <strong>{formatCOP(totalSaldoSalon)}</strong>
             </span>
             <button
               type="button"
-              className="sd-red-band-btn"
+              className="caja-btn caja-btn-claro"
               onClick={() => { cargarCuentas(); cargarDia() }}
               disabled={loading}
               title="Actualizar cuentas y lo recaudado hoy"
             >
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
               <span>ACTUALIZAR</span>
             </button>
           </div>
-        </div>
-      </div>
-
-      <div className="sd-page-container sd-caja-container">
-        {/* Encabezado con título editorial y contadores */}
-        <header className="sd-caja-header" style={{ marginBottom: 28 }}>
-          <h1 className="sd-page-title">
-            CAJA<br />
-            REGISTRADORA
-          </h1>
-          <div className="sd-tables-counters">
-            <span data-testid="recaudado-hoy" title={errorDia ? `No se pudo cargar lo recaudado hoy: ${errorDia}` : undefined}>
-              {textoRecaudadoHoy} RECAUDADO HOY
-            </span>
-            <span className="sd-counter-sep">·</span>
-            <span>{cuentasMesas.length} CUENTAS PENDIENTES</span>
-            <span className="sd-counter-sep">·</span>
-            <span className="sd-counter-alert">{formatCOP(totalSaldoSalon)} POR COBRAR</span>
-          </div>
         </header>
+
+        <div className="caja-resumen">
+          <span data-testid="recaudado-hoy" title={errorDia ? `No se pudo cargar lo recaudado hoy: ${errorDia}` : undefined}>
+            {textoRecaudadoHoy} RECAUDADO HOY
+          </span>
+          <span className="caja-resumen-sep" aria-hidden="true">·</span>
+          <span>{cuentasMesas.length} CUENTAS PENDIENTES</span>
+          <span className="caja-resumen-sep" aria-hidden="true">·</span>
+          <span className="caja-resumen-alerta">{formatCOP(totalSaldoSalon)} POR COBRAR</span>
+        </div>
+
+        {/* Pestañas: cuentas por cobrar e historial del día */}
+        <div className="caja-tabs">
+          <button
+            type="button"
+            className={`caja-tab ${activeTab === 'pendientes' ? 'activa' : ''}`}
+            onClick={() => setActiveTab('pendientes')}
+          >
+            CUENTAS POR COBRAR <span>{cuentasMesas.length}</span>
+          </button>
+          <button
+            type="button"
+            className={`caja-tab ${activeTab === 'historial' ? 'activa' : ''}`}
+            onClick={() => setActiveTab('historial')}
+          >
+            HISTORIAL DE PAGOS <span>{cobrosDelDia.length}</span>
+          </button>
+        </div>
 
         {(excedentes.length > 0 || avisoExcedente) && (
           <section
             aria-labelledby="titulo-excedentes"
             data-testid="caja-excedentes"
-            className="table-toast-banner error"
+            className="caja-excedentes"
             role="alert"
-            style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 10, marginBottom: 20 }}
           >
             {excedentes.length > 0 && (
-              <h2 id="titulo-excedentes" style={{ margin: 0, fontFamily: 'var(--sd-font-heading)', fontSize: 18, textTransform: 'uppercase' }}>
+              <h2 id="titulo-excedentes" className="caja-excedentes-titulo">
                 Devolver en efectivo ({excedentes.length})
               </h2>
             )}
             {excedentes.map((x) => (
-              <div key={x.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div key={x.id} className="caja-excedente">
                 <span>{textoExcedente(x, formatCOP, numeroMesa)}</span>
                 <button
                   type="button"
-                  className="sd-btn sd-btn-primary"
+                  className="caja-btn caja-btn-mini"
                   onClick={() => marcarDevuelto(x)}
                   disabled={devolviendo === x.id}
                 >
@@ -568,34 +564,32 @@ function CajaRegistradora() {
         )}
 
         {errorMessage && (
-          <div className="table-toast-banner info" style={{ marginBottom: 20 }}>
+          <div className="caja-aviso">
             <span>{errorMessage}</span>
           </div>
         )}
 
         {activeTab === 'pendientes' ? (
-          <div className="sd-caja-layout">
-            {/* Columna Izquierda: Botones de Cuentas (72px alto) */}
-            <aside className="sd-caja-col-accounts">
-              <h2 className="sd-card-title" style={{ fontSize: 22, marginBottom: 12 }}>
+          <div className="caja-layout">
+            {/* Cuentas pendientes (ticket de papel) */}
+            <aside className="caja-ticket caja-cuentas">
+              <h2 className="caja-banda">
                 MESAS CON SALDO ({cuentasMesas.length})
               </h2>
 
               {loading && cuentasMesas.length === 0 ? (
-                <div className="sd-card sd-empty-box">
-                  <RefreshCw size={28} className="animate-spin" style={{ color: 'var(--sd-red)' }} />
+                <div className="caja-vacio">
+                  <RefreshCw size={28} className="animate-spin" />
                   <p>CONSULTANDO CUENTAS DEL SALÓN...</p>
                 </div>
               ) : cuentasMesas.length === 0 ? (
-                <div className="sd-card sd-empty-box">
-                  <CheckCircle2 size={40} style={{ color: 'var(--sd-white)' }} />
+                <div className="caja-vacio">
+                  <CheckCircle2 size={36} />
                   <p>NO HAY CUENTAS PENDIENTES</p>
-                  <small style={{ color: 'var(--sd-text-muted)' }}>
-                    Todas las mesas están al día o libres
-                  </small>
+                  <small>Todas las mesas están al día o libres</small>
                 </div>
               ) : (
-                <div className="sd-caja-accounts-list">
+                <div className="caja-cuentas-lista">
                   {cuentasMesas.map((cuenta) => {
                     const isSelected = cuenta.id_mesa === selectedMesaId
                     const mesaNum = cuenta.numero || cuenta.numero_mesa
@@ -604,18 +598,18 @@ function CajaRegistradora() {
                       <button
                         key={cuenta.id_mesa}
                         type="button"
-                        className={`sd-caja-account-btn ${isSelected ? 'selected' : ''}`}
+                        className={`caja-cuenta ${isSelected ? 'activa' : ''}`}
                         onClick={() => handleSelectMesa(cuenta.id_mesa)}
                       >
                         <div>
-                          <strong className="sd-account-mesa-name">
+                          <strong className="caja-cuenta-mesa">
                             Mesa {mesaNum}
                           </strong>
-                          <span className="sd-account-meta">
+                          <span className="caja-cuenta-meta">
                             <Users size={12} /> {cuenta.comensales?.length || 1} COMENSALES · {cuenta.ubicacion || cuenta.ubicacion_mesa || 'SALÓN'}
                           </span>
                         </div>
-                        <strong className="sd-account-saldo">
+                        <strong className="caja-cuenta-saldo">
                           {formatCOP(cuenta.saldo_mesa)}
                         </strong>
                       </button>
@@ -625,15 +619,15 @@ function CajaRegistradora() {
               )}
             </aside>
 
-            {/* Columna Derecha: Tarjeta COBRAR / MESA NN */}
-            <main className="sd-caja-col-billing">
+            {/* Cobro de la mesa elegida (ticket de papel) */}
+            <section className="caja-cobro">
               {selectedCuenta ? (
-                <div className="sd-card sd-billing-card">
-                  <header style={{ marginBottom: 20 }}>
-                    <h2 className="sd-page-title sd-billing-title" style={{ fontSize: 52 }}>
+                <div className="caja-ticket">
+                  <header className="caja-cobro-cab">
+                    <h2 className="caja-banda caja-cobro-titulo">
                       COBRAR / MESA {selectedCuenta.numero || selectedCuenta.numero_mesa}
                     </h2>
-                    <span style={{ fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-text-muted)', fontSize: 16 }}>
+                    <span className="caja-cobro-meta">
                       {selectedCuenta.pedidos?.length === 1 && selectedCuenta.pedidos[0].codigo_pedido
                         ? `PEDIDO ${selectedCuenta.pedidos[0].codigo_pedido} · `
                         : selectedCuenta.pedidos?.length > 1
@@ -643,192 +637,192 @@ function CajaRegistradora() {
                     </span>
                   </header>
 
-                  {/* Saldo Grande de la Mesa */}
-                  <div className="sd-billing-large-saldo">
-                    <span className="sd-saldo-label">SALDO PENDIENTE MESA</span>
-                    <strong className="sd-saldo-amount">
-                      {formatCOP(selectedCuenta.saldo_mesa)}
-                    </strong>
-                  </div>
-
-                  {/* Selector de División de Cuenta: Toda la mesa o por comensal */}
-                  <div style={{ marginBottom: 20 }}>
-                    <label className="sd-input-label" style={{ marginBottom: 8 }}>
-                      SELECCIONAR COBRO (DIVISIÓN DE CUENTA):
-                    </label>
-                    <div className="sd-comensales-chips-row">
-                      <button
-                        type="button"
-                        className={`sd-comensal-chip ${selectedComensal === 'TOTAL' ? 'sd-comensal-seleccionado' : 'sd-comensal-pendiente'}`}
-                        onClick={() => setSelectedComensal('TOTAL')}
-                      >
-                        <span>TODA LA MESA</span>
-                        <strong>{formatCOP(selectedCuenta.saldo_mesa)}</strong>
-                      </button>
-
-                      {(selectedCuenta.comensales || []).map((c, i) => {
-                        const owes = Number(c.saldo) > 0
-                        const isSelectedChip = selectedComensal === c.comensal
-
-                        return (
-                          <button
-                            key={i}
-                            type="button"
-                            className={`sd-comensal-chip ${
-                              isSelectedChip
-                                ? 'sd-comensal-seleccionado'
-                                : !owes
-                                ? 'sd-comensal-pagado'
-                                : 'sd-comensal-pendiente'
-                            }`}
-                            onClick={() => owes && setSelectedComensal(c.comensal)}
-                            disabled={!owes}
-                          >
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <User size={12} /> {c.comensal}
-                            </span>
-                            <strong>{owes ? formatCOP(c.saldo) : 'PAGADO ✔'}</strong>
-                          </button>
-                        )
-                      })}
+                  <div className="caja-cuerpo">
+                    {/* Saldo grande de la mesa */}
+                    <div className="caja-saldo">
+                      <span className="caja-lbl">SALDO PENDIENTE MESA</span>
+                      <strong className="caja-saldo-monto">
+                        {formatCOP(selectedCuenta.saldo_mesa)}
+                      </strong>
                     </div>
-                  </div>
 
-                  {/* Desglose de ítems solicitados */}
-                  <div style={{ marginBottom: 24 }}>
-                    <label className="sd-input-label" style={{ marginBottom: 8 }}>
-                      ÍTEMS CONSUMIDOS EN SALA:
-                    </label>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
-                      {loadingDetalles ? (
-                        <div style={{ padding: 12, color: 'var(--sd-text-muted)' }}>Cargando consumo...</div>
-                      ) : detallesPedido.length > 0 ? (
-                        detallesPedido.map((item, idx) => (
-                          <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', borderRadius: 6 }}>
-                            <div>
-                              <strong style={{ color: 'var(--sd-text)' }}>x{item.cantidad} {item.plato_nombre || item.nombre}</strong>
-                              <span style={{ display: 'block', fontSize: 12, color: 'var(--sd-text-muted)' }}>Comensal: {item.comensal || 'General'}</span>
+                    {/* División de la cuenta: toda la mesa o por comensal */}
+                    <div className="caja-campo">
+                      <label className="caja-lbl">
+                        SELECCIONAR COBRO (DIVISIÓN DE CUENTA):
+                      </label>
+                      <div className="caja-comensales">
+                        <button
+                          type="button"
+                          className={`caja-comensal ${selectedComensal === 'TOTAL' ? 'activa' : ''}`}
+                          onClick={() => setSelectedComensal('TOTAL')}
+                        >
+                          <span>TODA LA MESA</span>
+                          <strong>{formatCOP(selectedCuenta.saldo_mesa)}</strong>
+                        </button>
+
+                        {(selectedCuenta.comensales || []).map((c, i) => {
+                          const owes = Number(c.saldo) > 0
+                          const isSelectedChip = selectedComensal === c.comensal
+
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              className={`caja-comensal ${
+                                isSelectedChip
+                                  ? 'activa'
+                                  : !owes
+                                  ? 'pagado'
+                                  : ''
+                              }`}
+                              onClick={() => owes && setSelectedComensal(c.comensal)}
+                              disabled={!owes}
+                            >
+                              <span>
+                                <User size={12} /> {c.comensal}
+                              </span>
+                              <strong>{owes ? formatCOP(c.saldo) : 'PAGADO ✔'}</strong>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Ítems consumidos */}
+                    <div className="caja-campo">
+                      <label className="caja-lbl">
+                        ÍTEMS CONSUMIDOS EN SALA:
+                      </label>
+                      <div className="caja-items">
+                        {loadingDetalles ? (
+                          <div className="caja-item caja-item-carga">Cargando consumo...</div>
+                        ) : detallesPedido.length > 0 ? (
+                          detallesPedido.map((item, idx) => (
+                            <div key={idx} className="caja-item">
+                              <div>
+                                <strong>x{item.cantidad} {item.plato_nombre || item.nombre}</strong>
+                                <span>Comensal: {item.comensal || 'General'}</span>
+                              </div>
+                              <b>{formatCOP(item.subtotal)}</b>
                             </div>
-                            <span style={{ fontFamily: 'var(--sd-font-heading)', fontWeight: 700 }}>{formatCOP(item.subtotal)}</span>
+                          ))
+                        ) : (
+                          <div className="caja-item">
+                            <span>Consumo registrado en Mesa {selectedCuenta.numero || selectedCuenta.numero_mesa}</span>
+                            <b>{formatCOP(financialDetails.subtotal)}</b>
                           </div>
-                        ))
-                      ) : (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', borderRadius: 6 }}>
-                          <span>Consumo registrado en Mesa {selectedCuenta.numero || selectedCuenta.numero_mesa}</span>
-                          <strong>{formatCOP(financialDetails.subtotal)}</strong>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="caja-corte" aria-hidden="true"></div>
+
+                    {/* Desglose del cobro */}
+                    <div className="caja-desglose">
+                      <div className="caja-desglose-fila">
+                        <span>COBRO PARA</span>
+                        <strong>{financialDetails.comensalNombre.toUpperCase()}</strong>
+                      </div>
+                      <div className="caja-desglose-fila">
+                        <span>TOTAL A LIQUIDAR</span>
+                        <strong>{formatCOP(financialDetails.subtotal)}</strong>
+                      </div>
+
+                      <div className="caja-desglose-fila">
+                        <label className="caja-propina">
+                          <input
+                            type="checkbox"
+                            checked={includeTip}
+                            onChange={(e) => setIncludeTip(e.target.checked)}
+                          />
+                          <span>INCLUIR PROPINA VOLUNTARIA SUGERIDA (10%)</span>
+                        </label>
+                        <span>{formatCOP(financialDetails.tip)}</span>
+                      </div>
+
+                      <div className="caja-total">
+                        <span>TOTAL A COBRAR</span>
+                        <strong>{formatCOP(financialDetails.total)}</strong>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleProcessPayment} className="caja-form">
+                      {/* Método de pago */}
+                      <div className="caja-campo">
+                        <label className="caja-lbl">
+                          MÉTODO DE PAGO:
+                        </label>
+                        <div className="caja-metodos">
+                          <button
+                            type="button"
+                            className={`caja-metodo ${paymentMethod === 'efectivo' ? 'activa' : ''}`}
+                            onClick={() => setPaymentMethod('efectivo')}
+                          >
+                            <DollarSign size={18} />
+                            <span>EFECTIVO</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`caja-metodo ${paymentMethod === 'tarjeta_debito' ? 'activa' : ''}`}
+                            onClick={() => setPaymentMethod('tarjeta_debito')}
+                          >
+                            <CreditCard size={18} />
+                            <span>T. DÉBITO</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`caja-metodo ${paymentMethod === 'tarjeta_credito' ? 'activa' : ''}`}
+                            onClick={() => setPaymentMethod('tarjeta_credito')}
+                          >
+                            <CreditCard size={18} />
+                            <span>T. CRÉDITO</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`caja-metodo ${paymentMethod === 'transferencia' ? 'activa' : ''}`}
+                            onClick={() => setPaymentMethod('transferencia')}
+                          >
+                            <Smartphone size={18} />
+                            <span>TRANSFERENCIA</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Efectivo: recibido y vueltos */}
+                      {paymentMethod === 'efectivo' && (
+                        <div className="caja-efectivo">
+                          <div className="caja-campo">
+                            <label htmlFor="efectivo-input" className="caja-lbl">
+                              EFECTIVO RECIBIDO (COP):
+                            </label>
+                            {/* Sin min/step/required: con step=1000 y min=total, un total
+                                que no es múltiplo de 1.000 (con propina, o un saldo de
+                                34.500) hacía que el navegador rechazara 50.000 en
+                                silencio. El mínimo lo comprueba handleProcessPayment. */}
+                            <input
+                              id="efectivo-input"
+                              type="number"
+                              inputMode="numeric"
+                              min="0"
+                              step="any"
+                              placeholder={financialDetails.total.toString()}
+                              value={cashGiven}
+                              onChange={(e) => setCashGiven(e.target.value)}
+                              className="caja-inp"
+                            />
+                          </div>
+
+                          <div className="caja-cambio">
+                            <span>CAMBIO / VUELTOS:</span>
+                            <strong>{formatCOP(changeDue)}</strong>
+                          </div>
                         </div>
                       )}
-                    </div>
-                  </div>
 
-                  {/* Desglose / Cálculo */}
-                  <div className="sd-breakdown-card">
-                    <div className="sd-breakdown-row">
-                      <span>COBRO PARA</span>
-                      <strong>{financialDetails.comensalNombre.toUpperCase()}</strong>
-                    </div>
-                    <div className="sd-breakdown-row">
-                      <span>TOTAL A LIQUIDAR</span>
-                      <strong>{formatCOP(financialDetails.subtotal)}</strong>
-                    </div>
-
-                    <div className="sd-breakdown-row">
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={includeTip}
-                          onChange={(e) => setIncludeTip(e.target.checked)}
-                        />
-                        <span>INCLUIR PROPINA VOLUNTARIA SUGERIDA (10%)</span>
-                      </label>
-                      <span>{formatCOP(financialDetails.tip)}</span>
-                    </div>
-
-                    <div className="sd-breakdown-total-row">
-                      <span>TOTAL A COBRAR</span>
-                      <strong className="sd-total-charge-amount">{formatCOP(financialDetails.total)}</strong>
-                    </div>
-                  </div>
-
-                  <form onSubmit={handleProcessPayment} className="sd-caja-form">
-                    {/* Selector de Método de Pago */}
-                    <div style={{ marginBottom: 16 }}>
-                      <label className="sd-input-label" style={{ marginBottom: 8 }}>
-                        MÉTODO DE PAGO:
-                      </label>
-                      <div className="sd-payment-methods-row">
-                        <button
-                          type="button"
-                          className={`sd-method-btn ${paymentMethod === 'efectivo' ? 'active' : ''}`}
-                          onClick={() => setPaymentMethod('efectivo')}
-                        >
-                          <DollarSign size={18} />
-                          <span>EFECTIVO</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`sd-method-btn ${paymentMethod === 'tarjeta_debito' ? 'active' : ''}`}
-                          onClick={() => setPaymentMethod('tarjeta_debito')}
-                        >
-                          <CreditCard size={18} />
-                          <span>T. DÉBITO</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`sd-method-btn ${paymentMethod === 'tarjeta_credito' ? 'active' : ''}`}
-                          onClick={() => setPaymentMethod('tarjeta_credito')}
-                        >
-                          <CreditCard size={18} />
-                          <span>T. CRÉDITO</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`sd-method-btn ${paymentMethod === 'transferencia' ? 'active' : ''}`}
-                          onClick={() => setPaymentMethod('transferencia')}
-                        >
-                          <Smartphone size={18} />
-                          <span>TRANSFERENCIA</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Detalle interactivo si es efectivo */}
-                    {paymentMethod === 'efectivo' && (
-                      <div className="sd-cash-details-box" style={{ background: 'rgba(0,0,0,0.3)', padding: 16, borderRadius: 8, marginBottom: 20 }}>
-                        <div className="sd-input-group">
-                          <label htmlFor="efectivo-input" className="sd-input-label">
-                            EFECTIVO RECIBIDO (COP):
-                          </label>
-                          {/* Sin min/step/required: con step=1000 y min=total, un total
-                              que no es múltiplo de 1.000 (con propina, o un saldo de
-                              34.500) hacía que el navegador rechazara 50.000 en
-                              silencio. El mínimo lo comprueba handleProcessPayment. */}
-                          <input
-                            id="efectivo-input"
-                            type="number"
-                            inputMode="numeric"
-                            min="0"
-                            step="any"
-                            placeholder={financialDetails.total.toString()}
-                            value={cashGiven}
-                            onChange={(e) => setCashGiven(e.target.value)}
-                            className="sd-input"
-                          />
-                        </div>
-
-                        <div className="sd-change-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                          <span style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 16 }}>CAMBIO / VUELTOS:</span>
-                          <strong className="sd-change-amount" style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 24, color: 'var(--sd-white)' }}>
-                            {formatCOP(changeDue)}
-                          </strong>
-                        </div>
-                      </div>
-                    )}
-
-                    {usaVoucher(paymentMethod) && (
-                      <div className="sd-card-details-box" style={{ marginBottom: 20 }}>
-                        <div className="sd-input-group">
-                          <label htmlFor="auth-code-input" className="sd-input-label">
+                      {usaVoucher(paymentMethod) && (
+                        <div className="caja-campo">
+                          <label htmlFor="auth-code-input" className="caja-lbl">
                             NRO. APROBACIÓN VOUCHER (OPCIONAL):
                           </label>
                           {/* Se guarda en mayúsculas, como lo deja el backend.
@@ -843,119 +837,116 @@ function CajaRegistradora() {
                             spellCheck={false}
                             value={authCode}
                             onChange={(e) => setAuthCode(e.target.value.toUpperCase())}
-                            className="sd-input"
+                            className="caja-inp"
                           />
                         </div>
-                      </div>
-                    )}
-
-                    {paymentMethod === 'transferencia' && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, background: 'rgba(224, 165, 38, 0.1)', border: '1px solid var(--sd-gold)', borderRadius: 8, marginBottom: 20, color: 'var(--sd-gold)' }}>
-                        <Sparkles size={16} />
-                        <span style={{ fontSize: 14 }}>Confirmar abono en App Bancolombia / Nequi / Daviplata antes de emitir recibo.</span>
-                      </div>
-                    )}
-
-                    {errorCobro && (
-                      <div className="table-toast-banner error" role="alert" style={{ marginBottom: 16 }}>
-                        <span>{errorCobro}</span>
-                      </div>
-                    )}
-
-                    {/* Botón rojo REGISTRAR PAGO / COBRAR */}
-                    <button
-                      type="submit"
-                      disabled={processingPayment || financialDetails.total <= 0}
-                      className="sd-btn sd-btn-primary sd-btn-block"
-                      style={{ minHeight: 54, fontSize: 20 }}
-                      aria-label={`Cobrar ${formatCOP(financialDetails.total)}`}
-                    >
-                      {processingPayment ? (
-                        <>
-                          <RefreshCw size={18} className="animate-spin" />
-                          <span>REGISTRANDO PAGO...</span>
-                        </>
-                      ) : (
-                        <span>COBRAR {formatCOP(financialDetails.total)}</span>
                       )}
-                    </button>
-                  </form>
+
+                      {paymentMethod === 'transferencia' && (
+                        <div className="caja-nota">
+                          <Sparkles size={16} />
+                          <span>Confirmar abono en App Bancolombia / Nequi / Daviplata antes de emitir recibo.</span>
+                        </div>
+                      )}
+
+                      {errorCobro && (
+                        <div className="caja-error" role="alert">
+                          <span>{errorCobro}</span>
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={processingPayment || financialDetails.total <= 0}
+                        className="caja-btn caja-btn-cobrar"
+                        aria-label={`Cobrar ${formatCOP(financialDetails.total)}`}
+                      >
+                        {processingPayment ? (
+                          <>
+                            <RefreshCw size={18} className="animate-spin" />
+                            <span>REGISTRANDO PAGO...</span>
+                          </>
+                        ) : (
+                          <span>COBRAR {formatCOP(financialDetails.total)}</span>
+                        )}
+                      </button>
+                    </form>
+                  </div>
                 </div>
               ) : (
-                <div className="sd-card sd-empty-box">
-                  <Receipt size={48} style={{ color: 'var(--sd-text-muted)' }} />
+                <div className="caja-ticket caja-vacio caja-vacio-cobro">
+                  <Receipt size={44} />
                   <p>SELECCIONA UNA MESA PARA COBRAR</p>
-                  <small style={{ color: 'var(--sd-text-muted)' }}>
+                  <small>
                     Elige una mesa con saldo en la columna izquierda para registrar el pago.
                   </small>
                 </div>
               )}
-            </main>
+            </section>
           </div>
         ) : (
-          /* Vista de Historial de Transacciones */
-          <section className="sd-card history-panel">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          /* Historial de pagos del día */
+          <section className="caja-ticket caja-historial history-panel">
+            <div className="caja-banda caja-historial-cab">
               <div>
-                <h3 className="sd-card-title" style={{ margin: 0 }}>HISTORIAL DE PAGOS Y CIERRES</h3>
-                <span style={{ color: 'var(--sd-text-muted)', fontSize: 14 }}>Transacciones registradas durante la jornada de hoy</span>
+                <h3 className="caja-historial-titulo">HISTORIAL DE PAGOS Y CIERRES</h3>
+                <span>Transacciones registradas durante la jornada de hoy</span>
               </div>
               <button
                 type="button"
-                className="sd-btn sd-btn-secondary"
+                className="caja-btn caja-btn-mini caja-btn-ambar"
                 onClick={() => window.print()}
-                style={{ minHeight: 38, fontSize: 13 }}
               >
                 <Printer size={15} />
                 <span>IMPRIMIR CUADRE DE CAJA</span>
               </button>
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div className="caja-tabla">
+              <table>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid var(--sd-border)', textAlign: 'left', fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-text-muted)' }}>
-                    <th style={{ padding: '10px 14px' }}>N° TRANSACCIÓN</th>
-                    <th style={{ padding: '10px 14px' }}>HORA</th>
-                    <th style={{ padding: '10px 14px' }}>MESA</th>
-                    <th style={{ padding: '10px 14px' }}>COMENSAL</th>
-                    <th style={{ padding: '10px 14px' }}>MÉTODO</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'right' }}>TOTAL COBRADO</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'center' }}>ESTADO</th>
+                  <tr>
+                    <th>N° TRANSACCIÓN</th>
+                    <th>HORA</th>
+                    <th>MESA</th>
+                    <th>COMENSAL</th>
+                    <th>MÉTODO</th>
+                    <th className="der">TOTAL COBRADO</th>
+                    <th className="centro">ESTADO</th>
                   </tr>
                 </thead>
                 <tbody>
                   {errorDia && !dia && (
                     <tr>
-                      <td colSpan={7} role="alert" style={{ padding: '12px 14px', color: 'var(--sd-red)' }}>
+                      <td colSpan={7} role="alert" className="caja-tabla-error">
                         No se pudo cargar el historial de hoy: {errorDia}. Pulsa ACTUALIZAR.
                       </td>
                     </tr>
                   )}
                   {dia && cobrosDelDia.length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>Todavía no hay cobros hoy.</td>
+                      <td colSpan={7} className="caja-tabla-vacia">Todavía no hay cobros hoy.</td>
                     </tr>
                   )}
                   {cobrosDelDia.map((cobro) => (
-                    <tr key={cobro.clave} style={{ borderBottom: '1px solid var(--sd-border)' }}>
-                      <td style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', fontWeight: 700, color: 'var(--sd-white)' }}>
+                    <tr key={cobro.clave}>
+                      <td className="caja-trx">
                         {cobro.ids.map((id) => `TRX-${id}`).join(' · ')}
                       </td>
-                      <td style={{ padding: '12px 14px' }}>{horaBogota(cobro.fecha)}</td>
-                      <td style={{ padding: '12px 14px', fontWeight: 700 }}>Mesa {cobro.numero_mesa}</td>
-                      <td style={{ padding: '12px 14px', color: 'var(--sd-text-muted)' }}>{cobro.comensal || 'Mesa'}</td>
-                      <td style={{ padding: '12px 14px', textTransform: 'uppercase' }}>
+                      <td>{horaBogota(cobro.fecha)}</td>
+                      <td className="caja-tabla-mesa">Mesa {cobro.numero_mesa}</td>
+                      <td className="caja-tabla-suave">{cobro.comensal || 'Mesa'}</td>
+                      <td className="caja-tabla-metodo">
                         {String(cobro.metodo_pago || '').replace('_', ' ')}
                         {cobro.voucher && (
-                          <small style={{ display: 'block', color: 'var(--sd-text-muted)', textTransform: 'none' }}>
+                          <small>
                             Voucher {cobro.voucher}
                           </small>
                         )}
                       </td>
-                      <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700 }}>{formatCOP(cobro.monto)}</td>
-                      <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                        <span className="sd-badge sd-badge-white">Completada</span>
+                      <td className="der caja-tabla-monto">{formatCOP(cobro.monto)}</td>
+                      <td className="centro">
+                        <span className="caja-estado">Completada</span>
                       </td>
                     </tr>
                   ))}
@@ -963,8 +954,8 @@ function CajaRegistradora() {
                 {dia && cobrosDelDia.length > 0 && (
                   <tfoot>
                     <tr>
-                      <td colSpan={5} style={{ padding: '12px 14px', fontFamily: 'var(--sd-font-heading)', textTransform: 'uppercase' }}>Total del día</td>
-                      <td data-testid="total-historial" style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800 }}>{formatCOP(dia.total)}</td>
+                      <td colSpan={5}>Total del día</td>
+                      <td data-testid="total-historial" className="der">{formatCOP(dia.total)}</td>
                       <td />
                     </tr>
                   </tfoot>
@@ -975,24 +966,23 @@ function CajaRegistradora() {
         )}
       </div>
 
-      {/* Modal de Recibo Impreso / Confirmación */}
+      {/* Recibo del cobro */}
       {paidReceipt && (
-        <div className="sd-modal-backdrop" onClick={() => setPaidReceipt(null)}>
+        <div className="caja-velo" onClick={() => setPaidReceipt(null)}>
           <div
-            className="sd-card sd-table-detail-modal"
+            className="caja-ticket caja-recibo"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            style={{ maxWidth: 480 }}
           >
-            <div className="sd-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <CheckCircle2 size={24} style={{ color: 'var(--sd-white)' }} />
+            <div className="caja-banda caja-recibo-cab">
+              <div className="caja-recibo-titulo">
+                <CheckCircle2 size={22} />
                 <div>
-                  <h3 className="sd-card-title" style={{ margin: 0, fontSize: 24 }}>
+                  <h3>
                     Pago Procesado con Éxito
                   </h3>
-                  <small style={{ color: 'var(--sd-text-muted)' }}>
+                  <small>
                     {paidReceipt.duplicado
                       ? 'Este cobro ya estaba registrado: no se cobró otra vez'
                       : 'Transacción guardada en base de datos'}
@@ -1001,60 +991,60 @@ function CajaRegistradora() {
               </div>
               <button
                 type="button"
-                className="sd-topbar-icon-btn"
+                className="caja-recibo-cerrar"
                 onClick={() => setPaidReceipt(null)}
                 aria-label="Cerrar recibo"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
-            <div style={{ margin: '20px 0', padding: 20, background: 'rgba(0,0,0,0.3)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ textAlign: 'center', borderBottom: '1px solid var(--sd-border)', paddingBottom: 12 }}>
-                <h4 style={{ fontFamily: 'var(--sd-font-heading)', margin: 0, fontSize: 22 }}>SMARTDINING</h4>
-                <p style={{ margin: '4px 0', fontSize: 13, color: 'var(--sd-text-muted)' }}>Comprobante de Pago POS</p>
-                <small style={{ fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-white)' }}>{paidReceipt.id_transaccion}</small>
+            <div className="caja-recibo-cuerpo">
+              <div className="caja-recibo-marca">
+                <h4>SMARTDINING</h4>
+                <p>Comprobante de Pago POS</p>
+                <small>{paidReceipt.id_transaccion}</small>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 14 }}>
-                <div><span style={{ color: 'var(--sd-text-muted)' }}>Mesa:</span> <strong>{paidReceipt.mesa}</strong></div>
-                <div><span style={{ color: 'var(--sd-text-muted)' }}>Comensal:</span> {paidReceipt.comensal}</div>
-                <div><span style={{ color: 'var(--sd-text-muted)' }}>Método:</span> {paidReceipt.metodo_pago.toUpperCase()}</div>
-                <div><span style={{ color: 'var(--sd-text-muted)' }}>Hora:</span> {paidReceipt.hora}</div>
+              <div className="caja-recibo-datos">
+                <div><span>Mesa:</span> <strong>{paidReceipt.mesa}</strong></div>
+                <div><span>Comensal:</span> {paidReceipt.comensal}</div>
+                <div><span>Método:</span> {paidReceipt.metodo_pago.toUpperCase()}</div>
+                <div><span>Hora:</span> {paidReceipt.hora}</div>
                 {paidReceipt.pedidos?.length > 0 && (
-                  <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--sd-text-muted)' }}>Pedidos:</span> {paidReceipt.pedidos.join(', ')}</div>
+                  <div className="ancho"><span>Pedidos:</span> {paidReceipt.pedidos.join(', ')}</div>
                 )}
                 {paidReceipt.voucher && (
-                  <div style={{ gridColumn: '1 / -1' }}><span style={{ color: 'var(--sd-text-muted)' }}>Voucher:</span> {paidReceipt.voucher}</div>
+                  <div className="ancho"><span>Voucher:</span> {paidReceipt.voucher}</div>
                 )}
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <span style={{ color: 'var(--sd-text-muted)' }}>Saldo de la mesa:</span>{' '}
+                <div className="ancho">
+                  <span>Saldo de la mesa:</span>{' '}
                   <strong>{paidReceipt.mesaLiberada ? 'PAGADA · mesa liberada' : formatCOP(paidReceipt.saldoRestante)}</strong>
                 </div>
               </div>
 
-              <div style={{ borderTop: '1px solid var(--sd-border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div className="caja-recibo-cuentas">
+                <div>
                   <span>Subtotal:</span>
                   <span>{formatCOP(paidReceipt.subtotal)}</span>
                 </div>
                 {paidReceipt.tip > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div>
                     <span>Propina (10%):</span>
                     <span>{formatCOP(paidReceipt.tip)}</span>
                   </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--sd-font-heading)', fontSize: 20, fontWeight: 800, borderTop: '1px solid var(--sd-border)', paddingTop: 6 }}>
+                <div className="caja-recibo-total">
                   <span>TOTAL:</span>
                   <span>{formatCOP(paidReceipt.total)}</span>
                 </div>
                 {paidReceipt.cashGiven && (
                   <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--sd-text-muted)' }}>
+                    <div className="caja-recibo-suave">
                       <span>Efectivo:</span>
                       <span>{formatCOP(paidReceipt.cashGiven)}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--sd-text-muted)' }}>
+                    <div className="caja-recibo-suave">
                       <span>Cambio:</span>
                       <span>{formatCOP(paidReceipt.changeDue)}</span>
                     </div>
@@ -1063,11 +1053,10 @@ function CajaRegistradora() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 12 }}>
+            <div className="caja-recibo-botones">
               <button
                 type="button"
-                className="sd-btn sd-btn-primary"
-                style={{ flex: 1, minHeight: 44, fontSize: 15 }}
+                className="caja-btn"
                 onClick={() => window.print()}
               >
                 <Printer size={16} />
@@ -1075,8 +1064,7 @@ function CajaRegistradora() {
               </button>
               <button
                 type="button"
-                className="sd-btn sd-btn-secondary"
-                style={{ minHeight: 44, fontSize: 15 }}
+                className="caja-btn caja-btn-claro"
                 onClick={() => setPaidReceipt(null)}
               >
                 CERRAR
@@ -1088,4 +1076,3 @@ function CajaRegistradora() {
     </div>
   )
 }
-
