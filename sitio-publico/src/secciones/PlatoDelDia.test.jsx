@@ -244,6 +244,7 @@ describe('Sección PlatoDelDia', () => {
       await act(async () => {
         root.unmount();
       });
+      expect(mockDisconnect).toHaveBeenCalled();
       contenedor.remove();
     }
   });

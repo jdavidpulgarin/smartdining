@@ -64,6 +64,8 @@ export const CALENDARIO_PLATO_DEL_DIA = {
     titulo2: 'CON PAPAS',
     lema: 'al carbón',
     descripcion: 'Corte premium de res a la parrilla con el toque justo de brasa, papas criollas doradas y chimichurri.',
+    video: '/videos/plato-del-dia/carne.mp4',
+    poster: '/videos/plato-del-dia/carne.webp',
   },
   domingo: {
     dia: 'domingo',
