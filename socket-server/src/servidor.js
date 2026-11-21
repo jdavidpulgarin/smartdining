@@ -42,6 +42,7 @@ const { rutasItemCancelado } = require('./item-cancelado');
 const { rutasMesaActualizada } = require('./mesa-actualizada');
 const { rutasMenuActualizado } = require('./menu-actualizado');
 const { rutasPagosEnCurso } = require('./pagos-en-curso');
+const { registrarMesaAtendida, crearVerificadorMesas } = require('./mesa-atendida');
 
 const rutasBase = {
   /**
@@ -151,6 +152,8 @@ function crearServidor(config, deps = {}) {
   ctx.backend = deps.backend || (config.backendUrl
     ? crearClienteBackend({ url: config.backendUrl, claveInterna: config.internalApiKey })
     : null);
+  // mesa:atendida: ¿la mesa existe y está activa? (GET /api/mesas/:id, con caché).
+  ctx.verificadorMesas = crearVerificadorMesas({ backend: ctx.backend, ...(deps.verificadorMesas || {}) });
   ctx.rotador = crearRotadorQr({
     io, qr: ctx.qr, presencia: ctx.presencia, backend: ctx.backend, intervaloMs: config.rotacionQrMs, ...(deps.rotacion || {}),
   });
@@ -241,6 +244,7 @@ function crearServidor(config, deps = {}) {
     registrarPedidos(socket, ctx);
     registrarSuscripcionesSocket(socket, ctx);
     registrarSala(socket, ctx);
+    registrarMesaAtendida(socket, ctx);
     socket.on('disconnect', (motivo) => log.info('socket desconectado', { socket: socket.id, motivo }));
   });
 

@@ -65,6 +65,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `push:unsubscribe` | `comensal` | — | Estable | [§4](#pushunsubscribe) |
 | `mesa:llamar_mesero` | `comensal` | Obligatorio | Estable | [§4](#mesallamar_mesero) |
 | `cuenta:solicitada` | `comensal` | Obligatorio | Estable | [§4](#cuentasolicitada) |
+| `mesa:atendida` | `admin`, `mesero`, `cajero` | Obligatorio | Nuevo: el socket-server lo valida y reenvía; falta que el panel lo emita y que panel y PWA lo escuchen | [§4](#mesaatendida) |
 | `mesa:presencia:solicitar` | `admin`, `mesero`, `cajero` | — | Estable (nuevo) | [§4](#mesapresenciasolicitar) |
 
 `pantalla` no puede emitir ningún evento: solo escucha.
@@ -80,6 +81,7 @@ Nadie debe depender de él en producción hasta que pase a Estable.
 | `qr:actualizado` | `room:mesa-{ID}` (incluye la pantalla) | No | Estable | [§6.2](#62-cómo-avisa-el-backend-una-rotación-de-token_qr-pantalla-de-mesa) |
 | `mesa:llamar_mesero` | `room:admin` | Sí | Estable | [§4](#mesallamar_mesero) |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | Sí | Estable | [§4](#cuentasolicitada) |
+| `mesa:atendida` | `room:mesa-{ID}`, `room:admin` | Sí | Nuevo (falta que panel y PWA lo escuchen) | [§4](#mesaatendida) |
 | `mesa:presencia` | `room:admin`, `room:mesa-{ID}` | No (estado completo) | Estable (con `sin_celular` desde R-19.2) | [§5.2](#52-mesapresencia) |
 | `mesa:liberada` | `room:mesa-{ID}`, `room:admin` | No (idempotente en el servidor) | Estable. `motivo: "pagada"`: caja Estable (PR #58); en línea Conectado (falta prueba E2E con Wompi sandbox) (PR #33) | [§5.1](#51-mesaliberada) |
 | `ingrediente:disponibilidad` | todos los sockets | Opcional | Estable (el backend lo llama desde PR #70) | [§5.3](#53-ingredientedisponibilidad) |
@@ -134,11 +136,11 @@ motivo exacto) va solo al log del servidor.
 
 | `codigo` | Cuándo |
 |---|---|
-| `PAYLOAD_INVALIDO` | Falta un campo o tiene un tipo/valor inválido |
+| `PAYLOAD_INVALIDO` | Falta un campo o tiene un tipo/valor inválido. En `mesa:atendida`, también un campo de más o una mesa que no existe o está inactiva |
 | `NO_AUTORIZADO` | El rol no puede emitir ese evento o tocar esa mesa; o el comensal manda otro alias que el de su JWT, o toca una línea de otro comensal |
 | `SIN_SALA` | El comensal no hizo `join:table` antes de emitir |
 | `RATE_LIMIT` | 20 eventos/s por socket, 1 llamada al mesero por mesa cada 60 s, o 1 `mesa:presencia:solicitar` por socket cada 2 s |
-| `ERROR_INTERNO` | Fallo inesperado del servidor o de Redis; reenviar con el **mismo** `eventId` |
+| `ERROR_INTERNO` | Fallo inesperado del servidor o de Redis, o (en `mesa:atendida`) no se pudo consultar la mesa al backend; reenviar con el **mismo** `eventId` |
 
 ### Respuestas HTTP (`{ ok: false, codigo, mensaje }`)
 
@@ -558,6 +560,55 @@ Llega a `room:admin` y a la sala de la mesa (los demás comensales lo ven) como
 `{ eventId, id_mesa, comensal, emitidoEn }`. La mesa queda marcada (`sd:mesa:{ID}:cuenta = 1`)
 hasta que se libere.
 
+### `mesa:atendida`
+
+El personal marcó **«Atendida»** un llamado (`mesa:llamar_mesero`) o una cuenta
+(`cuenta:solicitada`) en el panel. Rol: **solo `admin`, `mesero` y `cajero`**; no necesitan
+`join:table`. Lo que haga la mesa o el panel con el aviso (mostrarlo, limpiar la alerta) lo
+decide cada frontend.
+
+```json
+{ "eventId": "5d1c...", "idMesa": 5, "tipo": "llamado" }
+```
+
+| Campo | Tipo | Reglas |
+|---|---|---|
+| `eventId` | string | UUID, obligatorio |
+| `idMesa` | number | Entero de 1 a 2147483647, obligatorio; mesa que **existe y está activa** |
+| `tipo` | string | `"llamado"` o `"cuenta"`, obligatorio |
+
+- **Nombre del campo:** entra `idMesa` (camelCase) y sale `id_mesa`, como en el resto de
+  eventos servidor → cliente. Mandar `id_mesa` en lugar de `idMesa` es un campo de más.
+- **Cuerpo estricto:** es el **primer evento de socket** con esta regla. Un campo de más, uno
+  que falte o uno con tipo incorrecto → `PAYLOAD_INVALIDO` («Campos no permitidos: …» para
+  los de más), igual que las rutas `/internal/item-cancelado` y `/internal/menu-actualizado`.
+  Los demás eventos de socket siguen ignorando los campos que no conocen.
+- **Existencia de la mesa:** se pregunta al backend con `GET /api/mesas/:id`. Un `404` o una
+  respuesta con `activa: false` → `PAYLOAD_INVALIDO`; si la respuesta no trae `activa`, se
+  toma como activa. Las mesas activas se guardan 5 min en caché; las inexistentes o
+  inactivas se vuelven a consultar. Si no hay `BACKEND_URL`, el backend no responde (1500 ms)
+  o devuelve otra cosa (p. ej. `5xx`) → `ERROR_INTERNO`.
+- **Orden:** rol → cuerpo → mesa → reserva del `eventId` → emisión. Un comensal recibe
+  `NO_AUTORIZADO` aunque su cuerpo sea inválido. Ningún error gasta el `eventId`, y si la
+  emisión falla se libera: el panel reintenta con el **mismo** `eventId`.
+- **Idempotencia:** clave `personal:atendida:{idMesa}:{eventId}` (10 min). Repetirlo, desde la
+  misma pantalla o desde otra, responde `duplicado: true` y no se reenvía.
+- **Destino:** `room:mesa-{ID}` (los comensales y la `pantalla` de esa mesa) y `room:admin`
+  (todas las pantallas del panel, **incluida la que lo marcó**: que deduplique por `eventId`).
+  Ninguna otra mesa lo recibe.
+- **Payload reenviado:** `{ eventId, id_mesa, tipo, emitidoEn }`. `emitidoEn` lo pone el
+  servidor. **No lleva datos de quien lo marcó** (ni nombre, ni id, ni rol).
+
+| ack | Cuándo |
+|---|---|
+| `{ ok: true, eventId, duplicado: false }` | Se reenvió |
+| `{ ok: true, eventId, duplicado: true }` | Ese `eventId` ya se había reenviado; no se repite |
+| `{ ok: false, codigo: 'NO_AUTORIZADO' }` | Lo emite un comensal, una tablet o la cocina. No se reenvía nada |
+| `{ ok: false, codigo: 'PAYLOAD_INVALIDO' }` | Cuerpo inválido o con campos de más, o mesa inexistente o inactiva. No se reenvía nada |
+| `{ ok: false, codigo: 'ERROR_INTERNO' }` | No se pudo comprobar la mesa (backend caído o sin configurar) o falló la emisión. No se reenvía nada; reintentar con el mismo `eventId` |
+
+`eventId` va en el ack de error siempre que sea un UUID válido.
+
 ---
 
 ### `mesa:presencia:solicitar`
@@ -610,6 +661,7 @@ cambio el panel funciona igual, con el envío automático de 500 ms como respald
 | `qr:actualizado` | `room:mesa-{ID}` (incluye a la `pantalla` de esa mesa) | `{ id_mesa, token_qr, emitidoEn }` |
 | `mesa:llamar_mesero` | `room:admin` | `{ eventId, id_mesa, comensal, motivo, emitidoEn }` |
 | `cuenta:solicitada` | `room:admin`, `room:mesa-{ID}` | `{ eventId, id_mesa, comensal, emitidoEn }` |
+| `mesa:atendida` | `room:mesa-{ID}`, `room:admin` | `{ eventId, id_mesa, tipo, emitidoEn }` (`tipo`: `llamado` o `cuenta`; sin datos de quien lo marcó; ver [`mesa:atendida`](#mesaatendida)) |
 | `mesa:presencia` | `room:admin`, `room:mesa-{ID}` (solo la de esa mesa) | `{ id_mesa, comensales: [alias], total, pagaron: [alias], sin_celular: [alias] }` (ver §5.2) |
 | `ingrediente:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_ingrediente, disponible, emitidoEn }` |
 | `plato:disponibilidad` | todos los sockets (mesas, `room:kds`, panel) | `{ id_plato, disponible, emitidoEn }` |
@@ -1927,7 +1979,7 @@ antes de que Wompi aprobara), el pago aprobado puede superar lo que se debía. R
 | `PANTALLA_TOKEN_EXPIRES_IN` | Vigencia del JWT de la pantalla de mesa (30d por defecto) |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push (`npm run vapid` las genera) |
 | `PAGOS_WEBHOOK_TOLERANCIA_SEG` | Antigüedad máxima de un evento de Wompi (90000 = 25 h) |
-| `BACKEND_URL` | URL del backend para llamadas servidor a servidor (cuenta, registro de pagos, rotación de QR) |
+| `BACKEND_URL` | URL del backend para llamadas servidor a servidor (cuenta, registro de pagos, rotación de QR, existencia de la mesa en `mesa:atendida`) |
 | `WOMPI_PUBLIC_KEY` | Llave pública (`pub_test_…`). La **única** que llega al cliente |
 | `WOMPI_PRIVATE_KEY` | Llave privada (`prv_test_…`). Solo para consultar transacciones en la API |
 | `WOMPI_INTEGRITY_SECRET` | Secreto de integridad (`test_integrity_…`). Firma las intenciones |
@@ -1990,3 +2042,4 @@ el JWT (R-18), que obliga a abrir sesiones nuevas: un JWT de comensal sin alias 
 | `POST /internal/mesa-actualizada` · `mesa:actualizada` (nuevos, T12) | El panel no se enteraba en vivo de que una mesa se abría, cambiaba de estado, se creaba o se editaba: tenía que recargar | Nueva ruta: validación por campo, idempotencia `backend:mesa-actualizada:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`), campos de más descartados (nunca `token_qr`). `sesion_abierta` (boolean) y `motivo: "eliminada"` (con `activa: false` y solo `id_mesa` obligatorio), con chequeos de coherencia. Emite solo a `room:admin` (§5.7) | Backend (Daniel): llamarla tras el COMMIT de abrir, `PATCH /:id/estado`, `POST /`, `PATCH /:id`, `DELETE /:id` (`motivo: "eliminada"`) y de las dos liberaciones (manual y tras el cobro, `motivo: "liberada"`), siempre con `sesion_abierta`. Panel (Jarrinson): escuchar `mesa:actualizada` en `room:admin`, reemplazar la fila por `id_mesa` y quitarla con `eliminada` |
 | `POST /pagos/intencion` · sin modo `igual` (T2) | Tres modos: `total`, `igual` (saldo ÷ personas que aún no pagaron) y `propio` | Dos modos: `propio` («pagar lo mío») y `total` («pagar toda la cuenta»). `modo: "igual"` → `400 PAYLOAD_INVALIDO` con un mensaje que lo explica, sin consultar la cuenta ni gastar el límite. `mesa:presencia.pagaron` sigue igual (§8.1) | PWA (Juan, en el mismo bloque de merges): quitar «Dividir» y no mandar `igual`. Una PWA vieja que lo mande recibe el `400` con el mensaje |
 | `POST /internal/menu-actualizado` · `menu:actualizado` (nuevos) | Editar un plato (nombre, precio, descripción, imagen) o una opción del constructor no le llegaba al comensal hasta recargar: solo existía `plato:disponibilidad` | Nueva ruta con validación estricta (campos de más → `400`), idempotencia `backend:menu-actualizado:{eventId}` (se libera si la emisión falla → `500 ERROR_INTERNO`). Emite a todas las mesas y a `room:admin` (§5.8) | Backend: llamarla tras el COMMIT de platos, categorías y constructor, después de invalidar la caché. PWA: al recibirlo, volver a pedir `GET /api/menu` |
+| `mesa:atendida` (nuevo) | Marcar «Atendida» un llamado o una cuenta solo cambiaba la pantalla que lo marcó: las otras pantallas del panel seguían con la alerta y el comensal no se enteraba | El personal (`admin`, `mesero`, `cajero`) emite `{ eventId, idMesa, tipo }` (`tipo`: `llamado` o `cuenta`); se reenvía `{ eventId, id_mesa, tipo, emitidoEn }` solo a `room:mesa-{ID}` y `room:admin`, sin datos de quien lo marcó. Es el primer evento de socket con **cuerpo estricto** (campo de más → `PAYLOAD_INVALIDO`). Entra `idMesa` y sale `id_mesa`. La mesa debe existir y estar activa (`GET /api/mesas/:id`; si el backend no responde → `ERROR_INTERNO`, sin gastar el `eventId`). Comensal → `NO_AUTORIZADO`. Idempotencia `personal:atendida:{idMesa}:{eventId}` (§4) | Panel: emitirlo al pulsar «Atendida» y escucharlo en `room:admin` para limpiar la alerta (deduplicar por `eventId`). PWA: escucharlo para avisar al comensal |
