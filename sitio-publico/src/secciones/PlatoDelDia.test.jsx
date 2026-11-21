@@ -4,7 +4,7 @@ import React from 'react';
 import PlatoDelDia from './PlatoDelDia.jsx';
 
 describe('Sección PlatoDelDia', () => {
-  it('con martes: muestra "Salchipapa con todo", video con su portada, y botón "PÍDELO EN TU MESA"', () => {
+  it('con martes: muestra "Salchipapa con todo", precio "25.000" formateado, video con su portada, y botón "PÍDELO EN TU MESA"', () => {
     const html = renderToStaticMarkup(<PlatoDelDia dia="martes" />);
 
     expect(html).toContain('id="hoy"');
@@ -26,11 +26,12 @@ describe('Sección PlatoDelDia', () => {
     // Botón de control de reproducción accesible
     expect(html).toContain('aria-label');
 
-    // Sin precios
-    expect(html).not.toMatch(/\$\s*\d+/);
+    // Precio formateado grande en el ticket
+    expect(html).toContain('25.000');
+    expect(html).toContain('$');
   });
 
-  it('con un día sin video (miércoles): muestra la tarjeta con el nombre y descripción, y sin <video>', () => {
+  it('con un día sin video (miércoles): muestra la tarjeta con el nombre, descripción, precio "22.000" y sin <video>', () => {
     const html = renderToStaticMarkup(<PlatoDelDia dia="miercoles" />);
 
     expect(html).toContain('id="hoy"');
@@ -43,7 +44,23 @@ describe('Sección PlatoDelDia', () => {
     // No debe contener etiqueta video
     expect(html).not.toContain('<video');
 
-    // Sin precios
-    expect(html).not.toMatch(/\$\s*\d+/);
+    // Precio formateado
+    expect(html).toContain('22.000');
+    expect(html).toContain('$');
+  });
+
+  it('con un plato sin precio: no muestra el símbolo de moneda "$"', () => {
+    const platoSinPrecio = {
+      dia: 'lunes',
+      diaEtiqueta: 'lunes',
+      nombre: 'Plato Degustación Especial',
+      descripcion: 'Plato de cortesía para la mesa sin precio asignado.',
+    };
+
+    const html = renderToStaticMarkup(<PlatoDelDia plato={platoSinPrecio} />);
+
+    expect(html).toContain('Plato Degustación Especial');
+    expect(html).toContain('Plato de cortesía');
+    expect(html).not.toContain('$');
   });
 });

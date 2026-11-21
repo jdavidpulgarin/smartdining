@@ -28,7 +28,7 @@ function resolverDiaInicial(diaProp) {
  * Sección independiente del menú/carta, orientada a destacar el plato especial de cada día.
  * No realiza llamadas a la API ni muestra precios.
  */
-export default function PlatoDelDia({ dia: diaProp }) {
+export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
   const [diaActual, setDiaActual] = useState(() => resolverDiaInicial(diaProp));
   const [reproduciendo, setReproduciendo] = useState(true);
   const [soloPortada, setSoloPortada] = useState(false);
@@ -94,8 +94,18 @@ export default function PlatoDelDia({ dia: diaProp }) {
     };
   }, [diaProp]);
 
-  const plato = obtenerPlatoDelDia(diaActual);
+  const plato = platoProp || obtenerPlatoDelDia(diaActual);
   const tieneVideo = Boolean(plato.video && plato.poster);
+
+  const formateadorPrecio = new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  });
+  const precioFormateado =
+    typeof plato.precio === 'number' && !Number.isNaN(plato.precio)
+      ? formateadorPrecio.format(plato.precio)
+      : null;
 
   // IntersectionObserver para reproducir video solo cuando la sección es visible
   useEffect(() => {
@@ -224,7 +234,7 @@ export default function PlatoDelDia({ dia: diaProp }) {
               {plato.nombre}
             </h2>
 
-            {/* Ficha / Ticket con descripción */}
+            {/* Ficha / Ticket con descripción y precio */}
             <div className="w-full bg-superficie-2/90 border border-papel/15 rounded-xl p-5 sm:p-6 mb-6 shadow-md backdrop-blur-sm">
               <span className="block font-etiqueta uppercase tracking-widest text-xs text-primario-texto font-bold mb-2">
                 Descripción
@@ -232,6 +242,17 @@ export default function PlatoDelDia({ dia: diaProp }) {
               <p className="font-cuerpo text-texto-suave text-sm sm:text-base leading-relaxed">
                 {plato.descripcion}
               </p>
+
+              {precioFormateado && (
+                <div className="mt-4 pt-4 border-t border-papel/10 flex items-baseline justify-between gap-2">
+                  <span className="font-etiqueta uppercase tracking-widest text-xs text-papel/60">
+                    Precio especial
+                  </span>
+                  <span className="font-titulo text-3xl sm:text-4xl text-ambar tracking-wide">
+                    {precioFormateado}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Llamado a la acción: Pídelo en tu mesa */}
