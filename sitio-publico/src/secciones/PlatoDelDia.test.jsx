@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
+// @vitest-environment jsdom
+import { describe, it, expect, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import React from 'react';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import PlatoDelDia from './PlatoDelDia.jsx';
 
 describe('Sección PlatoDelDia', () => {
@@ -119,7 +121,7 @@ describe('Sección PlatoDelDia', () => {
     expect(html).not.toContain('PÍDELO EN TU MESA');
   });
 
-  it('mientras carga la carta (cargandoCarta = true): no muestra precio ni botón', () => {
+  it('mientras carga la carta (cargandoCarta = true): se ve el esqueleto y NO "Hoy no hay plato del día"', () => {
     const html = renderToStaticMarkup(
       <PlatoDelDia
         dia="martes"
@@ -128,9 +130,30 @@ describe('Sección PlatoDelDia', () => {
       />
     );
 
-    expect(html).toContain('Plato del día');
-    expect(html).toContain('MARTES');
-    expect(html).toContain('SALCHIPAPA');
+    expect(html).toContain('id="hoy"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('Cargando el plato del día');
+    expect(html).toContain('aspect-video');
+    expect(html).not.toContain('Hoy no hay plato del día');
+    expect(html).not.toContain('ticket-papel');
+    expect(html).not.toContain('PÍDELO EN TU MESA');
+  });
+
+  it('con carta null sin error: se ve el esqueleto y NO "Hoy no hay plato del día"', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDelDia
+        dia="martes"
+        carta={null}
+        cargandoCarta={false}
+        errorCarta={false}
+      />
+    );
+
+    expect(html).toContain('id="hoy"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('Cargando el plato del día');
+    expect(html).toContain('aspect-video');
+    expect(html).not.toContain('Hoy no hay plato del día');
     expect(html).not.toContain('ticket-papel');
     expect(html).not.toContain('PÍDELO EN TU MESA');
   });
@@ -147,5 +170,81 @@ describe('Sección PlatoDelDia', () => {
     expect(html).toContain('ticket-papel');
     expect(html).toContain('34.000');
     expect(html).toContain('PÍDELO EN TU MESA');
+  });
+
+  it('el IntersectionObserver observa la sección real y arranca el video tras pasar del esqueleto a la carta cargada', async () => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    window.matchMedia = window.matchMedia || vi.fn().mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    const elementosObservados = [];
+    let callbackObservador = null;
+
+    const mockObserve = vi.fn((el) => {
+      elementosObservados.push(el);
+    });
+    const mockDisconnect = vi.fn();
+
+    class MockIntersectionObserver {
+      constructor(callback) {
+        callbackObservador = callback;
+      }
+      observe(el) {
+        mockObserve(el);
+      }
+      disconnect() {
+        mockDisconnect();
+      }
+    }
+    window.IntersectionObserver = MockIntersectionObserver;
+    globalThis.IntersectionObserver = MockIntersectionObserver;
+
+    const playMock = vi.fn().mockResolvedValue(undefined);
+    window.HTMLMediaElement.prototype.play = playMock;
+    window.HTMLMediaElement.prototype.pause = vi.fn();
+
+    const contenedor = document.createElement('div');
+    document.body.appendChild(contenedor);
+    const root = createRoot(contenedor);
+
+    try {
+      // 1) Primer render con carta null: se ve el esqueleto
+      await act(async () => {
+        root.render(<PlatoDelDia dia="martes" carta={null} />);
+      });
+
+      expect(contenedor.querySelector('[aria-busy="true"]')).not.toBeNull();
+
+      // 2) Re-render con una carta que trae el plato del martes
+      await act(async () => {
+        root.render(<PlatoDelDia dia="martes" carta={cartaEnVivo} />);
+      });
+
+      // 3) Comprueba que el IntersectionObserver termina observando la sección real
+      expect(mockObserve).toHaveBeenCalled();
+      const seccionReal = contenedor.querySelector('section#hoy');
+      expect(elementosObservados).toContain(seccionReal);
+
+      // 4) Al simular que entra en pantalla se llama play()
+      expect(callbackObservador).not.toBeNull();
+      await act(async () => {
+        callbackObservador([{ isIntersecting: true }]);
+      });
+
+      expect(playMock).toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      contenedor.remove();
+    }
   });
 });

@@ -94,9 +94,11 @@ describe('platoDelDia utils', () => {
       expect(resultado.estado).toBe('no-existe');
     });
 
-    it('devuelve estado "no-existe" si la carta es nula o undefined', () => {
+    it('devuelve estado "cargando" si la carta es nula o undefined', () => {
       const resultado = obtenerPlatoDelDia('martes', null);
-      expect(resultado.estado).toBe('no-existe');
+      expect(resultado.estado).toBe('cargando');
+      const resultadoUndef = obtenerPlatoDelDia('martes', undefined);
+      expect(resultadoUndef.estado).toBe('cargando');
     });
 
     it('marca esRespaldo: true cuando carta.origen === "fija"', () => {

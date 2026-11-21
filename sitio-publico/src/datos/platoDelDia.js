@@ -42,6 +42,8 @@ export const CALENDARIO_PLATO_DEL_DIA = {
     titulo2: 'ASADO',
     lema: 'dorado al carbón',
     descripcion: 'Pollo marinado con finas hierbas y especias de la casa, dorado a la perfección y acompañado de papas rústicas.',
+    video: '/videos/plato-del-dia/pollo.mp4',
+    poster: '/videos/plato-del-dia/pollo.webp',
   },
   viernes: {
     dia: 'viernes',
@@ -51,6 +53,8 @@ export const CALENDARIO_PLATO_DEL_DIA = {
     titulo2: 'DE LA CASA',
     lema: 'recién horneada',
     descripcion: 'Masa crujiente artesanal con salsa pomodoro de la casa, queso mozzarella fundido y albahaca fresca.',
+    video: '/videos/plato-del-dia/pizza.mp4',
+    poster: '/videos/plato-del-dia/pizza.webp',
   },
   sabado: {
     dia: 'sabado',

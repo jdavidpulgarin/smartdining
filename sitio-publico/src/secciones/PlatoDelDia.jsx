@@ -103,9 +103,20 @@ export default function PlatoDelDia({
   const plato = platoProp || obtenerPlatoDelDia(diaActual, carta);
   const tieneVideo = Boolean(plato.video && plato.poster);
 
+  // Mientras la carta está cargando, o todavía es null sin error: esqueleto sobrio del tamaño de la sección
+  const estaCargando =
+    !errorCarta &&
+    (cargandoCarta || (!platoProp && !carta) || plato.estado === 'cargando');
+
+  const mostrandoSeccion =
+    !estaCargando &&
+    !errorCarta &&
+    plato.estado !== 'agotado' &&
+    plato.estado !== 'no-existe';
+
   // IntersectionObserver para reproducir video solo cuando la sección es visible
   useEffect(() => {
-    if (!tieneVideo || soloPortada || typeof window === 'undefined') return;
+    if (!tieneVideo || soloPortada || !mostrandoSeccion || typeof window === 'undefined') return;
 
     const seccionEl = seccionRef.current;
     if (!seccionEl) return;
@@ -130,7 +141,7 @@ export default function PlatoDelDia({
     return () => {
       observador.disconnect();
     };
-  }, [tieneVideo, soloPortada, reproduciendo]);
+  }, [tieneVideo, soloPortada, reproduciendo, mostrandoSeccion]);
 
   const alternarReproduccion = () => {
     const video = videoRef.current;
@@ -144,6 +155,51 @@ export default function PlatoDelDia({
       setReproduciendo(false);
     }
   };
+
+  if (estaCargando) {
+    return (
+      <section
+        id="hoy"
+        aria-busy="true"
+        aria-label="Cargando el plato del día"
+        className="relative fondo-poster text-papel py-16 sm:py-24 scroll-mt-16 border-b border-papel/10 overflow-hidden"
+      >
+        <span className="sr-only">Cargando el plato del día</span>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center motion-reduce:animate-none animate-pulse">
+            {/* Columna multimedia (bloque 16:9 a la izquierda) */}
+            <div className="lg:col-span-7">
+              <div className="aspect-video w-full rounded-2xl bg-superficie-2 border border-papel/10" />
+            </div>
+
+            {/* Columna informativa a la derecha (barras grises para etiqueta, título y precio) */}
+            <div className="lg:col-span-5 flex flex-col items-start w-full space-y-4">
+              {/* Barra para etiqueta */}
+              <div className="h-8 w-44 rounded-lg bg-superficie-2 border border-papel/10" />
+
+              {/* Barras para título */}
+              <div className="w-full space-y-2 my-2">
+                <div className="h-14 sm:h-16 w-3/4 rounded-xl bg-superficie-2" />
+                <div className="h-14 sm:h-16 w-1/2 rounded-xl bg-superficie-2" />
+              </div>
+
+              {/* Barra para lema */}
+              <div className="h-6 w-36 rounded-md bg-superficie-2" />
+
+              {/* Barras para descripción */}
+              <div className="w-full max-w-lg space-y-2 my-2">
+                <div className="h-4 w-full rounded bg-superficie-2" />
+                <div className="h-4 w-5/6 rounded bg-superficie-2" />
+              </div>
+
+              {/* Barra para precio / ticket */}
+              <div className="h-24 w-44 rounded-2xl bg-superficie-2 border border-papel/10" />
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   // Si hay error en la carta, o el plato está agotado o no existe: bloque corto
   if (errorCarta || plato.estado === 'agotado' || plato.estado === 'no-existe') {
