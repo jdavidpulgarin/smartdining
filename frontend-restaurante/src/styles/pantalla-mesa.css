@@ -193,9 +193,12 @@
   min-height: 0;
 }
 
+/* La columna es contenedor: «MESA N» no pasa de su ancho (34cqi), así una
+   mesa de dos dígitos no se mete en el ticket. */
 .tema-comanda .mesa-izq {
   position: relative;
   min-width: 0;
+  container-type: inline-size;
 }
 
 .tema-comanda .mesa-sobre {
@@ -206,7 +209,7 @@
 
 .tema-comanda .mesa-numero {
   margin: 6px 0 10px;
-  font: 400 clamp(100px, min(19vw, 27vh), 260px) / .82 var(--f-titulo);
+  font: 400 clamp(100px, min(19vw, 27vh, 34cqi), 260px) / .82 var(--f-titulo);
   letter-spacing: .01em;
   color: var(--ambar);
   text-shadow: 7px 7px 0 var(--rojo);
@@ -321,14 +324,16 @@
   to { clip-path: inset(-60px -60px -60px -60px); transform: none; }
 }
 
-/* Mascota (decorativa) */
+/* Mascota (decorativa). En horizontal el ticket queda casi pegado a la barra
+   superior: la mascota va metida en su esquina y no asoma por encima, para no
+   tapar «SMARTDINING». En vertical sí asoma (ver la media query). */
 .tema-comanda .mesa-mascota {
   position: absolute;
-  left: -44px;
-  top: -70px;
+  left: -30px;
+  top: 6px;
   z-index: 2;
-  width: 112px;
-  height: 112px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   background: url('/img/logo-smartdining.webp') center / cover no-repeat;
   rotate: -10deg;
@@ -356,7 +361,7 @@
 
 /* En el ticket, el texto de la banda empieza después de la mascota */
 .tema-comanda .mesa-ticket > .mesa-banda {
-  padding-left: 80px;
+  padding-left: 56px;
 }
 
 .tema-comanda .mesa-banda small {
