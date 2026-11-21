@@ -1,16 +1,17 @@
 import { CALENDARIO_PLATO_DEL_DIA } from '../datos/platoDelDia.js';
 
 /**
- * Normaliza una cadena de texto eliminando tildes y pasando a minúsculas.
+ * Normaliza una cadena de texto eliminando tildes, pasando a minúsculas y colapsando espacios.
  * @param {string} texto
  * @returns {string}
  */
-function normalizarTexto(texto) {
+export function normalizar(texto) {
   if (!texto || typeof texto !== 'string') return '';
   return texto
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -26,7 +27,7 @@ export function diaDeHoy(fecha = new Date()) {
     weekday: 'long',
   });
   const diaConTilde = formateador.format(fecha);
-  return normalizarTexto(diaConTilde);
+  return normalizar(diaConTilde);
 }
 
 /**
@@ -57,14 +58,80 @@ export function msHastaMedianocheBogota(fecha = new Date()) {
 }
 
 /**
- * Obtiene el plato del día correspondiente al día indicado o al día de hoy.
- * Función de entrada única que permite una futura sustitución por llamada a API
- * sin necesidad de modificar el componente de la sección.
- * @param {string} [dia]
- * @returns {object} Objeto con la información del plato del día.
+ * Extrae una lista plana de platos desde cualquier formato de carta (objeto con platos/armables, categorias o array).
+ * @param {object|Array} carta
+ * @returns {Array}
  */
-export function obtenerPlatoDelDia(dia) {
-  const claveDia = dia ? normalizarTexto(dia) : diaDeHoy();
-  const plato = CALENDARIO_PLATO_DEL_DIA[claveDia] || CALENDARIO_PLATO_DEL_DIA.lunes;
-  return { ...plato };
+function extraerPlatos(carta) {
+  if (!carta) return [];
+  if (Array.isArray(carta)) return carta;
+  const lista = [];
+  if (Array.isArray(carta.platos)) lista.push(...carta.platos);
+  if (Array.isArray(carta.armables)) lista.push(...carta.armables);
+  if (Array.isArray(carta.categorias)) {
+    for (const cat of carta.categorias) {
+      if (Array.isArray(cat.platos)) lista.push(...cat.platos);
+    }
+  }
+  return lista;
+}
+
+/**
+ * Obtiene el plato del día correspondiente al día indicado y busca su precio y disponibilidad en la carta en vivo.
+ *
+ * @param {string} [dia] - Día de la semana o undefined para usar hoy.
+ * @param {object|Array} [carta] - Objeto o arreglo con la carta de platos.
+ * @returns {object} Información del plato con su estado ('disponible', 'agotado', 'no-existe'), precio y datos promocionales.
+ */
+export function obtenerPlatoDelDia(dia, carta) {
+  const claveDia = dia ? normalizar(dia) : diaDeHoy();
+  const datosCalendario = CALENDARIO_PLATO_DEL_DIA[claveDia] || CALENDARIO_PLATO_DEL_DIA.lunes;
+  const nombreReferencia = datosCalendario.nombreCarta;
+
+  if (!carta) {
+    return {
+      estado: 'no-existe',
+      ...datosCalendario,
+      nombre: nombreReferencia,
+    };
+  }
+
+  const listaPlatos = extraerPlatos(carta);
+  const nombreBuscado = normalizar(nombreReferencia);
+
+  const platoEncontrado = listaPlatos.find(
+    (p) => normalizar(p?.nombre) === nombreBuscado
+  );
+
+  if (!platoEncontrado) {
+    return {
+      estado: 'no-existe',
+      ...datosCalendario,
+      nombre: nombreReferencia,
+    };
+  }
+
+  const disponible =
+    platoEncontrado.disponible !== false &&
+    platoEncontrado.disponible_plato !== false &&
+    (platoEncontrado.tieneStock !== undefined ? platoEncontrado.tieneStock : true);
+
+  const esRespaldo = carta?.origen === 'fija';
+
+  if (!disponible) {
+    return {
+      estado: 'agotado',
+      ...datosCalendario,
+      nombre: platoEncontrado.nombre || nombreReferencia,
+      esRespaldo,
+    };
+  }
+
+  return {
+    estado: 'disponible',
+    precio: Number(platoEncontrado.precio),
+    esRespaldo,
+    ...datosCalendario,
+    nombre: platoEncontrado.nombre || nombreReferencia,
+  };
 }

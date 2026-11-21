@@ -4,34 +4,48 @@ import React from 'react';
 import PlatoDelDia from './PlatoDelDia.jsx';
 
 describe('Sección PlatoDelDia', () => {
-  it('con martes: muestra etiqueta sin "HOY,", título en dos partes, lema, precio "25.000" en ticket, video con portada y botón "PÍDELO EN TU MESA"', () => {
-    const html = renderToStaticMarkup(<PlatoDelDia dia="martes" />);
+  const cartaEnVivo = {
+    origen: 'vivo',
+    platos: [
+      { nombre: 'Salchipapa con todo', precio: 25000, disponible: true },
+      { nombre: 'Hamburguesa Smart Angus', precio: 34000, disponible: true },
+      { nombre: 'Pollo asado', precio: 30000, disponible: false }, // agotado
+    ],
+  };
+
+  it('con plato disponible en carta en vivo: muestra etiqueta recta "PLATO DEL DÍA", día, título, lema, precio de la carta en ticket y botón "PÍDELO EN TU MESA"', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDelDia dia="martes" carta={cartaEnVivo} />
+    );
 
     expect(html).toContain('id="hoy"');
 
-    // 1) Etiqueta en mayúsculas espaciadas sin "HOY,"
-    expect(html).toContain('PLATO DEL DÍA · MARTES');
-    expect(html).not.toContain('Hoy, martes');
+    // 1) Etiqueta recta: "PLATO DEL DÍA" y día "MARTES", sin animación de punto
+    expect(html).toContain('PLATO DEL DÍA');
+    expect(html).toContain('MARTES');
+    expect(html).not.toContain('animate-pulse');
 
-    // 2) Título grande en dos líneas y lema
+    // 2) Título en dos partes y lema
     expect(html).toContain('SALCHIPAPA');
     expect(html).toContain('CON TODO');
     expect(html).toContain('como debe ser');
 
     // 3) Descripción suelta
     expect(html).toContain('Papas a la francesa crocantes');
-    expect(html).not.toContain('>Descripción<');
 
-    // 4) Ticket de papel con precio y botón
+    // 4) Ticket de papel con precio de la carta y contraste alto
     expect(html).toContain('ticket-papel');
     expect(html).toContain('PRECIO DE HOY');
+    expect(html).toContain('text-primario-oscuro');
     expect(html).toContain('25.000');
     expect(html).toContain('$');
     expect(html).toContain('Disponible hoy');
+
+    // Botón de pedido
     expect(html).toContain('PÍDELO EN TU MESA');
     expect(html).toContain('href="#como-pedir"');
 
-    // Video y portada con atributos accesibles
+    // Video con atributos requeridos
     expect(html).toContain('<video');
     expect(html).toContain('poster="/videos/plato-del-dia/salchipapa.webp"');
     expect(html).toContain('/videos/plato-del-dia/salchipapa.mp4');
@@ -39,52 +53,95 @@ describe('Sección PlatoDelDia', () => {
     expect(html).toContain('muted');
     expect(html).toMatch(/playsinline/i);
     expect(html).toContain('loop');
-    expect(html).toContain('aria-label');
   });
 
-  it('con un día sin video (miércoles): muestra etiqueta, título en dos partes, lema, ticket con "22.000" y sin <video>', () => {
-    const html = renderToStaticMarkup(<PlatoDelDia dia="miercoles" />);
+  it('con plato agotado en la carta: muestra bloque "Hoy no hay plato del día" sin precio, video ni botón', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDelDia dia="jueves" carta={cartaEnVivo} />
+    );
 
-    expect(html).toContain('id="hoy"');
-    expect(html).toContain('PLATO DEL DÍA · MIÉRCOLES');
-    expect(html).toContain('PASTAS A LA');
-    expect(html).toContain('BOLOÑESA');
-    expect(html).toContain('receta de la casa');
-    expect(html).toContain('Pasta artesanal cocida al dente');
-
-    // Ticket con precio
-    expect(html).toContain('ticket-papel');
-    expect(html).toContain('PRECIO DE HOY');
-    expect(html).toContain('22.000');
-    expect(html).toContain('$');
-    expect(html).toContain('Disponible hoy');
-
-    // No debe contener etiqueta video
+    expect(html).toContain('Hoy no hay plato del día');
     expect(html).not.toContain('<video');
-
-    // Botón
-    expect(html).toContain('PÍDELO EN TU MESA');
-    expect(html).toContain('href="#como-pedir"');
+    expect(html).not.toContain('ticket-papel');
+    expect(html).not.toContain('PÍDELO EN TU MESA');
+    expect(html).not.toContain('30.000');
   });
 
-  it('con un plato sin precio: no muestra el ticket de precio ni el símbolo "$"', () => {
-    const platoSinPrecio = {
-      dia: 'lunes',
-      diaEtiqueta: 'lunes',
-      nombre: 'Plato Degustación Especial',
-      titulo1: 'DEGUSTACIÓN',
-      titulo2: 'ESPECIAL',
-      lema: 'cortesía de la casa',
-      descripcion: 'Plato de cortesía para la mesa sin precio asignado.',
+  it('con plato no existente en la carta: muestra "Hoy no hay plato del día" sin precio ni botón', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDelDia dia="viernes" carta={cartaEnVivo} /> // Pizza no está en cartaEnVivo
+    );
+
+    expect(html).toContain('Hoy no hay plato del día');
+    expect(html).not.toContain('<video');
+    expect(html).not.toContain('ticket-papel');
+    expect(html).not.toContain('PÍDELO EN TU MESA');
+  });
+
+  it('con error al cargar la carta (errorCarta = true): muestra "Hoy no hay plato del día"', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDelDia dia="martes" carta={null} errorCarta={true} />
+    );
+
+    expect(html).toContain('Hoy no hay plato del día');
+    expect(html).not.toContain('<video');
+    expect(html).not.toContain('ticket-papel');
+    expect(html).not.toContain('PÍDELO EN TU MESA');
+  });
+
+  it('con carta de respaldo (origen: "fija"): muestra información y video pero SIN precio y SIN botón "PÍDELO EN TU MESA"', () => {
+    const cartaRespaldo = {
+      origen: 'fija',
+      platos: [
+        { nombre: 'Salchipapa con todo', precio: 25000, disponible: true },
+      ],
     };
 
-    const html = renderToStaticMarkup(<PlatoDelDia plato={platoSinPrecio} />);
+    const html = renderToStaticMarkup(
+      <PlatoDelDia dia="martes" carta={cartaRespaldo} />
+    );
 
-    expect(html).toContain('DEGUSTACIÓN');
-    expect(html).toContain('ESPECIAL');
-    expect(html).toContain('cortesía de la casa');
+    // Muestra cabecera, título, lema, descripción y video
+    expect(html).toContain('PLATO DEL DÍA');
+    expect(html).toContain('MARTES');
+    expect(html).toContain('SALCHIPAPA');
+    expect(html).toContain('como debe ser');
+    expect(html).toContain('<video');
+
+    // NO muestra precio ni ticket ni botón
     expect(html).not.toContain('ticket-papel');
     expect(html).not.toContain('PRECIO DE HOY');
+    expect(html).not.toContain('25.000');
     expect(html).not.toContain('$');
+    expect(html).not.toContain('PÍDELO EN TU MESA');
+  });
+
+  it('mientras carga la carta (cargandoCarta = true): no muestra precio ni botón', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDelDia
+        dia="martes"
+        carta={cartaEnVivo}
+        cargandoCarta={true}
+      />
+    );
+
+    expect(html).toContain('PLATO DEL DÍA');
+    expect(html).toContain('SALCHIPAPA');
+    expect(html).not.toContain('ticket-papel');
+    expect(html).not.toContain('PÍDELO EN TU MESA');
+  });
+
+  it('con día sin video disponible (lunes): muestra tarjeta de especialidad sin etiqueta <video>', () => {
+    const html = renderToStaticMarkup(
+      <PlatoDelDia dia="lunes" carta={cartaEnVivo} />
+    );
+
+    expect(html).toContain('HAMBURGUESA');
+    expect(html).toContain('SMART ANGUS');
+    expect(html).toContain('Especialidad de la casa');
+    expect(html).not.toContain('<video');
+    expect(html).toContain('ticket-papel');
+    expect(html).toContain('34.000');
+    expect(html).toContain('PÍDELO EN TU MESA');
   });
 });

@@ -25,10 +25,16 @@ function resolverDiaInicial(diaProp) {
 
 /**
  * Sección "Plato del día" (promoción semanal).
- * Sección independiente del menú/carta, orientada a destacar el plato especial de cada día.
- * No realiza llamadas a la API ni muestra precios.
+ * Sección conectada a la carta en vivo para obtener precio y disponibilidad en tiempo real.
+ * No realiza llamadas a la API duplicadas: consume la carta provista por App.jsx.
  */
-export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
+export default function PlatoDelDia({
+  dia: diaProp,
+  carta,
+  cargandoCarta = false,
+  errorCarta = false,
+  plato: platoProp,
+}) {
   const [diaActual, setDiaActual] = useState(() => resolverDiaInicial(diaProp));
   const [reproduciendo, setReproduciendo] = useState(true);
   const [soloPortada, setSoloPortada] = useState(false);
@@ -36,7 +42,7 @@ export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
   const seccionRef = useRef(null);
   const videoRef = useRef(null);
 
-  // Si cambia el prop explícito, sincroniza el estado
+  // Si cambia el prop explícito de día, sincroniza el estado
   useEffect(() => {
     if (diaProp) {
       setDiaActual(diaProp);
@@ -66,7 +72,7 @@ export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
 
   // Programación del cambio de día a medianoche y detección de regreso a la pestaña
   useEffect(() => {
-    if (diaProp) return; // Si se fijó un día por prop, no cambiar automáticamente
+    if (diaProp) return;
 
     let temporizadorId;
 
@@ -75,7 +81,7 @@ export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
       temporizadorId = setTimeout(() => {
         setDiaActual(diaDeHoy());
         programarSiguienteMedianoche();
-      }, ms + 500); // 500 ms de margen de seguridad tras las 00:00
+      }, ms + 500);
     };
 
     programarSiguienteMedianoche();
@@ -94,18 +100,8 @@ export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
     };
   }, [diaProp]);
 
-  const plato = platoProp || obtenerPlatoDelDia(diaActual);
+  const plato = platoProp || obtenerPlatoDelDia(diaActual, carta);
   const tieneVideo = Boolean(plato.video && plato.poster);
-
-  const formateadorPrecio = new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    maximumFractionDigits: 0,
-  });
-  const precioFormateado =
-    typeof plato.precio === 'number' && !Number.isNaN(plato.precio)
-      ? formateadorPrecio.format(plato.precio)
-      : null;
 
   // IntersectionObserver para reproducir video solo cuando la sección es visible
   useEffect(() => {
@@ -121,9 +117,7 @@ export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
         if (!video) return;
 
         if (entrada.isIntersecting && reproduciendo) {
-          video.play().catch(() => {
-            // Manejo silencioso de restricciones de reproducción automática del navegador
-          });
+          video.play().catch(() => {});
         } else {
           video.pause();
         }
@@ -150,6 +144,44 @@ export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
       setReproduciendo(false);
     }
   };
+
+  // Si hay error en la carta, o el plato está agotado o no existe: bloque corto
+  if (errorCarta || plato.estado === 'agotado' || plato.estado === 'no-existe') {
+    return (
+      <section
+        id="hoy"
+        ref={seccionRef}
+        aria-labelledby="titulo-plato-del-dia"
+        className="relative fondo-poster text-papel py-12 sm:py-16 scroll-mt-16 border-b border-papel/10"
+      >
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 text-center">
+          <h2
+            id="titulo-plato-del-dia"
+            className="font-titulo text-3xl sm:text-4xl uppercase text-papel/80 tracking-wide"
+          >
+            Hoy no hay plato del día
+          </h2>
+        </div>
+      </section>
+    );
+  }
+
+  const formateadorPrecio = new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  });
+
+  const tienePrecioValido =
+    typeof plato.precio === 'number' && !Number.isNaN(plato.precio);
+
+  const precioFormateado = tienePrecioValido
+    ? formateadorPrecio.format(plato.precio)
+    : null;
+
+  // Si es carta de respaldo fija o está cargando, no se muestra precio ni botón de pedido
+  const mostrarPrecioYPedido =
+    !plato.esRespaldo && !cargandoCarta && tienePrecioValido;
 
   return (
     <section
@@ -220,10 +252,18 @@ export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
 
           {/* Columna informativa estilo póster */}
           <div className="lg:col-span-5 flex flex-col items-start w-full">
-            {/* 1) Chip de día: PLATO DEL DÍA · {DÍA} con punto rojo que late (apagado en prefers-reduced-motion) */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-ambar/10 border border-ambar/40 text-ambar text-xs sm:text-sm font-etiqueta uppercase tracking-[0.18em] mb-3">
-              <span className="w-2 h-2 rounded-full bg-primario ring-4 ring-primario/25 animate-pulse motion-reduce:animate-none" aria-hidden="true" />
-              <span>PLATO DEL DÍA · {(plato.diaEtiqueta || plato.dia || '').toUpperCase()}</span>
+            {/* 1) Etiqueta tipo marbete de cocina: bloque ámbar sólido + día + raya ámbar */}
+            <div
+              className="flex items-center gap-2 mb-4 select-none"
+              aria-label={`Plato del día, ${plato.diaEtiqueta || plato.dia}`}
+            >
+              <span className="bg-ambar text-tinta font-titulo tracking-widest text-sm px-2.5 py-1 rounded-[2px] leading-none uppercase">
+                PLATO DEL DÍA
+              </span>
+              <span className="font-titulo text-papel tracking-widest text-sm leading-none uppercase">
+                {(plato.diaEtiqueta || plato.dia || '').toUpperCase()}
+              </span>
+              <span className="w-12 h-0.5 bg-ambar shrink-0 ml-1" aria-hidden="true" />
             </div>
 
             {/* 2) Título en dos líneas en Bebas Neue: titulo1 en papel y titulo2 en ámbar */}
@@ -249,30 +289,31 @@ export default function PlatoDelDia({ dia: diaProp, plato: platoProp }) {
               {plato.descripcion}
             </p>
 
-            {/* 4) Ticket de papel con precio y borde inferior ondulado */}
-            {precioFormateado && (
-              <div className="ticket-papel inline-flex flex-col items-start px-5 pt-4 pb-6 mb-6 max-w-full">
-                <small className="font-cuerpo text-[11px] font-bold uppercase tracking-[0.2em] text-primario mb-1">
-                  PRECIO DE HOY
-                </small>
-                <span className="font-titulo text-4xl sm:text-5xl text-tinta leading-none">
-                  {precioFormateado}
-                </span>
-                <span className="font-cuerpo text-xs text-[#5b4a46] mt-1.5">
-                  Disponible hoy
-                </span>
-              </div>
-            )}
+            {/* 4) Ticket de papel con precio y botón de pedido (solo cuando está disponible en carta viva) */}
+            {mostrarPrecioYPedido && (
+              <>
+                <div className="ticket-papel inline-flex flex-col items-start px-5 pt-4 pb-6 mb-6 max-w-full">
+                  <small className="font-cuerpo text-[11px] font-bold uppercase tracking-[0.2em] text-primario-oscuro mb-1">
+                    PRECIO DE HOY
+                  </small>
+                  <span className="font-titulo text-4xl sm:text-5xl text-tinta leading-none">
+                    {precioFormateado}
+                  </span>
+                  <span className="font-cuerpo text-xs text-[#5b4a46] mt-1.5">
+                    Disponible hoy
+                  </span>
+                </div>
 
-            {/* Llamado a la acción: Pídelo en tu mesa */}
-            <div className="pt-1">
-              <a
-                href="#como-pedir"
-                className="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full bg-ambar text-tinta font-titulo text-lg sm:text-xl uppercase tracking-wider hover:bg-ambar/90 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto shadow-md"
-              >
-                PÍDELO EN TU MESA →
-              </a>
-            </div>
+                <div className="pt-1">
+                  <a
+                    href="#como-pedir"
+                    className="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full bg-ambar text-tinta font-titulo text-lg sm:text-xl uppercase tracking-wider hover:bg-ambar/90 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto shadow-md"
+                  >
+                    PÍDELO EN TU MESA →
+                  </a>
+                </div>
+              </>
+            )}
           </div>
 
         </div>

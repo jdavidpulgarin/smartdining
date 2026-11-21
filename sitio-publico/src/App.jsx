@@ -90,7 +90,13 @@ export function App({
       <Encabezado secciones={secciones} datosRestaurante={datosRestaurante} />
       <main id="contenido" className="flex-1">
         <Inicio datosRestaurante={datosRestaurante} />
-        {MOSTRAR_PLATO_DEL_DIA && <PlatoDelDia />}
+        {MOSTRAR_PLATO_DEL_DIA && (
+          <PlatoDelDia
+            carta={menu}
+            cargandoCarta={cargando}
+            errorCarta={error}
+          />
+        )}
         <Nosotros datosRestaurante={datosRestaurante} />
         <CartaSeccion
           menu={menu}
