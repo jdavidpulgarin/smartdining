@@ -48,7 +48,7 @@ export function HistorialInsumo({ insumo, nombres = {}, onClose }) {
       {movimientos && movimientos.length > 0 && (
         <>
           <div style={{ overflowX: 'auto' }}>
-            <table className="sd-config-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <table className="sd-config-table inv-t-historial" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
                 <tr>
                   <th>FECHA</th>

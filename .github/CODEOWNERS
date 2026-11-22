@@ -15,7 +15,7 @@
 
 # Base de datos y panel del restaurante
 /database/               @jdavidpulgarin @rcarlosbuelvas
-/frontend-restaurante/   @jdavidpulgarin @rcarlosbuelvas
+/frontend-restaurante/   @jdavidpulgarin @rcarlosbuelvas @carlosdospino
 
 # API REST y pantalla de cocina
 /backend/                @carlosdospino @rcarlosbuelvas

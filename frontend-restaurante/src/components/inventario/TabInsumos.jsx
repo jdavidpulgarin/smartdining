@@ -198,7 +198,7 @@ export function TabInsumos() {
         </p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table className="sd-config-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <table className="sd-config-table inv-t-insumos" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
               <tr>
                 <th>INSUMO</th>

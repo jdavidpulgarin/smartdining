@@ -1905,8 +1905,10 @@ responde (no se guarda nada). Si falla solo el aviso a la tablet, responde 201 i
 { "solo_si_vacia": true }
 ```
 
-Es para la **renovación automática del modal del panel** (#174): el panel renueva el QR que
-muestra sin tumbar la sesión de quien ya entró. Con `solo_si_vacia: true` se aplica, **antes de
+Lo envían tanto la **renovación automática del modal del panel** (#174) como la **rotación
+manual** del panel («Nuevo QR», «Generar nuevo», «Rotar QR»; #336): el panel cambia el QR sin
+tumbar la sesión de quien ya entró. Con él, si la mesa tiene pedidos o nombres reservados, el
+backend responde **409 `mesa_con_comensales`** y no rota. Con `solo_si_vacia: true` se aplica, **antes de
 pedir el token** y en la misma transacción con la mesa bloqueada, **la misma guarda de
 continuidad que la rotación interna** (`/token-qr/interno`, abajo):
 
@@ -1916,9 +1918,14 @@ continuidad que la rotación interna** (`/token-qr/interno`, abajo):
 | Redis no responde (no se pueden leer las reservas) | **503** `{ "error", "motivo": "alias_no_disponible" }` | No |
 | la mesa está vacía | `201` como arriba | Sí |
 
-Sin cuerpo, con `{}` o con `solo_si_vacia: false` es el **"Nuevo QR" manual de siempre**: rota
-aunque haya comensales. Un campo de más o un `solo_si_vacia` que no sea booleano es **400**
+Sin cuerpo, con `{}` o con `solo_si_vacia: false` rota aunque haya comensales (el panel ya no
+lo usa así desde #336). Un campo de más o un `solo_si_vacia` que no sea booleano es **400**
 `{ "error", "motivo": "cuerpo_invalido" }`, sin tocar la mesa.
+
+Para cerrar la sesión de los comensales presentes, el camino es **liberar la mesa**
+(`POST /mesas/:id/liberar`), no rotar el QR, siempre que la mesa ya no tenga pedidos abiertos:
+liberar responde **409** con pedidos abiertos (ver `POST /mesas/:id/liberar`). Con pedidos
+abiertos, hoy el panel no tiene forma de invalidar un QR filtrado (ver #339).
 
 > Hoy el middleware de sesión compara el `sid` del JWT del comensal con el `token_qr`
 > vigente, así que **rotar cierra las sesiones de quienes ya estaban sentados**. Si se quiere

@@ -94,7 +94,7 @@ export function EditorReceta({ tipo, item, insumos, onGuardado, onClose }) {
           {filas.length === 0 ? (
             <p style={{ margin: 0 }}>Sin receta: no controla inventario.</p>
           ) : (
-            <table className="sd-config-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <table className="sd-config-table inv-t-receta" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
                 <tr>
                   <th>INSUMO</th>
