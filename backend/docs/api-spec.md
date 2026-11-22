@@ -1923,7 +1923,9 @@ lo usa así desde #336). Un campo de más o un `solo_si_vacia` que no sea boolea
 `{ "error", "motivo": "cuerpo_invalido" }`, sin tocar la mesa.
 
 Para cerrar la sesión de los comensales presentes, el camino es **liberar la mesa**
-(`POST /mesas/:id/liberar`), no rotar el QR.
+(`POST /mesas/:id/liberar`), no rotar el QR, siempre que la mesa ya no tenga pedidos abiertos:
+liberar responde **409** con pedidos abiertos (ver `POST /mesas/:id/liberar`). Con pedidos
+abiertos, hoy el panel no tiene forma de invalidar un QR filtrado (ver #339).
 
 > Hoy el middleware de sesión compara el `sid` del JWT del comensal con el `token_qr`
 > vigente, así que **rotar cierra las sesiones de quienes ya estaban sentados**. Si se quiere
