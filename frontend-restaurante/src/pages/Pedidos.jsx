@@ -24,6 +24,7 @@ import {
   mensajeErrorCancelarPlato,
   MOTIVO_MAX,
 } from '../utils/cancelarPlato'
+import '../styles/pedidos.css'
 
 function backendEstadoAUI(estado) {
   switch (estado) {
@@ -330,314 +331,311 @@ export function Pedidos() {
   }
 
   return (
-    <div className="sd-pedidos-page-wrap">
-      {/* Toast Alert */}
+    <div className="pedidos-pagina tema-comanda">
       {toastMsg && (
-        <div className="table-toast-banner info" style={{ position: 'fixed', top: 90, right: 24, zIndex: 100 }}>
-          <BellRing size={16} />
+        <div className="ped-toast">
+          <BellRing size={18} aria-hidden="true" />
           <span>{toastMsg}</span>
         </div>
       )}
 
-      {/* Franja roja con filtros */}
-      <div className="sd-red-band">
-        <div className="sd-red-band-content">
-          <div className="sd-red-band-filters">
-            <button
-              type="button"
-              className={`sd-red-band-btn ${selectedStatus === 'Todos' ? 'active' : ''}`}
-              onClick={() => setSelectedStatus('Todos')}
-            >
-              TODAS <span>{ordersList.length}</span>
-            </button>
-            <button
-              type="button"
-              className={`sd-red-band-btn ${selectedStatus === 'Pendiente' ? 'active' : ''}`}
-              onClick={() => setSelectedStatus('Pendiente')}
-            >
-              PENDIENTES <span>{pendientesCount}</span>
-            </button>
-            <button
-              type="button"
-              className={`sd-red-band-btn ${selectedStatus === 'En cocina' ? 'active' : ''}`}
-              onClick={() => setSelectedStatus('En cocina')}
-            >
-              EN COCINA <span>{enCocinaCount}</span>
-            </button>
-            <button
-              type="button"
-              className={`sd-red-band-btn ${selectedStatus === 'Por servir' ? 'active' : ''}`}
-              onClick={() => setSelectedStatus('Por servir')}
-            >
-              POR SERVIR <span>{porServirCount}</span>
-            </button>
-            <button
-              type="button"
-              className={`sd-red-band-btn ${selectedStatus === 'Entregado' ? 'active' : ''}`}
-              onClick={() => setSelectedStatus('Entregado')}
-            >
-              ENTREGADAS
-            </button>
+      <div className="ped-cont">
+        {/* Encabezado con contadores y buscador */}
+        <header className="ped-cab">
+          <div className="ped-cab-izq">
+            <h1 className="ped-titulo">PEDIDOS EN VIVO</h1>
+            <div className="ped-contadores">
+              <span>{totalActivas} activas</span>
+              <span aria-hidden="true">·</span>
+              <span>{pendientesCount} pendientes</span>
+              <span aria-hidden="true">·</span>
+              <span>{enCocinaCount} en cocina</span>
+              <span aria-hidden="true">·</span>
+              <span className="ped-por-servir">{porServirCount} por servir</span>
+            </div>
           </div>
 
-          <div className="sd-band-search-box">
-            <Search size={14} aria-hidden="true" />
+          <div className="ped-buscar">
+            <Search size={18} aria-hidden="true" />
             <input
               type="text"
               placeholder="Buscar comanda por mesa, cliente o ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="sd-band-search-input"
+              className="ped-inp"
             />
             {searchQuery && (
               <button
                 type="button"
-                className="clear-search-btn"
+                className="ped-buscar-x"
                 onClick={() => setSearchQuery('')}
-                style={{ background: 'transparent', border: 'none', color: 'var(--sd-white)', cursor: 'pointer' }}
               >
-                <X size={14} />
+                <X size={16} />
               </button>
             )}
           </div>
-        </div>
-      </div>
-
-      <div className="sd-page-container sd-pedidos-container">
-        {/* Encabezado con título editorial y contadores */}
-        <header className="sd-pedidos-header" style={{ marginBottom: 28 }}>
-          <h1 className="sd-page-title">
-            PEDIDOS<br />
-            EN VIVO
-          </h1>
-          <div className="sd-tables-counters">
-            <span>{totalActivas} ACTIVAS</span>
-            <span className="sd-counter-sep">·</span>
-            <span>{pendientesCount} PENDIENTES</span>
-            <span className="sd-counter-sep">·</span>
-            <span>{enCocinaCount} EN COCINA</span>
-            <span className="sd-counter-sep">·</span>
-            <span className="sd-counter-alert">{porServirCount} POR SERVIR</span>
-          </div>
         </header>
 
-        {/* Grid de Comandas KDS */}
-        <section className="pedidos-grid-layout">
+        {/* Filtros por estado */}
+        <div className="ped-chips">
+          <button
+            type="button"
+            className={`ped-chip ${selectedStatus === 'Todos' ? 'activa' : ''}`}
+            onClick={() => setSelectedStatus('Todos')}
+          >
+            TODAS <span>{ordersList.length}</span>
+          </button>
+          <button
+            type="button"
+            className={`ped-chip ${selectedStatus === 'Pendiente' ? 'activa' : ''}`}
+            onClick={() => setSelectedStatus('Pendiente')}
+          >
+            PENDIENTES <span>{pendientesCount}</span>
+          </button>
+          <button
+            type="button"
+            className={`ped-chip ${selectedStatus === 'En cocina' ? 'activa' : ''}`}
+            onClick={() => setSelectedStatus('En cocina')}
+          >
+            EN COCINA <span>{enCocinaCount}</span>
+          </button>
+          <button
+            type="button"
+            className={`ped-chip ${selectedStatus === 'Por servir' ? 'activa' : ''}`}
+            onClick={() => setSelectedStatus('Por servir')}
+          >
+            POR SERVIR <span>{porServirCount}</span>
+          </button>
+          <button
+            type="button"
+            className={`ped-chip ${selectedStatus === 'Entregado' ? 'activa' : ''}`}
+            onClick={() => setSelectedStatus('Entregado')}
+          >
+            ENTREGADAS
+          </button>
+        </div>
+
+        {/* Comandas */}
+        <section>
           {loading ? (
-            <div className="sd-card sd-empty-box">
-              <RefreshCw size={40} className="spin" style={{ color: 'var(--sd-red)' }} />
+            <div className="ped-estado">
+              <RefreshCw size={40} className="spin" aria-hidden="true" />
               <p>CARGANDO COMANDAS EN VIVO...</p>
               <small>Sincronizando pedidos activos desde el backend.</small>
             </div>
           ) : error ? (
-            <div className="sd-card sd-empty-box">
-              <AlertCircle size={40} style={{ color: 'var(--sd-gold)' }} />
+            <div className="ped-estado">
+              <AlertCircle size={40} className="ped-estado-error" aria-hidden="true" />
               <p>ERROR AL CONECTAR CON COMANDAS</p>
               <small>{error}</small>
               <button
                 type="button"
-                className="sd-btn sd-btn-primary"
+                className="ped-btn"
                 onClick={recargarPedidos}
-                style={{ marginTop: '1rem', minHeight: 38, fontSize: 14 }}
               >
-                <RefreshCw size={14} />
+                <RefreshCw size={16} aria-hidden="true" />
                 <span>REINTENTAR</span>
               </button>
             </div>
           ) : ordersList.length === 0 ? (
-            <div className="sd-card sd-empty-box">
-              <ChefHat size={46} style={{ color: 'var(--sd-text-muted)', opacity: 0.7 }} />
+            <div className="ped-estado">
+              <ChefHat size={46} aria-hidden="true" />
               <p>NO HAY PEDIDOS ACTIVOS</p>
               <small>No hay pedidos activos en este momento.</small>
             </div>
           ) : filteredOrders.length === 0 ? (
-            <div className="sd-card sd-empty-box">
-              <ChefHat size={46} style={{ color: 'var(--sd-text-muted)', opacity: 0.7 }} />
+            <div className="ped-estado">
+              <ChefHat size={46} aria-hidden="true" />
               <p>NO HAY COMANDAS QUE COINCIDAN</p>
               <small>No se encontraron comandas con el filtro "{selectedStatus}".</small>
             </div>
           ) : (
-            <div className="sd-pedidos-cards-grid">
-              {filteredOrders.map((order) => {
-                const urgency = getUrgencyClass(order.elapsedMin)
-                const isDelivered = order.state.toLowerCase() === 'entregado'
+            // Tablero: una columna por estado. Con un filtro puesto, solo la suya.
+            <div className={`ped-tablero ${selectedStatus === 'Todos' ? '' : 'una'}`}>
+              {[
+                ['Pendiente', 'PENDIENTES'],
+                ['En cocina', 'EN COCINA'],
+                ['Por servir', 'POR SERVIR'],
+                ['Entregado', 'ENTREGADAS'],
+              ]
+                .map(([estado, titulo]) => ({
+                  estado,
+                  titulo,
+                  comandas: filteredOrders.filter((o) => o.state === estado),
+                }))
+                .filter(({ estado, comandas }) =>
+                  comandas.length > 0 || (selectedStatus === 'Todos' && estado !== 'Entregado')
+                )
+                .map(({ estado, titulo, comandas }) => (
+                  <div key={estado} className={`ped-col ${estado === 'Entregado' ? 'ancha' : ''}`}>
+                    <h2 className="ped-col-titulo">
+                      {titulo}
+                      <span>{comandas.length}</span>
+                    </h2>
+                    {comandas.length === 0 && <div className="ped-nada">Nada por aquí</div>}
+                    <div className="ped-lista">
+                      {comandas.map((order) => {
+                        const urgency = getUrgencyClass(order.elapsedMin)
+                        const isDelivered = order.state.toLowerCase() === 'entregado'
 
-                return (
-                  <div
-                    key={order.id}
-                    className="sd-card sd-pedidos-kds-card"
-                    onClick={() => setSelectedOrder(order)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    {/* Header de la Tarjeta */}
-                    <div className="sd-pedidos-card-top">
-                      <div>
-                        <strong className="sd-pedidos-mesa-title">{order.table}</strong>
-                        <span className="sd-pedidos-code-time">
-                          {order.id} · {order.time}
-                        </span>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div className={`elapsed-timer-chip ${urgency}`} style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <Timer size={13} />
-                          <span>{order.elapsedMin ? `${order.elapsedMin}m` : 'Nuevo'}</span>
-                        </div>
-                        <StatusBadge status={order.state} />
-                      </div>
-                    </div>
-
-                    {/* Comensal & Mesero */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, color: 'var(--sd-text-muted)' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <User size={12} /> {order.client}
-                      </span>
-                      {order.waiter && (
-                        <span>Atiende: {order.waiter}</span>
-                      )}
-                    </div>
-
-                    {/* Lista de Ítems */}
-                    <div className="sd-pedidos-items-list">
-                      {order.items.map((item, idx) => (
-                        <div key={item.idDetalle ?? idx} className="sd-pedidos-item-row">
-                          <div className="sd-pedidos-item-meta">
-                            <span
-                              className="sd-pedidos-item-name"
-                              style={item.estado === 'cancelado' ? { textDecoration: 'line-through', opacity: 0.55 } : undefined}
-                            >
-                              x{item.qty} {item.name}
-                              {item.estado === 'cancelado' && <small style={{ marginLeft: 6 }}>(cancelado)</small>}
-                            </span>
-                            {item.notes && (
-                              <small style={{ color: 'var(--sd-gold)', display: 'block', fontSize: 12 }}>
-                                Nota: {item.notes}
-                              </small>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Footer & Acciones KDS */}
-                    <div className="sd-pedidos-card-footer">
-                      <strong className="sd-pedidos-total">{order.total}</strong>
-
-                      <div className="kds-action-btn-wrap">
-                        {!isDelivered ? (
-                          <button
-                            type="button"
-                            className="sd-btn sd-btn-primary"
-                            style={{ minHeight: 36, fontSize: 13, padding: '4px 14px' }}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleAdvanceStatus(order.id, order.state)
-                            }}
+                        return (
+                          <div
+                            key={order.id}
+                            className="ped-ticket"
+                            onClick={() => setSelectedOrder(order)}
                           >
-                            {order.state === 'Pendiente' && (
-                              <>
-                                <Flame size={14} />
-                                <span>A Cocina</span>
-                              </>
-                            )}
-                            {order.state === 'En cocina' && (
-                              <>
-                                <BellRing size={14} />
-                                <span>Marcar Listo</span>
-                              </>
-                            )}
-                            {order.state === 'Por servir' && (
-                              <>
-                                <CheckCircle2 size={14} />
-                                <span>Entregar</span>
-                              </>
-                            )}
-                          </button>
-                        ) : (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--sd-white)', fontSize: 13, fontWeight: 700 }}>
-                            <CheckCircle2 size={14} /> Servido
-                          </span>
-                        )}
-                      </div>
+                            <div className="ped-banda">
+                              <strong className="ped-mesa">{order.table}</strong>
+                              <span className={`ped-timer ${urgency}`}>
+                                <Timer size={15} aria-hidden="true" />
+                                <span>{order.elapsedMin ? `${order.elapsedMin}m` : 'Nuevo'}</span>
+                              </span>
+                            </div>
+
+                            <div className="ped-meta">
+                              <div className="ped-meta-izq">
+                                <span className="ped-cliente">
+                                  <User size={14} aria-hidden="true" /> {order.client}
+                                </span>
+                                <span className="ped-codigo">
+                                  {order.id} · {order.time}
+                                </span>
+                                {order.waiter && (
+                                  <span>Atiende: {order.waiter}</span>
+                                )}
+                              </div>
+                              <StatusBadge status={order.state} />
+                            </div>
+
+                            <div className="ped-items">
+                              {order.items.map((item, idx) => (
+                                <div key={item.idDetalle ?? idx} className="ped-item">
+                                  <span className={item.estado === 'cancelado' ? 'ped-item-nombre cancelado' : 'ped-item-nombre'}>
+                                    x{item.qty} {item.name}
+                                    {item.estado === 'cancelado' && <small>(cancelado)</small>}
+                                  </span>
+                                  {item.notes && (
+                                    <small className="ped-nota">Nota: {item.notes}</small>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="ped-pie">
+                              <strong className="ped-total">{order.total}</strong>
+                              {!isDelivered ? (
+                                <button
+                                  type="button"
+                                  className="ped-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleAdvanceStatus(order.id, order.state)
+                                  }}
+                                >
+                                  {order.state === 'Pendiente' && (
+                                    <>
+                                      <Flame size={17} aria-hidden="true" />
+                                      <span>A Cocina</span>
+                                    </>
+                                  )}
+                                  {order.state === 'En cocina' && (
+                                    <>
+                                      <BellRing size={17} aria-hidden="true" />
+                                      <span>Marcar Listo</span>
+                                    </>
+                                  )}
+                                  {order.state === 'Por servir' && (
+                                    <>
+                                      <CheckCircle2 size={17} aria-hidden="true" />
+                                      <span>Entregar</span>
+                                    </>
+                                  )}
+                                </button>
+                              ) : (
+                                <span className="ped-servido">
+                                  <CheckCircle2 size={17} aria-hidden="true" /> Servido
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
-                )
-              })}
+                ))}
             </div>
           )}
         </section>
       </div>
 
-      {/* Modal de Detalle de Comanda */}
+      {/* Detalle de la comanda */}
       {selectedOrder && (
-        <div className="sd-modal-backdrop" onClick={() => setSelectedOrder(null)}>
-          <div className="sd-card sd-table-detail-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
-            <div className="sd-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <FileText size={24} style={{ color: 'var(--sd-red)' }} />
+        <div className="ped-velo" onClick={() => setSelectedOrder(null)}>
+          {/* sd-table-detail-modal: la usan las pruebas para encontrar la ventana. */}
+          <div className="sd-table-detail-modal ped-ventana" onClick={(e) => e.stopPropagation()}>
+            <div className="ped-ventana-cab">
+              <div className="ped-ventana-titulo">
+                <FileText size={24} aria-hidden="true" />
                 <div>
-                  <h3 className="sd-card-title" style={{ margin: 0, fontSize: 24 }}>
+                  <h3>
                     Comanda {selectedOrder.id}
                   </h3>
-                  <p style={{ margin: 0, fontSize: 14, color: 'var(--sd-text-muted)' }}>
+                  <span>
                     {selectedOrder.table} · {selectedOrder.client} · {selectedOrder.time}
-                  </p>
+                  </span>
                 </div>
               </div>
               <button
                 type="button"
-                className="sd-topbar-icon-btn"
+                className="ped-cerrar"
                 onClick={() => setSelectedOrder(null)}
                 aria-label="Cerrar"
               >
-                <X size={20} />
+                <X size={18} strokeWidth={3} />
               </button>
             </div>
 
-            <div style={{ margin: '20px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <h4 style={{ fontFamily: 'var(--sd-font-heading)', margin: 0, fontSize: 18, color: 'var(--sd-text)' }}>
-                ÍTEMS SOLICITADOS:
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+            <div className="ped-ventana-cuerpo">
+              <h4 className="ped-ventana-sub">ÍTEMS SOLICITADOS:</h4>
+              <div className="ped-lineas">
                 {selectedOrder.items.map((it, i) => {
                   const cancelada = it.estado === 'cancelado'
                   const mostrarBoton = puedeCancelar && it.idDetalle
                     && lineaCancelable(selectedOrder.rawEstado, it.estado)
                   const abierto = cancelando && cancelando.idDetalle === it.idDetalle
                   return (
-                    <div key={it.idDetalle ?? i} style={{ padding: '8px 12px', background: 'rgba(0,0,0,0.3)', borderRadius: 6 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                        <div style={cancelada ? { textDecoration: 'line-through', opacity: 0.55 } : undefined}>
-                          <strong style={{ color: 'var(--sd-text)' }}>{it.qty}x {it.name}</strong>
-                          <div style={{ fontSize: 12, color: 'var(--sd-text-muted)' }}>{it.comensal}{cancelada ? ' · CANCELADO' : ''}</div>
+                    <div key={it.idDetalle ?? i} className="ped-linea">
+                      <div className="ped-linea-fila">
+                        <div className={cancelada ? 'ped-linea-txt cancelado' : 'ped-linea-txt'}>
+                          <strong>{it.qty}x {it.name}</strong>
+                          <div className="ped-linea-quien">{it.comensal}{cancelada ? ' · CANCELADO' : ''}</div>
                           {it.notes && (
-                            <div style={{ fontSize: 12, color: 'var(--sd-gold)' }}>Nota: {it.notes}</div>
+                            <div className="ped-nota">Nota: {it.notes}</div>
                           )}
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {it.subtotal && <span style={{ color: 'var(--sd-text-muted)' }}>{it.subtotal}</span>}
+                        <div className="ped-linea-der">
+                          {it.subtotal && <span>{it.subtotal}</span>}
                           {mostrarBoton && !abierto && (
                             <button
                               type="button"
-                              className="sd-btn sd-btn-secondary"
-                              style={{ minHeight: 32, fontSize: 12, padding: '2px 10px' }}
+                              className="ped-btn peligro mini"
                               onClick={() => setCancelando({ idDetalle: it.idDetalle, motivo: '', error: null, enviando: false })}
                               aria-label={`Cancelar plato ${it.name}`}
                             >
-                              <Ban size={13} />
+                              <Ban size={15} aria-hidden="true" />
                               <span>Cancelar plato</span>
                             </button>
                           )}
                         </div>
                       </div>
                       {abierto && (
-                        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          <label htmlFor={`motivo-${it.idDetalle}`} className="sd-input-label">
+                        <div className="ped-cancelar">
+                          <label htmlFor={`motivo-${it.idDetalle}`} className="ped-lbl">
                             MOTIVO (OBLIGATORIO, QUEDA EN EL HISTORIAL):
                           </label>
                           <textarea
                             id={`motivo-${it.idDetalle}`}
-                            className="sd-input"
+                            className="ped-inp"
                             rows={2}
                             maxLength={MOTIVO_MAX}
                             placeholder="Ej. El cliente ya no lo quiere"
@@ -648,21 +646,20 @@ export function Pedidos() {
                             }}
                             disabled={cancelando.enviando}
                           />
-                          <small style={{ color: 'var(--sd-text-muted)' }}>
+                          <small className="ped-cancelar-ayuda">
                             {it.estado === 'pendiente' && selectedOrder.rawEstado === 'recibido'
                               ? 'Cocina no lo ha empezado: lo reservado vuelve al inventario.'
                               : 'Cocina ya lo empezó: queda como merma.'}
                           </small>
                           {cancelando.error && (
-                            <div className="table-toast-banner error" role="alert">
+                            <div className="ped-error" role="alert">
                               <span>{cancelando.error}</span>
                             </div>
                           )}
-                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                          <div className="ped-cancelar-pie">
                             <button
                               type="button"
-                              className="sd-btn sd-btn-secondary"
-                              style={{ minHeight: 34, fontSize: 13 }}
+                              className="ped-btn contorno mini"
                               onClick={() => setCancelando(null)}
                               disabled={cancelando.enviando}
                             >
@@ -670,8 +667,7 @@ export function Pedidos() {
                             </button>
                             <button
                               type="button"
-                              className="sd-btn sd-btn-primary"
-                              style={{ minHeight: 34, fontSize: 13 }}
+                              className="ped-btn urgente mini"
                               onClick={confirmarCancelarPlato}
                               disabled={cancelando.enviando}
                             >
@@ -685,17 +681,16 @@ export function Pedidos() {
                 })}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTop: '1px solid var(--sd-border)' }}>
-                <span style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 18, color: 'var(--sd-text-muted)' }}>IMPORTE COMANDA:</span>
-                <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 24, color: 'var(--sd-text)' }}>{selectedOrder.total}</strong>
+              <div className="ped-importe">
+                <span>IMPORTE COMANDA:</span>
+                <strong>{selectedOrder.total}</strong>
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, paddingTop: 12, borderTop: '1px solid var(--sd-border)' }}>
+            <div className="ped-ventana-pie">
               <button
                 type="button"
-                className="sd-btn sd-btn-secondary"
-                style={{ minHeight: 40, fontSize: 14 }}
+                className="ped-btn contorno"
                 onClick={() => window.print()}
               >
                 Imprimir Comanda
@@ -703,8 +698,7 @@ export function Pedidos() {
               {selectedOrder.state !== 'Entregado' && (
                 <button
                   type="button"
-                  className="sd-btn sd-btn-primary"
-                  style={{ minHeight: 40, fontSize: 14 }}
+                  className="ped-btn"
                   onClick={() => {
                     handleAdvanceStatus(selectedOrder.id, selectedOrder.state)
                     setSelectedOrder(null)
