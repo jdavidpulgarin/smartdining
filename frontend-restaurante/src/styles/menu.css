@@ -1,0 +1,935 @@
+/* ==============================================================================
+   Menú · versión negra
+   Diseño: referencia-diseno/roles/smartdining-admin-negro.html (sección MENÚ)
+   Todo bajo .tema-comanda; clases con prefijo menu-. Solo diseño: la lógica vive
+   en src/pages/Menu.jsx y no cambia.
+   ============================================================================== */
+
+/* contain: inline-size: el ancho lo pone la pantalla, no el contenido (si no, el
+   contenedor del panel crece y el shell corta lo que sobra). */
+.tema-comanda.menu-pagina {
+  /* Lo que ocupa la barra superior: 76 px, o dos filas por debajo de 1024 px */
+  --menu-barra: 88px;
+
+  contain: inline-size;
+  min-width: 0;
+  min-height: calc(100vh - 72px);
+  background:
+    repeating-linear-gradient(115deg, transparent 0 34px, rgba(255, 176, 46, .035) 34px 38px),
+    var(--carbon);
+  color: var(--papel);
+  font-family: var(--f-texto);
+}
+
+.tema-comanda .menu-cont {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 24px 60px;
+}
+
+.tema-comanda.menu-pagina :focus-visible {
+  outline: 3px solid var(--ambar);
+  outline-offset: 2px;
+}
+
+.tema-comanda .menu-plato :focus-visible,
+.tema-comanda .menu-ventana :focus-visible {
+  outline-color: var(--rojo);
+}
+
+.tema-comanda .menu-ventana-cab :focus-visible {
+  outline-color: var(--papel);
+}
+
+.tema-comanda.menu-pagina .spin {
+  animation: menu-gira 1s linear infinite;
+}
+
+@keyframes menu-gira {
+  to { transform: rotate(360deg); }
+}
+
+/* Aviso fijo de guardado / no guardado. Va debajo de la barra superior: el
+   contenedor del panel (z-index: 1) queda siempre por debajo de ella. */
+.tema-comanda .menu-aviso {
+  position: fixed;
+  top: var(--menu-barra);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 12px 16px;
+  border: 2px solid var(--ambar);
+  border-left-width: 8px;
+  border-radius: 12px;
+  background: var(--papel);
+  color: var(--tinta);
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .6);
+}
+
+.tema-comanda .menu-aviso svg {
+  flex: none;
+}
+
+.tema-comanda .menu-aviso.error {
+  border-color: var(--brasa);
+  color: var(--granate);
+}
+
+/* Encabezado */
+.tema-comanda .menu-cab {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px 24px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.tema-comanda .menu-cab-izq {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tema-comanda .menu-titulo {
+  margin: 0;
+  font: 400 clamp(44px, 5vw, 64px) / .88 var(--f-titulo);
+  letter-spacing: .04em;
+  color: var(--papel);
+  text-shadow: 4px 4px 0 var(--rojo);
+}
+
+.tema-comanda .menu-sub {
+  font: 700 23px / 1.1 var(--f-mano);
+  color: var(--ambar);
+}
+
+.tema-comanda .menu-acciones {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Botones */
+.tema-comanda .menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--ambar);
+  color: var(--carbon);
+  font: 400 19px var(--f-titulo);
+  letter-spacing: .08em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tema-comanda .menu-btn.claro {
+  background: transparent;
+  color: var(--papel);
+  box-shadow: inset 0 0 0 2px var(--papel);
+}
+
+.tema-comanda .menu-btn.oscuro {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+.tema-comanda .menu-btn.contorno {
+  background: var(--papel);
+  color: var(--carbon);
+  box-shadow: inset 0 0 0 2px var(--carbon);
+}
+
+.tema-comanda .menu-btn.mini {
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: 16px;
+}
+
+.tema-comanda .menu-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* Filtros */
+.tema-comanda .menu-filtros {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.tema-comanda .menu-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tema-comanda .menu-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 2px solid var(--papel);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--papel);
+  font: 400 16px var(--f-titulo);
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+
+.tema-comanda .menu-chip:hover {
+  border-color: var(--ambar);
+  color: var(--ambar);
+}
+
+.tema-comanda .menu-chip.activa {
+  border-color: var(--ambar);
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+.tema-comanda .menu-chip-n {
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--carbon2);
+  color: var(--papel);
+  font-size: 15px;
+  letter-spacing: 0;
+  line-height: 22px;
+  text-align: center;
+}
+
+.tema-comanda .menu-chip.activa .menu-chip-n {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+.tema-comanda .menu-busqueda {
+  display: flex;
+  align-items: center;
+  gap: 12px 18px;
+  flex-wrap: wrap;
+}
+
+.tema-comanda .menu-buscar {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 0;
+  max-width: 460px;
+}
+
+.tema-comanda .menu-buscar > svg {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--suave);
+  pointer-events: none;
+}
+
+.tema-comanda .menu-buscar .menu-inp {
+  padding-left: 40px;
+  padding-right: 44px;
+}
+
+.tema-comanda .menu-buscar-x {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  border: 0;
+  background: none;
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.tema-comanda .menu-solo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font: 400 17px var(--f-titulo);
+  letter-spacing: .08em;
+  color: var(--papel);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Interruptor: un checkbox nativo con forma de interruptor */
+.tema-comanda .menu-sw {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 26px;
+  margin: 0;
+  border: 2px solid var(--carbon);
+  border-radius: 13px;
+  background: var(--papel2);
+  cursor: pointer;
+}
+
+.tema-comanda .menu-sw::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--carbon);
+  transition: left .2s;
+}
+
+.tema-comanda .menu-sw:checked {
+  background: var(--ambar);
+}
+
+.tema-comanda .menu-sw:checked::after {
+  left: 22px;
+}
+
+.tema-comanda .menu-solo .menu-sw {
+  border-color: var(--papel);
+  background: var(--carbon2);
+}
+
+.tema-comanda .menu-solo .menu-sw::after {
+  background: var(--papel);
+}
+
+.tema-comanda .menu-solo .menu-sw:checked {
+  border-color: var(--ambar);
+  background: var(--ambar);
+}
+
+.tema-comanda .menu-solo .menu-sw:checked::after {
+  background: var(--carbon);
+}
+
+/* Campos */
+.tema-comanda .menu-inp {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 2px solid var(--carbon);
+  border-radius: 10px;
+  background: #fffaf3;
+  color: var(--tinta);
+  font: 500 16px var(--f-texto);
+  box-sizing: border-box;
+}
+
+.tema-comanda .menu-inp::placeholder {
+  color: #75635d;
+  opacity: 1;
+}
+
+.tema-comanda textarea.menu-inp {
+  min-height: 88px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+/* Cargando / error / vacío */
+.tema-comanda .menu-estado {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 48px 24px;
+  border-radius: 14px;
+  background: var(--papel);
+  color: var(--suave);
+  text-align: center;
+}
+
+.tema-comanda .menu-estado h3 {
+  margin: 0;
+  font: 400 28px var(--f-titulo);
+  letter-spacing: .06em;
+  color: var(--carbon);
+}
+
+.tema-comanda .menu-estado p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tema-comanda .menu-estado-error {
+  color: var(--rojo);
+}
+
+/* Tarjetas de los platos */
+.tema-comanda .menu-platos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr));
+  gap: 18px;
+}
+
+.tema-comanda .sd-card.menu-plato {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid var(--papel);
+  border-radius: 14px;
+  background: var(--papel);
+  color: var(--tinta);
+  box-shadow: 0 16px 24px -16px rgba(0, 0, 0, .6);
+}
+
+.tema-comanda .sd-card.menu-plato.armable {
+  border-color: var(--ambar);
+}
+
+.tema-comanda .sd-card.menu-plato.apagado {
+  border-color: var(--brasa);
+}
+
+.tema-comanda .menu-foto {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(150deg, #3a2622, #120c0c);
+  overflow: hidden;
+}
+
+.tema-comanda .menu-foto img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tema-comanda .menu-etq,
+.tema-comanda .menu-tiempo {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+  padding: 2px 9px;
+  border: 2px solid var(--carbon);
+  border-radius: 6px;
+  background: var(--papel);
+  color: var(--carbon);
+  font: 400 15px var(--f-titulo);
+  letter-spacing: .1em;
+}
+
+.tema-comanda .menu-etq {
+  left: 10px;
+  top: 10px;
+}
+
+.tema-comanda .menu-etq.osc,
+.tema-comanda .menu-tiempo {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+.tema-comanda .menu-tiempo {
+  right: 10px;
+  bottom: 10px;
+  letter-spacing: .04em;
+}
+
+.tema-comanda .menu-plato-cuerpo {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  flex: 1;
+  padding: 14px 16px 12px;
+}
+
+.tema-comanda .menu-plato-cat {
+  font: 400 15px var(--f-titulo);
+  letter-spacing: .14em;
+  color: var(--suave);
+}
+
+.tema-comanda .menu-plato-nombre {
+  margin: 0;
+  font: 400 27px / 1 var(--f-titulo);
+  letter-spacing: .03em;
+  color: var(--carbon);
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .menu-plato-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 2px 0 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--suave);
+}
+
+.tema-comanda .menu-plato-precio {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 16px;
+  border-top: 2px dashed #ecdcc8;
+}
+
+.tema-comanda .menu-plato-precio strong {
+  font: 400 30px / 1.1 var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .menu-historial {
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tinta);
+  font: 600 14px var(--f-texto);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.tema-comanda .menu-plato-pie {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 16px 14px;
+  border-top: 2px dashed #ecdcc8;
+}
+
+.tema-comanda .menu-disp {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--carbon);
+  font: 400 16px / 1.1 var(--f-titulo);
+  letter-spacing: .08em;
+  text-align: left;
+}
+
+.tema-comanda .menu-disp svg {
+  flex: none;
+}
+
+.tema-comanda .menu-disp.no {
+  color: var(--granate);
+}
+
+/* Admin: el interruptor dibuja el estado manual (aria-pressed) */
+.tema-comanda .menu-disp.interruptor {
+  position: relative;
+  padding-left: 56px;
+  cursor: pointer;
+}
+
+.tema-comanda .menu-disp.interruptor svg {
+  display: none;
+}
+
+.tema-comanda .menu-disp.interruptor::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 46px;
+  height: 26px;
+  border: 2px solid var(--carbon);
+  border-radius: 13px;
+  background: var(--papel2);
+  transform: translateY(-50%);
+  box-sizing: border-box;
+}
+
+.tema-comanda .menu-disp.interruptor::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--carbon);
+  transform: translateY(-50%);
+  transition: left .2s;
+}
+
+.tema-comanda .menu-disp.interruptor[aria-pressed="true"]::before {
+  background: var(--ambar);
+}
+
+.tema-comanda .menu-disp.interruptor[aria-pressed="true"]::after {
+  left: 24px;
+}
+
+.tema-comanda .menu-plato-acc {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.tema-comanda .menu-ico {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 2px solid var(--carbon);
+  border-radius: 9px;
+  background: var(--papel);
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.tema-comanda .menu-ico:hover {
+  background: var(--papel2);
+}
+
+.tema-comanda .menu-ico.armable {
+  background: var(--ambar);
+}
+
+.tema-comanda .menu-ico.peligro {
+  border-color: var(--granate);
+  color: var(--granate);
+}
+
+/* Plato no disponible: la tarjeta va atenuada (opacity en línea); el texto se
+   oscurece para que se siga leyendo. */
+.tema-comanda .menu-plato.apagado .menu-plato-cat,
+.tema-comanda .menu-plato.apagado .menu-plato-desc {
+  color: var(--tinta);
+}
+
+/* Ventanas: empiezan debajo de la barra superior, que si no les tapa la cabecera y el botón de cerrar. */
+.tema-comanda .menu-velo {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--menu-barra) 16px 16px;
+  background: rgba(18, 12, 12, .72);
+}
+
+/* Los tokens --sd-* se reasignan a papel: SubirImagen (compartido) los usa. */
+.tema-comanda .menu-ventana {
+  --sd-text: var(--tinta);
+  --sd-text-muted: var(--suave);
+  --sd-border: var(--carbon);
+  --sd-border-strong: var(--carbon);
+  --sd-surface: var(--papel);
+  --sd-red: var(--rojo);
+  --sd-green: var(--ok);
+
+  width: min(680px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  border-radius: 14px;
+  background: var(--papel);
+  color: var(--tinta);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .7);
+}
+
+.tema-comanda .menu-ventana.angosta {
+  width: min(540px, 100%);
+}
+
+.tema-comanda .menu-ventana-cab {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--carbon);
+  border-bottom: 4px solid var(--ambar);
+}
+
+.tema-comanda .menu-ventana-cab h3 {
+  margin: 0;
+  font: 400 26px / 1 var(--f-titulo);
+  letter-spacing: .08em;
+  color: var(--ambar);
+}
+
+.tema-comanda .menu-ventana-cab small {
+  display: block;
+  margin-top: 4px;
+  font: 500 14px / 1.3 var(--f-texto);
+  color: #d9c3a5;
+}
+
+.tema-comanda .menu-cerrar {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ambar);
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.tema-comanda .menu-form {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+  padding: 16px;
+}
+
+.tema-comanda .menu-campo {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+  grid-column: span 2;
+}
+
+.tema-comanda .menu-form > .mitad {
+  grid-column: span 3;
+}
+
+.tema-comanda .menu-form > .entera {
+  grid-column: 1 / -1;
+}
+
+.tema-comanda .menu-lbl {
+  margin: 0;
+  font: 400 16px var(--f-titulo);
+  letter-spacing: .12em;
+  color: var(--suave);
+}
+
+.tema-comanda .menu-inp-ico {
+  position: relative;
+}
+
+.tema-comanda .menu-inp-ico > svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--suave);
+  pointer-events: none;
+}
+
+.tema-comanda .menu-inp-ico .menu-inp {
+  padding-left: 36px;
+}
+
+.tema-comanda .menu-ventana .sd-btn {
+  min-height: 40px;
+  border: 2px solid var(--carbon);
+  border-radius: 9px;
+  background: var(--papel);
+  color: var(--carbon);
+  font-family: var(--f-titulo);
+  font-weight: 400;
+  letter-spacing: .08em;
+}
+
+.tema-comanda .menu-armable {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 2px dashed var(--carbon);
+  border-radius: 12px;
+  background: var(--papel2);
+}
+
+.tema-comanda .menu-armable-txt {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.tema-comanda .menu-armable-txt p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--suave);
+}
+
+.tema-comanda .menu-kcal {
+  flex: 0 1 170px;
+}
+
+.tema-comanda .menu-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  font: 400 17px / 1.15 var(--f-titulo);
+  letter-spacing: .06em;
+  color: var(--carbon);
+  cursor: pointer;
+}
+
+.tema-comanda .menu-form-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 2px solid var(--brasa);
+  border-radius: 10px;
+  background: #fdeaea;
+  color: var(--granate);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tema-comanda .menu-form-error svg {
+  flex: none;
+}
+
+.tema-comanda .menu-form-pie {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 2px dashed var(--linea);
+}
+
+.tema-comanda .menu-cats {
+  padding: 4px 16px 18px;
+}
+
+.tema-comanda .menu-cats h4 {
+  margin: 0 0 8px;
+  font: 400 21px var(--f-titulo);
+  letter-spacing: .08em;
+  color: var(--carbon);
+}
+
+.tema-comanda .menu-cat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 2px dashed #ecdcc8;
+}
+
+.tema-comanda .menu-cat-txt {
+  flex: 1;
+  min-width: 0;
+}
+
+.tema-comanda .menu-cat-txt strong {
+  display: block;
+  font: 400 20px / 1.1 var(--f-titulo);
+  letter-spacing: .04em;
+  color: var(--carbon);
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .menu-cat-txt span {
+  display: block;
+  font-size: 14px;
+  color: var(--suave);
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .menu-cat-n {
+  flex: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--suave);
+}
+
+/* Editor de pasos e historial de precios (compartidos, sin rediseñar): lo mismo */
+.tema-comanda.menu-pagina .sd-modal-backdrop {
+  align-items: flex-start;
+  padding-top: var(--menu-barra);
+}
+
+.tema-comanda.menu-pagina .sd-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tema-comanda.menu-pagina .sd-modal-backdrop .sd-btn-primary {
+  border-radius: 9px;
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+@media (max-width: 1023px) {
+  .tema-comanda.menu-pagina {
+    --menu-barra: 120px;
+  }
+}
+
+@media (max-width: 760px) {
+  .tema-comanda .menu-cont {
+    padding: 18px 12px 60px;
+  }
+
+  .tema-comanda .menu-acciones .menu-btn {
+    flex: 1;
+  }
+
+  .tema-comanda .menu-buscar {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .tema-comanda .menu-form > .menu-campo,
+  .tema-comanda .menu-form > .mitad {
+    grid-column: 1 / -1;
+  }
+
+  .tema-comanda .menu-form-pie .menu-btn {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tema-comanda.menu-pagina .spin,
+  .tema-comanda.menu-pagina .menu-sw::after,
+  .tema-comanda.menu-pagina .menu-disp::after {
+    animation: none;
+    transition: none;
+  }
+}
