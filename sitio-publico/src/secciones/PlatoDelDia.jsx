@@ -252,46 +252,49 @@ export default function PlatoDelDia({
           {/* Columna multimedia (video 16:9 o tarjeta sin video) */}
           <div className="lg:col-span-7">
             {tieneVideo ? (
-              <div className="relative aspect-video rounded-2xl overflow-hidden bg-fondo shadow-2xl border border-papel/10 group">
-                {soloPortada ? (
-                  <img
-                    src={plato.poster}
-                    alt={plato.nombre}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <>
-                    <video
-                      ref={videoRef}
-                      src={plato.video}
-                      poster={plato.poster}
-                      muted
-                      loop
-                      playsInline
-                      preload="none"
+              <div className="marco-foto">
+                <div className="relative aspect-video overflow-hidden bg-fondo shadow-2xl group">
+                  {soloPortada ? (
+                    <img
+                      src={plato.poster}
+                      alt={plato.nombre}
                       className="w-full h-full object-cover"
                     />
+                  ) : (
+                    <>
+                      <video
+                        ref={videoRef}
+                        src={plato.video}
+                        poster={plato.poster}
+                        muted
+                        loop
+                        playsInline
+                        preload="none"
+                        className="w-full h-full object-cover"
+                      />
 
-                    {/* Botón visible de control de reproducción */}
-                    <button
-                      type="button"
-                      onClick={alternarReproduccion}
-                      aria-label={reproduciendo ? 'Pausar video del plato del día' : 'Reproducir video del plato del día'}
-                      className="absolute bottom-4 right-4 z-10 p-3 rounded-full bg-superficie/80 text-papel backdrop-blur-md border border-papel/20 hover:bg-superficie hover:text-ambar focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto transition-all cursor-pointer shadow-lg"
-                    >
-                      {reproduciendo ? (
-                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                          <rect x="6" y="4" width="4" height="16" rx="1" />
-                          <rect x="14" y="4" width="4" height="16" rx="1" />
-                        </svg>
-                      ) : (
-                        <svg className="w-5 h-5 translate-x-0.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                      )}
-                    </button>
-                  </>
-                )}
+                      {/* Botón visible de control de reproducción */}
+                      <button
+                        type="button"
+                        onClick={alternarReproduccion}
+                        aria-label={reproduciendo ? 'Pausar video del plato del día' : 'Reproducir video del plato del día'}
+                        className="absolute bottom-4 right-4 z-10 p-3 rounded-full bg-superficie/80 text-papel backdrop-blur-md border border-papel/20 hover:bg-superficie hover:text-ambar focus:outline-none focus-visible:ring-2 focus-visible:ring-primario-texto transition-all cursor-pointer shadow-lg"
+                      >
+                        {reproduciendo ? (
+                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="6" y="4" width="4" height="16" rx="1" />
+                            <rect x="14" y="4" width="4" height="16" rx="1" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5 translate-x-0.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        )}
+                      </button>
+                    </>
+                  )}
+                </div>
+                {plato.pie && <p className="marco-foto-pie font-mano">{plato.pie}</p>}
               </div>
             ) : (
               <div className="relative aspect-video rounded-2xl bg-superficie-2 border border-papel/10 p-8 sm:p-12 flex flex-col justify-center items-center text-center shadow-xl">
