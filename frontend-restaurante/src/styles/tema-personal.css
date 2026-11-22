@@ -2480,3 +2480,536 @@
     border-bottom: 0;
   }
 }
+
+/* ==============================================================================
+   MODAL DETALLE DE MESA (TableDetailModal) — clases dm-*
+   ============================================================================== */
+.tema-comanda.dm-fondo {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow-y: auto;
+  background: rgba(18, 12, 12, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.tema-comanda .dm-tarjeta {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 600px;
+  margin: auto;
+  overflow: hidden;
+  border: 3px solid var(--ambar);
+  border-radius: 14px;
+  color: var(--tinta);
+  background:
+    repeating-linear-gradient(180deg, transparent 0 27px, rgba(42, 29, 27, 0.05) 27px 28px),
+    var(--papel);
+  box-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.8);
+}
+
+.tema-comanda .dm-franja {
+  height: 10px;
+  flex: none;
+  background: repeating-linear-gradient(115deg, var(--ambar) 0 14px, var(--carbon) 14px 22px);
+}
+
+/* Encabezado carbón */
+.tema-comanda .dm-cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 22px 16px;
+  background: var(--carbon);
+  color: var(--papel);
+}
+
+.tema-comanda .dm-cabecera-izq {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tema-comanda .dm-rotulo {
+  font: 600 11px var(--f-mono);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ambar);
+}
+
+.tema-comanda .dm-titulo-fila {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.tema-comanda .dm-numero {
+  flex: none;
+  padding: 4px 10px 2px;
+  border-radius: 6px;
+  background: var(--ambar);
+  color: var(--carbon);
+  font: 400 30px/1 var(--f-titulo);
+  letter-spacing: 0.04em;
+}
+
+.tema-comanda .dm-titulo {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--papel);
+  font: 400 58px/0.9 var(--f-titulo);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-shadow: 3px 3px 0 var(--rojo);
+}
+
+.tema-comanda .dm-subtitulo {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+/* Etiqueta de estado ámbar: App.css fuerza fondo, color, borde y peso en .status.ocupada/.disponible */
+.tema-comanda .dm-subtitulo .status {
+  gap: 6px;
+  padding: 3px 10px 2px;
+  border-radius: 999px;
+  font: 400 13px var(--f-titulo);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  background-color: var(--ambar) !important;
+  color: var(--carbon) !important;
+  border: 2px solid var(--ambar) !important;
+  font-weight: 400 !important;
+}
+
+.tema-comanda .dm-subtitulo .status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Disponible: neutra, como la etiqueta de la tarjeta de mesa libre (pisa App.css .status.disponible) */
+.tema-comanda .dm-subtitulo .status.disponible {
+  background-color: transparent !important;
+  color: var(--text-dim) !important;
+  border: 2px solid var(--sd-border-strong) !important;
+}
+
+.tema-comanda .dm-meta {
+  font: 700 22px/1 var(--f-mano);
+  color: var(--ambar);
+}
+
+.tema-comanda .dm-sid {
+  font: 500 12px var(--f-mono);
+  color: var(--sd-text-muted);
+}
+
+.tema-comanda .dm-cerrar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: 18px 4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ambar);
+  color: var(--carbon);
+  box-shadow: 0 0 0 3px var(--carbon), 0 0 0 5px var(--ambar);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.tema-comanda .dm-cerrar:hover {
+  background: var(--papel);
+}
+
+/* Métricas: barra carbón con saldo ámbar */
+.tema-comanda .dm-metricas {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 18px 22px 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--carbon);
+  color: var(--papel);
+}
+
+.tema-comanda .dm-metrica {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px dashed var(--sd-border-strong);
+}
+
+.tema-comanda .dm-metrica:last-child {
+  border-right: 0;
+}
+
+.tema-comanda .dm-metrica-rotulo {
+  font: 600 10.5px var(--f-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--sd-text-muted);
+}
+
+.tema-comanda .dm-metrica-valor {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font: 400 38px/1 var(--f-titulo);
+  letter-spacing: 0.03em;
+  color: var(--ambar);
+}
+
+.tema-comanda .dm-metrica-sub {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--sd-text-muted);
+}
+
+.tema-comanda .dm-metrica-saldo {
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+.tema-comanda .dm-metrica-saldo .dm-metrica-rotulo,
+.tema-comanda .dm-metrica-saldo .dm-metrica-valor,
+.tema-comanda .dm-metrica-saldo .dm-metrica-sub {
+  color: var(--carbon);
+}
+
+/* Avisos */
+.tema-comanda .dm-aviso {
+  margin: 12px 22px 0;
+  padding: 10px 14px;
+  border: 2px dashed var(--carbon);
+  border-radius: 8px;
+  background: var(--papel2);
+  color: var(--tinta);
+  font-size: 13.5px;
+}
+
+.tema-comanda .dm-aviso-error {
+  border-color: var(--brasa);
+  color: var(--rojo);
+  text-align: center;
+}
+
+.tema-comanda .dm-aviso-pagada {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-style: solid;
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+.tema-comanda .dm-aviso-icono {
+  flex-shrink: 0;
+  color: var(--carbon);
+}
+
+/* Secciones (comensales y comandas) */
+.tema-comanda .dm-seccion {
+  margin: 16px 22px 0;
+}
+
+.tema-comanda .dm-seccion-cabeza,
+.tema-comanda .dm-seccion-cabeza-izq {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tema-comanda .dm-seccion-cabeza {
+  margin-bottom: 8px;
+}
+
+.tema-comanda .dm-seccion-icono {
+  flex: none;
+  color: var(--tinta);
+}
+
+.tema-comanda .dm-seccion-titulo {
+  margin: 0;
+  font: 400 20px/1 var(--f-titulo);
+  letter-spacing: 0.12em;
+  color: var(--tinta);
+}
+
+.tema-comanda .dm-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 2px 12px 0;
+  overflow-y: auto;
+}
+
+.tema-comanda .dm-lista-comensales {
+  max-height: 170px;
+}
+
+.tema-comanda .dm-lista-comandas {
+  max-height: 230px;
+}
+
+/* Tiquete con dientecitos abajo */
+.tema-comanda .dm-tiquete {
+  position: relative;
+  flex: none;
+  margin-bottom: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--linea);
+  border-bottom: 0;
+  border-left: 4px solid var(--ambar);
+  border-radius: 8px 8px 0 0;
+  background: var(--sd-white);
+  color: var(--tinta);
+}
+
+.tema-comanda .dm-tiquete::after {
+  content: "";
+  position: absolute;
+  left: -4px;
+  right: -1px;
+  top: 100%;
+  height: 10px;
+  background:
+    linear-gradient(-45deg, transparent 5px, var(--sd-white) 0) 0 0 / 10px 10px,
+    linear-gradient(45deg, transparent 5px, var(--sd-white) 0) 0 0 / 10px 10px;
+}
+
+.tema-comanda .dm-comensal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tema-comanda .dm-comensal-nombre {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tinta);
+}
+
+.tema-comanda .dm-comensal-items {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--suave);
+}
+
+.tema-comanda .dm-comensal-cifras {
+  text-align: right;
+}
+
+.tema-comanda .dm-comensal-subtotal {
+  font: 400 22px/1 var(--f-titulo);
+  letter-spacing: 0.03em;
+  color: var(--tinta);
+}
+
+.tema-comanda .dm-comensal-saldo {
+  display: block;
+  font: 500 11px var(--f-mono);
+  color: var(--suave);
+}
+
+.tema-comanda .dm-comanda {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tema-comanda .dm-comanda-lista {
+  border-left-color: var(--ok);
+  box-shadow: inset 0 0 0 1px var(--ok);
+}
+
+.tema-comanda .dm-comanda-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tema-comanda .dm-comanda-id {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tema-comanda .dm-comanda-codigo {
+  font: 600 14px var(--f-mono);
+  color: var(--tinta);
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .dm-comanda .order-state {
+  padding: 1px 8px;
+  border-color: var(--carbon);
+  background: var(--carbon);
+  color: var(--ambar);
+  font-size: 12px;
+}
+
+.tema-comanda .dm-comanda-total {
+  flex: none;
+  font: 400 26px/1 var(--f-titulo);
+  letter-spacing: 0.03em;
+  color: var(--tinta);
+}
+
+.tema-comanda .dm-comanda-platos {
+  font-size: 12.5px;
+  color: var(--suave);
+}
+
+.tema-comanda .dm-plato {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.tema-comanda .dm-comanda-acciones {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.tema-comanda .primary-button.dm-entregar {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 16px;
+}
+
+.tema-comanda .dm-vacio {
+  padding: 14px 16px;
+  border: 2px dashed var(--linea);
+  border-radius: 8px;
+  text-align: center;
+  font: 700 21px/1.15 var(--f-mano);
+  color: var(--suave);
+}
+
+/* Botonera: Tomar Pedido arriba a todo el ancho, el resto en fila */
+.tema-comanda .dm-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 22px 20px;
+}
+
+.tema-comanda .dm-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 2px solid var(--carbon);
+  border-radius: 8px;
+  background: var(--papel);
+  color: var(--carbon);
+  font: 400 18px var(--f-titulo);
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.tema-comanda .dm-btn:hover {
+  background: var(--papel2);
+}
+
+.tema-comanda .dm-btn:focus-visible,
+.tema-comanda .dm-cerrar:focus-visible {
+  outline: 3px solid var(--ambar);
+  outline-offset: 2px;
+}
+
+.tema-comanda .dm-btn-tomar {
+  order: -1;
+  flex-basis: 100%;
+  min-height: 52px;
+  margin-bottom: 4px;
+  background: var(--ambar);
+  font-size: 22px;
+  box-shadow: 0 4px 0 var(--carbon);
+}
+
+.tema-comanda .dm-btn-tomar:hover {
+  background: var(--papel);
+}
+
+.tema-comanda .dm-btn-liberar:hover {
+  border-color: var(--brasa);
+  background: var(--brasa);
+  color: var(--sd-white);
+}
+
+@media (max-width: 560px) {
+  .tema-comanda.dm-fondo {
+    padding: 12px;
+  }
+
+  .tema-comanda .dm-cabecera {
+    padding: 10px 14px 14px;
+  }
+
+  .tema-comanda .dm-titulo {
+    font-size: 42px;
+  }
+
+  .tema-comanda .dm-metricas,
+  .tema-comanda .dm-aviso,
+  .tema-comanda .dm-seccion {
+    margin-left: 14px;
+    margin-right: 14px;
+  }
+
+  .tema-comanda .dm-acciones {
+    margin: 16px 14px;
+  }
+
+  .tema-comanda .dm-metricas {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tema-comanda .dm-metrica {
+    border-right: 0;
+    border-bottom: 1px dashed var(--sd-border-strong);
+  }
+
+  .tema-comanda .dm-metrica:last-child {
+    border-bottom: 0;
+  }
+
+  .tema-comanda .dm-btn {
+    flex-basis: 100%;
+  }
+}
