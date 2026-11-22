@@ -160,7 +160,7 @@ export function TabPersonal() {
         <p style={{ color: 'var(--sd-text-muted)' }}>No hay personal registrado.</p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table className="sd-config-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <table className="sd-config-table conf-t-personal" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
               <tr>
                 <th>NOMBRE</th>

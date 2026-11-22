@@ -1,0 +1,451 @@
+/* ==============================================================================
+   Configuración · versión negra
+   Diseño: referencia-diseno/roles/smartdining-admin-negro.html (sección CONFIGURACIÓN)
+   Todo bajo .tema-comanda. Las pestañas usan las clases comunes del
+   panel (sd-btn, sd-input, sd-config-table…): aquí se les da el tema solo dentro
+   de .configuracion-pagina. Solo diseño: la lógica no cambia.
+   ============================================================================== */
+
+.tema-comanda.configuracion-pagina {
+  /* El ancho lo pone la pantalla, no el contenido (si no, el shell corta). */
+  contain: inline-size;
+  min-width: 0;
+  min-height: calc(100vh - 72px);
+  background:
+    repeating-linear-gradient(115deg, transparent 0 34px, rgba(255, 176, 46, .035) 34px 38px),
+    var(--carbon);
+  color: var(--papel);
+  font-family: var(--f-texto);
+}
+
+.tema-comanda .conf-cont {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 24px 60px;
+}
+
+.tema-comanda.configuracion-pagina :focus-visible {
+  outline: 3px solid var(--ambar);
+  outline-offset: 2px;
+}
+
+.tema-comanda .conf-panel .sd-card :focus-visible,
+.tema-comanda .conf-panel .sd-config-table :focus-visible {
+  outline-color: var(--rojo);
+}
+
+/* Encabezado y pestañas */
+.tema-comanda .conf-cab {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.tema-comanda .conf-titulo {
+  margin: 0;
+  font: 400 clamp(44px, 5vw, 64px) / .88 var(--f-titulo);
+  letter-spacing: .04em;
+  color: var(--papel);
+  text-shadow: 4px 4px 0 var(--rojo);
+}
+
+.tema-comanda .conf-sub {
+  font: 700 23px / 1.1 var(--f-mano);
+  color: var(--ambar);
+}
+
+.tema-comanda .conf-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 18px;
+  border-bottom: 3px solid #3a2b28;
+}
+
+.tema-comanda .conf-tab {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px 10px 0 0;
+  background: transparent;
+  color: #cbbcb2;
+  font: 400 19px var(--f-titulo);
+  letter-spacing: .1em;
+  cursor: pointer;
+}
+
+.tema-comanda .conf-tab:hover {
+  color: var(--papel);
+}
+
+.tema-comanda .conf-tab[aria-selected="true"] {
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+/* Botones sobre el fondo oscuro */
+.tema-comanda .conf-panel .sd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 11px;
+  font: 400 18px / 1.1 var(--f-titulo);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tema-comanda .conf-panel .sd-btn svg {
+  flex: none;
+}
+
+.tema-comanda .conf-panel .sd-btn-primary,
+.tema-comanda .conf-panel .sd-btn-primary:hover:not(:disabled) {
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+.tema-comanda .conf-panel .sd-btn-secondary,
+.tema-comanda .conf-panel .sd-btn-secondary:hover:not(:disabled) {
+  background: transparent;
+  color: var(--papel);
+  box-shadow: inset 0 0 0 2px var(--papel);
+}
+
+.tema-comanda .conf-panel .sd-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* Campos */
+.tema-comanda .conf-panel .sd-input {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 2px solid var(--carbon);
+  border-radius: 10px;
+  background-color: #fffaf3;
+  color: var(--tinta);
+  font: 500 16px var(--f-texto);
+  letter-spacing: 0;
+  text-transform: none;
+  box-sizing: border-box;
+}
+
+.tema-comanda .conf-panel .sd-input::placeholder {
+  color: #75635d;
+  opacity: 1;
+}
+
+.tema-comanda .conf-panel input[type="checkbox"],
+.tema-comanda .conf-panel input[type="radio"] {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--rojo);
+}
+
+.tema-comanda .conf-panel .sd-card > label.sd-input-label {
+  flex: 1 1 130px;
+}
+
+/* Grupos de datos: REDES y HORARIO */
+.tema-comanda .conf-panel fieldset.sd-card {
+  min-width: 0;
+}
+
+.tema-comanda .conf-panel fieldset.sd-card > legend.sd-input-label {
+  float: left;
+  width: 100%;
+  margin-bottom: 6px;
+  font: 400 25px / 1 var(--f-titulo);
+  letter-spacing: .08em;
+  color: var(--carbon);
+}
+
+.tema-comanda .conf-panel fieldset.sd-card > legend ~ * {
+  clear: both;
+}
+
+/* El ancho (130 px) va en línea: con menos relleno cabe «11:00 a. m.» */
+.tema-comanda .conf-panel .conf-t-horario input[type="time"].sd-input {
+  padding: 0 4px 0 8px;
+  font-size: 14px;
+}
+
+.tema-comanda .conf-panel .conf-t-horario label {
+  min-height: 40px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Avisos */
+.tema-comanda .conf-panel .table-toast-banner {
+  gap: 10px;
+  padding: 10px 14px;
+  border: 2px solid var(--ambar);
+  border-left-width: 8px;
+  border-radius: 12px;
+  background: var(--papel);
+  color: var(--tinta);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* App.css fuerza borde, fondo y color con !important */
+.tema-comanda .conf-panel .table-toast-banner.success {
+  border-color: var(--ok) !important;
+  border-width: 2px 2px 2px 8px !important;
+  background: var(--papel) !important;
+  color: var(--tinta) !important;
+}
+
+.tema-comanda .conf-panel .table-toast-banner.error {
+  border-color: var(--brasa);
+  color: var(--granate);
+}
+
+/* Papel: tablas y tarjetas. Los tokens --sd-* se reasignan porque el
+   marcado los usa en línea. */
+.tema-comanda .conf-panel .sd-config-table,
+.tema-comanda .conf-panel .sd-card {
+  --sd-text: var(--tinta);
+  --sd-text-muted: var(--suave);
+  --sd-border: #ecdcc8;
+  --sd-border-strong: var(--carbon);
+  --sd-surface: var(--papel);
+  --sd-red: var(--rojo);
+
+  background: var(--papel);
+  color: var(--tinta);
+}
+
+.tema-comanda .conf-panel .sd-card {
+  padding: 20px;
+  border: 0;
+  border-radius: 14px;
+  box-shadow: 0 16px 24px -16px rgba(0, 0, 0, .6);
+}
+
+.tema-comanda .conf-panel .sd-card p {
+  font-family: var(--f-texto);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.tema-comanda .conf-panel .sd-card .sd-input-label,
+.tema-comanda .conf-panel .sd-config-table .sd-input-label {
+  font: 400 16px / 1.2 var(--f-titulo);
+  letter-spacing: .12em;
+  color: var(--suave);
+}
+
+.tema-comanda .conf-panel .sd-card label.sd-input-label {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.tema-comanda .conf-panel .sd-card .sd-btn-primary,
+.tema-comanda .conf-panel .sd-card .sd-btn-primary:hover:not(:disabled),
+.tema-comanda .conf-panel .sd-config-table .sd-btn-primary,
+.tema-comanda .conf-panel .sd-config-table .sd-btn-primary:hover:not(:disabled) {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+.tema-comanda .conf-panel .sd-card .sd-btn-secondary,
+.tema-comanda .conf-panel .sd-card .sd-btn-secondary:hover:not(:disabled),
+.tema-comanda .conf-panel .sd-config-table .sd-btn-secondary,
+.tema-comanda .conf-panel .sd-config-table .sd-btn-secondary:hover:not(:disabled) {
+  background: var(--papel);
+  color: var(--carbon);
+  box-shadow: inset 0 0 0 2px var(--carbon);
+}
+
+/* Tablas */
+.tema-comanda .conf-panel .sd-config-table th {
+  padding: 10px 16px;
+  border-bottom: 0;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 400 17px var(--f-titulo);
+  letter-spacing: .14em;
+  white-space: nowrap;
+}
+
+.tema-comanda .conf-panel .sd-config-table td {
+  padding: 10px 16px;
+  border-bottom: 2px dashed #ecdcc8;
+  color: var(--tinta);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.tema-comanda .conf-panel .sd-config-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.tema-comanda .conf-panel .conf-t-mesas,
+.tema-comanda .conf-panel .conf-t-personal {
+  border: 2px solid var(--papel);
+}
+
+.tema-comanda .conf-panel .conf-t-mesas td:nth-child(1) {
+  font: 400 24px / 1.1 var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .conf-panel .conf-t-mesas td:nth-child(4) {
+  font: 400 17px / 1.2 var(--f-titulo);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.tema-comanda .conf-panel .conf-t-personal td:nth-child(1) {
+  font-weight: 700;
+}
+
+.tema-comanda .conf-panel .sd-config-table .sd-btn {
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 16px;
+  vertical-align: middle;
+}
+
+.tema-comanda .conf-panel .sd-config-table td .sd-btn + .sd-btn {
+  margin-left: 4px;
+}
+
+.tema-comanda .conf-panel .sd-topbar-icon-btn {
+  display: inline-grid;
+  vertical-align: middle;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 2px solid var(--carbon);
+  border-radius: 9px;
+  background: var(--papel);
+  color: var(--carbon);
+  cursor: pointer;
+}
+
+.tema-comanda .conf-panel td .sd-topbar-icon-btn + .sd-topbar-icon-btn {
+  margin-left: 8px;
+}
+
+.tema-comanda .conf-panel .sd-topbar-icon-btn:hover {
+  background: var(--papel2);
+}
+
+/* En pantallas chicas cada fila es una ficha: sin deslizar de lado para llegar a
+   las acciones. */
+@media (max-width: 1023px) {
+  .tema-comanda .conf-panel .sd-config-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .tema-comanda .conf-panel .sd-config-table,
+  .tema-comanda .conf-panel .sd-config-table tbody {
+    display: block;
+  }
+
+  .tema-comanda .conf-panel .sd-config-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px 12px;
+    padding: 12px 14px;
+    border-bottom: 2px dashed #dcc8b2;
+  }
+
+  .tema-comanda .conf-panel .sd-config-table tr:last-child {
+    border-bottom: 0;
+  }
+
+  .tema-comanda .conf-panel .sd-config-table td {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .tema-comanda .conf-panel .sd-config-table tr .sd-topbar-icon-btn,
+  .tema-comanda .conf-panel .sd-config-table tr .sd-btn {
+    margin: 0;
+  }
+
+  /* flex: etiqueta junto a su valor y acciones que bajan de línea */
+  .tema-comanda .conf-panel .conf-t-mesas td,
+  .tema-comanda .conf-panel .conf-t-personal td:nth-child(n + 3) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tema-comanda .conf-panel .conf-t-mesas td:last-child,
+  .tema-comanda .conf-panel .conf-t-personal td:last-child,
+  .tema-comanda .conf-panel .conf-t-personal td:nth-child(1),
+  .tema-comanda .conf-panel .conf-t-personal td:nth-child(2) {
+    grid-column: 1 / -1;
+  }
+
+  .tema-comanda .conf-panel td::before {
+    font: 400 16px var(--f-titulo);
+    letter-spacing: .12em;
+    color: var(--suave);
+  }
+
+  .tema-comanda .conf-panel .conf-t-mesas td:nth-child(1)::before {
+    content: "MESA";
+  }
+
+  .tema-comanda .conf-panel .conf-t-mesas td:nth-child(2)::before {
+    content: "CAPACIDAD";
+  }
+
+  .tema-comanda .conf-panel .conf-t-mesas td:nth-child(3)::before {
+    content: "UBICACIÓN";
+  }
+
+  .tema-comanda .conf-panel .conf-t-mesas td:nth-child(4)::before,
+  .tema-comanda .conf-panel .conf-t-personal td:nth-child(4)::before {
+    content: "ESTADO";
+  }
+
+  .tema-comanda .conf-panel .conf-t-mesas td:nth-child(5):not(:last-child)::before {
+    content: "ACTIVA";
+  }
+
+  .tema-comanda .conf-panel .conf-t-personal td:nth-child(3)::before {
+    content: "ROL";
+  }
+
+  .tema-comanda .conf-panel .conf-t-personal td:nth-child(3) .sd-input {
+    flex: 1 1 110px;
+  }
+}
+
+@media (max-width: 760px) {
+  .tema-comanda .conf-cont {
+    padding: 18px 12px 60px;
+  }
+
+  .tema-comanda .conf-panel .sd-card > label.sd-input-label {
+    min-width: 0;
+  }
+
+  .tema-comanda .conf-panel .conf-t-horario tr {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px 0;
+  }
+}

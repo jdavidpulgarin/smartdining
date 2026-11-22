@@ -4,6 +4,7 @@ import { useAuth } from '../hooks'
 import { TabMesas } from '../components/configuracion/TabMesas'
 import { TabPersonal } from '../components/configuracion/TabPersonal'
 import { TabRestaurante } from '../components/configuracion/TabRestaurante'
+import '../styles/configuracion.css'
 
 /**
  * Configuración (P-21), solo admin: que el administrador opere mesas, personal
@@ -30,16 +31,14 @@ export function Configuracion() {
   const Contenido = CONTENIDO[activa]
 
   return (
-    <div className="sd-page-wrapper">
-      <div className="sd-page-header">
-        <div>
-          <h1 className="sd-page-title">CONFIGURACIÓN</h1>
-          <p className="sd-page-subtitle">Mesas, personal y datos del restaurante</p>
+    <div className="configuracion-pagina tema-comanda">
+      <div className="conf-cont">
+        <div className="conf-cab">
+          <h1 className="conf-titulo">CONFIGURACIÓN</h1>
+          <span className="conf-sub">Mesas, personal y datos del restaurante</span>
         </div>
-      </div>
 
-      <div className="sd-page-container">
-        <div role="tablist" aria-label="Secciones de configuración" style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <div role="tablist" aria-label="Secciones de configuración" className="conf-tabs">
           {PESTANAS.map((p) => (
             <button
               key={p.id}
@@ -48,7 +47,7 @@ export function Configuracion() {
               id={`tab-${p.id}`}
               aria-selected={activa === p.id}
               aria-controls={`panel-${p.id}`}
-              className={`sd-btn ${activa === p.id ? 'sd-btn-primary' : 'sd-btn-secondary'}`}
+              className="conf-tab"
               onClick={() => setActiva(p.id)}
             >
               {p.etiqueta}
@@ -56,7 +55,7 @@ export function Configuracion() {
           ))}
         </div>
 
-        <div role="tabpanel" id={`panel-${activa}`} aria-labelledby={`tab-${activa}`}>
+        <div role="tabpanel" className="conf-panel" id={`panel-${activa}`} aria-labelledby={`tab-${activa}`}>
           <Contenido />
         </div>
       </div>
