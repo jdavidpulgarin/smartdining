@@ -26,6 +26,7 @@ import { useSocketListener } from '../hooks'
 import { crearUltimoPorId } from '../utils/dedupeEventos'
 import { confirmacionAlCambiar, ETIQUETA_DISPONIBILIDAD, NO_DISPONIBLE } from '../utils/disponibilidadPlato'
 import { urlImagenGuardable, MENSAJE_URL_IMAGEN, fotoDePlato, FOTO_AREPA, esArepaRellena } from '../utils/imagenes'
+import '../styles/menu.css'
 
 /**
  * Carta para ADMINISTRAR: todas las categorías y TODOS los platos, también los
@@ -407,75 +408,62 @@ export function Menu() {
   }
 
   return (
-    <div className="sd-page-wrapper">
+    <div className="menu-pagina tema-comanda">
       {apiNotice && (
+        // Fijo arriba de la pantalla: el interruptor que falló puede estar
+        // muy abajo en la carta, y un aviso al inicio de la página no se vería.
         <div
-          className={`table-toast-banner ${apiNoticeTipo}`}
+          className={`menu-aviso ${apiNoticeTipo}`}
           role={apiNoticeTipo === 'error' ? 'alert' : 'status'}
-          // Fijo arriba de la pantalla: el interruptor que falló puede estar
-          // muy abajo en la carta, y un aviso al inicio de la página no se vería.
-          style={{
-            position: 'fixed',
-            top: 16,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 1000,
-            maxWidth: 'calc(100vw - 32px)',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
-            background: apiNoticeTipo === 'error' ? '#2a0d10' : undefined,
-          }}
         >
-          <AlertCircle size={16} />
+          <AlertCircle size={18} aria-hidden="true" />
           <span>{apiNotice}</span>
         </div>
       )}
 
-      {/* Encabezado Editorial con Acciones */}
-      <div className="sd-page-header">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-          <div>
-            <h1 className="sd-page-title">MENÚ</h1>
-            <p className="sd-page-subtitle">
+      <div className="menu-cont">
+        {/* Encabezado con acciones */}
+        <div className="menu-cab">
+          <div className="menu-cab-izq">
+            <h1 className="menu-titulo">MENÚ</h1>
+            <span className="menu-sub">
               {esAdmin
                 ? 'Administración de categorías, platos y disponibilidad en tiempo real'
                 : 'Carta del restaurante y disponibilidad en tiempo real (solo consulta)'}
-            </p>
+            </span>
           </div>
           {esAdmin && (
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button
-              type="button"
-              className="sd-btn sd-btn-secondary"
-              onClick={() => setIsCategoryModalOpen(true)}
-            >
-              <FolderPlus size={16} />
-              <span>CATEGORÍAS ({categoriesList.length})</span>
-            </button>
-            <button
-              type="button"
-              className="sd-btn sd-btn-primary"
-              onClick={() => handleOpenDishModal()}
-            >
-              <Plus size={16} />
-              <span>NUEVO PLATO</span>
-            </button>
-          </div>
+            <div className="menu-acciones">
+              <button
+                type="button"
+                className="menu-btn claro"
+                onClick={() => setIsCategoryModalOpen(true)}
+              >
+                <FolderPlus size={18} aria-hidden="true" />
+                <span>CATEGORÍAS ({categoriesList.length})</span>
+              </button>
+              <button
+                type="button"
+                className="menu-btn"
+                onClick={() => handleOpenDishModal()}
+              >
+                <Plus size={18} aria-hidden="true" />
+                <span>NUEVO PLATO</span>
+              </button>
+            </div>
           )}
         </div>
-      </div>
 
-      {/* Franja Roja con Filtros de Categorías y Buscador */}
-      <div className="sd-red-band">
-        <div className="sd-red-band-inner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-          {/* Categorías Tabs */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', flex: 1, paddingBottom: 2 }}>
+        {/* Filtros: categorías, buscador y solo disponibles */}
+        <div className="menu-filtros">
+          <div className="menu-chips">
             <button
               type="button"
-              className={`sd-band-pill ${activeCategory === 'Todas' ? 'active' : ''}`}
+              className={`menu-chip ${activeCategory === 'Todas' ? 'activa' : ''}`}
               onClick={() => setActiveCategory('Todas')}
             >
               <span>TODAS</span>
-              <span className="sd-pill-count">{dishesList.length}</span>
+              <span className="menu-chip-n">{dishesList.length}</span>
             </button>
             {categoriesList.map((cat) => {
               const catName = cat.name || ''
@@ -484,100 +472,86 @@ export function Menu() {
                 <button
                   key={cat.id}
                   type="button"
-                  className={`sd-band-pill ${activeCategory === catName ? 'active' : ''}`}
+                  className={`menu-chip ${activeCategory === catName ? 'activa' : ''}`}
                   onClick={() => setActiveCategory(catName)}
                 >
                   <span>{catName.toUpperCase()}</span>
-                  <span className="sd-pill-count">{count}</span>
+                  <span className="menu-chip-n">{count}</span>
                 </button>
               )
             })}
           </div>
 
-          {/* Buscador + Solo Disponibles */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            <div className="sd-band-search-box">
-              <Search size={14} aria-hidden="true" />
+          <div className="menu-busqueda">
+            <div className="menu-buscar">
+              <Search size={18} aria-hidden="true" />
               <input
                 type="text"
                 placeholder="Buscar plato por nombre, ingrediente..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="sd-band-search-input"
+                className="menu-inp"
               />
               {searchQuery && (
                 <button
                   type="button"
+                  className="menu-buscar-x"
                   onClick={() => setSearchQuery('')}
-                  style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: 2 }}
                 >
-                  <X size={14} />
+                  <X size={16} />
                 </button>
               )}
             </div>
 
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, fontFamily: 'var(--sd-font-heading)', cursor: 'pointer', color: 'var(--sd-white)', userSelect: 'none' }}>
+            <label className="menu-solo">
               <input
                 type="checkbox"
+                className="menu-sw"
                 checked={onlyAvailable}
                 onChange={(e) => setOnlyAvailable(e.target.checked)}
-                style={{ accentColor: 'var(--sd-white)' }}
               />
               <span>SOLO DISPONIBLES</span>
             </label>
           </div>
         </div>
-      </div>
 
-      {/* Grid de Platos */}
-      <div className="sd-page-container">
+        {/* Platos */}
         {loading ? (
-          <div className="sd-card" style={{ textAlign: 'center', padding: '60px 20px' }}>
-            <RefreshCw size={44} className="spin" style={{ color: 'var(--sd-white)', margin: '0 auto 16px auto', display: 'block' }} />
-            <h3 className="sd-card-title">Cargando catálogo en vivo...</h3>
-            <p style={{ color: 'var(--sd-text-muted)' }}>Consultando carta gastronómica desde el servidor.</p>
+          <div className="menu-estado">
+            <RefreshCw size={44} className="spin" aria-hidden="true" />
+            <h3>Cargando catálogo en vivo...</h3>
+            <p>Consultando carta gastronómica desde el servidor.</p>
           </div>
         ) : error ? (
-          <div className="sd-card" style={{ textAlign: 'center', padding: '60px 20px' }}>
-            <AlertCircle size={44} style={{ color: 'var(--sd-red)', margin: '0 auto 16px auto', display: 'block' }} />
-            <h3 className="sd-card-title">Error al cargar el menú</h3>
-            <p style={{ color: 'var(--sd-text-muted)' }}>{error}</p>
+          <div className="menu-estado">
+            <AlertCircle size={44} className="menu-estado-error" aria-hidden="true" />
+            <h3>Error al cargar el menú</h3>
+            <p>{error}</p>
             <button
               type="button"
-              className="sd-btn sd-btn-primary"
+              className="menu-btn oscuro"
               onClick={recargarCarta}
-              style={{ margin: '16px auto 0 auto' }}
             >
-              <RefreshCw size={14} />
+              <RefreshCw size={16} aria-hidden="true" />
               <span>REINTENTAR</span>
             </button>
           </div>
         ) : filteredDishes.length === 0 ? (
-          <div className="sd-card" style={{ textAlign: 'center', padding: '60px 20px' }}>
-            <UtensilsCrossed size={48} style={{ color: 'var(--sd-text-muted)', margin: '0 auto 16px auto', display: 'block' }} />
-            <h3 className="sd-card-title">No se encontraron platos</h3>
-            <p style={{ color: 'var(--sd-text-muted)' }}>Prueba con otros términos de búsqueda o selecciona otra categoría.</p>
+          <div className="menu-estado">
+            <UtensilsCrossed size={48} aria-hidden="true" />
+            <h3>No se encontraron platos</h3>
+            <p>Prueba con otros términos de búsqueda o selecciona otra categoría.</p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
+          <div className="menu-platos">
             {filteredDishes.map((dish) => (
+              // sd-card: la usan las pruebas y la demo para encontrar la tarjeta.
               <div
                 key={dish.id}
-                className="sd-card"
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  overflow: 'hidden',
-                  padding: 0,
-                  opacity: estaDisponible(dish) ? 1 : 0.65,
-                  borderTop: !estaDisponible(dish)
-                    ? '4px solid var(--sd-red)'
-                    : dish.personalizable
-                    ? '4px solid var(--sd-gold)'
-                    : '4px solid var(--sd-border-strong)',
-                }}
+                className={`sd-card menu-plato ${estaDisponible(dish) ? '' : 'apagado'} ${dish.personalizable ? 'armable' : ''}`}
+                style={{ opacity: estaDisponible(dish) ? 1 : 0.65 }}
               >
-                <div style={{ position: 'relative', width: '100%', height: 180, background: '#0a0807', overflow: 'hidden' }}>
+                <div className="menu-foto">
                   <img
                     src={dish.imageUrl}
                     alt={dish.name}
@@ -586,208 +560,110 @@ export function Menu() {
                       // La foto propia no cargó: respaldo (la local, si es la arepa).
                       e.target.src = esArepaRellena(dish.name) ? FOTO_AREPA : FOTO_RESPALDO
                     }}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                   {dish.personalizable ? (
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: 12,
-                        left: 12,
-                        padding: '4px 10px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        fontWeight: 800,
-                        fontFamily: 'var(--sd-font-heading)',
-                        letterSpacing: '0.04em',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        background: 'var(--sd-gold)',
-                        color: 'var(--sd-gold-text)',
-                      }}
-                    >
-                      <Layers size={12} /> Arma tu plato
+                    <span className="menu-etq osc">
+                      <Layers size={13} aria-hidden="true" /> Arma tu plato
                     </span>
                   ) : dish.tag ? (
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: 12,
-                        left: 12,
-                        padding: '4px 10px',
-                        borderRadius: 4,
-                        fontSize: 12,
-                        fontWeight: 800,
-                        fontFamily: 'var(--sd-font-heading)',
-                        letterSpacing: '0.04em',
-                        background: 'rgba(30, 26, 25, 0.9)',
-                        color: 'var(--sd-text-muted)',
-                        border: '1px solid var(--sd-border)',
-                      }}
-                    >
-                      {dish.tag}
-                    </span>
+                    <span className="menu-etq">{dish.tag}</span>
                   ) : null}
-                  <span
-                    style={{
-                      position: 'absolute',
-                      bottom: 12,
-                      right: 12,
-                      padding: '4px 8px',
-                      borderRadius: 4,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      fontFamily: 'var(--sd-font-heading)',
-                      background: 'rgba(0,0,0,0.75)',
-                      color: 'var(--sd-text)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                  >
-                    <Clock size={12} /> {dish.prepTime} min
+                  <span className="menu-tiempo">
+                    <Clock size={13} aria-hidden="true" /> {dish.prepTime} min
                   </span>
                 </div>
 
-                <div style={{ padding: 18, display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'space-between', gap: 14 }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
-                      <div>
-                        <span style={{ color: 'var(--sd-text-muted)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.04em', fontFamily: 'var(--sd-font-heading)', fontWeight: 700 }}>
-                          {dish.categoryName}
-                        </span>
-                        <h4 style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 22, fontWeight: 800, margin: '2px 0 0 0', color: 'var(--sd-text)' }}>
-                          {dish.name}
-                        </h4>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                        <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 20, fontWeight: 800, color: 'var(--sd-white)', whiteSpace: 'nowrap' }}>
-                          {dish.priceFormatted}
-                        </strong>
-                        {esAdmin && (
-                          <button
-                            type="button"
-                            onClick={() => setPlatoHistorial(dish)}
-                            aria-label={`Ver historial de precios de ${dish.name}`}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              padding: 0,
-                              cursor: 'pointer',
-                              color: 'var(--sd-text-muted)',
-                              fontSize: 12,
-                              textDecoration: 'underline',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            Ver historial
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                <div className="menu-plato-cuerpo">
+                  <span className="menu-plato-cat">{dish.categoryName}</span>
+                  <h4 className="menu-plato-nombre">{dish.name}</h4>
+                  <p className="menu-plato-desc">
+                    {dish.description || 'Sin descripción disponible.'}
+                  </p>
+                </div>
 
-                    <p style={{ fontSize: 13, color: 'var(--sd-text-muted)', margin: 0, lineClamp: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {dish.description || 'Sin descripción disponible.'}
-                    </p>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--sd-border)', paddingTop: 12, marginTop: 'auto' }}>
-                    {/* Disponibilidad (sin verde: disponible en BLANCO, agotado en ROJO) */}
-                    <Disponibilidad
-                      {...(esAdmin
-                        ? {
-                            type: 'button',
-                            onClick: () => handleToggleAvailability(dish.id),
-                            title: 'Alternar disponibilidad para comensales',
-                            // Interruptor: encendido = el admin lo dejó disponible.
-                            'aria-pressed': dish.available,
-                            'aria-label': `Disponible: ${dish.name}`,
-                          }
-                        : { 'data-testid': `disponibilidad-${dish.id}` })}
-                      style={{
-                        padding: '6px 12px',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        fontFamily: 'var(--sd-font-heading)',
-                        letterSpacing: '0.04em',
-                        borderRadius: 4,
-                        cursor: esAdmin ? 'pointer' : 'default',
-                        background: estaDisponible(dish) ? 'var(--sd-surface)' : 'var(--sd-red)',
-                        color: 'var(--sd-white)',
-                        border: estaDisponible(dish) ? '1px solid var(--sd-border-strong)' : 'none',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                      }}
+                <div className="menu-plato-precio">
+                  <strong>{dish.priceFormatted}</strong>
+                  {esAdmin && (
+                    <button
+                      type="button"
+                      className="menu-historial"
+                      onClick={() => setPlatoHistorial(dish)}
+                      aria-label={`Ver historial de precios de ${dish.name}`}
                     >
-                      {estaDisponible(dish) ? (
-                        <>
-                          <CheckCircle2 size={13} />
-                          <span>DISPONIBLE</span>
-                        </>
-                      ) : dish.available ? (
-                        // Encendido a mano pero sin stock: lo apagó el inventario, no
-                        // la cocina. El botón sigue siendo el interruptor MANUAL (un clic
-                        // lo apaga a mano); el plato vuelve solo con una entrada.
-                        <>
-                          <XCircle size={13} />
-                          <span title="Sin stock en Inventario: vuelve solo al registrar una entrada">
-                            AGOTADO · SIN STOCK
-                          </span>
-                        </>
-                      ) : (
-                        // Apagado a mano (T8): no es falta de stock, así que no dice
-                        // «AGOTADO». Vuelve cuando el admin lo activa.
-                        <>
-                          <XCircle size={13} />
-                          <span>{ETIQUETA_DISPONIBILIDAD[NO_DISPONIBLE]}</span>
-                        </>
-                      )}
-                    </Disponibilidad>
+                      Ver historial
+                    </button>
+                  )}
+                </div>
 
-                    {/* Acciones (solo admin: el backend las niega al resto) */}
-                    {esAdmin && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="menu-plato-pie">
+                  {/* Disponibilidad: el interruptor es el estado MANUAL; el texto, el que ve el comensal */}
+                  <Disponibilidad
+                    {...(esAdmin
+                      ? {
+                          type: 'button',
+                          onClick: () => handleToggleAvailability(dish.id),
+                          title: 'Alternar disponibilidad para comensales',
+                          // Interruptor: encendido = el admin lo dejó disponible.
+                          'aria-pressed': dish.available,
+                          'aria-label': `Disponible: ${dish.name}`,
+                        }
+                      : { 'data-testid': `disponibilidad-${dish.id}` })}
+                    className={`menu-disp ${esAdmin ? 'interruptor' : ''} ${estaDisponible(dish) ? '' : 'no'}`}
+                  >
+                    {estaDisponible(dish) ? (
+                      <>
+                        <CheckCircle2 size={15} aria-hidden="true" />
+                        <span>DISPONIBLE</span>
+                      </>
+                    ) : dish.available ? (
+                      // Encendido a mano pero sin stock: lo apagó el inventario, no
+                      // la cocina. El botón sigue siendo el interruptor MANUAL (un clic
+                      // lo apaga a mano); el plato vuelve solo con una entrada.
+                      <>
+                        <XCircle size={15} aria-hidden="true" />
+                        <span title="Sin stock en Inventario: vuelve solo al registrar una entrada">
+                          AGOTADO · SIN STOCK
+                        </span>
+                      </>
+                    ) : (
+                      // Apagado a mano (T8): no es falta de stock, así que no dice
+                      // «AGOTADO». Vuelve cuando el admin lo activa.
+                      <>
+                        <XCircle size={15} aria-hidden="true" />
+                        <span>{ETIQUETA_DISPONIBILIDAD[NO_DISPONIBLE]}</span>
+                      </>
+                    )}
+                  </Disponibilidad>
+
+                  {/* Acciones (solo admin: el backend las niega al resto) */}
+                  {esAdmin && (
+                    <div className="menu-plato-acc">
                       <button
                         type="button"
-                        className="sd-topbar-icon-btn"
+                        className={`menu-ico ${dish.personalizable ? 'armable' : ''}`}
                         onClick={() => setSelectedDishForConstructor(dish)}
                         title="Configurar Pasos e Ingredientes del Constructor"
-                        style={{
-                          width: 36,
-                          height: 36,
-                          border: '1px solid var(--sd-border-strong)',
-                          borderRadius: 4,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: dish.personalizable ? 'var(--sd-gold)' : 'var(--sd-text)',
-                        }}
                       >
-                        <Layers size={16} />
+                        <Layers size={17} aria-hidden="true" />
                       </button>
                       <button
                         type="button"
-                        className="sd-topbar-icon-btn"
+                        className="menu-ico"
                         onClick={() => handleOpenDishModal(dish)}
                         title="Editar plato"
-                        style={{ width: 36, height: 36, border: '1px solid var(--sd-border-strong)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
-                        <Edit2 size={15} />
+                        <Edit2 size={16} aria-hidden="true" />
                       </button>
                       <button
                         type="button"
-                        className="sd-topbar-icon-btn"
+                        className="menu-ico peligro"
                         onClick={() => handleDeleteDish(dish.id)}
                         title="Eliminar plato"
-                        style={{ width: 36, height: 36, border: '1px solid var(--sd-border-strong)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--sd-red-text)' }}
                       >
-                        <Trash2 size={15} />
+                        <Trash2 size={16} aria-hidden="true" />
                       </button>
                     </div>
-                    )}
-                  </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -797,126 +673,111 @@ export function Menu() {
 
       {/* Modal Crear / Editar Plato */}
       {isDishModalOpen && (
-        <div className="sd-modal-backdrop" onClick={() => setIsDishModalOpen(false)}>
+        <div className="menu-velo" onClick={() => setIsDishModalOpen(false)}>
           <div
-            className="sd-card sd-table-detail-modal"
+            className="menu-ventana"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            style={{ maxWidth: 640 }}
           >
-            <div className="sd-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <UtensilsCrossed size={22} style={{ color: 'var(--sd-white)' }} />
-                <div>
-                  <h3 className="sd-card-title" style={{ margin: 0, fontSize: 24 }}>
-                    {editingDish ? 'Editar Plato' : 'Nuevo Plato en Menú'}
-                  </h3>
-                  <small style={{ color: 'var(--sd-text-muted)' }}>
-                    Configuración de precio, tiempos, categoría e inventario
-                  </small>
-                </div>
+            <div className="menu-ventana-cab">
+              <div>
+                <h3>{editingDish ? 'Editar Plato' : 'Nuevo Plato en Menú'}</h3>
+                <small>Configuración de precio, tiempos, categoría e inventario</small>
               </div>
               <button
                 type="button"
-                className="sd-topbar-icon-btn"
+                className="menu-cerrar"
                 onClick={() => setIsDishModalOpen(false)}
                 aria-label="Cerrar modal"
               >
-                <X size={20} />
+                <X size={18} strokeWidth={3} />
               </button>
             </div>
 
-            <form onSubmit={handleSaveDish} style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div>
-                  <label className="sd-input-label">NOMBRE DEL PLATO</label>
+            <form className="menu-form" onSubmit={handleSaveDish}>
+              <div className="menu-campo mitad">
+                <label className="menu-lbl">NOMBRE DEL PLATO</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Bowl Personalizado, Lomo Criollo"
+                  value={dishForm.name}
+                  onChange={(e) => setDishForm({ ...dishForm, name: e.target.value })}
+                  className="menu-inp"
+                />
+              </div>
+
+              <div className="menu-campo mitad">
+                <label className="menu-lbl">CATEGORÍA</label>
+                <select
+                  value={dishForm.categoryId || dishForm.categoryName}
+                  onChange={(e) => {
+                    const selCat = categoriesList.find((c) => c.id === Number(e.target.value) || c.name === e.target.value)
+                    setDishForm({
+                      ...dishForm,
+                      categoryId: selCat ? selCat.id : e.target.value,
+                      categoryName: selCat ? selCat.name : e.target.value,
+                    })
+                  }}
+                  className="menu-inp"
+                >
+                  {categoriesList.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="menu-campo">
+                <label className="menu-lbl">PRECIO DE VENTA ($)</label>
+                <div className="menu-inp-ico">
+                  <DollarSign size={16} aria-hidden="true" />
                   <input
-                    type="text"
+                    type="number"
+                    step="500"
+                    min="0"
                     required
-                    placeholder="Ej. Bowl Personalizado, Lomo Criollo"
-                    value={dishForm.name}
-                    onChange={(e) => setDishForm({ ...dishForm, name: e.target.value })}
-                    className="sd-input"
+                    placeholder="25000"
+                    value={dishForm.price}
+                    onChange={(e) => setDishForm({ ...dishForm, price: e.target.value })}
+                    className="menu-inp"
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label className="sd-input-label">CATEGORÍA</label>
-                  <select
-                    value={dishForm.categoryId || dishForm.categoryName}
-                    onChange={(e) => {
-                      const selCat = categoriesList.find((c) => c.id === Number(e.target.value) || c.name === e.target.value)
-                      setDishForm({
-                        ...dishForm,
-                        categoryId: selCat ? selCat.id : e.target.value,
-                        categoryName: selCat ? selCat.name : e.target.value,
-                      })
-                    }}
-                    className="sd-input"
-                  >
-                    {categoriesList.map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </option>
-                    ))}
-                  </select>
+              <div className="menu-campo">
+                <label className="menu-lbl">TIEMPO ESTIMADO (MIN)</label>
+                <div className="menu-inp-ico">
+                  <Clock size={16} aria-hidden="true" />
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="15"
+                    value={dishForm.prepTime}
+                    onChange={(e) => setDishForm({ ...dishForm, prepTime: e.target.value })}
+                    className="menu-inp"
+                  />
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-                <div>
-                  <label className="sd-input-label">PRECIO DE VENTA ($)</label>
-                  <div style={{ position: 'relative' }}>
-                    <DollarSign size={14} style={{ position: 'absolute', left: 12, top: 12, color: 'var(--sd-text-muted)' }} />
-                    <input
-                      type="number"
-                      step="500"
-                      min="0"
-                      required
-                      placeholder="25000"
-                      value={dishForm.price}
-                      onChange={(e) => setDishForm({ ...dishForm, price: e.target.value })}
-                      className="sd-input"
-                      style={{ paddingLeft: 32 }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="sd-input-label">TIEMPO ESTIMADO (MIN)</label>
-                  <div style={{ position: 'relative' }}>
-                    <Clock size={14} style={{ position: 'absolute', left: 12, top: 12, color: 'var(--sd-text-muted)' }} />
-                    <input
-                      type="number"
-                      min="1"
-                      placeholder="15"
-                      value={dishForm.prepTime}
-                      onChange={(e) => setDishForm({ ...dishForm, prepTime: e.target.value })}
-                      className="sd-input"
-                      style={{ paddingLeft: 32 }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="sd-input-label">TAG VISUAL</label>
-                  <div style={{ position: 'relative' }}>
-                    <Tag size={14} style={{ position: 'absolute', left: 12, top: 12, color: 'var(--sd-text-muted)' }} />
-                    <input
-                      type="text"
-                      placeholder="Popular, Parrilla, Chef"
-                      value={dishForm.tag}
-                      onChange={(e) => setDishForm({ ...dishForm, tag: e.target.value })}
-                      className="sd-input"
-                      style={{ paddingLeft: 32 }}
-                    />
-                  </div>
+              <div className="menu-campo">
+                <label className="menu-lbl">TAG VISUAL</label>
+                <div className="menu-inp-ico">
+                  <Tag size={16} aria-hidden="true" />
+                  <input
+                    type="text"
+                    placeholder="Popular, Parrilla, Chef"
+                    value={dishForm.tag}
+                    onChange={(e) => setDishForm({ ...dishForm, tag: e.target.value })}
+                    className="menu-inp"
+                  />
                 </div>
               </div>
 
-              <div>
-                <label className="sd-input-label">URL DE IMAGEN</label>
+              <div className="menu-campo entera">
+                <label className="menu-lbl">URL DE IMAGEN</label>
                 {/* type="text": una imagen subida se guarda como /imagenes/<uuid>.webp,
                     que el type="url" del navegador no deja enviar. */}
                 <input
@@ -925,7 +786,7 @@ export function Menu() {
                   placeholder="https://… o /imagenes/<código>.webp"
                   value={dishForm.imageUrl}
                   onChange={(e) => setDishForm({ ...dishForm, imageUrl: e.target.value })}
-                  className="sd-input"
+                  className="menu-inp"
                 />
                 {/* La subida es asíncrona: se actualiza con la forma funcional para
                     no pisar lo que se haya escrito mientras subía. */}
@@ -937,58 +798,43 @@ export function Menu() {
                 />
               </div>
 
-              <div>
-                <label className="sd-input-label">DESCRIPCIÓN / INGREDIENTES BASE</label>
+              <div className="menu-campo entera">
+                <label className="menu-lbl">DESCRIPCIÓN / INGREDIENTES BASE</label>
                 <textarea
                   rows="3"
                   placeholder="Describe la preparación, guarniciones y notas para alérgenos..."
                   value={dishForm.description}
                   onChange={(e) => setDishForm({ ...dishForm, description: e.target.value })}
-                  className="sd-input"
-                  style={{ resize: 'vertical' }}
+                  className="menu-inp"
                 ></textarea>
               </div>
 
               {/* Opciones del Constructor */}
-              <div
-                style={{
-                  padding: 16,
-                  borderRadius: 8,
-                  backgroundColor: 'rgba(224, 165, 38, 0.08)',
-                  border: '1px solid rgba(224, 165, 38, 0.25)',
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 16,
-                  alignItems: 'center',
-                }}
-              >
-                <div style={{ flex: '1 1 240px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontFamily: 'var(--sd-font-heading)', cursor: 'pointer' }}>
+              <div className="menu-armable entera">
+                <div className="menu-armable-txt">
+                  <label className="menu-check">
                     <input
                       type="checkbox"
+                      className="menu-sw"
                       checked={dishForm.personalizable}
                       onChange={(e) => setDishForm({ ...dishForm, personalizable: e.target.checked })}
-                      style={{ accentColor: 'var(--sd-gold)' }}
                     />
                     <span>HABILITAR COMO PERSONALIZABLE ("ARMA TU PLATO")</span>
                   </label>
-                  <p style={{ margin: '4px 0 0 24px', fontSize: 12, color: 'var(--sd-text-muted)' }}>
-                    Permite definir pasos e ingredientes dinámicos para el comensal.
-                  </p>
+                  <p>Permite definir pasos e ingredientes dinámicos para el comensal.</p>
                 </div>
 
-                <div style={{ flex: '0 1 160px' }}>
-                  <label className="sd-input-label">CALORÍAS (KCAL)</label>
-                  <div style={{ position: 'relative' }}>
-                    <Flame size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--sd-gold)' }} />
+                <div className="menu-campo menu-kcal">
+                  <label className="menu-lbl">CALORÍAS (KCAL)</label>
+                  <div className="menu-inp-ico">
+                    <Flame size={16} aria-hidden="true" />
                     <input
                       type="number"
                       min="0"
                       placeholder="450"
                       value={dishForm.calorias}
                       onChange={(e) => setDishForm({ ...dishForm, calorias: e.target.value })}
-                      className="sd-input"
-                      style={{ paddingLeft: 30, height: 36, fontSize: 13 }}
+                      className="menu-inp"
                     />
                   </div>
                 </div>
@@ -996,47 +842,44 @@ export function Menu() {
                 {editingDish && dishForm.personalizable && (
                   <button
                     type="button"
-                    className="sd-btn sd-btn-secondary"
+                    className="menu-btn contorno mini"
                     onClick={() => {
                       setIsDishModalOpen(false)
                       setSelectedDishForConstructor(editingDish)
                     }}
-                    style={{ borderColor: 'var(--sd-gold)', color: 'var(--sd-gold)', height: 36, marginLeft: 'auto', fontSize: 13 }}
                   >
-                    <Layers size={14} />
+                    <Layers size={15} aria-hidden="true" />
                     <span>Configurar Pasos &rarr;</span>
                   </button>
                 )}
               </div>
 
-              <div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontFamily: 'var(--sd-font-heading)', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={dishForm.available}
-                    onChange={(e) => setDishForm({ ...dishForm, available: e.target.checked })}
-                    style={{ accentColor: 'var(--sd-white)' }}
-                  />
-                  <span>DISPONIBLE DE INMEDIATO PARA PEDIDOS</span>
-                </label>
-              </div>
+              <label className="menu-check entera">
+                <input
+                  type="checkbox"
+                  className="menu-sw"
+                  checked={dishForm.available}
+                  onChange={(e) => setDishForm({ ...dishForm, available: e.target.checked })}
+                />
+                <span>DISPONIBLE DE INMEDIATO PARA PEDIDOS</span>
+              </label>
 
               {dishFormError && (
-                <div className="table-toast-banner error" role="alert" style={{ margin: 0 }}>
-                  <AlertCircle size={16} />
+                <div className="menu-form-error entera" role="alert">
+                  <AlertCircle size={18} aria-hidden="true" />
                   <span>{dishFormError}</span>
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, borderTop: '1px solid var(--sd-border)', paddingTop: 16 }}>
+              <div className="menu-form-pie entera">
                 <button
                   type="button"
-                  className="sd-btn sd-btn-secondary"
+                  className="menu-btn contorno"
                   onClick={() => setIsDishModalOpen(false)}
                 >
                   CANCELAR
                 </button>
-                <button type="submit" className="sd-btn sd-btn-primary" disabled={submittingAction || subiendoImagen}>
+                <button type="submit" className="menu-btn oscuro" disabled={submittingAction || subiendoImagen}>
                   {subiendoImagen
                     ? 'SUBIENDO IMAGEN...'
                     : submittingAction
@@ -1053,110 +896,84 @@ export function Menu() {
 
       {/* Modal Administración de Categorías */}
       {isCategoryModalOpen && (
-        <div className="sd-modal-backdrop" onClick={() => setIsCategoryModalOpen(false)}>
+        <div className="menu-velo" onClick={() => setIsCategoryModalOpen(false)}>
           <div
-            className="sd-card sd-table-detail-modal"
+            className="menu-ventana angosta"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            style={{ maxWidth: 540 }}
           >
-            <div className="sd-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <FolderPlus size={22} style={{ color: 'var(--sd-white)' }} />
-                <div>
-                  <h3 className="sd-card-title" style={{ margin: 0, fontSize: 24 }}>
-                    Administración de Categorías
-                  </h3>
-                  <small style={{ color: 'var(--sd-text-muted)' }}>
-                    Organización de secciones en la carta digital
-                  </small>
-                </div>
+            <div className="menu-ventana-cab">
+              <div>
+                <h3>Administración de Categorías</h3>
+                <small>Organización de secciones en la carta digital</small>
               </div>
               <button
                 type="button"
-                className="sd-topbar-icon-btn"
+                className="menu-cerrar"
                 onClick={() => setIsCategoryModalOpen(false)}
                 aria-label="Cerrar modal"
               >
-                <X size={20} />
+                <X size={18} strokeWidth={3} />
               </button>
             </div>
 
-            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {/* Formulario para agregar */}
-              <form onSubmit={handleSaveCategory} style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, background: 'rgba(0,0,0,0.25)', borderRadius: 8 }}>
-                <div>
-                  <label className="sd-input-label">NOMBRE DE LA CATEGORÍA</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej. Pastas & Risottos"
-                    value={categoryForm.name}
-                    onChange={(e) =>
-                      setCategoryForm({ ...categoryForm, name: e.target.value })
-                    }
-                    className="sd-input"
-                  />
-                </div>
-                <div>
-                  <label className="sd-input-label">DESCRIPCIÓN CORTA</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. Elaboradas artesanalmente al dente"
-                    value={categoryForm.description}
-                    onChange={(e) =>
-                      setCategoryForm({ ...categoryForm, description: e.target.value })
-                    }
-                    className="sd-input"
-                  />
-                </div>
-                <button type="submit" className="sd-btn sd-btn-primary" style={{ alignSelf: 'flex-start' }}>
-                  <Plus size={16} />
-                  <span>AGREGAR CATEGORÍA</span>
-                </button>
-              </form>
+            {/* Formulario para agregar */}
+            <form className="menu-form" onSubmit={handleSaveCategory}>
+              <div className="menu-campo entera">
+                <label className="menu-lbl">NOMBRE DE LA CATEGORÍA</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Pastas & Risottos"
+                  value={categoryForm.name}
+                  onChange={(e) =>
+                    setCategoryForm({ ...categoryForm, name: e.target.value })
+                  }
+                  className="menu-inp"
+                />
+              </div>
+              <div className="menu-campo entera">
+                <label className="menu-lbl">DESCRIPCIÓN CORTA</label>
+                <input
+                  type="text"
+                  placeholder="Ej. Elaboradas artesanalmente al dente"
+                  value={categoryForm.description}
+                  onChange={(e) =>
+                    setCategoryForm({ ...categoryForm, description: e.target.value })
+                  }
+                  className="menu-inp"
+                />
+              </div>
+              <button type="submit" className="menu-btn oscuro entera">
+                <Plus size={18} aria-hidden="true" />
+                <span>AGREGAR CATEGORÍA</span>
+              </button>
+            </form>
 
-              {/* Lista actual de categorías */}
-              <div>
-                <h4 style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 18, color: 'var(--sd-text)', margin: '0 0 10px 0' }}>
-                  Categorías Activas ({categoriesList.length})
-                </h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
-                  {categoriesList.map((cat) => (
-                    <div
-                      key={cat.id}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '10px 14px',
-                        background: 'var(--sd-surface)',
-                        border: '1px solid var(--sd-border)',
-                        borderRadius: 6,
-                      }}
-                    >
-                      <div>
-                        <strong style={{ fontFamily: 'var(--sd-font-heading)', fontSize: 16, color: 'var(--sd-text)' }}>{cat.name}</strong>
-                        <p style={{ margin: 0, fontSize: 12, color: 'var(--sd-text-muted)' }}>{cat.description || 'Sin descripción'}</p>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--sd-font-heading)', color: 'var(--sd-text-muted)' }}>
-                          {dishesList.filter((d) => d.categoryName === cat.name || d.categoryId === cat.id).length} platos
-                        </span>
-                        <button
-                          type="button"
-                          className="sd-topbar-icon-btn"
-                          onClick={() => handleDeleteCategory(cat.id)}
-                          title="Eliminar categoría"
-                          style={{ width: 32, height: 32, color: 'var(--sd-red-text)', border: '1px solid var(--sd-border)' }}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
+            {/* Lista actual de categorías */}
+            <div className="menu-cats">
+              <h4>Categorías Activas ({categoriesList.length})</h4>
+              <div className="menu-cats-lista">
+                {categoriesList.map((cat) => (
+                  <div key={cat.id} className="menu-cat">
+                    <div className="menu-cat-txt">
+                      <strong>{cat.name}</strong>
+                      <span>{cat.description || 'Sin descripción'}</span>
                     </div>
-                  ))}
-                </div>
+                    <span className="menu-cat-n">
+                      {dishesList.filter((d) => d.categoryName === cat.name || d.categoryId === cat.id).length} platos
+                    </span>
+                    <button
+                      type="button"
+                      className="menu-ico peligro"
+                      onClick={() => handleDeleteCategory(cat.id)}
+                      title="Eliminar categoría"
+                    >
+                      <Trash2 size={16} aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
