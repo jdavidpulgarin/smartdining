@@ -399,7 +399,7 @@ export function QRModal({
 
   return (
     <div className="tema-comanda qm-fondo" onClick={onClose}>
-      <div className="qm-tarjeta" onClick={(e) => e.stopPropagation()}>
+      <div className="qm-tarjeta qr-modal" onClick={(e) => e.stopPropagation()}>
         <div className="qm-franja" aria-hidden="true" />
         <div className="qm-cabecera">
           <div className="qm-cabecera-izq">
@@ -764,7 +764,7 @@ export function QRModal({
 
             {/* Enlace directo codificado en el QR */}
             {token && (
-              <div className="qm-enlace">
+              <div className="qm-enlace qr-url-box">
                 <label className="qm-rotulo">
                   Enlace codificado en el QR:
                 </label>

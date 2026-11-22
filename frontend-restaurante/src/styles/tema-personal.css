@@ -3437,6 +3437,11 @@
   color: var(--suave);
 }
 
+.tema-comanda .qm-pausa:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .tema-comanda .qm-barra {
   height: 8px;
   overflow: hidden;
