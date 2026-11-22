@@ -3013,3 +3013,857 @@
     flex-basis: 100%;
   }
 }
+
+/* ==============================================================================
+   MODAL QR DE LA MESA / LANZAR TABLET (QRModal) — clases qm-*
+   ============================================================================== */
+.tema-comanda.qm-fondo {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow-y: auto;
+  background: rgba(18, 12, 12, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.tema-comanda .qm-tarjeta {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 880px;
+  margin: auto;
+  overflow: hidden;
+  border: 3px solid var(--ambar);
+  border-radius: 14px;
+  color: var(--tinta);
+  background:
+    repeating-linear-gradient(180deg, transparent 0 27px, rgba(42, 29, 27, 0.05) 27px 28px),
+    var(--papel);
+  box-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.8);
+}
+
+.tema-comanda .qm-franja {
+  height: 10px;
+  flex: none;
+  background: repeating-linear-gradient(115deg, var(--ambar) 0 14px, var(--carbon) 14px 22px);
+}
+
+/* Encabezado carbón */
+.tema-comanda .qm-cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 22px 16px;
+  background: var(--carbon);
+  color: var(--papel);
+}
+
+.tema-comanda .qm-cabecera-izq {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.tema-comanda .qm-icono {
+  display: none;
+}
+
+.tema-comanda .qm-titulos {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-width: 0;
+}
+
+.tema-comanda .qm-kicker {
+  flex-basis: 100%;
+  font: 600 11px var(--f-mono);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ambar);
+}
+
+.tema-comanda .qm-titulo {
+  flex-basis: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--papel);
+  font: 400 58px/0.9 var(--f-titulo);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-shadow: 3px 3px 0 var(--rojo);
+}
+
+.tema-comanda .qm-subtitulo {
+  margin: 0;
+  font: 700 22px/1 var(--f-mano);
+  color: var(--ambar);
+}
+
+/* Etiqueta de estado: ámbar ocupada, neutra disponible, brasa con cuenta pedida */
+.tema-comanda .qm-estado {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 2px;
+  border: 2px solid var(--ambar);
+  border-radius: 999px;
+  background: var(--ambar);
+  color: var(--carbon);
+  font: 400 13px var(--f-titulo);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tema-comanda .qm-estado::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.tema-comanda .qm-estado.disponible {
+  border-color: var(--sd-border-strong);
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.tema-comanda .qm-estado.cuenta_pedida {
+  border-color: var(--brasa);
+  background: var(--brasa);
+  color: var(--sd-white);
+}
+
+.tema-comanda .qm-controles .qm-estado.disponible {
+  border-color: var(--linea);
+  color: var(--suave);
+}
+
+.tema-comanda .qm-cerrar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: 18px 4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ambar);
+  color: var(--carbon);
+  box-shadow: 0 0 0 3px var(--carbon), 0 0 0 5px var(--ambar);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.tema-comanda .qm-cerrar:hover {
+  background: var(--papel);
+}
+
+/* Cuerpo en dos columnas */
+.tema-comanda .qm-cuerpo {
+  display: grid;
+  grid-template-columns: minmax(0, 310px) minmax(0, 1fr);
+  align-items: start;
+  gap: 22px;
+  padding: 20px 22px 22px;
+}
+
+/* Tarjeta imprimible del QR */
+.tema-comanda .qm-impreso {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border: 2px solid var(--carbon);
+  border-radius: 10px;
+  background: var(--sd-white);
+  color: var(--tinta);
+  box-shadow: 6px 6px 0 var(--ambar);
+}
+
+.tema-comanda .qm-impreso-marca {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--carbon);
+}
+
+.tema-comanda .qm-marca {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tema-comanda .qm-marca-sd {
+  padding: 2px 5px 1px;
+  border-radius: 4px;
+  background: var(--ambar);
+  color: var(--carbon);
+  font: 400 13px/1 var(--f-titulo);
+  letter-spacing: 0.04em;
+}
+
+.tema-comanda .qm-marca-nombre {
+  font: 600 12px var(--f-mono);
+  letter-spacing: 0.24em;
+  color: var(--carbon);
+}
+
+.tema-comanda .qm-impreso-mesa {
+  font: 400 30px/1 var(--f-titulo);
+  letter-spacing: 0.03em;
+  color: var(--carbon);
+}
+
+.tema-comanda .qm-qr {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 230px;
+  border-radius: 8px;
+  transition: box-shadow 0.3s ease;
+}
+
+.tema-comanda .qm-qr svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.tema-comanda .qm-qr-renovado {
+  box-shadow: 0 0 0 3px var(--ambar);
+}
+
+.tema-comanda .qm-qr-vacio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 24px 14px;
+  border: 2px dashed var(--linea);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.tema-comanda .qm-vacio-icono {
+  color: var(--suave);
+}
+
+.tema-comanda .qm-vacio-icono-alerta {
+  color: var(--brasa);
+}
+
+.tema-comanda .qm-vacio-titulo {
+  margin: 0;
+  font: 400 24px/1 var(--f-titulo);
+  letter-spacing: 0.08em;
+  color: var(--tinta);
+}
+
+.tema-comanda .qm-vacio-texto {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--tinta);
+}
+
+.tema-comanda .qm-vacio-nota {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--suave);
+}
+
+.tema-comanda .qm-qr-aviso {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(255, 176, 46, 0.22);
+  color: var(--carbon);
+  font: 400 22px var(--f-titulo);
+  letter-spacing: 0.1em;
+  pointer-events: none;
+}
+
+.tema-comanda .qm-qr-aviso-icono {
+  margin-right: 6px;
+}
+
+.tema-comanda .qm-impreso-pie {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.tema-comanda .qm-impreso-cta {
+  margin: 0;
+  font: 600 10.5px/1.4 var(--f-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--suave);
+}
+
+.tema-comanda .qm-firma {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--papel2);
+  color: var(--tinta);
+  font: 500 11px var(--f-mono);
+}
+
+/* Columna de controles */
+.tema-comanda .qm-controles {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.tema-comanda .qm-estado-fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 2px dashed var(--linea);
+}
+
+.tema-comanda .qm-rotulo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 11px var(--f-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--suave);
+}
+
+.tema-comanda .qm-icono-linea {
+  flex: none;
+}
+
+/* Tiquetes (rotación, sesión, red) con dientecitos abajo */
+.tema-comanda .qm-tiquete {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--linea);
+  border-bottom: 0;
+  border-left: 4px solid var(--ambar);
+  border-radius: 8px 8px 0 0;
+  background: var(--sd-white);
+  color: var(--tinta);
+}
+
+.tema-comanda .qm-tiquete::after {
+  content: "";
+  position: absolute;
+  left: -4px;
+  right: -1px;
+  top: 100%;
+  height: 10px;
+  background:
+    linear-gradient(-45deg, transparent 5px, var(--sd-white) 0) 0 0 / 10px 10px,
+    linear-gradient(45deg, transparent 5px, var(--sd-white) 0) 0 0 / 10px 10px;
+}
+
+.tema-comanda .qm-rotacion-cabeza,
+.tema-comanda .qm-rotacion-pie {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tema-comanda .qm-rotacion-titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tema-comanda .qm-icono-ambar {
+  flex: none;
+  color: var(--ambar);
+}
+
+.tema-comanda .qm-rotacion-nombre {
+  font: 400 18px/1 var(--f-titulo);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tinta);
+}
+
+.tema-comanda .qm-pausa {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--tinta);
+  font: 400 15px var(--f-titulo);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tema-comanda .qm-pausa-inactiva {
+  color: var(--suave);
+}
+
+.tema-comanda .qm-barra {
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--linea);
+  border-radius: 999px;
+  background: var(--papel2);
+}
+
+.tema-comanda .qm-barra-relleno {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--ambar), var(--brasa));
+  transition: width 1s linear;
+}
+
+.tema-comanda .qm-barra-urgente {
+  background: var(--brasa);
+}
+
+.tema-comanda .qm-barra-fija {
+  background: var(--linea);
+}
+
+.tema-comanda .qm-rotacion-info {
+  font-size: 12.5px;
+  color: var(--suave);
+}
+
+.tema-comanda .qm-rotacion-pausa {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tema-comanda .qm-reloj {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 600 14px var(--f-mono);
+}
+
+.tema-comanda .qm-rotacion-manual {
+  color: var(--suave);
+}
+
+.tema-comanda .qm-rotacion-nota {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--suave);
+}
+
+.tema-comanda .qm-error {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--rojo);
+}
+
+.tema-comanda .qm-sesion-dato {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12.5px;
+  color: var(--tinta);
+}
+
+.tema-comanda .qm-sesion-rotulo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--suave);
+}
+
+.tema-comanda .qm-sesion-sid {
+  font: 600 13px var(--f-mono);
+  color: var(--carbon);
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .qm-sesion-nota {
+  font-size: 11px;
+  color: var(--suave);
+}
+
+/* Abrir mesa */
+.tema-comanda .qm-abrir {
+  padding: 12px 14px;
+  border: 2px dashed var(--carbon);
+  border-radius: 8px;
+  background: var(--papel2);
+}
+
+.tema-comanda .qm-abrir-texto {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--tinta);
+}
+
+/* Modo pantalla tablet: tarjeta carbón */
+.tema-comanda .qm-tablet {
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--carbon);
+  color: var(--papel);
+}
+
+.tema-comanda .qm-tablet-izq {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tema-comanda .qm-tablet-icono {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--sd-border-strong);
+  border-radius: 8px;
+  background: var(--carbon2);
+  color: var(--ambar);
+}
+
+.tema-comanda .qm-tablet-textos {
+  min-width: 0;
+}
+
+.tema-comanda .qm-tablet-titulo {
+  margin: 0;
+  font: 400 22px/1.05 var(--f-titulo);
+  letter-spacing: 0.08em;
+  color: var(--papel);
+}
+
+.tema-comanda .qm-tablet-desc {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--sd-text-muted);
+}
+
+.tema-comanda .qm-tablet-botones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.tema-comanda .qm-tablet-botones .qm-btn {
+  flex: 1 1 0;
+}
+
+.tema-comanda .qm-tablet-error {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--sd-red-text);
+}
+
+/* Destino del escaneo (Wi-Fi / localhost) */
+.tema-comanda .qm-red-cabeza {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tema-comanda .qm-red-opciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tema-comanda .qm-opcion {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 2px solid var(--carbon);
+  border-radius: 999px;
+  background: var(--papel);
+  color: var(--carbon);
+  font: 400 15px var(--f-titulo);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.tema-comanda .qm-opcion.active {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+.tema-comanda .qm-ip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tema-comanda .qm-ip-label {
+  font: 600 11px var(--f-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--suave);
+}
+
+.tema-comanda .qm-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 2px solid var(--carbon);
+  border-radius: 6px;
+  background: var(--sd-white);
+  color: var(--tinta);
+  font: 500 13px var(--f-mono);
+}
+
+.tema-comanda .qm-input:focus-visible {
+  outline: 3px solid var(--ambar);
+  outline-offset: 1px;
+}
+
+.tema-comanda .qm-aviso-local {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--brasa);
+  border-radius: 6px;
+  background: rgba(229, 33, 46, 0.08);
+  color: var(--rojo);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tema-comanda .qm-aviso-local-icono {
+  flex-shrink: 0;
+  color: var(--brasa);
+}
+
+.tema-comanda .qm-ip-nota {
+  font-size: 11.5px;
+  color: var(--suave);
+}
+
+/* Enlace codificado */
+.tema-comanda .qm-enlace {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tema-comanda .qm-enlace-grupo {
+  display: flex;
+}
+
+.tema-comanda .qm-enlace-input {
+  flex: 1 1 auto;
+  border-radius: 6px 0 0 6px;
+}
+
+.tema-comanda .qm-btn.qm-enlace-copiar {
+  flex: none;
+  min-width: 96px;
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+}
+
+/* Botones del modal */
+.tema-comanda .qm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 2px solid var(--carbon);
+  border-radius: 8px;
+  background: var(--papel);
+  color: var(--carbon);
+  font: 400 18px var(--f-titulo);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.tema-comanda .qm-btn:hover {
+  background: var(--papel2);
+}
+
+.tema-comanda .qm-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tema-comanda .qm-btn:focus-visible,
+.tema-comanda .qm-cerrar:focus-visible,
+.tema-comanda .qm-opcion:focus-visible,
+.tema-comanda .qm-pausa:focus-visible {
+  outline: 3px solid var(--ambar);
+  outline-offset: 2px;
+}
+
+.tema-comanda .qm-btn-ambar {
+  border-color: var(--carbon);
+  background: var(--ambar);
+}
+
+.tema-comanda .qm-btn-ambar:hover {
+  background: var(--papel);
+}
+
+.tema-comanda .qm-btn-oscuro {
+  border-color: var(--papel);
+  background: transparent;
+  color: var(--papel);
+}
+
+.tema-comanda .qm-btn-oscuro:hover {
+  background: var(--carbon2);
+}
+
+.tema-comanda .qm-btn.copied {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: var(--sd-white);
+}
+
+.tema-comanda .qm-btn-mini {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 15px;
+}
+
+.tema-comanda .qm-btn-ancho {
+  width: 100%;
+}
+
+.tema-comanda .qm-acciones {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tema-comanda .qm-btn-liberar,
+.tema-comanda .qm-acciones .qm-accion:last-child {
+  grid-column: 1 / -1;
+}
+
+.tema-comanda .qm-btn-liberar {
+  order: 9;
+}
+
+.tema-comanda .qm-btn-liberar:hover {
+  border-color: var(--brasa);
+  background: var(--brasa);
+  color: var(--sd-white);
+}
+
+.tema-comanda .qm-liberar-nota {
+  margin-top: -6px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--suave);
+}
+
+/* Giro de los íconos de carga */
+.tema-comanda .qm-tarjeta .spin {
+  animation: qm-girar 1s linear infinite;
+}
+
+@keyframes qm-girar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tema-comanda .qm-tarjeta .spin {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .tema-comanda .qm-cuerpo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tema-comanda .qm-impreso {
+    width: 100%;
+    max-width: 330px;
+    justify-self: center;
+  }
+}
+
+@media (max-width: 560px) {
+  .tema-comanda.qm-fondo {
+    padding: 12px;
+  }
+
+  .tema-comanda .qm-cabecera {
+    padding: 10px 14px 14px;
+  }
+
+  .tema-comanda .qm-titulo {
+    font-size: 42px;
+  }
+
+  .tema-comanda .qm-cuerpo {
+    padding: 16px 14px 18px;
+  }
+
+  .tema-comanda .qm-acciones {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tema-comanda .qm-tablet-botones .qm-btn {
+    flex-basis: 100%;
+  }
+}
