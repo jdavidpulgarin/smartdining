@@ -396,83 +396,65 @@ export function QRModal({
   }
 
   return (
-    <div className="modal-backdrop sd-modal-backdrop" onClick={onClose}>
-      <div className="modal-card qr-modal sd-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title-group">
-            <div className="modal-icon-badge">
+    <div className="tema-comanda qm-fondo" onClick={onClose}>
+      <div className="qm-tarjeta" onClick={(e) => e.stopPropagation()}>
+        <div className="qm-franja" aria-hidden="true" />
+        <div className="qm-cabecera">
+          <div className="qm-cabecera-izq">
+            <div className="qm-icono">
               <QrCode size={20} />
             </div>
-            <div>
-              <h3>QR · MESA {table.number || table.id}</h3>
-              <p className="modal-subtitle">
+            <div className="qm-titulos">
+              <span aria-hidden="true" className="qm-kicker">Código QR</span>
+              <h3 className="qm-titulo">QR · MESA {table.number || table.id}</h3>
+              <span aria-hidden="true" className={`qm-estado ${isOcupada ? 'ocupada' : isDisponible ? 'disponible' : 'cuenta_pedida'}`}>
+                {isOcupada ? 'OCUPADA' : isDisponible ? 'DISPONIBLE' : (table.status || 'ESTADO').toUpperCase()}
+              </span>
+              <p className="qm-subtitulo">
                 {table.location || 'Salón'} · Capacidad: {table.seats || table.capacidad || 4} personas
               </p>
             </div>
           </div>
-          <button className="modal-close-btn" onClick={onClose} aria-label="Cerrar">
+          <button className="qm-cerrar" onClick={onClose} aria-label="Cerrar">
             <X size={18} />
           </button>
         </div>
 
-        <div className="modal-body qr-modal-body">
+        <div className="qm-cuerpo">
           {/* Tarjeta del Código QR en Pantalla para el Comensal */}
-          <div className="printable-qr-card" ref={qrRef}>
-            <div className="printable-brand">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span
-                  style={{
-                    background: 'var(--sd-red)',
-                    color: '#ffffff',
-                    fontFamily: 'var(--sd-font-heading)',
-                    fontWeight: 800,
-                    fontSize: 13,
-                    padding: '2px 6px',
-                    borderRadius: 4,
-                  }}
-                >
+          <div className="qm-impreso" ref={qrRef}>
+            <div className="qm-impreso-marca">
+              <div className="qm-marca">
+                <span className="qm-marca-sd">
                   SD
                 </span>
-                <span
-                  style={{
-                    fontFamily: 'var(--sd-font-heading)',
-                    fontWeight: 800,
-                    fontSize: 17,
-                    letterSpacing: '0.04em',
-                    color: '#120E0D',
-                  }}
-                >
+                <span className="qm-marca-nombre">
                   SMARTDINING
                 </span>
               </div>
-              <span className="printable-mesa">MESA {table.number || table.id}</span>
+              <span className="qm-impreso-mesa">MESA {table.number || table.id}</span>
             </div>
 
             <div
-              className={`qr-svg-wrapper ${justRotated ? 'qr-rotated-pulse' : ''}`}
-              style={{
-                transition: 'all 0.3s ease',
-                position: 'relative',
-              }}
+              className={`qm-qr ${justRotated ? 'qm-qr-renovado' : ''}`}
             >
               {token && pendienteApertura ? (
-                <div className="qr-placeholder-box" role="status" style={{ padding: '20px 12px', textAlign: 'center' }}>
-                  <RefreshCw size={40} className="spin" style={{ margin: '0 auto 12px auto', color: '#8E827B' }} />
-                  <p style={{ margin: 0, fontSize: '0.9rem', color: '#334155' }}>Generando QR vigente…</p>
+                <div className="qm-qr-vacio" role="status">
+                  <RefreshCw size={40} className="spin qm-vacio-icono" />
+                  <p className="qm-vacio-texto">Generando QR vigente…</p>
                 </div>
               ) : token && qrVencido ? (
-                <div className="qr-placeholder-box" role="alert" style={{ padding: '20px 12px', textAlign: 'center' }}>
-                  <AlertCircle size={44} style={{ margin: '0 auto 10px auto', color: 'var(--sd-red)' }} />
-                  <p style={{ margin: '0 0 6px 0', fontSize: '1rem', fontWeight: 800, color: '#120E0D' }}>QR vencido</p>
-                  <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', lineHeight: 1.4, color: '#334155' }}>
+                <div className="qm-qr-vacio" role="alert">
+                  <AlertCircle size={44} className="qm-vacio-icono qm-vacio-icono-alerta" />
+                  <p className="qm-vacio-titulo">QR vencido</p>
+                  <p className="qm-vacio-texto">
                     {errorRotacion || 'El código rota cada 3 minutos mientras la mesa esté vacía; este ya no sirve.'}
                   </p>
                   <button
                     type="button"
-                    className="sd-qr-btn sd-qr-btn-gold"
+                    className="qm-btn qm-btn-ambar"
                     onClick={() => ejecutarRotacion('manual')}
                     disabled={loadingAction}
-                    style={{ margin: '0 auto' }}
                   >
                     <RefreshCw size={14} className={loadingAction ? 'spin' : ''} />
                     <span>{loadingAction ? 'Generando...' : 'Generar nuevo'}</span>
@@ -488,109 +470,77 @@ export function QRModal({
                   bgColor="#ffffff"
                 />
               ) : isOcupada ? (
-                <div className="qr-placeholder-box" style={{ padding: '20px 12px', textAlign: 'center' }}>
-                  <QrCode size={48} className="text-muted" style={{ margin: '0 auto 12px auto' }} />
-                  <p style={{ margin: '0 0 12px 0', fontSize: '0.9rem', lineHeight: 1.4, color: '#334155' }}>
+                <div className="qm-qr-vacio">
+                  <QrCode size={48} className="qm-vacio-icono" />
+                  <p className="qm-vacio-texto">
                     Esta mesa tiene una sesión abierta, pero su QR no está en este dispositivo.
                   </p>
                   <button
                     type="button"
-                    className="sd-qr-btn sd-qr-btn-gold"
+                    className="qm-btn qm-btn-ambar"
                     onClick={() => ejecutarRotacion('manual')}
                     disabled={loadingAction || tieneComensalesOpedidos}
                     title={tieneComensalesOpedidos ? 'La mesa ya tiene comensales: rotar el QR los sacaría de la mesa' : undefined}
-                    style={{ margin: '0 auto' }}
                   >
                     <RefreshCw size={14} className={loadingAction ? 'spin' : ''} />
                     <span>{loadingAction ? 'Generando...' : 'Generar nuevo QR'}</span>
                   </button>
-                  <p style={{ margin: '10px 0 0 0', fontSize: '0.75rem', color: '#8E827B' }}>
+                  <p className="qm-vacio-nota">
                     El QR anterior dejará de funcionar.
                   </p>
                 </div>
               ) : (
-                <div className="qr-placeholder-box">
-                  <QrCode size={56} className="text-muted" />
-                  <p>Mesa disponible. Pulsa "Abrir Mesa" para generar el QR de la sesión.</p>
+                <div className="qm-qr-vacio">
+                  <QrCode size={56} className="qm-vacio-icono" />
+                  <p className="qm-vacio-texto">Mesa disponible. Pulsa "Abrir Mesa" para generar el QR de la sesión.</p>
                 </div>
               )}
 
               {justRotated && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    background: 'rgba(238, 28, 37, 0.15)',
-                    borderRadius: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 700,
-                    color: 'var(--sd-red)',
-                    fontSize: '0.85rem',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  <Sparkles size={18} style={{ marginRight: '6px' }} />
+                <div className="qm-qr-aviso">
+                  <Sparkles size={18} className="qm-qr-aviso-icono" />
                   ¡QR Renovado!
                 </div>
               )}
             </div>
 
-            <div className="printable-footer">
+            <div className="qm-impreso-pie">
               {token ? (
                 <>
-                  <p className="printable-cta">
+                  <p className="qm-impreso-cta">
                     Muestra este código al grupo. Válido durante su estadía.
                   </p>
-                  <div className="token-meta-pill">
+                  <div className="qm-firma">
                     <ShieldCheck size={12} />
                     <span>v1 firmado · sid: {sid || 'activo'}</span>
                   </div>
                 </>
               ) : (
-                <p className="printable-cta text-muted">Sin sesión activa</p>
+                <p className="qm-impreso-cta qm-impreso-sin">Sin sesión activa</p>
               )}
             </div>
           </div>
 
           {/* Controles de Sesión y Ajustes para el Personal */}
-          <div className="qr-controls">
+          <div className="qm-controles">
             {/* Estado actual de la mesa */}
-            <div className="qr-status-row">
-              <span className="qr-label">Estado de la mesa:</span>
-              <span className={`sd-qr-status-chip ${isOcupada ? 'ocupada' : isDisponible ? 'disponible' : 'cuenta_pedida'}`}>
+            <div className="qm-estado-fila">
+              <span className="qm-rotulo">Estado de la mesa:</span>
+              <span className={`qm-estado ${isOcupada ? 'ocupada' : isDisponible ? 'disponible' : 'cuenta_pedida'}`}>
                 {isOcupada ? 'OCUPADA' : isDisponible ? 'DISPONIBLE' : (table.status || 'ESTADO').toUpperCase()}
               </span>
             </div>
 
             {/* SECCIÓN P-07: Rotación y Temporizador de 3 Minutos */}
             {isOcupada && token && (
-              <div
-                className="qr-rotacion-card"
-                style={{
-                  background: 'var(--sd-bg)',
-                  border: '1px solid var(--sd-border)',
-                  borderRadius: '12px',
-                  padding: '12px 14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="qm-tiquete qm-rotacion">
+                <div className="qm-rotacion-cabeza">
+                  <div className="qm-rotacion-titulo">
                     <Clock
                       size={16}
-                      style={{ color: 'var(--sd-gold)' }}
+                      className="qm-icono-ambar"
                     />
-                    <strong style={{ fontSize: '0.85rem', color: 'var(--sd-text)', fontFamily: 'var(--sd-font-heading)', textTransform: 'uppercase' }}>
+                    <strong className="qm-rotacion-nombre">
                       Rotación Automática (3 min)
                     </strong>
                   </div>
@@ -599,19 +549,7 @@ export function QRModal({
                     type="button"
                     onClick={() => setAutoRotacionHabilitada((prev) => !prev)}
                     title={autoRotacionHabilitada ? 'Pausar auto-rotación' : 'Activar auto-rotación'}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: autoRotacionHabilitada ? 'var(--sd-text)' : '#8E827B',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      fontSize: '0.75rem',
-                      fontFamily: 'var(--sd-font-heading)',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                    }}
+                    className={autoRotacionHabilitada ? 'qm-pausa' : 'qm-pausa qm-pausa-inactiva'}
                   >
                     {autoRotacionHabilitada ? <Pause size={14} /> : <Play size={14} />}
                     <span>{autoRotacionHabilitada ? 'Pausar' : 'Reanudar'}</span>
@@ -619,59 +557,38 @@ export function QRModal({
                 </div>
 
                 {/* Barra de progreso de los 3 minutos */}
-                <div
-                  style={{
-                    width: '100%',
-                    height: '6px',
-                    background: 'rgba(255, 255, 255, 0.08)',
-                    borderRadius: '999px',
-                    overflow: 'hidden',
-                  }}
-                >
+                <div className="qm-barra">
                   <div
-                    style={{
-                      height: '100%',
-                      width: tieneComensalesOpedidos ? '100%' : `${porcentajeTiempo}%`,
-                      background: tieneComensalesOpedidos
-                        ? 'rgba(255, 255, 255, 0.2)'
+                    className={
+                      tieneComensalesOpedidos
+                        ? 'qm-barra-relleno qm-barra-fija'
                         : segundosRestantes <= 30
-                          ? 'var(--sd-red)'
-                          : 'linear-gradient(90deg, var(--sd-gold), var(--sd-red))',
-                      transition: 'width 1s linear',
-                      borderRadius: '999px',
+                          ? 'qm-barra-relleno qm-barra-urgente'
+                          : 'qm-barra-relleno'
+                    }
+                    style={{
+                      width: tieneComensalesOpedidos ? '100%' : `${porcentajeTiempo}%`,
                     }}
                   />
                 </div>
 
                 {/* Info del temporizador y Botón Nuevo QR */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <div style={{ fontSize: '0.78rem', color: 'var(--sd-text-muted)' }}>
+                <div className="qm-rotacion-pie">
+                  <div className="qm-rotacion-info">
                     {tieneComensalesOpedidos ? (
-                      <span style={{ color: 'var(--sd-text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span className="qm-rotacion-pausa">
                         <span>⏸️ En pausa:</span>
                         <strong>comensales en mesa</strong>
                       </span>
                     ) : autoRotacionHabilitada ? (
                       <span>
                         Próxima renovación en:{' '}
-                        <strong
-                          style={{
-                            color: 'var(--sd-gold)',
-                            fontFamily: 'monospace',
-                            fontSize: '0.9rem',
-                          }}
-                        >
+                        <strong className="qm-reloj">
                           {tiempoFormateado}
                         </strong>
                       </span>
                     ) : (
-                      <span style={{ color: 'var(--sd-text-muted)' }}>Auto-rotación pausada manualmente</span>
+                      <span className="qm-rotacion-manual">Auto-rotación pausada manualmente</span>
                     )}
                   </div>
 
@@ -681,36 +598,26 @@ export function QRModal({
                     type="button"
                     onClick={() => ejecutarRotacion('manual')}
                     disabled={loadingAction || tieneComensalesOpedidos}
-                    className="sd-qr-btn sd-qr-btn-secondary"
+                    className="qm-btn qm-btn-mini"
                     title={
                       tieneComensalesOpedidos
                         ? 'La mesa ya tiene comensales: el QR queda fijo'
                         : 'Rotar inmediatamente el QR de la mesa (POST /api/mesas/:id/rotar-qr)'
                     }
-                    style={{
-                      padding: '4px 12px',
-                      fontSize: '0.8rem',
-                    }}
                   >
                     <RefreshCw size={13} className={loadingAction ? 'spin' : ''} />
                     <span>{loadingAction ? 'Rotando...' : 'Nuevo QR'}</span>
                   </button>
                 </div>
 
-                <div
-                  style={{
-                    fontSize: '0.7rem',
-                    color: 'var(--sd-text-muted)',
-                    lineHeight: '1.3',
-                  }}
-                >
+                <div className="qm-rotacion-nota">
                   {tieneComensalesOpedidos
                     ? '🔒 La mesa ya tiene comensales: el QR queda fijo y nadie pierde su sesión. Si este enlace no sirve, usa el QR de la pantalla de la mesa.'
                     : '🛡️ Seguridad: El código rota cada 3 min mientras no haya comensales para invalidar fotos o capturas viejas.'}
                 </div>
 
                 {errorRotacion && !qrVencido && (
-                  <div role="alert" style={{ fontSize: '0.75rem', color: 'var(--sd-red)', lineHeight: 1.35 }}>
+                  <div role="alert" className="qm-error">
                     {errorRotacion}
                   </div>
                 )}
@@ -719,18 +626,18 @@ export function QRModal({
 
             {/* Metadatos de la sesión activa */}
             {isOcupada && token && (
-              <div className="qr-session-info-card">
-                <div className="session-info-item">
-                  <span className="session-label">ID Sesión (sid):</span>
-                  <strong className="session-sid-code">{sid}</strong>
+              <div className="qm-tiquete qm-sesion">
+                <div className="qm-sesion-dato">
+                  <span className="qm-sesion-rotulo">ID Sesión (sid):</span>
+                  <strong className="qm-sesion-sid">{sid}</strong>
                 </div>
-                <div className="session-info-item">
-                  <span className="session-label">
-                    <Clock size={12} className="inline-icon" /> Expiración estimada:
+                <div className="qm-sesion-dato">
+                  <span className="qm-sesion-rotulo">
+                    <Clock size={12} className="qm-icono-linea" /> Expiración estimada:
                   </span>
                   <span>{infoToken.expiraTexto || '4 horas tras apertura'}</span>
                 </div>
-                <small className="session-security-note">
+                <small className="qm-sesion-nota">
                   🔒 El backend rechaza peticiones con 401 si el sid no coincide con esta mesa.
                 </small>
               </div>
@@ -738,16 +645,15 @@ export function QRModal({
 
             {/* Acción de Apertura si la mesa está libre */}
             {isDisponible && (
-              <div className="qr-open-table-banner">
-                <p style={{ color: 'var(--sd-text-muted)', fontSize: 13, margin: '0 0 10px 0' }}>
+              <div className="qm-abrir">
+                <p className="qm-abrir-texto">
                   Genera un QR nuevo e inicia la sesión para el grupo que va a ocupar esta mesa.
                 </p>
                 <button
                   type="button"
-                  className="sd-qr-btn sd-qr-btn-gold qr-open-btn"
+                  className="qm-btn qm-btn-ambar qm-btn-ancho"
                   onClick={handleAbrirMesa}
                   disabled={loadingAction}
-                  style={{ width: '100%' }}
                 >
                   <Sparkles size={16} />
                   <span>{loadingAction ? 'Generando QR...' : 'Abrir Mesa y Generar QR'}</span>
@@ -756,24 +662,24 @@ export function QRModal({
             )}
 
             {/* Modo Pantalla Tablet (QR en Vidrio) */}
-            <div className="qr-tablet-mode-banner">
-              <div className="tablet-mode-left">
-                <div className="tablet-mode-badge-icon">
+            <div className="qm-tablet">
+              <div className="qm-tablet-izq">
+                <div className="qm-tablet-icono">
                   <Tablet size={20} />
                 </div>
-                <div>
-                  <h4 className="tablet-mode-title">Modo Pantalla Tablet ("QR en Vidrio")</h4>
-                  <p className="tablet-mode-desc">
+                <div className="qm-tablet-textos">
+                  <h4 className="qm-tablet-titulo">Modo Pantalla Tablet ("QR en Vidrio")</h4>
+                  <p className="qm-tablet-desc">
                     Vista para la tablet fija de la mesa. Se conecta al socket server y se auto-refresca sola cuando el token rota.
                   </p>
                 </div>
               </div>
-              <div className="tablet-mode-buttons">
+              <div className="qm-tablet-botones">
                 <button
                   type="button"
                   onClick={lanzarPantalla}
                   disabled={preparandoTablet}
-                  className="sd-qr-btn sd-qr-btn-primary tablet-launch-btn"
+                  className="qm-btn qm-btn-ambar"
                   title="Abrir la interfaz dedicada para la tablet física de la mesa"
                 >
                   <Monitor size={14} />
@@ -781,7 +687,7 @@ export function QRModal({
                 </button>
                 <button
                   type="button"
-                  className={`sd-qr-btn sd-qr-btn-secondary tablet-copy-btn ${copiedTablet ? 'copied' : ''}`}
+                  className={`qm-btn qm-btn-oscuro ${copiedTablet ? 'copied' : ''}`}
                   onClick={copiarUrlTablet}
                   disabled={preparandoTablet}
                   title="Copiar URL para configurar la tablet del restaurante (lleva su credencial: compártela solo con la tablet)"
@@ -791,7 +697,7 @@ export function QRModal({
                 </button>
               </div>
               {errorTablet && (
-                <p role="alert" className="tablet-mode-desc" style={{ color: 'var(--sd-red-text)', fontWeight: 700, margin: '8px 0 0 0' }}>
+                <p role="alert" className="qm-tablet-error">
                   {errorTablet}
                 </p>
               )}
@@ -799,15 +705,15 @@ export function QRModal({
 
             {/* Selector de Conexión Wi-Fi vs Local */}
             {token && (
-              <div className="qr-network-selector-box">
-                <div className="network-toggle-header">
-                  <span className="qr-label">
-                    <Wifi size={14} className="inline-icon" style={{ color: 'var(--sd-red)' }} /> Destino del Escaneo:
+              <div className="qm-tiquete qm-red">
+                <div className="qm-red-cabeza">
+                  <span className="qm-rotulo">
+                    <Wifi size={14} className="qm-icono-linea" /> Destino del Escaneo:
                   </span>
-                  <div className="network-pills">
+                  <div className="qm-red-opciones">
                     <button
                       type="button"
-                      className={`net-pill ${useWifiIp ? 'active' : ''}`}
+                      className={`qm-opcion ${useWifiIp ? 'active' : ''}`}
                       onClick={() => setUseWifiIp(true)}
                     >
                       <Smartphone size={13} />
@@ -815,7 +721,7 @@ export function QRModal({
                     </button>
                     <button
                       type="button"
-                      className={`net-pill ${!useWifiIp ? 'active' : ''}`}
+                      className={`qm-opcion ${!useWifiIp ? 'active' : ''}`}
                       onClick={() => setUseWifiIp(false)}
                     >
                       <span>Localhost</span>
@@ -824,39 +730,24 @@ export function QRModal({
                 </div>
 
                 {useWifiIp && (
-                  <div className="ip-input-wrapper">
-                    <label>IP del servidor en tu Wi-Fi:</label>
+                  <div className="qm-ip">
+                    <label className="qm-ip-label">IP del servidor en tu Wi-Fi:</label>
                     <input
                       type="text"
                       value={hostIp}
                       onChange={(e) => setHostIp(e.target.value.trim())}
                       placeholder="192.168.1.X"
-                      className="sd-input"
+                      className="qm-input"
                     />
                     {qrApuntaALocalhost && (
-                      <div
-                        className="sd-localhost-warning"
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          marginTop: 8,
-                          padding: '8px 12px',
-                          borderRadius: 6,
-                          background: 'rgba(238, 28, 37, 0.12)',
-                          border: '1px solid rgba(238, 28, 37, 0.35)',
-                          color: 'var(--sd-red-text, #ff6b6b)',
-                          fontSize: 12,
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        <AlertCircle size={15} style={{ flexShrink: 0, color: 'var(--sd-red)' }} />
+                      <div className="qm-aviso-local">
+                        <AlertCircle size={15} className="qm-aviso-local-icono" />
                         <span>
                           El QR apunta a localhost: un celular no podrá abrirlo. Escribe la IP de este PC en la red Wi-Fi.
                         </span>
                       </div>
                     )}
-                    <small className="ip-hint">
+                    <small className="qm-ip-nota">
                       💡 Los comensales deben estar conectados al mismo Wi-Fi del restaurante.
                     </small>
                   </div>
@@ -866,27 +757,25 @@ export function QRModal({
 
             {/* Enlace directo codificado en el QR */}
             {token && (
-              <div className="qr-url-box">
-                <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--sd-text-muted)', textTransform: 'uppercase', fontFamily: 'var(--sd-font-heading)' }}>
+              <div className="qm-enlace">
+                <label className="qm-rotulo">
                   Enlace codificado en el QR:
                 </label>
-                <div className="qr-url-input-group" style={{ display: 'flex', marginTop: 4 }}>
+                <div className="qm-enlace-grupo">
                   <input
                     type="text"
                     readOnly
                     value={qrVigente ? diningUrl : ''}
                     placeholder={pendienteApertura ? 'Generando QR vigente…' : 'QR vencido: genera uno nuevo'}
                     aria-label="Enlace del comensal"
-                    className="sd-input"
-                    style={{ borderRadius: '6px 0 0 6px' }}
+                    className="qm-input qm-enlace-input"
                   />
                   <button
                     type="button"
-                    className={`sd-qr-btn sd-qr-btn-secondary qr-btn-icon ${copied ? 'copied' : ''}`}
+                    className={`qm-btn qm-enlace-copiar ${copied ? 'copied' : ''}`}
                     onClick={handleCopy}
                     disabled={!qrVigente}
                     title="Copiar enlace"
-                    style={{ borderRadius: '0 6px 6px 0', borderLeft: 'none', minWidth: 90 }}
                   >
                     {copied ? <Check size={16} /> : <Copy size={16} />}
                     <span>{copied ? 'Copiado' : 'Copiar'}</span>
@@ -896,11 +785,11 @@ export function QRModal({
             )}
 
             {/* Botones de Acción para el Mesero */}
-            <div className="qr-actions-grid">
+            <div className="qm-acciones">
               {isOcupada && onFreeTable && (
                 <button
                   type="button"
-                  className="sd-qr-btn sd-qr-btn-danger qr-action-btn danger-hover"
+                  className="qm-btn qm-btn-liberar"
                   onClick={handleLiberarMesa}
                   disabled={loadingAction}
                   title="Libera la mesa manualmente e invalida el QR actual"
@@ -913,7 +802,7 @@ export function QRModal({
               {token && (
                 <button
                   type="button"
-                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn"
+                  className="qm-btn qm-accion"
                   onClick={() => ejecutarRotacion(false)}
                   disabled={loadingAction}
                   title="Roto el QR con POST /api/mesas/:id/rotar-qr"
@@ -926,7 +815,7 @@ export function QRModal({
               {token && (
                 <button
                   type="button"
-                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn"
+                  className="qm-btn qm-accion"
                   onClick={handleDownload}
                 >
                   <Download size={16} />
@@ -937,7 +826,7 @@ export function QRModal({
               {token && (
                 <button
                   type="button"
-                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn"
+                  className="qm-btn qm-accion"
                   onClick={handlePrint}
                 >
                   <Printer size={16} />
@@ -950,7 +839,7 @@ export function QRModal({
                   type="button"
                   onClick={lanzarPantalla}
                   disabled={preparandoTablet}
-                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn tablet-link-btn"
+                  className="qm-btn qm-accion"
                   title="Abrir vista de tablet para esta mesa"
                 >
                   <Tablet size={16} />
@@ -963,13 +852,16 @@ export function QRModal({
                   href={diningUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="sd-qr-btn sd-qr-btn-sec qr-action-btn test-link"
+                  className="qm-btn qm-accion"
                 >
                   <ExternalLink size={16} />
                   <span>Probar comensal</span>
                 </a>
               )}
             </div>
+            {isOcupada && onFreeTable && (
+              <span aria-hidden="true" className="qm-liberar-nota">Cierra la sesión de los comensales.</span>
+            )}
           </div>
         </div>
       </div>
