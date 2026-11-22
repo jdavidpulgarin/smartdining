@@ -36,54 +36,33 @@ export function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) 
   const esObligatorio = Boolean(paso.obligatorio || Number(paso.min_sel) > 0)
 
   return (
-    <section aria-labelledby={`paso-titulo-${paso.id_paso}`} style={{ marginBottom: '20px' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: '8px',
-          marginBottom: '12px',
-        }}
-      >
+    <section aria-labelledby={`paso-titulo-${paso.id_paso}`} className="cm-paso">
+      <div className="cm-paso-cabeza">
         <div>
           <h3
             id={`paso-titulo-${paso.id_paso}`}
-            style={{
-              margin: '0 0 4px',
-              fontSize: '1rem',
-              color: 'var(--sd-text)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}
+            className="cm-paso-titulo"
           >
             {paso.nombre}
           </h3>
-          <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--sd-text-muted)' }}>
+          <p className="cm-paso-regla">
             {obtenerTextoRegla(paso)}
           </p>
           {maxAlcanzado && (
-            <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: 'var(--sd-gold)' }}>
+            <p className="cm-paso-maximo">
               Máximo alcanzado: desmarca una opción para cambiarla
             </p>
           )}
         </div>
 
         <span
-          style={{
-            fontSize: '0.75rem',
-            padding: '2px 8px',
-            borderRadius: '4px',
-            background: esObligatorio ? 'rgba(238, 28, 37, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-            color: esObligatorio ? 'var(--sd-red)' : 'var(--sd-text-muted)',
-            fontWeight: 600,
-          }}
+          className={esObligatorio ? 'cm-obligatorio cm-obligatorio-si' : 'cm-obligatorio'}
         >
           {esObligatorio ? 'Obligatorio' : 'Opcional'}
         </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div className="cm-ingredientes">
         {(paso.ingredientes || []).map((ingrediente) => {
           const idIng = ingrediente.id_ingrediente
           const seleccionado = Object.prototype.hasOwnProperty.call(
@@ -97,18 +76,7 @@ export function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) 
           return (
             <div
               key={idIng}
-              style={{
-                borderRadius: '8px',
-                border: seleccionado
-                  ? '1px solid var(--sd-red)'
-                  : '1px solid var(--sd-border)',
-                background: seleccionado
-                  ? 'rgba(238, 28, 37, 0.08)'
-                  : 'var(--sd-surface-2)',
-                padding: '10px 12px',
-                opacity: deshabilitado ? 0.45 : 1,
-                transition: 'all 0.15s ease',
-              }}
+              className={`cm-ingrediente${seleccionado ? ' cm-ingrediente-elegido' : ''}${deshabilitado ? ' cm-ingrediente-bloqueado' : ''}`}
             >
               <div
                 role="checkbox"
@@ -134,44 +102,21 @@ export function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) 
                     })
                   }
                 }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  cursor: deshabilitado ? 'not-allowed' : 'pointer',
-                  minHeight: '44px',
-                }}
+                className={deshabilitado ? 'cm-ingrediente-fila cm-ingrediente-fila-bloqueada' : 'cm-ingrediente-fila'}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="cm-ingrediente-izq">
                   <div
-                    style={{
-                      width: '22px',
-                      height: '22px',
-                      borderRadius: '4px',
-                      border: seleccionado ? '1px solid var(--sd-red)' : '1px solid var(--sd-border)',
-                      background: seleccionado ? 'var(--sd-red)' : 'transparent',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#fff',
-                    }}
+                    className={seleccionado ? 'cm-casilla cm-casilla-marcada' : 'cm-casilla'}
                   >
                     {seleccionado && <Check size={14} />}
                   </div>
 
                   <div>
-                    <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
+                    <strong className="cm-ingrediente-nombre">
                       {ingrediente.nombre}
                     </strong>
                     {agotado && (
-                      <span
-                        style={{
-                          marginLeft: '8px',
-                          color: 'var(--sd-red)',
-                          fontSize: '0.75rem',
-                          fontWeight: 600,
-                        }}
-                      >
+                      <span className="cm-ingrediente-agotado">
                         (Agotado)
                       </span>
                     )}
@@ -179,7 +124,7 @@ export function PasoConstructor({ paso, seleccionesDelPaso = {}, despachador }) 
                 </div>
 
                 {Number(ingrediente.precio_extra) > 0 && (
-                  <span style={{ fontSize: '0.8rem', color: 'var(--sd-gold)' }}>
+                  <span className="cm-ingrediente-extra">
                     +${Number(ingrediente.precio_extra).toLocaleString('es-CO')}
                   </span>
                 )}
