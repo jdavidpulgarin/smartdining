@@ -112,26 +112,27 @@ export function TableDetailModal({
   const cifra = (monto) => (sinCifras ? '—' : formatearDinero(monto))
 
   return (
-    <div className="qr-modal-backdrop" onClick={onClose}>
+    <div className="tema-comanda dm-fondo" onClick={onClose}>
       <div
-        className="qr-modal-card table-detail-modal-card"
+        className="dm-tarjeta"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '680px', width: '92%' }}
       >
+        <div className="dm-franja" aria-hidden="true" />
         {/* Encabezado */}
-        <div className="table-detail-header">
-          <div className="table-detail-header-left">
-            <div className="table-detail-title-row">
-              <div className="table-badge-large">#{table?.numero ?? table?.number ?? idMesa}</div>
-              <h2 className="table-detail-title">{tableName}</h2>
+        <div className="dm-cabecera">
+          <div className="dm-cabecera-izq">
+            <span aria-hidden="true" className="dm-rotulo">Detalle de mesa</span>
+            <div className="dm-titulo-fila">
+              <div className="dm-numero">#{table?.numero ?? table?.number ?? idMesa}</div>
+              <h2 className="dm-titulo">{tableName}</h2>
             </div>
-            <div className="table-detail-subtitle-row">
+            <div className="dm-subtitulo">
               <StatusBadge status={table?.status || table?.estado || 'Disponible'} />
-              <span className="table-detail-meta">
+              <span className="dm-meta">
                 Zona {table?.location || table?.ubicacion || 'Principal'} · Capacidad {table?.seats || table?.capacidad || 4}
               </span>
               {sid && (
-                <span className="table-detail-sid">
+                <span className="dm-sid">
                   · sid: {sid}
                 </span>
               )}
@@ -140,7 +141,7 @@ export function TableDetailModal({
 
           <button
             type="button"
-            className="table-detail-close-btn"
+            className="dm-cerrar"
             onClick={onClose}
             aria-label="Cerrar modal"
           >
@@ -149,40 +150,40 @@ export function TableDetailModal({
         </div>
 
         {/* Tarjetas de Métricas de Mesa */}
-        <div className="table-detail-metrics-grid">
-          <div className="table-metric-card">
-            <span className="table-metric-caption">Consumo Mesa</span>
-            <strong className="table-metric-value">
+        <div className="dm-metricas">
+          <div className="dm-metrica">
+            <span className="dm-metrica-rotulo">Consumo Mesa</span>
+            <strong className="dm-metrica-valor">
               {cifra(resumen.total)}
             </strong>
-            <span className="table-metric-subtext">
+            <span className="dm-metrica-sub">
               {resumen.total > 0 ? `${resumen.items} ítems ordenados` : 'Sin consumo'}
             </span>
           </div>
 
-          <div className="table-metric-card">
-            <span className="table-metric-caption">Comensales</span>
-            <strong className="table-metric-value">
+          <div className="dm-metrica">
+            <span className="dm-metrica-rotulo">Comensales</span>
+            <strong className="dm-metrica-valor">
               {resumen.comensales.length > 0 ? resumen.comensales.length : (resumen.conSesion ? '1+' : '0')}
             </strong>
-            <span className="table-metric-subtext">
+            <span className="dm-metrica-sub">
               {resumen.conSesion ? 'Grupo activo' : 'Mesa libre'}
             </span>
           </div>
 
-          <div className="table-metric-card table-metric-card-saldo">
-            <span className="table-metric-caption-saldo">Saldo Pendiente</span>
-            <strong className="table-metric-value">
+          <div className="dm-metrica dm-metrica-saldo">
+            <span className="dm-metrica-rotulo">Saldo Pendiente</span>
+            <strong className="dm-metrica-valor">
               {cifra(resumen.saldo)}
             </strong>
-            <span className="table-metric-subtext">
+            <span className="dm-metrica-sub">
               {resumen.pagado > 0 ? `Pagado ${formatearDinero(resumen.pagado)}` : 'Por liquidar en caja'}
             </span>
           </div>
         </div>
 
         {errorCuenta && (
-          <div role="alert" className="table-detail-empty-box" style={{ marginBottom: '12px' }}>
+          <div role="alert" className="dm-aviso dm-aviso-error">
             {errorCuenta}
           </div>
         )}
@@ -190,54 +191,39 @@ export function TableDetailModal({
         {resumen.pagadaSinEntregar && (
           <div
             role="status"
-            className="table-detail-empty-box"
-            style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', borderColor: 'var(--sd-gold)' }}
+            className="dm-aviso dm-aviso-pagada"
           >
-            <AlertTriangle size={16} style={{ color: 'var(--sd-gold)', flexShrink: 0 }} />
+            <AlertTriangle size={16} className="dm-aviso-icono" />
             <span>{AVISO_PAGADA_SIN_ENTREGAR}</span>
           </div>
         )}
 
         {/* Desglose de Comensales (si hay consumos) */}
         {resumen.comensales.length > 0 && (
-          <div className="detail-section-block" style={{ marginBottom: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <UserCheck size={16} style={{ color: 'var(--sd-red)' }} />
-              <h3 style={{ fontSize: '0.9rem', color: '#f1f5f9', margin: 0 }}>
+          <div className="dm-seccion">
+            <div className="dm-seccion-cabeza">
+              <UserCheck size={16} className="dm-seccion-icono" />
+              <h3 className="dm-seccion-titulo">
                 Cuenta Dividida por Comensal
               </h3>
             </div>
-            <div className="comensales-cards-wrap" style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              maxHeight: '160px',
-              overflowY: 'auto',
-            }}>
+            <div className="dm-lista dm-lista-comensales">
               {resumen.comensales.map((c) => (
                 <div
                   key={c.nombre}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    background: 'rgba(255, 255, 255, 0.02)',
-                    border: '1px solid rgba(255, 255, 255, 0.06)',
-                  }}
+                  className="dm-tiquete dm-comensal"
                 >
                   <div>
-                    <strong style={{ color: '#e2e8f0', fontSize: '0.85rem' }}>{c.nombre}</strong>
-                    <span style={{ color: 'var(--sd-text-muted)', fontSize: '0.75rem', marginLeft: '8px' }}>
+                    <strong className="dm-comensal-nombre">{c.nombre}</strong>
+                    <span className="dm-comensal-items">
                       ({c.items} {c.items === 1 ? 'ítem' : 'ítems'})
                     </span>
                   </div>
-                  <span style={{ textAlign: 'right' }}>
-                    <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
+                  <span className="dm-comensal-cifras">
+                    <strong className="dm-comensal-subtotal">
                       {formatearDinero(c.subtotal)}
                     </strong>
-                    <span style={{ display: 'block', color: 'var(--sd-text-muted)', fontSize: '0.72rem' }}>
+                    <span className="dm-comensal-saldo">
                       {c.saldo > 0 ? `Saldo ${formatearDinero(c.saldo)}` : 'Pagado'}
                     </span>
                   </span>
@@ -248,57 +234,41 @@ export function TableDetailModal({
         )}
 
         {/* Pedidos Activos de la Mesa */}
-        <div className="detail-section-block" style={{ marginBottom: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Utensils size={16} style={{ color: 'var(--sd-red)' }} />
-              <h3 style={{ fontSize: '0.9rem', color: '#f1f5f9', margin: 0 }}>
+        <div className="dm-seccion dm-seccion-comandas">
+          <div className="dm-seccion-cabeza">
+            <div className="dm-seccion-cabeza-izq">
+              <Utensils size={16} className="dm-seccion-icono" />
+              <h3 className="dm-seccion-titulo">
                 Comandas en Curso ({pedidosMesa.length})
               </h3>
             </div>
           </div>
 
           {pedidosMesa.length > 0 ? (
-            <div className="orders-cards-list" style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-              maxHeight: '220px',
-              overflowY: 'auto',
-            }}>
+            <div className="dm-lista dm-lista-comandas">
               {pedidosMesa.map((ped) => {
                 const isListo = ped.estado?.toLowerCase() === 'listo'
                 return (
                   <div
                     key={ped.id_pedido || ped.codigo_pedido}
-                    style={{
-                      padding: '12px',
-                      borderRadius: '10px',
-                      background: 'rgba(255, 255, 255, 0.03)',
-                      border: isListo
-                        ? '1px solid var(--sd-gold)'
-                        : '1px solid rgba(255, 255, 255, 0.08)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}
+                    className={isListo ? 'dm-tiquete dm-comanda dm-comanda-lista' : 'dm-tiquete dm-comanda'}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <strong style={{ color: '#f8fafc', fontSize: '0.85rem' }}>
+                    <div className="dm-comanda-fila">
+                      <div className="dm-comanda-id">
+                        <strong className="dm-comanda-codigo">
                           {ped.codigo_pedido || `#${ped.id_pedido}`}
                         </strong>
                         <StateBadge state={ped.estado} />
                       </div>
-                      <strong style={{ color: 'var(--sd-text)', fontSize: '0.9rem' }}>
+                      <strong className="dm-comanda-total">
                         {formatearDinero(ped.total)}
                       </strong>
                     </div>
 
                     {/* Platos del pedido */}
-                    <div style={{ fontSize: '0.78rem', color: 'var(--sd-text-muted)' }}>
+                    <div className="dm-comanda-platos">
                       {(ped.detalles || ped.items || []).map((it, idx) => (
-                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+                        <div key={idx} className="dm-plato">
                           <span>
                             {it.cantidad}x {it.plato_nombre || it.nombre || 'Plato'}{' '}
                             {it.comensal ? `(${it.comensal})` : ''}
@@ -310,16 +280,11 @@ export function TableDetailModal({
 
                     {/* Botón Marcar Entregado si está listo */}
                     {isListo && onDeliverOrder && (
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                      <div className="dm-comanda-acciones">
                         <button
                           type="button"
-                          className="primary-button small"
+                          className="primary-button small dm-entregar"
                           onClick={() => onDeliverOrder(ped.id_pedido)}
-                          style={{
-                            background: 'var(--sd-red)',
-                            padding: '6px 12px',
-                            fontSize: '0.75rem',
-                          }}
                         >
                           <CheckCircle2 size={13} />
                           <span>Marcar Entregado</span>
@@ -331,7 +296,7 @@ export function TableDetailModal({
               })}
             </div>
           ) : (
-            <div className="table-detail-empty-box">
+            <div className="dm-vacio">
               {resumen.conSesion && sinCifras
                 ? (errorCuenta ? 'Sin datos de la cuenta.' : 'Cargando cuenta…')
                 : resumen.conSesion
@@ -342,11 +307,11 @@ export function TableDetailModal({
         </div>
 
         {/* Barra de Acciones de Mesa */}
-        <div className="table-detail-modal-footer">
+        <div className="dm-acciones">
           {onOpenQR && (
             <button
               type="button"
-              className="table-btn-secondary"
+              className="dm-btn dm-btn-qr"
               onClick={() => {
                 onClose()
                 onOpenQR(table)
@@ -360,8 +325,7 @@ export function TableDetailModal({
           {isOcupada && canTakeOrder && (
             <button
               type="button"
-              className="table-btn-primary"
-              style={{ background: 'var(--sd-red)', borderColor: 'var(--sd-red)' }}
+              className="dm-btn dm-btn-tomar"
               onClick={() => {
                 onClose()
                 navigate(`/mesas/${idMesa}/tomar-pedido`)
@@ -376,7 +340,7 @@ export function TableDetailModal({
           {isOcupada && puedeUsarCaja(userRole) && (
             <button
               type="button"
-              className="table-btn-secondary"
+              className="dm-btn dm-btn-caja"
               onClick={() => {
                 onClose()
                 navigate(`/caja?mesa=${idMesa}`)
@@ -391,7 +355,7 @@ export function TableDetailModal({
           {isOcupada && onFreeTable && (
             <button
               type="button"
-              className="table-btn-danger"
+              className="dm-btn dm-btn-liberar"
               onClick={() => {
                 if (window.confirm(`¿Liberar ${tableName}? Se revocará el QR de la sesión.`)) {
                   onFreeTable(idMesa)
