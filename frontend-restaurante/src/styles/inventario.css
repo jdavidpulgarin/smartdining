@@ -1,0 +1,548 @@
+/* ==============================================================================
+   Inventario · versión negra
+   Diseño: referencia-diseno/roles/smartdining-admin-negro.html (sección INVENTARIO)
+   Todo bajo .tema-comanda. Las pestañas y ventanas usan las clases comunes del
+   panel (sd-btn, sd-input, sd-config-table…): aquí se les da el tema solo dentro
+   de .inventario-pagina. Solo diseño: la lógica no cambia.
+   ============================================================================== */
+
+.tema-comanda.inventario-pagina {
+  /* Lo que ocupa la barra superior: 76 px, o dos filas por debajo de 1024 px */
+  --inv-barra: 88px;
+
+  /* El ancho lo pone la pantalla, no el contenido (si no, el shell corta). */
+  contain: inline-size;
+  min-width: 0;
+  min-height: calc(100vh - 72px);
+  background:
+    repeating-linear-gradient(115deg, transparent 0 34px, rgba(255, 176, 46, .035) 34px 38px),
+    var(--carbon);
+  color: var(--papel);
+  font-family: var(--f-texto);
+}
+
+.tema-comanda .inv-cont {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 24px 60px;
+}
+
+.tema-comanda.inventario-pagina :focus-visible {
+  outline: 3px solid var(--ambar);
+  outline-offset: 2px;
+}
+
+.tema-comanda .inv-panel .sd-card :focus-visible,
+.tema-comanda .inv-panel .sd-config-table :focus-visible {
+  outline-color: var(--rojo);
+}
+
+/* Encabezado y pestañas */
+.tema-comanda .inv-cab {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.tema-comanda .inv-titulo {
+  margin: 0;
+  font: 400 clamp(44px, 5vw, 64px) / .88 var(--f-titulo);
+  letter-spacing: .04em;
+  color: var(--papel);
+  text-shadow: 4px 4px 0 var(--rojo);
+}
+
+.tema-comanda .inv-sub {
+  font: 700 23px / 1.1 var(--f-mano);
+  color: var(--ambar);
+}
+
+.tema-comanda .inv-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 18px;
+  border-bottom: 3px solid #3a2b28;
+}
+
+.tema-comanda .inv-tab {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px 10px 0 0;
+  background: transparent;
+  color: #cbbcb2;
+  font: 400 19px var(--f-titulo);
+  letter-spacing: .1em;
+  cursor: pointer;
+}
+
+.tema-comanda .inv-tab:hover {
+  color: var(--papel);
+}
+
+.tema-comanda .inv-tab[aria-selected="true"] {
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+/* Textos sobre el fondo oscuro */
+.tema-comanda .inv-panel > div > div > p {
+  font: 700 23px / 1.15 var(--f-mano);
+  color: var(--papel);
+}
+
+.tema-comanda .inv-panel > div > div > p strong {
+  color: var(--ambar);
+}
+
+.tema-comanda .inv-panel section > .sd-card-title {
+  margin: 0 0 6px;
+  font: 400 30px / 1 var(--f-titulo);
+  letter-spacing: .06em;
+  color: var(--papel);
+}
+
+.tema-comanda .inv-panel section .sd-input-label {
+  font-size: 19px;
+  letter-spacing: .12em;
+  color: var(--ambar);
+}
+
+/* Botones sobre el fondo oscuro */
+.tema-comanda .inv-panel .sd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 11px;
+  font: 400 18px / 1.1 var(--f-titulo);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tema-comanda .inv-panel .sd-btn svg {
+  flex: none;
+}
+
+.tema-comanda .inv-panel .sd-btn-primary,
+.tema-comanda .inv-panel .sd-btn-primary:hover:not(:disabled) {
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+.tema-comanda .inv-panel .sd-btn-secondary,
+.tema-comanda .inv-panel .sd-btn-secondary:hover:not(:disabled) {
+  background: transparent;
+  color: var(--papel);
+  box-shadow: inset 0 0 0 2px var(--papel);
+}
+
+.tema-comanda .inv-panel .sd-btn[aria-pressed] {
+  min-height: 40px;
+  border-radius: 999px;
+  font-size: 16px;
+}
+
+.tema-comanda .inv-panel .sd-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.tema-comanda .inv-panel [role="group"] {
+  flex-wrap: wrap;
+}
+
+/* Campos */
+.tema-comanda .inv-panel .sd-input {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 2px solid var(--carbon);
+  border-radius: 10px;
+  background-color: #fffaf3;
+  color: var(--tinta);
+  font: 500 16px var(--f-texto);
+  letter-spacing: 0;
+  text-transform: none;
+  box-sizing: border-box;
+}
+
+.tema-comanda .inv-panel .sd-input::placeholder {
+  color: #75635d;
+  opacity: 1;
+}
+
+.tema-comanda .inv-panel textarea.sd-input {
+  min-height: 72px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.tema-comanda .inv-panel input[type="checkbox"],
+.tema-comanda .inv-panel input[type="radio"] {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--rojo);
+}
+
+/* Avisos */
+.tema-comanda .inv-panel .table-toast-banner {
+  gap: 10px;
+  padding: 10px 14px;
+  border: 2px solid var(--ambar);
+  border-left-width: 8px;
+  border-radius: 12px;
+  background: var(--papel);
+  color: var(--tinta);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* App.css fuerza borde, fondo y color con !important */
+.tema-comanda .inv-panel .table-toast-banner.success {
+  border-color: var(--ok) !important;
+  border-width: 2px 2px 2px 8px !important;
+  background: var(--papel) !important;
+  color: var(--tinta) !important;
+}
+
+.tema-comanda .inv-panel .table-toast-banner.error {
+  border-color: var(--brasa);
+  color: var(--granate);
+}
+
+/* Papel: tablas, tarjetas y ventanas. Los tokens --sd-* se reasignan porque el
+   marcado los usa en línea. */
+.tema-comanda .inv-panel .sd-config-table,
+.tema-comanda .inv-panel .sd-card {
+  --sd-text: var(--tinta);
+  --sd-text-muted: var(--suave);
+  --sd-border: #ecdcc8;
+  --sd-border-strong: var(--carbon);
+  --sd-surface: var(--papel);
+  --sd-red: var(--rojo);
+
+  background: var(--papel);
+  color: var(--tinta);
+}
+
+.tema-comanda .inv-panel .sd-card {
+  padding: 20px;
+  border: 0;
+  border-radius: 14px;
+  box-shadow: 0 16px 24px -16px rgba(0, 0, 0, .6);
+}
+
+.tema-comanda .inv-panel .sd-card p {
+  font-family: var(--f-texto);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.tema-comanda .inv-panel .sd-card .sd-input-label,
+.tema-comanda .inv-panel .sd-config-table .sd-input-label {
+  font: 400 16px / 1.2 var(--f-titulo);
+  letter-spacing: .12em;
+  color: var(--suave);
+}
+
+.tema-comanda .inv-panel .sd-card label.sd-input-label {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.tema-comanda .inv-panel .sd-card .sd-btn-primary,
+.tema-comanda .inv-panel .sd-card .sd-btn-primary:hover:not(:disabled) {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+.tema-comanda .inv-panel .sd-card .sd-btn-secondary,
+.tema-comanda .inv-panel .sd-card .sd-btn-secondary:hover:not(:disabled),
+.tema-comanda .inv-panel .sd-config-table .sd-btn-secondary,
+.tema-comanda .inv-panel .sd-config-table .sd-btn-secondary:hover:not(:disabled) {
+  background: var(--papel);
+  color: var(--carbon);
+  box-shadow: inset 0 0 0 2px var(--carbon);
+}
+
+/* Tablas */
+.tema-comanda .inv-panel .sd-config-table th {
+  padding: 10px 16px;
+  border-bottom: 0;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 400 17px var(--f-titulo);
+  letter-spacing: .14em;
+  white-space: nowrap;
+}
+
+.tema-comanda .inv-panel .inv-t-insumos,
+.tema-comanda .inv-panel .inv-t-recetas {
+  border: 2px solid var(--papel);
+}
+
+.tema-comanda .inv-panel .sd-config-table td {
+  padding: 10px 16px;
+  border-bottom: 2px dashed #ecdcc8;
+  color: var(--tinta);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.tema-comanda .inv-panel .sd-config-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.tema-comanda .inv-panel .inv-t-insumos td:nth-child(1),
+.tema-comanda .inv-panel .inv-t-recetas td:nth-child(1) {
+  font-weight: 700;
+}
+
+.tema-comanda .inv-panel .inv-t-insumos td:nth-child(3) {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.tema-comanda .inv-panel .sd-config-table .sd-btn {
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 16px;
+}
+
+.tema-comanda .inv-panel .sd-topbar-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 2px solid var(--carbon);
+  border-radius: 9px;
+  background: var(--papel);
+  color: var(--carbon);
+  cursor: pointer;
+}
+
+.tema-comanda .inv-panel td .sd-topbar-icon-btn + .sd-topbar-icon-btn {
+  margin-left: 8px;
+}
+
+.tema-comanda .inv-panel .sd-topbar-icon-btn:hover {
+  background: var(--papel2);
+}
+
+/* Etiquetas de estado */
+.tema-comanda .inv-panel .sd-badge {
+  padding: 2px 9px;
+  border: 2px solid var(--carbon);
+  border-radius: 6px;
+  background: var(--papel);
+  color: var(--carbon);
+  font: 400 15px / 1.2 var(--f-titulo);
+  letter-spacing: .1em;
+}
+
+.tema-comanda .inv-panel .sd-badge-gold {
+  background: var(--ambar);
+}
+
+.tema-comanda .inv-panel .sd-badge-red {
+  border-color: var(--rojo);
+  background: var(--rojo);
+  color: #fff;
+}
+
+.tema-comanda .inv-panel .sd-badge-dark {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+/* Ventanas: debajo de la barra superior, que si no les tapa la cabecera. En
+   columna para que la ventana se encoja al alto disponible y deslice por dentro. */
+.tema-comanda .inv-panel .sd-modal-backdrop {
+  z-index: 1000;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: var(--inv-barra) 16px 16px;
+  background: rgba(18, 12, 12, .78);
+  backdrop-filter: none;
+}
+
+.tema-comanda .inv-panel .sd-modal-backdrop > .sd-card {
+  flex: 0 1 auto;
+  min-height: 0;
+  padding: 0 20px 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .7);
+}
+
+.tema-comanda .inv-panel .sd-modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  gap: 12px;
+  margin-left: -20px;
+  margin-right: -20px;
+  padding: 12px 16px;
+  border-bottom: 4px solid var(--ambar);
+  background: var(--carbon);
+}
+
+.tema-comanda .inv-panel .sd-modal-header .sd-card-title {
+  font: 400 25px / 1.05 var(--f-titulo);
+  letter-spacing: .06em;
+  color: var(--ambar);
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .inv-panel .sd-modal-header .sd-topbar-icon-btn {
+  flex: none;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ambar);
+}
+
+.tema-comanda .inv-panel .sd-modal-header :focus-visible {
+  outline-color: var(--papel);
+}
+
+.tema-comanda .inv-panel .sd-card [role="status"] strong {
+  font: 400 21px var(--f-titulo);
+}
+
+@media (max-width: 1023px) {
+  .tema-comanda.inventario-pagina {
+    --inv-barra: 120px;
+  }
+}
+
+/* En pantallas chicas cada fila es una ficha: sin deslizar de lado para llegar a
+   las acciones. */
+@media (max-width: 760px) {
+  .tema-comanda .inv-cont {
+    padding: 18px 12px 60px;
+  }
+
+  .tema-comanda .inv-panel input[type="search"].sd-input {
+    flex: 1 1 100%;
+  }
+
+  .tema-comanda .inv-panel .sd-config-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .tema-comanda .inv-panel .sd-config-table,
+  .tema-comanda .inv-panel .sd-config-table tbody {
+    display: block;
+  }
+
+  .tema-comanda .inv-panel .sd-config-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px 12px;
+    padding: 12px 14px;
+    border-bottom: 2px dashed #dcc8b2;
+  }
+
+  .tema-comanda .inv-panel .sd-config-table tr:last-child {
+    border-bottom: 0;
+  }
+
+  .tema-comanda .inv-panel .sd-config-table td {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(1),
+  .tema-comanda .inv-panel .inv-t-recetas td:nth-child(1),
+  .tema-comanda .inv-panel .inv-t-receta td:nth-child(1),
+  .tema-comanda .inv-panel .inv-t-historial td:nth-child(6) {
+    grid-column: 1 / -1;
+    font-size: 16px;
+  }
+
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(3)::before,
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(4)::before,
+  .tema-comanda .inv-panel .inv-t-historial td:nth-child(4)::before,
+  .tema-comanda .inv-panel .inv-t-receta td:nth-child(3)::before {
+    font: 400 16px var(--f-titulo);
+    letter-spacing: .12em;
+    color: var(--suave);
+  }
+
+  /* flex: deja la etiqueta junto a su valor (el text-align va en línea) */
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(n + 3),
+  .tema-comanda .inv-panel .inv-t-historial td:nth-child(3),
+  .tema-comanda .inv-panel .inv-t-historial td:nth-child(4),
+  .tema-comanda .inv-panel .inv-t-receta td:nth-child(3) {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .tema-comanda .inv-panel .inv-t-receta td:nth-child(3) {
+    align-self: center;
+    padding-left: 10px;
+  }
+
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(3)::before {
+    content: "STOCK";
+  }
+
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(4)::before {
+    content: "MÍNIMO";
+  }
+
+  .tema-comanda .inv-panel .inv-t-historial td:nth-child(4)::before {
+    content: "QUEDÓ EN";
+  }
+
+  .tema-comanda .inv-panel .inv-t-receta td:nth-child(3)::before {
+    content: "HAY";
+  }
+
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(2) {
+    order: 2;
+    color: var(--suave);
+  }
+
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(5) {
+    order: 1;
+  }
+
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(3),
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(4) {
+    order: 3;
+  }
+
+  .tema-comanda .inv-panel .inv-t-insumos td:nth-child(6) {
+    order: 4;
+    grid-column: 1 / -1;
+    gap: 0;
+  }
+
+  .tema-comanda .inv-panel .inv-t-recetas td:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+
+  .tema-comanda .inv-panel .inv-t-recetas td:nth-child(4) .sd-btn {
+    width: 100%;
+  }
+
+  .tema-comanda .inv-panel .inv-t-receta td:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+}

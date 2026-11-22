@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../hooks'
 import { TabInsumos } from '../components/inventario/TabInsumos'
 import { TabRecetas } from '../components/inventario/TabRecetas'
+import '../styles/inventario.css'
 
 /**
  * Inventario (P-22), solo admin: lo que hay en bodega, cómo entra y sale, y qué
@@ -27,15 +28,13 @@ export function Inventario() {
   const Contenido = CONTENIDO[activa]
 
   return (
-    <div className="sd-page-wrapper">
-      <div className="sd-page-header">
-        <div>
-          <h1 className="sd-page-title">INVENTARIO</h1>
-          <p className="sd-page-subtitle">Insumos, movimientos y recetas</p>
+    <div className="inventario-pagina tema-comanda">
+      <div className="inv-cont">
+        <div className="inv-cab">
+          <h1 className="inv-titulo">INVENTARIO</h1>
+          <span className="inv-sub">Insumos, movimientos y recetas</span>
         </div>
-      </div>
-      <div className="sd-page-container">
-        <div role="tablist" aria-label="Secciones de inventario" style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <div role="tablist" aria-label="Secciones de inventario" className="inv-tabs">
           {PESTANAS.map((p) => (
             <button
               key={p.id}
@@ -44,14 +43,14 @@ export function Inventario() {
               id={`tab-${p.id}`}
               aria-selected={activa === p.id}
               aria-controls={`panel-${p.id}`}
-              className={`sd-btn ${activa === p.id ? 'sd-btn-primary' : 'sd-btn-secondary'}`}
+              className="inv-tab"
               onClick={() => setActiva(p.id)}
             >
               {p.etiqueta}
             </button>
           ))}
         </div>
-        <div role="tabpanel" id={`panel-${activa}`} aria-labelledby={`tab-${activa}`}>
+        <div role="tabpanel" className="inv-panel" id={`panel-${activa}`} aria-labelledby={`tab-${activa}`}>
           <Contenido />
         </div>
       </div>
