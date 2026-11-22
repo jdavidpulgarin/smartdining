@@ -2484,7 +2484,12 @@
 /* ==============================================================================
    MODAL DETALLE DE MESA (TableDetailModal) — clases dm-*
    ============================================================================== */
+/* La barra superior queda por encima del modal (.sd-page-wrapper crea su propia
+   capa con z-index 1), así que el fondo deja libre arriba su alto real más un
+   margen. --alto-barra sigue los cortes de la barra: 76px, 111px (≤1023px, dos
+   filas) y 102px (≤479px). */
 .tema-comanda.dm-fondo {
+  --alto-barra: 76px;
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -2492,10 +2497,23 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
+  padding-top: calc(var(--alto-barra) + 12px);
   overflow-y: auto;
   background: rgba(18, 12, 12, 0.78);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
+}
+
+@media (max-width: 1023px) {
+  .tema-comanda.dm-fondo {
+    --alto-barra: 111px;
+  }
+}
+
+@media (max-width: 479px) {
+  .tema-comanda.dm-fondo {
+    --alto-barra: 102px;
+  }
 }
 
 .tema-comanda .dm-tarjeta {
@@ -2974,7 +2992,7 @@
 
 @media (max-width: 560px) {
   .tema-comanda.dm-fondo {
-    padding: 12px;
+    padding: calc(var(--alto-barra) + 12px) 12px 12px;
   }
 
   .tema-comanda .dm-cabecera {
@@ -3017,7 +3035,10 @@
 /* ==============================================================================
    MODAL QR DE LA MESA / LANZAR TABLET (QRModal) — clases qm-*
    ============================================================================== */
+/* Igual que dm-fondo: deja libre arriba el alto real de la barra superior más un
+   margen (76px, 111px en ≤1023px y 102px en ≤479px). */
 .tema-comanda.qm-fondo {
+  --alto-barra: 76px;
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -3025,10 +3046,23 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
+  padding-top: calc(var(--alto-barra) + 12px);
   overflow-y: auto;
   background: rgba(18, 12, 12, 0.78);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
+}
+
+@media (max-width: 1023px) {
+  .tema-comanda.qm-fondo {
+    --alto-barra: 111px;
+  }
+}
+
+@media (max-width: 479px) {
+  .tema-comanda.qm-fondo {
+    --alto-barra: 102px;
+  }
 }
 
 .tema-comanda .qm-tarjeta {
@@ -3844,7 +3878,7 @@
 
 @media (max-width: 560px) {
   .tema-comanda.qm-fondo {
-    padding: 12px;
+    padding: calc(var(--alto-barra) + 12px) 12px 12px;
   }
 
   .tema-comanda .qm-cabecera {
