@@ -671,7 +671,14 @@ export function TablesProvider({ children }) {
       if (!silencioso) showNotification(`QR regenerado para ${tableName}. Sesión actualizada.`, 'success')
       return qrResult
     } catch (err) {
-      if (!silencioso) showNotification(err.message || `Error al rotar QR en ${tableName}`, 'error')
+      if (!silencioso) {
+        // 409 mesa_con_comensales (solo_si_vacia): no es un fallo, el QR queda fijo.
+        if (err?.status === 409 && err?.motivo === 'mesa_con_comensales') {
+          showNotification('La mesa tiene comensales: el QR queda fijo', 'info')
+        } else {
+          showNotification(err.message || `Error al rotar QR en ${tableName}`, 'error')
+        }
+      }
       throw err
     }
   }, [tables, showNotification])
