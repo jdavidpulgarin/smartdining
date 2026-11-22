@@ -298,7 +298,8 @@ Por qué importan las dos del medio:
   responde **503** (ver [`docs/api-spec.md`](docs/api-spec.md)).
 
 **Cierre ordenado.** Ante `SIGTERM` (lo que manda `docker stop`) o `SIGINT` (Ctrl+C), el
-backend cierra en este orden: servidor HTTP → Redis → pool de PostgreSQL. El HTTP primero
+backend cierra en este orden: servidor HTTP → Redis → canal de `inventario` y vencimiento de
+`por_pagar` (D-20b) → pool de PostgreSQL. El HTTP primero
 para no cerrarle la base a una petición en vuelo, y el pool de último porque es el que
 puede tener transacciones a medias. Si algo no cierra en `APAGADO_TIMEOUT_MS`, se fuerza la
 salida: un apagado colgado es peor que uno brusco. `SIGUSR2` **no** se intercepta, porque
@@ -619,6 +620,41 @@ Cuando pide el **personal**, el alias que se guarda no es el texto que llegó si
 «Abuela» con «abuela» saldrían en dos filas. Si el nombre no corresponde a nadie, **409
 `comensal_no_registrado`**. Sin Redis el pedido **no se bloquea**: se guarda el alias tal como
 llegó. El detalle, en [docs/api-spec.md](docs/api-spec.md).
+
+## Pedidos para llevar y a domicilio desde la app (D-20b)
+
+| Ruta | Quién | Para qué |
+|---|---|---|
+| `POST /api/v1/pedidos-domicilio` | cliente (JWT de la app) | Pide para llevar o a domicilio; nace en `por_pagar` |
+| `GET /api/v1/pedidos-domicilio/mios` | cliente | Sus pedidos de la app, del más nuevo al más viejo |
+| `GET /api/v1/pedidos-domicilio/:id` | cliente | Uno suyo (la misma forma que `/mios`), para consultar después de pagar |
+| `POST /api/v1/pedidos-domicilio/:id/cancelar` | cliente | Lo cancela, solo mientras está en `por_pagar` |
+| `GET /api/pedidos-domicilio/:id/cobro/interno` | socket-server (`x-internal-key`) | Monto y referencia (`SD-P-<id>-…`, siempre la misma) para la intención de Wompi |
+| `POST /api/pedidos-domicilio/:id/pago/interno` | socket-server (`x-internal-key`) | El pago aprobado: `registrar_pago_anticipado` |
+
+Todo lo decide la base (script 36). El pedido nace en **`por_pagar`** con el envío dentro del
+total (`cotizar_zona`) y **15 minutos** para pagar (`minutos_pago_anticipado`). El pago lo
+confirma `registrar_pago_anticipado` (`por_pagar → recibido`: llega a cocina), que **nunca
+rechaza** un pago aprobado: si el pedido ya venció o se canceló, o el monto no cuadra, queda en
+`pagos_por_devolver`. Es idempotente por referencia. Pago, cancelación y vencimiento bloquean el
+pedido, así que **nunca pasan dos**.
+
+**Un solo pedido en `por_pagar` por cliente.** Al crear se bloquea primero la fila del cliente
+(orden: `clientes → pedidos → pedidos_domicilio → detalles_pedido`). Si ya tiene uno sin vencer,
+**409 `pedido_pendiente`** con ese pedido, sin crear otro; eso también cubre el reintento de la app
+cuando se pierde la respuesta. Uno vencido que el temporizador todavía no canceló se cancela en
+la misma transacción. **Teléfono:** a domicilio se usa `telefono_contacto` del cuerpo o el del
+perfil; sin ninguno, **422 `telefono_requerido`** (para llevar no lo exige).
+
+**El vencimiento** es una tarea del backend (`src/services/vencimiento-por-pagar.js`) que llama
+`cancelar_por_pagar_vencidos()` **cada minuto**, sin solaparse. Solo la arranca el proceso del
+servidor (`node server.js`): las pruebas no la corren. En el cierre ordenado se detiene, y se
+espera la pasada en curso, **antes** de cerrar el pool. Al log va solo cuántos canceló.
+
+**Pendiente de Roberto:** el aviso de «pedido pagado» va a `POST /internal/order-created` (el
+formato de `order:created`, con `origen: "domicilio"`), pero hoy esa ruta exige `id_mesa` y
+responde 400; queda en el log. La cocina ve el pedido al recargar. El contrato completo, en
+[docs/api-spec.md](docs/api-spec.md#d-20b--pedidos-para-llevar-y-a-domicilio-desde-la-app).
 
 ## Pruebas
 

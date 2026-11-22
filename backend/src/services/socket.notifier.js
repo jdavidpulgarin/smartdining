@@ -321,6 +321,26 @@ async function notificarPedidoCreado(pedido, detalles) {
 }
 
 /**
+ * D-20b: un pedido para llevar o a domicilio de la app quedó PAGADO (pasó de
+ * por_pagar a recibido: llega a cocina). El MISMO formato que order:created
+ * (el pedido y sus ítems), más `canal` e `id_cliente` en el pedido y
+ * `origen: 'domicilio'`, a POST /internal/order-created.
+ *
+ * PENDIENTE DE ROBERTO: hoy esa ruta exige `id_mesa` (socket-server/src/
+ * pedidos.js) y responde 400 a un pedido sin mesa. Se manda igual: el 400 queda
+ * en el log y nada más (el notifier no lanza), y en cuanto el socket-server lo
+ * acepte la cocina lo verá en vivo sin cambiar el backend. Hasta entonces el KDS
+ * lo ve al recargar (GET /kds/comandas ya trae los pedidos sin mesa).
+ */
+async function notificarPedidoAnticipadoPagado(pedido, detalles) {
+  return enviar('/internal/order-created', {
+    eventId: nuevoEventId(),
+    pedido: { ...armarPedido(pedido, detalles), canal: pedido.canal, id_cliente: pedido.id_cliente ?? null },
+    origen: 'domicilio',
+  });
+}
+
+/**
  * POST /internal/order-status — cambio de estado hacia KDS, admin y la mesa.
  *
  * `origen` (pedido de Juan) es OPCIONAL y solo va cuando el pedido pasa a
@@ -1014,6 +1034,7 @@ module.exports = {
   validarTokenQr,
   notificarQrRotado,
   notificarPedidoCreado,
+  notificarPedidoAnticipadoPagado,
   notificarCambioEstado,
   notificarItemCancelado,
   notificarPagoConfirmado,
