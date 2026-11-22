@@ -1,0 +1,769 @@
+/* ==============================================================================
+   Pedidos · versión negra
+   Diseño: referencia-diseno/roles/smartdining-admin-negro.html (sección PEDIDOS)
+   Todo bajo .tema-comanda; clases con prefijo ped-. Solo diseño: la lógica vive
+   en src/pages/Pedidos.jsx y no cambia.
+   ============================================================================== */
+
+.tema-comanda.pedidos-pagina {
+  /* Lo que ocupa la barra superior: 76 px, o dos filas por debajo de 1024 px */
+  --ped-barra: 88px;
+
+  /* El ancho lo pone la pantalla, no el contenido (si no, el shell corta). */
+  contain: inline-size;
+  min-width: 0;
+  min-height: calc(100vh - 72px);
+  background:
+    repeating-linear-gradient(115deg, transparent 0 34px, rgba(255, 176, 46, .035) 34px 38px),
+    var(--carbon);
+  color: var(--papel);
+  font-family: var(--f-texto);
+}
+
+.tema-comanda .ped-cont {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 24px 60px;
+}
+
+.tema-comanda.pedidos-pagina :focus-visible {
+  outline: 3px solid var(--ambar);
+  outline-offset: 2px;
+}
+
+.tema-comanda .ped-ticket :focus-visible,
+.tema-comanda .ped-ventana :focus-visible {
+  outline-color: var(--rojo);
+}
+
+.tema-comanda .ped-ventana-cab :focus-visible {
+  outline-color: var(--papel);
+}
+
+.tema-comanda.pedidos-pagina .spin {
+  animation: ped-gira 1s linear infinite;
+}
+
+@keyframes ped-gira {
+  to { transform: rotate(360deg); }
+}
+
+/* Aviso: debajo de la barra superior, que si no lo tapa */
+.tema-comanda .ped-toast {
+  position: fixed;
+  top: var(--ped-barra);
+  right: 16px;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border: 2px solid var(--ambar);
+  border-left-width: 8px;
+  border-radius: 12px;
+  background: var(--papel);
+  color: var(--tinta);
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .6);
+}
+
+.tema-comanda .ped-toast svg {
+  flex: none;
+}
+
+.tema-comanda .ped-toast span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Encabezado */
+.tema-comanda .ped-cab {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px 24px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.tema-comanda .ped-cab-izq {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tema-comanda .ped-titulo {
+  margin: 0;
+  font: 400 clamp(44px, 5vw, 64px) / .88 var(--f-titulo);
+  letter-spacing: .04em;
+  color: var(--papel);
+  text-shadow: 4px 4px 0 var(--rojo);
+}
+
+.tema-comanda .ped-contadores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font: 700 23px / 1.1 var(--f-mano);
+  color: var(--papel);
+}
+
+.tema-comanda .ped-contadores .ped-por-servir {
+  color: var(--ambar);
+}
+
+.tema-comanda .ped-buscar {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 0;
+  max-width: 440px;
+}
+
+.tema-comanda .ped-buscar > svg {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--suave);
+  pointer-events: none;
+}
+
+.tema-comanda .ped-inp {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 2px solid var(--carbon);
+  border-radius: 10px;
+  background: #fffaf3;
+  color: var(--tinta);
+  font: 500 16px var(--f-texto);
+  box-sizing: border-box;
+}
+
+.tema-comanda .ped-inp::placeholder {
+  color: #75635d;
+  opacity: 1;
+}
+
+.tema-comanda textarea.ped-inp {
+  min-height: 72px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.tema-comanda .ped-buscar .ped-inp {
+  padding-left: 40px;
+  padding-right: 44px;
+}
+
+.tema-comanda .ped-buscar-x {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  border: 0;
+  background: none;
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.tema-comanda .ped-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.tema-comanda .ped-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 2px solid var(--papel);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--papel);
+  font: 400 16px var(--f-titulo);
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+
+.tema-comanda .ped-chip:hover {
+  border-color: var(--ambar);
+  color: var(--ambar);
+}
+
+.tema-comanda .ped-chip.activa {
+  border-color: var(--ambar);
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+.tema-comanda .ped-chip span {
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--carbon2);
+  color: var(--papel);
+  font-size: 15px;
+  letter-spacing: 0;
+  line-height: 22px;
+  text-align: center;
+}
+
+.tema-comanda .ped-chip.activa span {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+/* Botones (sobre papel) */
+.tema-comanda .ped-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--carbon);
+  color: var(--ambar);
+  font: 400 18px / 1.1 var(--f-titulo);
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+
+.tema-comanda .ped-btn svg {
+  flex: none;
+}
+
+.tema-comanda .ped-btn.mini {
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 16px;
+}
+
+.tema-comanda .ped-btn.contorno {
+  background: var(--papel);
+  color: var(--carbon);
+  box-shadow: inset 0 0 0 2px var(--carbon);
+}
+
+.tema-comanda .ped-btn.peligro {
+  background: var(--papel);
+  color: var(--granate);
+  box-shadow: inset 0 0 0 2px var(--granate);
+}
+
+.tema-comanda .ped-btn.urgente {
+  background: var(--rojo);
+  color: #fff;
+}
+
+.tema-comanda .ped-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* Cargando / error / vacío */
+.tema-comanda .ped-estado {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  border-radius: 14px;
+  background: var(--papel);
+  color: var(--suave);
+  text-align: center;
+}
+
+.tema-comanda .ped-estado p {
+  margin: 0;
+  font: 400 28px / 1.05 var(--f-titulo);
+  letter-spacing: .06em;
+  color: var(--carbon);
+}
+
+.tema-comanda .ped-estado small {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tema-comanda .ped-estado-error {
+  color: var(--rojo);
+}
+
+.tema-comanda .ped-estado .ped-btn {
+  margin-top: 8px;
+}
+
+/* Tablero: una columna por estado; las entregadas, abajo y a lo ancho */
+.tema-comanda .ped-tablero {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 34px 18px;
+  align-items: start;
+}
+
+.tema-comanda .ped-tablero.una {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tema-comanda .ped-col {
+  min-width: 0;
+}
+
+.tema-comanda .ped-col.ancha {
+  grid-column: 1 / -1;
+}
+
+.tema-comanda .ped-col-titulo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 10px;
+  font: 400 25px var(--f-titulo);
+  letter-spacing: .08em;
+  color: var(--papel);
+}
+
+.tema-comanda .ped-col-titulo span {
+  min-width: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--ambar);
+  color: var(--carbon);
+  font-size: 18px;
+  letter-spacing: 0;
+  line-height: 28px;
+  text-align: center;
+}
+
+.tema-comanda .ped-nada {
+  padding: 20px 16px;
+  border: 2px dashed #4a3a36;
+  border-radius: 14px;
+  font: 700 25px var(--f-mano);
+  color: #cbbcb2;
+  text-align: center;
+}
+
+.tema-comanda .ped-lista {
+  display: grid;
+  gap: 28px 18px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tema-comanda .ped-tablero.una .ped-lista,
+.tema-comanda .ped-col.ancha .ped-lista {
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  align-items: start;
+}
+
+/* Comanda de papel */
+.tema-comanda .ped-ticket {
+  position: relative;
+  min-width: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--papel);
+  color: var(--tinta);
+  box-shadow: 0 16px 24px -16px rgba(0, 0, 0, .6);
+  cursor: pointer;
+}
+
+.tema-comanda .ped-ticket::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% - 1px);
+  height: 11px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 12'%3E%3Cpath d='M0 0h24L12 12z' fill='%23fff4e6'/%3E%3C/svg%3E") repeat-x;
+  background-size: 20px 11px;
+}
+
+.tema-comanda .ped-banda {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border: 2px solid var(--papel);
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--carbon);
+}
+
+.tema-comanda .ped-ticket:hover .ped-banda {
+  background: var(--carbon2);
+}
+
+.tema-comanda .ped-mesa {
+  font: 400 25px / 1.1 var(--f-titulo);
+  letter-spacing: .1em;
+  color: var(--ambar);
+}
+
+.tema-comanda .ped-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 6px;
+  background: var(--carbon2);
+  color: var(--papel);
+  font: 400 17px var(--f-titulo);
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+
+.tema-comanda .ped-timer.urgency-mid {
+  background: var(--ambar);
+  color: var(--carbon);
+}
+
+.tema-comanda .ped-timer.urgency-high {
+  background: var(--rojo);
+  color: #fff;
+}
+
+.tema-comanda .ped-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--suave);
+}
+
+.tema-comanda .ped-meta-izq {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .ped-cliente {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  color: var(--tinta);
+}
+
+.tema-comanda .ped-cliente svg {
+  flex: none;
+}
+
+.tema-comanda .ped-codigo {
+  font: 500 14px var(--f-mono);
+}
+
+.tema-comanda .ped-meta .est {
+  flex: none;
+  font-size: 15px;
+}
+
+.tema-comanda .ped-meta .est.en-cocina {
+  background: var(--carbon);
+  color: var(--ambar);
+}
+
+.tema-comanda .ped-meta .est.por-servir {
+  border-color: var(--ok);
+  color: #0f5f2e;
+}
+
+.tema-comanda .ped-item {
+  display: grid;
+  gap: 2px;
+  padding: 8px 16px;
+  border-top: 2px dashed #ecdcc8;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .ped-item-nombre.cancelado,
+.tema-comanda .ped-linea-txt.cancelado {
+  text-decoration: line-through;
+  color: var(--suave);
+}
+
+.tema-comanda .ped-item-nombre small {
+  margin-left: 6px;
+  font-size: 14px;
+}
+
+.tema-comanda .ped-nota {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--granate);
+}
+
+.tema-comanda .ped-pie {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 16px 12px;
+  border-top: 2px solid var(--carbon);
+}
+
+.tema-comanda .ped-total {
+  font: 400 28px / 1 var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .ped-servido {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f5f2e;
+}
+
+/* Detalle de la comanda: debajo de la barra superior, que si no le tapa la cabecera */
+.tema-comanda .ped-velo {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ped-barra) 16px 16px;
+  background: rgba(18, 12, 12, .72);
+}
+
+.tema-comanda .ped-ventana {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--papel);
+  color: var(--tinta);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .7);
+}
+
+.tema-comanda .ped-ventana-cab {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 4px solid var(--ambar);
+  background: var(--carbon);
+}
+
+.tema-comanda .ped-ventana-titulo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--ambar);
+}
+
+.tema-comanda .ped-ventana-titulo svg {
+  flex: none;
+}
+
+.tema-comanda .ped-ventana-titulo h3 {
+  margin: 0;
+  font: 400 24px / 1.05 var(--f-titulo);
+  letter-spacing: .06em;
+  color: var(--ambar);
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .ped-ventana-titulo span {
+  font: 500 14px / 1.3 var(--f-texto);
+  color: #d9c3a5;
+}
+
+.tema-comanda .ped-cerrar {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ambar);
+  color: var(--carbon);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.tema-comanda .ped-ventana-cuerpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+.tema-comanda .ped-ventana-sub {
+  margin: 0 0 6px;
+  font: 400 20px var(--f-titulo);
+  letter-spacing: .1em;
+  color: var(--carbon);
+}
+
+.tema-comanda .ped-linea {
+  padding: 10px 0;
+  border-top: 2px dashed #ecdcc8;
+}
+
+.tema-comanda .ped-linea-fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+
+.tema-comanda .ped-linea-txt {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.tema-comanda .ped-linea-quien {
+  font-size: 14px;
+  color: var(--suave);
+}
+
+.tema-comanda .ped-linea-der {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.tema-comanda .ped-linea-der > span {
+  font: 400 20px var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .ped-cancelar {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 2px dashed var(--carbon);
+  border-radius: 12px;
+  background: var(--papel2);
+}
+
+.tema-comanda .ped-lbl {
+  font: 400 16px / 1.15 var(--f-titulo);
+  letter-spacing: .1em;
+  color: var(--carbon);
+}
+
+.tema-comanda .ped-cancelar-ayuda {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--suave);
+}
+
+.tema-comanda .ped-error {
+  padding: 10px 12px;
+  border: 2px solid var(--brasa);
+  border-radius: 10px;
+  background: #fdeaea;
+  color: var(--granate);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tema-comanda .ped-cancelar-pie {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tema-comanda .ped-importe {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 2px solid var(--carbon);
+}
+
+.tema-comanda .ped-importe span {
+  font: 400 19px var(--f-titulo);
+  letter-spacing: .08em;
+  color: var(--suave);
+}
+
+.tema-comanda .ped-importe strong {
+  font: 400 36px / .9 var(--f-titulo);
+  color: var(--carbon);
+}
+
+.tema-comanda .ped-ventana-pie {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px 16px;
+  border-top: 2px dashed var(--linea);
+}
+
+@media (max-width: 1100px) {
+  .tema-comanda .ped-tablero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tema-comanda .ped-lista {
+    grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+    align-items: start;
+  }
+}
+
+@media (max-width: 1023px) {
+  .tema-comanda.pedidos-pagina {
+    --ped-barra: 120px;
+  }
+}
+
+@media (max-width: 760px) {
+  .tema-comanda .ped-cont {
+    padding: 18px 12px 60px;
+  }
+
+  .tema-comanda .ped-buscar {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .tema-comanda .ped-ventana-pie .ped-btn {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tema-comanda.pedidos-pagina .spin {
+    animation: none;
+  }
+}
