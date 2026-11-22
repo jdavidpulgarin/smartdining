@@ -126,34 +126,17 @@ export function ResumenPedido({
   if (carrito.length === 0) {
     return (
       <div
-        className="resumen-vacio"
-        style={{
-          background: 'var(--sd-surface)',
-          border: '1px solid var(--sd-border)',
-          borderRadius: '12px',
-          padding: '40px 20px',
-          textAlign: 'center',
-          maxWidth: '600px',
-          margin: '20px auto',
-        }}
+        className="resumen-vacio tp-tarjeta tp-resumen-vacio"
       >
-        <ShoppingBag size={48} style={{ color: 'var(--sd-text-muted)', margin: '0 auto 16px' }} />
-        <h2 style={{ color: 'var(--sd-text)', marginBottom: '8px' }}>La comanda está vacía</h2>
-        <p style={{ color: 'var(--sd-text-muted)', marginBottom: '24px' }}>
+        <ShoppingBag size={48} className="tp-resumen-vacio-icono" />
+        <h2 className="tp-resumen-vacio-titulo">La comanda está vacía</h2>
+        <p className="tp-resumen-vacio-texto">
           No has agregado ningún plato al pedido de esta mesa.
         </p>
         <button
           type="button"
           onClick={onVolverAlMenu}
-          className="table-btn-primary"
-          style={{
-            minHeight: '44px',
-            padding: '10px 20px',
-            background: 'var(--sd-red)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}
+          className="tp-btn tp-btn-ambar"
         >
           <ArrowLeft size={16} />
           <span>Ir a la carta</span>
@@ -163,23 +146,14 @@ export function ResumenPedido({
   }
 
   return (
-    <div className="resumen-pedido-container" style={{ maxWidth: '850px', margin: '0 auto' }}>
+    <div className="resumen-pedido-container tp-resumen">
       {/* Cabecera del resumen */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px',
-          marginBottom: '20px',
-        }}
-      >
+      <div className="tp-resumen-cabeza">
         <div>
-          <h2 style={{ margin: 0, fontSize: '1.3rem', color: 'var(--sd-text)' }}>
+          <h2 className="tp-resumen-titulo">
             Resumen de la Comanda
           </h2>
-          <span style={{ fontSize: '0.85rem', color: 'var(--sd-text-muted)' }}>
+          <span className="tp-resumen-meta">
             Mesa #{numeroMesa ?? idMesa} · {carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'} en total
           </span>
         </div>
@@ -187,14 +161,7 @@ export function ResumenPedido({
         <button
           type="button"
           onClick={onVolverAlMenu}
-          className="table-btn-secondary"
-          style={{
-            minHeight: '44px',
-            padding: '8px 16px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
+          className="tp-btn tp-btn-claro"
         >
           <ArrowLeft size={16} />
           <span>Seguir agregando platos</span>
@@ -203,43 +170,20 @@ export function ResumenPedido({
 
       {/* Alertas de error de envío */}
       {errorEnvio && (
-        <div
-          style={{
-            padding: '16px',
-            borderRadius: '10px',
-            background: 'rgba(238, 28, 37, 0.1)',
-            border: '1px solid var(--sd-red)',
-            marginBottom: '20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--sd-red)', fontWeight: 600 }}>
+        <div className="tp-aviso tp-aviso-error tp-aviso-columna">
+          <div className="tp-aviso-linea tp-aviso-fuerte">
             <AlertCircle size={18} />
             <span>{errorEnvio}</span>
           </div>
 
           {/* Acción para comensal no registrado */}
           {comensalARegistrar && (
-            <div style={{ marginTop: '4px' }}>
+            <div className="tp-aviso-accion">
               <button
                 type="button"
                 disabled={reintentandoComensal || reintentoHecho}
                 onClick={handleReRegistrarYReintentar}
-                className="table-btn-primary"
-                style={{
-                  minHeight: '44px',
-                  padding: '8px 16px',
-                  background: 'var(--sd-gold)',
-                  color: '#000',
-                  fontWeight: 600,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  cursor: reintentandoComensal || reintentoHecho ? 'not-allowed' : 'pointer',
-                  opacity: reintentandoComensal || reintentoHecho ? 0.6 : 1,
-                }}
+                className="tp-btn tp-btn-ambar tp-btn-mini"
               >
                 <UserCheck size={16} />
                 <span>
@@ -254,54 +198,30 @@ export function ResumenPedido({
       )}
 
       {/* Lista agrupada por comensal */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
+      <div className="tp-grupos">
         {agrupadoPorComensal.map(({ comensal, items, subtotalComensal }) => (
           <div
             key={comensal}
-            style={{
-              background: 'var(--sd-surface)',
-              border: '1px solid var(--sd-border)',
-              borderRadius: '12px',
-              overflow: 'hidden',
-            }}
+            className="tp-grupo"
           >
             {/* Encabezado del grupo de comensal */}
-            <div
-              style={{
-                padding: '12px 16px',
-                background: 'var(--sd-surface-2)',
-                borderBottom: '1px solid var(--sd-border)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span
-                  style={{
-                    background: 'var(--sd-surface)',
-                    border: '1px solid var(--sd-border)',
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                    color: 'var(--sd-text)',
-                  }}
-                >
+            <div className="tp-grupo-cabeza">
+              <div className="tp-grupo-quien">
+                <span className="tp-grupo-nombre">
                   {comensal}
                 </span>
-                <span style={{ fontSize: '0.8rem', color: 'var(--sd-text-muted)' }}>
+                <span className="tp-grupo-cuenta">
                   ({items.length} {items.length === 1 ? 'plato' : 'platos'})
                 </span>
               </div>
 
-              <strong style={{ fontSize: '0.95rem', color: 'var(--sd-text)' }}>
+              <strong className="tp-grupo-subtotal">
                 ${subtotalComensal.toLocaleString('es-CO')}
               </strong>
             </div>
 
             {/* Ítems del comensal */}
-            <div style={{ padding: '8px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="tp-grupo-items">
               {items.map((item) => {
                 const tieneFaltante = itemTieneFaltante(item, faltantesStock)
                 const subtotalItem = (Number(item.precio) || 0) * (item.cantidad || 1)
@@ -309,33 +229,15 @@ export function ResumenPedido({
                 return (
                   <div
                     key={item.indiceOriginal}
-                    style={{
-                      padding: '10px 0',
-                      borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      gap: '12px',
-                      background: tieneFaltante ? 'rgba(238, 28, 37, 0.08)' : 'transparent',
-                      borderRadius: tieneFaltante ? '8px' : 0,
-                    }}
+                    className={tieneFaltante ? 'tp-item tp-item-faltante' : 'tp-item'}
                   >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <strong style={{ color: 'var(--sd-text)', fontSize: '0.92rem' }}>
+                    <div className="tp-item-info">
+                      <div className="tp-item-nombre-fila">
+                        <strong className="tp-item-nombre">
                           {item.nombre}
                         </strong>
                         {tieneFaltante && (
-                          <span
-                            style={{
-                              background: 'var(--sd-red)',
-                              color: '#fff',
-                              fontSize: '0.7rem',
-                              fontWeight: 700,
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                            }}
-                          >
+                          <span className="tp-etiqueta tp-etiqueta-agotado">
                             AGOTADO
                           </span>
                         )}
@@ -343,15 +245,9 @@ export function ResumenPedido({
 
                       {/* Detalles de ingredientes si es personalizable */}
                       {Array.isArray(item.ingredientes) && item.ingredientes.length > 0 && (
-                        <div
-                          style={{
-                            fontSize: '0.78rem',
-                            color: 'var(--sd-text-muted)',
-                            marginTop: '2px',
-                          }}
-                        >
+                        <div className="tp-item-ingredientes">
                           {item.ingredientes.map((ig, i) => (
-                            <span key={i} style={{ marginRight: '6px' }}>
+                            <span key={i} className="tp-item-ingrediente">
                               · {ig.nombre || `Ingr #${ig.id_ingrediente}`}
                               {ig.porcion && ig.porcion !== 'normal' ? ` (${ig.porcion})` : ''}
                             </span>
@@ -361,48 +257,28 @@ export function ResumenPedido({
 
                       {/* Notas para cocina */}
                       {item.notas && (
-                        <div style={{ fontSize: '0.76rem', color: 'var(--sd-gold)', fontStyle: 'italic', marginTop: '2px' }}>
+                        <div className="tp-item-nota">
                           Nota: {item.notas}
                         </div>
                       )}
 
-                      <div style={{ fontSize: '0.8rem', color: 'var(--sd-text-muted)', marginTop: '2px' }}>
+                      <div className="tp-item-unitario">
                         ${Number(item.precio).toLocaleString('es-CO')} c/u
                       </div>
                     </div>
 
                     {/* Controles de cantidad y precio */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          background: 'var(--sd-surface-2)',
-                          border: '1px solid var(--sd-border)',
-                          borderRadius: '8px',
-                          padding: '2px',
-                        }}
-                      >
+                    <div className="tp-item-controles">
+                      <div className="tp-cantidad">
                         <button
                           type="button"
                           onClick={() => onModificarCantidad(item.indiceOriginal, -1)}
                           aria-label={`Reducir ${item.nombre}`}
-                          style={{
-                            minWidth: '36px',
-                            minHeight: '36px',
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--sd-text)',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
+                          className="tp-cantidad-btn"
                         >
                           <Minus size={14} />
                         </button>
-                        <span style={{ minWidth: '20px', textAlign: 'center', fontWeight: 700, fontSize: '0.9rem', color: 'var(--sd-text)' }}>
+                        <span className="tp-cantidad-num">
                           {item.cantidad || 1}
                         </span>
                         <button
@@ -410,24 +286,13 @@ export function ResumenPedido({
                           disabled={(item.cantidad || 1) >= 20}
                           onClick={() => onModificarCantidad(item.indiceOriginal, 1)}
                           aria-label={`Aumentar ${item.nombre}`}
-                          style={{
-                            minWidth: '36px',
-                            minHeight: '36px',
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--sd-text)',
-                            cursor: (item.cantidad || 1) >= 20 ? 'not-allowed' : 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            opacity: (item.cantidad || 1) >= 20 ? 0.4 : 1,
-                          }}
+                          className="tp-cantidad-btn"
                         >
                           <Plus size={14} />
                         </button>
                       </div>
 
-                      <strong style={{ fontSize: '0.95rem', color: 'var(--sd-text)', minWidth: '75px', textAlign: 'right' }}>
+                      <strong className="tp-item-subtotal">
                         ${subtotalItem.toLocaleString('es-CO')}
                       </strong>
 
@@ -435,18 +300,7 @@ export function ResumenPedido({
                         type="button"
                         onClick={() => onEliminarItem(item.indiceOriginal)}
                         aria-label={`Quitar ${item.nombre}`}
-                        style={{
-                          minWidth: '36px',
-                          minHeight: '36px',
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--sd-text-muted)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '6px',
-                        }}
+                        className="tp-quitar"
                       >
                         <Trash2 size={16} />
                       </button>
@@ -460,23 +314,10 @@ export function ResumenPedido({
       </div>
 
       {/* Notas generales para cocina */}
-      <div
-        style={{
-          background: 'var(--sd-surface)',
-          border: '1px solid var(--sd-border)',
-          borderRadius: '12px',
-          padding: '16px',
-          marginBottom: '20px',
-        }}
-      >
+      <div className="tp-tarjeta tp-notas">
         <label
           htmlFor="input-notas-generales"
-          style={{
-            display: 'block',
-            fontSize: '0.85rem',
-            color: 'var(--sd-text-muted)',
-            marginBottom: '6px',
-          }}
+          className="tp-label"
         >
           Notas generales de la comanda (opcional, máx. 500 caracteres)
         </label>
@@ -487,60 +328,25 @@ export function ResumenPedido({
           value={notasGenerales}
           onChange={(e) => setNotasGenerales(e.target.value)}
           placeholder="Ej. Servir platos al mismo tiempo, comensales tienen prisa..."
-          style={{
-            width: '100%',
-            minHeight: '44px',
-            padding: '8px 12px',
-            borderRadius: '8px',
-            background: 'var(--sd-surface-2)',
-            border: '1px solid var(--sd-border)',
-            color: 'var(--sd-text)',
-            fontSize: '0.9rem',
-            outline: 'none',
-          }}
+          className="tp-input"
         />
       </div>
 
       {/* Barra de total y botón de envío */}
-      <div
-        style={{
-          background: 'var(--sd-surface)',
-          border: '1px solid var(--sd-border)',
-          borderRadius: '12px',
-          padding: '20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '16px',
-        }}
-      >
+      <div className="tp-total">
         <div>
-          <span style={{ fontSize: '0.85rem', color: 'var(--sd-text-muted)' }}>Total de la Comanda</span>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--sd-text)' }}>
+          <span className="tp-total-rotulo">Total de la Comanda</span>
+          <div className="tp-total-cifra">
             ${totalPedido.toLocaleString('es-CO')}
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div className="tp-total-acciones">
           <button
             type="button"
             disabled={enviando || carrito.length === 0}
             onClick={() => handleEnviarPedido(carrito)}
-            className="table-btn-primary"
-            style={{
-              minHeight: '48px',
-              padding: '12px 28px',
-              fontSize: '1rem',
-              fontWeight: 700,
-              background: enviando ? 'var(--sd-border)' : 'var(--sd-red)',
-              borderColor: enviando ? 'var(--sd-border)' : 'var(--sd-red)',
-              cursor: enviando ? 'not-allowed' : 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '10px',
-              opacity: enviando ? 0.6 : 1,
-            }}
+            className={enviando ? 'tp-btn tp-btn-ambar tp-btn-enviar tp-btn-enviando' : 'tp-btn tp-btn-ambar tp-btn-enviar'}
           >
             {enviando ? (
               <>

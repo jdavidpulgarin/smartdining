@@ -44,66 +44,27 @@ export function ConstructorModal({ plato, comensal, onAgregar, onClose }) {
 
   return (
     <div
-      className="qr-modal-backdrop"
+      className="tema-comanda cm-fondo"
       onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0,0,0,0.75)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-        padding: '16px',
-      }}
     >
       <div
-        className="constructor-modal-card"
+        className="constructor-modal-card cm-tarjeta"
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--sd-surface)',
-          border: '1px solid var(--sd-border)',
-          borderRadius: '16px',
-          width: '100%',
-          maxWidth: '650px',
-          maxHeight: '90vh',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
-        }}
       >
+        <div className="cm-franja" aria-hidden="true" />
         {/* Encabezado */}
-        <div
-          style={{
-            padding: '16px 20px',
-            borderBottom: '1px solid var(--sd-border)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h2 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--sd-text)' }}>
+        <div className="cm-cabecera">
+          <div className="cm-cabecera-izq">
+            <div className="cm-titulo-fila">
+              <h2 className="cm-titulo">
                 {plato.nombre}
               </h2>
-              <span
-                style={{
-                  background: 'rgba(238, 28, 37, 0.15)',
-                  color: 'var(--sd-red)',
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  fontSize: '0.72rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                }}
-              >
+              <span className="cm-etiqueta">
                 Personalizable
               </span>
             </div>
-            <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--sd-text-muted)' }}>
-              Para: <strong style={{ color: 'var(--sd-text)' }}>{comensal}</strong> · Base: ${Number(plato.precio).toLocaleString('es-CO')}
+            <p className="cm-subtitulo">
+              Para: <strong className="cm-subtitulo-nombre">{comensal}</strong> · Base: ${Number(plato.precio).toLocaleString('es-CO')}
             </p>
           </div>
 
@@ -111,29 +72,14 @@ export function ConstructorModal({ plato, comensal, onAgregar, onClose }) {
             type="button"
             onClick={onClose}
             aria-label="Cerrar modal"
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--sd-text-muted)',
-              cursor: 'pointer',
-              padding: '6px',
-            }}
+            className="cm-cerrar"
           >
             <X size={20} />
           </button>
         </div>
 
         {/* Cuerpo con los pasos del constructor */}
-        <div
-          style={{
-            padding: '20px',
-            overflowY: 'auto',
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px',
-          }}
-        >
+        <div className="cm-cuerpo">
           {(plato.pasos || []).map((paso) => (
             <PasoConstructor
               key={paso.id_paso}
@@ -144,15 +90,10 @@ export function ConstructorModal({ plato, comensal, onAgregar, onClose }) {
           ))}
 
           {/* Notas para cocina */}
-          <div style={{ marginTop: '8px' }}>
+          <div className="cm-notas">
             <label
               htmlFor="notas-cocina-constructor"
-              style={{
-                display: 'block',
-                fontSize: '0.85rem',
-                color: 'var(--sd-text-muted)',
-                marginBottom: '6px',
-              }}
+              className="cm-label"
             >
               Notas para cocina (opcional, máx. 200 caracteres)
             </label>
@@ -163,51 +104,23 @@ export function ConstructorModal({ plato, comensal, onAgregar, onClose }) {
               value={estado.notas}
               onChange={(e) => despachador({ type: 'CAMBIAR_NOTAS', notas: e.target.value })}
               placeholder="Ej. Sin cebolla, término medio..."
-              style={{
-                width: '100%',
-                minHeight: '44px',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                background: 'var(--sd-surface-2)',
-                border: '1px solid var(--sd-border)',
-                color: 'var(--sd-text)',
-                fontSize: '0.9rem',
-                outline: 'none',
-              }}
+              className="cm-input"
             />
           </div>
         </div>
 
         {/* Barra inferior de confirmación */}
-        <div
-          style={{
-            padding: '16px 20px',
-            borderTop: '1px solid var(--sd-border)',
-            background: 'var(--sd-surface-2)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '16px',
-          }}
-        >
+        <div className="cm-pie">
           <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--sd-text-muted)' }}>Precio total ítem</div>
-            <strong style={{ fontSize: '1.25rem', color: 'var(--sd-text)' }}>
+            <div className="cm-pie-rotulo">Precio total ítem</div>
+            <strong className="cm-pie-precio">
               ${calculo.precio.toLocaleString('es-CO')}
             </strong>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div className="cm-pie-acciones">
             {!esValido && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  color: 'var(--sd-gold)',
-                  fontSize: '0.8rem',
-                }}
-              >
+              <div className="cm-faltan">
                 <AlertCircle size={16} />
                 <span>Faltan: {pendientes.join(', ')}</span>
               </div>
@@ -217,18 +130,7 @@ export function ConstructorModal({ plato, comensal, onAgregar, onClose }) {
               type="button"
               disabled={!esValido}
               onClick={handleAgregar}
-              className="table-btn-primary"
-              style={{
-                minHeight: '48px',
-                padding: '10px 20px',
-                background: esValido ? 'var(--sd-red)' : 'var(--sd-border)',
-                borderColor: esValido ? 'var(--sd-red)' : 'var(--sd-border)',
-                cursor: esValido ? 'pointer' : 'not-allowed',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                opacity: esValido ? 1 : 0.6,
-              }}
+              className="cm-btn cm-btn-ambar"
             >
               <Plus size={18} />
               <span>Agregar a la comanda</span>
