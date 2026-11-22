@@ -140,7 +140,7 @@ export function TabRecetas() {
           categorias.map((grupo) => (
             <div key={grupo.categoria} style={{ marginBottom: 16, overflowX: 'auto' }}>
               <h3 className="sd-input-label" style={{ margin: '8px 0' }}>{grupo.categoria.toUpperCase()}</h3>
-              <table className="sd-config-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <table className="sd-config-table inv-t-recetas" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                 {cabecera('PLATO')}
                 <tbody>{grupo.platos.map((p) => fila('plato', p, p.nombre))}</tbody>
               </table>
@@ -157,7 +157,7 @@ export function TabRecetas() {
           platosConOpciones.map((plato) => (
             <div key={plato.id_plato} style={{ marginBottom: 16, overflowX: 'auto' }}>
               <h3 className="sd-input-label" style={{ margin: '8px 0' }}>{String(plato.plato).toUpperCase()}</h3>
-              <table className="sd-config-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <table className="sd-config-table inv-t-recetas" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                 {cabecera('PASO · OPCIÓN')}
                 <tbody>
                   {plato.pasos.flatMap((paso) =>

@@ -152,7 +152,7 @@ export function TabMesas() {
         <p style={{ color: 'var(--sd-text-muted)' }}>Todavía no hay mesas registradas.</p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table className="sd-config-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <table className="sd-config-table conf-t-mesas" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
               <tr>
                 <th>NÚMERO</th>

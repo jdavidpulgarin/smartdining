@@ -129,7 +129,7 @@ describe('QRModal: QR vigente (rotación del socket-server cada 3 min)', () => {
     expect(copiar()).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Generar nuevo' }))
     await avanzar(1)
-    expect(onUpdateToken).toHaveBeenLastCalledWith(5, { silencioso: false, soloSiVacia: false })
+    expect(onUpdateToken).toHaveBeenLastCalledWith(5, { silencioso: false, soloSiVacia: true })
     expect(enlace()).toContain(T2)
     expect(screen.queryByText('QR vencido')).not.toBeInTheDocument()
   })
@@ -172,5 +172,92 @@ describe('QRModal: QR vigente (rotación del socket-server cada 3 min)', () => {
     expect(screen.getByText(/ya tiene comensales: el QR queda fijo/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Nuevo QR/ })).toBeDisabled()
     expect(enlace()).toContain(T0)
+  })
+})
+
+describe('QRModal: «Rotar QR» y «Pausar» respetan a los comensales (#336)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    pedidosActivos = []
+    presenciaPorMesa = {}
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const rotarQr = () => screen.getByRole('button', { name: /Rotar QR/ })
+  const pausar = () => screen.getByRole('button', { name: /Pausar|Reanudar/ })
+  const MANUAL = { silencioso: false, soloSiVacia: true }
+
+  it('con la mesa vacía, «Rotar QR» rota en modo manual (con toast y solo_si_vacia) y corrige el title', async () => {
+    const onUpdateToken = vi.fn()
+      .mockResolvedValueOnce({ token: T1, url: url(T1) })
+      .mockResolvedValueOnce({ token: T2, url: url(T2) })
+    montar(mesa(), onUpdateToken)
+    await avanzar(1)
+    expect(rotarQr()).toBeEnabled()
+    expect(rotarQr()).toHaveAttribute('title', 'Rotar el QR con POST /api/mesas/:id/rotar-qr')
+    fireEvent.click(rotarQr())
+    await avanzar(1)
+    expect(onUpdateToken).toHaveBeenCalledTimes(2)
+    expect(onUpdateToken).toHaveBeenLastCalledWith(5, MANUAL)
+    expect(enlace()).toContain(T2)
+  })
+
+  it('con comensales, «Rotar QR» y «Pausar» quedan deshabilitados con el title del QR fijo', async () => {
+    const onUpdateToken = vi.fn()
+    montar(mesa({ comensales: ['Ana'] }), onUpdateToken)
+    await avanzar(1)
+    for (const boton of [rotarQr(), pausar()]) {
+      expect(boton).toBeDisabled()
+      expect(boton).toHaveAttribute('title', 'La mesa ya tiene comensales: el QR queda fijo')
+    }
+    fireEvent.click(rotarQr())
+    fireEvent.click(pausar())
+    await avanzar(1)
+    expect(onUpdateToken).not.toHaveBeenCalled()
+    expect(pausar()).toHaveTextContent('Pausar')
+  })
+
+  it('«Pausar» conserva su estado mientras está deshabilitado por comensales', async () => {
+    const onUpdateToken = vi.fn().mockResolvedValue({ token: T1, url: url(T1) })
+    const { rerender } = montar(mesa(), onUpdateToken)
+    await avanzar(1)
+    fireEvent.click(pausar())
+    expect(pausar()).toHaveTextContent('Reanudar')
+    rerender(<QRModal table={mesa({ comensales: ['Ana'] })} onClose={() => {}} onUpdateToken={onUpdateToken} />)
+    expect(pausar()).toBeDisabled()
+    expect(pausar()).toHaveTextContent('Reanudar')
+    rerender(<QRModal table={mesa({ comensales: [] })} onClose={() => {}} onUpdateToken={onUpdateToken} />)
+    expect(pausar()).toBeEnabled()
+    expect(pausar()).toHaveTextContent('Reanudar')
+  })
+
+  it('409 mesa_con_comensales en manual: el QR queda fijo y los botones se deshabilitan', async () => {
+    const onUpdateToken = vi.fn()
+      .mockResolvedValueOnce({ token: T1, url: url(T1) })
+      .mockRejectedValueOnce(err(409, { motivo: 'mesa_con_comensales' }))
+    montar(mesa(), onUpdateToken)
+    await avanzar(1)
+    fireEvent.click(rotarQr())
+    await avanzar(1)
+    expect(onUpdateToken).toHaveBeenLastCalledWith(5, MANUAL)
+    expect(enlace()).toContain(T1)
+    expect(screen.getByText(/ya tiene comensales: el QR queda fijo/)).toBeInTheDocument()
+    expect(rotarQr()).toBeDisabled()
+    expect(pausar()).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Nuevo QR/ })).toBeDisabled()
+    await avanzar(400)
+    expect(onUpdateToken).toHaveBeenCalledTimes(2)
+  })
+
+  it('«Nuevo QR» sigue funcionando con la mesa vacía (modo manual)', async () => {
+    const onUpdateToken = vi.fn()
+      .mockResolvedValueOnce({ token: T1, url: url(T1) })
+      .mockResolvedValueOnce({ token: T2, url: url(T2) })
+    montar(mesa(), onUpdateToken)
+    await avanzar(1)
+    fireEvent.click(screen.getByRole('button', { name: /Nuevo QR/ }))
+    await avanzar(1)
+    expect(onUpdateToken).toHaveBeenLastCalledWith(5, MANUAL)
+    expect(enlace()).toContain(T2)
   })
 })

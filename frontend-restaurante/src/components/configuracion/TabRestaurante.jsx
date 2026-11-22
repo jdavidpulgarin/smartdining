@@ -184,7 +184,7 @@ export function TabRestaurante() {
       <fieldset className="sd-card" style={{ marginBottom: 20, border: '1px solid var(--sd-border)' }}>
         <legend className="sd-input-label" style={{ padding: '0 6px' }}>HORARIO</legend>
         <p style={{ color: 'var(--sd-text-muted)', margin: '0 0 12px' }}>Un día sin marcar sale como cerrado.</p>
-        <table className="sd-config-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+        <table className="sd-config-table conf-t-horario" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
           <tbody>
             {DIAS.map(({ clave, etiqueta }) => {
               const dia = form.horario[clave]
