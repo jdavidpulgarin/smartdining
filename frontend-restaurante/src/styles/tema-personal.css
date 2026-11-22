@@ -164,6 +164,14 @@
   overflow-x: auto;
   scrollbar-width: none;
   align-items: center;
+  /* Degradado en el borde donde queda menú por deslizar: las dos tapas (local)
+     se mueven con el contenido y cubren el degradado al llegar a ese extremo. */
+  background:
+    linear-gradient(to right, var(--carbon) 60%, rgba(18, 12, 12, 0)) left / 64px 100% no-repeat local,
+    linear-gradient(to left, var(--carbon) 60%, rgba(18, 12, 12, 0)) right / 64px 100% no-repeat local,
+    linear-gradient(to right, rgba(255, 176, 46, .38), rgba(255, 176, 46, 0)) left / 36px 100% no-repeat scroll,
+    linear-gradient(to left, rgba(255, 176, 46, .38), rgba(255, 176, 46, 0)) right / 36px 100% no-repeat scroll,
+    var(--carbon);
 }
 
 .tema-comanda .sd-topbar-nav::-webkit-scrollbar {
@@ -344,6 +352,43 @@
 }
 
 /* Responsive de la barra superior */
+
+/* Sin esto el ancho mínimo de la barra es el de todos sus enlaces: ensancha la
+   columna del panel y el shell corta lo que sobra por la derecha. */
+.tema-comanda.sd-topbar,
+.tema-comanda.sd-topbar .fila {
+  min-width: 0;
+}
+
+/* Un nombre largo no empuja el menú ni «Cerrar sesión» */
+.tema-comanda.sd-topbar .sd-user-name,
+.tema-comanda.sd-topbar .sd-user-name b {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Tablet en horizontal: los siete enlaces del admin caben sin deslizar */
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .tema-comanda.sd-topbar .fila {
+    gap: 12px;
+    padding: 0 16px;
+  }
+
+  .tema-comanda.sd-topbar .sd-topbar-nav .sd-nav-link {
+    padding: 0 7px;
+  }
+
+  .tema-comanda.sd-topbar .sd-topbar-actions {
+    gap: 10px;
+  }
+
+  .tema-comanda.sd-topbar .sd-user-name,
+  .tema-comanda.sd-topbar .sd-user-name b {
+    max-width: 150px;
+  }
+}
+
 @media (max-width: 1023px) {
   .tema-comanda.top .fila,
   .tema-comanda.sd-topbar .fila,
