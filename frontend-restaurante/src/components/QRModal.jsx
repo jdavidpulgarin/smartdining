@@ -134,11 +134,12 @@ export function QRModal({
   })
 
   /**
-   * Pide un QR nuevo (POST /mesas/:id/rotar-qr). `motivo`: 'manual' (Nuevo QR),
-   * 'apertura' (al abrir el modal), 'tiempo' (antes de que lo rote el
-   * socket-server) o 'reintento'. Solo 'manual' avisa con un toast; nunca rota
-   * solo con comensales dentro. Si falla, no se inventa ningún QR: se dice por
-   * qué y, si es pasajero (503, sin conexión), se reintenta.
+   * Pide un QR nuevo (POST /mesas/:id/rotar-qr). `motivo`: 'manual' (Nuevo QR,
+   * Generar nuevo, Rotar QR), 'apertura' (al abrir el modal), 'tiempo' (antes
+   * de que lo rote el socket-server) o 'reintento'. Solo 'manual' avisa con un
+   * toast; nunca rota solo con comensales dentro. Si falla, no se inventa
+   * ningún QR: se dice por qué y, si es pasajero (503, sin conexión), se
+   * reintenta.
    */
   const ejecutarRotacion = useCallback(
     async (motivo = 'manual') => {
@@ -151,10 +152,11 @@ export function QRModal({
       clearTimeout(temporizadorReintento.current)
       setLoadingAction(true)
       try {
-        // Las rotaciones automáticas piden además que el backend se niegue (409
-        // mesa_con_comensales) si la mesa tiene pedidos o nombres reservados.
+        // Todas, también la manual, piden que el backend se niegue (409
+        // mesa_con_comensales) si la mesa tiene pedidos o nombres reservados:
+        // protege a comensales que el panel no ve (#336). Solo la manual avisa.
         const automatica = motivo !== 'manual'
-        const res = await onUpdateToken(tableId, { silencioso: automatica, soloSiVacia: automatica })
+        const res = await onUpdateToken(tableId, { silencioso: automatica, soloSiVacia: true })
         if (!res?.token) throw new Error('El servidor no devolvió el nuevo código QR de la mesa')
         setToken(res.token)
         if (res?.url) setQrUrl(res.url)
@@ -548,7 +550,12 @@ export function QRModal({
                   <button
                     type="button"
                     onClick={() => setAutoRotacionHabilitada((prev) => !prev)}
-                    title={autoRotacionHabilitada ? 'Pausar auto-rotación' : 'Activar auto-rotación'}
+                    disabled={tieneComensalesOpedidos}
+                    title={
+                      tieneComensalesOpedidos
+                        ? 'La mesa ya tiene comensales: el QR queda fijo'
+                        : autoRotacionHabilitada ? 'Pausar auto-rotación' : 'Activar auto-rotación'
+                    }
                     className={autoRotacionHabilitada ? 'qm-pausa' : 'qm-pausa qm-pausa-inactiva'}
                   >
                     {autoRotacionHabilitada ? <Pause size={14} /> : <Play size={14} />}
@@ -803,9 +810,13 @@ export function QRModal({
                 <button
                   type="button"
                   className="qm-btn qm-accion"
-                  onClick={() => ejecutarRotacion(false)}
-                  disabled={loadingAction}
-                  title="Roto el QR con POST /api/mesas/:id/rotar-qr"
+                  onClick={() => ejecutarRotacion('manual')}
+                  disabled={loadingAction || tieneComensalesOpedidos}
+                  title={
+                    tieneComensalesOpedidos
+                      ? 'La mesa ya tiene comensales: el QR queda fijo'
+                      : 'Rotar el QR con POST /api/mesas/:id/rotar-qr'
+                  }
                 >
                   <RotateCw size={16} className={loadingAction ? 'spin' : ''} />
                   <span>Rotar QR</span>
