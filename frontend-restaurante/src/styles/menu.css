@@ -757,7 +757,7 @@
 }
 
 .tema-comanda .menu-ventana .sd-btn {
-  min-height: 40px;
+  min-height: 44px;
   border: 2px solid var(--carbon);
   border-radius: 9px;
   background: var(--papel);
@@ -765,6 +765,11 @@
   font-family: var(--f-titulo);
   font-weight: 400;
   letter-spacing: .08em;
+}
+
+/* El recuadro de la vista previa es oscuro (va en línea en SubirImagen) */
+.tema-comanda .menu-ventana .menu-campo > div > div:first-child {
+  --sd-text-muted: #cbbcb2;
 }
 
 .tema-comanda .menu-armable {
